@@ -249,10 +249,12 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
         from astrometricslib.pipelines.spectroscopy.post_processing.record_quality import (
             below_feature_limit_notice_measurement,
             gaia_xp_download_failed_notice_measurement,
+            reddening_lookup_failed_notice_measurement,
         )
 
         notice_rows.append(below_feature_limit_notice_measurement(2, context, context.run_subject()))
         notice_rows.append(gaia_xp_download_failed_notice_measurement(2, context, context.run_subject()))
+        notice_rows.append(reddening_lookup_failed_notice_measurement(2, context, context.run_subject()))
     return [*rows, *notice_rows]
 
 

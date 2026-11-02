@@ -30,17 +30,32 @@ extinction value, so it cannot hold this result. The driver therefore keeps
 the answers in memory for the life of the driver object, including the answer
 "Gaia has no reddening for this star".
 
+Batching. Asking Gaia once for each star is slow and unreliable: every query
+is a job on the archive, the archive allows each user only a few running jobs,
+and a query that times out leaves its worker thread running. A run therefore
+calls `prefetch_reddening` once, before its per-star loop, with every Gaia id
+it will need. The driver asks for them in chunks of `GAIA_BATCH_SIZE` ids per
+query and keeps every answer in the cache, so each later `get_reddening` is a
+lookup by id. Each star gets the same two cells and the same conversion as a
+one-star query would give.
+
 A failed query (no network, a server error, a reply that cannot be read, or
-no reply within `GAIA_QUERY_TIMEOUT_SECONDS`) is raised as
-`ExternalServiceError`. After `CONSECUTIVE_FAILURE_LIMIT` failures in a row
-the driver stops asking and raises at once, so a run without a connection
-does not wait for a timeout on every star.
+no reply within `GAIA_QUERY_TIMEOUT_SECONDS`, or `GAIA_BATCH_TIMEOUT_SECONDS`
+for a batch) is raised as `ExternalServiceError`. A failed chunk stops the
+prefetch at once, so a failure costs one wait, not one for each chunk. The
+ids that were not answered are marked unavailable, and `get_reddening` raises
+for them without sending a query. Ids already answered stay usable. A later
+prefetch tries again, and any success resets the count of failures in a row.
+For an id that was not prefetched, `get_reddening` still sends a one-star
+query, and after `CONSECUTIVE_FAILURE_LIMIT` failures in a row it raises at
+once, so a run without a connection does not wait for a timeout on every
+star.
 """
 
 import logging
 import math
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 import numpy as np
@@ -55,6 +70,7 @@ __all__ = [
     "A_G_PER_E_B_V",
     "E_BP_RP_PER_E_B_V",
     "AstroqueryGaiaReddeningDriver",
+    "build_reddening_batch_query",
     "build_reddening_query",
     "estimate_from_gaia_values",
 ]
@@ -78,11 +94,49 @@ GAIA_QUERY_TIMEOUT_SECONDS = 60.0
 timeout of its own, so a stalled connection would otherwise wait for ever.
 The same 60 seconds as the star identifier's Gaia queries."""
 
+GAIA_BATCH_TIMEOUT_SECONDS = 180.0
+"""How long to wait for one batch reply, in seconds. The archive's answer time
+is erratic: on 2026-11-01 one-star queries took 35 s and a 313-star query
+63 s, while other queries of 100 and 200 stars took 6 s and 3 s, so the
+queueing, not the size, sets the time. A run asks once, so a long wait is
+paid at most once."""
+
 CONSECUTIVE_FAILURE_LIMIT = 3
-"""How many failed queries in a row make the driver stop asking."""
+"""How many failed one-star queries in a row make the driver stop asking."""
+
+GAIA_BATCH_SIZE = 200
+"""How many Gaia ids one batch query asks for. A crowded field has about
+a hundred stars, so a run is usually one query. The cap keeps each query
+short and each reply well under the archive's row limit for a synchronous
+query."""
 
 _SOURCE_NOTE_BP_RP = f"Gaia DR3 GSP-Phot E(BP-RP) / {E_BP_RP_PER_E_B_V}"
 _SOURCE_NOTE_A_G = f"Gaia DR3 GSP-Phot A(G) / {A_G_PER_E_B_V}"
+
+
+def _checked_source_id(gaia_source_id: object) -> int:
+    """Check that a Gaia source id is a positive whole number.
+
+    Parameters
+    ----------
+    gaia_source_id : `object`
+        The value to check.
+
+    Returns
+    -------
+    source_id : `int`
+        The id as a plain `int`.
+
+    Raises
+    ------
+    ValueError
+        If the id is not a positive whole number.
+    """
+    if isinstance(gaia_source_id, bool) or not isinstance(gaia_source_id, int | np.integer):
+        raise ValueError(f"A Gaia source id must be a whole number, got {gaia_source_id!r}.")
+    if gaia_source_id <= 0:
+        raise ValueError(f"A Gaia source id must be positive, got {gaia_source_id}.")
+    return int(gaia_source_id)
 
 
 def build_reddening_query(gaia_source_id: int) -> str:
@@ -97,17 +151,10 @@ def build_reddening_query(gaia_source_id: int) -> str:
     -------
     query : `str`
         An ADQL ``SELECT`` for the star's ``source_id``, ``ebpminrp_gspphot``
-        and ``ag_gspphot`` from `GAIA_REDDENING_TABLE`.
-
-    Raises
-    ------
-    ValueError
-        If the id is not a positive whole number.
+        and ``ag_gspphot`` from `GAIA_REDDENING_TABLE`. A `ValueError` is
+        raised if the id is not a positive whole number.
     """
-    if isinstance(gaia_source_id, bool) or not isinstance(gaia_source_id, int | np.integer):
-        raise ValueError(f"A Gaia source id must be a whole number, got {gaia_source_id!r}.")
-    if gaia_source_id <= 0:
-        raise ValueError(f"A Gaia source id must be positive, got {gaia_source_id}.")
+    checked_id = _checked_source_id(gaia_source_id)
     # The id was checked above to be a positive whole number, so it carries
     # no query text. The parts are joined, not formatted into one string.
     return " ".join([
@@ -115,7 +162,40 @@ def build_reddening_query(gaia_source_id: int) -> str:
         "FROM",
         GAIA_REDDENING_TABLE,
         "WHERE source_id =",
-        str(int(gaia_source_id)),
+        str(checked_id),
+    ])
+
+
+def build_reddening_batch_query(gaia_source_ids: Iterable[int]) -> str:
+    """Write the ADQL query that asks Gaia for many stars' extinction values.
+
+    Parameters
+    ----------
+    gaia_source_ids : `Iterable` [`int`]
+        The Gaia DR3 source ids. Each is checked like the id of
+        `build_reddening_query`.
+
+    Returns
+    -------
+    query : `str`
+        An ADQL ``SELECT`` of ``source_id``, ``ebpminrp_gspphot`` and
+        ``ag_gspphot`` from `GAIA_REDDENING_TABLE` for every id.
+
+    Raises
+    ------
+    ValueError
+        If there is no id, or an id is not a positive whole number.
+    """
+    checked_ids = [_checked_source_id(source_id) for source_id in gaia_source_ids]
+    if not checked_ids:
+        raise ValueError("A batch reddening query needs at least one Gaia source id.")
+    # Every id was checked above to be a positive whole number, so none
+    # carries query text.
+    return " ".join([
+        "SELECT source_id, ebpminrp_gspphot, ag_gspphot",
+        "FROM",
+        GAIA_REDDENING_TABLE,
+        "WHERE source_id IN (" + ", ".join(str(source_id) for source_id in checked_ids) + ")",
     ])
 
 
@@ -174,6 +254,27 @@ def estimate_from_gaia_values(gaia_source_id: int, e_bp_rp: object, a_g: object)
             ebv=dimming / A_G_PER_E_B_V, source=_SOURCE_NOTE_A_G, gaia_source_id=int(gaia_source_id)
         )
     return None
+
+
+def _failure_reason(failure: BaseException) -> str:
+    """Say why a Gaia query failed, with the underlying error if any.
+
+    Parameters
+    ----------
+    failure : `BaseException`
+        The error the query raised.
+
+    Returns
+    -------
+    reason : `str`
+        The error's message, followed by the type and message of the error it
+        came from (such as an HTTP 503 reply) when it has one.
+    """
+    reason = str(failure)
+    cause = failure.__cause__
+    if cause is not None:
+        reason = f"{reason} {type(cause).__name__}: {cause}"
+    return reason
 
 
 def _run_gaia_query(adql_query: str) -> Any:
@@ -272,6 +373,42 @@ def _first_row_values(result_table: Any) -> tuple[object, object] | None:
     return row[columns["ebpminrp_gspphot"]], row[columns["ag_gspphot"]]
 
 
+def _values_by_source_id(result_table: Any) -> dict[int, tuple[object, object]]:
+    """Pick the two extinction cells of every star out of a batch reply.
+
+    Parameters
+    ----------
+    result_table : `astropy.table.Table` or `None`
+        The rows Gaia returned.
+
+    Returns
+    -------
+    values : `dict` [`int`, `tuple` [`object`, `object`]]
+        For each ``source_id`` in the reply, its ``ebpminrp_gspphot`` and
+        ``ag_gspphot`` cells. Empty when the reply has no rows. Column names
+        are matched without regard to case.
+
+    Raises
+    ------
+    ExternalServiceError
+        If the reply has rows but lacks the expected columns.
+    """
+    if result_table is None or len(result_table) == 0:
+        return {}
+    columns = {str(name).lower(): name for name in result_table.colnames}
+    if not {"source_id", "ebpminrp_gspphot", "ag_gspphot"} <= columns.keys():
+        raise ExternalServiceError(
+            "The Gaia reddening reply lacks the expected columns.", details={"columns": sorted(columns)}
+        )
+    values: dict[int, tuple[object, object]] = {}
+    for row in result_table:
+        values[int(row[columns["source_id"]])] = (
+            row[columns["ebpminrp_gspphot"]],
+            row[columns["ag_gspphot"]],
+        )
+    return values
+
+
 class AstroqueryGaiaReddeningDriver(ReddeningDriver):
     """Looks up a star's reddening in Gaia DR3 through astroquery.
 
@@ -282,21 +419,77 @@ class AstroqueryGaiaReddeningDriver(ReddeningDriver):
         `astropy.table.Table`). Defaults to the Gaia archive through
         astroquery. A test passes its own function so no network is used.
     timeout_seconds : `float`, optional
-        How long to wait for one reply. Defaults to
+        How long to wait for one one-star reply. Defaults to
         `GAIA_QUERY_TIMEOUT_SECONDS`.
+    batch_timeout_seconds : `float`, optional
+        How long to wait for one batch reply. Defaults to
+        `GAIA_BATCH_TIMEOUT_SECONDS`.
     """
 
     def __init__(
         self,
         run_query: Callable[[str], Any] | None = None,
         timeout_seconds: float = GAIA_QUERY_TIMEOUT_SECONDS,
+        batch_timeout_seconds: float = GAIA_BATCH_TIMEOUT_SECONDS,
     ) -> None:
         """Set up an empty cache."""
         self._run_query = run_query or _run_gaia_query
         self._timeout_seconds = timeout_seconds
+        self._batch_timeout_seconds = batch_timeout_seconds
         self._lock = threading.Lock()
         self._cache: dict[int, ReddeningEstimate | None] = {}
         self._consecutive_failures = 0
+        self._unavailable_ids: set[int] = set()
+
+    def prefetch_reddening(self, gaia_source_ids: Iterable[int]) -> None:
+        """Ask Gaia for many stars at once and keep every answer.
+
+        The ids not yet in the cache are asked for in chunks of
+        `GAIA_BATCH_SIZE`. A star that Gaia holds no row for, or no usable
+        value for, is cached as "no reddening", as a one-star query would.
+
+        Parameters
+        ----------
+        gaia_source_ids : `Iterable` [`int`]
+            The Gaia DR3 source ids the run will look up. Each must be a
+            positive whole number.
+
+        Raises
+        ------
+        ExternalServiceError
+            If a chunk failed or did not answer in time. The prefetch stops at
+            that chunk, so a failure costs one wait. Chunks already answered
+            stay cached, and the ids not answered raise from `get_reddening`
+            without a query.
+        """
+        wanted = sorted({_checked_source_id(source_id) for source_id in gaia_source_ids})
+        with self._lock:
+            # A new prefetch is a new try, so the earlier verdict is dropped.
+            self._unavailable_ids.difference_update(wanted)
+            missing = [source_id for source_id in wanted if source_id not in self._cache]
+            for start in range(0, len(missing), GAIA_BATCH_SIZE):
+                chunk = missing[start : start + GAIA_BATCH_SIZE]
+                try:
+                    result_table = _run_with_timeout(
+                        self._run_query, build_reddening_batch_query(chunk), self._batch_timeout_seconds
+                    )
+                    values_by_id = _values_by_source_id(result_table)
+                except ExternalServiceError as failure:
+                    self._consecutive_failures += 1
+                    self._unavailable_ids.update(missing[start:])
+                    logger.warning(
+                        "Gaia reddening batch query failed for %d star(s) (%s); the rest of the run "
+                        "goes without reddening.",
+                        len(missing) - start,
+                        _failure_reason(failure),
+                    )
+                    raise
+                self._consecutive_failures = 0
+                for source_id in chunk:
+                    values = values_by_id.get(source_id)
+                    self._cache[source_id] = (
+                        None if values is None else estimate_from_gaia_values(source_id, *values)
+                    )
 
     def get_reddening(self, gaia_source_id: int) -> ReddeningEstimate | None:
         """Look up the colour excess E(B-V) of one star in Gaia DR3.
@@ -325,6 +518,10 @@ class AstroqueryGaiaReddeningDriver(ReddeningDriver):
         with self._lock:
             if source_id in self._cache:
                 return self._cache[source_id]
+            if source_id in self._unavailable_ids:
+                raise ExternalServiceError(
+                    "The Gaia reddening batch query for this run failed, so this star has no reddening."
+                )
             if self._consecutive_failures >= CONSECUTIVE_FAILURE_LIMIT:
                 raise ExternalServiceError(
                     "Gaia reddening queries are switched off after repeated failures.",
@@ -333,9 +530,11 @@ class AstroqueryGaiaReddeningDriver(ReddeningDriver):
             try:
                 result_table = _run_with_timeout(self._run_query, adql_query, self._timeout_seconds)
                 values = _first_row_values(result_table)
-            except ExternalServiceError:
+            except ExternalServiceError as failure:
                 self._consecutive_failures += 1
-                logger.warning("Gaia reddening lookup failed for source %s.", source_id)
+                logger.warning(
+                    "Gaia reddening lookup failed for source %s (%s).", source_id, _failure_reason(failure)
+                )
                 raise
             self._consecutive_failures = 0
             estimate = None if values is None else estimate_from_gaia_values(source_id, *values)

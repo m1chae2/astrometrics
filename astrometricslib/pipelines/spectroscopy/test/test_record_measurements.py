@@ -277,6 +277,7 @@ def test_the_single_image_runner_writes_one_row_per_metric_and_a_repeat_writes_n
         last_run_skipped_unidentified_count=0,
         last_run_below_feature_limit_count=0,
         last_run_gaia_xp_download_failed_count=0,
+        last_run_reddening_lookup_failed_count=0,
         config=SimpleNamespace(camera=SimpleNamespace(name="ZWO ASI 533MM Pro")),
     )
     result = Result(
@@ -320,6 +321,7 @@ def test_a_run_without_a_time_stores_nothing(tmp_path: Path, monkeypatch: pytest
         last_run_skipped_unidentified_count=0,
         last_run_below_feature_limit_count=0,
         last_run_gaia_xp_download_failed_count=0,
+        last_run_reddening_lookup_failed_count=0,
         config=SimpleNamespace(camera=SimpleNamespace(name="ZWO ASI 533MM Pro")),
     )
     result = Result(
@@ -361,6 +363,7 @@ def test_a_storage_failure_does_not_fail_the_run(
         last_run_skipped_unidentified_count=0,
         last_run_below_feature_limit_count=0,
         last_run_gaia_xp_download_failed_count=0,
+        last_run_reddening_lookup_failed_count=0,
         config=SimpleNamespace(camera=SimpleNamespace(name="ZWO ASI 533MM Pro")),
     )
     result = Result(
@@ -464,3 +467,17 @@ def test_the_skipped_star_counts_are_stored_and_a_batch_gives_none() -> None:
     assert counted["spectroscopy.skipped_no_trail_star_count"] == pytest.approx(4.0)
     assert counted["spectroscopy.skipped_unidentified_star_count"] == pytest.approx(7.0)
     assert batch_rows["spectroscopy.skipped_no_trail_star_count"].status is MeasurementStatus.NOT_MEASURED
+
+
+def test_failed_reddening_lookups_are_stored_as_a_notice() -> None:
+    """Failed reddening lookups give a failed notice, if there are any."""
+    metrics = healthy_summary_metrics().model_copy(update={"reddening_lookup_failed_star_count": 4})
+
+    stored = rg.spectroscopy_run_measurements(metrics, healthy_gates(), run_context())
+    quiet = rg.spectroscopy_run_measurements(healthy_summary_metrics(), healthy_gates(), run_context())
+
+    notices = [m for m in stored if m.metric == "spectroscopy.notice_reddening_lookup_failed"]
+    assert len(notices) == 1
+    assert notices[0].value == pytest.approx(4.0)
+    assert notices[0].check_outcome is GateStatus.FAILED
+    assert not [m for m in quiet if ".notice_" in m.metric]

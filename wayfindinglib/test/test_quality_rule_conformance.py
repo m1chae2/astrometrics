@@ -110,6 +110,10 @@ UNUSED_DECISION_METRICS = {
         "(SPE-31), so a job can list them as a warning. No rule reads it yet; the pipeline-quality view "
         "of issue 97 decides how it is shown."
     ),
+    "spectroscopy.notice_reddening_lookup_failed": (
+        "issue 97: counts the stars whose Gaia reddening lookup failed, so a job can list them as a "
+        "warning. No rule reads it yet; the pipeline-quality view of issue 97 decides how it is shown."
+    ),
     "spectroscopy.notice_gaia_xp_download_failed": (
         "issue 97: counts the stars whose Gaia XP spectrum could not be downloaded, so a job can list them "
         "as a warning. No rule reads it yet; the pipeline-quality view of issue 97 decides how it is shown."

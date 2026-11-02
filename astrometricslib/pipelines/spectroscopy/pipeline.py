@@ -126,7 +126,10 @@ from astrometricslib.pipelines.spectroscopy.processing.spectrum_analysis import 
 from astrometricslib.pipelines.spectroscopy.processing.spectrum_signal import (
     MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE,
 )
-from astrometricslib.pipelines.spectroscopy.processing.star_reddening import look_up_star_reddening
+from astrometricslib.pipelines.spectroscopy.processing.star_reddening import (
+    look_up_star_reddening,
+    prefetch_star_reddening,
+)
 from astrometricslib.utilities import SpectroscopyConfig
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
@@ -963,6 +966,9 @@ class SpectroscopyPipeline:
         self.last_run_stored_unidentified_count = 0
         self.last_run_below_feature_limit_count = 0
         self.last_run_gaia_xp_download_failed_count = 0
+        # How many stars had no catalog reddening because the Gaia lookup
+        # failed. Read by the runner for the run's quality metrics.
+        self.last_run_reddening_lookup_failed_count = 0
 
     def _noise_model_for(self, image: Any) -> PixelNoiseModel:
         """Give the camera noise to use for the samples read from an image.
@@ -1385,9 +1391,15 @@ class SpectroscopyPipeline:
         """
         self.last_run_below_feature_limit_count = 0
         self.last_run_gaia_xp_download_failed_count = 0
+        self.last_run_reddening_lookup_failed_count = 0
         neighbor_only_ids = {id(star) for star in (neighbor_only_stars or [])}
         extracted: list[tuple[Any, bool, dict[str, Any]]] = []
         batch = target_stars if limit is None else target_stars[:limit]
+        # One Gaia query for the whole run's reddening, before the per-star
+        # loop. A failure costs one bounded wait and never stops the run.
+        prefetch_star_reddening(
+            (star for star in batch if isinstance(star, StellarObject)), self.reddening_driver
+        )
         batch_positions = [_star_pixel_position(star)[1] for star in batch]
         dispersion_vector = self.instrument.get_dispersion_vector()
         for star_index, star in enumerate(batch):
@@ -1662,6 +1674,17 @@ class SpectroscopyPipeline:
             self.last_run_gaia_xp_download_failed_count += 1
         return comparison
 
+    def _count_reddening_failure(self, failure: Exception) -> None:
+        """Count one star whose catalog reddening lookup failed.
+
+        Parameters
+        ----------
+        failure : `Exception`
+            The error the lookup raised. It is already logged; only the count
+            is kept.
+        """
+        self.last_run_reddening_lookup_failed_count += 1
+
     def _apply_result_to_stellar_object(
         self, star: StellarObject, result: dict[str, Any], image: AstrometricsImage
     ) -> None:
@@ -1796,7 +1819,9 @@ class SpectroscopyPipeline:
 
         # The star's catalog reddening, when it has a Gaia DR3 id. The
         # classification removes it from the spectrum before comparing.
-        reddening = look_up_star_reddening(star, self.reddening_driver)
+        reddening = look_up_star_reddening(
+            star, self.reddening_driver, on_failure=self._count_reddening_failure
+        )
 
         # How wide the blur is at each wavelength, from this spectrum's own
         # trail width. Always measured and reported at checkpoint 1; it

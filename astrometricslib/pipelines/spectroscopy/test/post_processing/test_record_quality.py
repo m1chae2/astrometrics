@@ -264,6 +264,7 @@ def test_the_real_validate_output_records_the_gates() -> None:
         last_run_skipped_unidentified_count=0,
         last_run_below_feature_limit_count=0,
         last_run_gaia_xp_download_failed_count=0,
+        last_run_reddening_lookup_failed_count=0,
         config=SimpleNamespace(camera=SimpleNamespace(name="ZWO ASI 533MM Pro")),
     )
     result = Result(
@@ -358,6 +359,7 @@ def test_the_real_validate_output_records_the_stage_quality_summary() -> None:
         last_run_skipped_unidentified_count=0,
         last_run_below_feature_limit_count=0,
         last_run_gaia_xp_download_failed_count=0,
+        last_run_reddening_lookup_failed_count=0,
         config=SimpleNamespace(camera=SimpleNamespace(name="ZWO ASI 533MM Pro")),
     )
     result = Result(

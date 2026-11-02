@@ -10,6 +10,7 @@ that quality checkpoint 2 carries ``ebv_used``,
 ``slope_and_lines_disagree`` flag.
 """
 
+from collections.abc import Iterable
 from types import SimpleNamespace
 
 import numpy as np
@@ -40,6 +41,7 @@ from astrometricslib.pipelines.spectroscopy.processing.interstellar_extinction i
 from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier import _get_reference_templates
 from astrometricslib.pipelines.spectroscopy.processing.star_reddening import (
     look_up_star_reddening,
+    prefetch_star_reddening,
 )
 from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
 
@@ -71,6 +73,19 @@ class FakeReddening(ReddeningDriver):
         self._ebv = ebv
         self._fail = fail
         self.calls: list[int] = []
+        self.prefetched: list[set[int]] = []
+
+    def prefetch_reddening(self, gaia_source_ids: Iterable[int]) -> None:
+        """Record the ids and raise when the fake was built to fail.
+
+        Raises
+        ------
+        ExternalServiceError
+            When the fake was built to fail.
+        """
+        self.prefetched.append(set(gaia_source_ids))
+        if self._fail:
+            raise ExternalServiceError("fake batch outage")
 
     def get_reddening(self, gaia_source_id: int) -> ReddeningEstimate | None:
         """Record the call and answer.
@@ -213,6 +228,58 @@ def test_a_failed_lookup_gives_no_reddening_and_no_error() -> None:
 
     assert look_up_star_reddening(star, driver) is None
     assert driver.calls == [GAIA_ID]
+
+
+def test_a_failed_lookup_is_reported_to_the_caller_with_its_reason(caplog: pytest.LogCaptureFixture) -> None:
+    """Verify the failure callback runs and the log carries the reason."""
+    driver = FakeReddening(0.3, fail=True)
+    star = StellarObject(id=f"Gaia DR3 {GAIA_ID}", name=f"Gaia DR3 {GAIA_ID}")
+    failures: list[Exception] = []
+
+    with caplog.at_level("WARNING"):
+        assert look_up_star_reddening(star, driver, on_failure=failures.append) is None
+
+    assert len(failures) == 1
+    assert "fake outage" in caplog.text
+
+
+def test_the_prefetch_sends_each_gaia_id_once_and_skips_stars_without_one() -> None:
+    """Verify one prefetch call carries the distinct Gaia ids of the stars."""
+    driver = FakeReddening(0.3)
+    stars = [
+        StellarObject(id=f"Gaia DR3 {GAIA_ID}", name=""),
+        StellarObject(id=f"Gaia DR3 {GAIA_ID}", name=""),
+        StellarObject(id="HD 172167", name="Vega"),
+    ]
+
+    assert prefetch_star_reddening(stars, driver) is True
+    assert driver.prefetched == [{GAIA_ID}]
+    assert prefetch_star_reddening([StellarObject(id="HD 172167", name="Vega")], driver) is True
+    assert len(driver.prefetched) == 1
+
+
+def test_a_failed_prefetch_is_logged_with_its_reason_and_does_not_raise(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a batch outage returns False and logs the reason."""
+    driver = FakeReddening(0.3, fail=True)
+    star = StellarObject(id=f"Gaia DR3 {GAIA_ID}", name="")
+
+    with caplog.at_level("WARNING"):
+        assert prefetch_star_reddening([star], driver) is False
+
+    assert "fake batch outage" in caplog.text
+
+
+def test_the_pipeline_counts_stars_whose_reddening_lookup_failed() -> None:
+    """Verify a failing catalog leaves the star unreddened and counted."""
+    pipeline = build_pipeline(FakeReddening(0.3, fail=True))
+    star = StellarObject(id=f"Gaia DR3 {GAIA_ID}", name=f"Gaia DR3 {GAIA_ID}")
+
+    pipeline._apply_result_to_stellar_object(star, extraction_result("G0V", 0.0), _FAKE_IMAGE)
+
+    assert pipeline.last_run_reddening_lookup_failed_count == 1
+    assert star.spectroscopy.reddening is None
 
 
 # --------------------------------------------- the pipeline-built result

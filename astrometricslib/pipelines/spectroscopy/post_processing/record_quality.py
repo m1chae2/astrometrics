@@ -103,6 +103,7 @@ from astrometricslib.pipelines.spectroscopy.metrics import (
     below_feature_limit_notice_spec,
     gaia_xp_band_metric_name,
     gaia_xp_download_failed_notice_spec,
+    reddening_lookup_failed_notice_spec,
     stage_metric_name,
     stage_spectrum_count_name,
 )
@@ -844,6 +845,37 @@ def gaia_xp_download_failed_notice_measurement(
     )
 
 
+def reddening_lookup_failed_notice_measurement(
+    star_count: int, context: PipelineRunContext, subject: QualitySubject
+) -> QualityMeasurement:
+    """Build the row that says some Gaia reddening lookups failed.
+
+    Parameters
+    ----------
+    star_count : `int`
+        How many stars had no catalog reddening because the lookup failed.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The run.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        A failed notice whose value is the number of stars. They were
+        classified as observed, without the dust correction.
+    """
+    return notice_measurement(
+        reddening_lookup_failed_notice_spec(),
+        float(star_count),
+        context,
+        subject,
+        f"{star_count} star(s) have no catalog reddening because the Gaia lookup failed; they were "
+        "classified on the observed spectrum, without the dust correction",
+        action_taken="classified the stars without the catalog reddening and went on",
+    )
+
+
 def spectroscopy_run_measurements(
     metrics: SpectroscopyPipelineQualityMetrics,
     gates: Sequence[GateResult],
@@ -895,6 +927,13 @@ def spectroscopy_run_measurements(
         measurements.append(
             gaia_xp_download_failed_notice_measurement(
                 metrics.gaia_xp_download_failed_star_count, context, subject
+            )
+        )
+
+    if metrics.reddening_lookup_failed_star_count > 0:
+        measurements.append(
+            reddening_lookup_failed_notice_measurement(
+                metrics.reddening_lookup_failed_star_count, context, subject
             )
         )
 

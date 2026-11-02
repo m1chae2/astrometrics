@@ -890,7 +890,7 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
   On real data, read `reddening.type_shift_steps` of the calibrated result.
 - **Acceptance criterion:** Not recorded (set after the result).
 - **What to look at:** The type found and its steps from the true type, for each E(B-V) removed.
-- **Our result:** G0V with E(B-V) 0.3: K2V without dereddening, G0V with 0.3 removed; with 0.25 removed, closer to G0V.
+- **Our result:** G0V with E(B-V) 0.3: K2V without dereddening, G0V with 0.3 removed; with 0.25 removed, closer to G0V. Gaia lookup on real data (2026-11-01, M 13, 313 stars with a Gaia id): the batched query and the one-star query gave the same value for each of 30 stars compared and no value for the same 6 more (a random sample of 40; 4 of the 40 one-star queries timed out at 60 s, so they were not compared), with a largest difference in E(B-V) of 0. The archive's answer time was erratic: one-star queries took up to 46 s, and batches of 100, 200 and 313 stars took 6 s, 3 s and 63 s. A full M 13 spectroscopy run with one batched lookup took 671 s, of which 136 s was the lookup, and no star went without reddening because of a failed lookup; the same run with one query for each star took 1155 s, of which 815 s was the per-star step. The batch wait is therefore 180 s (`GAIA_BATCH_TIMEOUT_SECONDS`), paid at most once for each run.
 - **Verdict:** Not judged.
 - **Limits:** Templates only.
 - **To tune for your setup:** Nothing to tune; check `ebv_used` and `dereddening_type_shift_steps` at checkpoint 2.

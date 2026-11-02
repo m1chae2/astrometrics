@@ -11,6 +11,7 @@ supplies a fake.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 
@@ -37,6 +38,24 @@ class ReddeningEstimate:
 
 class ReddeningDriver(ABC):
     """What the library needs from a source of reddening values."""
+
+    def prefetch_reddening(self, gaia_source_ids: Iterable[int]) -> None:
+        """Look up many stars at once, so later single lookups are free.
+
+        A source that can ask for many stars in one request overrides this. A
+        run calls it once, before its per-star loop. The default does
+        nothing, and `get_reddening` then looks up each star on its own.
+
+        Parameters
+        ----------
+        gaia_source_ids : `Iterable` [`int`]
+            The Gaia DR3 source ids the run will look up.
+
+        An override raises `ExternalServiceError` if the catalog could not be
+        reached or its reply could not be read; the caller then goes on
+        without the values.
+        """
+        del gaia_source_ids  # The default asks for nothing.
 
     @abstractmethod
     def get_reddening(self, gaia_source_id: int) -> ReddeningEstimate | None:

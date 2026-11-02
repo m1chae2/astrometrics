@@ -65,6 +65,7 @@ SPECTROSCOPY_SKIPPED_NO_TRAIL_STAR_COUNT = "spectroscopy.skipped_no_trail_star_c
 SPECTROSCOPY_SKIPPED_UNIDENTIFIED_STAR_COUNT = "spectroscopy.skipped_unidentified_star_count"
 SPECTROSCOPY_NOTICE_BELOW_FEATURE_LIMIT = "spectroscopy.notice_stars_below_feature_limit"
 SPECTROSCOPY_NOTICE_GAIA_XP_DOWNLOAD_FAILED = "spectroscopy.notice_gaia_xp_download_failed"
+SPECTROSCOPY_NOTICE_REDDENING_LOOKUP_FAILED = "spectroscopy.notice_reddening_lookup_failed"
 SPECTROSCOPY_POOR_MATCH_CLASSIFICATION_COUNT = "spectroscopy.poor_match_classification_count"
 SPECTROSCOPY_AMBIGUOUS_CLASSIFICATION_COUNT = "spectroscopy.ambiguous_classification_count"
 
@@ -975,6 +976,33 @@ def gaia_xp_download_failed_notice_spec() -> MetricSpec:
     )
 
 
+def reddening_lookup_failed_notice_spec() -> MetricSpec:
+    """Declare the notice for stars whose Gaia reddening lookup failed.
+
+    Returns
+    -------
+    spec : `MetricSpec`
+        A run-level notice. Its value is the number of stars whose catalog
+        reddening could not be looked up, so their spectra were classified as
+        observed; the row is stored only when there was at least one.
+    """
+    return notice_spec(
+        SPECTROSCOPY_NOTICE_REDDENING_LOOKUP_FAILED,
+        Checkpoint.SPECTROSCOPY,
+        SubjectLevel.RUN,
+        "count",
+        "Whether some stars were classified without the catalog reddening because the lookup failed.",
+        "The number of stars whose Gaia reddening could not be looked up (no network, a server error or "
+        "no answer in time). A star Gaia holds no reddening for is not counted. These stars are classified "
+        "on the observed spectrum, without the dust correction; their extracted spectra are unaffected.",
+        "pipelines.spectroscopy.post_processing.record_quality.reddening_lookup_failed_notice_measurement",
+        (
+            "A run in which the lookup failed would otherwise look like one in which no star has a catalog "
+            "reddening, and a classification of a dusty star could be off without a sign."
+        ),
+    )
+
+
 def below_feature_limit_notice_spec() -> MetricSpec:
     """Declare the notice for spectra below the feature-analysis limit.
 
@@ -1275,4 +1303,5 @@ SPECTROSCOPY_METRICS: tuple[MetricSpec, ...] = (
     camera_without_profile_spec("spectroscopy"),
     below_feature_limit_notice_spec(),
     gaia_xp_download_failed_notice_spec(),
+    reddening_lookup_failed_notice_spec(),
 )

@@ -235,6 +235,7 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `skipped_unidentified_star_count` | `int` | Quality metric attribute. |
 | `below_feature_limit_star_count` | `int` | Quality metric attribute. |
 | `gaia_xp_download_failed_star_count` | `int` | Quality metric attribute. |
+| `reddening_lookup_failed_star_count` | `int` | Quality metric attribute. |
 | `stage_quality_summary` | `list[astrometricslib.models.quality.spectroscopy_quality.StageQualityRollup] \| None` | Summary of the quality metrics at each extraction checkpoint. |
 | `gaia_xp_summary` | `astrometricslib.models.quality.gaia_xp_comparison.GaiaXpRunSummary \| None` | Comparison with Gaia DR3 synthetic XP spectra (low-resolution spectra from the Gaia space mission). |
 | `wavelength_scale_summary` | `astrometricslib.models.wavelength_scale.WavelengthScaleSummary \| None` | Scatter and drift of the wavelength zero points (offsets of the wavelength scale). |

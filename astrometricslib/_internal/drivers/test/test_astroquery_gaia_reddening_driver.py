@@ -6,8 +6,10 @@ driver a function in place of the archive, so nothing leaves the machine. They
 check the query text that would be sent, the two conversions and their
 documented factors, the preference for E(BP-RP) over A(G), masked and negative
 values, the in-memory cache (including "no value"), the handling of failures
-and timeouts, and that `Drivers` builds this driver by default and returns a
-caller's own driver when one is given.
+and timeouts, the batched prefetch (one query for many stars, chunks, one
+bounded wait on failure, the same values as one-star queries), and that
+`Drivers` builds this driver by default and returns a caller's own driver
+when one is given.
 """
 
 import threading
@@ -21,8 +23,10 @@ from astrometricslib._internal.drivers.astroquery_gaia_reddening_driver import (
     A_G_PER_E_B_V,
     CONSECUTIVE_FAILURE_LIMIT,
     E_BP_RP_PER_E_B_V,
+    GAIA_BATCH_SIZE,
     GAIA_REDDENING_TABLE,
     AstroqueryGaiaReddeningDriver,
+    build_reddening_batch_query,
     build_reddening_query,
     estimate_from_gaia_values,
 )
@@ -371,3 +375,275 @@ def test_drivers_gives_back_the_fake_a_caller_chose() -> None:
     assert estimate is not None
     assert estimate.ebv == pytest.approx(0.3)
     assert fake.calls == [SOURCE_ID]
+
+
+# ------------------------------------------------------- the batched prefetch
+
+
+def batch_table(rows: dict[int, tuple[float | None, float | None]]) -> Table:
+    """Build a table shaped like the archive's reply to a batch query.
+
+    Parameters
+    ----------
+    rows : `dict` [`int`, `tuple` [`float` or `None`, `float` or `None`]]
+        For each source id, its E(BP-RP) and A(G); `None` is a masked cell.
+
+    Returns
+    -------
+    table : `astropy.table.Table`
+        The reply, with one row for each id.
+    """
+    ids = list(rows)
+    return Table({
+        "source_id": ids,
+        "ebpminrp_gspphot": MaskedColumn(
+            [rows[i][0] if rows[i][0] is not None else 0.0 for i in ids],
+            mask=[rows[i][0] is None for i in ids],
+        ),
+        "ag_gspphot": MaskedColumn(
+            [rows[i][1] if rows[i][1] is not None else 0.0 for i in ids],
+            mask=[rows[i][1] is None for i in ids],
+        ),
+    })
+
+
+def test_the_batch_query_asks_for_every_id_in_one_select() -> None:
+    """Verify the batch ADQL has one IN list and refuses a bad id or no id."""
+    query = build_reddening_batch_query([SOURCE_ID, SOURCE_ID + 1])
+
+    assert query.endswith(f"WHERE source_id IN ({SOURCE_ID}, {SOURCE_ID + 1})")
+    assert GAIA_REDDENING_TABLE in query
+    with pytest.raises(ValueError, match="at least one"):
+        build_reddening_batch_query([])
+    with pytest.raises(ValueError, match="whole number"):
+        build_reddening_batch_query([SOURCE_ID, "1; DROP TABLE x"])
+
+
+def test_a_prefetch_asks_once_and_later_lookups_send_no_query() -> None:
+    """Verify many stars cost one query; answers then come from the cache."""
+    ids = [SOURCE_ID + offset for offset in range(5)]
+    reply = {ids[0]: (0.134, None), ids[1]: (None, 0.274), ids[2]: (None, None)}
+    queries: list[str] = []
+
+    def archive(query: str) -> Table:
+        """Record the query and answer for the stars Gaia holds.
+
+        Returns
+        -------
+        reply : `astropy.table.Table`
+            The rows for ids 0 to 2; ids 3 and 4 have no row.
+        """
+        queries.append(query)
+        return batch_table(reply)
+
+    driver = AstroqueryGaiaReddeningDriver(run_query=archive)
+    driver.prefetch_reddening(ids)
+
+    assert len(queries) == 1
+    first, second, empty, absent = (driver.get_reddening(i) for i in ids[:4])
+    assert first is not None and first.ebv == pytest.approx(0.134 / E_BP_RP_PER_E_B_V)
+    assert second is not None and second.ebv == pytest.approx(0.274 / A_G_PER_E_B_V)
+    assert empty is None
+    assert absent is None
+    assert len(queries) == 1
+
+
+def test_a_prefetch_gives_the_values_of_one_star_queries() -> None:
+    """Verify batch and one-star queries give identical estimates."""
+    values = {SOURCE_ID: (0.2, 0.5), SOURCE_ID + 1: (None, 0.3), SOURCE_ID + 2: (0.0, None)}
+
+    def archive(query: str) -> Table:
+        """Answer a one-star or batch query from the same values.
+
+        Returns
+        -------
+        reply : `astropy.table.Table`
+            The rows for the ids named in the query.
+        """
+        wanted = [i for i in values if str(i) in query]
+        return batch_table({i: values[i] for i in wanted})
+
+    batched = AstroqueryGaiaReddeningDriver(run_query=archive)
+    batched.prefetch_reddening(values)
+    single = AstroqueryGaiaReddeningDriver(run_query=archive)
+
+    for source_id in values:
+        assert batched.get_reddening(source_id) == single.get_reddening(source_id)
+
+
+def test_a_long_list_is_asked_for_in_chunks() -> None:
+    """Verify more than `GAIA_BATCH_SIZE` ids make one query per chunk."""
+    ids = list(range(1, 2 * GAIA_BATCH_SIZE + 2))
+    queries: list[str] = []
+
+    def archive(query: str) -> Table:
+        """Record the query and answer with no rows.
+
+        Returns
+        -------
+        reply : `astropy.table.Table`
+            An empty reply.
+        """
+        queries.append(query)
+        return Table()
+
+    driver = AstroqueryGaiaReddeningDriver(run_query=archive)
+    driver.prefetch_reddening(ids)
+
+    assert len(queries) == 3
+    assert max(len(query.split("(")[1].split(",")) for query in queries) <= GAIA_BATCH_SIZE
+    assert driver.get_reddening(ids[-1]) is None
+    assert len(queries) == 3
+
+
+def test_ids_already_cached_are_not_asked_for_again() -> None:
+    """Verify a second prefetch asks only for the ids it has not seen."""
+    queries: list[str] = []
+
+    def archive(query: str) -> Table:
+        """Record the query and answer with no rows.
+
+        Returns
+        -------
+        reply : `astropy.table.Table`
+            An empty reply.
+        """
+        queries.append(query)
+        return Table()
+
+    driver = AstroqueryGaiaReddeningDriver(run_query=archive)
+    driver.prefetch_reddening([SOURCE_ID])
+    driver.prefetch_reddening([SOURCE_ID])
+    driver.prefetch_reddening([SOURCE_ID, SOURCE_ID + 1])
+
+    assert len(queries) == 2
+    assert str(SOURCE_ID + 1) in queries[1]
+    assert str(SOURCE_ID) not in queries[1].replace(str(SOURCE_ID + 1), "")
+
+
+def test_a_failed_batch_costs_one_wait_and_later_lookups_fail_at_once() -> None:
+    """Verify one failed chunk stops the prefetch and no star sends a query."""
+    ids = list(range(1, 3 * GAIA_BATCH_SIZE + 1))
+    attempts: list[str] = []
+
+    def overloaded_archive(query: str) -> Table:
+        """Fail like an overloaded server.
+
+        Raises
+        ------
+        OSError
+            Always.
+        """
+        attempts.append(query)
+        raise OSError("HTTP 503 Server overloaded")
+
+    driver = AstroqueryGaiaReddeningDriver(run_query=overloaded_archive)
+    with pytest.raises(ExternalServiceError):
+        driver.prefetch_reddening(ids)
+
+    assert len(attempts) == 1
+    for source_id in (ids[0], ids[-1], 10 * len(ids)):
+        if source_id in ids:
+            with pytest.raises(ExternalServiceError, match="batch query"):
+                driver.get_reddening(source_id)
+    assert len(attempts) == 1
+
+
+def test_a_batch_that_does_not_answer_in_time_is_one_bounded_wait() -> None:
+    """Verify a stalled archive raises after one timeout, not one per chunk."""
+    release = threading.Event()
+    attempts: list[str] = []
+
+    def stalled_archive(query: str) -> Table:
+        """Wait until the test lets go.
+
+        Returns
+        -------
+        reply : `astropy.table.Table`
+            An empty reply, once released.
+        """
+        attempts.append(query)
+        release.wait(timeout=5.0)
+        return Table()
+
+    driver = AstroqueryGaiaReddeningDriver(run_query=stalled_archive, batch_timeout_seconds=0.05)
+    try:
+        with pytest.raises(ExternalServiceError, match="timed out"):
+            driver.prefetch_reddening(range(1, 2 * GAIA_BATCH_SIZE + 1))
+        assert len(attempts) == 1
+    finally:
+        release.set()
+
+
+def test_a_prefetch_after_failures_still_succeeds_and_clears_the_verdict() -> None:
+    """Verify a success does not depend on earlier failures."""
+    state = {"fail": True}
+
+    def archive(query: str) -> Table:
+        """Fail until told to answer.
+
+        Returns
+        -------
+        reply : `astropy.table.Table`
+            One row for `SOURCE_ID`.
+
+        Raises
+        ------
+        OSError
+            While the test says to fail.
+        """
+        if state["fail"]:
+            raise OSError("down")
+        return batch_table({SOURCE_ID: (0.134, None)})
+
+    driver = AstroqueryGaiaReddeningDriver(run_query=archive)
+    for _ in range(CONSECUTIVE_FAILURE_LIMIT + 1):
+        with pytest.raises(ExternalServiceError):
+            driver.prefetch_reddening([SOURCE_ID])
+    state["fail"] = False
+    driver.prefetch_reddening([SOURCE_ID])
+
+    estimate = driver.get_reddening(SOURCE_ID)
+    assert estimate is not None and estimate.ebv == pytest.approx(0.134 / E_BP_RP_PER_E_B_V)
+
+
+def test_a_failed_second_chunk_keeps_the_first_chunks_answers() -> None:
+    """Verify ids answered before a failure stay usable."""
+    ids = list(range(1, GAIA_BATCH_SIZE + 3))
+    calls = {"count": 0}
+
+    def archive(query: str) -> Table:
+        """Answer the first chunk and fail the second.
+
+        Returns
+        -------
+        reply : `astropy.table.Table`
+            One row for id 1 on the first call.
+
+        Raises
+        ------
+        OSError
+            On the second call.
+        """
+        calls["count"] += 1
+        if calls["count"] == 2:
+            raise OSError("down")
+        return batch_table({1: (0.134, None)})
+
+    driver = AstroqueryGaiaReddeningDriver(run_query=archive)
+    with pytest.raises(ExternalServiceError):
+        driver.prefetch_reddening(ids)
+
+    assert driver.get_reddening(1) is not None
+    with pytest.raises(ExternalServiceError):
+        driver.get_reddening(ids[-1])
+    assert calls["count"] == 2
+
+
+def test_a_batch_reply_without_the_source_id_column_is_an_error() -> None:
+    """Verify a reply that cannot be matched to stars is a failure."""
+    reply = Table({"ebpminrp_gspphot": [0.1], "ag_gspphot": [0.2]})
+    driver = AstroqueryGaiaReddeningDriver(run_query=lambda _query: reply)
+
+    with pytest.raises(ExternalServiceError, match="lacks"):
+        driver.prefetch_reddening([SOURCE_ID])

@@ -25,12 +25,25 @@ const baseStatus = {
     message: 'About 1 h 20 min more integration needed.', reason: '',
 };
 
+/** The library's target list that the mocked backend returns. */
+const libraryTargetList = [{ id: 'M 31', name: 'M 31' }];
+
+/**
+ * Answers the target list read with the library list and every other call with the given answer.
+ * @param answer What the depth goal calls return (or a function that makes the answer).
+ */
+function answerBackend(answer: (action: string, params: unknown) => unknown) {
+    callBackendMock.mockImplementation(async (action: string, params: unknown) => (
+        action === 'target:get_targets' ? libraryTargetList : answer(action, params)
+    ));
+}
+
 /** Renders the row inside a fresh query client. */
-function renderRow() {
+function renderRow(targetId: string = 'M 31') {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     return render(
         <QueryClientProvider client={client}>
-            <DepthGoalRow targetId="M 31" />
+            <DepthGoalRow targetId={targetId} />
         </QueryClientProvider>
     );
 }
@@ -41,7 +54,7 @@ describe('DepthGoalRow', () => {
     });
 
     it('shows the levels and the message', async () => {
-        backend.callBackend.mockResolvedValue(baseStatus);
+        answerBackend(() => baseStatus);
         renderRow();
         expect(await screen.findByText(baseStatus.message)).toBeTruthy();
         expect(screen.getByRole('option', { name: 'Quick look' })).toBeTruthy();
@@ -51,17 +64,20 @@ describe('DepthGoalRow', () => {
     });
 
     it('sets the level on change and shows the returned message', async () => {
-        backend.callBackend.mockResolvedValueOnce(baseStatus);
+        answerBackend((action) => (
+            action === 'advisory:set_depth_goal'
+                ? { ...baseStatus, level: 'deep', message: 'Integration goal reached.' }
+                : baseStatus
+        ));
         renderRow();
         await screen.findByText(baseStatus.message);
-        backend.callBackend.mockResolvedValueOnce({ ...baseStatus, level: 'deep', message: 'Integration goal reached.' });
         fireEvent.change(screen.getByRole('combobox'), { target: { value: 'deep' } });
         expect(await screen.findByText('Integration goal reached.')).toBeTruthy();
         expect(backend.callBackend).toHaveBeenCalledWith('advisory:set_depth_goal', { target: 'M 31', level: 'deep' });
     });
 
     it('shows a muted note and no dropdown when there is no depth goal', async () => {
-        backend.callBackend.mockResolvedValue({ ...baseStatus, state: 'no_depth_goal', options: [], reason: 'Planets move.' });
+        answerBackend(() => ({ ...baseStatus, state: 'no_depth_goal', options: [], reason: 'Planets move.' }));
         renderRow();
         const note = await screen.findByText('No depth goal for this kind of object.');
         expect(note.getAttribute('title')).toBe('Planets move.');
@@ -69,11 +85,21 @@ describe('DepthGoalRow', () => {
     });
 
     it('shows loading, then an error', async () => {
-        callBackendMock.mockRejectedValue(new Error('down'));
+        answerBackend(() => new Promise((_, reject) => setTimeout(() => reject(new Error('down')), 30)));
         renderRow();
-        expect(screen.getByText(/Loading depth goal/)).toBeTruthy();
+        expect(await screen.findByText(/Loading depth goal/)).toBeTruthy();
         const alert = await screen.findByRole('alert');
         expect(alert.textContent).toContain('Could not load');
+    });
+
+    it('reads no depth goal and shows nothing for a star that is not in the library', async () => {
+        answerBackend(() => baseStatus);
+        const { container } = renderRow('HIP 48113');
+        await vi.waitFor(() => expect(callBackendMock).toHaveBeenCalledWith('target:get_targets', {}));
+        // Give the row a chance to react to the loaded list before checking.
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(callBackendMock.mock.calls.some(([action]) => String(action).startsWith('advisory:'))).toBe(false);
+        expect(container.textContent).toBe('');
     });
 
     it('describes the goal with units', () => {

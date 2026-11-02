@@ -97,23 +97,34 @@ export const ObservationManager: React.FC = () => {
         setSelectedTarget(observationPackage.target_id);
     };
 
+    /** The targets whose New package request is still running, so a second click cannot start another. */
+    const newPackageInFlight = React.useRef<Set<string>>(new Set());
+
     /**
      * Opens the target's planned package, else its suggested one (the library finds it, matching
-     * names its own way), and creates a package only when it has neither.
+     * names its own way), and creates a package only when it has neither. A second request for a
+     * target whose first request is still running (a double click) is ignored, so one target never
+     * gets two packages from one gesture.
      */
     const handleNewPackage = async (targetId: string) => {
-        let existing: ObservationPackage | null;
+        if (newPackageInFlight.current.has(targetId)) return;
+        newPackageInFlight.current.add(targetId);
         try {
-            existing = await callBackend('plan:package_for_target', { target: targetId }, { silent: true });
-        } catch {
-            existing = null;
+            let existing: ObservationPackage | null;
+            try {
+                existing = await callBackend('plan:package_for_target', { target: targetId }, { silent: true });
+            } catch {
+                existing = null;
+            }
+            if (existing) {
+                handleSelectPackage(existing);
+                return;
+            }
+            const created = await libraryActions.createPackage(targetId);
+            if (created) handleSelectPackage(created);
+        } finally {
+            newPackageInFlight.current.delete(targetId);
         }
-        if (existing) {
-            handleSelectPackage(existing);
-            return;
-        }
-        const created = await libraryActions.createPackage(targetId);
-        if (created) handleSelectPackage(created);
     };
 
     /** Deletes the shown library package (after the editor's confirmation) and clears the selection. */

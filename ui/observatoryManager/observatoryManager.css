@@ -124,9 +124,9 @@
 /*
  * Row budget. The page never scrolls: the panel group has a fixed height and each panel scrolls inside itself.
  * The group is about 900px tall at 1870x1040 and about 560px at 1024x700.
- *   Top row (Telescope Control, Tracking Settings, Calibration Library): fixed, about 150px (Telescope Control's three
- *     button rows set it); never shrinks. Telescope Control and Tracking Settings are as wide as their content; the
- *     Calibration Library takes the rest; its Darks table fills the row's height and scrolls inside itself, never growing the row.
+ *   Top row (Telescope Control, Tracking Settings, Calibration Library): about 285px, set by the Calibration Library
+ *     (its header, two control lines and a table with room for four full rows); never shrinks. Telescope Control and
+ *     Tracking Settings stretch to the same height. The Calibration Library takes the most width; its table scrolls inside itself.
  *   Middle row (Camera Profiles, Manual Guide, Safety Limits): wants up to 290px (Safety Limits needs about 280px), may shrink to 90px, then scrolls inside.
  *     Safety Limits needs about 200px: header with Apply, telescope line, tab strip, a checkbox and two fields.
  *   Guiding row (Guiding Trends, Alignment and Guiding): takes all that is left and never goes below 150px.
@@ -144,11 +144,11 @@
 .observatory-top-row > .observatory-top-row__fit { flex: 3 1 0; min-width: 0; }
 .observatory-top-row > .observatory-top-row__fit + .observatory-top-row__fit { flex: 2 1 0; }
 .observatory-top-row > .calibration-panel { flex: 3 1 0; min-width: 240px; }
-/* The Darks table keeps room for its header and four rows (about Telescope Control's height, so neither
-   panel has much empty space), grows into any extra height the row has, and scrolls inside itself. */
+/* The Darks table keeps room for its header and four full rows (26px header, 25px rows, 2px of border: 128px,
+   plus a little spare), which makes this panel set the top row's height. It grows into any extra height the row has, and scrolls inside itself. */
 .calibration-panel > .panel__content { display: flex; flex-direction: column; overflow: hidden; flex: 1 0 auto; }
 .calibration-panel .calibration-section { flex: 1 0 auto; }
-.calibration-panel .calibration-table-container { flex: 1 1 0; height: 0; min-height: 110px; max-height: none; }
+.calibration-panel .calibration-table-container { flex: 1 1 0; height: 0; min-height: 132px; max-height: none; }
 .observatory-guiding-row { flex: 1 1 150px; min-height: 150px; flex-wrap: nowrap; }
 
 /* The guiding panels fill the row's height and pass it down to the plots (percent heights alone collapse). */

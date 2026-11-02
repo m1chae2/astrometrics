@@ -77,6 +77,19 @@ def test_available_filters_accept_member_names_and_values_in_any_case() -> None:
     assert config.get_available_filters() == [FilterType.L, FilterType.SPEC, FilterType.Ha]
 
 
+def test_older_owned_key_is_used_when_available_is_missing() -> None:
+    """Check that the older `owned` key still lists the filters."""
+    import configparser
+
+    parser = configparser.ConfigParser()
+    parser.read_string("[Observatory.Filters]\nowned = L, SPEC\nanalyzable = L, SPEC\n")
+    config = AppConfiguration()
+    config.app_config = parser
+    assert config.get_available_filters() == [FilterType.L, FilterType.SPEC]
+    parser.set("Observatory.Filters", "available", "Ha")
+    assert config.get_available_filters() == [FilterType.Ha]
+
+
 def test_no_available_filters_gives_an_empty_list() -> None:
     """Check that a configuration without the filter list gives no filters."""
     import configparser

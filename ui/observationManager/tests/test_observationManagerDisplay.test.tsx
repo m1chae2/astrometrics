@@ -169,6 +169,23 @@ describe('ObservationManager display', () => {
         ));
     });
 
+    it('makes only one package when the same target is clicked twice before the first answer', async () => {
+        let releaseLookup: (value: null) => void = () => undefined;
+        const lookupAnswer = new Promise<null>((resolve) => { releaseLookup = resolve; });
+        answerBackend({ 'plan:package_for_target': () => lookupAnswer });
+        renderDisplay();
+        await screen.findByRole('button', { name: 'M 81, planned package' });
+        const row = screen.getByText('M 31', { selector: 'td' });
+        await userEvent.click(row);
+        await userEvent.click(row);
+        releaseLookup(null);
+        await waitFor(() => expect(callBackendMock).toHaveBeenCalledWith(
+            'plan:create_package', { target: 'M 31' }, expect.anything()
+        ));
+        const createCalls = callBackendMock.mock.calls.filter(([action]) => action === 'plan:create_package');
+        expect(createCalls).toHaveLength(1);
+    });
+
     describe('single selection', () => {
         const queuedSequence = {
             id: 's1', target_name: 'M 51', total_duration: 600, status: 'pending',

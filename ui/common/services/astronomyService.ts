@@ -131,6 +131,8 @@ export interface SpectralClassStar {
     ra: number | null;
     dec: number | null;
     magnitude: number | null;
+    /** The library's verdict that `magnitude` is a real catalog magnitude. */
+    hasCatalogMagnitude?: boolean;
     spectralType: string;
     hasSpectra: boolean;
     hasPhotometry: boolean;

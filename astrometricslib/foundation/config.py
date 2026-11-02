@@ -1208,12 +1208,17 @@ class AppConfiguration:
         -------
         filters : `list` [`FilterType`]
             Configured filters, in the order listed under
-            ``[Observatory.Filters] available``. Each name may be a
+            ``[Observatory.Filters] available``. Older configuration
+            files name the same list ``owned``; it is used when
+            ``available`` is missing. Each name may be a
             `FilterType` member name (``L``, ``Ha``, ``SPEC``) or value
             (``Luminance``), in any case. A name that matches no filter is
             left out and logged.
         """
-        filters_str = self.app_config.get("Observatory.Filters", "available", fallback="")
+        filters_str = self.app_config.get("Observatory.Filters", "available", fallback=None)
+        if filters_str is None:
+            # Older configuration files called this list "owned".
+            filters_str = self.app_config.get("Observatory.Filters", "owned", fallback="")
         filters: list[FilterType] = []
         for raw_name in filters_str.split(","):
             wanted = raw_name.strip().lower()

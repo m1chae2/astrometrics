@@ -410,6 +410,10 @@ export const PlanetariumDisplay: React.FC = () => {
       ra: item.ra,
       dec: item.dec,
       name: item.label,
+      // The card shows the same magnitude and spectral type as the list row.
+      magnitude: item.magnitude,
+      hasCatalogMagnitude: item.hasCatalogMagnitude,
+      spectralType: item.spectralType,
       hasSpectra: !!item.hasSpectra,
       hasPhotometry: !!item.hasPhotometry,
       type: 'star',

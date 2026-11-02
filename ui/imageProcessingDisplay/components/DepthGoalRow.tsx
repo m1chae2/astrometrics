@@ -7,6 +7,8 @@
 import React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { callBackend } from '../../common/services/backendApi';
+import { useTargetListQuery } from '../../common/queries/useTargetListQuery';
+import { targetListId } from '../../common/hooks/targetListFiltering';
 import { qualityQueryKeys } from '../../common/queries/qualityQueryKeys';
 import { DepthGoalState, DepthKind } from '../../common/types/backendTypes';
 import type { DepthGoalStatus } from '../../common/types/backendTypes';
@@ -35,17 +37,30 @@ export const describeDepthDetail = (status: DepthGoalStatus): string => {
 };
 
 /**
+ * Folds a target id so spelling differences do not matter: underscores read as spaces, case ignored.
+ * @param id The target id.
+ * @return The folded id.
+ */
+const foldTargetId = (id: string): string => id.replace(/_/g, ' ').trim().toLowerCase();
+
+/**
  * Shows the depth goal dropdown and the status line for one target.
  * When the kind of object has no depth goal, the row says so in muted text,
  * so a new user knows the goal was not forgotten.
  */
 export const DepthGoalRow: React.FC<DepthGoalRowProps> = ({ targetId, refreshKey }) => {
     const queryClient = useQueryClient();
+    // The selected target is shared by every display, so it can name a star picked in the
+    // Planetarium that is not in the library. The library keeps a depth goal only for its own
+    // targets and refuses the rest, so the goal is read only once the list shows the target.
+    const { data: libraryTargets } = useTargetListQuery();
+    const isLibraryTarget = Boolean(targetId) && Array.isArray(libraryTargets)
+        && libraryTargets.some((target) => foldTargetId(targetListId(target)) === foldTargetId(targetId as string));
     const queryKey = [...qualityQueryKeys.targetReport(targetId ?? ''), 'depth-goal', refreshKey ?? ''];
     const { data: status, isLoading, isError } = useQuery({
         queryKey,
         queryFn: () => callBackend('advisory:depth_goal', { target: targetId as string }),
-        enabled: Boolean(targetId),
+        enabled: isLibraryTarget,
     });
     const setLevel = useMutation({
         mutationFn: (level: DepthLevelChoice) =>
@@ -53,7 +68,7 @@ export const DepthGoalRow: React.FC<DepthGoalRowProps> = ({ targetId, refreshKey
         onSuccess: (updated) => queryClient.setQueryData(queryKey, updated),
     });
 
-    if (!targetId) return null;
+    if (!targetId || !isLibraryTarget) return null;
     if (isLoading) {
         return <div className="depth-goal-row depth-goal-row--muted">Loading depth goal...</div>;
     }

@@ -21,6 +21,11 @@ set -euo pipefail
 #   ./run_backend.sh install           - install latest wheel (or editable) into the selected Python
 #                                        environment (does NOT start the backend)
 #   ./run_backend.sh --lan start       - start backend and bind to 0.0.0.0 so it's reachable on the LAN
+#
+# The backend runs in a systemd user scope with a memory limit (see
+# backend_memory_limit.sh; override with ASTROMETRICS_BACKEND_MEMORY_MAX and
+# ASTROMETRICS_BACKEND_MEMORY_HIGH, or "off"). `status` reports a kill by the
+# kernel's out-of-memory killer.
 #   ./run_backend.sh help|--help|-h    - print this help text
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -31,6 +36,10 @@ mkdir -p "$LOG_DIR" "$PID_DIR"
 
 PID_FILE="$PID_DIR/backend.pid"
 LOG_FILE="$LOG_DIR/backend.log"
+# Name of the memory-limited systemd scope the backend runs in (see backend_memory_limit.sh).
+SCOPE_FILE="$PID_DIR/backend.scope"
+# shellcheck source=build/linux/backend_memory_limit.sh
+source "$ROOT_DIR/build/linux/backend_memory_limit.sh"
 
 # ---------------------------------------------------------------------------
 # ensure_venv: create and populate .venv if it does not already exist.
@@ -164,7 +173,15 @@ launch_backend() {
   # diagnostics -- including the INDI driver's "No indiserver running on
   # host:port" -- can sit unflushed indefinitely, making the log look
   # silent even while something is actively failing.
-  ASTROMETRICS_BIND_HOST="$BIND_HOST" nohup "$PYTHON" -u -m "$BACKEND_MODULE" >"$LOG_FILE" 2>&1 &
+  # Run inside a memory-limited systemd scope when one is available (see
+  # backend_memory_limit.sh). systemd-run replaces itself with the command, so
+  # $! is still the backend's pid.
+  prepare_backend_scope "$(date +%Y%m%d%H%M%S)"
+  rm -f "$SCOPE_FILE"
+  if [ -n "$BACKEND_SCOPE_UNIT" ]; then
+    echo "$BACKEND_SCOPE_UNIT" > "$SCOPE_FILE"
+  fi
+  ASTROMETRICS_BIND_HOST="$BIND_HOST" nohup ${BACKEND_SCOPE_PREFIX[@]+"${BACKEND_SCOPE_PREFIX[@]}"} "$PYTHON" -u -m "$BACKEND_MODULE" >"$LOG_FILE" 2>&1 &
   backend_pid=$!
   echo "$backend_pid" > "$PID_FILE"
 }
@@ -295,9 +312,15 @@ status_backend() {
     pid=$(cat "$PID_FILE")
     if kill -0 "$pid" >/dev/null 2>&1; then
       echo "Backend running (pid $pid). Logs: $LOG_FILE"
+      if [ -f "$SCOPE_FILE" ]; then
+        echo "Memory-limited scope: $(cat "$SCOPE_FILE")"
+      fi
       return 0
     else
       echo "Stale pidfile found (pid $pid not running)."
+      if [ -f "$SCOPE_FILE" ]; then
+        backend_scope_oom_report "$(cat "$SCOPE_FILE")"
+      fi
       return 1
     fi
   else

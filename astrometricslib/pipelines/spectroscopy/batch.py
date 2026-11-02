@@ -43,8 +43,10 @@ logger = logging.getLogger(__name__)
 # The most stars followed in each raw frame. Following the spectrum of a
 # star over time only needs the target itself and a few well-known
 # reference stars, and every extra star is one more spectrum to extract
-# from every frame of every night. Ten matches the per-image limit the
-# other spectroscopy entry points already use.
+# from every frame of every night. This cap is separate from the star
+# selection of a spectroscopy run on a stack, which now processes every
+# usable identified star unless the caller passes `options["limit"]`
+# (see `spectrum_star_limit` in runner.py).
 MAXIMUM_TRACKED_STARS_PER_FRAME = 10
 
 # A magnitude below this is an instrument reading, not a catalog

@@ -456,7 +456,7 @@
     min-height: 0;
 }
 
-.last-image-viewer .section-panel__content {
+.last-image-viewer .panel__content {
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -484,6 +484,13 @@
     display: flex;
     align-items: center;
     justify-content: center;
+}
+
+/* The renderer's only content is an absolutely positioned canvas, so in this
+   row-flex frame it would shrink to its padding (0 wide). Make it fill the frame. */
+.last-image-viewer__frame .fits-renderer {
+    flex: 1;
+    min-width: 0;
 }
 
 .last-image-viewer__status {

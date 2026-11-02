@@ -251,6 +251,7 @@ export const useCanvasInteraction = (
 
     /**
      * Resets the viewport scale and centers the image within the container.
+     * Does nothing while the container has no width or height.
      */
     const zoomToFit = useCallback(() => {
         const container = containerRef.current;
@@ -258,6 +259,10 @@ export const useCanvasInteraction = (
 
         const cW = container.clientWidth;
         const cH = container.clientHeight;
+        // A container with no width or height (hidden, or not laid out yet)
+        // would give a zero scale and an invisible image. Keep the current
+        // view; the resize observer below fits again once there is a real size.
+        if (cW === 0 || cH === 0) return;
 
         const scaleX = cW / drawnSize.w;
         const scaleY = cH / drawnSize.h;

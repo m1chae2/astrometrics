@@ -104,6 +104,14 @@ cost at least this share of the captured time. Ten percent is the same size the
 stop signal treats as too small to act on (`MINIMUM_GAIN_FRACTION` in
 ``noise_growth.py``). Design estimate, register row WAY-D64."""
 
+SKY_COST_MINIMUM_CAPTURED_SECONDS = 300.0
+"""``sky_cost`` stays quiet for a setting with less captured time than this, in
+seconds. A share of a few frames is not a share of the sky: Polaris was told
+it "lost about 100%" from one 32-microsecond frame, and Arcturus rested on one
+30 s frame. Five minutes is about ten of the 30 s frames, enough for the
+share to describe the nights and not one frame. Design estimate, register row
+WAY-D64; not yet tested against nights of known sky loss."""
+
 ALTITUDE_CUTS_DEG = (30.0, 40.0, 50.0)
 """Altitudes, in degrees, at which the frames are split into low and high. 30
 degrees is about an airmass of 2, where the atmosphere starts to cost visibly;
@@ -185,6 +193,25 @@ def duration_text(seconds: float) -> str:
     if seconds < 7200.0:
         return f"{seconds / 60.0:.0f} min"
     return f"{seconds / 3600.0:.1f} h"
+
+
+def _short_duration_text(seconds: float) -> str:
+    """Write a duration for a reason, in seconds when it is under two minutes.
+
+    Parameters
+    ----------
+    seconds : `float`
+        The duration, in seconds.
+
+    Returns
+    -------
+    text : `str`
+        For example ``"45 s"`` or ``"35 min"``, so a short time never reads
+        as ``"0 min"``.
+    """
+    if seconds < 120.0:
+        return f"{seconds:.0f} s"
+    return duration_text(seconds)
 
 
 def _from_rule(
@@ -424,13 +451,14 @@ def sky_cost_statements(summaries: Sequence[CaptureSettingSummary]) -> list[Targ
     -------
     statements : `list` [`TargetStatement`]
         One recommendation for each setting whose sky loss reaches
-        `SKY_COST_MINIMUM_SHARE` of its captured time.
+        `SKY_COST_MINIMUM_SHARE` of its captured time, when that time is at
+        least `SKY_COST_MINIMUM_CAPTURED_SECONDS`.
     """
     rule = rule_by_name("sky_cost")
     statements: list[TargetStatement] = []
     for summary in summaries:
         account = summary.loss_account
-        if account is None or summary.captured_seconds <= 0.0:
+        if account is None or summary.captured_seconds < SKY_COST_MINIMUM_CAPTURED_SECONDS:
             continue
         moon_seconds = sum(s.seconds for s in account.kept_frame_deficit if s.cause == CAUSE_SKY_MOON)
         sky_seconds = sum(s.seconds for s in account.kept_frame_deficit if s.cause == CAUSE_SKY)
@@ -448,8 +476,8 @@ def sky_cost_statements(summaries: Sequence[CaptureSettingSummary]) -> list[Targ
                 rule.wording.format_map(fields),
                 (
                     f"The loss account against the {account.reference_name} reference puts "
-                    f"{lost_seconds / 60.0:.0f} min of {summary.captured_seconds / 60.0:.0f} min of captured "
-                    "time into the sky. "
+                    f"{_short_duration_text(lost_seconds)} of "
+                    f"{_short_duration_text(summary.captured_seconds)} of captured time into the sky. "
                     + (
                         "The Moon's part comes from the sky model fitted to your own frames."
                         if has_split

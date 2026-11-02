@@ -168,6 +168,23 @@ def test_sky_cost_without_a_split_uses_the_whole_sky_loss_and_says_so() -> None:
     assert "No sky model" in statements[0].reason
 
 
+def test_sky_cost_needs_the_minimum_captured_time() -> None:
+    """One short frame cannot say the sky lost 100% of the time."""
+    tiny = rr.SKY_COST_MINIMUM_CAPTURED_SECONDS - 1.0
+    assert rr.sky_cost_statements([_summary(captured_seconds=tiny, account=_account(tiny, None))]) == []
+    enough = rr.SKY_COST_MINIMUM_CAPTURED_SECONDS
+    statements = rr.sky_cost_statements([_summary(captured_seconds=enough, account=_account(enough, None))])
+    assert len(statements) == 1
+
+
+def test_sky_cost_reason_writes_short_times_in_seconds() -> None:
+    """Under two minutes the reason says seconds, never "0 min of 0 min"."""
+    assert rr._short_duration_text(45.0) == "45 s"
+    assert rr._short_duration_text(2100.0) == "35 min"
+    (statement,) = rr.sky_cost_statements([_summary(account=_account(900.0, None))])
+    assert "15 min of 100 min" in statement.reason
+
+
 def test_sky_cost_needs_a_loss_account() -> None:
     """A summary with no loss account makes no statement."""
     assert rr.sky_cost_statements([_summary()]) == []

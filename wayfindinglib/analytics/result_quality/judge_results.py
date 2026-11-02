@@ -560,7 +560,10 @@ def _judge_underexposed_setting(case: _Case) -> list[TargetStatement]:
     exposure that reaches the least ratio is the present one times the
     square of the missing factor. The proposal does not check the longer
     exposure against the clipping limit; the rule ``overexposed_setting``
-    does that for the exposures already taken.
+    does that for the exposures already taken. When ``overexposed_setting``
+    fired for the same setting, this rule stays quiet, because one setting
+    cannot be told both to lengthen and to shorten (the clipped stars come
+    first).
 
     Parameters
     ----------
@@ -572,6 +575,8 @@ def _judge_underexposed_setting(case: _Case) -> list[TargetStatement]:
     statements : `list` [`TargetStatement`]
         One recommendation, or an empty list.
     """
+    if "overexposed_setting" in case.fired_rules:
+        return []
     sky_noise = case.readings[SKY_NOISE_METRIC].value
     read_noise = case.readings[READ_NOISE_METRIC].value
     if read_noise <= 0.0:
@@ -1046,6 +1051,36 @@ _PLAIN_RULE_JUDGES: dict[str, Callable[[_Case], list[TargetStatement]]] = {
     "retake_bad_calibration_set": _judge_retake_bad_calibration_set,
 }
 
+_JUDGED_AFTER: dict[str, frozenset[str]] = {
+    "underexposed_setting": frozenset({"overexposed_setting"}),
+    "retake_bad_calibration_set": frozenset({"offset_too_low"}),
+}
+"""Rules that read ``_Case.fired_rules`` of another rule, and that other rule.
+
+`judge_results` judges a rule after the rules it depends on, whatever order
+the caller passes the rules in.
+"""
+
+
+def _in_dependency_order(rules: Sequence[QualityRule]) -> list[QualityRule]:
+    """Put each rule after the rules whose statements it reads.
+
+    Parameters
+    ----------
+    rules : `Sequence` [`QualityRule`]
+        The rules, in the caller's order.
+
+    Returns
+    -------
+    ordered : `list` [`QualityRule`]
+        The rules that depend on none stay in the caller's order, then the
+        dependent ones follow, also in the caller's order.
+    """
+    return [rule for rule in rules if rule.name not in _JUDGED_AFTER] + [
+        rule for rule in rules if rule.name in _JUDGED_AFTER
+    ]
+
+
 PLAIN_RULE_NAMES: frozenset[str] = frozenset(_PLAIN_RULE_JUDGES)
 """The names of the rules that `judge_results` evaluates itself.
 
@@ -1229,7 +1264,7 @@ def judge_results(
     for setting_id in setting_ids:
         capture_setting = capture_settings.get(setting_id) if setting_id is not None else None
         rows = grouped.get(setting_id, [])
-        for rule in rules:
+        for rule in _in_dependency_order(rules):
             if rule.computed_by is not None:
                 continue
             judge = _PLAIN_RULE_JUDGES.get(rule.name)

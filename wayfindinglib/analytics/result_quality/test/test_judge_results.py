@@ -170,6 +170,46 @@ def test_underexposed_is_quiet_when_sky_dominates() -> None:
     assert _of_rule(_judge(rows), "underexposed_setting") == []
 
 
+def _clipped_and_read_noise_limited_rows() -> list[QualityMeasurement]:
+    """Make rows that would fire both exposure rules.
+
+    Returns
+    -------
+    rows : `list` [`QualityMeasurement`]
+        A peak at 2 times the room, and a sky noise far below the read noise.
+    """
+    return [
+        _row("stacking.group_brightest_star_peak_fraction", 2.0, level="stack"),
+        _row("frame.sky_noise_e", 1.5, version=3),
+        _row("frame.read_noise_e", 3.0, version=2),
+    ]
+
+
+def test_underexposed_is_quiet_when_overexposed_fired_for_the_setting() -> None:
+    """One setting is never told both to shorten and to lengthen."""
+    statements = _judge(_clipped_and_read_noise_limited_rows())
+    assert len(_of_rule(statements, "overexposed_setting")) == 1
+    assert _of_rule(statements, "underexposed_setting") == []
+
+
+def test_the_underexposed_silence_does_not_depend_on_rule_order() -> None:
+    """Passing the rules with underexposed first gives the same answer."""
+    rules = sorted(RESULT_QUALITY_RULES, key=lambda rule: rule.name != "underexposed_setting")
+    assert rules[0].name == "underexposed_setting"
+    statements = _judge(_clipped_and_read_noise_limited_rows(), rules=rules)
+    assert len(_of_rule(statements, "overexposed_setting")) == 1
+    assert _of_rule(statements, "underexposed_setting") == []
+
+
+def test_underexposed_still_speaks_when_the_peak_is_within_the_ceiling() -> None:
+    """A peak of 0.5 of the room does not silence the lengthen advice."""
+    rows = _clipped_and_read_noise_limited_rows()
+    rows[0] = _row("stacking.group_brightest_star_peak_fraction", 0.5, level="stack")
+    statements = _judge(rows)
+    assert _of_rule(statements, "overexposed_setting") == []
+    assert len(_of_rule(statements, "underexposed_setting")) == 1
+
+
 def test_frame_readings_use_the_median_over_frames() -> None:
     """The reading of a frame metric is the median over the frames."""
     rows = [_row("frame.star_elongation", value) for value in (1.0, 1.5, 1.6)]

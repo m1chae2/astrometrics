@@ -8,7 +8,9 @@ focus. The tests check the geometry helpers (any dispersion direction), that a
 faint star's spectrum is pulled toward the truth, that a bright star and a
 lone star are left alone, that a distant star is not called a neighbour, that a
 bad fit is skipped with a reason, and that the pipeline's switch turns the
-whole stage on and off.
+whole stage on and off. The pipeline leaves spectra alone while the
+correction is turned off, so the tests that need it turn it on.
+The tests also check the rough neighbor-share estimate that replaces it.
 """
 
 import json
@@ -24,6 +26,7 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_trail_deblen
 from astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_wing_correction import (
     MAXIMUM_FITTED_NEIGHBORS,
     STATUS_APPLIED,
+    STATUS_NOT_APPLIED_TURNED_OFF,
     STATUS_NOT_NEEDED,
     StarTrace,
     StoredCrossTrailBlur,
@@ -31,6 +34,7 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_wing_correct
     brightest_neighbor_indices,
     correct_neighbor_wings,
     cross_trail_blur_record,
+    estimate_neighbor_shares,
     load_cross_trail_blur,
     star_trace_from_result,
     working_frame_for,
@@ -342,16 +346,32 @@ def _run_pipeline(
     ), traces
 
 
-def test_the_switch_off_leaves_every_result_as_extracted() -> None:
-    """With the switch off no result has a record; the light is untouched."""
+def test_the_switch_off_leaves_every_result_as_extracted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With the switch off no light is changed; neighbors are still counted."""
+    monkeypatch.setattr(wing_module, "NEIGHBOR_WING_CORRECTION_IS_ON", True)
     results, traces = _run_pipeline(False, stored_blur())
-    assert all("neighbor_wing_status" not in result for result in results)
     for result, trace in zip(results, traces, strict=True):
         assert result["intensities"] == trace.box_flux.tolist()
+        assert "neighbor_wing_fraction" not in result
+        assert result["neighbor_wing_status"] == STATUS_NOT_APPLIED_TURNED_OFF
+        assert result["neighbor_overlap_count"] == 1
 
 
-def test_the_switch_on_corrects_the_faint_star_and_records_what_it_did() -> None:
-    """With the switch on the faint star's light drops and is recorded."""
+def test_the_correction_is_turned_off_by_default_and_says_so() -> None:
+    """The constant is off, so even with the switch on no light is changed."""
+    assert wing_module.NEIGHBOR_WING_CORRECTION_IS_ON is False
+    results, traces = _run_pipeline(True, stored_blur())
+    for result, trace in zip(results, traces, strict=True):
+        assert result["intensities"] == trace.box_flux.tolist()
+        assert "neighbor_wing_fraction" not in result
+        assert result["neighbor_wing_status"] == "not applied: the correction is turned off"
+
+
+def test_the_switch_on_corrects_the_faint_star_and_records_what_it_did(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the constant and the switch on the faint star's light drops."""
+    monkeypatch.setattr(wing_module, "NEIGHBOR_WING_CORRECTION_IS_ON", True)
     results, traces = _run_pipeline(True, stored_blur())
     faint = results[1]
     assert faint["neighbor_wing_status"] == STATUS_APPLIED
@@ -360,17 +380,71 @@ def test_the_switch_on_corrects_the_faint_star_and_records_what_it_did() -> None
     assert results[0]["neighbor_wing_status"] == STATUS_APPLIED
 
 
-def test_the_switch_on_without_a_stored_blur_only_records_why_nothing_was_done() -> None:
+def test_every_star_with_a_neighbor_gets_the_share_estimate() -> None:
+    """The faint star has a near-true estimate; the bright star a small one."""
+    results, _ = _run_pipeline(False, stored_blur())
+    faint_share = results[1]["neighbor_share_estimate"]
+    bright_share = results[0]["neighbor_share_estimate"]
+    assert faint_share is not None
+    assert bright_share is not None
+    # The true share of the faint star's box that is the bright star's light
+    # is about 0.014 in this synthetic pair (the image holds noise).
+    assert 0.005 < faint_share < 0.03
+    assert abs(bright_share) < faint_share / 5
+
+
+def test_a_lone_star_has_no_estimate_and_no_status() -> None:
+    """With no neighbor the star carries no estimate and a count of zero."""
+    results, _ = _run_pipeline(False, stored_blur(), count=1)
+    assert "neighbor_share_estimate" not in results[0]
+    assert "neighbor_overlap_count" not in results[0]
+    assert "neighbor_wing_status" not in results[0]
+
+
+def test_the_estimate_needs_a_stored_blur_but_the_count_does_not() -> None:
+    """With no stored blur the estimate is `None`; neighbors are counted."""
+    image, traces, _ = make_pair()
+    shares = estimate_neighbor_shares(image, traces, None, VERTICAL)
+    assert [share.share_estimate for share in shares] == [None, None]
+    assert [share.overlap_count for share in shares] == [1, 1]
+
+
+def test_a_neighbor_only_star_gets_no_estimate() -> None:
+    """A star read only for its neighbors' sake is not described."""
+    image, traces, _ = make_pair()
+    shares = estimate_neighbor_shares(image, traces, stored_blur(), VERTICAL, neighbor_only=[True, False])
+    assert shares[0].share_estimate is None
+    assert shares[0].overlap_count == 0
+    assert shares[1].overlap_count == 1
+
+
+def test_a_distant_star_is_not_counted_in_the_estimate() -> None:
+    """A streak far across the image is no neighbor, so the count is zero."""
+    faint = np.linspace(3000.0, 250.0, ROWS)
+    image = make_image([(BRIGHT_COLUMN, np.full(ROWS, 8000.0)), (BRIGHT_COLUMN - 100.0, faint)], 1.1, seed=4)
+    traces = [make_trace(image, BRIGHT_COLUMN), make_trace(image, BRIGHT_COLUMN - 100.0)]
+    shares = estimate_neighbor_shares(image, traces, stored_blur(), VERTICAL)
+    assert [share.overlap_count for share in shares] == [0, 0]
+    assert [share.share_estimate for share in shares] == [None, None]
+
+
+def test_the_switch_on_without_a_stored_blur_only_records_why_nothing_was_done(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """With no stored blur the light is untouched and the result says so."""
+    monkeypatch.setattr(wing_module, "NEIGHBOR_WING_CORRECTION_IS_ON", True)
     results, traces = _run_pipeline(True, None)
     for result, trace in zip(results, traces, strict=True):
         assert result["neighbor_wing_status"].startswith("skipped: no blur profile")
         assert result["intensities"] == trace.box_flux.tolist()
         assert "neighbor_wing_fraction" not in result
+        assert result["neighbor_share_estimate"] is None
+        assert result["neighbor_overlap_count"] == 1
 
 
-def test_a_lone_star_gets_no_record_even_with_the_switch_on() -> None:
+def test_a_lone_star_gets_no_record_even_with_the_switch_on(monkeypatch: pytest.MonkeyPatch) -> None:
     """A star with no neighbour in the image has nothing recorded."""
+    monkeypatch.setattr(wing_module, "NEIGHBOR_WING_CORRECTION_IS_ON", True)
     results, _ = _run_pipeline(True, stored_blur(), count=1)
     assert "neighbor_wing_status" not in results[0]
 

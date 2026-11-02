@@ -431,6 +431,8 @@ export interface SpectroscopyResult {
   extractionRadius?: number | null;
   neighborWingFraction?: number[] | null;
   neighborWingStatus?: string | null;
+  neighborShareEstimate?: number | null;
+  neighborOverlapCount?: number;
   possibleNeighborContamination?: Record<string, number | null>[] | null;
   countsPerSecondFactor?: number | null;
   catalogComparison?: CatalogComparison | null;

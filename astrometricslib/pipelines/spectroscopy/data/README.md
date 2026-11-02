@@ -103,7 +103,7 @@ A setup where extending the range would help, for example one that adds a blocki
 
 `cross_trail_blur_zwo_asi_533mm_pro.json` records the shape of an isolated bright star's trail across the dispersion direction. It comes from 40 short Vega frames, aligned on the zero order (the star's undispersed, point-like image) and averaged (the `source` field gives the date, the airmass and the focuser state). It holds `offsets_px`, the distance from the trail's center in pixels (-75 to +75), `band_edges_px`, eight bands along the trail from 340 to 680 pixels beyond the zero order (about 3800 to 7700 Å), and one normalized profile per band in `profiles`.
 
-`load_cross_trail_blur` in `pre_processing/neighbor_wing_correction.py` reads it. The neighbor-wing correction fits this stored shape to a crowded star's trail to work out how much of a bright neighbor's light falls in its box. The instrument response section above also takes its reference airmass from this file's log.
+`load_cross_trail_blur` in `pre_processing/neighbor_wing_correction.py` reads it. The neighbor-share estimate uses this stored shape to work out roughly how much of a bright neighbor's light falls in a star's box. The correction that fits it to a crowded star's trail is turned off (partly measured; see [SPE-34](../../../../documentation/library_design/validation/spectroscopy.md#spe-34)). The instrument response section above also takes its reference airmass from this file's log.
 
 ## Atmospheric extinction
 

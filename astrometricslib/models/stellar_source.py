@@ -922,13 +922,25 @@ class SpectroscopyResult(BaseModel):
     # An audit record for the neighbour-wing correction (see
     # neighbor_trail_deblending). For each sample of the spectrum above, the
     # share of this star's box light that came from a neighbouring star's
-    # blur and was taken out, from 0 to 1. `None` when the correction was not
-    # run (the switch is off, or there was no neighbour to correct for).
+    # blur and was taken out, from 0 to 1. `None` unless the correction was
+    # run. The correction is turned off (validation entry SPE-34), so this is
+    # `None` for new spectra; an older spectrum may hold it.
     neighbor_wing_fraction: list[float] | None = Field(default=None, alias="neighborWingFraction")
     # What the neighbour-wing correction did for this star, in words:
-    # "applied", or "skipped: ..." with the reason (for example the fit was
-    # not trustworthy). `None` when the correction was not run.
+    # "applied", "skipped: ..." with the reason, or "not applied: the
+    # correction is turned off" for a star that has a neighbor. `None` when
+    # the star has no neighbor or the correction was not looked at.
     neighbor_wing_status: str | None = Field(default=None, alias="neighborWingStatus")
+    # A rough estimate of the neighbors' share of this star's box light,
+    # worked out from the camera's stored blur and the neighbors' own box
+    # light (see `neighbor_share_estimate`). An estimated ratio, not a true
+    # fraction: it can be above 1 or below 0. `None` when the star has no
+    # neighbor within reach, or the camera has no stored blur. Changes
+    # nothing in the spectrum. Not validated near the image edge (SPE-34).
+    neighbor_share_estimate: float | None = Field(default=None, alias="neighborShareEstimate")
+    # How many neighbors have a streak running alongside this star's, close
+    # enough to count for `neighbor_share_estimate`. 0 when there is none.
+    neighbor_overlap_count: int = Field(default=0, alias="neighborOverlapCount")
     # An audit warning: wavelength windows where a different, independently
     # detected star's own known position lands inside this star's reading
     # box (see `find_neighbor_contamination_windows`), each with the

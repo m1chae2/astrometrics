@@ -170,6 +170,8 @@ def _spectrum_summary(star: Any) -> dict[str, Any]:
         "dispersion_angle_degrees": _round(spectroscopy.dispersion_angle, 2),
         "median_trail_width_px": _round(sorted(widths)[len(widths) // 2], 2) if widths else None,
         "neighbor_wing_status": spectroscopy.neighbor_wing_status,
+        "neighbor_share_estimate": _round(spectroscopy.neighbor_share_estimate, 3),
+        "neighbor_overlap_count": spectroscopy.neighbor_overlap_count,
         "possible_neighbor_contamination": spectroscopy.possible_neighbor_contamination,
         "catalog_comparison": _plain(spectroscopy.catalog_comparison),
         "input_quality": _plain(spectroscopy.input_quality),

@@ -166,3 +166,5 @@ def test_the_extended_target_is_excluded_from_neighbor_wing_deblending() -> None
 
     assert "neighbor_wing_status" not in nebula_result
     assert "neighbor_wing_fraction" not in nebula_result
+    assert "neighbor_share_estimate" not in nebula_result
+    assert "neighbor_overlap_count" not in nebula_result

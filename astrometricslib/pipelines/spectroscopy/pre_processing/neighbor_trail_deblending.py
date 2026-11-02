@@ -68,9 +68,12 @@ What this module does NOT do:
   7900 A on real stars, 0.81-0.85 on the synthetic pair in the tests), partly
   because the blur beyond the measured window is taken to be zero.
 
-Not connected to the pipeline yet. It is meant to be switched on by a config
-option, off by default, once it has been checked on isolated stars, synthetic
-pairs and real pairs.
+The pipeline does not use the correction. It is turned off (see
+`NEIGHBOR_WING_CORRECTION_IS_ON` in `neighbor_wing_correction`), because the
+fit's own residual limit did not tell good corrections from bad ones when
+model neighbors were injected into real images (validation entry SPE-34).
+The code stays so it is easy to switch back on. `sky_aware_neighbor_wing_flux`
+is used for the rough neighbor-share estimate that replaces it.
 """
 
 from dataclasses import dataclass
@@ -78,6 +81,13 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.interpolate import CubicSpline
 from scipy.optimize import least_squares
+
+from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor import (
+    MEDIAN_STANDARD_ERROR_FACTOR,
+    SKY_BAND_GAP_PX,
+    SKY_BAND_WIDTH_PX,
+    SKY_CONTAMINATION_SIGMA,
+)
 
 # How finely the blur is sampled when the light inside a stretch is worked
 # out, in samples per pixel. Twelve is far finer than the blur, so the sums
@@ -100,6 +110,13 @@ _CENTROID_HALF_WIDTH_PX = 4
 # in pixels. The centre lines are measured, so this is only a small correction.
 _MAXIMUM_CENTRE_SHIFT_PX = 2.0
 
+# How many places along the streak `sky_aware_neighbor_wing_flux` works out
+# the sky strips at. The light in the strips changes slowly along the streak,
+# and the values between these places are read off a straight line, so 20
+# places keep the cost small. Chosen with the estimate tested in validation
+# entry SPE-34; it was not varied there.
+_SKY_AWARE_PLACE_COUNT = 20
+
 # How much the measured blur may be stretched or squeezed to match the crowded
 # image. Across the 2026-09-25 stars the stretch needed was 1.0-1.4 for a
 # 4 C change of focuser temperature; a fit that reaches either limit is
@@ -113,6 +130,11 @@ MAXIMUM_DILATION = 2.0
 # stars and 1.3-1.7% on the real Albireo pair. 2% leaves a little room above
 # the worst of those. It has not been checked against a fit that is wrong
 # in a way the profile cannot show.
+# The correction is now turned off. When model neighbors were injected into
+# real images, fits within this limit did not give smaller flux errors than
+# no correction (validation entry SPE-34), so the limit does not tell good
+# corrections from bad ones. It is kept for the day the correction is
+# switched back on.
 MAXIMUM_TRUSTED_RELATIVE_RESIDUAL = 0.02
 
 
@@ -857,6 +879,99 @@ def neighbor_wing_flux(
         )
         wing_flux[sample] = neighbor_box_flux[sample] / own * inside_target
     return wing_flux
+
+
+def sky_aware_neighbor_wing_flux(
+    blur: EmpiricalBlur,
+    dilation: float,
+    positions_px: np.ndarray,
+    neighbor_box_flux: np.ndarray,
+    neighbor_box_half_width_px: np.ndarray,
+    neighbor_offset_px: np.ndarray,
+    target_box_half_width_px: np.ndarray,
+    sky_scatter_px: float,
+) -> np.ndarray:
+    """Work out a neighbour's light left in the target's box after the sky.
+
+    The spectrum extractor measures the sky in two strips beside the box and
+    takes it off every sample. A bright neighbour's wing also falls in those
+    strips, so part of its light is taken off with the sky. This function
+    finds the neighbour's light in the box from the measured blur alone, as
+    `neighbor_wing_flux` does, and then takes off the sky level the extractor
+    would have used (`measure_sky` in `spectrum_extractor`: the mean of the two
+    strips, or the lower one when they differ by more than
+    `SKY_CONTAMINATION_SIGMA` times the noise of their difference).
+
+    Parameters
+    ----------
+    blur : `EmpiricalBlur`
+        The measured blur.
+    dilation : `float`
+        How much to stretch the measured shape.
+    positions_px : `numpy.ndarray`
+        Distance along the streak from the zero-order star at each sample.
+    neighbor_box_flux : `numpy.ndarray`
+        The neighbour's sky-subtracted box flux at each sample.
+    neighbor_box_half_width_px : `numpy.ndarray`
+        Half-width of the neighbour's box at each sample, in pixels.
+    neighbor_offset_px : `numpy.ndarray`
+        Where the neighbour's streak is across the streak at each sample,
+        measured from the target's streak.
+    target_box_half_width_px : `numpy.ndarray`
+        Half-width of the target's box at each sample.
+    sky_scatter_px : `float`
+        The scatter of single pixels of sky near the target, in the units of
+        the box flux. It sets how big a difference between the two strips
+        counts as contamination.
+
+    Returns
+    -------
+    wing_flux : `numpy.ndarray`
+        The neighbour's light that stays in the target's box at each sample.
+        It can be negative where the sky level taken off is larger than the
+        light in the box.
+    """
+    sample_count = positions_px.size
+    places = np.linspace(0, sample_count - 1, _SKY_AWARE_PLACE_COUNT).astype(int)
+    strip_noise_limit = (
+        SKY_CONTAMINATION_SIGMA
+        * MEDIAN_STANDARD_ERROR_FACTOR
+        * np.sqrt(2.0 / SKY_BAND_WIDTH_PX)
+        * sky_scatter_px
+    )
+    lower_strip, upper_strip, inside_target, inside_neighbor = [], [], [], []
+    for place in places:
+        position = float(positions_px[place])
+        offset = float(neighbor_offset_px[place])
+        nearest_edge = int(np.ceil(target_box_half_width_px[place])) + SKY_BAND_GAP_PX
+        lower_pixels = np.arange(-(nearest_edge + SKY_BAND_WIDTH_PX), -nearest_edge, dtype=float)
+        upper_pixels = np.arange(nearest_edge + 1, nearest_edge + SKY_BAND_WIDTH_PX + 1, dtype=float)
+        spline = _profile_spline(blur, position)
+        lower_strip.append(np.median(pixel_profile(blur, position, dilation, offset, lower_pixels, spline)))
+        upper_strip.append(np.median(pixel_profile(blur, position, dilation, offset, upper_pixels, spline)))
+        grid_px, cumulative = _cumulative_light(blur, position, dilation)
+        half_width = float(target_box_half_width_px[place])
+        inside_target.append(_fraction_between(grid_px, cumulative, offset, -half_width, half_width))
+        neighbor_half_width = float(neighbor_box_half_width_px[place])
+        inside_neighbor.append(
+            _fraction_between(
+                grid_px, cumulative, offset, offset - neighbor_half_width, offset + neighbor_half_width
+            )
+        )
+    samples = np.arange(sample_count)
+    total_light = np.nan_to_num(neighbor_box_flux) / np.maximum(
+        np.interp(samples, places, inside_neighbor), 1e-6
+    )
+    lower_level = total_light * np.interp(samples, places, lower_strip)
+    upper_level = total_light * np.interp(samples, places, upper_strip)
+    sky_level = np.where(
+        np.abs(upper_level - lower_level) > strip_noise_limit,
+        np.minimum(lower_level, upper_level),
+        0.5 * (lower_level + upper_level),
+    )
+    return (
+        total_light * np.interp(samples, places, inside_target) - 2.0 * target_box_half_width_px * sky_level
+    )
 
 
 def subtract_neighbor_wings(

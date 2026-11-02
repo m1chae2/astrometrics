@@ -154,7 +154,11 @@ class SpectroscopyConfig(BaseModel):
         and the bright one's blur reaches into the faint one's box (see
         ``neighbor_trail_deblending``). It needs a stored blur profile for
         the camera (``neighbor_wing_correction``); with none, nothing is
-        changed. Off until it has been checked on more real pairs.
+        changed. It has an effect only when the module constant
+        ``NEIGHBOR_WING_CORRECTION_IS_ON`` is also ``True``, and that
+        constant is ``False``: the correction is turned off (validation
+        entry SPE-34). Each star with a neighbor gets a rough estimate of
+        the neighbor's share instead.
     use_flare_mask_extraction : `bool`
         Whether to extract starting from an offset anchored past the
         star's own position, to avoid a bright flare/astigmatism
@@ -220,7 +224,10 @@ class SpectroscopyConfig(BaseModel):
     )
     subtract_neighbor_wings: bool = Field(
         False,
-        description="Take a bright neighbour's blurred light out of each star's box (needs a stored blur)",
+        description=(
+            "Take a bright neighbour's blurred light out of each star's box (needs a stored blur; "
+            "has no effect while NEIGHBOR_WING_CORRECTION_IS_ON is False)"
+        ),
     )
     use_flare_mask_extraction: bool = Field(
         False,

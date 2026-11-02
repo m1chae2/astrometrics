@@ -28,7 +28,7 @@ flowchart TD
     B --> C["Name stars from the matching normal image's sky map, else by their pixel pattern"]
     C --> D["Find the spectrum direction and trace each spectrum trail"]
     D --> E["Sum light across each spectrum trail; subtract sky from two side bands"]
-    E --> F["Remove light spilling over from bright neighbors"]
+    E --> F["Estimate the share of light from close neighbors (spectrum not changed)"]
     F --> G["Turn position along the spectrum trail into wavelength"]
     G --> H["Correct the shift from the air bending light"]
     H --> I["Correct the offset of the wavelength scale"]
@@ -84,7 +84,7 @@ where $\sigma_\text{trail}$ is the fitted Gaussian sigma, smoothed over 61 steps
 
 **The sky.** Two sky bands, each 10 pixels wide and 6 pixels from the box, are sigma-clipped (pixels far from the median, such as stars, are dropped). The sky level is the mean of their medians. When the two disagree by more than the noise allows, the fainter band (the one with the lower median) is used alone: light can only add to a band, so the brighter one holds a neighbor's light.
 
-**Neighbors.** A bright neighbor's wings (the faint outer edges of its spectrum trail) are removed with a blur profile measured from an isolated star (`neighbor_trail_deblending.py`, `neighbor_wing_correction.py`).
+**Neighbors.** A bright neighbor's wings (the faint outer edges of its spectrum trail) can reach into a star's box. The pipeline does not take them out: the correction is turned off because its fit check did not tell good corrections from bad ones ([SPE-34](../validation/spectroscopy.md#spe-34)). Each star with a close neighbor instead carries a rough estimate of the neighbors' share of its box light, worked out from a blur profile measured from an isolated star (`neighbor_wing_correction.py`). It is an estimated ratio, not a true fraction, and it changes nothing in the spectrum.
 
 ### 3.3 Flux calibration
 

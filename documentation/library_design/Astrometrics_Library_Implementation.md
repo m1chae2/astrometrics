@@ -456,7 +456,7 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 | --- | --- | --- | --- |
 | Reading box half-width; width smoothing | 2.5 times the trail width; 61 steps | Design estimate ([table](validation/spectroscopy.md#design-estimates)); [SPE-04](validation/spectroscopy.md#spe-04) | §6.2 (concept 2) |
 | Minimum signal-to-noise: spectrum and emission-line test; absorption-line test | 1.5; 7 | Partly measured ([SPE-10](validation/spectroscopy.md#spe-10), [SPE-31](validation/spectroscopy.md#spe-31), [SPE-32](validation/spectroscopy.md#spe-32)) | §6.2 (concept 5) |
-| Fitted neighbors per star | 8 | Design estimate ([SPE-D27](validation/spectroscopy.md#design-estimates)) | §6.2 |
+| Wing correction; fitted neighbors if on | Off; 8 | Partly measured ([SPE-34](validation/spectroscopy.md#spe-34)); [SPE-D27](validation/spectroscopy.md#design-estimates) | §6.2 |
 | Line significance for the wavelength zero point | 6 | Partly measured ([SPE-11](validation/spectroscopy.md#spe-11)) | §6.2 (concept 4) |
 | Sky strip gap and width | 6 px; 10 px | Partly measured ([SPE-01](validation/spectroscopy.md#spe-01)) | §6.2 (concept 2) |
 | Sky contamination limit | 3σ | Partly measured ([SPE-03](validation/spectroscopy.md#spe-03)); simulation only | §6.2 (concept 2) |

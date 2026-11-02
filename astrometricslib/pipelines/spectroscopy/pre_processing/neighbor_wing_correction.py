@@ -1,4 +1,12 @@
-"""Takes a bright neighbour's blurred light out of each star's spectrum.
+"""Finds each star's close neighbors and estimates their share of its light.
+
+The pipeline no longer takes a neighbor's blurred light out of a star's
+spectrum (`NEIGHBOR_WING_CORRECTION_IS_ON` is `False`). The correction code
+stays in this file and in `neighbor_trail_deblending`, so it is easy to switch
+back on. What the pipeline uses now is `estimate_neighbor_shares`, which
+reports for every star with a neighbor a rough estimate of the neighbor's
+share of the star's box light (`neighbor_share_estimate`). See validation
+entry SPE-34 for the evidence.
 
 This is the part of the neighbour-wing stage that knows about the pipeline. The
 maths of the blur is in `neighbor_trail_deblending`, which works on plain
@@ -14,9 +22,10 @@ arrays. This file does what is left:
   stored blur to their band profiles, and removes each neighbour's light from
   the box flux (`correct_neighbor_wings`).
 
-The result for every star says what was done ("applied", or "skipped" and
-why) and, sample by sample, what share of the box light was taken out, so a
-reader can see how large the correction was at each wavelength.
+When the correction is run, the result for every star says what was done
+("applied", or "skipped" and why) and, sample by sample, what share of the box
+light was taken out, so a reader can see how large the correction was at each
+wavelength.
 
 What it does NOT do:
 
@@ -43,6 +52,7 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_trail_deblen
     build_band_profiles,
     fit_neighbor_amplitudes,
     neighbor_wing_flux,
+    sky_aware_neighbor_wing_flux,
     subtract_neighbor_wings,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor import (
@@ -50,6 +60,18 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor im
 )
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
+
+# Whether the pipeline takes a neighbor's blurred light out of a star's
+# spectrum. It is `False`: the correction is turned off. Derivation: model
+# neighbors were injected beside real stars of M 13 and Albireo and the
+# spectra were extracted again. Stars whose fit passed the 2% residual limit
+# (`MAXIMUM_TRUSTED_RELATIVE_RESIDUAL`) had a median flux error of 0.725 with
+# the correction and 0.694 without it on M 13 (0.518 and 0.462 on the held-out
+# set), and the correction was better than none for only about a third of the
+# injections. Validation entry SPE-34 has the tables and the limits of the
+# test. Setting this to `True` (and the configuration option
+# `subtract_neighbor_wings` to `True`) brings the correction back.
+NEIGHBOR_WING_CORRECTION_IS_ON = False
 
 # A neighbour this far or nearer across the streak, in pixels, is fitted
 # together with the star. The stored blur reaches 75 px either side, so a
@@ -81,6 +103,18 @@ MINIMUM_OVERLAP_FRACTION = 0.5
 # is called. The pipeline records nothing for these stars.
 STATUS_NOT_NEEDED = "not needed"
 STATUS_APPLIED = "applied"
+
+# What the status of a star that has a neighbor is called while the correction
+# is turned off. The spectrum is left as it was read.
+STATUS_NOT_APPLIED_TURNED_OFF = "not applied: the correction is turned off"
+
+# How far along and across the image, in pixels, the scatter of the sky is
+# measured around a star for the neighbor-share estimate. The window is wide
+# enough to hold many sky pixels and narrow enough to stay near the star. The
+# blur reaches 75 px either side, so the cross window matches it. Used as in
+# the SPE-34 test; not varied there.
+_SKY_SCATTER_HALF_LENGTH_PX = 100
+_SKY_SCATTER_HALF_WIDTH_PX = 75
 
 
 @dataclass(frozen=True)
@@ -156,6 +190,25 @@ class NeighborWingOutcome:
     corrected_flux: np.ndarray | None = None
     wing_fraction: np.ndarray | None = None
     fit: NeighborFit | None = None
+
+
+@dataclass(frozen=True)
+class NeighborShare:
+    """The rough neighbor-share estimate for one star.
+
+    Attributes
+    ----------
+    share_estimate : `float` or `None`
+        The estimated ratio of the neighbors' light in the star's box to the
+        box light (`neighbor_share_estimate`). `None` when the star has no
+        neighbor, or when no blur profile is stored for the camera.
+    overlap_count : `int`
+        How many neighbors have a streak that runs alongside this star's
+        within `MAXIMUM_NEIGHBOR_DISTANCE_PX`. 0 when there is none.
+    """
+
+    share_estimate: float | None
+    overlap_count: int
 
 
 @dataclass(frozen=True)
@@ -427,20 +480,7 @@ def correct_neighbor_wings(
         if target is None:
             outcomes.append(NeighborWingOutcome("skipped: the extraction did not record its geometry"))
             continue
-        neighbors = []
-        for other_index, other in enumerate(placed):
-            if other_index == target_index or other is None:
-                continue
-            cross_at_target = np.interp(
-                target.along_px, other.along_px, other.cross_px, left=np.nan, right=np.nan
-            )
-            offset = cross_at_target - target.cross_px
-            covered = np.isfinite(offset)
-            if covered.mean() < MINIMUM_OVERLAP_FRACTION:
-                continue
-            median_offset = float(np.median(offset[covered]))
-            if MINIMUM_NEIGHBOR_DISTANCE_PX <= abs(median_offset) <= MAXIMUM_NEIGHBOR_DISTANCE_PX:
-                neighbors.append((other, offset))
+        neighbors = _find_neighbors(placed, target_index)
         if not neighbors:
             outcomes.append(NeighborWingOutcome(STATUS_NOT_NEEDED))
         elif stored is None:
@@ -448,6 +488,193 @@ def correct_neighbor_wings(
         else:
             outcomes.append(_correct_one_star(working_image, target, neighbors, stored))
     return outcomes
+
+
+def _find_neighbors(
+    placed: list[_PlacedTrace | None], target_index: int
+) -> list[tuple[_PlacedTrace, np.ndarray]]:
+    """List the stars whose streaks run alongside one star's streak.
+
+    A star counts as a neighbor when its streak covers at least
+    `MINIMUM_OVERLAP_FRACTION` of the star's samples and its median distance
+    across the streak is between `MINIMUM_NEIGHBOR_DISTANCE_PX` and
+    `MAXIMUM_NEIGHBOR_DISTANCE_PX`.
+
+    Parameters
+    ----------
+    placed : `list` [`_PlacedTrace` or `None`]
+        Every star's placed trace; `None` for a star with no known geometry.
+    target_index : `int`
+        Which star to find the neighbors of.
+
+    Returns
+    -------
+    neighbors : `list` [`tuple` [`_PlacedTrace`, `numpy.ndarray`]]
+        Each neighbor with its cross-streak offset from the star at every
+        sample (not a number where the neighbor's streak does not reach).
+    """
+    target = placed[target_index]
+    neighbors = []
+    for other_index, other in enumerate(placed):
+        if other_index == target_index or other is None:
+            continue
+        cross_at_target = np.interp(
+            target.along_px, other.along_px, other.cross_px, left=np.nan, right=np.nan
+        )
+        offset = cross_at_target - target.cross_px
+        covered = np.isfinite(offset)
+        if covered.mean() < MINIMUM_OVERLAP_FRACTION:
+            continue
+        median_offset = float(np.median(offset[covered]))
+        if MINIMUM_NEIGHBOR_DISTANCE_PX <= abs(median_offset) <= MAXIMUM_NEIGHBOR_DISTANCE_PX:
+            neighbors.append((other, offset))
+    return neighbors
+
+
+def neighbor_share_estimate(
+    stored_blur: EmpiricalBlur,
+    target: _PlacedTrace,
+    neighbors: list[tuple[_PlacedTrace, np.ndarray]],
+    sky_scatter_px: float,
+) -> float | None:
+    """Estimate how much of a star's box light is its neighbors' light.
+
+    The stored blur (not stretched) gives the share of each neighbor's light
+    that lands in the star's box. The sky level the extractor took off with
+    the strips beside the box is taken out of that (see
+    `sky_aware_neighbor_wing_flux`). The result is that light summed over
+    the spectrum, divided by the star's positive box flux summed over the
+    spectrum.
+
+    This is an estimated ratio, not a true fraction. It can be above 1, and
+    below 0 where the sky level taken off is larger than the neighbor's light.
+    It is only a rough guide: the stored blur is not fitted to this image,
+    and nothing here has been checked for a star near the image edge.
+
+    Parameters
+    ----------
+    stored_blur : `EmpiricalBlur`
+        The camera's stored blur.
+    target : `_PlacedTrace`
+        The star.
+    neighbors : `list` [`tuple` [`_PlacedTrace`, `numpy.ndarray`]]
+        The neighbors, each with its cross-streak offset from the star at
+        every sample.
+    sky_scatter_px : `float`
+        The scatter of single pixels of sky near the star, in the units of
+        the box flux.
+
+    Returns
+    -------
+    estimate : `float` or `None`
+        The estimated ratio, or `None` when there is no neighbor or the star
+        has no positive box flux.
+    """
+    box_flux = np.asarray(target.trace.box_flux, dtype=float)
+    positive_box_flux = float(np.nansum(np.clip(box_flux, 0.0, None)))
+    if not neighbors or positive_box_flux <= 0.0:
+        return None
+    wing_total = 0.0
+    for other, offset in neighbors:
+        neighbor_trace = other.trace
+        neighbor_flux = np.interp(
+            target.along_px, other.along_px, neighbor_trace.box_flux, left=0.0, right=0.0
+        )
+        neighbor_half_width = np.interp(
+            target.along_px,
+            other.along_px,
+            neighbor_trace.box_half_width_px,
+            left=neighbor_trace.box_half_width_px[0],
+            right=neighbor_trace.box_half_width_px[-1],
+        )
+        wing_flux = sky_aware_neighbor_wing_flux(
+            stored_blur,
+            1.0,
+            target.trace.distance_px,
+            neighbor_flux,
+            neighbor_half_width,
+            np.where(np.isfinite(offset), offset, 0.0),
+            target.trace.box_half_width_px,
+            sky_scatter_px,
+        )
+        wing_total += float(np.nansum(wing_flux))
+    return wing_total / positive_box_flux
+
+
+def _sky_scatter_near(working_image: np.ndarray, target: _PlacedTrace) -> float:
+    """Measure the scatter of single sky pixels around a star.
+
+    Parameters
+    ----------
+    working_image : `numpy.ndarray`
+        The image laid out with the spectra running down the rows.
+    target : `_PlacedTrace`
+        The star.
+
+    Returns
+    -------
+    scatter : `float`
+        1.4826 times the median absolute deviation of the pixels in a window
+        around the middle of the star's streak.
+    """
+    row = int(np.median(target.along_px))
+    column = int(np.median(target.cross_px))
+    window = working_image[
+        max(row - _SKY_SCATTER_HALF_LENGTH_PX, 0) : row + _SKY_SCATTER_HALF_LENGTH_PX,
+        max(column - _SKY_SCATTER_HALF_WIDTH_PX, 0) : column + _SKY_SCATTER_HALF_WIDTH_PX + 1,
+    ]
+    return float(1.4826 * np.median(np.abs(window - np.median(window))))
+
+
+def estimate_neighbor_shares(
+    plane: np.ndarray,
+    traces: list[StarTrace | None],
+    stored: StoredCrossTrailBlur | None,
+    dispersion_vector: tuple[float, float],
+    neighbor_only: Sequence[bool] | None = None,
+) -> list[NeighborShare]:
+    """Count each star's neighbors and estimate their share of its box light.
+
+    Changes nothing in the spectra.
+
+    Parameters
+    ----------
+    plane : `numpy.ndarray`
+        The image the spectra were extracted from.
+    traces : `list` [`StarTrace` or `None`]
+        One trace per extracted star, in a fixed order; `None` for a star
+        whose geometry is not known.
+    stored : `StoredCrossTrailBlur` or `None`
+        The camera's stored blur, or `None` when there is none.
+    dispersion_vector : `tuple` [`float`, `float`]
+        The direction the spectra run on the image, as (x, y).
+    neighbor_only : `Sequence` [`bool`], optional
+        One flag per trace. A star flagged `True` is used as a neighbor of
+        the other stars but gets no estimate of its own.
+
+    Returns
+    -------
+    shares : `list` [`NeighborShare`]
+        One per trace, in the same order. A star with no known geometry, or
+        flagged neighbor-only, gets no estimate and a count of 0.
+    """
+    frame = working_frame_for(dispersion_vector, plane.shape)
+    working_image = frame.image(plane)
+    placed = [_place_trace(frame, trace) for trace in traces]
+    shares = []
+    for target_index, target in enumerate(placed):
+        if target is None or (neighbor_only is not None and neighbor_only[target_index]):
+            shares.append(NeighborShare(None, 0))
+            continue
+        neighbors = _find_neighbors(placed, target_index)
+        if not neighbors or stored is None:
+            shares.append(NeighborShare(None, len(neighbors)))
+            continue
+        estimate = neighbor_share_estimate(
+            stored.blur, target, neighbors, _sky_scatter_near(working_image, target)
+        )
+        shares.append(NeighborShare(estimate, len(neighbors)))
+    return shares
 
 
 @dataclass(frozen=True)

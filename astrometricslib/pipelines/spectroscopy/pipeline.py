@@ -43,6 +43,7 @@ from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp i
     compare_to_gaia_xp,
     gaia_xp_precheck,
 )
+from astrometricslib.pipelines.spectroscopy.pre_processing import neighbor_wing_correction
 from astrometricslib.pipelines.spectroscopy.pre_processing.assess_input_quality import (
     assess_input_quality,
     input_quality_checkpoint,
@@ -81,9 +82,11 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.measured_line_spread 
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_wing_correction import (
     STATUS_APPLIED,
+    STATUS_NOT_APPLIED_TURNED_OFF,
     STATUS_NOT_NEEDED,
     StoredCrossTrailBlur,
     correct_neighbor_wings,
+    estimate_neighbor_shares,
     load_cross_trail_blur,
     star_trace_from_result,
 )
@@ -796,7 +799,7 @@ class SpectrumStarSelection:
 
 # The `neighbor_wing_status` of a star stored with no catalog identity. Such a
 # star is read as a neighbor only, so neighbors' light is neither looked for
-# nor removed from its spectrum.
+# (no neighbor-share estimate is made) nor removed from its spectrum.
 _NEIGHBORS_NOT_CHECKED_STATUS = "skipped: read as a neighbor only; neighbors' light not checked or removed"
 
 
@@ -925,8 +928,10 @@ class SpectroscopyPipeline:
         self.instrument_response = load_instrument_response(config.camera.name)
         self.line_spread_profile = load_line_spread_profile(config.camera.name)
         # The stored blur of this camera's streaks, measured on an isolated
-        # bright star, or `None` when none has been derived. Only used when
-        # `config.subtract_neighbor_wings` is on.
+        # bright star, or `None` when none has been derived. It gives the
+        # neighbor-share estimate, and the correction too when that is on
+        # (`config.subtract_neighbor_wings` and
+        # `neighbor_wing_correction.NEIGHBOR_WING_CORRECTION_IS_ON`).
         self.cross_trail_blur: StoredCrossTrailBlur | None = load_cross_trail_blur(config.camera.name)
         self.instrument = SpectroscopyInstrument(config)
         # The extractor also does the sky background subtraction stage:
@@ -1448,9 +1453,10 @@ class SpectroscopyPipeline:
                 )
                 extracted.append((star, is_stellar_obj, result))
 
-        # Every star is read first, so each one's neighbours' light can be
-        # taken out of it before the results are applied.
-        if self.config.subtract_neighbor_wings and len(extracted) > 1:
+        # Every star is read first, so each one's neighbors can be found and
+        # their share of the star's light estimated before the results are
+        # applied. The estimate changes no spectrum (SPE-34).
+        if len(extracted) > 1:
             self._subtract_neighbor_wings(image, [result for _, _, result in extracted])
 
         results = []
@@ -1484,7 +1490,7 @@ class SpectroscopyPipeline:
         lookups have nothing to read. The stored record says what is not known:
         `is_catalog_identified` is `False`, `possible_neighbor_contamination`
         is `None` (never checked), and `neighbor_wing_status` says the
-        neighbors' light was not taken out.
+        neighbors' light was not checked or removed.
 
         Parameters
         ----------
@@ -1525,29 +1531,35 @@ class SpectroscopyPipeline:
         return True
 
     def _subtract_neighbor_wings(self, image: AstrometricsImage, results: list[dict[str, Any]]) -> None:
-        """Take each star's neighbours' blurred light out of its spectrum.
+        """Record each star's close neighbors; correct for them if turned on.
 
         Two stars close together give side-by-side streaks, and the bright
         one's blur reaches into the faint one's box (see
-        `neighbor_trail_deblending`). For every star with such a neighbour the
-        stored blur is fitted to the pair, and the neighbour's share is taken
-        out of the star's intensities. What was done, and how much was taken
-        out at each sample, is recorded in the star's result.
+        `neighbor_trail_deblending`). For every star with such a neighbor the
+        result gets a rough estimate of the neighbors' share of its box light
+        (`neighbor_share_estimate`) and the count of neighbors. The spectrum
+        is not changed: the correction is turned off
+        (`NEIGHBOR_WING_CORRECTION_IS_ON`, validation entry SPE-34), and each
+        such star's status says so. When both that constant and
+        `config.subtract_neighbor_wings` are `True`, the stored blur is fitted
+        to the pair instead and the neighbor's share is taken out of the
+        star's intensities.
 
         Parameters
         ----------
         image : `AstrometricsImage`
             The picture the spectra were read from.
         results : `list` [`dict`]
-            Every star's extraction result. Changed in place: a corrected
-            star's ``"intensities"`` are replaced, and every star with a
-            neighbour gets ``"neighbor_wing_status"`` and, when it was
-            corrected, ``"neighbor_wing_fraction"``. An extended target
-            (a nebula or cluster) is left out entirely, in both roles:
-            its own spectrum is never corrected, and it is never treated
-            as a "neighbour" whose blur reaches into a real star's box --
-            the blur-fit math here assumes a point source's narrow streak,
-            which a diffuse, wide-aperture target does not have.
+            Every star's extraction result. Changed in place: every star with
+            a neighbor gets ``"neighbor_wing_status"``,
+            ``"neighbor_overlap_count"`` and, when the camera has a stored
+            blur, ``"neighbor_share_estimate"``. With the correction on, a
+            corrected star's ``"intensities"`` are replaced and it gets
+            ``"neighbor_wing_fraction"``. An extended target (a nebula or
+            cluster) is left out entirely, in both roles: its own spectrum
+            gets nothing, and it is never treated as a "neighbor" -- the
+            blur math here assumes a point source's narrow streak, which a
+            diffuse, wide-aperture target does not have.
         """
         correctable = [
             result
@@ -1562,14 +1574,30 @@ class SpectroscopyPipeline:
         )
         if first_vector is None:
             return
-        outcomes = correct_neighbor_wings(
-            image.data,
-            traces,
-            self.cross_trail_blur,
-            (float(first_vector[0]), float(first_vector[1])),
-            neighbor_only=[bool(result.get("is_neighbor_only")) for result in correctable],
+        dispersion_vector = (float(first_vector[0]), float(first_vector[1]))
+        neighbor_only = [bool(result.get("is_neighbor_only")) for result in correctable]
+        shares = estimate_neighbor_shares(
+            image.data, traces, self.cross_trail_blur, dispersion_vector, neighbor_only=neighbor_only
         )
-        for result, outcome in zip(correctable, outcomes, strict=True):
+        is_correcting = (
+            neighbor_wing_correction.NEIGHBOR_WING_CORRECTION_IS_ON and self.config.subtract_neighbor_wings
+        )
+        outcomes = (
+            correct_neighbor_wings(
+                image.data, traces, self.cross_trail_blur, dispersion_vector, neighbor_only=neighbor_only
+            )
+            if is_correcting
+            else None
+        )
+        for index, (result, share) in enumerate(zip(correctable, shares, strict=True)):
+            if share.overlap_count > 0:
+                result["neighbor_overlap_count"] = share.overlap_count
+                result["neighbor_share_estimate"] = share.share_estimate
+            if outcomes is None:
+                if share.overlap_count > 0:
+                    result["neighbor_wing_status"] = STATUS_NOT_APPLIED_TURNED_OFF
+                continue
+            outcome = outcomes[index]
             if outcome.status == STATUS_NOT_NEEDED:
                 continue
             result["neighbor_wing_status"] = outcome.status
@@ -1943,6 +1971,8 @@ class SpectroscopyPipeline:
             measured_line_spread=measured_line_spread,
             neighbor_wing_fraction=result.get("neighbor_wing_fraction"),
             neighbor_wing_status=result.get("neighbor_wing_status"),
+            neighbor_share_estimate=result.get("neighbor_share_estimate"),
+            neighbor_overlap_count=result.get("neighbor_overlap_count", 0),
             possible_neighbor_contamination=result.get("possible_neighbor_contamination"),
             counts_per_second_factor=counts_per_second_factor(getattr(image, "header", None)),
             catalog_comparison=analysis.catalog_comparison,

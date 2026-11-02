@@ -30,6 +30,7 @@ element is present.
 """
 
 import math
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -104,16 +105,6 @@ VERDICT_NOT_COVERED = "not_covered"
 # leaves generous room for the untuned case). The best dip inside this
 # window is used, and the control test searches the same size of window.
 CENTER_SEARCH_TOLERANCE_ANGSTROM = 30.0
-
-# When two features share one dip (see `_mark_features_sharing_a_dip`), the
-# reference type's expected depths decide which keeps it if they differ by more
-# than this; otherwise the nearer rest wavelength does. Set to
-# MINIMUM_REPORTED_DEPTH, the smallest depth the detector reports at all: a
-# smaller difference is not a difference the detector reports anyway. On the
-# bundled templates, H-gamma against the G band is 0.13 to 0.14 against 0.0 for
-# A0V and A2V, and 0.0 against 0.08 for K0III and K3III (measured
-# 2026-09-25); other pairs are not tested.
-EXPECTED_DEPTH_TIE_BREAK_MARGIN = 0.01
 
 # Degree of the polynomial fitted as the continuum. 2 (a gentle curve)
 # rather than 1 (a straight line): the instrument's own response bends the
@@ -675,31 +666,32 @@ def expected_feature_depth(
     return None
 
 
-def _mark_features_sharing_a_dip(
+def _label_features_sharing_a_dip(
     entries: list[dict[str, object]], resolution_element_angstrom: float
 ) -> None:
-    """Stop one dip being reported as two different lines.
+    """Label features that report the same dip, so it is not read as two lines.
 
     Each feature looks for its best dip within
     `CENTER_SEARCH_TOLERANCE_ANGSTROM` of its rest wavelength, independently
     of the others. Two features whose rest wavelengths are closer together
     than the instrument can separate (the G band at 4300 A and H-gamma at
     4340 A, against a resolution element of 45 to 50 A) therefore find the
-    same dip and both report it. On real Vega, Albireo B and Deneb spectra
-    the G band came out with the same depth and p-value as H-gamma, and a G
-    band "detected" in an A0V star is not real.
+    same dip and both report it, with the same depth and p-value. The
+    spectrum cannot say which of the two lines made the dip, so neither is
+    given up: both keep their verdicts, and each gets ``"blended_with"``
+    naming the other (the shared-dip label). Earlier versions gave the dip to
+    one feature and set the other to `VERDICT_INCONCLUSIVE`; that threw away
+    real detections of the line the dip belonged to (issue 144).
 
-    When two reported features of the same kind (both dips or both bumps)
-    measure them less than one resolution element apart, only one keeps
-    the dip. If a reference type was given and
-    the two features' expected depths for it differ by more than
-    `EXPECTED_DEPTH_TIE_BREAK_MARGIN`, the feature the type expects to be
-    deeper keeps it (an A star shows H-gamma and not the G band; a K star the
-    reverse). Otherwise the dip goes to the feature whose rest wavelength is
-    nearer to it. The other is set to `VERDICT_INCONCLUSIVE` (the spectrum
-    cannot say whether it adds anything of its own) and its ``"blended_with"``
-    names the feature that keeps the dip. A feature that was not reported to
-    begin with is left alone. Changes `entries` in place.
+    Only features reported as `VERDICT_DETECTED` or `VERDICT_POSSIBLE` are
+    labeled, and only against another feature of the same kind (both dips or
+    both bumps) reported in the same way. A feature that was not reported to
+    begin with is left alone. Where more than two features share a dip, each
+    names the one whose dip is nearest its own, then the one with the lower
+    rest wavelength. Changes `entries` in place.
+
+    Counts that add up detected features should count a shared dip once; see
+    `count_shared_dips_once`.
 
     Parameters
     ----------
@@ -709,7 +701,12 @@ def _mark_features_sharing_a_dip(
     resolution_element_angstrom : `float`
         Dips closer together than this are treated as one.
     """
-    measured = [entry for entry in entries if "measured_wavelength_angstrom" in entry]
+    reported = [
+        entry
+        for entry in entries
+        if "measured_wavelength_angstrom" in entry
+        and entry["verdict"] in (VERDICT_DETECTED, VERDICT_POSSIBLE)
+    ]
 
     def dip_center(entry: dict[str, object]) -> float:
         """Read where an entry's dip was measured.
@@ -719,55 +716,54 @@ def _mark_features_sharing_a_dip(
         center : `float`
             The measured wavelength, in Angstroms.
         """
-        return float(entry["measured_wavelength_angstrom"])
+        return float(entry["measured_wavelength_angstrom"])  # type: ignore[arg-type]
 
-    def nearness_rank(entry: dict[str, object]) -> tuple[float, float]:
-        """Rank how near an entry's dip is to its rest wavelength.
+    for entry in reported:
+        partners = [
+            other
+            for other in reported
+            if other is not entry
+            and other["kind"] == entry["kind"]
+            and abs(dip_center(other) - dip_center(entry)) < resolution_element_angstrom
+        ]
+        if partners:
+            nearest = min(
+                partners,
+                key=lambda other: (
+                    abs(dip_center(other) - dip_center(entry)),
+                    float(other["wavelength_angstrom"]),  # type: ignore[arg-type]
+                ),
+            )
+            entry["blended_with"] = nearest["feature"]
 
-        Returns
-        -------
-        rank : `tuple` [`float`, `float`]
-            The distance from the rest wavelength to the dip, then the rest
-            wavelength itself (so an exact tie has a fixed winner).
-        """
-        rest = float(entry["wavelength_angstrom"])
-        return abs(dip_center(entry) - rest), rest
 
-    def keeps_dip_over(candidate: dict[str, object], rival: dict[str, object]) -> bool:
-        """Decide whether `candidate` has a stronger claim to the shared dip.
+def count_shared_dips_once(features: Sequence[Mapping[str, object]]) -> list[Mapping[str, object]]:
+    """Keep one name for each shared dip in a list of reported features.
 
-        Returns
-        -------
-        keeps : `bool`
-            `True` when `candidate` should keep the dip rather than `rival`.
-        """
-        candidate_expected = candidate.get("expected_depth")
-        rival_expected = rival.get("expected_depth")
-        if (
-            candidate["kind"] == KIND_ABSORPTION
-            and candidate_expected is not None
-            and rival_expected is not None
-            and abs(float(candidate_expected) - float(rival_expected)) > EXPECTED_DEPTH_TIE_BREAK_MARGIN
-        ):
-            return float(candidate_expected) > float(rival_expected)
-        return nearness_rank(candidate) < nearness_rank(rival)
+    Two features that share a dip (see `_label_features_sharing_a_dip`) both
+    keep their verdicts, so a count of reported features would count the one
+    dip twice. This keeps the feature with the lower name of each pair, so the
+    dip is counted once and the same one is chosen every time.
 
-    for entry in measured:
-        if entry["verdict"] not in (VERDICT_DETECTED, VERDICT_POSSIBLE):
-            continue
-        keeper = None
-        for other in measured:
-            if (
-                other is entry
-                or other["kind"] != entry["kind"]
-                or abs(dip_center(other) - dip_center(entry)) >= resolution_element_angstrom
-            ):
-                continue
-            if keeps_dip_over(other, entry) and (keeper is None or keeps_dip_over(other, keeper)):
-                keeper = other
-        if keeper is not None:
-            entry["blended_with"] = keeper["feature"]
-            entry["verdict"] = VERDICT_INCONCLUSIVE
+    Parameters
+    ----------
+    features : `~collections.abc.Sequence` [`~collections.abc.Mapping`]
+        Feature entries from `detect_named_features`. Only those the caller
+        counts (for example those with a detected or possible verdict) should
+        be passed in.
+
+    Returns
+    -------
+    counted : `list` [`~collections.abc.Mapping`]
+        The features with each shared dip represented once.
+    """
+    names = {str(feature.get("feature")) for feature in features}
+    return [
+        feature
+        for feature in features
+        if feature.get("blended_with") not in names
+        or str(feature.get("feature")) < str(feature.get("blended_with"))
+    ]
 
 
 def _one_sided_p_value(
@@ -961,8 +957,9 @@ def detect_named_features(
         positions were available), ``"expected_depth"`` and
         ``"probability_present"`` (`None` without a reference type, and for
         emission: the reference spectra hold absorption only)
-        and ``"blended_with"`` (the name of a nearby feature that keeps the
-        same dip, or `None`; see `_mark_features_sharing_a_dip`).
+        and ``"blended_with"`` (the name of a nearby feature reported at the
+        same dip, or `None`; both keep their verdicts; see
+        `_label_features_sharing_a_dip`).
         A covered feature also has ``"equivalent_width_angstrom"`` (positive
         for a dip, negative for a bump), ``"equivalent_width_error_angstrom"``
         and ``"equivalent_width_window_half_width_angstrom"``, all `None`
@@ -1130,7 +1127,7 @@ def detect_named_features(
         })
         entries.append(entry)
 
-    _mark_features_sharing_a_dip(entries, resolution_element_angstrom)
+    _label_features_sharing_a_dip(entries, resolution_element_angstrom)
 
     verdict_rank = {
         VERDICT_DETECTED: 0,

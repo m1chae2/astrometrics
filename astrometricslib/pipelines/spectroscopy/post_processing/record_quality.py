@@ -797,7 +797,8 @@ def below_feature_limit_notice_measurement(
     -------
     measurement : `QualityMeasurement`
         A failed notice whose value is the number of spectra. Those stars keep
-        their spectrum and have no feature detection or classification.
+        their spectrum and their emission-line test, and have no
+        absorption-feature detection or classification.
     """
     return notice_measurement(
         below_feature_limit_notice_spec(),
@@ -805,9 +806,9 @@ def below_feature_limit_notice_measurement(
         context,
         subject,
         f"{star_count} spectrum(s) have a signal-to-noise below {MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE:g} "
-        "per resolution element, too low to find a line; each keeps its spectrum and has no feature "
-        "detection or classification",
-        action_taken="kept the spectra and skipped the feature detection and classification",
+        "per resolution element, too low to find an absorption line; each keeps its spectrum and its "
+        "emission-line test and has no absorption-feature detection or classification",
+        action_taken="kept the spectra and skipped the absorption-feature detection and classification",
     )
 
 

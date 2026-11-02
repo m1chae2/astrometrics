@@ -503,7 +503,8 @@ _STAGE_ROWS: tuple[_StageRow, ...] = (
         "count",
         Direction.NONE,
         "How many absorption features the feature test judged significant.",
-        "Features with a detected or possible verdict, among the features that were tested.",
+        "Features with a detected or possible verdict, among those tested. "
+        "Two names that share one dip count once.",
         "SPE-24",
     ),
     (
@@ -989,14 +990,16 @@ def below_feature_limit_notice_spec() -> MetricSpec:
         Checkpoint.SPECTROSCOPY,
         SubjectLevel.RUN,
         "count",
-        "Whether some spectra were too faint for feature detection and classification.",
+        "Whether some spectra were too faint for absorption-feature detection and classification.",
         "The number of extracted spectra whose signal-to-noise per resolution element is below the limit for "
-        "finding a line (validation register SPE-31). Those stars keep their spectrum and get no feature "
-        "detection or classification. An extended target is not counted.",
+        "finding an absorption line (validation register SPE-31). Those stars keep their spectrum and get no "
+        "absorption-feature detection or classification; their emission lines are still tested (validation "
+        "register SPE-32). An extended target is not counted.",
         "pipelines.spectroscopy.post_processing.record_quality.below_feature_limit_notice_measurement",
         (
-            "A line cannot be found in a spectrum this faint, so the spectrum is kept but its features and "
-            "type are not reported; a person should know that stars were left unanalyzed."
+            "An absorption line cannot be found in a spectrum this faint, so the spectrum is kept but its "
+            "absorption features and type are not reported; a person should know that stars were left "
+            "partly unanalyzed."
         ),
     )
 

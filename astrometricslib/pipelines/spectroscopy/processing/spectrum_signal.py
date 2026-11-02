@@ -32,24 +32,26 @@ import numpy as np
 MINIMUM_SPECTRUM_SIGNAL_TO_NOISE = 1.5
 
 # A spectrum below this signal-to-noise per resolution element keeps its
-# extracted spectrum, but gets no absorption-feature detection and no
-# spectral classification. The number is the same measure as the cut above
-# (`estimate_spectrum_signal_to_noise`). It is higher because the cut above
-# only asks whether a continuum exists, while a line has to stand out of the
-# noise.
+# extracted spectrum and its emission-line test (floor above, validation
+# register entry SPE-32), but gets no absorption-feature detection, no
+# spectral classification and no response-corrected spectrum. The number is
+# the same measure as the cut above (`estimate_spectrum_signal_to_noise`). It
+# is higher because the cut above only asks whether a continuum exists, while
+# an absorption line has to stand out of the noise.
 #
 # Measured by injecting 0.30-deep lines into 94 real spectra of 17 targets and
 # counting how many the feature detector found (validation register entry
 # SPE-31, "Partly measured"). At a signal-to-noise of 1.5 to 4.5, 2 of 265
 # Balmer lines and 3 of 298 other lines were found; at 4.5 to 7, 2 of 35 and
-# 1 of 39. There is no 90 percent point: even strong spectra find at most 0.5
-# to 0.65 of the lines. The pooled curve reaches 25 percent at line depth times
-# signal-to-noise of about 5 and 50 percent at 10 to 12, which is what the
-# noise theory of a line depth predicts (Cayrel 1988, IAU Symposium 132).
-# Below about 7 no realistic line is found, so the analysis is not run.
-#
-# The emission-line detector was not measured, so this cut is not applied to
-# it on an extended target (see `analyze_spectrum`).
+# 1 of 39. Even at 35 and above the share depends on the line: the red lines
+# (H-alpha, H-beta, Mg b, Na D) were found in 97 of 108 cases (0.90), the blue
+# ones (H-gamma, H-delta, Ca H&K, G band) in 13 of 74 (0.18). The blue
+# shortfall comes from noise at the blue end that the whole-spectrum
+# signal-to-noise does not describe, extra scatter there, the rule for dips
+# shared by two names, and a flaw in how the test builds blue lines; it is not
+# a ceiling of the detector in general. Below about 7 no realistic line is
+# found, so the absorption analysis is not run. An extended target is not held
+# to this cut (see `analyze_spectrum`).
 MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE = 7.0
 
 # The scatter between neighbouring elements is measured from their second

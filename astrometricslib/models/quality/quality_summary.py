@@ -673,9 +673,10 @@ class SpectroscopyPipelineQualityMetrics(StarIdentificationMetrics):
     skipped_no_trail_star_count: int = Field(default=0, alias="skippedNoTrailStarCount")
     skipped_unidentified_star_count: int = Field(default=0, alias="skippedUnidentifiedStarCount")
     # How many extracted spectra were below the signal-to-noise limit for
-    # feature detection and classification (see
+    # absorption-feature detection and classification (see
     # `MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE`). Those stars keep their
-    # spectrum and get no feature detection or classification. The single-
+    # spectrum and their emission-line test and get no absorption-feature
+    # detection or classification. The single-
     # image run counts them; a summary saved before this was recorded reads 0.
     below_feature_limit_star_count: int = Field(default=0, alias="belowFeatureLimitStarCount")
     # How many stars could not be compared with Gaia XP because the download of

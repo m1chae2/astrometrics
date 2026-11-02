@@ -45,6 +45,7 @@ from astrometricslib.models.quality.metric_spec import (
     MetricSpec,
     UncertaintyKind,
 )
+from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_spec
 
 ASTROMETRY_SOURCES_DETECTED = "astrometry.sources_detected_count"
 ASTROMETRY_SIMBAD_MATCHED_COUNT = "astrometry.simbad_matched_count"
@@ -559,7 +560,7 @@ ASTROMETRY_METRICS: tuple[MetricSpec, ...] = (
         "The solve requests made during the run.",
         "A solve that needed retries is told apart from one that worked the first time.",
         better=Direction.LOWER,
-        computed_by="drivers.astrometry_net_driver.get_plate_solve_attempt_count",
+        computed_by="_internal.drivers.astrometry_net_driver._call_with_transient_retry",
         levels=_RUN_ONLY,
     ),
     _count_metric(
@@ -570,7 +571,7 @@ ASTROMETRY_METRICS: tuple[MetricSpec, ...] = (
         "solver does.",
         "The fit residual is an RMS over these stars, so the count says how far to trust it.",
         better=Direction.HIGHER,
-        computed_by="drivers.astrometry_net_driver.read_corr_fit_statistics",
+        computed_by="_internal.drivers.astrometry_net_driver.read_corr_fit_statistics",
     ),
     _count_metric(
         ASTROMETRY_GAIA_FIT_STAR_COUNT,
@@ -629,7 +630,7 @@ ASTROMETRY_METRICS: tuple[MetricSpec, ...] = (
         "The stars in the solver's match table. Missing when the solver gave no table.",
         "The `astrometric_residual` self-check uses it when the Gaia refit gave no residual.",
         better=Direction.LOWER,
-        computed_by="drivers.astrometry_net_driver.read_corr_fit_statistics",
+        computed_by="_internal.drivers.astrometry_net_driver.read_corr_fit_statistics",
         register_entry="AST-01",
     ),
     _value_metric(
@@ -747,4 +748,5 @@ ASTROMETRY_METRICS: tuple[MetricSpec, ...] = (
         "when no lookup was made, including when the breaker was already open.",
         "The catalog lookups made during the run.",
     ),
+    camera_without_profile_spec("astrometry"),
 )

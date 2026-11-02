@@ -26,7 +26,7 @@ from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
     QuarantineReport,
 )
 
-SIRIL_DRIVER = "astrometricslib.drivers.siril_interface.ImageProcessing"
+SIRIL_DRIVER = "astrometricslib._internal.drivers.siril_interface.ImageProcessing"
 SUMMARY_BUILDER = "astrometricslib.pipelines.stacking.stage._build_stack_quality_summary"
 QUARANTINE_STEP = "astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.quarantine_bad_frames"
 
@@ -82,9 +82,7 @@ def run_stage(
         driver.process_target.return_value = "/library/lights/M_52/M_52_L_Stacked.fits"
         driver_class.return_value = driver
         summary_builder.return_value = dummy_summary
-        stacking_tasks.stack_frames(
-            target, filter_type=FilterType.L, measured_at=measured_at, quality_recording=quality_recording
-        )
+        stacking_tasks.stack_frames(target, measured_at=measured_at, quality_recording=quality_recording)
     return driver, summary_builder
 
 
@@ -109,7 +107,7 @@ def test_stage_stacks_only_the_frames_the_quarantine_step_keeps() -> None:
         driver, summary_builder = run_stage(target)
 
     quarantine_step.assert_called_once()
-    stacked_frames = driver.process_target.call_args.kwargs["image_files"]
+    stacked_frames = driver.process_target.call_args.args[0].image_files
     stacked_paths = [frame["path"] if isinstance(frame, dict) else frame.path for frame in stacked_frames]
     assert moved_path not in stacked_paths
     assert len(stacked_frames) == 9
@@ -153,8 +151,8 @@ def test_stage_records_a_switched_off_quarantine_as_not_checked(monkeypatch: pyt
     assert gates["frame_quarantine"].status is GateStatus.NOT_CHECKED
 
 
-def test_a_failed_quarantine_gate_survives_the_flag_rebuild() -> None:
-    """The real builder keeps a failed gate's reason after the flag rebuild."""
+def test_a_failed_quarantine_gate_reaches_the_summary() -> None:
+    """The real builder keeps a failed gate and its reason."""
     summary = stacking_tasks._build_stack_quality_summary(
         target=make_target(),
         is_spectral=False,
@@ -167,9 +165,8 @@ def test_a_failed_quarantine_gate_survives_the_flag_rebuild() -> None:
         gate_results=[failed_gate("frame_quarantine", "too many bad frames; still in the stack")],
     )
 
-    assert summary.flagged is True
-    assert "too many bad frames; still in the stack" in summary.flag_reasons
     assert summary.gate("frame_quarantine").status is GateStatus.FAILED
+    assert summary.gate("frame_quarantine").detail == "too many bad frames; still in the stack"
 
 
 MEASURED_AT = datetime(2026, 10, 22, 6, 0, tzinfo=UTC)

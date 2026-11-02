@@ -8,7 +8,8 @@ import os
 from contextlib import AbstractContextManager
 from typing import TextIO
 
-from astrometricslib import AppConfiguration, file_lock, locks_directory
+from astrometricslib import AppConfiguration
+from astrometricslib.drivers import file_lock, locks_directory
 
 
 class HardwareLock:

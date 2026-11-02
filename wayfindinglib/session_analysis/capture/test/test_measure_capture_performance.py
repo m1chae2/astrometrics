@@ -20,7 +20,7 @@ from wayfindinglib.session_analysis.capture.processing.measure_capture_performan
     measure_efficiency,
     measure_star_quality,
 )
-from wayfindinglib.session_analysis.capture.test.conftest import SENSOR_PIXELS
+from wayfindinglib.session_analysis.capture.test.conftest import CAPTURE_LIMITS, SENSOR_PIXELS
 
 _CLIPPED = 20 / SENSOR_PIXELS
 """A saturated-pixel fraction worth 20 saturated pixels, a clipped star."""
@@ -38,7 +38,7 @@ def test_a_group_clips_when_half_its_frames_hold_a_saturated_star(make_frame: An
         make_frame(index + 3, exposure_seconds=1.0, saturated_pixel_fraction=0.0) for index in range(3)
     ]
 
-    (group,) = measure_clipping(frames, SENSOR_PIXELS)
+    (group,) = measure_clipping(frames, SENSOR_PIXELS, CAPTURE_LIMITS)
 
     assert group.frames == 6
     assert group.clipped_frames == 3
@@ -49,7 +49,7 @@ def test_a_lone_hot_pixel_is_not_a_clipped_star(make_frame: Any) -> None:
     """Verify fewer saturated pixels than the smallest star do not count."""
     frames = [make_frame(index, saturated_pixel_fraction=_HOT_PIXEL) for index in range(6)]
 
-    (group,) = measure_clipping(frames, SENSOR_PIXELS)
+    (group,) = measure_clipping(frames, SENSOR_PIXELS, CAPTURE_LIMITS)
 
     assert group.clipped_frames == 0
     assert not group.is_clipped
@@ -69,7 +69,7 @@ def test_a_stacking_summary_verdict_is_not_an_input(make_frame: Any) -> None:
         for index in range(6)
     ]
 
-    (group,) = measure_clipping(frames, SENSOR_PIXELS)
+    (group,) = measure_clipping(frames, SENSOR_PIXELS, CAPTURE_LIMITS)
 
     assert not group.is_clipped
     assert [reference.row_id for reference in group.evidence] == [100, 101, 102, 103, 104, 105]
@@ -82,7 +82,7 @@ def test_exposure_lengths_that_differ_by_rounding_form_one_group(make_frame: Any
         make_frame(1, exposure_seconds=0.010000000000000002),
     ]
 
-    groups = measure_clipping(frames, SENSOR_PIXELS)
+    groups = measure_clipping(frames, SENSOR_PIXELS, CAPTURE_LIMITS)
 
     assert len(groups) == 1
     assert groups[0].frames == 2
@@ -93,7 +93,7 @@ def test_binned_frames_have_fewer_pixels(make_frame: Any) -> None:
     fraction = 20 / (SENSOR_PIXELS / 4)
     frames = [make_frame(index, binning=2, saturated_pixel_fraction=fraction) for index in range(4)]
 
-    (group,) = measure_clipping(frames, SENSOR_PIXELS)
+    (group,) = measure_clipping(frames, SENSOR_PIXELS, CAPTURE_LIMITS)
 
     assert group.clipped_frames == 4
 
@@ -102,7 +102,7 @@ def test_without_a_sensor_size_nothing_is_judged(make_frame: Any) -> None:
     """Verify frame counts are skipped when they cannot be made into counts."""
     frames = [make_frame(index, saturated_pixel_fraction=_CLIPPED) for index in range(4)]
 
-    assert measure_clipping(frames, None) == []
+    assert measure_clipping(frames, None, CAPTURE_LIMITS) == []
 
 
 def test_groups_are_kept_per_target_and_exposure(make_frame: Any) -> None:
@@ -113,7 +113,7 @@ def test_groups_are_kept_per_target_and_exposure(make_frame: Any) -> None:
         make_frame(2, target_id="B", exposure_seconds=1.0),
     ]
 
-    groups = measure_clipping(frames, SENSOR_PIXELS)
+    groups = measure_clipping(frames, SENSOR_PIXELS, CAPTURE_LIMITS)
 
     assert [(g.target_id, g.exposure_seconds) for g in groups] == [("A", 1.0), ("A", 2.0), ("B", 1.0)]
 
@@ -225,7 +225,7 @@ def test_the_three_measurements_come_together(make_frame: Any, make_envelope: An
     """Verify the result holds clipping, star quality and efficiency."""
     frames = [make_frame(index) for index in range(12)]
 
-    performance = measure_capture_performance(frames, SENSOR_PIXELS, make_envelope(), "exact")
+    performance = measure_capture_performance(frames, SENSOR_PIXELS, make_envelope(), "exact", CAPTURE_LIMITS)
 
     assert len(performance.clipping) == 1
     assert performance.star_quality.frames == 12

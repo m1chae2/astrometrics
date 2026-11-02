@@ -5,16 +5,16 @@ of stars, and returns the final, cleaned-up color data (spectra) for each star.
 """
 
 import logging
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
 
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-from astrometricslib.drivers.driver_set import Drivers
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_data
-from astrometricslib.drivers.image import AstrometricsImage
-from astrometricslib.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_data
+from astrometricslib._internal.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
 from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.foundation.observatory_site import ObservatorySite
 from astrometricslib.models.quality.gaia_xp_comparison import GaiaXpComparison
@@ -33,14 +33,17 @@ from astrometricslib.pipelines.shared.quality.saturation import (
     compute_stack_saturated_pixel_fraction,
     is_normalised_stack_scale,
 )
+from astrometricslib.pipelines.shared.star_kinds import position_only_star_id
+from astrometricslib.pipelines.shared.star_recording import is_unresolved_star
 from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import (
-    assess_output_quality,
     output_quality_checkpoint,
 )
 from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp import (
+    REASON_XP_DOWNLOAD_FAILED,
     compare_to_gaia_xp,
     gaia_xp_precheck,
 )
+from astrometricslib.pipelines.spectroscopy.pre_processing import neighbor_wing_correction
 from astrometricslib.pipelines.spectroscopy.pre_processing.assess_input_quality import (
     assess_input_quality,
     input_quality_checkpoint,
@@ -79,9 +82,11 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.measured_line_spread 
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_wing_correction import (
     STATUS_APPLIED,
+    STATUS_NOT_APPLIED_TURNED_OFF,
     STATUS_NOT_NEEDED,
     StoredCrossTrailBlur,
     correct_neighbor_wings,
+    estimate_neighbor_shares,
     load_cross_trail_blur,
     star_trace_from_result,
 )
@@ -105,6 +110,9 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.wavelength_zero_point
 from astrometricslib.pipelines.spectroscopy.processing.assess_processing_quality import (
     assess_processing_quality,
 )
+from astrometricslib.pipelines.spectroscopy.processing.detection_label_limits import (
+    build_detection_label_limits,
+)
 from astrometricslib.pipelines.spectroscopy.processing.second_order_risk import (
     compute_second_order_blue_to_red_ratio,
 )
@@ -115,7 +123,13 @@ from astrometricslib.pipelines.spectroscopy.processing.spectrum_analysis import 
     EXTENDED_TARGET_SPECTRAL_TYPE,
     analyze_spectrum,
 )
-from astrometricslib.pipelines.spectroscopy.processing.star_reddening import look_up_star_reddening
+from astrometricslib.pipelines.spectroscopy.processing.spectrum_signal import (
+    MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE,
+)
+from astrometricslib.pipelines.spectroscopy.processing.star_reddening import (
+    look_up_star_reddening,
+    prefetch_star_reddening,
+)
 from astrometricslib.utilities import SpectroscopyConfig
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
@@ -706,6 +720,92 @@ def keep_usable_samples(
     )
 
 
+def count_trail_samples_on_frame(
+    position: tuple[float, float],
+    dispersion_vector: np.ndarray,
+    zero_order_offset_px: float,
+    expected_length_px: float,
+    dispersion_offset_px: tuple[float, float],
+    image_shape: tuple[int, int],
+) -> int:
+    """Count how many samples of a star's trail fall on the image.
+
+    This repeats the on-image test of the line extraction
+    (`SpectrumExtractor.extract_line`): the trail starts
+    `zero_order_offset_px` from the star along the dispersion direction,
+    takes one sample per pixel for `expected_length_px` pixels, and a sample
+    counts when its position, cut down to whole pixels, is on the image. A
+    star with a count of zero would fail with "No part of the spectrum trail
+    is on the image", so it can be skipped before any work is done on it.
+
+    Parameters
+    ----------
+    position : `tuple` [`float`, `float`]
+        Where the star is, as ``(x, y)``.
+    dispersion_vector : `numpy.ndarray`
+        Unit vector ``(x, y)`` along the dispersion direction.
+    zero_order_offset_px : `float`
+        How far the trail starts from the star, in pixels.
+    expected_length_px : `float`
+        How long the trail runs, in pixels.
+    dispersion_offset_px : `tuple` [`float`, `float`]
+        The fine-tuning shift ``(x, y)`` that the extraction adds to the star's
+        position (``dispersion_offset_x`` and ``dispersion_offset_y`` in the
+        configuration).
+    image_shape : `tuple` [`int`, `int`]
+        The image's ``(height, width)``.
+
+    Returns
+    -------
+    sample_count : `int`
+        The number of trail samples on the image, 0 when none are.
+    """
+    height, width = image_shape
+    start_x = position[0] + dispersion_offset_px[0] + zero_order_offset_px * dispersion_vector[0]
+    start_y = position[1] + dispersion_offset_px[1] + zero_order_offset_px * dispersion_vector[1]
+    steps = np.arange(int(expected_length_px), dtype=float)
+    # `np.trunc` cuts toward zero, the same as the `int()` the extractor uses.
+    whole_x = np.trunc(start_x + steps * dispersion_vector[0])
+    whole_y = np.trunc(start_y + steps * dispersion_vector[1])
+    on_image = (whole_x >= 0) & (whole_x < width) & (whole_y >= 0) & (whole_y < height)
+    return int(on_image.sum())
+
+
+@dataclass(frozen=True)
+class SpectrumStarSelection:
+    """Which candidate stars a run extracts, and which it left out.
+
+    Attributes
+    ----------
+    stars : `list`
+        The stars to extract, in the candidates' order (brightest first). It
+        holds every star that gets a spectrum and every neighbor-only star.
+    neighbor_only_stars : `list`
+        The stars in `stars` that are extracted only so that their light can
+        be taken out of their neighbors' spectra. One with a sky position and
+        a strong enough spectrum is kept after all (see
+        `SpectroscopyPipeline._keep_strong_unidentified_star`); the others are
+        not returned as results.
+    skipped_no_trail_count : `int`
+        How many candidates had no part of their trail on the image.
+    skipped_unidentified_count : `int`
+        How many candidates had no catalog identity (and so would be dropped
+        when the run is saved). Counted whether or not the star was kept as a
+        neighbor.
+    """
+
+    stars: list[Any]
+    neighbor_only_stars: list[Any]
+    skipped_no_trail_count: int
+    skipped_unidentified_count: int
+
+
+# The `neighbor_wing_status` of a star stored with no catalog identity. Such a
+# star is read as a neighbor only, so neighbors' light is neither looked for
+# (no neighbor-share estimate is made) nor removed from its spectrum.
+_NEIGHBORS_NOT_CHECKED_STATUS = "skipped: read as a neighbor only; neighbors' light not checked or removed"
+
+
 def _frame_airmass(image: Any) -> float | None:
     """Read the airmass of a frame from its header.
 
@@ -831,8 +931,10 @@ class SpectroscopyPipeline:
         self.instrument_response = load_instrument_response(config.camera.name)
         self.line_spread_profile = load_line_spread_profile(config.camera.name)
         # The stored blur of this camera's streaks, measured on an isolated
-        # bright star, or `None` when none has been derived. Only used when
-        # `config.subtract_neighbor_wings` is on.
+        # bright star, or `None` when none has been derived. It gives the
+        # neighbor-share estimate, and the correction too when that is on
+        # (`config.subtract_neighbor_wings` and
+        # `neighbor_wing_correction.NEIGHBOR_WING_CORRECTION_IS_ON`).
         self.cross_trail_blur: StoredCrossTrailBlur | None = load_cross_trail_blur(config.camera.name)
         self.instrument = SpectroscopyInstrument(config)
         # The extractor also does the sky background subtraction stage:
@@ -855,6 +957,18 @@ class SpectroscopyPipeline:
         # center. We save this list so other parts of the program can check
         # the overall image quality later.
         self.last_run_zero_order_saturation_fractions: list[float] = []
+        # How many candidate stars the latest run left out before extraction,
+        # how many analyzed stars were below the feature-analysis limit, and
+        # how many stars had no Gaia XP comparison because the download failed.
+        # Read by the runner for the run's quality metrics.
+        self.last_run_skipped_no_trail_count = 0
+        self.last_run_skipped_unidentified_count = 0
+        self.last_run_stored_unidentified_count = 0
+        self.last_run_below_feature_limit_count = 0
+        self.last_run_gaia_xp_download_failed_count = 0
+        # How many stars had no catalog reddening because the Gaia lookup
+        # failed. Read by the runner for the run's quality metrics.
+        self.last_run_reddening_lookup_failed_count = 0
 
     def _noise_model_for(self, image: Any) -> PixelNoiseModel:
         """Give the camera noise to use for the samples read from an image.
@@ -898,16 +1012,15 @@ class SpectroscopyPipeline:
         context : `AnalysisContext`
             The picture and the list of stars we found in it.
         limit : `int`, optional
-            A cap on how many candidate stars to process. Left at `None`
-            (the default), every candidate that survived detection and
-            `_drop_spurious_trail_detections` is processed -- the real
-            limit on how many stars get a spectrum is the detector's own
-            5-sigma detection threshold (`source_detection.py`), not an
-            arbitrary top-N count. A fixed count used to be the default
-            here (10, brightness-ordered), which silently dropped real,
-            fainter, already-identified stars once a field had more than
-            10 detections; pass a number only to deliberately cap a run
-            (for example a quick interactive check).
+            A cap on how many stars get a spectrum, counted after the stars
+            with no trail on the image and the stars with no catalog identity
+            are left out (see `select_stars_for_spectra`). Left at `None`
+            (the default), every candidate that survived detection,
+            `_drop_spurious_trail_detections` and those two filters is
+            processed. A fixed count used to be the default here, which
+            silently dropped real, fainter, already-identified stars once a
+            field had more than that many detections; pass a number only to
+            deliberately cap a run.
         auto_detect_angle : `bool`, optional
             Whether to try and figure out the exact tilt of the camera
             automatically (default is True).
@@ -963,10 +1076,30 @@ class SpectroscopyPipeline:
             if context.extended_target not in context.stellar_objects:
                 context.stellar_objects.insert(0, context.extended_target)
 
-        target_stars = candidate_stars if limit is None else candidate_stars[:limit]
+        selection = self.select_stars_for_spectra(context.image, candidate_stars, limit)
+        self.last_run_skipped_no_trail_count = selection.skipped_no_trail_count
+        self.last_run_skipped_unidentified_count = selection.skipped_unidentified_count
+        self.last_run_stored_unidentified_count = 0
+        if selection.skipped_no_trail_count or selection.skipped_unidentified_count:
+            logger.info(
+                "Left out %d star(s) with no trail on the image and %d star(s) with no catalog identity "
+                "before extraction; %d of the unidentified stars were kept only as neighbors.",
+                selection.skipped_no_trail_count,
+                selection.skipped_unidentified_count,
+                len(selection.neighbor_only_stars),
+            )
+        if candidate_stars and len(selection.stars) == len(selection.neighbor_only_stars):
+            logger.warning(
+                "No star of this run has a catalog identity and a trail on the image, so only a strong "
+                "spectrum with a known sky position can be saved."
+            )
         results = self.process_image(
-            context.image, target_stars=target_stars, auto_detect_angle=auto_detect_angle
+            context.image,
+            target_stars=selection.stars,
+            auto_detect_angle=auto_detect_angle,
+            neighbor_only_stars=selection.neighbor_only_stars,
         )
+        self.last_run_skipped_unidentified_count -= self.last_run_stored_unidentified_count
         self.last_run_zero_order_saturation_fractions = [
             res["zero_order_saturated_pixel_fraction"]
             for res in results
@@ -976,12 +1109,101 @@ class SpectroscopyPipeline:
 
         return valid_objects
 
+    def select_stars_for_spectra(
+        self, image: AstrometricsImage, candidate_stars: list[Any], limit: int | None
+    ) -> SpectrumStarSelection:
+        """Choose which candidate stars are extracted, before any extraction.
+
+        Two kinds of star are left out, because no usable result can come from
+        them:
+
+        * A star with no part of its trail on the image. Extraction would fail
+          for it with "No part of the spectrum trail is on the image". The
+          check uses the dispersion direction in the configuration at this
+          point; extraction still stops a star that turns out to have no trail
+          once the angle is measured. (Not applied with the flare-mask
+          extraction, which reads a different region.)
+        * A star with no catalog identity (still named ``Star_<number>``).
+          `record_pipeline_stars` drops such a star when the run is saved. It
+          gets no spectrum of its own unless its neighbor reading turns out
+          strong enough to keep (see `_keep_strong_unidentified_star`). The
+          extended target
+          (a nebula or cluster) and a plain ``(x, y)`` position are never
+          dropped for this reason.
+
+        The limit is applied to the stars that remain. An unidentified star is
+        still extracted when it comes before the last star that gets a
+        spectrum (or always, with no limit), because its light reaches its
+        neighbors' reading boxes and the neighbor-wing subtraction needs its
+        trace. Such a star is extracted and used as a neighbor only: it is not
+        corrected, analyzed or returned.
+
+        Parameters
+        ----------
+        image : `AstrometricsImage`
+            The picture the stars were found in.
+        candidate_stars : `list`
+            The candidates, brightest first.
+        limit : `int`, optional
+            How many stars may get a spectrum; `None` for all of them.
+
+        Returns
+        -------
+        selection : `SpectrumStarSelection`
+            The stars to extract, which of them are neighbors only, and how
+            many candidates were left out for each reason.
+        """
+        vector = self.instrument.get_dispersion_vector()
+        dispersion_offset = (self.config.dispersion_offset_x, self.config.dispersion_offset_y)
+        eligible_indexes: list[int] = []
+        unidentified_indexes: list[int] = []
+        skipped_no_trail = 0
+        for index, star in enumerate(candidate_stars):
+            is_stellar_object, position = _star_pixel_position(star)
+            if (
+                not self.config.use_flare_mask_extraction
+                and position[0] is not None
+                and position[1] is not None
+                and count_trail_samples_on_frame(
+                    (float(position[0]), float(position[1])),
+                    vector,
+                    self.instrument.zero_order_offset_px,
+                    self.instrument.expected_length_px,
+                    dispersion_offset,
+                    image.data.shape,
+                )
+                == 0
+            ):
+                skipped_no_trail += 1
+                continue
+            is_extended = getattr(star, "stellar_spectral_type", None) == EXTENDED_TARGET_SPECTRAL_TYPE
+            if is_stellar_object and not is_extended and is_unresolved_star(star):
+                unidentified_indexes.append(index)
+            else:
+                eligible_indexes.append(index)
+
+        chosen_indexes = eligible_indexes if limit is None else eligible_indexes[:limit]
+        if limit is None:
+            neighbor_indexes = unidentified_indexes
+        elif chosen_indexes:
+            neighbor_indexes = [index for index in unidentified_indexes if index < chosen_indexes[-1]]
+        else:
+            neighbor_indexes = []
+        extracted_indexes = sorted([*chosen_indexes, *neighbor_indexes])
+        return SpectrumStarSelection(
+            stars=[candidate_stars[index] for index in extracted_indexes],
+            neighbor_only_stars=[candidate_stars[index] for index in neighbor_indexes],
+            skipped_no_trail_count=skipped_no_trail,
+            skipped_unidentified_count=len(unidentified_indexes),
+        )
+
     def process_image(
         self,
         image: AstrometricsImage,
         target_stars: list[Any] | None = None,
         limit: int | None = None,
         auto_detect_angle: bool = True,
+        neighbor_only_stars: list[Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Process stars in an image at a lower level than `process`.
 
@@ -998,12 +1220,16 @@ class SpectroscopyPipeline:
             is no longer a fixed count.
         auto_detect_angle : `bool`, optional
             Whether to automatically find the camera tilt.
+        neighbor_only_stars : `list`, optional
+            Members of `target_stars` that are read only so their light can be
+            taken out of the other stars' spectra. They are left out of the
+            results.
 
         Returns
         -------
         results : `list` [`dict`]
             A list of dictionaries containing the raw spectrum data for each
-            star.
+            star, without the neighbor-only stars.
         """
         # 1. Detect stars if no targets provided
         if target_stars is None:
@@ -1014,7 +1240,9 @@ class SpectroscopyPipeline:
             self._resolve_global_dispersion_angle(image, target_stars)
             auto_detect_angle = False
 
-        return self._process_target_stars(image, target_stars, limit, auto_detect_angle)
+        return self._process_target_stars(
+            image, target_stars, limit, auto_detect_angle, neighbor_only_stars or []
+        )
 
     def _resolve_global_dispersion_angle(self, image: AstrometricsImage, target_stars: list[Any]) -> None:
         """Auto-detect the grating dispersion angle once for a whole batch.
@@ -1136,8 +1364,24 @@ class SpectroscopyPipeline:
         target_stars: list[Any],
         limit: int | None,
         auto_detect_angle: bool,
+        neighbor_only_stars: list[Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Run single-star extraction over a batch of target stars.
+
+        Parameters
+        ----------
+        image : `AstrometricsImage`
+            The picture to read from.
+        target_stars : `list`
+            The stars to read.
+        limit : `int`, optional
+            A cap on how many of `target_stars` to read.
+        auto_detect_angle : `bool`
+            Whether to find the camera tilt for each star.
+        neighbor_only_stars : `list`, optional
+            Stars in the batch that are read only as neighbors: they take part
+            in the extraction radius, contamination and wing steps of the
+            other stars, but are not corrected, applied or returned.
 
         Returns
         -------
@@ -1145,8 +1389,17 @@ class SpectroscopyPipeline:
             One result dict per successfully processed star, each also
             carrying its original `star_source` object.
         """
+        self.last_run_below_feature_limit_count = 0
+        self.last_run_gaia_xp_download_failed_count = 0
+        self.last_run_reddening_lookup_failed_count = 0
+        neighbor_only_ids = {id(star) for star in (neighbor_only_stars or [])}
         extracted: list[tuple[Any, bool, dict[str, Any]]] = []
         batch = target_stars if limit is None else target_stars[:limit]
+        # One Gaia query for the whole run's reddening, before the per-star
+        # loop. A failure costs one bounded wait and never stops the run.
+        prefetch_star_reddening(
+            (star for star in batch if isinstance(star, StellarObject)), self.reddening_driver
+        )
         batch_positions = [_star_pixel_position(star)[1] for star in batch]
         dispersion_vector = self.instrument.get_dispersion_vector()
         for star_index, star in enumerate(batch):
@@ -1193,6 +1446,10 @@ class SpectroscopyPipeline:
             else:
                 # Attach the original star object if possible for reference
                 result["star_source"] = star
+                if id(star) in neighbor_only_ids:
+                    result["is_neighbor_only"] = True
+                    extracted.append((star, is_stellar_obj, result))
+                    continue
                 neighbor_stars = [
                     other for other_index, other in enumerate(batch) if other_index != star_index
                 ]
@@ -1208,13 +1465,20 @@ class SpectroscopyPipeline:
                 )
                 extracted.append((star, is_stellar_obj, result))
 
-        # Every star is read first, so each one's neighbours' light can be
-        # taken out of it before the results are applied.
-        if self.config.subtract_neighbor_wings and len(extracted) > 1:
+        # Every star is read first, so each one's neighbors can be found and
+        # their share of the star's light estimated before the results are
+        # applied. The estimate changes no spectrum (SPE-34).
+        if len(extracted) > 1:
             self._subtract_neighbor_wings(image, [result for _, _, result in extracted])
 
         results = []
         for star, is_stellar_obj, result in extracted:
+            if result.get("is_neighbor_only"):
+                # Read for its neighbors' sake. Its reading is reused, not
+                # repeated, if it can be stored under its sky position.
+                if is_stellar_obj and self._keep_strong_unidentified_star(star, result, image):
+                    results.append(result)
+                continue
             # If it's a StellarObject, enrich it with results
             if is_stellar_obj:
                 self._apply_result_to_stellar_object(star, result, image)
@@ -1222,30 +1486,92 @@ class SpectroscopyPipeline:
 
         return results
 
+    def _keep_strong_unidentified_star(
+        self, star: StellarObject, result: dict[str, Any], image: AstrometricsImage
+    ) -> bool:
+        """Keep a star no catalog names if its spectrum is strong enough.
+
+        A star at `MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE` or above gets a
+        position-based id, which `record_pipeline_stars` saves. The signal to
+        noise is known only after the star's corrections, so the star goes
+        through the same steps as any other, using the reading already made for
+        it as a neighbor. A weaker star, or one with no sky position, is left
+        exactly as it was and is not saved.
+
+        A kept star has no catalog data, so the catalog comparison and the Gaia
+        lookups have nothing to read. The stored record says what is not known:
+        `is_catalog_identified` is `False`, `possible_neighbor_contamination`
+        is `None` (never checked), and `neighbor_wing_status` says the
+        neighbors' light was not checked or removed.
+
+        Parameters
+        ----------
+        star : `StellarObject`
+            The neighbor-only star.
+        result : `dict`
+            Its extraction result.
+        image : `AstrometricsImage`
+            The picture it was read from.
+
+        Returns
+        -------
+        is_kept : `bool`
+            `True` when the star now has a position-based id and a spectrum.
+        """
+        if (
+            not is_unresolved_star(star)
+            or star.right_ascension is None
+            or star.declination is None
+            or getattr(star, "stellar_spectral_type", None) == EXTENDED_TARGET_SPECTRAL_TYPE
+        ):
+            return False
+        earlier_spectroscopy = star.spectroscopy
+        earlier_star_data = dict(star.star_data) if isinstance(star.star_data, dict) else star.star_data
+        earlier_below_limit_count = self.last_run_below_feature_limit_count
+        result["neighbor_wing_status"] = _NEIGHBORS_NOT_CHECKED_STATUS
+        self._apply_result_to_stellar_object(star, result, image)
+        signal_to_noise = star.spectroscopy.input_quality.signal_to_noise
+        if signal_to_noise is None or signal_to_noise < MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE:
+            star.spectroscopy = earlier_spectroscopy
+            star.star_data = earlier_star_data
+            self.last_run_below_feature_limit_count = earlier_below_limit_count
+            return False
+        star.id = position_only_star_id(float(star.right_ascension), float(star.declination))
+        star.name = star.id
+        star.is_catalog_identified = False
+        self.last_run_stored_unidentified_count += 1
+        return True
+
     def _subtract_neighbor_wings(self, image: AstrometricsImage, results: list[dict[str, Any]]) -> None:
-        """Take each star's neighbours' blurred light out of its spectrum.
+        """Record each star's close neighbors; correct for them if turned on.
 
         Two stars close together give side-by-side streaks, and the bright
         one's blur reaches into the faint one's box (see
-        `neighbor_trail_deblending`). For every star with such a neighbour the
-        stored blur is fitted to the pair, and the neighbour's share is taken
-        out of the star's intensities. What was done, and how much was taken
-        out at each sample, is recorded in the star's result.
+        `neighbor_trail_deblending`). For every star with such a neighbor the
+        result gets a rough estimate of the neighbors' share of its box light
+        (`neighbor_share_estimate`) and the count of neighbors. The spectrum
+        is not changed: the correction is turned off
+        (`NEIGHBOR_WING_CORRECTION_IS_ON`, validation entry SPE-34), and each
+        such star's status says so. When both that constant and
+        `config.subtract_neighbor_wings` are `True`, the stored blur is fitted
+        to the pair instead and the neighbor's share is taken out of the
+        star's intensities.
 
         Parameters
         ----------
         image : `AstrometricsImage`
             The picture the spectra were read from.
         results : `list` [`dict`]
-            Every star's extraction result. Changed in place: a corrected
-            star's ``"intensities"`` are replaced, and every star with a
-            neighbour gets ``"neighbor_wing_status"`` and, when it was
-            corrected, ``"neighbor_wing_fraction"``. An extended target
-            (a nebula or cluster) is left out entirely, in both roles:
-            its own spectrum is never corrected, and it is never treated
-            as a "neighbour" whose blur reaches into a real star's box --
-            the blur-fit math here assumes a point source's narrow streak,
-            which a diffuse, wide-aperture target does not have.
+            Every star's extraction result. Changed in place: every star with
+            a neighbor gets ``"neighbor_wing_status"``,
+            ``"neighbor_overlap_count"`` and, when the camera has a stored
+            blur, ``"neighbor_share_estimate"``. With the correction on, a
+            corrected star's ``"intensities"`` are replaced and it gets
+            ``"neighbor_wing_fraction"``. An extended target (a nebula or
+            cluster) is left out entirely, in both roles: its own spectrum
+            gets nothing, and it is never treated as a "neighbor" -- the
+            blur math here assumes a point source's narrow streak, which a
+            diffuse, wide-aperture target does not have.
         """
         correctable = [
             result
@@ -1260,10 +1586,30 @@ class SpectroscopyPipeline:
         )
         if first_vector is None:
             return
-        outcomes = correct_neighbor_wings(
-            image.data, traces, self.cross_trail_blur, (float(first_vector[0]), float(first_vector[1]))
+        dispersion_vector = (float(first_vector[0]), float(first_vector[1]))
+        neighbor_only = [bool(result.get("is_neighbor_only")) for result in correctable]
+        shares = estimate_neighbor_shares(
+            image.data, traces, self.cross_trail_blur, dispersion_vector, neighbor_only=neighbor_only
         )
-        for result, outcome in zip(correctable, outcomes, strict=True):
+        is_correcting = (
+            neighbor_wing_correction.NEIGHBOR_WING_CORRECTION_IS_ON and self.config.subtract_neighbor_wings
+        )
+        outcomes = (
+            correct_neighbor_wings(
+                image.data, traces, self.cross_trail_blur, dispersion_vector, neighbor_only=neighbor_only
+            )
+            if is_correcting
+            else None
+        )
+        for index, (result, share) in enumerate(zip(correctable, shares, strict=True)):
+            if share.overlap_count > 0:
+                result["neighbor_overlap_count"] = share.overlap_count
+                result["neighbor_share_estimate"] = share.share_estimate
+            if outcomes is None:
+                if share.overlap_count > 0:
+                    result["neighbor_wing_status"] = STATUS_NOT_APPLIED_TURNED_OFF
+                continue
+            outcome = outcomes[index]
             if outcome.status == STATUS_NOT_NEEDED:
                 continue
             result["neighbor_wing_status"] = outcome.status
@@ -1305,6 +1651,8 @@ class SpectroscopyPipeline:
         -------
         comparison : `GaiaXpComparison`
             The comparison, or a ``not_checked`` record that says why not.
+            A failed download is also added to
+            `last_run_gaia_xp_download_failed_count`.
         """
         source_id = gaia_dr3_source_id_of(star)
         response_corrected = analysis.response_corrected_intensity
@@ -1313,7 +1661,7 @@ class SpectroscopyPipeline:
             return not_checked
         if self._gaia_xp_driver is None:
             self._gaia_xp_driver = self._drivers.gaia_xp_or_default()
-        return compare_to_gaia_xp(
+        comparison = compare_to_gaia_xp(
             self._gaia_xp_driver,
             source_id,
             wavelengths_angstrom,
@@ -1322,6 +1670,20 @@ class SpectroscopyPipeline:
             line_spread=self.line_spread_profile,
             fallback_resolution_angstrom=analysis.resolution_element_angstrom,
         )
+        if comparison.not_checked_reason == REASON_XP_DOWNLOAD_FAILED:
+            self.last_run_gaia_xp_download_failed_count += 1
+        return comparison
+
+    def _count_reddening_failure(self, failure: Exception) -> None:
+        """Count one star whose catalog reddening lookup failed.
+
+        Parameters
+        ----------
+        failure : `Exception`
+            The error the lookup raised. It is already logged; only the count
+            is kept.
+        """
+        self.last_run_reddening_lookup_failed_count += 1
 
     def _apply_result_to_stellar_object(
         self, star: StellarObject, result: dict[str, Any], image: AstrometricsImage
@@ -1457,7 +1819,9 @@ class SpectroscopyPipeline:
 
         # The star's catalog reddening, when it has a Gaia DR3 id. The
         # classification removes it from the spectrum before comparing.
-        reddening = look_up_star_reddening(star, self.reddening_driver)
+        reddening = look_up_star_reddening(
+            star, self.reddening_driver, on_failure=self._count_reddening_failure
+        )
 
         # How wide the blur is at each wavelength, from this spectrum's own
         # trail width. Always measured and reported at checkpoint 1; it
@@ -1494,6 +1858,12 @@ class SpectroscopyPipeline:
         )
         classification = analysis.classification
         probable_spectral_features = analysis.features
+        if (
+            star.stellar_spectral_type != EXTENDED_TARGET_SPECTRAL_TYPE
+            and analysis.signal_to_noise is not None
+            and analysis.signal_to_noise < MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE
+        ):
+            self.last_run_below_feature_limit_count += 1
 
         input_quality = assess_input_quality(
             resolution_element_angstrom=analysis.resolution_element_angstrom,
@@ -1501,9 +1871,6 @@ class SpectroscopyPipeline:
             zero_order_saturated_pixel_fraction=result.get("zero_order_saturated_pixel_fraction"),
             valid_fraction=result.get("valid_fraction"),
             signal_to_noise=analysis.signal_to_noise,
-        )
-        output_quality = assess_output_quality(
-            classification, analysis.catalog_comparison, analysis.resolution_element_angstrom
         )
         gaia_xp_comparison = self._gaia_xp_comparison(
             star, wavelengths_angstrom, analysis, response_corrected_errors
@@ -1580,7 +1947,7 @@ class SpectroscopyPipeline:
                 line_index_classification=analysis.line_index_classification,
             ),
             output_quality_checkpoint(
-                output_quality,
+                classification,
                 own_spectral_type=str(classification["spectral_type"]),
                 catalog_spectral_type=star.spectral_type,
                 catalog_comparison=analysis.catalog_comparison,
@@ -1608,6 +1975,7 @@ class SpectroscopyPipeline:
             self_determined_spectral_type_candidates=classification["ranked_types"],
             probable_spectral_features=probable_spectral_features,
             emission_lines=analysis.emission_lines,
+            detection_label_limits=build_detection_label_limits(),
             is_emission_line_source=analysis.is_emission_line_source,
             star_position_px=[float(result["target_pos"][0]), float(result["target_pos"][1])],
             requested_wavelength_range_angstrom=(
@@ -1628,12 +1996,13 @@ class SpectroscopyPipeline:
             measured_line_spread=measured_line_spread,
             neighbor_wing_fraction=result.get("neighbor_wing_fraction"),
             neighbor_wing_status=result.get("neighbor_wing_status"),
+            neighbor_share_estimate=result.get("neighbor_share_estimate"),
+            neighbor_overlap_count=result.get("neighbor_overlap_count", 0),
             possible_neighbor_contamination=result.get("possible_neighbor_contamination"),
             counts_per_second_factor=counts_per_second_factor(getattr(image, "header", None)),
             catalog_comparison=analysis.catalog_comparison,
             gaia_xp_comparison=gaia_xp_comparison,
             input_quality=input_quality,
-            output_quality=output_quality,
             stage_quality=stage_quality,
             wavelength_zero_point=zero_point,
             reddening=analysis.reddening,
@@ -2102,7 +2471,7 @@ class SpectroscopyPipeline:
             # Siril stacks run 0 to 1, below any ADU level.
             return compute_stack_saturated_pixel_fraction(data, zero_order_cutout)
         return compute_saturated_pixel_fraction(
-            zero_order_cutout, self.camera_profile.saturation_threshold_adu.value
+            zero_order_cutout, self.camera_profile.pixel_saturation_level_adu.value
         )
 
     def _dispersion_overlay_geometry(

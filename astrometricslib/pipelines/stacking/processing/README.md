@@ -15,7 +15,8 @@ These terms appear throughout:
 
 The steps are:
 
-1. `exposure_groups.py` splits frames by exposure length, then combines the per-group stacks into one image. It weights each group by its noise and leaves a group out where it is saturated or clipped at zero. It also puts every group on the brightness scale of the reference group (see [the brightness scale between exposure groups](#the-brightness-scale-between-exposure-groups)). `saturated_pixel_mask` marks those pixels, so a later check can tell which stars had their cores replaced.
+1. `exposure_groups.py` splits frames by exposure length. Then `group_combination.py` combines the per-group stacks into one image. It weights each group by its noise and leaves a group out where it is saturated or clipped at zero. It also puts every group on the brightness scale of the reference group (see [the brightness scale between exposure groups](#the-brightness-scale-between-exposure-groups)). `saturated_pixel_mask` in `group_gains.py` marks those pixels, so a later check can tell which stars had their cores replaced.
+    - **How the noise of one pixel is measured.** `estimate_background_noise` takes the differences between neighboring pixels, finds a rough scale from their median absolute deviation, keeps the differences within 4 times that scale (`NOISE_CLIP_SIGMAS`; star pixels fall outside), and takes their standard deviation divided by √2. The median alone is too coarse for a camera that stores values in steps, such as the ASI533MM in steps of 4 counts, because every difference is then a multiple of the step. The standard deviation uses every kept value, so it is fine-grained. On synthetic noise of 8 to 40 counts stored in steps of 1 and 4, the result was within 0.1% of the true value, with a spread of 0.12% between images (synthetic check in `test_exposure_groups.py`, not yet on real frames; design estimate).
 2. `group_alignment.py` lines up the group stacks in three sub-steps, described in [how group stacks are lined up](#how-group-stacks-are-lined-up).
 3. `spectral_frame_alignment.py` aligns spectral frames that have no usable star pattern.
 4. `group_derotation.py` turns spectral group stacks to one common trail tilt, the angle at which the spectrum trail crosses the frame.
@@ -57,7 +58,7 @@ The zero order is the undispersed image of the target in a slitless spectrum fra
 
 ### The brightness scale between exposure groups
 
-Siril leaves each group stack with its own overall brightness. Before the stage averages the groups, `exposure_groups.py` divides each group's counts-per-second image by a group scale factor (a single number) so that all groups read the same. A counts-per-second image is the raw camera counts divided by the exposure time. The code and the quality summary call this number a "gain" (for example `gainMidRange`). It is not the camera's gain setting.
+Siril leaves each group stack with its own overall brightness. Before the stage averages the groups, `group_combination.py` divides each group's counts-per-second image by a group scale factor (a single number) so that all groups read the same. A counts-per-second image is the raw camera counts divided by the exposure time. The code and the quality summary call this number a "gain" (for example `gainMidRange`). It is not the camera's gain setting.
 
 **How the group scale factor is measured.** For every group except the reference group, the stage measures the same isolated stars in both groups (`measure_star_flux_ratios`):
 
@@ -86,7 +87,7 @@ A group that shares fewer than 16 such stars with the reference (`STAR_GAIN_MINI
 | Setting | Default | Effect |
 | --- | --- | --- |
 | `exposure_group_gain_tolerance` in `[Processing.Siril]` | 0.05 (partly measured; see [STK-20](../../../../documentation/library_design/validation/stacking.md#stk-20)) | Largest disagreement between the faint-star and bright-star ratios before a group is left out |
-| `SKY_RATIO_LIMIT` in `exposure_groups.py` | 3 (partly measured; see [STK-21](../../../../documentation/library_design/validation/stacking.md#stk-21)) | Brightest sky, relative to the reference group, that a group may have |
+| `SKY_RATIO_LIMIT` in `group_gains.py` | 3 (partly measured; see [STK-21](../../../../documentation/library_design/validation/stacking.md#stk-21)) | Brightest sky, relative to the reference group, that a group may have |
 | Alignment limits in `group_alignment.py` | Correlation 0.3 (measured; see [STK-13](../../../../documentation/library_design/validation/stacking.md#stk-13)); 30 stars, 0.5°, 0.5%, 0.5 pixel (partly measured; see [STK-14](../../../../documentation/library_design/validation/stacking.md#stk-14)) | Decide whether an alignment is trusted |
 
 ## Quality metrics
@@ -104,7 +105,11 @@ A group with too few shared pixels, or a scale factor outside 0.25 to 4, keeps a
 
 ## Files
 
-- `exposure_groups.py`: splits frames by exposure length, measures the group scale factor and combines the group stacks.
+- `exposure_groups.py`: splits frames by exposure length and by night. `fold_exposure_lengths` is the one rule that says which group each exposure length lands in (a length with fewer than `MINIMUM_FRAMES_PER_EXPOSURE_GROUP` frames joins the nearest length), and `split_frames_by_exposure` calls it.
+- `group_gains.py`: measures the group scale factor from mid-range pixels, and holds the background-noise and saturation helpers.
+- `group_star_gains.py`: measures the group scale factor from isolated stars.
+- `group_combination.py`: weights the groups and combines the group stacks. `combine_exposure_group_images` returns an `ExposureGroupCombination`: the image, the gain applied to each group and whether it was measured, the sky levels, the group weights, the reference group, and the trusted and covered masks.
+- `group_file_merging.py`: joins the per-group rejection maps and registration sequences into one file each.
 - `group_alignment.py`: lines up the group stacks and finds the zero-order target.
 - `star_pattern_candidates.py`: the star-pattern search that `group_alignment.py` falls back to.
 - `spectral_frame_alignment.py`: aligns spectral frames by phase correlation.

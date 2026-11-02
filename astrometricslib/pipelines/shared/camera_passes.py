@@ -14,7 +14,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from astrometricslib.drivers.camera_profile_store import camera_identity, record_name_for_camera
+from astrometricslib._internal.drivers.camera_profile_store import camera_identity, record_name_for_camera
 from astrometricslib.foundation.observatory_setups import ObservatorySetups
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.shared.frame_grouping import (

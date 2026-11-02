@@ -14,6 +14,8 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_trail_deblen
     MAXIMUM_TRUSTED_RELATIVE_RESIDUAL,
     EmpiricalBlur,
     NeighborFit,
+    _profile_spline,
+    _solve_amplitudes,
     build_band_profiles,
     enclosed_fraction,
     fit_neighbor_amplitudes,
@@ -268,3 +270,92 @@ def test_subtraction_never_goes_below_zero() -> None:
     """An overshooting correction is held at zero, not made negative."""
     corrected, _ = subtract_neighbor_wings(np.array([10.0, 10.0]), [np.array([3.0, 30.0])])
     assert corrected.tolist() == [7.0, 0.0]
+
+
+def test_prebuilt_splines_give_the_same_amplitudes_as_splines_built_per_call() -> None:
+    """Splines built once give the same amplitudes as splines rebuilt per call.
+
+    Both runs happen in this test, so the comparison does not depend on the
+    platform or library versions (a stored number from one machine did).
+    The fitter calls `_solve_amplitudes` with the splines built once; the
+    old code rebuilt them on every call. The answers must match exactly.
+    """
+    blur = measure_reference_blur()
+    image, *_ = make_pair(1.1)
+    offsets, profiles, positions = build_band_profiles(
+        image, True, np.full(ROWS, BRIGHT_CENTRE_PX), BAND_EDGES, 0.0, half_width_px=75
+    )
+    weights = 1.0 / np.sqrt(0.25 + np.clip(profiles, 0.0, None))
+    star_offsets = np.array([0.0, GAP_PX, GAP_PX - 9.0])
+    splines = [_profile_spline(blur, float(position)) for position in positions]
+
+    for dilation in (0.9, 1.0006, 1.1):
+        rebuilt = _solve_amplitudes(blur, dilation, offsets, profiles, positions, star_offsets, weights)
+        shared = _solve_amplitudes(
+            blur, dilation, offsets, profiles, positions, star_offsets, weights, splines
+        )
+        for rebuilt_part, shared_part in zip(rebuilt, shared, strict=True):
+            np.testing.assert_array_equal(shared_part, rebuilt_part)
+
+
+def test_reused_star_shapes_give_the_same_fit_as_shapes_rebuilt_every_trial() -> None:
+    """Reusing each star's shape gives the same fit as rebuilding it.
+
+    Both fits run in this test on the same input, so nothing depends on the
+    platform or library versions. Three stars make the fitter's
+    finite-difference steps revisit shapes, so the cache is really used.
+    Every number of the two fits must match exactly.
+    """
+    blur = measure_reference_blur()
+    image, *_ = make_pair(1.1)
+    offsets, profiles, positions = build_band_profiles(
+        image, True, np.full(ROWS, BRIGHT_CENTRE_PX), BAND_EDGES, 0.0, half_width_px=75
+    )
+    star_offsets = np.array([0.0, GAP_PX, GAP_PX - 9.0])
+
+    reused = fit_neighbor_amplitudes(blur, offsets, profiles, positions, star_offsets, 0.5)
+    rebuilt = fit_neighbor_amplitudes(
+        blur, offsets, profiles, positions, star_offsets, 0.5, reuse_star_shapes=False
+    )
+
+    assert reused.dilation == rebuilt.dilation
+    assert reused.relative_residual == rebuilt.relative_residual
+    assert reused.is_reliable == rebuilt.is_reliable
+    np.testing.assert_array_equal(reused.centre_shifts_px, rebuilt.centre_shifts_px)
+    np.testing.assert_array_equal(reused.amplitudes, rebuilt.amplitudes)
+    np.testing.assert_array_equal(reused.sky_levels, rebuilt.sky_levels)
+
+
+def test_wing_flux_equals_the_per_sample_enclosed_fractions_with_and_without_a_cache() -> None:
+    """Shared-curve wing flux equals the per-sample `enclosed_fraction` result.
+
+    `enclosed_fraction` builds its own curve on every call, as the old
+    `neighbor_wing_flux` did for each of its two fractions. Both sides run in
+    this test, so nothing depends on the platform. The stretch is fixed, not
+    fitted, so the fitter plays no part.
+    """
+    blur = measure_reference_blur()
+    image, *_ = make_pair(1.1)
+    dilation = 1.09
+    bright_box = box_sum(image, BRIGHT_CENTRE_PX)
+    count = len(bright_box)
+    positions = np.arange(count, dtype=float)
+    arguments = (
+        positions,
+        bright_box,
+        np.full(count, BOX_HALF_WIDTH_PX),
+        np.full(count, -GAP_PX),
+        np.full(count, BOX_HALF_WIDTH_PX),
+        np.zeros(count),
+    )
+    expected = np.zeros(count)
+    for sample in range(count):
+        own = enclosed_fraction(blur, positions[sample], dilation, -GAP_PX, -GAP_PX - 8.5, -GAP_PX + 8.5)
+        inside = enclosed_fraction(blur, positions[sample], dilation, -GAP_PX, -8.5, 8.5)
+        expected[sample] = bright_box[sample] / own * inside if own > 0 else 0.0
+    shared: dict = {}
+
+    np.testing.assert_array_equal(neighbor_wing_flux(blur, dilation, *arguments), expected)
+    np.testing.assert_array_equal(neighbor_wing_flux(blur, dilation, *arguments, shared), expected)
+    np.testing.assert_array_equal(neighbor_wing_flux(blur, dilation, *arguments, shared), expected)
+    assert len(shared) == count

@@ -24,7 +24,7 @@ from wayfindinglib.tasks.control_tasks import night_analysis
 def _spell_cameras_plainly(monkeypatch: pytest.MonkeyPatch) -> None:
     """Skip the camera-profile lookup the isolated configuration lacks."""
     monkeypatch.setattr(
-        capture_history, "equipment_spellings", lambda name, config=None: {normalize_name(name)}
+        capture_history, "equipment_spellings", lambda astrometrics, name: {normalize_name(name)}
     )
 
 
@@ -38,6 +38,7 @@ class _LightFrame:
         self.timestamp = FIRST_NIGHT + 60.0 * index
         self.exposure = 60.0
         self.filter = "Luminance"
+        self.is_spectral = False
         self.camera = camera
         self.telescope = telescope
         self.sensor_temperature_c = -10.0

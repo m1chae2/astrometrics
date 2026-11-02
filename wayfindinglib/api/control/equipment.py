@@ -12,9 +12,7 @@ from typing import Any
 
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.control_status import EquipmentStatus
-from wayfindinglib.models.equipment_and_site.equipment import CoolingPolicy
 from wayfindinglib.models.policy.commissioning import CommissioningRun
-from wayfindinglib.models.policy.device_state import DeviceRole, DeviceState
 
 __all__ = ["EquipmentControl"]
 
@@ -72,7 +70,7 @@ class EquipmentControl(ControlChild):
             If ``indi_properties`` is asked for without `device_name`, or
             `device_name` is given without ``indi_properties``.
         """
-        from astrometricslib import InvalidArgumentError
+        from astrometricslib.exceptions import InvalidArgumentError
         from wayfindinglib.tasks.control_tasks import equipment_activation, hardware_operations
 
         if include is None:
@@ -91,7 +89,9 @@ class EquipmentControl(ControlChild):
         if "guide_camera" in sections:
             status.guide_camera = context.active_guide_camera()
         if "camera_profiles" in sections:
-            status.camera_profiles = equipment_activation.list_camera_profiles(context.config)
+            status.camera_profiles = equipment_activation.list_camera_profiles(
+                context.config, context.astrometrics
+            )
         if "configuration" in sections:
             status.configuration = equipment_activation.get_equipment_configuration(context.config)
         if "observer_location" in sections:
@@ -130,6 +130,15 @@ class EquipmentControl(ControlChild):
         from wayfindinglib.tasks.control_tasks import hardware_operations
 
         return hardware_operations.disconnect(self._context)
+
+    def apply_configuration(self) -> None:
+        """Make the INDI session read the telescope hostname again.
+
+        Call it after the configuration changed, so a new hostname is used
+        on the next connection. It points the session at the host and does
+        not reconnect or move anything.
+        """
+        self._context.driver.sync_configuration()
 
     def set_active_telescope(self, telescope_id: str, limits: dict[str, float | bool] | None = None) -> bool:
         """Choose the active telescope, and optionally save its safety limits.
@@ -211,58 +220,7 @@ class EquipmentControl(ControlChild):
             return False
         return diagnostics.set_property(device_name, property_name, value, element)
 
-    def cooling_ramp_rate(self, policy: CoolingPolicy) -> float:
-        """Return the active camera's cooling ramp rate, capped at its maximum.
-
-        Parameters
-        ----------
-        policy : `CoolingPolicy`
-            The requested cooling policy.
-
-        Returns
-        -------
-        ramp_rate_c_per_min : `float`
-            The ramp rate in degrees Celsius per minute.
-        """
-        from wayfindinglib.tasks.control_tasks.cooling_control import effective_ramp_rate_c_per_min
-
-        return effective_ramp_rate_c_per_min(policy, self._context.active_camera())
-
-    def summarize_device(
-        self,
-        device_id: str,
-        device_role: DeviceRole,
-        is_present: bool,
-        is_connected: bool,
-        allow_commands: bool,
-        has_alert: bool,
-        fault_detail: str | None = None,
-    ) -> DeviceState:
-        """Classify one device's raw signals into a `DeviceState`.
-
-        Parameters
-        ----------
-        device_id : `str`
-            The device.
-        device_role : `DeviceRole`
-            What the device does.
-        is_present, is_connected, allow_commands, has_alert : `bool`
-            The device's raw signals.
-        fault_detail : `str`, optional
-            The device's own fault message.
-
-        Returns
-        -------
-        state : `DeviceState`
-            The classified state.
-        """
-        from wayfindinglib.tasks.control_tasks.device_state_tasks import summarize_device
-
-        return summarize_device(
-            device_id, device_role, is_present, is_connected, allow_commands, has_alert, fault_detail
-        )
-
-    def save_commissioning_run(self, run: CommissioningRun) -> None:
+    def _save_commissioning_run(self, run: CommissioningRun) -> None:
         """Save one commissioning drill.
 
         Saving again under the same id replaces the record, so give each

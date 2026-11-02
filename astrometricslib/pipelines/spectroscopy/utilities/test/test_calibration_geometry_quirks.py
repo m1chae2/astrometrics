@@ -9,7 +9,7 @@ a calibration frame instead of hand-set in config.
 import numpy as np
 import pytest
 
-from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner import (
     SpectroscopyCalibrationTuner,
 )

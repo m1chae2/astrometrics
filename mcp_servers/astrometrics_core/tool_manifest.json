@@ -2,26 +2,33 @@
   "server": "astrometricslib-core",
   "generated_by": "python -m mcp_servers.inventory --write-runtime-manifests",
   "tools": {
-    "calibration_add": {
-      "tool_class": "change-data",
+    "calibration_add_frames": {
+      "tool_class": "unclassified",
       "category": "calibration",
       "disposition": "withhold",
       "interim_block": "",
-      "note": "The AI is read-only, so a tool that writes is not offered."
+      "note": "Moves files into the calibration library from any path. The AI is read-only."
     },
-    "calibration_assess_flats": {
+    "calibration_assess": {
       "tool_class": "compute",
       "category": "calibration",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Checks flats. Writes nothing."
+      "note": "Judges the dark, bias or flat sets of the library from the stored numbers. Flats are measured when asked. Writes nothing."
     },
-    "calibration_get": {
+    "calibration_camera_profile": {
       "tool_class": "observe",
       "category": "calibration",
-      "disposition": "drop",
+      "disposition": "keep",
       "interim_block": "",
-      "note": "Replaced by calibration_query."
+      "note": "Built 2026-11-01. Reads the stored facts about one camera model: aliases, limits and gains."
+    },
+    "calibration_measure_frames": {
+      "tool_class": "compute",
+      "category": "calibration",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Writes the measured numbers of dark and bias frames to the quality store and their stamps to the calibration index. The AI is read-only."
     },
     "calibration_measure_sensor_noise": {
       "tool_class": "compute",
@@ -37,7 +44,7 @@
       "interim_block": "",
       "note": "Built 2026-10-05. Calibration counts, or how a target's light frames match the darks. refresh reloads the index into memory and writes nothing."
     },
-    "calibration_refresh": {
+    "calibration_reindex_frames": {
       "tool_class": "change-data",
       "category": "calibration",
       "disposition": "withhold",
@@ -56,49 +63,42 @@
       "category": "jobs-history",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-03. Reads jobs, log tails, stored results and data lineage from the logs database, opened read-only. A job stuck at 'started' after the app stopped still shows as active."
+      "note": "Built 2026-10-03. Reads jobs, log tails, stored results, data lineage and (detail=warnings) the warnings one job detected, from the logs and quality databases, opened read-only. A job stuck at 'started' after the app stopped still shows as active."
     },
-    "processing_acquire_analysis_slot": {
+    "processing_acquire_job_slot": {
       "tool_class": "change-data",
       "category": "image-processing",
       "disposition": "drop",
       "interim_block": "",
       "note": "Internal concurrency lock exposed by reflection."
     },
-    "processing_acquire_stacking_slot": {
+    "processing_measure_noise": {
       "tool_class": "change-data",
+      "category": "image-processing",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Stacks some of a target's frames into the target's _subsets folder (never over the library stack, its previews or its records) and writes the noise of each result into the quality database. It costs one stack for each subset, so it takes minutes (kind=odd_even_difference stacks two halves, about one library stack's time in all). The AI is read-only, so it reads the stored numbers with quality_query instead."
+    },
+    "processing_open_in_siril": {
+      "tool_class": "unclassified",
       "category": "image-processing",
       "disposition": "drop",
       "interim_block": "",
-      "note": "Internal concurrency lock exposed by reflection."
+      "note": "Opens a window on the person's screen. An AI client cannot see it. The app's button uses it."
     },
-    "processing_discard_previous_stack": {
-      "tool_class": "change-data",
+    "processing_plate_solve": {
+      "tool_class": "compute",
       "category": "image-processing",
-      "disposition": "withhold",
+      "disposition": "fix",
       "interim_block": "",
-      "note": "The AI is read-only, so a tool that writes is not offered."
+      "note": "Returns an astropy WCS, which MCP cannot send. Return the solved center and pixel scale."
     },
-    "processing_measure_half_difference_noise": {
-      "tool_class": "change-data",
+    "processing_predict_stack_weights": {
+      "tool_class": "unclassified",
       "category": "image-processing",
-      "disposition": "withhold",
+      "disposition": "drop",
       "interim_block": "",
-      "note": "Stacks two halves of a target's frames into the target's _subsets folder (about one library stack's time in all), subtracts them, and writes the noise of the difference into the quality database. The halves are deleted afterwards, and the library stack, its previews and its records are never changed. The AI is read-only, so it reads the stored numbers with quality_query instead."
-    },
-    "processing_measure_night_contributions": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Stacks some of a target's frames into the target's _subsets folder (never over the library stack, its previews or its records) and writes the noise of each result into the quality database. It costs one stack for each subset, so it takes minutes. The AI is read-only, so it reads the stored numbers with quality_query instead."
-    },
-    "processing_measure_noise_growth": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Stacks some of a target's frames into the target's _subsets folder (never over the library stack, its previews or its records) and writes the noise of each result into the quality database. It costs one stack for each subset, so it takes minutes. The AI is read-only, so it reads the stored numbers with quality_query instead."
+      "note": "Takes per-frame lists that only forecast code holds. An AI client has no way to supply them."
     },
     "processing_process_target": {
       "tool_class": "change-data",
@@ -107,26 +107,12 @@
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
     },
-    "processing_record_frame_measurements": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Measures a target's light frames and writes the numbers into the quality database, and stamps each measured frame on the target record. It never changes a frame file. The AI is read-only, so it reads the stored numbers with quality_query instead."
-    },
     "processing_remake_preview": {
       "tool_class": "process",
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-04 from gap report #1. Makes a target's preview picture again from its existing stack, without restacking. denoise, denoise_strength and star_toning apply to that run only and never reach the configuration. The old pictures are copied into _previous_preview first and put back if the run fails. The stack file is never written. Writes only the preview JPEG, the processed FITS and the target's processed-image pointer."
-    },
-    "processing_restore_excluded_frames": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "The AI is read-only, so a tool that writes is not offered."
     },
     "processing_run_spectroscopy_by_session": {
       "tool_class": "change-data",
@@ -142,26 +128,26 @@
       "interim_block": "",
       "note": "Built 2026-10-04 at the user's request: the AI may stack a target the way the app's Stack button does, choosing imaging or spectral frames, a filter and a file or time range. plan_only lists the frames without stacking. It runs the app's own stage: sets aside bad frames into _excluded (never deletes), keeps one previous stack, and saves the target. Since 2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to stack."
     },
-    "processing_stack_subset": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Stacks some of a target's frames into the target's _subsets folder (never over the library stack, its previews or its records) and writes the noise of each result into the quality database. It costs one stack for each subset, so it takes minutes. The AI is read-only, so it reads the stored numbers with quality_query instead."
-    },
     "processing_stack_summary": {
       "tool_class": "observe",
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-04. One short answer for a target's stack: frames stacked and skipped, rejected fraction, star width against the inputs, flags and each exposure group. Reads the saved summary."
+      "note": "Built 2026-10-04. One short answer for a target's stack: frames stacked and skipped, rejected fraction, star width against the inputs and each exposure group. Reads the saved summary."
     },
-    "processing_swap_with_previous_stack": {
-      "tool_class": "change-data",
+    "processing_stop_stacking_programs": {
+      "tool_class": "unclassified",
       "category": "image-processing",
-      "disposition": "withhold",
+      "disposition": "drop",
       "interim_block": "",
-      "note": "The AI is read-only, so a tool that writes is not offered."
+      "note": "Stops every Siril the library started. The backend calls it when it stops."
+    },
+    "quality_calibration_identities": {
+      "tool_class": "observe",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-10-25. Reads which flat, bias and dark masters, optic, camera, Siril version and stacking algorithm version each library stacking run used, by run id or target, so two runs confounded by a calibration change can be told apart. Writes nothing and creates no table."
     },
     "quality_capture_settings": {
       "tool_class": "observe",
@@ -170,26 +156,19 @@
       "interim_block": "",
       "note": "Built 2026-10-24. Reads the camera, telescope, filter, exposure, gain setting, offset and binning that stored quality measurements point at, by capture setting id. Writes nothing and creates no table."
     },
-    "quality_check_spectral_frames": {
-      "tool_class": "compute",
-      "category": "image-processing",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-10-04. Measures raw spectrum frames: zero-order position, tilt, width, peaks, saturated patches along the spectrum, a predicted peak at another exposure, and a summary by exposure and by pier side. Nothing is saved."
-    },
-    "quality_flag_value_outliers": {
-      "tool_class": "compute",
+    "quality_get_aperture_record": {
+      "tool_class": "observe",
       "category": "image-processing",
       "disposition": "drop",
       "interim_block": "",
-      "note": "Arithmetic on numbers the caller passes in. The user does not want it."
+      "note": "Reads a file from any path and returns every aperture, which can overflow the reply. Scripts and wayfindinglib use it."
     },
     "quality_measure_frames": {
       "tool_class": "compute",
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-03. Statistics on raw frames. Nothing is saved."
+      "note": "Built 2026-10-03. Statistics on raw frames. Nothing is saved. Since 2026-10-31 kind=spectral measures raw spectrum frames (zero-order position, tilt, width, peaks, saturated patches along the spectrum, a predicted peak at another exposure, a summary by exposure and pier side); it replaces quality_check_spectral_frames."
     },
     "quality_measure_stack": {
       "tool_class": "compute",
@@ -211,6 +190,13 @@
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-21. Reads the quality measurements that earlier runs stored (the latest for each subject and metric, or every row). Writes nothing and creates no table."
+    },
+    "quality_record_frame_measurements": {
+      "tool_class": "change-data",
+      "category": "image-processing",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Measures a target's light frames and writes the numbers into the quality database, and stamps each measured frame on the target record. It never changes a frame file. The AI is read-only, so it reads the stored numbers with quality_query instead."
     },
     "quality_resolve_rows": {
       "tool_class": "observe",
@@ -240,12 +226,12 @@
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
     },
-    "star_detect_point_sources": {
-      "tool_class": "compute",
+    "star_dataset_version": {
+      "tool_class": "unclassified",
       "category": "stars",
-      "disposition": "fix",
+      "disposition": "drop",
       "interim_block": "",
-      "note": "Needs a NumPy array, which MCP cannot send. Take a frame path."
+      "note": "A change counter for the backend's answer cache. It tells an AI client nothing about the sky."
     },
     "star_find_or_create_by_position": {
       "tool_class": "change-data",
@@ -261,12 +247,12 @@
       "interim_block": "",
       "note": "Reads one star's full record by id. Writes nothing."
     },
-    "star_plate_solve": {
-      "tool_class": "compute",
+    "star_get_spectrum": {
+      "tool_class": "observe",
       "category": "stars",
-      "disposition": "fix",
+      "disposition": "withhold",
       "interim_block": "",
-      "note": "Returns an astropy WCS, which MCP cannot send. Return the solved center and pixel scale."
+      "note": "A script convenience. The AI reads a star's spectrum through star_get and star_query."
     },
     "star_query": {
       "tool_class": "observe",
@@ -274,20 +260,6 @@
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-03. Library star lookup with hard caps on rows, region size and full records."
-    },
-    "star_save_all": {
-      "tool_class": "change-data",
-      "category": "stars",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Replaces the whole star catalog."
-    },
-    "star_tune_spectroscopy_calibration": {
-      "tool_class": "change-data",
-      "category": "stars",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Rewrites the live configuration file through update_config. Needs an apply=false mode that only returns the fitted values."
     },
     "star_update": {
       "tool_class": "change-data",
@@ -302,6 +274,13 @@
       "disposition": "withhold",
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
+    },
+    "target_add_frames": {
+      "tool_class": "unclassified",
+      "category": "targets",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Moves files into the library from any path. The AI is read-only; wayfindinglib calls it."
     },
     "target_create": {
       "tool_class": "change-data",
@@ -331,6 +310,13 @@
       "interim_block": "",
       "note": "Reads one FITS header."
     },
+    "target_get_stars": {
+      "tool_class": "observe",
+      "category": "targets",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "A script convenience, uncapped. The AI reads a target's stars through star_query."
+    },
     "target_imaged_field_centers": {
       "tool_class": "observe",
       "category": "targets",
@@ -352,6 +338,13 @@
       "interim_block": "",
       "note": "Built 2026-10-04. Targets as short rows or one grouped record, the cameras used, or each target's frames per camera; replaces target_get and target_list."
     },
+    "target_read_frame_header": {
+      "tool_class": "unclassified",
+      "category": "targets",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Reads a header from any path with typed values. target_get_header already serves an AI client."
+    },
     "target_read_saved": {
       "tool_class": "unclassified",
       "category": "targets",
@@ -366,12 +359,33 @@
       "interim_block": "",
       "note": "Writes the frame records. A dry_run mode that only reports what would change would let an AI use it."
     },
+    "target_resolve": {
+      "tool_class": "compute",
+      "category": "targets",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Returns the whole target record, frames and all, which overflows the reply. Use target_query."
+    },
     "target_save": {
       "tool_class": "change-data",
       "category": "targets",
       "disposition": "withhold",
       "interim_block": "",
       "note": "Writes the database. The AI is read-only."
+    },
+    "target_select_frames": {
+      "tool_class": "unclassified",
+      "category": "targets",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Returns whole frame records, which can overflow the reply. Scripts and wayfindinglib use it. review_frame_guiding already serves an AI client."
+    },
+    "target_sessions": {
+      "tool_class": "observe",
+      "category": "targets",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-01. Groups one target's frames into nights. Reads only."
     },
     "typegen_contract_validator": {
       "tool_class": "develop",

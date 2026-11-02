@@ -32,7 +32,11 @@ class SetAsideFrame(BaseModel):
     file: str
     # Where the frame lies (or lay) in the target's folder.
     original_path: str = Field(alias="originalPath")
-    # "clouded" (few stars) or "trailed" (stars smeared into streaks).
+    # "clouded" (far fewer stars than usual and a brighter sky) or "trailed".
+    # "trailed" also covers a frame with far fewer stars than usual under a
+    # normal sky, so it means "stars smeared, or far fewer than usual". The
+    # stored text of ``reason`` tells which. The name is kept because it is
+    # stored in the quality rows and in each folder's ``excluded_frames.json``.
     kind: str
     # One sentence saying what was measured.
     reason: str
@@ -57,7 +61,11 @@ class QuarantinePreview(BaseModel):
 
     kind: Literal["quarantine_preview"] = "quarantine_preview"
     target_id: str = Field(alias="targetId")
-    # Light frames the check measured.
+    # False when ``quarantine_bad_frames_enabled`` is off: a stack then moves
+    # nothing and the preview measured nothing.
+    quarantine_enabled: bool = Field(default=True, alias="quarantineEnabled")
+    # Light frames the check measured: those left after the stacker's earlier
+    # steps (minority gain, frames already set aside).
     frames_checked: int = Field(alias="framesChecked")
     # How many frames it would move. ``would_move`` may list fewer.
     would_move_total: int = Field(default=0, alias="wouldMoveTotal")
@@ -67,8 +75,6 @@ class QuarantinePreview(BaseModel):
     notes: list[str] = Field(default_factory=list)
     # Frames that could not be measured. They would stay where they are.
     unreadable: list[str] = Field(default_factory=list)
-    # The frames the stacker has already set aside, when asked for.
-    excluded: list[SetAsideFrame] | None = None
 
 
 class RestoreReport(BaseModel):
@@ -105,7 +111,8 @@ class SetAsideFrameRecord(BaseModel):
     subject_id: str | None = Field(default=None, alias="subjectId")
     # Where the frame lay before it was moved, when known.
     original_path: str | None = Field(default=None, alias="originalPath")
-    # "clouded", "trailed" or `None` when no source names a kind.
+    # "clouded", "trailed" (see `SetAsideFrame.kind`) or `None` when no source
+    # names a kind.
     kind: str | None = None
     # One sentence saying what was measured. Empty when no source has it.
     reason: str = ""
@@ -123,3 +130,10 @@ class SetAsideFrameRecord(BaseModel):
     # When the frame was moved (UTC, ISO 8601), from the manifest; else the
     # time of the stored row.
     moved_at: str | None = Field(default=None, alias="movedAt")
+    # Whether the internal `restore_excluded_frames` function can move the
+    # frame back. Only a frame with an `excluded_frames.json` entry can:
+    # that entry holds where it came from, and restore never guesses a
+    # place.
+    restorable: bool = True
+    # Why the frame cannot be restored automatically. Empty when it can.
+    restore_note: str = Field(default="", alias="restoreNote")

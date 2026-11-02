@@ -17,6 +17,63 @@ from typing import Any
 _DOCS_CACHE: dict[str, dict[str, str]] = {}
 
 
+PUBLIC_LIBRARY_MODULES = {
+    "astrometricslib": (
+        "astrometricslib",
+        "astrometricslib.exceptions",
+        "astrometricslib.reports",
+        "astrometricslib.jobs",
+        "astrometricslib.drivers",
+    ),
+    "wayfindinglib": ("wayfindinglib", "wayfindinglib.exceptions", "wayfindinglib.reports"),
+}
+"""For each library, the root and its public modules."""
+
+
+def _public_attribute(library: str, name: str) -> Any:
+    """Find a public name in a library root or in one of its public modules.
+
+    Parameters
+    ----------
+    library : `str`
+        ``astrometricslib`` or ``wayfindinglib``.
+    name : `str`
+        The name to look up.
+
+    Returns
+    -------
+    value : `Any`
+        The named object, or `None` when no public module has it.
+    """
+    import importlib
+
+    for module_name in PUBLIC_LIBRARY_MODULES[library]:
+        value = getattr(importlib.import_module(module_name), name, None)
+        if value is not None:
+            return value
+    return None
+
+
+def _class_hints(cls: type) -> dict[str, Any]:
+    """Read the annotations of a class, or nothing when one cannot be resolved.
+
+    Parameters
+    ----------
+    cls : `type`
+        The class to read.
+
+    Returns
+    -------
+    hints : `dict` [`str`, `Any`]
+        Attribute name to type. Empty if an annotation names a type that is
+        only imported for type checking.
+    """
+    try:
+        return typing.get_type_hints(cls)
+    except NameError, TypeError:
+        return {}
+
+
 def format_docstring(doc: str | None) -> str:
     r"""Format a Python docstring into structured Markdown.
 
@@ -135,6 +192,59 @@ def format_class_markdown(
             lines.append("\n---\n")
 
     return "\n".join(lines)
+
+
+def format_public_module_markdown(module_name: str) -> str:
+    """List the public names of one library module, with a summary of each.
+
+    Parameters
+    ----------
+    module_name : `str`
+        A public module, such as ``astrometricslib.exceptions``.
+
+    Returns
+    -------
+    markdown : `str`
+        A heading, the module's purpose, and one line for each name in its
+        ``__all__`` (a function shows its signature).
+    """
+    import importlib
+
+    module = importlib.import_module(module_name)
+    first_paragraph = (inspect.getdoc(module) or "").split("\n\n")[0].replace("\n", " ")
+    first_paragraph = first_paragraph.removeprefix("Purpose: ")
+    lines = [f"### `{module_name}`\n", f"{first_paragraph}\n"]
+    for name in sorted(getattr(module, "__all__", ())):
+        value = getattr(module, name, None)
+        if value is None:
+            continue
+        raw_doc = inspect.getdoc(value) if callable(value) else None
+        summary = raw_doc.split("\n")[0] if raw_doc else "No description provided."
+        signature = ""
+        if callable(value) and not isinstance(value, type):
+            try:
+                signature = str(inspect.signature(value))
+            except ValueError, TypeError, NameError:
+                signature = "(...)"
+        lines.append(f"- **`{name}{signature}`**: {summary}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def format_public_modules_markdown(library: str) -> str:
+    """List the public modules of a library other than its root.
+
+    Parameters
+    ----------
+    library : `str`
+        ``astrometricslib`` or ``wayfindinglib``.
+
+    Returns
+    -------
+    markdown : `str`
+        One block for each public module after the root.
+    """
+    return "\n".join(format_public_module_markdown(name) for name in PUBLIC_LIBRARY_MODULES[library][1:])
 
 
 def generate_api_index() -> str:
@@ -267,6 +377,7 @@ def generate_astrometricslib_docs() -> str:
         "- [Quality Diagnostics: `QualityRecords`](#class-qualityrecords)",
         "- [Utility Functions](#utility-functions)",
         "- [Core Data Models](#core-data-models)",
+        "- [Public Modules](#public-modules)",
         "",
         "---",
         "",
@@ -365,13 +476,10 @@ def generate_astrometricslib_docs() -> str:
     sections.append("## Utility Functions\n")
     utility_names = [
         "capture_job_logs",
-        "classify_and_sort_fits_files",
-        "derive_target_sessions",
         "get_configuration",
-        "parse_coordinate_string",
     ]
     for u_name in utility_names:
-        func = getattr(astrometricslib, u_name, None)
+        func = _public_attribute("astrometricslib", u_name)
         if func and callable(func):
             sections.append(format_method_markdown(u_name, func))
             sections.append("\n---\n")
@@ -387,19 +495,23 @@ def generate_astrometricslib_docs() -> str:
         "Target",
         "FrameRecord",
         "StellarObject",
-        "FitsHeaderEntry",
-        "PhotometryResult",
-        "SpectroscopyResult",
-        "AsteroidDetectionCandidate",
-        "AnalysisResult",
-        "BatchRunSummary",
         "ProcessingJob",
     ]
     for m_name in model_names:
-        m_cls = getattr(astrometricslib, m_name, None)
+        m_cls = _public_attribute("astrometricslib", m_name)
         if m_cls and isinstance(m_cls, type):
             doc = format_docstring(inspect.getdoc(m_cls))
             sections.append(f"### `{m_name}`\n\n{doc}\n")
+
+    # 9. Public modules
+    sections.append('<a id="public-modules"></a>')
+    sections.append("## Public Modules\n")
+    sections.append(
+        "Besides the package root, a script may import from these modules: "
+        "the errors, the report states and helpers, the job tools and the storage "
+        "tools. Nothing else is public.\n"
+    )
+    sections.append(format_public_modules_markdown("astrometricslib"))
 
     return "\n".join(sections)
 
@@ -431,7 +543,8 @@ def generate_wayfindinglib_docs() -> str:
         "- [Observatory Control: `ObservatoryControl`](#class-observatorycontrol)",
         "- [Observation Planning: `ObservationPlanning`](#class-observationplanning)",
         "- [Observation Execution: `ObservationExecution`](#class-observationexecution)",
-        "- [Hardware Drivers & Exceptions](#hardware-drivers)",
+        "- [Observation Review: `ObservationReview`](#class-observationreview)",
+        "- [Public Modules](#public-modules)",
         "",
         "---",
         "",
@@ -462,9 +575,9 @@ def generate_wayfindinglib_docs() -> str:
             )
         )
         sections.append("\n---\n")
-        # The operations live on the seven topic children, such as
+        # The operations live on the six topic children, such as
         # `control.mount`; the class annotations name each child's class.
-        for child_name, child_class in typing.get_type_hints(control_cls).items():
+        for child_name, child_class in _class_hints(control_cls).items():
             sections.append(
                 format_class_markdown(
                     child_class,
@@ -500,14 +613,23 @@ def generate_wayfindinglib_docs() -> str:
         )
         sections.append("\n---\n")
 
-    # 5. Hardware Drivers & Exceptions
-    sections.append('<a id="hardware-drivers"></a>')
-    sections.append("## Hardware Drivers & Exceptions\n")
-    for name in ["IndiInterface", "SimulatorIndiInterface"]:
-        cls_obj = getattr(wayfindinglib, name, None)
-        if cls_obj and isinstance(cls_obj, type):
-            doc = format_docstring(inspect.getdoc(cls_obj))
-            sections.append(f"### `{name}`\n\n{doc}\n")
+    # 5. ObservationReview
+    sections.append('<a id="class-observationreview"></a>')
+    review_cls = getattr(wayfindinglib, "ObservationReview", None)
+    if review_cls:
+        sections.append(
+            format_class_markdown(
+                review_cls,
+                display_title="ObservationReview",
+                console_alias="wayfinder.review",
+            )
+        )
+        sections.append("\n---\n")
+
+    # 6. Public modules
+    sections.append('<a id="public-modules"></a>')
+    sections.append("## Public Modules\n")
+    sections.append(format_public_modules_markdown("wayfindinglib"))
 
     return "\n".join(sections)
 
@@ -526,19 +648,16 @@ def generate_entity_doc(entity_name: str) -> str:
     content : `str`
         Detailed Markdown document for the entity.
     """
-    import astrometricslib
-    import wayfindinglib
-
     # Strip prefixes like 'api/generated/' or '.rst'
     clean_name = entity_name.split("/")[-1].replace(".rst", "").replace(".md", "")
     short_name = clean_name.split(".")[-1]
 
     # Search in astrometricslib then wayfindinglib
     obj = (
-        getattr(astrometricslib, short_name, None)
-        or getattr(wayfindinglib, short_name, None)
-        or getattr(astrometricslib, clean_name, None)
-        or getattr(wayfindinglib, clean_name, None)
+        _public_attribute("astrometricslib", short_name)
+        or _public_attribute("wayfindinglib", short_name)
+        or _public_attribute("astrometricslib", clean_name)
+        or _public_attribute("wayfindinglib", clean_name)
     )
 
     if obj is None:

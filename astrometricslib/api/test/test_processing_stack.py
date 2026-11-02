@@ -11,7 +11,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib import FrameRecord, InvalidArgumentError, NotFoundError, ProcessingPipelines, Target
+from astrometricslib import FrameRecord, ProcessingPipelines, Target
+from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.pipelines.stacking import stage as stacking_stage
 
@@ -65,7 +66,7 @@ def library(monkeypatch: pytest.MonkeyPatch) -> tuple[ProcessingPipelines, Simpl
     pipelines = ProcessingPipelines(
         AppConfiguration(), None, targets=SimpleNamespace(save=save, get=lambda *_: None)
     )
-    monkeypatch.setattr(pipelines, "acquire_stacking_slot", nullcontext)
+    monkeypatch.setattr(pipelines, "acquire_job_slot", nullcontext)
     return pipelines, record
 
 

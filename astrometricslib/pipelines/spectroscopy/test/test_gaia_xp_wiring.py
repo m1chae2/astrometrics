@@ -13,8 +13,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-from astrometricslib.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.models.quality.gaia_xp_comparison import GaiaXpComparison
 from astrometricslib.models.quality.gate_result import GateStatus
 from astrometricslib.models.stellar_source import StellarObject
@@ -27,6 +27,7 @@ from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp i
     GAIA_XP_GATE_NAME,
     REASON_NO_SOURCE_ID,
     REASON_NO_XP,
+    REASON_XP_DOWNLOAD_FAILED,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response import load_instrument_response
 from astrometricslib.pipelines.spectroscopy.pre_processing.quantum_efficiency_correction import (
@@ -183,6 +184,21 @@ def test_a_gaia_star_with_no_xp_spectrum_is_not_checked_with_that_reason() -> No
     assert driver.requested_ids == [SOURCE_ID]
 
 
+def test_a_failed_download_is_counted_and_a_missing_spectrum_is_not() -> None:
+    """Only a failed download raises the count behind the job warning."""
+    star = StellarObject(id=f"Gaia DR3 {SOURCE_ID}")
+
+    missing = build_pipeline(FakeGaiaXpDriver())
+    missing._apply_result_to_stellar_object(star, extraction_result("G2V"), _FAKE_IMAGE)
+    assert star.spectroscopy.gaia_xp_comparison.not_checked_reason == REASON_NO_XP
+    assert missing.last_run_gaia_xp_download_failed_count == 0
+
+    failing = build_pipeline(FakeGaiaXpDriver(download_fails=True))
+    failing._apply_result_to_stellar_object(star, extraction_result("G2V"), _FAKE_IMAGE)
+    assert star.spectroscopy.gaia_xp_comparison.not_checked_reason == REASON_XP_DOWNLOAD_FAILED
+    assert failing.last_run_gaia_xp_download_failed_count == 1
+
+
 def test_a_failing_comparison_never_stops_the_spectrum(monkeypatch: pytest.MonkeyPatch) -> None:
     """An error inside the comparison is stored as a not-checked reason."""
 
@@ -263,6 +279,11 @@ def test_the_runner_records_the_gaia_summary_and_fails_the_gate_for_tilted_stars
             ),
             "spectroscopy": SimpleNamespace(
                 last_run_zero_order_saturation_fractions=[0.0],
+                last_run_skipped_no_trail_count=0,
+                last_run_skipped_unidentified_count=0,
+                last_run_below_feature_limit_count=0,
+                last_run_gaia_xp_download_failed_count=0,
+                last_run_reddening_lookup_failed_count=0,
                 config=SimpleNamespace(camera=SimpleNamespace(name="ZWO ASI 533MM Pro")),
             ),
             "flagged_spectral_classifications": [],
@@ -293,6 +314,11 @@ def test_the_runner_leaves_the_gate_unchecked_when_no_star_was_compared() -> Non
             ),
             "spectroscopy": SimpleNamespace(
                 last_run_zero_order_saturation_fractions=[0.0],
+                last_run_skipped_no_trail_count=0,
+                last_run_skipped_unidentified_count=0,
+                last_run_below_feature_limit_count=0,
+                last_run_gaia_xp_download_failed_count=0,
+                last_run_reddening_lookup_failed_count=0,
                 config=SimpleNamespace(camera=SimpleNamespace(name="ZWO ASI 533MM Pro")),
             ),
             "flagged_spectral_classifications": [],

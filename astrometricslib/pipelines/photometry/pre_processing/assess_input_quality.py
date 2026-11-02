@@ -1,4 +1,4 @@
-"""Judges how good the raw per-frame measurements behind a light curve were.
+"""Measures how good the raw per-frame measurements behind a light curve were.
 
 This only looks at signals from measurement and normalization
 themselves -- coverage, saturation, and registration drift -- so it can
@@ -7,11 +7,6 @@ never needs to change when the variability-flagging logic does.
 """
 
 from astrometricslib.models.quality.photometry_quality import InputQualityAssessment
-
-# A star missing from more than half of a session's frames has a light
-# curve that is mostly gaps, not signal. Below this share, coverage itself
-# is the dominant quality problem. A design estimate, not a measured value.
-LOW_COVERAGE_THRESHOLD = 0.5
 
 # `locate_star_centroid` only searches a +/-40px box around a star's
 # expected position (its `search_half_width` default). Once frame-to-frame
@@ -43,15 +38,10 @@ def assess_input_quality(
         each field means.
     """
     coverage_fraction = frames_measured / frames_available if frames_available else 0.0
-    is_tracking_unstable = (
-        max_registration_drift_px is not None and max_registration_drift_px > UNSTABLE_TRACKING_DRIFT_PX
-    )
     return InputQualityAssessment(
         frames_measured=frames_measured,
         frames_available=frames_available,
         coverage_fraction=coverage_fraction,
         saturated_fraction=saturated_fraction,
         max_registration_drift_px=max_registration_drift_px,
-        is_low_coverage=coverage_fraction < LOW_COVERAGE_THRESHOLD,
-        is_tracking_unstable=is_tracking_unstable,
     )

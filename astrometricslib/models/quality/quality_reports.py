@@ -26,7 +26,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrometricslib.models.quality.excluded_frames import SetAsideFrame
 from astrometricslib.models.quality.stack_comparison import StackComparison
 
 __all__ = [
@@ -55,8 +54,6 @@ class RawFrameCheckReport(BaseModel):
     # For star width, star count and sky level: how far each moved across
     # the newest frames, with a sentence in ``alerts`` for each worrying drift.
     trends: dict[str, Any] = Field(default_factory=dict)
-    # The frames the stacker has set aside, when ``include=["excluded"]``.
-    excluded: list[SetAsideFrame] | None = None
 
 
 class InputQualityReport(BaseModel):
@@ -80,7 +77,6 @@ class InputQualityReport(BaseModel):
     trends: dict[str, Any] = Field(default_factory=dict)
     frames: list[dict[str, Any]] = Field(default_factory=list)
     note: str = ""
-    excluded: list[SetAsideFrame] | None = None
 
 
 class SpectralFrameCheckReport(BaseModel):
@@ -173,6 +169,10 @@ class StackSummary(BaseModel):
     target_id: str
     kind: Literal["imaging", "spectral"] = "imaging"
     stack_path: str | None = None
+    # The id of the stacking job that made this stack. A reader lists that
+    # job's warnings with `Jobs.query(job_id=..., detail="warnings")`. `None`
+    # for a stack saved before jobs were recorded, or made with no job.
+    job_id: str | None = None
     made_at: str
     frames_submitted: int
     frames_stacked: int
@@ -182,12 +182,9 @@ class StackSummary(BaseModel):
     frames_set_aside_before_stacking: int | None = None
     sessions: list[dict[str, Any]] = Field(default_factory=list)
     rejected_pixel_fraction: float | None = None
-    rejected_fraction_flagged: bool | None = None
     # The stack's star width against what the input frames predict.
     star_width_px: dict[str, Any] = Field(default_factory=dict)
     saturated_pixel_fraction: float | None = None
     zero_pixel_fraction: float | None = None
     exposure_groups: list[dict[str, Any]] = Field(default_factory=list)
-    flagged: bool = False
-    flag_reasons: list[str] = Field(default_factory=list)
     calibration_mismatches: int = 0

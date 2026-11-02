@@ -8,7 +8,7 @@ spectrum, with its normal-image position untouched.
 
 from pathlib import Path
 
-from astrometricslib.drivers.catalog_access import CatalogAccess
+from astrometricslib._internal.drivers.catalog_access import CatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.stellar_source import PhotometryResult, SpectroscopyResult, StellarObject
 from astrometricslib.scripts.merge_spectroscopy_star_rows import (
@@ -22,7 +22,7 @@ class _FakeAstrometrics:
 
     def __init__(self, config: AppConfiguration) -> None:
         self.config = config
-        self.catalog_access = CatalogAccess(config)
+        self._catalog_access = CatalogAccess(config)
 
 
 def _make_isolated_astrometrics(tmp_path: Path) -> _FakeAstrometrics:
@@ -42,7 +42,9 @@ def _make_isolated_astrometrics(tmp_path: Path) -> _FakeAstrometrics:
 
 
 def _save(astrometrics: _FakeAstrometrics, stars: list[StellarObject]) -> None:
-    astrometrics.catalog_access.merge_and_record("stellar_catalog", stars, lambda _existing, updated: updated)
+    astrometrics._catalog_access.merge_and_record(
+        "stellar_catalog", stars, lambda _existing, updated: updated
+    )
 
 
 def _spectral_row(star_id: str) -> StellarObject:
@@ -88,12 +90,12 @@ def test_merge_spectroscopy_rows_folds_spectrum_into_the_stars_own_row(tmp_path:
 
     assert (merged_count, renamed_count) == (1, 0)
     assert find_spectroscopy_row_ids(astrometrics) == []
-    (star,) = astrometrics.catalog_access.get_by_ids("stellar_catalog", ["Gaia DR3 1"])
+    (star,) = astrometrics._catalog_access.get_by_ids("stellar_catalog", ["Gaia DR3 1"])
     assert star.photometry.fluxes == [1.0, 2.0, 3.0]
     assert star.spectroscopy.wavelengths_angstrom == [4000.0, 5000.0]
     assert star.spectroscopy.star_position_px == [900.0, 800.0]
     assert star.star_data == {"xcentroid": 100.0, "ycentroid": 200.0}
-    assert astrometrics.catalog_access.get_by_ids("stellar_catalog", ["Gaia DR3 1::spectroscopy"]) == []
+    assert astrometrics._catalog_access.get_by_ids("stellar_catalog", ["Gaia DR3 1::spectroscopy"]) == []
 
 
 def test_merge_spectroscopy_rows_renames_a_row_that_has_no_base_row(tmp_path: Path) -> None:
@@ -104,7 +106,7 @@ def test_merge_spectroscopy_rows_renames_a_row_that_has_no_base_row(tmp_path: Pa
     merged_count, renamed_count = merge_spectroscopy_rows(astrometrics, ["HD 5::spectroscopy"])
 
     assert (merged_count, renamed_count) == (0, 1)
-    (star,) = astrometrics.catalog_access.get_by_ids("stellar_catalog", ["HD 5"])
+    (star,) = astrometrics._catalog_access.get_by_ids("stellar_catalog", ["HD 5"])
     assert star.spectroscopy.wavelengths_angstrom == [4000.0, 5000.0]
     assert star.spectroscopy.star_position_px == [900.0, 800.0]
     assert star.star_data == {}

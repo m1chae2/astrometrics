@@ -16,7 +16,7 @@ import pytest
 from astropy.io import fits
 from astropy.wcs import WCS
 
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.models.camera_profile import (
     CameraProfile,

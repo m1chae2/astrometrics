@@ -160,3 +160,27 @@ def test_a_bad_time_is_refused(diagnostics: QualityRecords) -> None:
     """An unreadable time raises InvalidArgumentError."""
     with pytest.raises(InvalidArgumentError, match="ISO 8601"):
         diagnostics.measure_frames(_target(), since="last night")
+
+
+def test_the_spectral_kind_passes_its_inputs_to_the_spectrum_check(diagnostics: QualityRecords) -> None:
+    """``kind="spectral"`` hands the exposure inputs and a clamped limit on."""
+    with patch(
+        "astrometricslib.pipelines.spectroscopy.pre_processing.spectral_frame_check.check_spectral_frames",
+        return_value="report",
+    ) as check:
+        report = diagnostics.measure_frames(
+            _target(), kind="spectral", exposure_seconds=30.0, predict_exposure_seconds=60.0, limit=500
+        )
+    assert report == "report"
+    arguments = check.call_args.args
+    assert arguments[2:] == (30.0, 60.0, 100)
+
+
+def test_the_spectral_inputs_are_refused_for_other_kinds(diagnostics: QualityRecords) -> None:
+    """The exposure inputs belong to the spectral kind; others refuse them."""
+    with pytest.raises(InvalidArgumentError, match="does not use: exposure_seconds"):
+        diagnostics.measure_frames(_target(), exposure_seconds=30.0)
+    with pytest.raises(InvalidArgumentError, match="does not use: predict_exposure_seconds"):
+        diagnostics.measure_frames(_target(), kind="raw_check", predict_exposure_seconds=60.0)
+    with pytest.raises(InvalidArgumentError, match="does not use: camera_id"):
+        diagnostics.measure_frames(_target(), kind="spectral", camera_id="asi533")

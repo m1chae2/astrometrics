@@ -34,7 +34,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.ndimage import median_filter
 
-from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import NotFoundError, StorageError
 from astrometricslib.pipelines.shared.image_scaling import (
     AUTOSTRETCH_SHADOWS_CLIP_SIGMA,

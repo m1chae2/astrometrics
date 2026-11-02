@@ -26,12 +26,11 @@ from astrometricslib.pipelines.stacking.post_processing.exposure_group_report im
     build_group_summary,
     exposure_group_linearity_gate,
 )
-from astrometricslib.pipelines.stacking.processing.exposure_groups import (
+from astrometricslib.pipelines.stacking.processing.exposure_groups import ExposureGroup
+from astrometricslib.pipelines.stacking.processing.group_combination import measure_exposure_group_gains
+from astrometricslib.pipelines.stacking.processing.group_gains import (
     DEFAULT_GAIN_DISAGREEMENT_TOLERANCE,
-    ExposureGroup,
     GroupGainMeasurement,
-    estimate_group_gains,
-    measure_exposure_group_gains,
     measure_group_gains,
 )
 
@@ -166,12 +165,15 @@ def test_a_wider_tolerance_accepts_the_same_disagreement() -> None:
     assert lenient.bright_end_ratio == strict.bright_end_ratio
 
 
-def test_estimate_group_gains_returns_the_mid_range_gain() -> None:
+def test_measure_group_gains_returns_the_mid_range_gain() -> None:
     """The plain gain list uses the mid-range estimate."""
     group_a = make_group_a()
     usable = [np.ones(group_a.shape, dtype=bool)] * 2
 
-    gains = estimate_group_gains([group_a, make_compressed_group_b(group_a)], usable, reference_index=0)
+    gains = [
+        m.gain
+        for m in measure_group_gains([group_a, make_compressed_group_b(group_a)], usable, reference_index=0)
+    ]
 
     assert gains == pytest.approx([1.0, TRUE_GAIN], rel=0.01)
 
@@ -313,7 +315,7 @@ def run_two_groups(tmp_path: Path, group_b_image: np.ndarray) -> tuple[str | Non
     with (
         patch.object(stack_runner, "_stack_one_batch", fake_stack_one_batch),
         patch(
-            "astrometricslib.pipelines.stacking.processing.exposure_groups.measure_group_frames",
+            "astrometricslib.pipelines.stacking.processing.group_combination.measure_group_frames",
             return_value=([1.0, 1.0], [0.0, 0.0]),
         ),
         patch(

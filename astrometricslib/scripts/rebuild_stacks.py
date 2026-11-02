@@ -30,13 +30,14 @@ from typing import Any
 import numpy as np
 
 from astrometricslib import Astrometrics
-from astrometricslib.drivers.fits_access import read_data
-from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral, group_frames_by_configuration
-from astrometricslib.pipelines.stacking.post_processing.stack_quality import is_zero_fraction_significant
-from astrometricslib.pipelines.stacking.processing.exposure_groups import (
-    MINIMUM_FRAMES_PER_EXPOSURE_GROUP,
+from astrometricslib._internal.drivers.fits_access import read_data
+from astrometricslib.pipelines.shared.frame_grouping import (
     frame_exposure_seconds,
+    frame_is_spectral,
+    group_frames_by_configuration,
 )
+from astrometricslib.pipelines.stacking.post_processing.stack_quality import is_zero_fraction_significant
+from astrometricslib.pipelines.stacking.processing.exposure_groups import MINIMUM_FRAMES_PER_EXPOSURE_GROUP
 
 # Every n-th pixel is read when counting zeros, so a large stack is checked
 # quickly. One pixel in 36 is plenty to tell a stack that is 98% zero from one
@@ -201,12 +202,13 @@ def rebuild_target(astrometrics: Astrometrics, name: str, backup_directory: str)
     backup_directory : `str`
         Where the existing stacks are copied first.
     """
+    from astrometricslib._internal.drivers.calibration_library import CalibrationLibrary
     from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
     from astrometricslib.pipelines.tasks import stack_frames_with_timeout
 
     target = astrometrics.targets.get(name)
     quality_recording = FrameQualityRecording(
-        astrometrics.config, astrometrics.processing.calibration.library
+        astrometrics.config, CalibrationLibrary(app_config=astrometrics.config)
     )
     folder = os.path.join(astrometrics.config.get_frames_path(), "lights", name)
     destination = os.path.join(backup_directory, name.replace(" ", "_"))

@@ -6,12 +6,13 @@ caller reads named fields instead of
 guessing at the keys of a dictionary.
 
 - `StackResult` says which frames were chosen and, unless only a plan was
-  asked for, where the stack went, its quality summary, and whether it was
-  flagged.
+  asked for, where the stack went and its quality summary.
 - `PreviewRemakeResult` says where the new preview picture went and which
   steps made it.
 - `ProcessTargetResult` holds one target's result from each analysis stage
   that ran, and the target's quality summaries afterwards.
+- `StackWeightPrediction` says how the stacker would weight a set of frames:
+  the mode, each frame's exposure group and each frame's weight.
 """
 
 from typing import Any, Literal
@@ -21,7 +22,14 @@ from pydantic import BaseModel, Field
 from astrometricslib.models.quality.quality_summary import StackQualitySummary
 from astrometricslib.models.target import TargetQualitySummaries
 
-__all__ = ["PreviewRemakeResult", "ProcessTargetResult", "StackResult"]
+__all__ = [
+    "PreviewRemakeResult",
+    "PreviewSettingsRecord",
+    "PreviewSettingsUsed",
+    "ProcessTargetResult",
+    "StackResult",
+    "StackWeightPrediction",
+]
 
 
 class StackResult(BaseModel):
@@ -39,13 +47,56 @@ class StackResult(BaseModel):
     plan_only: bool = False
     # Where the stack is. None for a plan, or when stacking made no image.
     stacked_path: str | None = None
-    # Whether the stack's quality summary flags a problem. None for a plan.
-    flagged: bool | None = None
-    flag_reasons: list[str] = Field(default_factory=list)
     # The new stack's quality summary (rejected fraction, star sharpness
-    # against the inputs, flags). None for a plan.
+    # against the inputs, gates). None for a plan. Its warnings are listed by
+    # `Jobs.query(job_id=..., detail="warnings")`.
     quality_summary: StackQualitySummary | None = None
     note: str = ""
+
+    @property
+    def provenance_activity_id(self) -> str | None:
+        """The id of the provenance record of the run that made this stack.
+
+        It is read from the quality summary, where the run stamped it, so
+        nothing extra is stored. Pass it to `Jobs.query` with
+        ``detail="lineage"`` and the target to see the chain of runs.
+
+        Returns
+        -------
+        activity_id : `str` or `None`
+            The run's id, or `None` for a plan or a run with no provenance.
+        """
+        if self.quality_summary is None:
+            return None
+        return self.quality_summary.provenance_activity_id
+
+
+class PreviewSettingsUsed(BaseModel):
+    """The choices a preview run really used, as recorded beside the stack."""
+
+    # Whether Cosmic Clarity's denoise ran (or was due to run).
+    denoise: bool
+    # The denoise strength, from 0 to 1. None when the denoise did not run.
+    denoise_strength: float | None = None
+    # Whether the star toning was on.
+    star_toning: bool
+    # Whether the stars were stretched on their own with StarNet.
+    starnet: bool = False
+    # True when the stack is a bright extended object, which takes its own
+    # stretch and skips GraXpert, the denoise and the star toning.
+    bright_object: bool = False
+
+
+class PreviewSettingsRecord(BaseModel):
+    """What made a stack's preview picture (its settings record file)."""
+
+    # When the picture was made, as an ISO 8601 time in UTC.
+    made_at: str
+    settings_used: PreviewSettingsUsed
+    # The sentence for each step and whether it ran.
+    steps_run: list[str] = Field(default_factory=list)
+    # True when the run overrode the saved settings.
+    custom: bool = False
 
 
 class PreviewRemakeResult(BaseModel):
@@ -64,6 +115,9 @@ class PreviewRemakeResult(BaseModel):
     previous_pictures: list[str] = Field(default_factory=list)
     # True when the stack file itself was not touched, as it never should be.
     stack_file_unchanged: bool = True
+    # What made the new picture, read from the record saved beside the stack.
+    # None when the record could not be read, which means unknown.
+    preview_settings: PreviewSettingsRecord | None = None
 
 
 class ProcessTargetResult(BaseModel):
@@ -81,3 +135,48 @@ class ProcessTargetResult(BaseModel):
     # The target's astrometry, photometry and spectroscopy quality
     # summaries after the stages ran.
     quality: TargetQualitySummaries | None = None
+
+    @property
+    def provenance_activity_ids(self) -> dict[str, str]:
+        """The provenance record ids of the analysis runs, by stage.
+
+        They are read from the quality summaries, where each run stamped its
+        id, so nothing extra is stored. Pass an id to `Jobs.query` with
+        ``detail="lineage"`` and the target to see the chain of runs.
+
+        Returns
+        -------
+        activity_ids : `dict` [`str`, `str`]
+            The id of each stage that has one, keyed by stage name
+            (``"astrometry"``, ``"photometry"`` or ``"spectroscopy"``).
+        """
+        if self.quality is None:
+            return {}
+        summaries = {
+            "astrometry": self.quality.astrometry,
+            "photometry": self.quality.photometry,
+            "spectroscopy": self.quality.spectroscopy,
+        }
+        return {
+            stage: summary.provenance_activity_id
+            for stage, summary in summaries.items()
+            if summary is not None and summary.provenance_activity_id
+        }
+
+
+class StackWeightPrediction(BaseModel):
+    """How the stacker would weight a set of frames."""
+
+    # The weighting mode: "equal", "noise", "wfwhm" (star width), "group" (the
+    # frames fall in more than one exposure group), or the configured mode's
+    # own text for a mode the forecast does not know.
+    mode: str
+    # For each frame, the length of the exposure group it would land in, in
+    # seconds. Every entry is None when the frames stay in one group because
+    # a length cannot be read or no length has enough frames.
+    folded_exposure_lengths: list[float | None] = Field(default_factory=list)
+    # For each frame, the weight it would carry (the star-width weights have
+    # mean 1; the others are not scaled). None when they are unknown.
+    weights: list[float] | None = None
+    # Why the weights are unknown. Empty when they are known.
+    reasons: list[str] = Field(default_factory=list)

@@ -20,7 +20,7 @@ from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from astropy.wcs import WCS, Sip
 
-from astrometricslib.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
 from astrometricslib.pipelines.astrometry.processing import wcs_refinement
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier

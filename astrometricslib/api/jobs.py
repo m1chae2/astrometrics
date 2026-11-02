@@ -15,16 +15,26 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
-from astrometricslib.drivers.provenance_store import ProvenanceStore
+from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
+from astrometricslib._internal.drivers.provenance_store import ProvenanceStore
+from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.jobs.models import ProcessingJob
 from astrometricslib.foundation.jobs.store import JobStore
+from astrometricslib.models.job_queries import (
+    JobLogLine,
+    JobQueryResult,
+    JobSummary,
+    JobWarning,
+    LineageRun,
+)
+from astrometricslib.models.quality.gate_result import GateStatus
+from astrometricslib.models.quality.measurement import QualityMeasurement
 
 __all__ = ["Jobs"]
 
-DETAILS = ("summary", "log_tail", "result", "lineage")
+DETAILS = ("summary", "log_tail", "result", "lineage", "warnings")
 """The kinds of answer `Jobs.query` can give."""
 
 LINEAGE_NEEDS_A_TARGET = "detail='lineage' needs a target_id, or a job_id of a job that has one."
@@ -50,6 +60,10 @@ MAXIMUM_LOG_LINES = 200
 
 MAXIMUM_LINEAGE_RUNS = 50
 """Most pipeline runs one lineage answer lists."""
+
+MAXIMUM_WARNINGS = 500
+"""Most warnings one call returns. A stack that fails many checks stays well
+below this; the cap only guards the reply size."""
 
 MAXIMUM_TEXT_LENGTH = 500
 """Longest message or log line returned, in characters."""
@@ -110,6 +124,40 @@ def _minutes_since(timestamp: str | None) -> float | None:
         return None
 
 
+def _warning_from_row(row: QualityMeasurement) -> JobWarning:
+    """Describe one failed check as a warning.
+
+    Parameters
+    ----------
+    row : `QualityMeasurement`
+        A stored measurement whose check outcome is ``failed``.
+
+    Returns
+    -------
+    warning : `JobWarning`
+        The warning, with the value, the limit and the register entry.
+    """
+    limit = row.check_limit
+    return JobWarning(
+        pipeline=row.metric.split(".", 1)[0],
+        metric=row.metric,
+        subject=row.subject.subject_id,
+        subject_level=row.subject.level.value,
+        target_id=row.subject.target_id,
+        reason=_shorten(row.reason),
+        outcome=GateStatus.FAILED.value,
+        value=row.value,
+        limit=None if limit is None else limit.value,
+        unit=None if limit is None else limit.unit,
+        limit_tier=None if limit is None else limit.tier.value,
+        limit_derivation=None if limit is None else _shorten(limit.derivation),
+        register_entry=None if limit is None else limit.register_entry,
+        action_taken=row.action_taken,
+        measured_at=row.measured_at.isoformat(),
+        row_id=row.row_id,
+    )
+
+
 class Jobs:
     """Read-only view of the job history and the data lineage.
 
@@ -131,7 +179,7 @@ class Jobs:
         self._storage = storage
         self._database_path = str(config.get_logs_db_path())
 
-    def _summarize(self, job: ProcessingJob) -> dict[str, Any]:
+    def _summarize(self, job: ProcessingJob) -> JobSummary:
         """Describe one job in a few fields.
 
         Parameters
@@ -141,7 +189,7 @@ class Jobs:
 
         Returns
         -------
-        summary : `dict` [`str`, `Any`]
+        summary : `JobSummary`
             Id, type, target, status, progress, message and times. An
             unfinished job that has not been updated for
             `STALE_AFTER_MINUTES` has ``looks_stale`` set, ``is_active``
@@ -151,20 +199,20 @@ class Jobs:
         unfinished = job.status in ACTIVE_STATUSES
         idle_minutes = _minutes_since(job.updated_at or job.created_at) if unfinished else None
         looks_stale = idle_minutes is not None and idle_minutes > STALE_AFTER_MINUTES
-        return {
-            "id": job.id,
-            "job_type": job.job_type,
-            "target_id": job.target_id,
-            "status": job.status,
-            "progress": f"{job.progress_current}/{job.progress_total}",
-            "message": _shorten(job.message),
-            "created_at": job.created_at,
-            "updated_at": job.updated_at,
-            "completed_at": job.completed_at,
-            "is_active": unfinished and not looks_stale,
-            "looks_stale": looks_stale,
-            "idle_minutes": None if idle_minutes is None else round(idle_minutes),
-        }
+        return JobSummary(
+            id=job.id,
+            job_type=job.job_type,
+            target_id=job.target_id,
+            status=job.status,
+            progress=f"{job.progress_current}/{job.progress_total}",
+            message=_shorten(job.message),
+            created_at=job.created_at,
+            updated_at=job.updated_at,
+            completed_at=job.completed_at,
+            is_active=unfinished and not looks_stale,
+            looks_stale=looks_stale,
+            idle_minutes=None if idle_minutes is None else round(idle_minutes),
+        )
 
     def query(
         self,
@@ -176,7 +224,8 @@ class Jobs:
         detail: str = "summary",
         lines: int = 50,
         limit: int = 20,
-    ) -> dict[str, Any]:
+        offset: int = 0,
+    ) -> JobQueryResult:
         """List jobs, read one job, tail its log, or show a target's lineage.
 
         Everything here only reads. The answers are short on purpose: a job
@@ -186,8 +235,8 @@ class Jobs:
         Parameters
         ----------
         job_id : `str`, optional
-            Read one job. With ``detail="log_tail"`` or ``"result"`` this
-            is required.
+            Read one job. With ``detail="log_tail"``, ``"result"`` or
+            ``"warnings"`` this is required.
         target_id : `str`, optional
             Only jobs for this target. With ``detail="lineage"``, the
             target whose lineage to show (or taken from ``job_id``).
@@ -206,41 +255,62 @@ class Jobs:
             ``"log_tail"``: the last log lines of ``job_id``.
             ``"result"``: the stored input and output numbers of ``job_id``.
             ``"lineage"``: the pipeline runs that produced a target's data.
+            ``"warnings"``: the warnings ``job_id`` detected (see Notes).
         lines : `int`, optional
             How many log lines to return, from 1 to 200. Defaults to 50.
         limit : `int`, optional
             How many jobs or runs to return, from 1 to 50. Defaults to 20.
+        offset : `int`, optional
+            For a job list, how many of the newest matching jobs to skip, so
+            ``limit=20, offset=20`` gives the next 20. Defaults to 0.
 
         Returns
         -------
-        answer : `dict` [`str`, `Any`]
+        answer : `JobQueryResult`
             The answer for the chosen detail. With no logs database yet, a
             job list is empty.
 
         Raises
         ------
         InvalidArgumentError
-            If the detail is unknown, or a detail lacks the job or target
-            it needs.
+            If the detail is unknown, a detail lacks the job or target it
+            needs, or ``offset`` is negative.
         NotFoundError
             If the job does not exist, or there is no logs database yet for
-            a question about one job or one target.
+            a question about one job or one target. For
+            ``detail="warnings"``, if neither the job list nor the
+            measurement table knows the id.
+
+        Notes
+        -----
+        A warning is a stored quality measurement of the job whose check
+        outcome is ``failed``. A check that ``passed`` is not a warning. A
+        check that could not run (``not_checked``) is not a warning either,
+        because it detected nothing; it is only counted. The answer lists
+        the warnings and says how many measurements the job stored, so an
+        empty list for a job that stored measurements ("checked, nothing
+        failed") differs from a job that stored none ("nothing to check"),
+        and both differ from an unknown id, which raises `NotFoundError`.
         """
         if detail not in DETAILS:
             raise InvalidArgumentError(
                 f"detail must be one of: {', '.join(DETAILS)}.", details={"detail": detail}
             )
-        if detail in ("log_tail", "result") and not job_id:
+        if detail in ("log_tail", "result", "warnings") and not job_id:
             raise InvalidArgumentError(f"detail={detail!r} needs a job_id.")
         if detail == "lineage" and not (target_id or job_id):
             raise InvalidArgumentError(
                 "detail='lineage' needs a target_id, or a job_id of a job that has one."
             )
+        if offset < 0:
+            raise InvalidArgumentError("offset must be 0 or more.", details={"offset": offset})
         limit = max(1, min(int(limit), MAXIMUM_JOBS))
         lines = max(1, min(int(lines), MAXIMUM_LOG_LINES))
+        if detail == "warnings":
+            return self._warnings(job_id)
         if not Path(self._database_path).is_file():
             if detail == "summary" and not job_id:
-                return {"detail": "summary", "count": 0, "jobs": [], "note": UNTRUSTED_TEXT_NOTE}
+                return JobQueryResult(detail="summary", count=0, jobs=[], note=UNTRUSTED_TEXT_NOTE)
             raise NotFoundError("The logs database does not exist yet, so no jobs are recorded.")
         job_store = JobStore(self._database_path, read_only=True)
 
@@ -250,15 +320,18 @@ class Jobs:
             return self._one_job(job_store, job_id, detail, lines)
         if job_id:
             return self._one_job(job_store, job_id, "summary", lines)
-        jobs = job_store.query_jobs(target_id, job_type, status, active_only, limit)
-        return {
-            "detail": "summary",
-            "count": len(jobs),
-            "jobs": [self._summarize(job) for job in jobs],
-            "note": UNTRUSTED_TEXT_NOTE,
-        }
+        # One more than asked for, to tell whether the list goes on.
+        jobs = job_store.query_jobs(target_id, job_type, status, active_only, limit + 1, offset)
+        return JobQueryResult(
+            detail="summary",
+            count=min(len(jobs), limit),
+            offset=offset,
+            truncated=len(jobs) > limit,
+            jobs=[self._summarize(job) for job in jobs[:limit]],
+            note=UNTRUSTED_TEXT_NOTE,
+        )
 
-    def _one_job(self, job_store: JobStore, job_id: str, detail: str, lines: int) -> dict[str, Any]:
+    def _one_job(self, job_store: JobStore, job_id: str, detail: str, lines: int) -> JobQueryResult:
         """Answer for one job: its summary, log tail or stored result.
 
         Parameters
@@ -274,7 +347,7 @@ class Jobs:
 
         Returns
         -------
-        answer : `dict` [`str`, `Any`]
+        answer : `JobQueryResult`
             The job's summary plus the extra the detail asks for.
 
         Raises
@@ -285,23 +358,63 @@ class Jobs:
         job = job_store.get_job(job_id)
         if job is None:
             raise NotFoundError(f"No job with id {job_id!r}.", details={"job_id": job_id})
-        answer: dict[str, Any] = {"detail": detail, "job": self._summarize(job), "note": UNTRUSTED_TEXT_NOTE}
+        answer = JobQueryResult(detail=detail, job=self._summarize(job), note=UNTRUSTED_TEXT_NOTE)
         if detail == "log_tail":
             entries, total = job_store.get_recent_log_entries_for_job(job_id, lines)
-            answer["log_lines"] = [
-                {"time": entry["created_at"], "level": entry["level"], "text": _shorten(entry["message"])}
+            answer.log_lines = [
+                JobLogLine(time=entry["created_at"], level=entry["level"], text=_shorten(entry["message"]))
                 for entry in entries
             ]
-            answer["log_lines_total"] = total
-            answer["log_lines_shown"] = len(entries)
+            answer.log_lines_total = total
+            answer.log_lines_shown = len(entries)
         elif detail == "result":
-            answer["input_metrics"] = _shorten(job.input_metrics, MAXIMUM_RESULT_LENGTH)
-            answer["output_metrics"] = _shorten(job.output_metrics, MAXIMUM_RESULT_LENGTH)
+            answer.input_metrics = _shorten(job.input_metrics, MAXIMUM_RESULT_LENGTH)
+            answer.output_metrics = _shorten(job.output_metrics, MAXIMUM_RESULT_LENGTH)
         return answer
+
+    def _warnings(self, job_id: str | None) -> JobQueryResult:
+        """Answer with the warnings one job detected.
+
+        Parameters
+        ----------
+        job_id : `str`
+            The job to read. `query` has already checked that it is given.
+
+        Returns
+        -------
+        answer : `JobQueryResult`
+            The job's summary when the logs database knows it, the warnings
+            (oldest first, at most `MAXIMUM_WARNINGS`), the number of
+            measurements the job stored and the number of checks that could
+            not run.
+
+        Raises
+        ------
+        NotFoundError
+            If the logs database has no such job and no measurement carries
+            the id.
+        """
+        job = None
+        if Path(self._database_path).is_file():
+            job = JobStore(self._database_path, read_only=True).get_job(job_id)
+        rows = QualityStore(quality_database_path(self._config)).query(job_id=job_id, latest_only=False)
+        if job is None and not rows:
+            raise NotFoundError(f"No job with id {job_id!r}.", details={"job_id": job_id})
+        failed = [row for row in rows if row.check_outcome == GateStatus.FAILED]
+        warnings = [_warning_from_row(row) for row in failed[:MAXIMUM_WARNINGS]]
+        return JobQueryResult(
+            detail="warnings",
+            job=None if job is None else self._summarize(job),
+            warnings=warnings,
+            measurement_count=len(rows),
+            checks_not_run_count=sum(1 for row in rows if row.check_outcome == GateStatus.NOT_CHECKED),
+            truncated=len(failed) > MAXIMUM_WARNINGS,
+            note=UNTRUSTED_TEXT_NOTE,
+        )
 
     def _lineage(
         self, job_store: JobStore, job_id: str | None, target_id: str | None, limit: int
-    ) -> dict[str, Any]:
+    ) -> JobQueryResult:
         """Answer with the pipeline runs that produced a target's data.
 
         Parameters
@@ -317,7 +430,7 @@ class Jobs:
 
         Returns
         -------
-        answer : `dict` [`str`, `Any`]
+        answer : `JobQueryResult`
             The runs, newest first.
 
         Raises
@@ -334,22 +447,22 @@ class Jobs:
             )
         activities = ProvenanceStore(self._database_path, read_only=True).get_lineage(target_id)
         runs = [
-            {
-                "id": activity.id,
-                "name": activity.name,
-                "start_time": activity.start_time.isoformat() if activity.start_time else None,
-                "end_time": activity.end_time.isoformat() if activity.end_time else None,
-                "comment": _shorten(activity.comment),
-                "informed_by": list(activity.informant),
-                "inputs_used": len(activity.used),
-            }
+            LineageRun(
+                id=activity.id,
+                name=activity.name,
+                start_time=activity.start_time.isoformat() if activity.start_time else None,
+                end_time=activity.end_time.isoformat() if activity.end_time else None,
+                comment=_shorten(activity.comment),
+                informed_by=list(activity.informant),
+                inputs_used=len(activity.used),
+            )
             for activity in activities[:MAXIMUM_LINEAGE_RUNS][:limit]
         ]
-        return {
-            "detail": "lineage",
-            "target_id": target_id,
-            "runs_total": len(activities),
-            "runs_shown": len(runs),
-            "runs": runs,
-            "note": UNTRUSTED_TEXT_NOTE,
-        }
+        return JobQueryResult(
+            detail="lineage",
+            target_id=target_id,
+            runs_total=len(activities),
+            runs_shown=len(runs),
+            runs=runs,
+            note=UNTRUSTED_TEXT_NOTE,
+        )

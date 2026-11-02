@@ -9,7 +9,7 @@ import json
 from datetime import UTC, datetime
 
 from mcp_servers.common.tool_registry import MAXIMUM_REPLY_BYTES, result_content
-from wayfindinglib import TargetDatasetReport
+from wayfindinglib._internal.review import TargetDatasetReport
 
 
 def test_a_long_list_keeps_whole_items_and_notes_the_rest() -> None:

@@ -105,7 +105,7 @@ def test_the_photometry_stage_forwards_its_options(
     pipelines.process_target(
         target,
         stages=["photometry"],
-        photometry={"frames": [frame], "filter_type": "L", "use_astrometry_seed": False, "max_workers": 3},
+        photometry={"frames": [frame], "filter_name": "L", "use_astrometry_seed": False, "max_workers": 3},
         register_job=False,
     )
 
@@ -377,3 +377,33 @@ def test_one_target_still_refuses_the_batch_only_callback(
         pipelines.process_target(_mixed_target(), on_item_complete=lambda *_: None, register_job=False)
     pipelines.process_target(_mixed_target(), stages=["astrometry"], camera_id="ZWO", register_job=False)
     assert len(recorder.calls) == 1
+
+
+def test_plate_solve_returns_the_solved_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`plate_solve` asks the star identifier to solve and returns its WCS."""
+    from astrometricslib.pipelines.astrometry.processing import star_identifier
+
+    calls: list[tuple[str, bool]] = []
+    solved = object()
+
+    class FakeIdentifier:
+        """Stands in for `StarIdentifier` and records each request."""
+
+        def __init__(self, config: object, drivers: object = None) -> None:
+            """Accept the configuration and drivers the catalog passes."""
+
+        def process_image(self, path: str, attempt_plate_solving: bool) -> tuple[list, object]:
+            """Record the call and return a made-up solution.
+
+            Returns
+            -------
+            result : `tuple`
+                No stars, and the made-up solution.
+            """
+            calls.append((path, attempt_plate_solving))
+            return [], solved
+
+    monkeypatch.setattr(star_identifier, "StarIdentifier", FakeIdentifier)
+
+    assert ProcessingPipelines(AppConfiguration(), MagicMock()).plate_solve("/frames/one.fits") is solved
+    assert calls == [("/frames/one.fits", True)]

@@ -129,12 +129,13 @@ def test_analyze_guiding_telemetry_detects_worm_period_and_backlash() -> None:
 def test_alignment_service_compute_pointing_model() -> None:
     """Verify AlignmentService.compute_pointing_model queries logger.
 
-    Delegates to `control.history.query(kind="pointing_model")` rather
+    Delegates to `review.query(kind="pointing_model")` rather
     than fitting directly, so the logger mock is injected on the control's
     shared context, not on `AlignmentService` itself.
     """
     from backend.services.observatory.alignment_service import AlignmentService
     from wayfindinglib import ObservatoryControl
+    from wayfindinglib.api.review import ObservationReview
 
     records_mock = MagicMock()
     records_mock.get_session_alignment_attempts.return_value = [
@@ -146,7 +147,7 @@ def test_alignment_service_compute_pointing_model() -> None:
     observatory._context.records = records_mock
     observatory._context.observer_location = lambda: {"latitude": 39.7}
 
-    service = AlignmentService(observatory_api=observatory)
+    service = AlignmentService(observatory_api=observatory, review=ObservationReview(observatory))
     res = service.compute_pointing_model(session_id="2026-09-25")
     assert res["sampleCount"] == 2
     assert res["confidence"] == "insufficient_data"

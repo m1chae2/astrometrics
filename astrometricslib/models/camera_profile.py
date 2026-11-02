@@ -10,7 +10,8 @@ Every number carries a note saying where it came from (see
 measured on our own frames, and from a plain assumption.
 
 This file only describes the shape of the data. The code that finds and
-loads the profiles is in `astrometricslib.drivers.camera_profile_store`.
+loads the profiles is in
+`astrometricslib._internal.drivers.camera_profile_store`.
 """
 
 import enum
@@ -131,7 +132,9 @@ class SensorSettingNoise(BaseModel):
     change with the camera's gain setting, its offset and its binning. A
     value measured at one setting is therefore not a value for another, so
     each entry names the setting it was measured at, and a frame uses an
-    entry only when its own setting matches exactly.
+    entry when its own setting matches exactly. The one exception is the
+    offset: `CameraProfile.sensor_noise_for` may use an entry of another
+    offset for a frame that is not clipped at zero.
 
     The three setting fields are rewritten into their standard form when the
     entry is built (``0.0`` becomes ``0``), so ``"10.0"`` and ``"10"`` are the
@@ -251,11 +254,139 @@ class SensorSettingNoise(BaseModel):
         return (self.gain_setting, self.offset, self.binning)
 
 
+class SettingBiasLevel(BaseModel):
+    """The bias level of a camera at one gain, offset and binning.
+
+    The bias level is the pixel value a frame reads with no light and no
+    exposure time: the camera's offset times a constant, plus a small amount.
+    It is measured from bias frames. A bias frame whose level differs from
+    this value is suspect, and so is a dark frame that does not sit near the
+    bias level of its own setting. Unlike gain and read noise, the level
+    changes with the offset, so a value is only ever used for the exact
+    setting it names.
+
+    Attributes
+    ----------
+    gain_setting : `str`
+        The camera's gain setting (or the ISO of a DSLR).
+    offset : `str`
+        The camera's offset.
+    binning : `str`
+        The binning, such as ``"1x1"``.
+    bias_level_adu : `ProvenancedValue`
+        The mean pixel value of a bias frame, in ADU, with how it was found.
+    temperature_c : `float` or `None`
+        The sensor temperature of the measurement. A note, not part of the key.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    gain_setting: str = Field(min_length=1)
+    offset: str = "0"
+    binning: str = "1x1"
+    bias_level_adu: ProvenancedValue
+    temperature_c: float | None = None
+
+    @field_validator("gain_setting", mode="before")
+    @classmethod
+    def write_gain_setting_in_standard_form(cls, value: object) -> str:
+        """Write the gain setting the way frames are compared.
+
+        Returns
+        -------
+        gain_setting : `str`
+            The setting in its standard form.
+        """
+        return canonical_gain_setting(value)
+
+    @field_validator("offset", mode="before")
+    @classmethod
+    def write_offset_in_standard_form(cls, value: object) -> str:
+        """Write the offset the way frames are compared.
+
+        Returns
+        -------
+        offset : `str`
+            The offset in its standard form.
+        """
+        return canonical_offset_setting(value)
+
+    @field_validator("binning", mode="before")
+    @classmethod
+    def write_binning_in_standard_form(cls, value: object) -> str:
+        """Write the binning the way frames are compared.
+
+        Returns
+        -------
+        binning : `str`
+            The binning in its standard form.
+        """
+        return canonical_binning_setting(value)
+
+    @property
+    def setting_key(self) -> tuple[str, str, str]:
+        """Give the setting this entry applies to.
+
+        Returns
+        -------
+        key : `tuple` [`str`, `str`, `str`]
+            The gain setting, offset and binning, each in standard form.
+        """
+        return (self.gain_setting, self.offset, self.binning)
+
+
 # The reason given for a frame when the profile still holds the single,
 # setting-less gain and read noise of the old file layout. Decision 7 of the
 # quality-metrics plan: such a value is never applied, because nobody recorded
 # the setting it was measured at. The profile migration script fixes it.
 UNMIGRATED_NOISE_REASON = "camera profile has no setting-keyed gain and read noise; run the profile migration"
+
+
+def _entry_used_at_offset(entry: SensorSettingNoise, used_offset: str) -> SensorSettingNoise:
+    """Copy a noise entry for use at another offset, saying so in each source.
+
+    Parameters
+    ----------
+    entry : `SensorSettingNoise`
+        The entry measured at its own offset.
+    used_offset : `str`
+        The offset of the frame that will use it, in standard form.
+
+    Returns
+    -------
+    entry : `SensorSettingNoise`
+        The same entry, with each present value's provenance source extended
+        by the offset fallback note. Values and kinds are unchanged.
+    """
+    note = (
+        f"offset fallback: measured at offset {entry.offset} and used at offset {used_offset}, "
+        "because the offset does not change gain or read noise"
+    )
+
+    def with_note(value: ProvenancedValue | None) -> ProvenancedValue | None:
+        """Extend one value's source with the fallback note.
+
+        Parameters
+        ----------
+        value : `ProvenancedValue` or `None`
+            The value.
+
+        Returns
+        -------
+        value : `ProvenancedValue` or `None`
+            The value with the longer source, or `None` if there was none.
+        """
+        if value is None:
+            return None
+        provenance = value.provenance.model_copy(update={"source": f"{value.provenance.source}; {note}"})
+        return value.model_copy(update={"provenance": provenance})
+
+    return entry.model_copy(
+        update={
+            "gain_e_per_adu": with_note(entry.gain_e_per_adu),
+            "read_noise_e": with_note(entry.read_noise_e),
+        }
+    )
 
 
 class CameraProfile(BaseModel):
@@ -301,6 +432,10 @@ class CameraProfile(BaseModel):
         turn counts into a noise estimate. Each setting appears once. A
         frame uses an entry only when its own setting matches exactly; it
         never borrows the value of a nearby setting.
+    bias_levels : `tuple` [`SettingBiasLevel`, ...]
+        The bias level measured at each gain setting, offset and binning.
+        A setting appears once. A level is only used for the exact setting
+        it names, because the level moves with the offset.
     has_unkeyed_noise_values : `bool`
         `True` when the config still holds the old single gain and read
         noise for this camera. They are ignored, because nobody recorded the
@@ -323,6 +458,7 @@ class CameraProfile(BaseModel):
     photometric_linearity_limit_adu: ProvenancedValue | None = None
     quantum_efficiency: QuantumEfficiencyRecord | None = None
     sensor_noise: tuple[SensorSettingNoise, ...] = ()
+    bias_levels: tuple[SettingBiasLevel, ...] = ()
     has_unkeyed_noise_values: bool = False
     notes: str = ""
 
@@ -348,12 +484,67 @@ class CameraProfile(BaseModel):
                     f"binning {entry.binning}"
                 )
             seen.add(entry.setting_key)
+        seen_levels: set[tuple[str, str, str]] = set()
+        for level in self.bias_levels:
+            if level.setting_key in seen_levels:
+                raise ValueError(
+                    f"two bias_levels entries share gain {level.gain_setting}, offset {level.offset}, "
+                    f"binning {level.binning}"
+                )
+            seen_levels.add(level.setting_key)
         return self
 
-    def sensor_noise_for(
+    def bias_level_for(
         self, gain_setting: object, offset: object, binning: object
+    ) -> SettingBiasLevel | None:
+        """Find the bias level stored for a camera setting.
+
+        Parameters
+        ----------
+        gain_setting : `Any`
+            The gain (or ISO), as text or a number.
+        offset : `Any`
+            The offset. A missing offset counts as 0.
+        binning : `Any`
+            The binning, such as ``"1x1"`` or ``2``.
+
+        Returns
+        -------
+        level : `SettingBiasLevel` or `None`
+            The entry for exactly this setting, or `None`. There is no
+            fallback to another offset: the level changes with the offset.
+        """
+        wanted = (
+            canonical_gain_setting(gain_setting),
+            canonical_offset_setting(offset),
+            canonical_binning_setting(binning),
+        )
+        return next((level for level in self.bias_levels if level.setting_key == wanted), None)
+
+    def sensor_noise_for(
+        self,
+        gain_setting: object,
+        offset: object,
+        binning: object,
+        *,
+        clipped_at_zero: bool | None = None,
     ) -> SensorSettingNoise | None:
-        """Find the noise entry recorded for exactly this camera setting.
+        """Find the noise entry for a camera setting.
+
+        An entry for exactly this gain, offset and binning always wins. The
+        offset is a constant the camera adds before it digitizes, so it
+        changes neither the gain nor the read noise, unless the noise is cut
+        off at zero. A caller that knows its frame is not cut off at zero can
+        therefore pass ``clipped_at_zero=False``; when no exact entry exists
+        the lookup then falls back to the entry of the same gain and binning
+        at another offset (the "offset fallback"). Among several, it picks
+        the offset nearest to the frame's, and on a tie the higher offset.
+
+        The fallback entry comes back with each value's source text extended
+        by "measured at offset X and used at offset Y" and the words "offset
+        fallback"; the value and its kind (``measured`` stays ``measured``)
+        are unchanged. The entry's ``offset`` field still names the offset
+        it was measured at.
 
         Parameters
         ----------
@@ -363,22 +554,65 @@ class CameraProfile(BaseModel):
             The frame's offset. A missing offset counts as 0.
         binning : `Any`
             The frame's binning, such as ``"1x1"`` or ``2``.
+        clipped_at_zero : `bool` or `None`, optional
+            Whether the frame's pixels are cut off at zero (see
+            `astrometricslib.pipelines.stacking.processing.group_gains.
+            CLIPPED_FRAME_ZERO_FRACTION`). `False` allows the offset
+            fallback. `True` and `None` (not known) do not, so only an exact
+            match is returned.
 
         Returns
         -------
         entry : `SensorSettingNoise` or `None`
             The entry whose gain, offset and binning all equal the frame's
-            (after each is written in standard form), or `None`. There is no
-            nearest-match fallback.
+            (after each is written in standard form); failing that, when
+            ``clipped_at_zero`` is `False`, the offset fallback entry; else
+            `None`.
         """
         wanted = (
             canonical_gain_setting(gain_setting),
             canonical_offset_setting(offset),
             canonical_binning_setting(binning),
         )
-        return next((entry for entry in self.sensor_noise if entry.setting_key == wanted), None)
+        exact = next((entry for entry in self.sensor_noise if entry.setting_key == wanted), None)
+        if exact is not None or clipped_at_zero is not False:
+            return exact
+        other = self._nearest_other_offset_entry(*wanted)
+        return None if other is None else _entry_used_at_offset(other, wanted[1])
 
-    def sensor_noise_gap_reason(self, gain_setting: object, offset: object, binning: object) -> str | None:
+    def _nearest_other_offset_entry(
+        self, gain_setting: str, offset: str, binning: str
+    ) -> SensorSettingNoise | None:
+        """Pick the same-gain, same-binning entry at the nearest other offset.
+
+        Parameters
+        ----------
+        gain_setting, offset, binning : `str`
+            The frame's setting, in standard form.
+
+        Returns
+        -------
+        entry : `SensorSettingNoise` or `None`
+            The same-gain, same-binning entry whose offset is closest to
+            ``offset``; on a tie, the higher offset. `None` when there is
+            none, or when an offset is not a number.
+        """
+        try:
+            wanted_offset = float(offset)
+            candidates = [
+                (abs(float(entry.offset) - wanted_offset), -float(entry.offset), entry)
+                for entry in self.sensor_noise
+                if entry.gain_setting == gain_setting and entry.binning == binning and entry.offset != offset
+            ]
+        except ValueError:
+            return None
+        if not candidates:
+            return None
+        return min(candidates, key=lambda candidate: candidate[:2])[2]
+
+    def sensor_noise_gap_reason(
+        self, gain_setting: object, offset: object, binning: object, *, clipped_at_zero: bool | None = None
+    ) -> str | None:
         """Say why a frame's setting has no gain and read noise.
 
         Parameters
@@ -389,6 +623,8 @@ class CameraProfile(BaseModel):
             The frame's offset.
         binning : `Any`
             The frame's binning.
+        clipped_at_zero : `bool` or `None`, optional
+            As in `sensor_noise_for`.
 
         Returns
         -------
@@ -396,18 +632,32 @@ class CameraProfile(BaseModel):
             `None` when `sensor_noise_for` finds an entry. Otherwise one
             sentence saying why not: the profile still holds only the old
             single values (`UNMIGRATED_NOISE_REASON`), the frame states no
-            gain, or the profile has no entry for this setting.
+            gain, the profile has an entry at another offset that cannot be
+            used because the frame is clipped at zero or not known to be
+            unclipped, or the profile has no entry for this setting.
         """
         if gain_setting is None:
             return "the frame does not state its gain setting, so no gain and read noise entry can match"
-        if self.sensor_noise_for(gain_setting, offset, binning) is not None:
+        if self.sensor_noise_for(gain_setting, offset, binning, clipped_at_zero=clipped_at_zero) is not None:
             return None
         if self.has_unkeyed_noise_values and not self.sensor_noise:
             return UNMIGRATED_NOISE_REASON
+        wanted = (
+            canonical_gain_setting(gain_setting),
+            canonical_offset_setting(offset),
+            canonical_binning_setting(binning),
+        )
+        other = self._nearest_other_offset_entry(*wanted)
+        if other is not None:
+            state = "is clipped at zero" if clipped_at_zero else "is not known to be free of clipping at zero"
+            return (
+                f"camera profile has no gain and read noise entry for gain {wanted[0]}, offset {wanted[1]}, "
+                f"binning {wanted[2]}; the entry at offset {other.offset} cannot stand in for it because "
+                f"the frame {state}"
+            )
         return (
             "camera profile has no gain and read noise entry for "
-            f"gain {canonical_gain_setting(gain_setting)}, offset {canonical_offset_setting(offset)}, "
-            f"binning {canonical_binning_setting(binning)}"
+            f"gain {wanted[0]}, offset {wanted[1]}, binning {wanted[2]}"
         )
 
     @property
@@ -424,3 +674,59 @@ class CameraProfile(BaseModel):
             `True` when the threshold is at or below the clip ceiling.
         """
         return self.saturation_threshold_adu.value <= self.clip_ceiling_adu.value
+
+    @property
+    def pixel_saturation_level_adu(self) -> ProvenancedValue:
+        """Give the level at which a pixel counts as saturated.
+
+        This is the saturation threshold, brought down to the clip ceiling
+        when the threshold lies above it. A clipped pixel can never read
+        more than the ceiling, so a higher threshold would hide real
+        saturation. The ceiling caps the threshold even when the ceiling
+        is only assumed. Use this level to count saturated pixels. The
+        photometric linearity limit does not enter here: it decides
+        whether a star is usable, not whether a pixel is clipped (see
+        `usable_peak_level_adu`).
+
+        Returns
+        -------
+        level : `ProvenancedValue`
+            The level in ADU, with the kind and source of the number that
+            set it. A pixel at or above the level is saturated.
+        """
+        threshold = self.saturation_threshold_adu
+        ceiling = self.clip_ceiling_adu
+        if threshold.value <= ceiling.value:
+            return threshold
+        return ProvenancedValue(
+            value=ceiling.value,
+            provenance=ValueProvenance(
+                kind=ceiling.provenance.kind,
+                source=(
+                    f"clip ceiling ({ceiling.provenance.source}); the saturation threshold of "
+                    f"{threshold.value:g} ADU is above it, so no pixel could reach it"
+                ),
+            ),
+        )
+
+    @property
+    def usable_peak_level_adu(self) -> ProvenancedValue:
+        """Give the star peak level above which a star is not photometric.
+
+        This is `pixel_saturation_level_adu`, brought further down to the
+        photometric linearity limit when the profile has one. Above that
+        limit the pixel value stops following the light, so a star whose
+        peak reaches it cannot be measured reliably. Use this level to
+        decide whether a star is photometric.
+
+        Returns
+        -------
+        level : `ProvenancedValue`
+            The level in ADU, with the kind and source of the number that
+            set it. A star peak at or above the level is not usable.
+        """
+        saturation_level = self.pixel_saturation_level_adu
+        linearity = self.photometric_linearity_limit_adu
+        if linearity is None or linearity.value >= saturation_level.value:
+            return saturation_level
+        return linearity

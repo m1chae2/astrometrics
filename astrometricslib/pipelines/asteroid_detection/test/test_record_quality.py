@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from pytest_mock import MockerFixture
 
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.foundation.errors import StorageError
 from astrometricslib.models.moving_object_config import MovingObjectConfig
 from astrometricslib.models.quality.gate_result import GateStatus
@@ -191,8 +191,9 @@ def test_the_real_validate_output_tells_an_empty_field_from_an_offline_database(
     summary = AsteroidDetectionPipelineAdapter().validate_output(request, result)
 
     assert summary.gate(rg.EPHEMERIS_GATE_NAME).status is expected_ephemeris
-    assert any(expected_flagged_text in reason for reason in summary.flag_reasons)
-    assert summary.flagged is True
+    assert any(
+        expected_flagged_text in gate.detail for gate in summary.gates if gate.status.value == "failed"
+    )
 
 
 def test_residual_gate_is_not_checked_when_no_chain_reached_the_straight_line_test() -> None:
@@ -256,9 +257,10 @@ def _declared_names() -> set[str]:
     Returns
     -------
     names : `set` [`str`]
-        The declared metric names.
+        The declared metric names, less the notice metric, whose row is
+        stored only when the condition occurs (see `test_notices.py`).
     """
-    return {spec.name for spec in ASTEROID_DETECTION_METRICS}
+    return {spec.name for spec in ASTEROID_DETECTION_METRICS if ".notice_" not in spec.name}
 
 
 def test_every_numeric_summary_field_and_gate_is_declared() -> None:
@@ -398,7 +400,13 @@ def test_the_runner_writes_one_row_per_declared_metric_and_a_repeat_writes_none(
     )
 
     summary = AsteroidDetectionPipelineAdapter().validate_output(request, result)
-    rows = [row for row in store.query(target_id=target.id, latest_only=False) if row.run_id == "job-7"]
+    run_rows = [row for row in store.query(target_id=target.id, latest_only=False) if row.run_id == "job-7"]
+    # The fixture's camera has no profile, so the run also stores that notice,
+    # on the same job as the other rows.
+    notices = [row for row in run_rows if ".notice_" in row.metric]
+    assert [row.metric for row in notices] == ["asteroid_detection.notice_camera_without_profile"]
+    assert notices[0].job_id == "job-7"
+    rows = [row for row in run_rows if ".notice_" not in row.metric]
 
     assert {row.metric for row in rows} == _declared_names()
     assert len(rows) == len(_declared_names())
@@ -417,7 +425,9 @@ def test_a_run_without_a_job_gets_a_generated_run_id(
     request = PipelineRequest(target=target, catalog_access=None, options={"measured_at": MEASURED_AT})
 
     AsteroidDetectionPipelineAdapter().validate_output(request, result)
-    rows = store.query(target_id=target.id, latest_only=False)
+    rows = [
+        row for row in store.query(target_id=target.id, latest_only=False) if ".notice_" not in row.metric
+    ]
 
     assert len(rows) == len(_declared_names())
     assert len({row.run_id for row in rows}) == 1
@@ -441,3 +451,41 @@ def test_a_storage_failure_does_not_fail_the_run(
     summary = AsteroidDetectionPipelineAdapter().validate_output(request, result)
 
     assert summary.gates
+
+
+def test_a_reached_question_limit_is_a_failed_gate_a_notice_row_and_not_an_unmatched_mover() -> None:
+    """Unchecked movers are not counted as new; a notice row says so."""
+    metrics = {
+        **HEALTHY_METRICS,
+        "candidates_rate_linearity_confirmed": 3,
+        "candidates_ephemeris_matched": 1,
+        "ephemeris_queries_attempted": 4,
+        "ephemeris_candidates_unchecked": 2,
+        "candidates_detected": 3,
+        "candidates_persistence_confirmed": 3,
+    }
+    gates = {gate.name: gate for gate in rg.asteroid_run_gates(metrics, 3, 2)}
+
+    assert gates[rg.EPHEMERIS_GATE_NAME].status is GateStatus.FAILED
+    assert "not checked against known asteroids" in gates[rg.EPHEMERIS_GATE_NAME].detail
+    assert gates[rg.UNMATCHED_MOVERS_GATE_NAME].status is GateStatus.NOT_CHECKED
+    assert "none is known to be new" in gates[rg.UNMATCHED_MOVERS_GATE_NAME].detail
+
+    with_unmatched = {gate.name: gate for gate in rg.asteroid_run_gates(metrics, 3, 3)}
+    assert with_unmatched[rg.UNMATCHED_MOVERS_GATE_NAME].status is GateStatus.FAILED
+    assert with_unmatched[rg.UNMATCHED_MOVERS_GATE_NAME].measured_value == pytest.approx(1.0)
+
+    measurements = rg.asteroid_run_measurements(metrics, list(gates.values()), _context())
+    by_metric = {m.metric: m for m in measurements}
+    notice = by_metric["asteroid_detection.notice_ephemeris_query_cap_reached"]
+    assert notice.value == pytest.approx(2.0)
+    assert notice.check_outcome is GateStatus.FAILED
+    assert by_metric[ASTEROID_GATE_EPHEMERIS_CROSS_MATCH].value == pytest.approx(2.0)
+
+
+def test_a_run_under_the_question_limit_stores_no_notice_row() -> None:
+    """The notice row exists only when the limit was reached."""
+    gates = rg.asteroid_run_gates(HEALTHY_METRICS, 3, 0)
+    measurements = rg.asteroid_run_measurements(HEALTHY_METRICS, gates, _context())
+
+    assert all("notice_ephemeris_query_cap_reached" not in m.metric for m in measurements)

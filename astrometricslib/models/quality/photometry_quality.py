@@ -1,4 +1,4 @@
-"""Data structures for judging one star's light curve, not the whole run.
+"""Data structures for measuring one star's light curve, not the whole run.
 
 `quality_summary.py` records how a whole processing run went (how many
 frames were rejected, how many stars were found). This module is about
@@ -48,14 +48,6 @@ class InputQualityAssessment(BaseModel):
     # or the frame-to-frame alignment failed, not that the star's
     # brightness actually changed -- see `pre_processing.assess_input_quality`.
     max_registration_drift_px: float | None = Field(default=None, alias="maxRegistrationDriftPx")
-    # `coverage_fraction` fell below the threshold this codebase already
-    # treats as too sparse for a reliable comparison star (see
-    # `pre_processing.assess_input_quality`).
-    is_low_coverage: bool = Field(alias="isLowCoverage")
-    # `max_registration_drift_px` was large enough that the star's own
-    # tracking, not its brightness, is the more likely explanation for
-    # any apparent variation (see `pre_processing.assess_input_quality`).
-    is_tracking_unstable: bool = Field(alias="isTrackingUnstable")
 
 
 class OutputQualityAssessment(BaseModel):
@@ -82,12 +74,3 @@ class OutputQualityAssessment(BaseModel):
     # `post_processing.assess_output_quality`). Positive means flagged
     # variable; a value near zero means the call was close either way.
     margin_in_mad_units: float = Field(alias="marginInMadUnits")
-    # `abs(margin_in_mad_units)` was small enough that one noisy
-    # measurement could flip this star's verdict either way (see
-    # `post_processing.assess_output_quality`).
-    is_low_confidence: bool = Field(alias="isLowConfidence")
-    # `not is_low_confidence`. Kept as its own field (rather than making
-    # callers negate `is_low_confidence` themselves) to match
-    # `SpectroscopyResult`'s equivalent field, and to leave room for a
-    # future factor to combine in without every caller having to change.
-    is_trustworthy: bool = Field(alias="isTrustworthy")

@@ -12,7 +12,8 @@ import json
 
 import pytest
 
-from astrometricslib import InvalidArgumentError, MeasurementStatus
+from astrometricslib.exceptions import InvalidArgumentError
+from astrometricslib.reports import MeasurementStatus
 from backend.container import container
 from backend.public_interface import RPC_METHODS
 from backend.routers.rpc_router import rpc_registry

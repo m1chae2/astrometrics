@@ -37,7 +37,8 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib import Astrometrics, MetricPurpose, MetricSpec
+from astrometricslib import Astrometrics
+from astrometricslib._internal.quality import MetricPurpose, MetricSpec
 from wayfindinglib.analytics.result_quality.all_rules import ALL_RULES
 from wayfindinglib.analytics.result_quality.judge_results import PLAIN_RULE_NAMES
 from wayfindinglib.analytics.result_quality.rules import DEFERRED_RULES, RESULT_QUALITY_RULES
@@ -72,6 +73,7 @@ DECISION_CATALOG = {
     "Flat noise limits the stack": "flat_noise_limits_stack",
     "Focus drift": "focus_drift",
     "Calibration gap": "calibration_gap",
+    "Retake a bad calibration set": "retake_bad_calibration_set",
     "Sky cost": "sky_cost",
     "Altitude cost": "altitude_cost",
     "Best window": "best_window",
@@ -88,7 +90,40 @@ DECISION_CATALOG = {
 # rule of this table compares them with a limit of its own, and the view of
 # those outcomes belongs to issue 97, so they are listed once by pattern (see
 # `SELF_CHECK_MARKER`) and not by name.
+_NOTICE_ROW_REASON = (
+    "issue 97: a notice row, so a job can list the warning (Jobs.query with detail warnings). No rule "
+    "reads it yet; the rules that turn notices into suggestions come with the pipeline-quality view of "
+    "issue 97."
+)
 UNUSED_DECISION_METRICS = {
+    "stacking.notice_frames_moved_to_excluded": _NOTICE_ROW_REASON,
+    "stacking.notice_single_frame_stack": _NOTICE_ROW_REASON,
+    "stacking.notice_flat_calibration_note": _NOTICE_ROW_REASON,
+    "stacking.notice_exposure_group_left_out": _NOTICE_ROW_REASON,
+    "stacking.notice_preview_step_skipped": _NOTICE_ROW_REASON,
+    "stacking.notice_camera_without_profile": _NOTICE_ROW_REASON,
+    "astrometry.notice_camera_without_profile": _NOTICE_ROW_REASON,
+    "photometry.notice_camera_without_profile": _NOTICE_ROW_REASON,
+    "spectroscopy.notice_camera_without_profile": _NOTICE_ROW_REASON,
+    "spectroscopy.notice_stars_below_feature_limit": (
+        "issue 97: counts the extracted spectra too faint for feature detection and classification "
+        "(SPE-31), so a job can list them as a warning. No rule reads it yet; the pipeline-quality view "
+        "of issue 97 decides how it is shown."
+    ),
+    "spectroscopy.notice_reddening_lookup_failed": (
+        "issue 97: counts the stars whose Gaia reddening lookup failed, so a job can list them as a "
+        "warning. No rule reads it yet; the pipeline-quality view of issue 97 decides how it is shown."
+    ),
+    "spectroscopy.notice_gaia_xp_download_failed": (
+        "issue 97: counts the stars whose Gaia XP spectrum could not be downloaded, so a job can list them "
+        "as a warning. No rule reads it yet; the pipeline-quality view of issue 97 decides how it is shown."
+    ),
+    "asteroid_detection.notice_camera_without_profile": _NOTICE_ROW_REASON,
+    "asteroid_detection.notice_ephemeris_query_cap_reached": _NOTICE_ROW_REASON,
+    "stacking.abandoned_after_s": (
+        "issue 97: records that a stack ran out of its time budget, so the job can list it as a warning. "
+        "No rule reads it yet."
+    ),
     "frame.background_level_adu": (
         "issue 97: input of the stacker's cloud check (STK-04). The stacker judges it and moves the frame; "
         "the report counts the frames moved (rule frames_lost, through the quarantine rows). A rule that "
@@ -102,9 +137,21 @@ UNUSED_DECISION_METRICS = {
         "issue 97: input of the stack sharpness check (STK-25), judged by the stacker. The report's "
         "sharpness trade-off reads the Moffat width in arcseconds, not this width."
     ),
-    "stacking.rejected_pixel_fraction": (
-        "issue 97: input of the stacker's rejection check (STK-24), judged by the stacker; its gate "
-        "outcome belongs to the pipeline-quality view of issue 97."
+    "frame.clipped_mean_level_adu": (
+        "issue 134: input of the dark and bias level checks (STK-48, STK-51), judged by the stacker's "
+        "gates, which the rule retake_bad_calibration_set reads."
+    ),
+    "frame.zero_pixel_fraction": (
+        "issue 134: input of the dark and bias zero-share checks (STK-47), judged by the stacker's gates, "
+        "which the rule retake_bad_calibration_set reads."
+    ),
+    "frame.block_range_adu": (
+        "issue 134: input of the light-strike check on darks (STK-50), judged by the stacker's gate, "
+        "which the rule retake_bad_calibration_set reads."
+    ),
+    "frame.neighbor_noise_adu": (
+        "issue 134: input of the noise checks on dark and bias frames (STK-49), judged by the stacker's "
+        "gates, which the rule retake_bad_calibration_set reads."
     ),
     "astrometry.gaia_fit_rms_arcsec": (
         "issue 96: input of the astrometry self-check (AST-02), judged in astrometricslib."

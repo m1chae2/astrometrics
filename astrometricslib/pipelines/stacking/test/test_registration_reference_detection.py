@@ -156,7 +156,7 @@ def test_all_zero_shifts_does_not_fabricate_a_reference() -> None:
 
 
 def test_the_stack_summary_records_the_camera_profile_of_its_frames() -> None:
-    """A listed camera is recorded plainly; an unlisted one flags."""
+    """A listed camera is recorded plainly; an unlisted one is generic."""
     paths = ["/lib/a.fits", "/lib/b.fits"]
     registration_frames = [_registration_fact(dx=0.0, dy=0.0), _registration_fact(dx=1.0, dy=1.0)]
 
@@ -170,8 +170,6 @@ def test_the_stack_summary_records_the_camera_profile_of_its_frames() -> None:
     unlisted_summary = _build_summary(unlisted, registration_frames, paths)
     assert unlisted_summary.camera_profile is not None
     assert unlisted_summary.camera_profile.is_generic_fallback is True
-    assert unlisted_summary.flagged is True
-    assert any("Acme Imager 9000" in reason for reason in unlisted_summary.flag_reasons)
 
 
 def test_registration_facts_fill_the_honestly_named_fields_only() -> None:
@@ -196,5 +194,3 @@ def test_registration_facts_fill_the_honestly_named_fields_only() -> None:
     assert measurements.registration_quality == pytest.approx(0.0)
     assert measurements.registration_rotation_deg == pytest.approx(0.001)
     assert measurements.registration_star_count == 1163
-    assert measurements.registration_fwhm_y_px is None
-    assert measurements.registration_rmse is None

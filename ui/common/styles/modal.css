@@ -53,18 +53,6 @@
     max-height: 90vh;
 }
 
-.modal.modal--compact-square {
-    width: 440px;
-    min-height: 320px;
-    padding: 24px;
-    max-width: 95vw;
-}
-
-.modal.modal--compact-square .modal__footer {
-    border-top: none;
-    padding-top: 12px;
-}
-
 .modal__header {
     display: flex;
     justify-content: space-between;

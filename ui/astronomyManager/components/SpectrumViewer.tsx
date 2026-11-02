@@ -254,6 +254,7 @@ export const SpectrumViewer: React.FC<Props> = ({
                 f.depth !== undefined ? `depth ${(f.depth * 100).toFixed(0)}%` : '',
                 f.p_value !== undefined ? `chance of noise doing this: ${formatFalseAlarmProbability(f.p_value)}` : '',
                 typeof f.probability_present === 'number' ? `model probability present: ${Math.round(f.probability_present * 100)}%` : '',
+                f.blended_with ? `shared dip with ${f.blended_with}: cannot tell which line made it` : '',
             ].filter((part) => part !== '').join(', ');
             return {
                 x: featureX(f),

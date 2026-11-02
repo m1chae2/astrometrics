@@ -348,7 +348,6 @@ def test_the_batch_merge_records_the_summary_and_the_gate() -> None:
     assert scale.spectrum_count == 3
     assert scale.rms_after_correction_angstrom == pytest.approx(math.sqrt((900 + 784 + 1225) / 3))
     assert recorded.gate(WAVELENGTH_SCALE_GATE_NAME).status is GateStatus.FAILED
-    assert recorded.flagged is True
 
 
 def test_the_real_validate_output_records_the_summary_and_the_gate() -> None:
@@ -360,6 +359,11 @@ def test_the_real_validate_output_records_the_summary_and_the_gate() -> None:
         stars.append(star)
     spectroscopy = SimpleNamespace(
         last_run_zero_order_saturation_fractions=[0.0],
+        last_run_skipped_no_trail_count=0,
+        last_run_skipped_unidentified_count=0,
+        last_run_below_feature_limit_count=0,
+        last_run_gaia_xp_download_failed_count=0,
+        last_run_reddening_lookup_failed_count=0,
         config=SimpleNamespace(camera=SimpleNamespace(name="ZWO ASI 533MM Pro")),
     )
     result = Result(
@@ -381,4 +385,3 @@ def test_the_real_validate_output_records_the_summary_and_the_gate() -> None:
     assert scale.spectrum_count == 3
     assert scale.applied_count == 0
     assert summary.gate(WAVELENGTH_SCALE_GATE_NAME).status is GateStatus.FAILED
-    assert summary.flagged is True

@@ -61,8 +61,8 @@ def _process_single_target_worker(
         ``error`` (the reason, if any) and ``stack_outputs`` (the stacks
         made, by kind).
     """
-    from astrometricslib.drivers.calibration_library import CalibrationLibrary
-    from astrometricslib.drivers.catalog_access import CatalogAccess
+    from astrometricslib._internal.drivers.calibration_library import CalibrationLibrary
+    from astrometricslib._internal.drivers.catalog_access import CatalogAccess
     from astrometricslib.foundation.config import get_configuration
     from astrometricslib.pipelines.shared.frame_grouping import select_frames_for_camera
     from astrometricslib.pipelines.shared.target_records import find_stored_target

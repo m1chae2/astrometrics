@@ -18,7 +18,7 @@ import logging
 import sqlite3
 from typing import Any
 
-from astrometricslib.drivers.provenance_store import ProvenanceStore
+from astrometricslib._internal.drivers.provenance_store import ProvenanceStore
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.models.provenance import (

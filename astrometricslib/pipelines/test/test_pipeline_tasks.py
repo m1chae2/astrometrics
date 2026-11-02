@@ -18,7 +18,7 @@ from astropy.modeling.models import Gaussian2D
 from pytest_mock import MockerFixture
 
 from astrometricslib import Astrometrics
-from astrometricslib.drivers.catalog_access import CatalogAccess, StarPosition
+from astrometricslib._internal.drivers.catalog_access import CatalogAccess, StarPosition
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ConflictError
 from astrometricslib.models.moving_object import CascadeStage
@@ -436,7 +436,7 @@ def test_target_analyze_frame_spectroscopy(tmp_path: Path, mocker: MockerFixture
         hdu.writeto(fit_path, overwrite=True)
 
         # Mock Pipelines
-        from astrometricslib.drivers.image import AstrometricsImage
+        from astrometricslib._internal.drivers.image import AstrometricsImage
         from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
 
         img = AstrometricsImage(str(fit_path))
@@ -460,7 +460,7 @@ def test_target_analyze_frame_spectroscopy(tmp_path: Path, mocker: MockerFixture
         assert len(target.frames) == 1
 
         # Verify recording
-        from astrometricslib.drivers.catalog_access import CatalogAccess
+        from astrometricslib._internal.drivers.catalog_access import CatalogAccess
 
         loaded = CatalogAccess(config).get("stellar_catalog", {})
         assert len(loaded) == 1
@@ -495,7 +495,7 @@ def test_analyze_frame_spectroscopy_does_not_disturb_other_stars_indexed_columns
     config.update_config({"Image Library": {"path": str(tmp_path)}})
 
     try:
-        from astrometricslib.drivers.catalog_access import CatalogAccess
+        from astrometricslib._internal.drivers.catalog_access import CatalogAccess
 
         catalog_access = CatalogAccess(config)
         other_star = StellarObject(id="Unrelated_Star", name="Unrelated_Star")
@@ -514,7 +514,7 @@ def test_analyze_frame_spectroscopy_does_not_disturb_other_stars_indexed_columns
         hdu.header["EXPTIME"] = 5.0
         hdu.writeto(fit_path, overwrite=True)
 
-        from astrometricslib.drivers.image import AstrometricsImage
+        from astrometricslib._internal.drivers.image import AstrometricsImage
         from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
 
         img = AstrometricsImage(str(fit_path))
@@ -615,8 +615,8 @@ def test_target_analyze_target_asteroid_detection(tmp_path: Path, mocker: Mocker
     assert summary.asteroid_detection_metrics.candidates_rate_linearity_confirmed == 1
     assert len(summary.target_session_breakdown) == 1
     assert summary.target_session_breakdown[0].frames_contributed == 4
-    assert summary.flagged is True
-    assert "not matched to a known body" in summary.flag_reasons[0]
+    failed_details = [gate.detail for gate in summary.gates if gate.status.value == "failed"]
+    assert "not matched to a known body" in failed_details[0]
 
 
 def test_target_analyze_target_asteroid_detection_drops_rejected_candidates(
@@ -1135,7 +1135,7 @@ def test_match_and_merge_across_sessions_falls_back_to_solving_when_session_abse
 
     _match_and_merge_across_sessions([session_a], per_session_results, target, session_wcs_map={})
 
-    solve_spy.assert_called_once_with(session_a, target)
+    solve_spy.assert_called_once_with(session_a, target, None)
 
 
 def test_match_and_merge_across_sessions_avoids_double_assignment_when_ambiguous(
@@ -1207,14 +1207,14 @@ def test_solve_session_wcs_failure_does_not_abort_other_sessions(mocker: MockerF
     target = Target(id="MatchTestTarget")
 
     mocker.patch(
-        "astrometricslib.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve",
+        "astrometricslib._internal.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve",
         return_value=None,
     )
     result_a = _solve_session_wcs(session_a, target)
     assert result_a is None  # ordinary solve failure -- no exception at all
 
     mocker.patch(
-        "astrometricslib.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve",
+        "astrometricslib._internal.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve",
         side_effect=RuntimeError("unexpected local solver failure"),
     )
     result_b = _solve_session_wcs(session_b, target)

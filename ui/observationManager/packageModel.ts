@@ -61,11 +61,12 @@ const SHORT_FILTER_NAMES: Record<string, string> = {
     Red: 'R',
     Green: 'G',
     Blue: 'B',
+    'Star Analyzer 200': 'SPEC',
 };
 
 /**
- * Gives the short name of a filter, the one the Image Planner offers: the library stores the
- * luminance filter as "Luminance", and the planner and lists show it as "L".
+ * Gives the short name of a filter: the library stores the luminance filter as "Luminance" and the
+ * spectroscopy grating as "Star Analyzer 200", and the planner and lists show them as "L" and "SPEC".
  * @param filter The filter as the library stores it.
  * @return The short name, or the filter unchanged when it has no long form.
  */

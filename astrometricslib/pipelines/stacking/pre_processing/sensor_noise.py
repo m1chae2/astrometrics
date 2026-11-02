@@ -60,8 +60,8 @@ from datetime import UTC, date, datetime
 
 import numpy as np
 
-from astrometricslib.drivers.calibration_library import header_binning, header_temperature_c
-from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.calibration_library import header_binning, header_temperature_c
+from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import NotFoundError, StorageError
 from astrometricslib.models.quality.measurement import MeasurementStatus
 from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasurement

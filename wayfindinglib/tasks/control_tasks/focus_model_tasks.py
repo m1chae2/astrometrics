@@ -10,7 +10,7 @@ by focusing through each filter at one temperature.
 
 import numpy as np
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.models.equipment_and_site.focus_model import FilterFocusOffset
 
 

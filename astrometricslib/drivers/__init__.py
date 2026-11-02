@@ -1,22 +1,36 @@
-"""Tools that talk directly to hardware, files, and other programs.
+"""Purpose: The storage and file tools that other apps may use.
 
-This includes the Siril interface, the target/stellar
-catalog database (`catalog_access.py`, `local_database.py`,
-`catalog_store.py`), and the basic tools every driver uses to read and
-write FITS image files (`fits_access.py`, `image.py`,
-`filter_detection.py`).
-
-Pure image-quality measurement (FWHM, saturation, background level,
-per-target frame statistics) doesn't belong here: it doesn't manage an
-external resource (a subprocess, a database connection) the way these
-tools do, so it lives in `pipelines/shared/quality/` instead, alongside
-the Siril-output text parsers in `siril_output_parsing.py` that are
-specific to Siril's own file formats rather than a generic quality
-measurement.
+Description: Storage and file helpers that the backend, the MCP servers and
+`wayfindinglib` share: the data store (`Butler`, `AbstractButler`,
+`DatasetSpec`, `connect_db`), file locks and work folders, the checks for a
+mounted drive, and `stop_process_group`, which ends a program and the helpers
+it started. The private driver code (Siril, catalog access, camera profiles)
+lives in `astrometricslib._internal.drivers`. Each name here is imported from
+the module where its code lives today.
 """
 
-from astrometricslib.drivers.siril_interface import ImageProcessing
+from astrometricslib.foundation.paths import (
+    is_path_inside,
+    locks_directory,
+    resolve_mounted_path,
+    scratch_directory,
+)
+from astrometricslib.foundation.run_abandonment import stop_process_group
+from astrometricslib.foundation.storage.butler import AbstractButler, Butler, DatasetSpec
+from astrometricslib.foundation.storage.local_database import connect_db
+from astrometricslib.foundation.storage.mount import require_mounted_storage
+from astrometricslib.foundation.storage.process_locks import file_lock
 
 __all__ = [
-    "ImageProcessing",
+    "AbstractButler",
+    "Butler",
+    "DatasetSpec",
+    "connect_db",
+    "file_lock",
+    "is_path_inside",
+    "locks_directory",
+    "require_mounted_storage",
+    "resolve_mounted_path",
+    "scratch_directory",
+    "stop_process_group",
 ]

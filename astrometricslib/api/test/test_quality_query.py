@@ -13,9 +13,10 @@ from types import SimpleNamespace
 import pytest
 
 from astrometricslib import Astrometrics
+from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
 from astrometricslib.api.quality import QualityRecords
-from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.models.quality.calibration_identities import CalibrationIdentities
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.measurement import (
     MeasurementOrigin,
@@ -68,7 +69,7 @@ def test_a_library_with_no_database_gives_an_empty_list_and_creates_nothing(
     quality: QualityRecords, tmp_path: Path
 ) -> None:
     """Asking before anything is stored creates no file."""
-    assert quality.query() == []
+    assert quality.query().rows == []
     assert list(tmp_path.iterdir()) == []
 
 
@@ -79,7 +80,7 @@ def test_a_database_without_the_quality_table_is_left_alone(quality: QualityReco
         connection.execute("CREATE TABLE other (x INTEGER)")
     connection.close()
 
-    assert quality.query() == []
+    assert quality.query().rows == []
 
     with sqlite3.connect(database) as connection:
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master")}
@@ -102,6 +103,21 @@ def test_capture_settings_read_by_id(quality: QualityRecords, tmp_path: Path) ->
     assert only_first[first].camera == "ASI533MM"
 
 
+def test_calibration_identities_read_by_run_and_target(quality: QualityRecords, tmp_path: Path) -> None:
+    """The reader returns records by run id and target; no file is created."""
+    assert quality.calibration_identities() == []
+    assert list(tmp_path.iterdir()) == []
+
+    store = QualityStore(str(tmp_path / "astrometrics.db"))
+    for run_id, target_id in (("run-1", "M31"), ("run-2", "M13")):
+        store.write_calibration_identities(
+            CalibrationIdentities(run_id=run_id, subject_id=f"{target_id}/stack.fits", target_id=target_id)
+        )
+
+    assert [record.run_id for record in quality.calibration_identities(run_ids=["run-2"])] == ["run-2"]
+    assert [record.target_id for record in quality.calibration_identities(target_id="M31")] == ["M31"]
+
+
 def test_stored_measurements_come_back_filtered(quality: QualityRecords, tmp_path: Path) -> None:
     """The filters narrow the rows, and the newest row wins by default."""
     store = QualityStore(str(tmp_path / "astrometrics.db"))
@@ -118,15 +134,39 @@ def test_stored_measurements_come_back_filtered(quality: QualityRecords, tmp_pat
         ),
     ])
 
-    latest = quality.query(level="frame")
+    latest = quality.query(level="frame").rows
     assert [measurement.value for measurement in latest] == [3.0]
-    assert len(quality.query(level="frame", latest_only=False)) == 2
-    assert [m.subject.target_id for m in quality.query(camera="ASI533MM")] == ["M13"]
-    assert quality.query(target_id="nobody") == []
-    assert len(quality.query(since="2026-10-01T03:30:00")) == 1
-    assert len(quality.query(since=BASE_TIME + timedelta(hours=2))) == 0
-    cited = quality.query(row_ids=[1])
+    assert len(quality.query(level="frame", latest_only=False).rows) == 2
+    assert [m.subject.target_id for m in quality.query(camera="ASI533MM").rows] == ["M13"]
+    assert quality.query(target_id="nobody").rows == []
+    assert len(quality.query(since="2026-10-01T03:30:00").rows) == 1
+    assert len(quality.query(since=BASE_TIME + timedelta(hours=2)).rows) == 0
+    cited = quality.query(row_ids=[1]).rows
     assert [measurement.row_id for measurement in cited] == [1]
+
+
+def test_a_limit_and_offset_page_the_answer_and_say_whether_more_remain(
+    quality: QualityRecords, tmp_path: Path
+) -> None:
+    """With no limit every match comes back; a limit pages the answer."""
+    QualityStore(str(tmp_path / "astrometrics.db")).write_measurements([
+        _measurement("run-1", BASE_TIME),
+        _measurement("run-2", BASE_TIME + timedelta(hours=1), value=3.0),
+        _measurement("run-3", BASE_TIME + timedelta(hours=2), value=4.0),
+    ])
+
+    everything = quality.query(latest_only=False)
+    assert (len(everything.rows), everything.total_matching, everything.truncated) == (3, 3, False)
+    first_page = quality.query(latest_only=False, limit=2)
+    assert [row.value for row in first_page.rows] == [2.5, 3.0]
+    assert (first_page.total_matching, first_page.truncated, first_page.offset) == (3, True, 0)
+    last_page = quality.query(latest_only=False, limit=2, offset=2)
+    assert [row.value for row in last_page.rows] == [4.0]
+    assert (last_page.truncated, last_page.offset) == (False, 2)
+    with pytest.raises(InvalidArgumentError):
+        quality.query(limit=0)
+    with pytest.raises(InvalidArgumentError):
+        quality.query(offset=-1)
 
 
 def test_variant_and_library_only_filters(quality: QualityRecords) -> None:
@@ -146,8 +186,8 @@ def test_variant_and_library_only_filters(quality: QualityRecords) -> None:
         ),
     ])
 
-    assert [m.subject.variant for m in quality.query(variant="half")] == ["half"]
-    assert [m.subject.variant for m in quality.query(library_only=True)] == [None]
+    assert [m.subject.variant for m in quality.query(variant="half").rows] == ["half"]
+    assert [m.subject.variant for m in quality.query(library_only=True).rows] == [None]
 
 
 def test_variant_with_library_only_is_refused(quality: QualityRecords) -> None:
@@ -168,7 +208,7 @@ def test_an_unregistered_metric_name_is_refused(quality: QualityRecords) -> None
     """`query(metric=...)` lists the registered names when it is wrong."""
     with pytest.raises(InvalidArgumentError, match=r"frame\.background_level_adu"):
         quality.query(metric="frame.no_such_metric")
-    assert quality.query(metric="frame.background_level_adu") == []
+    assert quality.query(metric="frame.background_level_adu").rows == []
 
 
 def test_metrics_with_a_name_gives_that_one_spec(quality: QualityRecords) -> None:
@@ -219,7 +259,7 @@ def test_query_fills_each_row_with_its_metric_unit(quality: QualityRecords, tmp_
     """A row read back carries the unit of its metric."""
     QualityStore(quality_database_path(quality._config)).write_measurements([_measurement("run", BASE_TIME)])
 
-    [row] = quality.query()
+    [row] = quality.query().rows
 
     assert row.unit == "arcsec"
 
@@ -256,7 +296,7 @@ def test_resolve_rows_gives_frame_and_stack_paths_and_reasons(tmp_path: Path) ->
     store.write_measurements([
         _measurement(f"run-{name}", BASE_TIME, subject=subject) for name, subject in subjects.items()
     ])
-    ids = {row.subject.subject_id: row.row_id for row in records.query(latest_only=False)}
+    ids = {row.subject.subject_id: row.row_id for row in records.query(latest_only=False).rows}
 
     result = records.resolve_rows([
         ids["run-1"],
@@ -275,3 +315,24 @@ def test_resolve_rows_gives_frame_and_stack_paths_and_reasons(tmp_path: Path) ->
     assert "not in the target's frame list" in by_subject["M31/scope/cam/z.fits"].reason
     assert by_subject["run-1"].path is None
     assert next(row.row_id for row in result.rows) == ids["run-1"]
+
+
+def test_the_aperture_set_identity_row_is_read_back_through_the_public_query(
+    quality: QualityRecords, tmp_path: Path
+) -> None:
+    """A stored identity row is read back and turned into its text."""
+    from astrometricslib._internal.stacking import aperture_identity_from_number, aperture_identity_to_number
+
+    store = QualityStore(str(tmp_path / "astrometrics.db"))
+    subject = QualitySubject(level=SubjectLevel.STACK, subject_id="M13/M13_Stacked.fits", target_id="M13")
+    store.write_measurements([
+        _measurement(
+            "run-1",
+            BASE_TIME,
+            metric="stacking.aperture_set_number",
+            subject=subject,
+            value=aperture_identity_to_number("v3-156104df543d"),
+        )
+    ])
+    rows = quality.query(metric="stacking.aperture_set_number", target_id="M13", library_only=True).rows
+    assert [aperture_identity_from_number(row.value) for row in rows] == ["v3-156104df543d"]

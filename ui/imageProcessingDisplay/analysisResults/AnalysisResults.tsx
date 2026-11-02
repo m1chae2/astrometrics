@@ -66,9 +66,6 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ results }) => 
     const rejected = results.rejectedCount ?? 0;
     const accepted = typeof total === 'number' ? total - rejected : '-';
     const candidates = results.variableCandidates || [];
-    const stackedFwhm = (results as any).stackedFwhmPx ?? (results as any).stacked_fwhm_px;
-    const medianFwhm = (results as any).medianInputFwhmPx ?? (results as any).median_input_fwhm_px;
-    const backgroundSplit = (results as any).backgroundSplitDetected ?? (results as any).background_split_detected;
 
     return (
         <div className="analysis-results-content">
@@ -85,26 +82,6 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ results }) => 
                     <div className="metric-label">Accepted</div>
                     <div className="metric-value success">{accepted}</div>
                 </div>
-                {stackedFwhm !== undefined && stackedFwhm !== null && (
-                    <div className="metric-box">
-                        <div className="metric-label">Stacked FWHM</div>
-                        <div className="metric-value">{Number(stackedFwhm).toFixed(2)} px</div>
-                    </div>
-                )}
-                {medianFwhm !== undefined && medianFwhm !== null && (
-                    <div className="metric-box">
-                        <div className="metric-label">Input Median FWHM</div>
-                        <div className="metric-value">{Number(medianFwhm).toFixed(2)} px</div>
-                    </div>
-                )}
-                {backgroundSplit !== undefined && backgroundSplit !== null && (
-                    <div className="metric-box">
-                        <div className="metric-label">Gradient</div>
-                        <div className={`metric-value ${backgroundSplit ? 'error' : 'success'}`}>
-                            {backgroundSplit ? 'Split Gradient' : 'Homogeneous'}
-                        </div>
-                    </div>
-                )}
             </div>
         </div>
     );

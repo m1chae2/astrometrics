@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.spectroscopy import pipeline as pipeline_module
 from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline

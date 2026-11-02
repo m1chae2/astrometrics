@@ -23,7 +23,8 @@ The module imports the rule table, so a statement from a rule that does not
 declare ``package_row`` gives no row.
 """
 
-from astrometricslib import CaptureSetting, FilterType
+from astrometricslib import FilterType
+from astrometricslib.reports import CaptureSetting
 from wayfindinglib.analytics.result_quality.all_rules import ALL_RULES
 from wayfindinglib.models.planning.observation_package import ExposureRequest, FrameType
 from wayfindinglib.models.quality.statements import TargetStatement

@@ -10,7 +10,7 @@ statement the report rule makes from the result. User decision U3,
 
 import pytest
 
-from astrometricslib import CaptureSetting
+from astrometricslib.reports import CaptureSetting
 from wayfindinglib.analytics.result_quality.guiding_exposure import (
     TARGET_SHARP_FRACTION,
     allowed_guide_rms_arcsec,

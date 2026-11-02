@@ -13,7 +13,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
-from astrometricslib.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.models.quality.quality_summary import SPECTROSCOPY_PIPELINE_VERSION
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
@@ -43,8 +43,10 @@ logger = logging.getLogger(__name__)
 # The most stars followed in each raw frame. Following the spectrum of a
 # star over time only needs the target itself and a few well-known
 # reference stars, and every extra star is one more spectrum to extract
-# from every frame of every night. Ten matches the per-image limit the
-# other spectroscopy entry points already use.
+# from every frame of every night. This cap is separate from the star
+# selection of a spectroscopy run on a stack, which now processes every
+# usable identified star unless the caller passes `options["limit"]`
+# (see `spectrum_star_limit` in runner.py).
 MAXIMUM_TRACKED_STARS_PER_FRAME = 10
 
 # A magnitude below this is an instrument reading, not a catalog
@@ -54,7 +56,7 @@ _BRIGHTEST_CATALOG_MAGNITUDE = -2.0
 
 # Prefix of the id given to a star that was found in an image but never
 # matched to a catalog. Must match POSITION_ONLY_STAR_ID_PREFIX in
-# astrometricslib/drivers/catalog_access.py.
+# astrometricslib/_internal/drivers/catalog_access.py.
 _POSITION_ONLY_STAR_ID_PREFIX = "FIELD_J"
 
 
@@ -304,8 +306,8 @@ def _process_single_spectroscopy_frame_worker_v2(
         "gaia_xp": [],
     }
     try:
-        from astrometricslib.drivers.catalog_access import CatalogAccess
-        from astrometricslib.drivers.image import AstrometricsImage
+        from astrometricslib._internal.drivers.catalog_access import CatalogAccess
+        from astrometricslib._internal.drivers.image import AstrometricsImage
 
         catalog_access = CatalogAccess()
 
@@ -402,7 +404,7 @@ def _merge_batch_summaries(summaries: list[parallel_batch.BatchRunSummary]) -> p
 
 
 def process_spectroscopy_frames_by_session(
-    api: Any,
+    config: Any,
     target: Target,
     frame_records: list[FrameRecord],
     max_workers: int | None = None,
@@ -421,8 +423,8 @@ def process_spectroscopy_frames_by_session(
 
     Parameters
     ----------
-    api : `Any`
-        The main program interface.
+    config : `AppConfiguration`
+        The application settings, for the worker counts.
     target : `Target`
         The target the images belong to.
     frame_records : `list` of `FrameRecord`
@@ -451,7 +453,7 @@ def process_spectroscopy_frames_by_session(
         The results for each session, pairing the session data with its
         star identification data.
     """
-    from astrometricslib.drivers.image import AstrometricsImage
+    from astrometricslib._internal.drivers.image import AstrometricsImage
     from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
     from astrometricslib.pipelines.shared.session_identification import (
         identify_session_stars,
@@ -460,7 +462,7 @@ def process_spectroscopy_frames_by_session(
     from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
 
     if max_workers is None:
-        worker_counts = resolve_worker_counts("1", api.config.get_photometry_workers())
+        worker_counts = resolve_worker_counts("1", config.get_photometry_workers())
         max_workers = worker_counts.inner_worker_count
 
     frames_with_timestamp = [frame for frame in frame_records if frame.timestamp is not None]
@@ -500,7 +502,7 @@ def process_spectroscopy_frames_by_session(
                 _process_single_spectroscopy_frame_worker_v2,
                 worker_arguments=(target.id, tracked_stars, session_wcs_header),
                 max_workers=max_workers,
-                niceness=api.config.get_worker_niceness(),
+                niceness=config.get_worker_niceness(),
                 on_item_complete=on_item_complete,
             )
         )
@@ -591,7 +593,6 @@ def _attach_spectroscopy_quality_summary(
             median_trail_width_px=median_trail_width_px,
             poor_match_classification_count=poor_match_count,
             ambiguous_classification_count=ambiguous_count,
-            flagged_spectral_classifications=all_spectral_classification_concerns,
             stage_quality_summary=summarize_stage_quality(all_stage_quality_rows) or None,
             gaia_xp_summary=summarize_gaia_xp(all_gaia_xp_rows),
             wavelength_scale_summary=wavelength_scale,
@@ -636,6 +637,7 @@ def _attach_spectroscopy_quality_summary(
     record_camera_profile(
         target.quality.spectroscopy,
         camera_name_for_paths(target.frames, [path for session in sessions for path in session.frame_paths]),
+        measurement_context,
     )
 
     from astrometricslib.pipelines.shared.provenance_recording import record_pipeline_run

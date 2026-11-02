@@ -24,18 +24,18 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Literal
 
-from astrometricslib import AstrometricsError, InvalidArgumentError
+from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError
 
 if TYPE_CHECKING:
     from astrometricslib import Target
     from wayfindinglib.api.control.context import ControlContext
 
 # Matches the private `_CalibrationKind` literal that
-# `astrometricslib.api.processing.CalibrationCatalog.refresh` accepts.
+# `astrometricslib.api.processing.CalibrationCatalog.reindex_frames` accepts.
 CalibrationKind = Literal["dark", "bias", "flat"]
 
 # Remote folder name (case-insensitive) -> the calibration kind
-# `CalibrationCatalog.refresh` understands. These are calibration-frame
+# `CalibrationCatalog.reindex_frames` understands. These are calibration-frame
 # folders on the telescope, never astronomical targets.
 CALIBRATION_FOLDER_KINDS: dict[str, CalibrationKind] = {"bias": "bias", "dark": "dark", "flat": "flat"}
 
@@ -176,7 +176,7 @@ def download_remote_targets(
     11 s per frame (real data: 61 frames of 3008 by 3008 pixels took about
     650 s), so this call returns that long after the copy for a big sync. An
     older, never-measured frame is left to an explicit run of
-    ``astrometrics.processing.record_frame_measurements`` or the backend's
+    ``astrometrics.quality.record_frame_measurements`` or the backend's
     re-index.
 
     Parameters
@@ -221,7 +221,7 @@ def download_remote_targets(
         `True` if the download (or local ingest) and reindex
         completed successfully.
     """
-    from astrometricslib import classify_and_sort_fits_files, get_configuration
+    from astrometricslib import get_configuration
 
     config = get_configuration()
     astrometrics = context.astrometrics
@@ -329,12 +329,11 @@ def download_remote_targets(
     if success:
         from wayfindinglib.tasks.control_tasks.frame_pointing import record_frame_pointing_errors
 
-        added_paths: list[str] = []
-        classify_and_sort_fits_files(scan_list, target_id, config, telescope_name, added_paths)
+        added_paths = astrometrics.targets.add_frames(scan_list, target, telescope=telescope_name)
         astrometrics.targets.reindex_frames(target, prune_missing=prune_missing)
         astrometrics.targets.save()
         # After the copy: the new frames that hold a plate solve give the
-        # mount's pointing error, for control.history.query(kind="alignment").
+        # mount's pointing error, for review.query(kind="alignment").
         record_frame_pointing_errors(context, added_paths)
         if added_paths:
             summary = record_new_frame_measurements(context, target, added_paths)
@@ -349,7 +348,7 @@ def record_new_frame_measurements(
 ) -> Any | None:
     """Measure the frames a sync just added and store the numbers.
 
-    Runs `astrometrics.processing.record_frame_measurements` on the frames
+    Runs `astrometrics.quality.record_frame_measurements` on the frames
     that were added (matched to the target's records by path), not on the
     whole target. A frame whose file still matches its measurement stamp is
     skipped. The run is guarded in the library: if the target is already
@@ -371,12 +370,12 @@ def record_new_frame_measurements(
     summary : `FrameMeasurementSummary` or `None`
         What the measurement run did, or `None` if it failed.
     """
-    from astrometricslib import get_current_job
+    from astrometricslib.jobs import get_current_job
 
     added = {os.path.normpath(path) for path in added_paths}
     added_frames = [frame for frame in target.frames if os.path.normpath(frame.path) in added]
     try:
-        summary = context.astrometrics.processing.record_frame_measurements(
+        summary = context.astrometrics.quality.record_frame_measurements(
             target, frames=added_frames, register_job=get_current_job() is None
         )
     except Exception:  # a measurement failure must never fail the sync: log it
@@ -452,7 +451,8 @@ def plan_target_download(context: ControlContext, target_id: str) -> dict[str, A
     NotFoundError
         If no remote target folder matches `target_id`.
     """
-    from astrometricslib import NotFoundError, get_configuration
+    from astrometricslib import get_configuration
+    from astrometricslib.exceptions import NotFoundError
 
     driver = context.remote_transfer_driver
     folders = list_remote_target_folders(context)
@@ -514,7 +514,7 @@ def report_download_progress(folder: str, expected: int) -> Generator[None]:
     None
         Control, while the progress thread runs.
     """
-    from astrometricslib import get_current_job
+    from astrometricslib.jobs import get_current_job
 
     job = get_current_job()
     if job is None or expected <= 0:
@@ -593,7 +593,8 @@ def sync_target_frames(context: ControlContext, target_id: str, dry_run: bool = 
     folder matches `target_id`, and a real run raises
     `StorageNotMountedError` when the frames drive is not mounted.
     """
-    from astrometricslib import get_configuration, require_mounted_storage
+    from astrometricslib import get_configuration
+    from astrometricslib.drivers import require_mounted_storage
 
     plan = plan_target_download(context, target_id)
     result: dict[str, Any] = {"dry_run": dry_run, **plan}
@@ -608,7 +609,7 @@ def sync_target_frames(context: ControlContext, target_id: str, dry_run: bool = 
             "message": "Nothing new to transfer.",
         }
     require_mounted_storage(os.path.join(str(get_configuration().get_frames_path()), "lights"))
-    from astrometricslib import get_current_job
+    from astrometricslib.jobs import get_current_job
 
     job = get_current_job()
     if job is not None:
@@ -713,7 +714,7 @@ def sync_remote_logs(
     ExternalServiceError
         If the telescope computer cannot be reached.
     """
-    from astrometricslib import ExternalServiceError
+    from astrometricslib.exceptions import ExternalServiceError
     from wayfindinglib.tasks.control_tasks import ekos_log_ingestion
 
     destination_dir = destination_dir or context.ekos_log_directory()
@@ -914,7 +915,7 @@ def sync_calibration_folder(context: ControlContext, remote_folder_name: str) ->
         Raised if `remote_folder_name` does not match Bias, Dark, or
         Flat.
     """
-    from astrometricslib import Target, classify_and_sort_fits_files, get_configuration
+    from astrometricslib import Target, get_configuration
 
     kind = CALIBRATION_FOLDER_KINDS.get(remote_folder_name.strip().lower())
     if not kind:
@@ -975,10 +976,11 @@ def sync_calibration_folder(context: ControlContext, remote_folder_name: str) ->
 
     # The sorter reports where it put each new file, so the summary needs no
     # walk of the whole calibration library (slow on a network drive).
-    added_paths: list[str] = []
-    classify_and_sort_fits_files([staging_dir], "Calibration", config, _DEFAULT_TELESCOPE_NAME, added_paths)
+    added_paths = astrometrics.processing.calibration.add_frames(
+        [staging_dir], telescope=_DEFAULT_TELESCOPE_NAME
+    )
 
-    astrometrics.processing.calibration.refresh(kind)
+    astrometrics.processing.calibration.reindex_frames(kind)
     astrometrics.processing.calibration.save()
 
     added_by_folder: dict[str, int] = {}
@@ -1061,7 +1063,7 @@ def sync_all_remote_folders(
 
     if register_job:
         try:
-            from astrometricslib import JobStore, ProcessingJob, capture_job_logs
+            from astrometricslib.jobs import JobStore, ProcessingJob, capture_job_logs
 
             config = get_configuration()
             job_store = JobStore(str(config.get_logs_db_path()))

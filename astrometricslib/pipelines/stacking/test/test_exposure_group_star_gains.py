@@ -14,17 +14,19 @@ from collections.abc import Callable
 import numpy as np
 import pytest
 
-from astrometricslib.pipelines.stacking.processing.exposure_groups import (
+from astrometricslib.pipelines.stacking.processing.group_combination import measure_exposure_group_gains
+from astrometricslib.pipelines.stacking.processing.group_gains import (
     DEFAULT_GAIN_DISAGREEMENT_TOLERANCE,
     SATURATION_FRACTION_OF_FULL_SCALE,
     SKY_RATIO_LIMIT,
-    STAR_GAIN_CLIP_FRACTION_OF_CEILING,
-    STAR_GAIN_MINIMUM_STARS,
     GroupGainMeasurement,
     estimate_saturation_mask_level,
-    find_isolated_stars,
-    measure_exposure_group_gains,
     measure_group_gains,
+)
+from astrometricslib.pipelines.stacking.processing.group_star_gains import (
+    STAR_GAIN_CLIP_FRACTION_OF_CEILING,
+    STAR_GAIN_MINIMUM_STARS,
+    find_isolated_stars,
     star_clip_level,
 )
 

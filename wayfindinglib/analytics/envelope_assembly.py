@@ -24,12 +24,7 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib import (
-    FITS_READ_ERRORS,
-    AstrometricsError,
-    ConfigurationError,
-    resolve_camera_profile,
-)
+from astrometricslib.exceptions import FITS_READ_ERRORS, AstrometricsError, ConfigurationError
 from wayfindinglib.analytics.capture_history import (
     collect_capture_baseline_values,
     collect_capture_frames,
@@ -77,16 +72,16 @@ def _describe_provenance(provenanced_value: Any) -> str:
     return f"{provenance.kind}: {provenance.source}"
 
 
-def sensor_limits_for_camera(camera_name: str, config: Any = None) -> SensorLimits:
+def sensor_limits_for_camera(astrometrics: Any, camera_name: str) -> SensorLimits:
     """Read a camera's saturation facts from its stored profile.
 
     Parameters
     ----------
+    astrometrics : `Any`
+        The science library's high-level interface (``Astrometrics``); it
+        holds the camera profiles.
     camera_name : `str`
         The camera's name, written in any spelling.
-    config : `AppConfiguration`, optional
-        The configuration holding the camera profiles. The process-wide
-        one is used when left out.
 
     Returns
     -------
@@ -95,13 +90,13 @@ def sensor_limits_for_camera(camera_name: str, config: Any = None) -> SensorLimi
         from. A camera with no profile gets the generic stand-in, marked
         as such.
     """
-    profile = resolve_camera_profile(camera_name, config)
+    profile = astrometrics.processing.calibration.camera_profile(camera_name)
     return SensorLimits(
         camera_name=profile.camera_name,
         clip_ceiling_adu=profile.clip_ceiling_adu.value,
         clip_ceiling_source=_describe_provenance(profile.clip_ceiling_adu),
-        saturation_threshold_adu=profile.saturation_threshold_adu.value,
-        saturation_threshold_source=_describe_provenance(profile.saturation_threshold_adu),
+        saturation_threshold_adu=profile.pixel_saturation_level_adu.value,
+        saturation_threshold_source=_describe_provenance(profile.pixel_saturation_level_adu),
         is_generic_fallback=profile.is_generic_fallback,
     )
 
@@ -111,7 +106,6 @@ def measure_image_quality(
     telescope_name: str,
     camera_name: str,
     minimum_exposure_seconds: float,
-    config: Any = None,
 ) -> MeasuredImageQuality | None:
     """Measure how sharp this equipment's own star images are.
 
@@ -130,9 +124,6 @@ def measure_image_quality(
         knows (its aliases and the library's record name) is accepted.
     minimum_exposure_seconds : `float`
         Shortest exposure to include.
-    config : `AppConfiguration`, optional
-        The configuration holding the camera profiles. The process-wide
-        one is used when left out.
 
     Returns
     -------
@@ -140,7 +131,7 @@ def measure_image_quality(
         The median star width and how many frames it rests on, or `None`
         if no frame of this equipment has a measured width.
     """
-    frames = collect_capture_frames(astrometrics, telescope_name, camera_name, config)
+    frames = collect_capture_frames(astrometrics, telescope_name, camera_name)
     return image_quality_from_frames(frames, minimum_exposure_seconds)
 
 
@@ -353,9 +344,7 @@ def collect_excursion_fraction_baseline(
     return fractions
 
 
-def read_capture_frames(
-    astrometrics: Any, telescope_name: str, camera_name: str, config: Any = None
-) -> list[CaptureFrame]:
+def read_capture_frames(astrometrics: Any, telescope_name: str, camera_name: str) -> list[CaptureFrame]:
     """Read the equipment's light frames, or none if they cannot be read.
 
     Parameters
@@ -366,8 +355,6 @@ def read_capture_frames(
         Name of the imaging telescope.
     camera_name : `str`
         Name of the imaging camera.
-    config : `AppConfiguration`, optional
-        The configuration holding the camera profiles.
 
     Returns
     -------
@@ -377,7 +364,7 @@ def read_capture_frames(
         read.
     """
     try:
-        return collect_capture_frames(astrometrics, telescope_name, camera_name, config)
+        return collect_capture_frames(astrometrics, telescope_name, camera_name)
     except (AstrometricsError, sqlite3.Error, *FITS_READ_ERRORS) as error:
         logger.warning("Could not read this equipment's frames from the frame library: %s", error)
         return []
@@ -460,7 +447,7 @@ def assemble_performance_envelope(
     cadences = every_night["guide_cadence_seconds"]
     guide_cadence = statistics.median(cadences) if cadences else None
     if capture_frames is None:
-        capture_frames = read_capture_frames(astrometrics, telescope.name, camera.name, config)
+        capture_frames = read_capture_frames(astrometrics, telescope.name, camera.name)
     minimum_exposure_seconds = (
         None if guide_cadence is None else MINIMUM_GUIDE_CYCLES_PER_EXPOSURE * guide_cadence
     )
@@ -472,7 +459,7 @@ def assemble_performance_envelope(
     }
 
     try:
-        sensor_limits = sensor_limits_for_camera(camera.name, config)
+        sensor_limits = sensor_limits_for_camera(astrometrics, camera.name)
     except ConfigurationError as error:
         logger.warning("No usable camera profiles, so no saturation limits: %s", error)
         sensor_limits = None

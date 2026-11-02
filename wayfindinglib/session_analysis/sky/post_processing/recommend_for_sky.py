@@ -22,7 +22,7 @@ design estimate: the data is observational, not a designed test, and altitude
 is linked to time of night, so a poor region can be a poor hour.
 """
 
-from astrometricslib import QualityLimit
+from astrometricslib.reports import QualityLimit
 from wayfindinglib.analytics.performance_envelope import BASELINE_SPREAD_MULTIPLIER, MINIMUM_BASELINE_SESSIONS
 from wayfindinglib.models.quality.statements import TargetStatement
 from wayfindinglib.models.session.sky_quality import SkyBinResult, SkyInputQuality, SkyPerformance

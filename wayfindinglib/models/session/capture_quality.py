@@ -24,11 +24,36 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrometricslib import MeasurementReference
+from astrometricslib.reports import MeasurementReference
 from wayfindinglib.models.quality.statements import TargetStatement
 
 CAPTURE_ANALYSIS_VERSION = "1.0.0"
 """Bumped whenever the capture analysis changes what it measures or reports."""
+
+
+class CaptureLimits(BaseModel):
+    """The science library's limits that the capture analysis quotes.
+
+    The values come from the library's own rows (the saturated-pixel metric
+    and the dark-matching tolerance of a calibration query), not from copies.
+
+    Attributes
+    ----------
+    saturated_star_minimum_pixels : `int`
+        The fewest saturated pixels that make a frame's star count as clipped.
+    clipped_frame_fraction : `float`
+        The share of an exposure length's frames that must clip for the
+        exposure length to count as clipped.
+    dark_temperature_tolerance_c : `float`
+        How far, in degrees Celsius, a dark frame's temperature may differ
+        from a light frame's and still calibrate it.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    saturated_star_minimum_pixels: int = Field(alias="saturatedStarMinimumPixels")
+    clipped_frame_fraction: float = Field(alias="clippedFrameFraction")
+    dark_temperature_tolerance_c: float = Field(alias="darkTemperatureToleranceC")
 
 
 class CaptureInputQuality(BaseModel):
@@ -237,6 +262,9 @@ class CapturePerformance(BaseModel):
         How sharp and round the stars were.
     efficiency : `CaptureEfficiency`
         How much of the night was spent exposing.
+    limits : `CaptureLimits` or `None`
+        The library limits the clipping was judged with. `None` when the
+        measurements were made without them.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -244,6 +272,7 @@ class CapturePerformance(BaseModel):
     clipping: list[ExposureClipping] = Field(default_factory=list)
     star_quality: StarQuality = Field(default_factory=StarQuality, alias="starQuality")
     efficiency: CaptureEfficiency = Field(default_factory=CaptureEfficiency)
+    limits: CaptureLimits | None = None
 
 
 class CaptureSessionAnalysis(BaseModel):
@@ -259,10 +288,6 @@ class CaptureSessionAnalysis(BaseModel):
         The observing night.
     equipment_fingerprint : `str`
         The equipment the limits were worked out for.
-    flagged : `bool`
-        `True` if any statement is a warning.
-    flag_reasons : `list` [`str`]
-        The rule names of the warnings.
     resolved_parameters : `dict` [`str`, `Any`]
         The limits and definitions this analysis used, so a result can be
         traced to the numbers behind it.
@@ -282,8 +307,6 @@ class CaptureSessionAnalysis(BaseModel):
     pipeline_version: str = Field(default=CAPTURE_ANALYSIS_VERSION, alias="pipelineVersion")
     session_id: str = Field(alias="sessionId")
     equipment_fingerprint: str = Field(alias="equipmentFingerprint")
-    flagged: bool = False
-    flag_reasons: list[str] = Field(default_factory=list, alias="flagReasons")
     resolved_parameters: dict[str, Any] = Field(default_factory=dict, alias="resolvedParameters")
     input_quality: CaptureInputQuality = Field(alias="inputQuality")
     performance: CapturePerformance

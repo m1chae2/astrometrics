@@ -13,7 +13,7 @@ from typing import Any
 
 from astropy.coordinates import SkyCoord
 
-from astrometricslib.drivers.catalog_access import AbstractCatalogAccess, StarPosition, StarSummary
+from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess, StarPosition, StarSummary
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.spectroscopy.runner import (
     _field_center_for_registration,

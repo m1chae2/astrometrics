@@ -92,15 +92,14 @@ export interface ErrorInfo {
 export interface FrameMeasurements {
   backgroundLevel?: number | null;
   saturatedPixelFraction?: number | null;
+  saturatedPixelFractionLimitAdu?: number | null;
   measuredFwhmPx?: number | null;
   registrationFwhmXPx?: number | null;
-  registrationFwhmYPx?: number | null;
   registrationWeightedFwhmPx?: number | null;
   registrationRoundness?: number | null;
   registrationQuality?: number | null;
   registrationBackgroundLevel?: number | null;
   registrationRotationDeg?: number | null;
-  registrationRmse?: number | null;
   registrationStarCount?: number | null;
   registrationDxPx?: number | null;
   registrationDyPx?: number | null;
@@ -231,6 +230,7 @@ export interface TargetObject {
   ra?: string;
   dec?: string;
   positionUnverified?: boolean;
+  simbadObjectType?: string | null;
   fieldOfView?: string;
   mainCamera?: string;
   mainScope?: string;
@@ -328,8 +328,6 @@ export interface Spectrum {
   hasSpectra?: boolean;
   /** Check if the star's magnitude is a real catalog magnitude. */
   hasCatalogMagnitude?: boolean;
-  /** Check if the spectrum's matched type disagrees with the catalog. */
-  differsFromCatalog?: boolean | null;
   /** Check if the light curve has enough points for the cycle search. */
   canRunPeriodSearch?: boolean;
   /** Check if the light curve has enough points for the dip search. */
@@ -417,6 +415,7 @@ export interface SpectroscopyResult {
   selfDeterminedSpectralTypeCandidates?: Record<string, any>[];
   probableSpectralFeatures?: Record<string, any>[];
   emissionLines?: Record<string, any>[];
+  detectionLabelLimits?: DetectionLabelLimits | null;
   isEmissionLineSource?: boolean;
   starPositionPx?: number[] | null;
   requestedWavelengthRangeAngstrom?: number[] | null;
@@ -432,11 +431,12 @@ export interface SpectroscopyResult {
   extractionRadius?: number | null;
   neighborWingFraction?: number[] | null;
   neighborWingStatus?: string | null;
+  neighborShareEstimate?: number | null;
+  neighborOverlapCount?: number;
   possibleNeighborContamination?: Record<string, number | null>[] | null;
   countsPerSecondFactor?: number | null;
   catalogComparison?: CatalogComparison | null;
   inputQuality?: InputQualityAssessment | null;
-  outputQuality?: OutputQualityAssessment | null;
   stageQuality?: StageQualityCheckpoint[];
   wavelengthZeroPoint?: WavelengthZeroPointRecord | null;
   reddening?: ReddeningRecord | null;
@@ -446,16 +446,10 @@ export interface SpectroscopyResult {
   differentialRefraction?: DifferentialRefractionRecord | null;
   gaiaXpComparison?: GaiaXpComparison | null;
   generatedByJobId?: string | null;
-  /** Check if even the closest reference spectrum fits badly. */
-  isPoorMatch?: boolean;
   /** Measure how much closer the best reference is than the runner-up. */
   rmsGapToSecondBest?: number | null;
-  /** Check if the best reference barely beats the runner-up. */
-  isAmbiguous?: boolean | null;
   /** Measure how much closer the best reference is than the next class. */
   rmsGapToNextClass?: number | null;
-  /** Check if another spectral class fits almost as well as the best. */
-  isClassAmbiguous?: boolean | null;
 }
 
 /**
@@ -666,6 +660,52 @@ export interface ExtinctionCorrectionRecord {
 }
 
 /**
+ * The limits behind every absorption-feature label in one spectrum.
+ *
+ * Each feature entry carries a label (detected, possible, inconclusive,
+ * not detected, not covered) and its statistic (p-value, depth). The limits
+ * that turned the statistic into the label are the same for every feature
+ * in the spectrum, so they are stored here once instead of on each entry.
+ */
+export interface AbsorptionFeatureLimits {
+  detectedPValue: number;
+  possiblePValue: number;
+  inconclusivePValue: number;
+  inconclusiveMinimumDepth: number;
+  minimumReportedDepth: number;
+  maximumDepthUncertaintyForLabel: number;
+  registerEntry: string;
+}
+
+/**
+ * The limits behind every emission-line label in one spectrum.
+ *
+ * Each line entry carries a label (detected, unclear, not seen, not
+ * covered) and its significance. The limits are the same for every line in
+ * the spectrum, so they are stored here once.
+ */
+export interface EmissionLineLimits {
+  detectedSignificance: number;
+  unclearSignificance: number;
+  minimumCoveredFraction: number;
+  minimumDetectedForEmissionSource: number;
+  registerEntry: string;
+}
+
+/**
+ * The limits and register entries behind one spectrum's labels.
+ *
+ * Spectral feature and emission-line entries keep only their statistics and
+ * labels. This record, stored once per spectrum, says which limits turned
+ * those statistics into labels and which register entry checked them. Old
+ * stored rows lack it and load with `None` where it is used.
+ */
+export interface DetectionLabelLimits {
+  absorptionFeatures: AbsorptionFeatureLimits;
+  emissionLines: EmissionLineLimits;
+}
+
+/**
  * How a star's self-determined spectrum compares with its catalog entry.
  *
  * The catalog (SIMBAD/Gaia) already has a spectral type and a B-V colour
@@ -676,13 +716,12 @@ export interface ExtinctionCorrectionRecord {
  * object).
  */
 export interface CatalogComparison {
-  spectralTypeAgrees?: boolean | null;
   spectralTypeNote?: string;
   isLuminosityClassUncertain?: boolean;
   luminosityClassNote?: string;
   closestGiantType?: string | null;
   closestGiantRms?: number | null;
-  colourAgrees?: boolean | null;
+  bMinusVDifferenceMag?: number | null;
   colourNote?: string;
 }
 
@@ -705,21 +744,18 @@ export interface InputQualityAssessment {
 }
 
 /**
- * How much to trust a spectrum's classification, given everything found.
+ * How much to trust a star's variability verdict, given its own CV.
  *
- * Combines the classifier's own match statistics (is the winning type a
- * weak match, or nearly tied with the runner-up) with the catalog
- * comparison above, into one overall verdict. Unlike
- * `InputQualityAssessment`, this depends on what classifying the
- * spectrum actually produced.
+ * A star is flagged as variable when its coefficient of variation (CV)
+ * exceeds the observing run's adaptive cutoff -- a single boolean that,
+ * on its own, does not say whether a star sits far past that line or
+ * right on top of it. This turns the same comparison into a continuous
+ * margin, so a confident call is distinguishable from a borderline one.
  */
 export interface OutputQualityAssessment {
-  isPoorMatch?: boolean | null;
-  isAmbiguous: boolean;
-  isClassAmbiguous?: boolean | null;
-  isSubtypeFinerThanResolution?: boolean | null;
-  catalogAgrees?: boolean | null;
-  isTrustworthy: boolean;
+  coefficientOfVariation: number;
+  adaptiveCutoff: number;
+  marginInMadUnits: number;
 }
 
 /**
@@ -952,7 +988,7 @@ export interface TelescopePulse {
   alignmentAttempts?: any[];
   alignmentTargets?: AlignmentTargetSession[];
   alignmentActive?: boolean;
-  polarAlignment?: PolarAlignmentStatus | null;
+  polarAlignment?: Record<string, any> | null;
   cameraTemperature?: string | null;
   cameraStatus?: string | null;
   targetName?: string | null;
@@ -1064,7 +1100,7 @@ export interface AlignmentTrackPoint {
  * as tracking error. Drift is the slope of a straight-line fit of the
  * offsets against time.
  *
- * `wayfindinglib.group_alignment_attempts` builds these from a list of
+ * `ObservationReview.query_alignment_sessions` builds these from a list of
  * `AlignmentAttempt` records.
  */
 export interface AlignmentTargetSession {
@@ -1178,7 +1214,7 @@ export interface TrackingRiskMap {
  * anyone can redo it. `QualityLimit` has no place for them.
  * tracking_risk : `TrackingRiskMap` or `None`
  * How risky each part of the sky is for tracking with this
- * equipment. Filled in by `control.history.get_performance_envelope`;
+ * equipment. Filled in by `review.get_performance_envelope`;
  * `None` in the envelopes the night analyses use internally.
  */
 export interface PerformanceEnvelope {
@@ -1773,6 +1809,7 @@ export interface ExposureGroupSummary {
   gainMidRange?: number | null;
   gainBrightEndRatio?: number | null;
   gainDisagreement?: number | null;
+  gainApplied?: number | null;
   gainNonlinear?: boolean;
   leftOutReason?: string | null;
   brightestStarPeakFraction?: number | null;
@@ -1812,53 +1849,6 @@ export interface AppliedCameraProfile {
 }
 
 /**
- * Whether the frames and calibration data going into a stack were sound.
- *
- * Answers "was this stack worth running?" using only facts known before
- * the stacking engine started: how many frames survived the pre-checks,
- * whether the sky background changed during the session, and whether the
- * flat frames could be trusted.
- */
-export interface StackingInputQuality {
-  framesSubmitted: number;
-  framesAccepted: number;
-  framesExcludedForGain?: number;
-  framesExcludedForBackground?: number;
-  framesQuarantined?: number;
-  backgroundSplitDetected?: boolean;
-  backgroundSplitDetail?: string | null;
-  flatFrameCount?: number | null;
-  flatNoiseFraction?: number | null;
-  flatSmoothingSigmaPx?: number | null;
-  flatCalibrationIssues?: string[];
-  calibrationMismatchFlags?: string[];
-  isFlagged?: boolean;
-  flagReasons?: string[];
-}
-
-/**
- * Whether a finished stack came out well.
- *
- * Answers "can this stacked image be trusted?" using only measurements of
- * the stacked file and of the per-frame results the engine reported.
- * Each measurement is `None` when it does not apply or could not be made
- * (for example the sharpness comparison is only made for images, not for
- * spectra).
- */
-export interface StackingOutputQuality {
-  rejectedPixelFraction?: number | null;
-  saturatedPixelFraction?: number | null;
-  zeroPixelFraction?: number | null;
-  negativePixelMaxPercent?: number | null;
-  stackedFwhmPx?: number | null;
-  medianInputFwhmPx?: number | null;
-  expectedStackFwhmPx?: number | null;
-  spectralRegistrationConcernCount?: number;
-  isFlagged?: boolean;
-  flagReasons?: string[];
-}
-
-/**
  * Measurements recorded when combining (stacking) multiple images.
  *
  * This tracks how many images were successfully combined and records details
@@ -1869,31 +1859,30 @@ export interface StackingPipelineQualityMetrics {
   framesSubmitted: number;
   framesStacked: number;
   excludedFrames?: ExcludedFrame[];
+  framesAccepted?: number | null;
+  framesExcludedForGain?: number;
+  framesExcludedForBackground?: number;
+  framesQuarantined?: number;
   rejectedPixelFraction?: number | null;
-  rejectedFractionFlagged?: boolean;
   backgroundSplitDetected?: boolean;
   backgroundSplitDetail?: string | null;
   calibrationMismatchFlags?: string[];
+  darkUniqueFrameCount?: number | null;
+  biasUniqueFrameCount?: number | null;
   flatFrameCount?: number | null;
   flatNoiseFraction?: number | null;
   flatSmoothingSigmaPx?: number | null;
   flatCalibrationIssues?: string[];
   saturatedPixelFraction?: number | null;
-  saturationFlagged?: boolean;
   exposureGroups?: ExposureGroupSummary[];
-  recommendedExposureSeconds?: number | null;
   zeroPixelFraction?: number | null;
-  zeroFractionFlagged?: boolean;
   negativePixelMaxPercent?: number | null;
-  negativePixelsFlagged?: boolean;
   stackedFwhmPx?: number | null;
   medianInputFwhmPx?: number | null;
   expectedStackFwhmPx?: number | null;
-  fwhmDegraded?: boolean;
   spectralRegistrationFlags?: ExcludedFrame[];
   spectralRegistrationChecked?: boolean;
   stackingDurationSeconds?: number | null;
-  timedOut?: boolean;
   debayerApplied?: boolean | null;
   stackingEngine?: string | null;
   stackingEngineVersion?: string | null;
@@ -1917,15 +1906,11 @@ export interface StackQualitySummary {
   resolvedParameters?: Record<string, any>;
   cameraProfile?: AppliedCameraProfile | null;
   qualityProcessingApplied?: boolean;
-  flagged?: boolean;
-  flagReasons?: string[];
   gates?: GateResult[];
   createdAt?: string;
   provenanceActivityId?: string | null;
   upstreamEntityId?: string | null;
   stackingMetrics: StackingPipelineQualityMetrics;
-  inputQuality?: StackingInputQuality | null;
-  outputQuality?: StackingOutputQuality | null;
 }
 
 /**
@@ -1973,8 +1958,6 @@ export interface AstrometryQualitySummary {
   resolvedParameters?: Record<string, any>;
   cameraProfile?: AppliedCameraProfile | null;
   qualityProcessingApplied?: boolean;
-  flagged?: boolean;
-  flagReasons?: string[];
   gates?: GateResult[];
   createdAt?: string;
   provenanceActivityId?: string | null;
@@ -2047,29 +2030,11 @@ export interface PhotometryQualitySummary {
   resolvedParameters?: Record<string, any>;
   cameraProfile?: AppliedCameraProfile | null;
   qualityProcessingApplied?: boolean;
-  flagged?: boolean;
-  flagReasons?: string[];
   gates?: GateResult[];
   createdAt?: string;
   provenanceActivityId?: string | null;
   upstreamEntityId?: string | null;
   photometryMetrics: PhotometryPipelineQualityMetrics;
-}
-
-/**
- * One star whose self-determined spectral type shouldn't be trusted as-is.
- *
- * Names exactly which stars a spectroscopy run's own classification is
- * shaky for, and why, rather than only reporting how many -- so a user
- * building a personal catalog from self-determined types knows which
- * entries to double-check instead of taking every one at face value.
- */
-export interface SpectralClassificationConcern {
-  starId: string;
-  reason: string;
-  spectralType: string;
-  classificationRms?: number | null;
-  rmsGapToNextClass?: number | null;
 }
 
 /**
@@ -2091,7 +2056,11 @@ export interface SpectroscopyPipelineQualityMetrics {
   medianTrailWidthPx?: number | null;
   poorMatchClassificationCount?: number;
   ambiguousClassificationCount?: number;
-  flaggedSpectralClassifications?: SpectralClassificationConcern[];
+  skippedNoTrailStarCount?: number;
+  skippedUnidentifiedStarCount?: number;
+  belowFeatureLimitStarCount?: number;
+  gaiaXpDownloadFailedStarCount?: number;
+  reddeningLookupFailedStarCount?: number;
   stageQualitySummary?: StageQualityRollup[] | null;
   gaiaXpSummary?: GaiaXpRunSummary | null;
   wavelengthScaleSummary?: WavelengthScaleSummary | null;
@@ -2110,8 +2079,6 @@ export interface SpectroscopyQualitySummary {
   resolvedParameters?: Record<string, any>;
   cameraProfile?: AppliedCameraProfile | null;
   qualityProcessingApplied?: boolean;
-  flagged?: boolean;
-  flagReasons?: string[];
   gates?: GateResult[];
   createdAt?: string;
   provenanceActivityId?: string | null;
@@ -2239,8 +2206,6 @@ export interface AsteroidDetectionQualitySummary {
   resolvedParameters?: Record<string, any>;
   cameraProfile?: AppliedCameraProfile | null;
   qualityProcessingApplied?: boolean;
-  flagged?: boolean;
-  flagReasons?: string[];
   gates?: GateResult[];
   createdAt?: string;
   provenanceActivityId?: string | null;
@@ -2421,7 +2386,8 @@ export interface QualityLimit {
  * focal_length_mm : `float` or `None`
  * The focal length in millimeters.
  * pixel_scale_arcsec : `float` or `None`
- * The size of one pixel on the sky, in arcseconds per pixel.
+ * The size of one pixel on the sky, in arcseconds per pixel, rounded to
+ * `PIXEL_SCALE_SIGNIFICANT_FIGURES` significant figures.
  * filter_name : `str` or `None`
  * The filter in the light path, such as ``"L"`` or ``"Ha"``.
  * exposure_seconds : `float` or `None`
@@ -2635,6 +2601,11 @@ export interface QualityRowResolution {
  * review_date : `datetime.date` or `None`
  * When an exploratory metric must be promoted or removed. Required for
  * exploratory.
+ * limits : `tuple` of `QualityLimit`
+ * The limits that decisions made from this metric apply to its values
+ * (or to counts worked out from them), with the source of each. Empty
+ * when the metric has none. The limits are not part of the metric's
+ * definition, so changing one does not change `definition_version`.
  */
 export interface MetricSpec {
   name: string;
@@ -2656,6 +2627,7 @@ export interface MetricSpec {
   purposeReason?: string;
   exploratoryQuestion?: string;
   reviewDate?: string | null;
+  limits?: QualityLimit[];
 }
 
 /**
@@ -3235,6 +3207,91 @@ export interface TonightRanking {
 }
 
 /**
+ * A target's chosen depth level and how close its image is.
+ *
+ * Parameters
+ * ----------
+ * target_id : `str`
+ * The target.
+ * level : `DepthLevel`
+ * The chosen level (Good when none was chosen).
+ * level_label : `str`
+ * The chosen level in words.
+ * options : `list` [`DepthLevelOption`]
+ * Every level, for a dropdown.
+ * state : `DepthGoalState`
+ * Where the image stands.
+ * depth_kind : `DepthKind` or `None`
+ * The depth the target is judged by, or ``None`` with no depth goal.
+ * depth_unit : `str` or `None`
+ * ``"mag"`` (point source) or ``"mag/arcsec2"`` (surface brightness).
+ * current_depth : `float` or `None`
+ * The newest library stack's depth.
+ * goal_depth : `float` or `None`
+ * The depth the chosen level needs.
+ * reached_level : `DepthLevel` or `None`
+ * The deepest level the current depth meets, or ``None`` when it meets
+ * none.
+ * reached_level_label : `str` or `None`
+ * That level in words.
+ * seconds_to_goal : `float` or `None`
+ * Clock time to reach the chosen level, with downloads, when below it
+ * and a forecast could be made.
+ * frames_to_goal : `int` or `None`
+ * The frames behind that time.
+ * exposure_seconds : `float` or `None`
+ * The exposure of each of those frames.
+ * forecast_status : `RecommendedAdditionalFramesStatus`
+ * Whether the forecast behind the time was checked. ``not_checked``
+ * hides the time.
+ * provisional : `bool`
+ * True when the time rests on a provisional forecast.
+ * message : `str`
+ * The sentence for a novice.
+ * reason : `str`
+ * Why there is no depth goal, no depth or no time (empty otherwise).
+ */
+export interface DepthGoalStatus {
+  targetId: string;
+  level: DepthLevel;
+  levelLabel: string;
+  options?: DepthLevelOption[];
+  state: DepthGoalState;
+  depthKind?: DepthKind | null;
+  depthUnit?: string | null;
+  currentDepth?: number | null;
+  goalDepth?: number | null;
+  reachedLevel?: DepthLevel | null;
+  reachedLevelLabel?: string | null;
+  secondsToGoal?: number | null;
+  framesToGoal?: number | null;
+  exposureSeconds?: number | null;
+  forecastStatus?: RecommendedAdditionalFramesStatus;
+  provisional?: boolean;
+  message: string;
+  reason?: string;
+}
+
+/**
+ * One level a person can choose, with its depth for this target.
+ *
+ * Parameters
+ * ----------
+ * level : `DepthLevel`
+ * The level.
+ * label : `str`
+ * The words to show ("Quick look", "Standard" or "Deep").
+ * goal_depth : `float` or `None`
+ * The depth that reaches the level, in the status' unit. ``None`` when
+ * the target has no depth goal.
+ */
+export interface DepthLevelOption {
+  level: DepthLevel;
+  label: string;
+  goalDepth?: number | null;
+}
+
+/**
  * The quality of one observing night.
  *
  * Parameters
@@ -3479,6 +3536,7 @@ export interface CameraNoiseSetting {
  */
 export interface CalibrationQueryResult {
   detail: string;
+  dark_temperature_tolerance_c?: number | null;
   kind?: string | null;
   target_id?: string | null;
   darks?: Record<string, any>[] | null;
@@ -3488,6 +3546,430 @@ export interface CalibrationQueryResult {
   lights?: Record<string, any>[] | null;
   camera_totals?: Record<string, any>[] | null;
   matched_row_keys?: string[] | null;
+}
+
+/**
+ * How good one set of dark, bias or flat frames is.
+ *
+ * One model for all three kinds. The checks are `GateResult` records, the
+ * same shape the stack's gates use, so a check that did not run
+ * (``not_checked``) is never mistaken for one that passed. A set is judged
+ * when it is asked for, from the numbers stored for each frame and the
+ * current limits; nothing judged is stored.
+ *
+ * Attributes
+ * ----------
+ * kind : `str`
+ * ``"dark"``, ``"bias"`` or ``"flat"``.
+ * row_key : `str`
+ * The key `CalibrationCatalog.query` gives the same set, so a display
+ * can join the two. Two flat sets of different telescopes can share a
+ * key.
+ * camera, gain, offset, binning
+ * The set's camera and settings.
+ * temperature_slot_c : `float` or `None`
+ * A dark's temperature slot.
+ * exposure_seconds : `float` or `None`
+ * A dark's exposure.
+ * telescope, filter : `str` or `None`
+ * A flat's telescope and filter.
+ * frame_count : `int`
+ * The files in the set.
+ * unique_frame_count : `int`
+ * The files with different pixels. Files not measured yet count as
+ * unique.
+ * measured_frame_count : `int`
+ * The files whose numbers are stored. Flats are not measured file by
+ * file, so this is 0 for them.
+ * status : `str`
+ * ``"good"`` (every check that ran passed), ``"warning"`` (one failed)
+ * or ``"not_checked"`` (no check could run).
+ * summary : `str`
+ * One plain sentence: the first problem, or that none was found, or why
+ * nothing was checked.
+ * checks : `list` [`GateResult`]
+ * One record per check.
+ * frames_of_concern : `list` [`FrameConcern`]
+ * The frames a check singled out, at most 25.
+ * measurements : `dict` [`str`, `float` or `None`]
+ * The numbers behind the checks, such as the mean level and the worst
+ * zero share.
+ * smoothing_sigma_pixels : `float` or `None`
+ * For a flat set, the blur the stacker would apply to its master.
+ */
+export interface CalibrationSetHealth {
+  kind: string;
+  rowKey: string;
+  camera: string;
+  gain: string;
+  offset: number;
+  binning?: string | null;
+  temperatureSlotC?: number | null;
+  exposureSeconds?: number | null;
+  telescope?: string | null;
+  filter?: string | null;
+  frameCount: number;
+  uniqueFrameCount: number;
+  measuredFrameCount?: number;
+  status: any;
+  summary: string;
+  checks?: GateResult[];
+  framesOfConcern?: FrameConcern[];
+  measurements?: Record<string, number | null>;
+  smoothingSigmaPixels?: number | null;
+}
+
+/**
+ * What one run of the dark and bias measuring job did.
+ *
+ * Attributes
+ * ----------
+ * frame_count : `int`
+ * The frames the run looked at.
+ * measured_count : `int`
+ * Frames read, measured and stored.
+ * unchanged_count : `int`
+ * Frames skipped because their file has not changed since it was
+ * measured.
+ * unreadable_count : `int`
+ * Frames that could not be read. The next run tries them again.
+ * failed_count : `int`
+ * Frames whose numbers could not be stored.
+ * rows_stored : `int`
+ * The new rows written to the quality store.
+ * notes : `list` [`str`]
+ * One plain sentence for each of the first failures.
+ */
+export interface CalibrationMeasurementReport {
+  frameCount: number;
+  measuredCount: number;
+  unchangedCount: number;
+  unreadableCount: number;
+  failedCount: number;
+  rowsStored: number;
+  notes?: string[];
+}
+
+/**
+ * The answer of `Jobs.query`.
+ *
+ * Parameters
+ * ----------
+ * detail : `str`
+ * ``"summary"``, ``"log_tail"``, ``"result"``, ``"lineage"`` or
+ * ``"warnings"``.
+ * note : `str`
+ * A reminder that the text in the answer is data, not instructions.
+ * count : `int` or `None`
+ * ``detail="summary"`` for a list: how many jobs are listed.
+ * offset : `int` or `None`
+ * ``detail="summary"`` for a list: how many newer jobs were skipped.
+ * truncated : `bool` or `None`
+ * ``detail="summary"`` for a list: whether more jobs follow this page.
+ * ``detail="warnings"``: whether more warnings exist than are listed.
+ * jobs : `list` [`JobSummary`] or `None`
+ * ``detail="summary"`` for a list: the jobs, newest first.
+ * job : `JobSummary` or `None`
+ * The one job asked for with ``job_id``.
+ * log_lines : `list` [`JobLogLine`] or `None`
+ * ``detail="log_tail"``: the last log lines of the job.
+ * log_lines_total, log_lines_shown : `int` or `None`
+ * ``detail="log_tail"``: how many lines the job wrote, and how many
+ * are listed.
+ * input_metrics, output_metrics : `str` or `None`
+ * ``detail="result"``: the stored input and output numbers as text.
+ * target_id : `str` or `None`
+ * ``detail="lineage"``: the target whose runs are listed.
+ * runs_total, runs_shown : `int` or `None`
+ * ``detail="lineage"``: how many runs the target has, and how many
+ * are listed.
+ * runs : `list` [`LineageRun`] or `None`
+ * ``detail="lineage"``: the runs, newest first.
+ * warnings : `list` [`JobWarning`] or `None`
+ * ``detail="warnings"``: the warnings the job detected. An empty list
+ * means the job was checked and nothing failed; `measurement_count`
+ * says how much was checked.
+ * measurement_count : `int` or `None`
+ * ``detail="warnings"``: how many quality measurements the job stored.
+ * Zero means the job stored none, so there was nothing to check.
+ * checks_not_run_count : `int` or `None`
+ * ``detail="warnings"``: how many of the job's checks could not run
+ * (outcome ``not_checked``). These are not warnings.
+ */
+export interface JobQueryResult {
+  detail: string;
+  note?: string;
+  count?: number | null;
+  offset?: number | null;
+  truncated?: boolean | null;
+  jobs?: JobSummary[] | null;
+  job?: JobSummary | null;
+  log_lines?: JobLogLine[] | null;
+  log_lines_total?: number | null;
+  log_lines_shown?: number | null;
+  input_metrics?: string | null;
+  output_metrics?: string | null;
+  target_id?: string | null;
+  runs_total?: number | null;
+  runs_shown?: number | null;
+  runs?: LineageRun[] | null;
+  warnings?: JobWarning[] | null;
+  measurement_count?: number | null;
+  checks_not_run_count?: number | null;
+}
+
+/**
+ * One job in a few fields.
+ *
+ * Parameters
+ * ----------
+ * id : `str`
+ * The job's id.
+ * job_type : `str`
+ * What kind of job it is, such as ``"stacking"``.
+ * target_id : `str` or `None`
+ * The target the job worked on.
+ * status : `str`
+ * ``"started"``, ``"running"``, ``"completed"``, ``"failed"`` and so on.
+ * progress : `str`
+ * Progress as ``"current/total"``.
+ * message : `str`
+ * The latest status message, cut to a limit.
+ * created_at, updated_at, completed_at : `str` or `None`
+ * Local times without a time zone, as the app wrote them.
+ * is_active : `bool`
+ * The job is unfinished and was updated recently.
+ * looks_stale : `bool`
+ * The job is unfinished but has not been updated for an hour, so its
+ * process most likely died and left the row at ``started`` or
+ * ``running``.
+ * idle_minutes : `int` or `None`
+ * Whole minutes since the last update, for an unfinished job.
+ */
+export interface JobSummary {
+  id: string;
+  job_type: string;
+  target_id?: string | null;
+  status: string;
+  progress: string;
+  message?: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+  completed_at?: string | null;
+  is_active?: boolean;
+  looks_stale?: boolean;
+  idle_minutes?: number | null;
+}
+
+/**
+ * One line from a job's log.
+ *
+ * Parameters
+ * ----------
+ * time : `str`
+ * When the line was written.
+ * level : `str`
+ * The log level, such as ``"INFO"``.
+ * text : `str`
+ * The message, cut to a limit.
+ */
+export interface JobLogLine {
+  time: string;
+  level: string;
+  text: string;
+}
+
+/**
+ * One pipeline run that produced some of a target's data.
+ *
+ * Parameters
+ * ----------
+ * id : `str`
+ * The run's id.
+ * name : `str`
+ * The run's name.
+ * start_time, end_time : `str` or `None`
+ * ISO 8601 times.
+ * comment : `str`
+ * A note about the run, cut to a limit.
+ * informed_by : `list` [`str`]
+ * The ids of the runs this one followed from.
+ * inputs_used : `int`
+ * How many inputs the run used.
+ */
+export interface LineageRun {
+  id: string;
+  name: string;
+  start_time?: string | null;
+  end_time?: string | null;
+  comment?: string;
+  informed_by?: string[];
+  inputs_used?: number;
+}
+
+/**
+ * One warning a job detected.
+ *
+ * A warning is a stored quality measurement whose check failed. The row
+ * keeps the number that was checked, the limit it was checked against and
+ * the validation register entry that backs the limit.
+ *
+ * Parameters
+ * ----------
+ * pipeline : `str`
+ * The pipeline that raised it: the first part of the metric name, such
+ * as ``"stacking"`` or ``"photometry"``.
+ * metric : `str`
+ * The registered metric name, such as ``"stacking.gate_flat_noise"``.
+ * subject : `str`
+ * What the warning is about: the stack, exposure group or run.
+ * subject_level : `str`
+ * ``"frame"``, ``"stack"`` or ``"run"``.
+ * target_id : `str` or `None`
+ * The target the subject belongs to.
+ * reason : `str`
+ * One plain sentence saying what is wrong.
+ * outcome : `str`
+ * The check's outcome. Always ``"failed"``: only failed checks are
+ * warnings.
+ * value : `float` or `None`
+ * The number that was checked, in the metric's unit. `None` when the
+ * check has no number.
+ * limit : `float` or `None`
+ * The limit the number was checked against. `None` when the limit has
+ * no number.
+ * unit : `str` or `None`
+ * The unit of the value and the limit.
+ * limit_tier : `str` or `None`
+ * How the limit was obtained, such as ``"design_estimate"``.
+ * limit_derivation : `str` or `None`
+ * How the limit was found, in words.
+ * register_entry : `str` or `None`
+ * The validation register entry that backs the limit.
+ * action_taken : `str` or `None`
+ * What the pipeline did about it, when it acted.
+ * measured_at : `str`
+ * When the check was made, in ISO 8601 form.
+ * row_id : `int` or `None`
+ * The row in the measurement table, for citing the warning.
+ */
+export interface JobWarning {
+  pipeline: string;
+  metric: string;
+  subject: string;
+  subject_level: string;
+  target_id?: string | null;
+  reason?: string;
+  outcome: string;
+  value?: number | null;
+  limit?: number | null;
+  unit?: string | null;
+  limit_tier?: string | null;
+  limit_derivation?: string | null;
+  register_entry?: string | null;
+  action_taken?: string | null;
+  measured_at: string;
+  row_id?: number | null;
+}
+
+/**
+ * The short description of a target's current stack.
+ *
+ * It is read from the quality summary that the stacking stage saved with the
+ * stack, so nothing is measured again.
+ */
+export interface StackSummary {
+  target_id: string;
+  kind?: any;
+  stack_path?: string | null;
+  job_id?: string | null;
+  made_at: string;
+  frames_submitted: number;
+  frames_stacked: number;
+  frames_skipped: number;
+  skipped_reasons?: Record<string, any>[];
+  frames_set_aside_before_stacking?: number | null;
+  sessions?: Record<string, any>[];
+  rejected_pixel_fraction?: number | null;
+  star_width_px?: Record<string, any>;
+  saturated_pixel_fraction?: number | null;
+  zero_pixel_fraction?: number | null;
+  exposure_groups?: Record<string, any>[];
+  calibration_mismatches?: number;
+}
+
+/**
+ * What one call of `ProcessingPipelines.remake_preview` made.
+ */
+export interface PreviewRemakeResult {
+  target_id: string;
+  stack_path: string;
+  preview_path: string;
+  processed_fits_path?: string | null;
+  steps_run?: string[];
+  shown_in_viewer?: boolean;
+  previous_pictures?: string[];
+  stack_file_unchanged?: boolean;
+  preview_settings?: PreviewSettingsRecord | null;
+}
+
+/**
+ * One frame that lies in a target's `_excluded` folder.
+ *
+ * The listing is read-only. Where the reason is known, it comes from the
+ * first source that has it: the stored quality rows of the frame (which
+ * carry the action taken), then the folder's `excluded_frames.json` file.
+ */
+export interface SetAsideFrameRecord {
+  file: string;
+  path: string;
+  subjectId?: string | null;
+  originalPath?: string | null;
+  kind?: string | null;
+  reason?: string;
+  reasonSource: any;
+  actionTaken?: string | null;
+  exposureSeconds?: number | null;
+  captureSettingId?: number | null;
+  movedAt?: string | null;
+  restorable?: boolean;
+  restoreNote?: string;
+}
+
+/**
+ * The answer to starting a slow stack review.
+ *
+ * Attributes
+ * ----------
+ * status : `str`
+ * ``"completed"`` when the work finished within the short wait, or
+ * ``"running"`` when it is still going.
+ * job_id : `str` or `None`
+ * The job to follow with ``processing:get_job``. `None` when the work
+ * has not recorded a job yet, for example because it waits for another
+ * job to finish.
+ * result : `dict` or `None`
+ * The library's result as plain data, when the status is
+ * ``"completed"``.
+ */
+export interface StackReviewStart {
+  status: any;
+  job_id?: string | null;
+  result?: Record<string, any> | null;
+}
+
+/**
+ * Measurements of one stack, and optionally a comparison with another.
+ */
+export interface StackQualityReport {
+  stack_path: string;
+  target_id?: string | null;
+  included?: string[];
+  fwhm_px?: number | null;
+  rejected_fraction?: number | null;
+  registration?: RegistrationRow[] | null;
+  comparison?: StackComparison | null;
+  notes?: string[];
 }
 
 /**
@@ -3953,6 +4435,10 @@ export interface StartingPoint {
  * arrived as forecast.
  * evidence : `list` [`MeasurementReference`]
  * The measurements the check used.
+ * basis : `ForecastBasis`
+ * Whether the check compared two library stacks (``later_stack``) or an
+ * earlier-nights subset with the library stack
+ * (``earlier_nights_subset``).
  */
 export interface ForecastCheck {
   stackRunId?: string | null;
@@ -3964,6 +4450,7 @@ export interface ForecastCheck {
   outcome: ForecastOutcome;
   reason?: string;
   evidence?: MeasurementReference[];
+  basis?: ForecastBasis;
 }
 
 /**
@@ -3981,14 +4468,11 @@ export interface ForecastCheck {
  * Asteroid candidates the detection run found.
  * confirmed_asteroid_candidate_count : `int`
  * Asteroid candidates that match a known orbit.
- * flagged_pipelines : `list` [`str`]
- * Names of the pipelines whose own quality summary is flagged.
  */
 export interface ScienceOutcomeSummary {
   variableStarCandidateCount?: number;
   asteroidCandidateCount?: number;
   confirmedAsteroidCandidateCount?: number;
-  flaggedPipelines?: string[];
 }
 
 /**
@@ -4086,6 +4570,57 @@ export interface TonightSkyModel {
 }
 
 /**
+ * The plain depth levels a person can choose.
+ */
+export enum DepthLevel {
+  QUICK_LOOK = "quick_look",
+  GOOD = "good",
+  DEEP = "deep"
+}
+
+/**
+ * Where an image stands against its chosen level.
+ *
+ * ``no_depth_goal`` means the kind of object has no depth goal.
+ * ``not_stacked`` means the target has no library stack.
+ * ``depth_not_measured`` means the stack has no usable depth. ``reached``
+ * means the depth meets the chosen
+ * level. ``below_goal`` means it does not, and ``seconds_to_goal`` may say
+ * how long it would take. ``will_not_help`` means more frames will not
+ * reach the level.
+ */
+export enum DepthGoalState {
+  NO_DEPTH_GOAL = "no_depth_goal",
+  NOT_STACKED = "not_stacked",
+  DEPTH_NOT_MEASURED = "depth_not_measured",
+  REACHED = "reached",
+  BELOW_GOAL = "below_goal",
+  WILL_NOT_HELP = "will_not_help"
+}
+
+/**
+ * Which measured depth a kind of object is judged by.
+ */
+export enum DepthKind {
+  POINT_SOURCE = "point_source",
+  SURFACE_BRIGHTNESS = "surface_brightness"
+}
+
+/**
+ * Whether "take N more" may be shown for a target, and on what footing.
+ *
+ * ``not_checked`` hides the count. ``provisional`` shows it after a check
+ * made from frames already taken agreed; the next real stack confirms or
+ * withdraws it. ``confirmed`` shows it after a check of two library stacks
+ * agreed.
+ */
+export enum RecommendedAdditionalFramesStatus {
+  NOT_CHECKED = "not_checked",
+  PROVISIONAL = "provisional",
+  CONFIRMED = "confirmed"
+}
+
+/**
  * What one target's frames of a night were worth.
  *
  * Parameters
@@ -4141,10 +4676,9 @@ export interface NightTargetQuality {
  * Whether the night has guiding data to summarize.
  * reason : `str`
  * Why it is not available. Empty when it is.
- * flagged : `bool` or `None`
- * True when the guiding analysis raised a warning.
- * flag_reasons : `list` [`str`]
- * The kinds of those warnings.
+ * statements : `list` [`TargetStatement`]
+ * What the guiding analysis says about the night: its warnings,
+ * advice and missing-data notes. Each names its rule.
  * rms_per_axis_arcsec : `float` or `None`
  * The robust guiding error per axis, in arcseconds.
  * expected_star_widening_fraction : `float` or `None`
@@ -4160,8 +4694,7 @@ export interface NightTargetQuality {
 export interface GuidingNightSummary {
   available: boolean;
   reason?: string;
-  flagged?: boolean | null;
-  flagReasons?: string[];
+  statements?: TargetStatement[];
   rmsPerAxisArcsec?: number | null;
   expectedStarWideningFraction?: number | null;
   lostFraction?: number | null;
@@ -4492,6 +5025,86 @@ export enum NoiseEvidenceStatus {
 }
 
 /**
+ * One calibration frame that a check found fault with.
+ *
+ * Attributes
+ * ----------
+ * path : `str`
+ * The frame's file path.
+ * reason : `str`
+ * One plain sentence saying what is wrong with this frame.
+ */
+export interface FrameConcern {
+  path: string;
+  reason: string;
+}
+
+/**
+ * What made a stack's preview picture (its settings record file).
+ */
+export interface PreviewSettingsRecord {
+  made_at: string;
+  settings_used: PreviewSettingsUsed;
+  steps_run?: string[];
+  custom?: boolean;
+}
+
+/**
+ * What Siril's registration found for one frame of a stack.
+ *
+ * The fields match the keys that `parse_seq_file` returns for each
+ * registration line of the ``_Registration.seq`` file.
+ *
+ * Attributes
+ * ----------
+ * fwhm_px : `float`
+ * Width of the stars in pixels (Siril's plain FWHM).
+ * weighted_fwhm_px : `float`
+ * Siril's weighted FWHM in pixels, which counts each star by how well
+ * its fit went.
+ * roundness : `float`
+ * Star roundness, 0 to 1 (1 is a perfect circle).
+ * quality : `float`
+ * Siril's registration quality score for the frame.
+ * background_level : `float`
+ * Sky background level, normalized to the 0 to 1 image range.
+ * star_count : `int`
+ * The number of stars Siril matched in the frame.
+ * homography : `list` [`float`]
+ * The 3 by 3 transform that moves the frame onto the reference, as nine
+ * numbers in row order.
+ * dx, dy : `float`
+ * The shift in pixels (the homography's ``h02`` and ``h12``).
+ * rotation_deg : `float`
+ * The rotation in degrees.
+ * scale : `float`
+ * The scale factor (1.0 means the same size as the reference).
+ */
+export interface RegistrationRow {
+  fwhmPx: number;
+  weightedFwhmPx: number;
+  roundness: number;
+  quality: number;
+  backgroundLevel: number;
+  starCount: number;
+  homography: number[];
+  dx: number;
+  dy: number;
+  rotationDeg: number;
+  scale: number;
+}
+
+/**
+ * Two stacks of the same target, measured and compared.
+ */
+export interface StackComparison {
+  before: StackMeasurements;
+  after: StackMeasurements;
+  changes?: Record<string, number | null>;
+  summary?: string[];
+}
+
+/**
  * A package placement request's starting disposition.
  */
 export enum StartTimeMode {
@@ -4742,6 +5355,19 @@ export enum ForecastOutcome {
 }
 
 /**
+ * What the later stack of a forecast check is compared with.
+ *
+ * ``later_stack`` is a check of two library stacks, the later one holding
+ * new frames. ``earlier_nights_subset`` is a check made from frames already
+ * taken: the stack of all observing nights but the last against the library
+ * stack of all nights.
+ */
+export enum ForecastBasis {
+  LATER_STACK = "later_stack",
+  EARLIER_NIGHTS_SUBSET = "earlier_nights_subset"
+}
+
+/**
  * What a target is observed for. Each use has its own ranked list.
  */
 export enum RankedUse {
@@ -4794,6 +5420,11 @@ export enum RankedUse {
  * ranked one. Empty when there is nothing to add.
  * confidence : `Confidence`
  * Always ``design_estimate`` today.
+ * recommended_additional_frames_status : `RecommendedAdditionalFramesStatus`
+ * Whether the target's "take N more" count is confirmed by a check of two
+ * library stacks, provisional (only a check made from frames already
+ * taken agreed), or not checked (no check agreed). A provisional target
+ * ranks below a confirmed or unchecked one of about the same gain.
  * register_entry : `str`
  * The validation register entry behind the ranking.
  * evidence : `list` [`MeasurementReference`]
@@ -4816,6 +5447,7 @@ export interface RankedCandidate {
   thinDataset?: boolean;
   reason?: string;
   confidence?: Confidence;
+  recommendedAdditionalFramesStatus?: RecommendedAdditionalFramesStatus;
   registerEntry?: string;
   evidence?: MeasurementReference[];
 }
@@ -4935,6 +5567,37 @@ export interface CapabilityDelegation {
   state: DelegationState;
   effective_since?: string;
   promotion_evidence_note?: string;
+}
+
+/**
+ * The choices a preview run really used, as recorded beside the stack.
+ */
+export interface PreviewSettingsUsed {
+  denoise: boolean;
+  denoise_strength?: number | null;
+  star_toning: boolean;
+  starnet?: boolean;
+  bright_object?: boolean;
+}
+
+/**
+ * What was measured on one stacked image.
+ *
+ * A number that could not be measured is `None`, and ``not_measured`` says
+ * why. No number is ever replaced by a default.
+ */
+export interface StackMeasurements {
+  path: string;
+  skyLevel?: number | null;
+  normalizedNoise?: number | null;
+  normalizedNoiseUncertainty?: number | null;
+  fineGrainNoiseFraction?: number | null;
+  flatnessRms?: number | null;
+  flatnessPeakToPeak?: number | null;
+  fwhmPx?: number | null;
+  zeroFraction?: number | null;
+  notMeasured?: Record<string, string>;
+  notes?: string[];
 }
 
 /**
@@ -5115,13 +5778,16 @@ export const RPC_METHODS = [
   "processing:delete_job",
   "processing:jobs_for_target",
   "processing:job_log_tail",
-  "processing:record_frame_measurements",
-  "processing:measure_half_difference_noise",
-  "processing:measure_noise_growth",
-  "processing:measure_night_contributions",
+  "processing:stack_summary",
+  "processing:remake_preview",
+  "quality:set_aside_frames",
+  "quality:measure_stack",
+  "quality:record_frame_measurements",
+  "processing:measure_noise",
   "quality:query",
   "quality:metrics",
   "quality:resolve_rows",
+  "jobs:query",
   "analysis:analyze_image",
   "analysis:get_results",
   "analysis:cancel",
@@ -5170,13 +5836,14 @@ export const RPC_METHODS = [
   "images:last",
   "calibration:get_stats",
   "calibration:measure_sensor_noise",
+  "calibration:measure_frames",
   "mosaic:preview",
   "mosaic:create",
   "execution:list_sessions",
   "execution:get_session",
   "execution:abort_session",
   "execution:reconcile_session",
-  "execution:record_divergence",
+  "execution:build_divergence_record",
   "plan:get",
   "plan:current_session",
   "plan:list_packages",
@@ -5190,18 +5857,23 @@ export const RPC_METHODS = [
   "advisory:target_report",
   "advisory:tonight",
   "advisory:result",
+  "advisory:depth_goal",
+  "advisory:set_depth_goal",
   "history:nights",
   "history:night_quality",
   "history:target_changes",
   "history:live_session_status",
   "observatory:safety_status",
   "calibration:query",
+  "calibration:assess",
   "sequencer:get_queue",
   "sequencer:create_plan",
   "sequencer:add",
   "sequencer:remove",
   "sequencer:reorder",
   "sequencer:begin",
+  "sequencer:pause",
+  "sequencer:abort",
   "sequencer:modify",
 ] as const;
 

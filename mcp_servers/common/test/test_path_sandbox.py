@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib import is_path_inside
+from astrometricslib.drivers import is_path_inside
 from mcp_servers.common.tool_registry import ToolRegistry
 
 SCHEMA = {"type": "object", "properties": {"file_path": {"type": "string"}}, "required": []}

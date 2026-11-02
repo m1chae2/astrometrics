@@ -23,7 +23,8 @@ from scipy.ndimage import median_filter
 from scipy.optimize import minimize
 from scipy.signal import find_peaks
 
-from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
@@ -91,21 +92,27 @@ class SpectroscopyCalibrationTuner:
     ----------
     config : `AppConfiguration`
         Where we load our settings from and save our new calibration to.
+    drivers : `Drivers` or `None`
+        The outside services the caller chose, passed to the pipelines this
+        builds. `None` means the built-in ones.
     """
 
-    def __init__(self, config: AppConfiguration | None = None) -> None:
+    def __init__(self, config: AppConfiguration | None = None, drivers: Drivers | None = None) -> None:
         """Initialize the tuner service with the system configuration.
 
         Parameters
         ----------
         config : `AppConfiguration`, optional
             The settings object. If None, it will grab the default one.
+        drivers : `Drivers`, optional
+            The outside services to use. Any left out is the built-in one.
         """
         if config is None:
             from astrometricslib.foundation.config import get_configuration
 
             config = get_configuration()
         self.config = config
+        self.drivers = drivers
 
     def tune_calibration(
         self,
@@ -144,7 +151,7 @@ class SpectroscopyCalibrationTuner:
         from astrometricslib.utilities import ConfigLoader
 
         spec_config = ConfigLoader.load_spectroscopy_config(app_config=self.config, camera_name=camera_name)
-        spec_pipeline = SpectroscopyPipeline(config=spec_config)
+        spec_pipeline = SpectroscopyPipeline(config=spec_config, drivers=self.drivers)
 
         star_pos = self._resolve_calibration_star_position(image_path, star_pos)
         logger.info("Target star identified at position: %s", star_pos)
@@ -273,7 +280,7 @@ class SpectroscopyCalibrationTuner:
             image,
             extraction_start,
             int(tuned_config.extraction_radius),
-            spec_pipeline.camera_profile.saturation_threshold_adu.value,
+            spec_pipeline.camera_profile.pixel_saturation_level_adu.value,
         )
         max_extraction_length_px = SpectroscopyCalibrationTuner._detect_max_extraction_length_px(
             base_pos, vector, offset_px, length_px, image.data.shape
@@ -385,7 +392,7 @@ class SpectroscopyCalibrationTuner:
             AstrometryPipeline,
         )
 
-        astrometry = AstrometryPipeline(app_config=self.config)
+        astrometry = AstrometryPipeline(app_config=self.config, drivers=self.drivers)
         context = astrometry.prepare_image(image_path, attempt_plate_solving=False)
         if not context.stellar_objects:
             raise ProcessingError("No stars detected in the calibration frame.")

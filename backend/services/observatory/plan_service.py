@@ -2,11 +2,13 @@
 
 Description: The night plan is an observing session stored by the planning
 library. The app reads it with `Wayfinder.planning.get_plan`, edits it with
-`edit_queue` and ticks checklist items with `tick_checklist_item`. The same
-`get_plan` lists the observation package library, `create_plan` records a
-package or the night's session, and `edit_package` changes, reopens or
-deletes a package. This service wraps those calls for the RPC route and does
-one more thing: after each write that succeeds, it sends the ``plan:changed``
+the queue calls (`add_to_queue`, `reorder_queue` and the others) and ticks
+checklist items with `tick_checklist_item`. `query_plans` lists the
+observation package library, `create_package` and `create_session` record a
+package or the night's session, and `update_package`, `reopen_package`,
+`dismiss_package` and `delete_package` change a package. This service wraps
+those calls for the RPC route and does one more thing: after each write that
+succeeds, it sends the ``plan:changed``
 event (session writes) or the ``packages:changed`` event (package writes) to
 every connected app window, so any open screen can read again.
 
@@ -37,8 +39,9 @@ import time
 from datetime import datetime
 from typing import Any
 
-from astrometricslib import InvalidArgumentError, observing_night_id
-from wayfindinglib import DitherConfig, ExposureRequest, ObservationPackage, PlanChange
+from astrometricslib.exceptions import InvalidArgumentError
+from astrometricslib.reports import observing_night_id
+from wayfindinglib import ObservationPackage
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +79,8 @@ class PlanService:
         plan : `ObservationSession` or `list` [`ObservationSessionSummary`]
             The whole session, or the list of summaries.
         """
+        if session_id is None:
+            return self.wayfinder.planning.query_plans()
         return self.wayfinder.planning.get_plan(session_id)
 
     def list_packages(
@@ -98,7 +103,7 @@ class PlanService:
         packages : `list` [`ObservationPackage`]
             The matching packages.
         """
-        return self.wayfinder.planning.get_plan(
+        return self.wayfinder.planning.query_plans(
             kind="packages", status=status, target=target, include_dismissed=include_dismissed
         )
 
@@ -117,7 +122,7 @@ class PlanService:
             The target's planned package, else its suggested package that is
             not dismissed, else `None`. The library does the choosing.
         """
-        return self.wayfinder.planning.get_plan(kind="packages", target=target, pick="one")
+        return self.wayfinder.planning.get_package_for_target(target)
 
     def current_session(self) -> Any:
         """Read tonight's session, the one session the app works with.
@@ -130,7 +135,7 @@ class PlanService:
             Reading never creates one.
         """
         return self.wayfinder.planning.get_plan(
-            night_id=observing_night_id(time.time()), include=["progress"]
+            observing_night_id=observing_night_id(time.time()), include=["progress"]
         )
 
     def refresh_suggestions(self, target_ids: list[str] | None = None) -> dict[str, Any]:
@@ -169,7 +174,7 @@ class PlanService:
         plan : `ObservationSession`
             The night's session.
         """
-        return self.wayfinder.planning.create_plan(kind="empty_session", night_id=night_id)
+        return self.wayfinder.planning.create_session(observing_night_id=night_id)
 
     def create_package(
         self,
@@ -205,16 +210,11 @@ class PlanService:
         package : `ObservationPackage`
             The stored package.
         """
-        package = self.wayfinder.planning.create_plan(
-            kind="package",
+        package = self.wayfinder.planning.create_package(
             target=target,
             plan_items=plan_items,
-            exposure_requests=(
-                None
-                if exposure_requests is None
-                else [ExposureRequest.model_validate(item) for item in exposure_requests]
-            ),
-            dither_config=None if dither_config is None else DitherConfig.model_validate(dither_config),
+            exposure_requests=exposure_requests,
+            dither_config=dither_config,
             minimum_altitude_deg=minimum_altitude_deg,
             priority=priority,
             notes=notes,
@@ -240,6 +240,9 @@ class PlanService:
         expected_revision: int | None = None,
     ) -> ObservationPackage:
         """Change, reopen, dismiss or delete a package and announce it.
+
+        One call makes one kind of write. Delete, dismiss and undismiss stand
+        alone. A reopen may come with changes; the reopen is written first.
 
         Parameters
         ----------
@@ -279,23 +282,58 @@ class PlanService:
         -------
         package : `ObservationPackage`
             The stored package (as it was when removed, for a delete).
+
+        Raises
+        ------
+        InvalidArgumentError
+            If nothing is asked for, or delete, dismiss or undismiss is
+            mixed with another change.
         """
-        package = self.wayfinder.planning.edit_package(
-            package_id,
-            exposure_requests=exposure_requests,
-            dither_config=dither_config,
-            minimum_altitude_deg=minimum_altitude_deg,
-            priority=priority,
-            notes=notes,
-            name=name,
-            framing=framing,
-            reopen=reopen,
-            delete=delete,
-            dismiss=dismiss,
-            undismiss=undismiss,
-            source_key=source_key,
-            expected_revision=expected_revision,
-        )
+        planning = self.wayfinder.planning
+        changes = {
+            "exposure_requests": exposure_requests,
+            "dither_config": dither_config,
+            "minimum_altitude_deg": minimum_altitude_deg,
+            "priority": priority,
+            "notes": notes,
+            "name": name,
+            "framing": framing,
+        }
+        has_change = any(value is not None for value in changes.values())
+        flags = [
+            label
+            for label, wanted in (("delete", delete), ("dismiss", dismiss), ("undismiss", undismiss))
+            if wanted
+        ]
+        if flags and (has_change or reopen or len(flags) > 1):
+            raise InvalidArgumentError(
+                f"{flags[0]} cannot be combined with a change or with delete, dismiss or undismiss."
+            )
+        if source_key is not None and not (dismiss or undismiss):
+            raise InvalidArgumentError("source_key is used only with dismiss or undismiss.")
+        if not (flags or has_change or reopen):
+            raise InvalidArgumentError(
+                "Give exposure_requests, dither_config, minimum_altitude_deg, priority, notes, name, "
+                "framing, reopen, delete, dismiss or undismiss."
+            )
+        if delete:
+            package = planning.delete_package(package_id, expected_revision=expected_revision)
+        elif dismiss:
+            package = planning.dismiss_package(
+                package_id, source_key=source_key, expected_revision=expected_revision
+            )
+        elif undismiss:
+            package = planning.undismiss_package(
+                package_id, source_key=source_key, expected_revision=expected_revision
+            )
+        else:
+            package = None
+            if reopen:
+                package = planning.reopen_package(package_id, expected_revision=expected_revision)
+                # The reopen moved the revision; a following change names it.
+                expected_revision = package.revision
+            if has_change:
+                package = planning.update_package(package_id, expected_revision=expected_revision, **changes)
         if delete:
             kind = "deleted"
         elif reopen:
@@ -323,15 +361,19 @@ class PlanService:
         add_checklist: list[dict[str, Any]] | None = None,
         framing: dict[str, Any] | None = None,
         expected_revision: int | None = None,
-    ) -> PlanChange:
+    ) -> Any:
         """Change the night plan by hand and announce the change.
+
+        One call makes one kind of change: give exactly one of `add`,
+        `order`, `remove`, `set_exposures`, `add_checklist` or `framing`.
 
         Parameters
         ----------
         session_id : `str`
             The session to change.
         add : `list` [`dict`], optional
-            Packages to append to the queue (a `QueueRequest` each).
+            Packages to append to the queue. Each is a dictionary with a
+            ``package_id`` and a start mode.
         order : `list` [`str`], optional
             Every entry id left after `remove`, in the new order.
         remove : `list` [`str`], optional
@@ -352,17 +394,46 @@ class PlanService:
         -------
         change : `PlanChange`
             The new revision, what changed and the stored session.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If not exactly one kind of change is given.
         """
-        change = self.wayfinder.planning.edit_queue(
-            session_id,
-            add=add,
-            order=order,
-            remove=remove,
-            set_exposures=set_exposures,
-            add_checklist=add_checklist,
-            framing=framing,
-            expected_revision=expected_revision,
-        )
+        planning = self.wayfinder.planning
+        given = {
+            name_: value
+            for name_, value in (
+                ("add", add),
+                ("order", order),
+                ("remove", remove),
+                ("set_exposures", set_exposures),
+                ("add_checklist", add_checklist),
+                ("framing", framing),
+            )
+            if value is not None
+        }
+        if len(given) != 1:
+            raise InvalidArgumentError(
+                "Give exactly one of add, order, remove, set_exposures, add_checklist or framing.",
+                details={"given": sorted(given)},
+            )
+        if add is not None:
+            change = planning.add_to_queue(session_id, add, expected_revision=expected_revision)
+        elif order is not None:
+            change = planning.reorder_queue(session_id, order, expected_revision=expected_revision)
+        elif remove is not None:
+            change = planning.remove_from_queue(session_id, remove, expected_revision=expected_revision)
+        elif set_exposures is not None:
+            change = planning.set_entry_exposures(
+                session_id, set_exposures, expected_revision=expected_revision
+            )
+        elif add_checklist is not None:
+            change = planning.add_checklist_items(
+                session_id, add_checklist, expected_revision=expected_revision
+            )
+        else:
+            change = planning.set_framing(session_id, framing, expected_revision=expected_revision)
         self._announce(change)
         return change
 
@@ -373,7 +444,7 @@ class PlanService:
         expected_revision: int | None = None,
         note: str | None = None,
         ticked_at: str | None = None,
-    ) -> PlanChange:
+    ) -> Any:
         """Record that the user did one checklist item, and announce it.
 
         Parameters
@@ -417,7 +488,7 @@ class PlanService:
         self._announce(change)
         return change
 
-    def _announce(self, change: PlanChange) -> None:
+    def _announce(self, change: Any) -> None:
         """Send the ``plan:changed`` event for one successful write.
 
         Parameters
@@ -440,7 +511,7 @@ class PlanService:
             },
         )
 
-    def _announce_promotions(self, change: PlanChange) -> None:
+    def _announce_promotions(self, change: Any) -> None:
         """Announce each suggested package a write promoted.
 
         Parameters

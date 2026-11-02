@@ -19,8 +19,10 @@ import numpy as np
 import pytest
 from astropy.table import Table
 
-from astrometricslib.drivers import catalog_store, gaia_cone_driver
-from astrometricslib.drivers.gaia_cone_driver import query_gaia_cone_vizier as real_query_gaia_cone_vizier
+from astrometricslib._internal.drivers import catalog_store, gaia_cone_driver
+from astrometricslib._internal.drivers.gaia_cone_driver import (
+    query_gaia_cone_vizier as real_query_gaia_cone_vizier,
+)
 from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 

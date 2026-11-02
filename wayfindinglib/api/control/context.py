@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from astrometricslib import AppConfiguration, Astrometrics
     from wayfindinglib.drivers.control_record_store import ControlRecordStore
     from wayfindinglib.drivers.indi.diagnostics import IndiDiagnostics
+    from wayfindinglib.drivers.indi_worker import IndiWorkerClient
     from wayfindinglib.drivers.interfaces.base_protocol_driver import ProtocolDriver
     from wayfindinglib.drivers.interfaces.camera_driver import CameraDriver
     from wayfindinglib.drivers.interfaces.enclosure_driver import EnclosureDriver
@@ -80,6 +81,12 @@ class ControlContext:
     astrometrics : `Astrometrics`, optional
         The science library handle shared with the rest of the
         `Wayfinder`. Built over `config` on first use when omitted.
+    simulated : `bool`, optional
+        Build the simulated INDI session instead of the real one. When
+        omitted, the simulator is used if ``ASTROMETRICS_TESTING`` is set.
+    separate_process : `bool`, optional
+        Run the INDI session in a process of its own (see
+        `wayfindinglib.drivers.indi_worker`). `False` by default.
     """
 
     def __init__(
@@ -89,6 +96,8 @@ class ControlContext:
         butler: DiskButler | None = None,
         correction_config: CorrectionConfig | None = None,
         astrometrics: Astrometrics | None = None,
+        simulated: bool | None = None,
+        separate_process: bool = False,
     ) -> None:
         """Store the shared inputs. No driver is built yet."""
         self.config = config
@@ -99,6 +108,13 @@ class ControlContext:
         self._astrometrics = astrometrics
         self._records: ControlRecordStore | None = None
         self._driver = driver
+        self._simulated = simulated
+        self._separate_process = separate_process
+        self._worker_client: IndiWorkerClient | None = None
+        # Builds the INDI session once, even when callers on several
+        # threads ask for it at the same moment (two would mean two
+        # worker processes).
+        self._driver_lock = threading.Lock()
         self._mount_driver: MountDriver | None = None
         self._focuser_driver: FocuserDriver | None = None
         self._filter_wheel_driver: FilterWheelDriver | None = None
@@ -163,20 +179,33 @@ class ControlContext:
 
         Returns
         -------
-        driver : `IndiInterface` or `SimulatorIndiInterface`
-            The simulator when ``ASTROMETRICS_TESTING`` is set, otherwise
-            the real INDI client.
+        driver : `IndiInterface`, `SimulatorIndiInterface` or `IndiWorkerProxy`
+            The simulator when it was asked for (or ``ASTROMETRICS_TESTING``
+            is set), otherwise the real INDI client. With
+            ``separate_process`` it is a proxy to a process that holds
+            the simulator or the real client.
         """
-        if self._driver is None:
-            if os.getenv("ASTROMETRICS_TESTING"):
-                from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
+        with self._driver_lock:
+            if self._driver is None:
+                simulated = (
+                    self._simulated
+                    if self._simulated is not None
+                    else bool(os.getenv("ASTROMETRICS_TESTING"))
+                )
+                if self._separate_process:
+                    from wayfindinglib.drivers.indi_worker import IndiWorkerClient, IndiWorkerProxy
 
-                self._driver = SimulatorIndiInterface(config=self.config)
-            else:
-                from wayfindinglib.drivers.indi_interface import IndiInterface
+                    self._worker_client = IndiWorkerClient(testing=simulated)
+                    self._driver = IndiWorkerProxy(self._worker_client)
+                elif simulated:
+                    from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
 
-                self._driver = IndiInterface(config=self.config)
-        return self._driver
+                    self._driver = SimulatorIndiInterface(config=self.config)
+                else:
+                    from wayfindinglib.drivers.indi_interface import IndiInterface
+
+                    self._driver = IndiInterface(config=self.config)
+            return self._driver
 
     @driver.setter
     def driver(self, driver: Any) -> None:
@@ -439,7 +468,7 @@ class ControlContext:
         ConfigurationError
             If the protocol has no guiding driver.
         """
-        from astrometricslib import ConfigurationError
+        from astrometricslib.exceptions import ConfigurationError
         from wayfindinglib.drivers.indi.guiding_driver import IndiGuidingDriver
         from wayfindinglib.drivers.interfaces.registry import build_guiding_driver_registry
 
@@ -469,12 +498,18 @@ class ControlContext:
         """Stop the background work of the drivers built so far, for good.
 
         Builds nothing: a driver that was never asked for has nothing
-        running. Safe to call more than once.
+        running. This includes the INDI worker process, if one was
+        started. Safe to call more than once.
         """
         with self._guiding_driver_lock:
             guiding_driver = self._guiding_driver
         if guiding_driver is not None:
             guiding_driver.close()
+        with self._driver_lock:
+            worker_client = self._worker_client
+            self._worker_client = None
+        if worker_client is not None:
+            worker_client.stop()
 
     @property
     def indi_diagnostics(self) -> IndiDiagnostics | None:

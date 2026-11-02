@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import HardwareError, InvalidArgumentError
+from astrometricslib.exceptions import HardwareError, InvalidArgumentError
 from wayfindinglib.api.execution import ObservationExecution
 from wayfindinglib.models.planning.observation_package import DitherConfig, ExposureRequest, FrameType
 from wayfindinglib.models.policy.delegation import (
@@ -261,7 +261,7 @@ def test_the_runner_waits_for_a_later_start_and_stops_when_asked() -> None:
 
 def test_advance_session_without_control_or_steps_is_refused() -> None:
     """Building the imaging steps needs `control`."""
-    from astrometricslib import ConfigurationError
+    from astrometricslib.exceptions import ConfigurationError
 
     execution = ObservationExecution(SimpleNamespace(), _Butler())
     with pytest.raises(ConfigurationError):

@@ -17,7 +17,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from astrometricslib import BatchRunSummary, FrameRecord, InvalidArgumentError, Target
+from astrometricslib import FrameRecord, Target
+from astrometricslib._internal.results import BatchRunSummary
+from astrometricslib.exceptions import InvalidArgumentError
 from backend.services.analysis.analysis_orchestrator import AnalysisOrchestrator
 
 
@@ -71,7 +73,7 @@ class TestRunSpectroscopyAnalysis:
         astrometrics = SimpleNamespace(
             processing=SimpleNamespace(
                 run_spectroscopy_by_session=run_spectroscopy_by_session,
-                acquire_analysis_slot=lambda: contextlib.nullcontext(),
+                acquire_job_slot=lambda: contextlib.nullcontext(),
             )
         )
 
@@ -86,9 +88,8 @@ class TestRunSpectroscopyAnalysis:
         )
 
         call_args = run_spectroscopy_by_session.call_args
-        assert call_args.args[0] is astrometrics
-        assert call_args.args[1] is target
-        assert call_args.args[2] == [frame_a, frame_b]  # unmatched path excluded
+        assert call_args.args[0] is target
+        assert call_args.args[1] == [frame_a, frame_b]  # unmatched path excluded
         assert call_args.kwargs["max_workers"] is None  # resolved internally by the library
 
         assert results["starsProcessed"] == 5
@@ -120,7 +121,7 @@ class TestMasterSpectralStackAnalysis:
             processing=SimpleNamespace(
                 process_target=process_target,
                 run_spectroscopy_by_session=run_spectroscopy_by_session,
-                acquire_analysis_slot=lambda: contextlib.nullcontext(),
+                acquire_job_slot=lambda: contextlib.nullcontext(),
             ),
         )
         orchestrator = _make_orchestrator(astrometrics=astrometrics)
@@ -150,7 +151,7 @@ class TestMasterSpectralStackAnalysis:
         )
 
         process_target.assert_called_once()
-        frame_records = run_by_session.call_args.args[2]
+        frame_records = run_by_session.call_args.args[1]
         assert [frame.path for frame in frame_records] == ["/lib/a.fits"]
         assert results["starsProcessed"] == 3 + 2
 
@@ -208,8 +209,8 @@ class TestStartAnalysisTaskClassification:
         assert "photometry" in result
         assert "spectroscopy" in result
 
-    def test_unmatched_path_falls_back_to_explicit_filter_type(self) -> None:
-        """Verify an unmatched path falls back to the explicit filter_type."""
+    def test_unmatched_path_falls_back_to_explicit_filter_name(self) -> None:
+        """Verify an unmatched path falls back to the explicit filter_name."""
         target = Target(id="ClassifyUnmatchedTarget", frames=[])
         orchestrator = self._make_orchestrator_with_target(target)
 
@@ -217,6 +218,29 @@ class TestStartAnalysisTaskClassification:
 
         orchestrator._run_spectroscopy_analysis.assert_called_once()
         orchestrator._run_photometry_analysis.assert_not_called()
+
+    def test_unmatched_frame_with_spectral_filter_header_is_spectroscopy(self) -> None:
+        """Verify a spectral FILTER card sends an ad hoc frame to spectra."""
+        target = Target(id="ClassifyHeaderTarget", frames=[])
+        orchestrator = self._make_orchestrator_with_target(target)
+        orchestrator.astrometrics.targets.read_frame_header.return_value = {"FILTER": "Star Analyzer 200"}
+
+        orchestrator._start_analysis_task("job1", "ClassifyHeaderTarget", ["/tmp/adhoc.fits"], "ALL")
+
+        orchestrator.astrometrics.targets.read_frame_header.assert_called_once_with("/tmp/adhoc.fits")
+        orchestrator._run_spectroscopy_analysis.assert_called_once()
+        orchestrator._run_photometry_analysis.assert_not_called()
+
+    def test_unreadable_header_is_logged_and_the_frame_stays_light(self) -> None:
+        """Verify a header read error is caught; the frame stays a light."""
+        target = Target(id="ClassifyBadHeaderTarget", frames=[])
+        orchestrator = self._make_orchestrator_with_target(target)
+        orchestrator.astrometrics.targets.read_frame_header.side_effect = OSError("cut off")
+
+        orchestrator._start_analysis_task("job1", "ClassifyBadHeaderTarget", ["/tmp/adhoc.fits"], "ALL")
+
+        orchestrator._run_spectroscopy_analysis.assert_not_called()
+        orchestrator._run_photometry_analysis.assert_called_once()
 
 
 class TestAnalysisFailures:

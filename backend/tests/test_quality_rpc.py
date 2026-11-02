@@ -13,13 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib import (
-    MeasurementOrigin,
-    MeasurementStatus,
-    QualityMeasurement,
-    QualitySubject,
-    SubjectLevel,
-)
+from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
+from astrometricslib.reports import MeasurementStatus, QualityMeasurement, SubjectLevel
 from backend.container import container
 from backend.public_interface import RPC_METHODS
 from backend.routers.rpc_router import rpc_registry
@@ -67,16 +62,16 @@ def test_query_returns_measurements_as_json(library_folder: Path, monkeypatch: p
     )
     asked: dict[str, object] = {}
 
-    def fake_query(**arguments: object) -> list[QualityMeasurement]:
+    def fake_query(**arguments: object) -> QualityQueryResult:
         """Record the arguments and give one measurement.
 
         Returns
         -------
-        measurements : `list` [`QualityMeasurement`]
-            The one stored measurement.
+        answer : `QualityQueryResult`
+            The answer holding the one stored measurement.
         """
         asked.update(arguments)
-        return [stored]
+        return QualityQueryResult(rows=[stored], total_matching=1)
 
     monkeypatch.setattr(container.astrometrics.quality, "query", fake_query)
 
@@ -84,7 +79,9 @@ def test_query_returns_measurements_as_json(library_folder: Path, monkeypatch: p
         asyncio.run(rpc_registry.execute("quality:query", {"target_id": "M31", "library_only": True}))
     )
 
-    assert asked == {"target_id": "M31", "library_only": True}
+    assert asked["target_id"] == "M31"
+    assert asked["library_only"] is True
+    assert asked["row_ids"] is None
     assert len(result) == 1
     assert result[0]["value"] == pytest.approx(2.5)
     assert result[0]["measuredAt"].startswith("2026-10-01T03:00")
@@ -104,7 +101,7 @@ def test_resolve_rows_passes_the_ids_to_the_library_and_returns_json(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The route passes the ids to `resolve_rows`; the reply is plain JSON."""
-    from astrometricslib import QualityRowFile, QualityRowResolution
+    from astrometricslib._internal.quality import QualityRowFile, QualityRowResolution
 
     asked: dict[str, object] = {}
 

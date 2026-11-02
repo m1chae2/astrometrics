@@ -9,7 +9,7 @@ it with a fake of its own.
 
 import pytest
 
-from astrometricslib.drivers import gaia_cone_driver
+from astrometricslib._internal.drivers import gaia_cone_driver
 
 
 @pytest.fixture(autouse=True)

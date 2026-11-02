@@ -1,0 +1,794 @@
+{
+ "imaging_bias_only_with_few_frames": {
+  "result": null,
+  "scripts": [
+   [
+    "setext fits",
+    "set32bits",
+    "cd <TMP>/work/GoldenTarget__golden_stack/biases",
+    "convert bias -out=../process",
+    "cd ../process",
+    "load bias_00001.fits",
+    "save bias_stacked",
+    "cd <TMP>/work/GoldenTarget__golden_stack/flats",
+    "convert flat -out=../process -fitseq",
+    "cd ../process",
+    "calibrate flat -bias=bias_stacked",
+    "stack pp_flat rej 3 3 -norm=mul -out=flat_stacked",
+    "cd <TMP>/work/GoldenTarget__golden_stack/lights",
+    "convert light_source -out=../process -fitseq",
+    "cd ../process",
+    "calibrate light_source  -flat=flat_stacked -bias=bias_stacked",
+    "setfindstar -relax=on",
+    "register pp_light_source -2pass",
+    "seqapplyreg pp_light_source",
+    "stack r_pp_light_source rej 2.5000 2.0000 -weight=wfwhm -norm=addscale -out=result_stacked"
+   ]
+  ],
+  "read_output_calls": [
+   {
+    "positional": [
+     "GoldenTarget"
+    ],
+    "keywords": {
+     "generate_rejmap": "False",
+     "library_dest": "<TMP>/frames/lights/GoldenTarget",
+     "output_file": "golden_stack.fits",
+     "registered_seq_name": "pp_light_source"
+    }
+   }
+  ],
+  "diagnostics": {
+   "corrupt_frames_skipped": [],
+   "calibration_mismatch_flags": [],
+   "calibration_blocking_flags": [
+    "bias master built from 1 frame(s), fewer than the minimum of 3: the master bias keeps the read noise of its few frames and any cosmic ray hit in them",
+    "flat master built from 2 frame(s), fewer than the minimum of 3: the master flat copies the noise of its few frames into every light frame"
+   ],
+   "calibration_match_blocking_flags": [],
+   "symlinked_light_paths": [
+    "/frames/light_0000.fits",
+    "/frames/light_0001.fits",
+    "/frames/light_0002.fits",
+    "/frames/light_0003.fits"
+   ],
+   "debayer_applied": false,
+   "num_lights": 4,
+   "rejection_sigma_low": 2.5,
+   "rejection_sigma_high": 2.0,
+   "rejection_sigma_mode": "adaptive",
+   "rejection_sigma_floor": 2.0,
+   "rejection_sigma_low_extra": 0.5,
+   "rejection_sigma_floor_applied": true,
+   "filter_wfwhm_requested": "50%",
+   "filter_wfwhm_effective": null,
+   "filter_wfwhm_loosened": true,
+   "calibration_applied": {
+    "dark": false,
+    "flat": true,
+    "bias": true
+   }
+  }
+ },
+ "imaging_cached_masters_override_sigma": {
+  "result": null,
+  "scripts": [
+   [
+    "setext fits",
+    "set32bits",
+    "cd <TMP>/work/GoldenTarget__golden_stack/lights",
+    "convert light_source -out=../process -fitseq",
+    "cd ../process",
+    "calibrate light_source -dark=dark_stacked -flat=flat_stacked ",
+    "setfindstar -relax=on",
+    "register pp_light_source -2pass",
+    "seqapplyreg pp_light_source -filter-wfwhm=100%",
+    "stack r_pp_light_source rej 2.5000 3.5000 -weight=wfwhm -norm=addscale -out=result_stacked"
+   ]
+  ],
+  "read_output_calls": [
+   {
+    "positional": [
+     "GoldenTarget"
+    ],
+    "keywords": {
+     "generate_rejmap": "False",
+     "library_dest": "<TMP>/frames/lights/GoldenTarget",
+     "output_file": "golden_stack.fits",
+     "registered_seq_name": "pp_light_source"
+    }
+   }
+  ],
+  "diagnostics": {
+   "corrupt_frames_skipped": [],
+   "calibration_mismatch_flags": [],
+   "calibration_blocking_flags": [],
+   "calibration_match_blocking_flags": [],
+   "symlinked_light_paths": [
+    "/frames/light_0000.fits",
+    "/frames/light_0001.fits",
+    "/frames/light_0002.fits",
+    "/frames/light_0003.fits",
+    "/frames/light_0004.fits",
+    "/frames/light_0005.fits",
+    "/frames/light_0006.fits",
+    "/frames/light_0007.fits",
+    "/frames/light_0008.fits",
+    "/frames/light_0009.fits",
+    "/frames/light_0010.fits",
+    "/frames/light_0011.fits"
+   ],
+   "debayer_applied": false,
+   "num_lights": 12,
+   "rejection_sigma_low": 2.5,
+   "rejection_sigma_high": 3.5,
+   "rejection_sigma_mode": "override",
+   "rejection_sigma_floor": null,
+   "rejection_sigma_low_extra": null,
+   "rejection_sigma_floor_applied": false,
+   "filter_wfwhm_requested": "100%",
+   "filter_wfwhm_effective": "100%",
+   "filter_wfwhm_loosened": false,
+   "calibration_applied": {
+    "dark": true,
+    "flat": true,
+    "bias": false
+   }
+  }
+ },
+ "imaging_color_sensor_reference_frame": {
+  "result": null,
+  "scripts": [
+   [
+    "setext fits",
+    "set32bits",
+    "cd <TMP>/work/GoldenTarget__golden_stack/biases",
+    "convert bias -out=../process -fitseq",
+    "cd ../process",
+    "stack bias rej 3 3 -nonorm -out=bias_stacked",
+    "cd <TMP>/work/GoldenTarget__golden_stack/darks",
+    "convert dark -out=../process -fitseq",
+    "cd ../process",
+    "stack dark rej 3 3 -nonorm -out=dark_stacked",
+    "cd <TMP>/work/GoldenTarget__golden_stack/flats",
+    "convert flat -out=../process -fitseq",
+    "cd ../process",
+    "calibrate flat -bias=bias_stacked -cfa -equalize_cfa",
+    "stack pp_flat rej 3 3 -norm=mul -out=flat_stacked",
+    "cd <TMP>/work/GoldenTarget__golden_stack/lights",
+    "convert light_source -out=../process -fitseq",
+    "cd ../process",
+    "calibrate light_source -dark=dark_stacked -flat=flat_stacked  -cfa -equalize_cfa -debayer",
+    "setfindstar -relax=on",
+    "setref pp_light_source 8",
+    "register pp_light_source -2pass",
+    "seqapplyreg pp_light_source -filter-wfwhm=95%",
+    "stack r_pp_light_source rej 3.0000 3.0000 -weight=noise -norm=addscale -out=result_stacked"
+   ]
+  ],
+  "read_output_calls": [
+   {
+    "positional": [
+     "GoldenTarget"
+    ],
+    "keywords": {
+     "generate_rejmap": "False",
+     "library_dest": "<TMP>/frames/lights/GoldenTarget",
+     "output_file": "golden_stack.fits",
+     "registered_seq_name": "pp_light_source"
+    }
+   }
+  ],
+  "diagnostics": {
+   "corrupt_frames_skipped": [],
+   "calibration_mismatch_flags": [],
+   "calibration_blocking_flags": [],
+   "calibration_match_blocking_flags": [],
+   "symlinked_light_paths": [
+    "/frames/light_0000.fits",
+    "/frames/light_0001.fits",
+    "/frames/light_0002.fits",
+    "/frames/light_0003.fits",
+    "/frames/light_0004.fits",
+    "/frames/light_0005.fits",
+    "/frames/light_0006.fits",
+    "/frames/light_0007.fits",
+    "/frames/light_0008.fits",
+    "/frames/light_0009.fits",
+    "/frames/light_0010.fits",
+    "/frames/light_0011.fits",
+    "/frames/light_0012.fits",
+    "/frames/light_0013.fits",
+    "/frames/light_0014.fits",
+    "/frames/light_0015.fits",
+    "/frames/light_0016.fits",
+    "/frames/light_0017.fits",
+    "/frames/light_0018.fits",
+    "/frames/light_0019.fits"
+   ],
+   "debayer_applied": true,
+   "num_lights": 20,
+   "rejection_sigma_low": 3.0,
+   "rejection_sigma_high": 3.0,
+   "rejection_sigma_mode": "fixed",
+   "rejection_sigma_floor": null,
+   "rejection_sigma_low_extra": null,
+   "rejection_sigma_floor_applied": false,
+   "filter_wfwhm_requested": "95%",
+   "filter_wfwhm_effective": "95%",
+   "filter_wfwhm_loosened": false,
+   "calibration_applied": {
+    "dark": true,
+    "flat": true,
+    "bias": false
+   }
+  }
+ },
+ "imaging_full_calibration_adaptive": {
+  "result": null,
+  "scripts": [
+   [
+    "setext fits",
+    "set32bits",
+    "cd <TMP>/work/GoldenTarget__golden_stack/biases",
+    "convert bias -out=../process -fitseq",
+    "cd ../process",
+    "stack bias rej 3 3 -nonorm -out=bias_stacked",
+    "cd <TMP>/work/GoldenTarget__golden_stack/darks",
+    "convert dark -out=../process -fitseq",
+    "cd ../process",
+    "stack dark rej 3 3 -nonorm -out=dark_stacked",
+    "cd <TMP>/work/GoldenTarget__golden_stack/flats",
+    "convert flat -out=../process -fitseq",
+    "cd ../process",
+    "calibrate flat -bias=bias_stacked",
+    "stack pp_flat rej 3 3 -norm=mul -out=flat_stacked",
+    "load flat_stacked",
+    "gauss 2.5000",
+    "save flat_stacked",
+    "cd <TMP>/work/GoldenTarget__golden_stack/lights",
+    "convert light_source -out=../process -fitseq",
+    "cd ../process",
+    "calibrate light_source -dark=dark_stacked -flat=flat_stacked ",
+    "setfindstar -relax=on",
+    "register pp_light_source -2pass",
+    "seqapplyreg pp_light_source -filter-wfwhm=90% -filter-round=80%",
+    "stack r_pp_light_source rej 2.7414 2.2414 -weight=wfwhm -rejmap -norm=addscale -out=result_stacked"
+   ]
+  ],
+  "read_output_calls": [
+   {
+    "positional": [
+     "GoldenTarget"
+    ],
+    "keywords": {
+     "generate_rejmap": "True",
+     "library_dest": "<TMP>/frames/lights/GoldenTarget",
+     "output_file": "golden_stack.fits",
+     "registered_seq_name": "pp_light_source"
+    }
+   }
+  ],
+  "diagnostics": {
+   "corrupt_frames_skipped": [],
+   "calibration_mismatch_flags": [],
+   "calibration_blocking_flags": [],
+   "calibration_match_blocking_flags": [],
+   "symlinked_light_paths": [
+    "/frames/light_0000.fits",
+    "/frames/light_0001.fits",
+    "/frames/light_0002.fits",
+    "/frames/light_0003.fits",
+    "/frames/light_0004.fits",
+    "/frames/light_0005.fits",
+    "/frames/light_0006.fits",
+    "/frames/light_0007.fits",
+    "/frames/light_0008.fits",
+    "/frames/light_0009.fits",
+    "/frames/light_0010.fits",
+    "/frames/light_0011.fits",
+    "/frames/light_0012.fits",
+    "/frames/light_0013.fits",
+    "/frames/light_0014.fits",
+    "/frames/light_0015.fits",
+    "/frames/light_0016.fits",
+    "/frames/light_0017.fits",
+    "/frames/light_0018.fits",
+    "/frames/light_0019.fits"
+   ],
+   "debayer_applied": false,
+   "num_lights": 20,
+   "rejection_sigma_low": 2.7414027276049455,
+   "rejection_sigma_high": 2.2414027276049455,
+   "rejection_sigma_mode": "adaptive",
+   "rejection_sigma_floor": 2.0,
+   "rejection_sigma_low_extra": 0.5,
+   "rejection_sigma_floor_applied": false,
+   "filter_wfwhm_requested": "90%",
+   "filter_wfwhm_effective": "90%",
+   "filter_wfwhm_loosened": false,
+   "flat_calibration": {
+    "needs_smoothing": true,
+    "smoothing_sigma_pixels": 2.5
+   },
+   "calibration_applied": {
+    "dark": true,
+    "flat": true,
+    "bias": false
+   }
+  }
+ },
+ "imaging_no_calibration": {
+  "result": null,
+  "scripts": [
+   [
+    "setext fits",
+    "set32bits",
+    "cd <TMP>/work/GoldenTarget__golden_stack/lights",
+    "convert light_source -out=../process -fitseq",
+    "cd ../process",
+    "setfindstar -relax=on",
+    "register light_source -2pass",
+    "seqapplyreg light_source -filter-wfwhm=95%",
+    "stack r_light_source rej 2.5000 2.0000 -weight=wfwhm -rejmap -norm=addscale -out=result_stacked"
+   ]
+  ],
+  "read_output_calls": [
+   {
+    "positional": [
+     "GoldenTarget"
+    ],
+    "keywords": {
+     "generate_rejmap": "True",
+     "library_dest": "<TMP>/frames/lights/GoldenTarget",
+     "output_file": "golden_stack.fits",
+     "registered_seq_name": "light_source"
+    }
+   }
+  ],
+  "diagnostics": {
+   "corrupt_frames_skipped": [],
+   "calibration_mismatch_flags": [],
+   "calibration_blocking_flags": [],
+   "calibration_match_blocking_flags": [],
+   "symlinked_light_paths": [
+    "/frames/light_0000.fits",
+    "/frames/light_0001.fits",
+    "/frames/light_0002.fits",
+    "/frames/light_0003.fits",
+    "/frames/light_0004.fits",
+    "/frames/light_0005.fits",
+    "/frames/light_0006.fits",
+    "/frames/light_0007.fits",
+    "/frames/light_0008.fits",
+    "/frames/light_0009.fits"
+   ],
+   "debayer_applied": false,
+   "num_lights": 10,
+   "rejection_sigma_low": 2.5,
+   "rejection_sigma_high": 2.0,
+   "rejection_sigma_mode": "adaptive",
+   "rejection_sigma_floor": 2.0,
+   "rejection_sigma_low_extra": 0.5,
+   "rejection_sigma_floor_applied": true,
+   "filter_wfwhm_requested": "95%",
+   "filter_wfwhm_effective": "95%",
+   "filter_wfwhm_loosened": false,
+   "calibration_applied": {
+    "dark": false,
+    "flat": false,
+    "bias": false
+   }
+  }
+ },
+ "single_light": {
+  "result": null,
+  "scripts": [
+   [
+    "setext fits",
+    "set32bits",
+    "cd <TMP>/work/GoldenTarget__golden_stack/biases",
+    "convert bias -out=../process -fitseq",
+    "cd ../process",
+    "stack bias rej 3 3 -nonorm -out=bias_stacked",
+    "cd <TMP>/work/GoldenTarget__golden_stack/darks",
+    "convert dark -out=../process -fitseq",
+    "cd ../process",
+    "stack dark rej 3 3 -nonorm -out=dark_stacked",
+    "cd <TMP>/work/GoldenTarget__golden_stack/flats",
+    "convert flat -out=../process -fitseq",
+    "cd ../process",
+    "calibrate flat -bias=bias_stacked -cfa -equalize_cfa",
+    "stack pp_flat rej 3 3 -norm=mul -out=flat_stacked",
+    "cd <TMP>/work/GoldenTarget__golden_stack/lights",
+    "convert light_source -out=../process",
+    "cd ../process",
+    "calibrate_single light_source_00001.fits -dark=dark_stacked -flat=flat_stacked -cfa -equalize_cfa -debayer",
+    "load pp_light_source_00001.fits",
+    "save result_stacked"
+   ]
+  ],
+  "read_output_calls": [
+   {
+    "positional": [
+     "GoldenTarget"
+    ],
+    "keywords": {
+     "generate_rejmap": "False",
+     "library_dest": "<TMP>/frames/lights/GoldenTarget",
+     "output_file": "golden_stack.fits",
+     "registered_seq_name": "None"
+    }
+   }
+  ],
+  "diagnostics": {
+   "corrupt_frames_skipped": [],
+   "calibration_mismatch_flags": [],
+   "calibration_blocking_flags": [],
+   "calibration_match_blocking_flags": [],
+   "symlinked_light_paths": [
+    "/frames/light_0000.fits"
+   ],
+   "debayer_applied": true,
+   "num_lights": 1,
+   "rejection_sigma_low": 3.0,
+   "rejection_sigma_high": 3.0,
+   "rejection_sigma_mode": "fixed",
+   "rejection_sigma_floor": null,
+   "rejection_sigma_low_extra": null,
+   "rejection_sigma_floor_applied": false,
+   "filter_wfwhm_requested": "95%",
+   "filter_wfwhm_effective": null,
+   "filter_wfwhm_loosened": true,
+   "calibration_applied": {
+    "dark": true,
+    "flat": true,
+    "bias": false
+   }
+  }
+ },
+ "spectral_alternate_detection": {
+  "result": null,
+  "scripts": [
+   [
+    "setext fits",
+    "set32bits",
+    "cd <TMP>/work/GoldenTarget__golden_stack/darks",
+    "convert dark -out=../process -fitseq",
+    "cd ../process",
+    "stack dark rej 3 3 -nonorm -out=dark_stacked",
+    "cd <TMP>/work/GoldenTarget__golden_stack/lights",
+    "convert light_source -out=../process -fitseq",
+    "cd ../process",
+    "calibrate light_source -dark=dark_stacked  ",
+    "setfindstar -relax=on -roundness=0.15 -radius=3",
+    "register pp_light_source -transf=shift",
+    "stack r_pp_light_source rej 3.0000 3.0000 -filter-wfwhm=95% -weight=wfwhm -norm=addscale -out=result_stacked"
+   ]
+  ],
+  "read_output_calls": [
+   {
+    "positional": [
+     "GoldenTarget"
+    ],
+    "keywords": {
+     "generate_rejmap": "False",
+     "library_dest": "<TMP>/frames/lights/GoldenTarget",
+     "output_file": "golden_stack.fits",
+     "registered_seq_name": "pp_light_source"
+    }
+   }
+  ],
+  "diagnostics": {
+   "corrupt_frames_skipped": [],
+   "calibration_mismatch_flags": [],
+   "calibration_blocking_flags": [],
+   "calibration_match_blocking_flags": [],
+   "symlinked_light_paths": [
+    "/frames/light_0000.fits",
+    "/frames/light_0001.fits",
+    "/frames/light_0002.fits",
+    "/frames/light_0003.fits",
+    "/frames/light_0004.fits",
+    "/frames/light_0005.fits",
+    "/frames/light_0006.fits",
+    "/frames/light_0007.fits"
+   ],
+   "debayer_applied": false,
+   "num_lights": 8,
+   "rejection_sigma_low": 3.0,
+   "rejection_sigma_high": 3.0,
+   "rejection_sigma_mode": "fixed",
+   "rejection_sigma_floor": null,
+   "rejection_sigma_low_extra": null,
+   "rejection_sigma_floor_applied": false,
+   "filter_wfwhm_requested": "95%",
+   "filter_wfwhm_effective": "95%",
+   "filter_wfwhm_loosened": false,
+   "calibration_applied": {
+    "dark": true,
+    "flat": false,
+    "bias": false
+   }
+  }
+ },
+ "spectral_phase_correlation": {
+  "result": null,
+  "scripts": [
+   [
+    "setext fits",
+    "set32bits",
+    "cd <TMP>/work/GoldenTarget__golden_stack/biases",
+    "convert bias -out=../process -fitseq",
+    "cd ../process",
+    "stack bias rej 3 3 -nonorm -out=bias_stacked",
+    "cd <TMP>/work/GoldenTarget__golden_stack/darks",
+    "convert dark -out=../process -fitseq",
+    "cd ../process",
+    "stack dark rej 3 3 -nonorm -out=dark_stacked",
+    "cd <TMP>/work/GoldenTarget__golden_stack/flats",
+    "convert flat -out=../process -fitseq",
+    "cd ../process",
+    "calibrate flat -bias=bias_stacked",
+    "stack pp_flat rej 3 3 -norm=mul -out=flat_stacked",
+    "cd <TMP>/work/GoldenTarget__golden_stack/lights",
+    "convert light_source -out=../process",
+    "cd ../process",
+    "calibrate light_source -dark=dark_stacked -flat=flat_stacked "
+   ],
+   [
+    "setext fits",
+    "set32bits",
+    "cd <TMP>/work/GoldenTarget__golden_stack/process/aligned",
+    "convert aligned_light -out=.",
+    "stack aligned_light rej 3.0000 3.0000 -weight=noise -rejmap -norm=addscale -out=../result_stacked"
+   ]
+  ],
+  "read_output_calls": [
+   {
+    "positional": [
+     "GoldenTarget__golden_stack"
+    ],
+    "keywords": {}
+   },
+   {
+    "positional": [
+     "GoldenTarget__golden_stack"
+    ],
+    "keywords": {
+     "generate_rejmap": "True",
+     "library_dest": "<TMP>/frames/lights/GoldenTarget",
+     "output_file": "golden_stack.fits",
+     "registered_seq_name": "None"
+    }
+   }
+  ],
+  "diagnostics": {
+   "corrupt_frames_skipped": [],
+   "calibration_mismatch_flags": [],
+   "calibration_blocking_flags": [
+    "bias master built from 2 frame(s), fewer than the minimum of 3: the master bias keeps the read noise of its few frames and any cosmic ray hit in them",
+    "dark master built from 2 frame(s), fewer than the minimum of 3: the master dark keeps the noise of its few frames and any cosmic ray hit in them",
+    "flat master built from 2 frame(s), fewer than the minimum of 3: the master flat copies the noise of its few frames into every light frame"
+   ],
+   "calibration_match_blocking_flags": [],
+   "symlinked_light_paths": [
+    "/frames/light_0000.fits",
+    "/frames/light_0001.fits",
+    "/frames/light_0002.fits",
+    "/frames/light_0003.fits",
+    "/frames/light_0004.fits",
+    "/frames/light_0005.fits",
+    "/frames/light_0006.fits",
+    "/frames/light_0007.fits",
+    "/frames/light_0008.fits",
+    "/frames/light_0009.fits",
+    "/frames/light_0010.fits",
+    "/frames/light_0011.fits",
+    "/frames/light_0012.fits",
+    "/frames/light_0013.fits",
+    "/frames/light_0014.fits",
+    "/frames/light_0015.fits",
+    "/frames/light_0016.fits",
+    "/frames/light_0017.fits",
+    "/frames/light_0018.fits",
+    "/frames/light_0019.fits"
+   ],
+   "debayer_applied": false,
+   "num_lights": 20,
+   "rejection_sigma_low": 3.0,
+   "rejection_sigma_high": 3.0,
+   "rejection_sigma_mode": "fixed",
+   "rejection_sigma_floor": null,
+   "rejection_sigma_low_extra": null,
+   "rejection_sigma_floor_applied": false,
+   "filter_wfwhm_requested": "95%",
+   "filter_wfwhm_effective": "95%",
+   "filter_wfwhm_loosened": false,
+   "calibration_applied": {
+    "dark": true,
+    "flat": true,
+    "bias": false
+   },
+   "registered_frames": 1,
+   "registration_failed_frames": 0
+  }
+ },
+ "spectral_standard": {
+  "result": null,
+  "scripts": [
+   [
+    "setext fits",
+    "set32bits",
+    "cd <TMP>/work/GoldenTarget__golden_stack/biases",
+    "convert bias -out=../process -fitseq",
+    "cd ../process",
+    "stack bias rej 3 3 -nonorm -out=bias_stacked",
+    "cd <TMP>/work/GoldenTarget__golden_stack/darks",
+    "convert dark -out=../process -fitseq",
+    "cd ../process",
+    "stack dark rej 3 3 -nonorm -out=dark_stacked",
+    "cd <TMP>/work/GoldenTarget__golden_stack/flats",
+    "convert flat -out=../process -fitseq",
+    "cd ../process",
+    "calibrate flat -bias=bias_stacked",
+    "stack pp_flat rej 3 3 -norm=mul -out=flat_stacked",
+    "cd <TMP>/work/GoldenTarget__golden_stack/lights",
+    "convert light_source -out=../process -fitseq",
+    "cd ../process",
+    "calibrate light_source -dark=dark_stacked -flat=flat_stacked ",
+    "setfindstar -relax=on",
+    "register pp_light_source -transf=shift",
+    "stack r_pp_light_source rej 2.7414 2.2414 -filter-wfwhm=90% -weight=wfwhm -rejmap -norm=addscale -out=result_stacked"
+   ]
+  ],
+  "read_output_calls": [
+   {
+    "positional": [
+     "GoldenTarget"
+    ],
+    "keywords": {
+     "generate_rejmap": "True",
+     "library_dest": "<TMP>/frames/lights/GoldenTarget",
+     "output_file": "golden_stack.fits",
+     "registered_seq_name": "pp_light_source"
+    }
+   }
+  ],
+  "diagnostics": {
+   "corrupt_frames_skipped": [],
+   "calibration_mismatch_flags": [],
+   "calibration_blocking_flags": [],
+   "calibration_match_blocking_flags": [],
+   "symlinked_light_paths": [
+    "/frames/light_0000.fits",
+    "/frames/light_0001.fits",
+    "/frames/light_0002.fits",
+    "/frames/light_0003.fits",
+    "/frames/light_0004.fits",
+    "/frames/light_0005.fits",
+    "/frames/light_0006.fits",
+    "/frames/light_0007.fits",
+    "/frames/light_0008.fits",
+    "/frames/light_0009.fits",
+    "/frames/light_0010.fits",
+    "/frames/light_0011.fits",
+    "/frames/light_0012.fits",
+    "/frames/light_0013.fits",
+    "/frames/light_0014.fits",
+    "/frames/light_0015.fits",
+    "/frames/light_0016.fits",
+    "/frames/light_0017.fits",
+    "/frames/light_0018.fits",
+    "/frames/light_0019.fits"
+   ],
+   "debayer_applied": false,
+   "num_lights": 20,
+   "rejection_sigma_low": 2.7414027276049455,
+   "rejection_sigma_high": 2.2414027276049455,
+   "rejection_sigma_mode": "adaptive",
+   "rejection_sigma_floor": 2.0,
+   "rejection_sigma_low_extra": 0.5,
+   "rejection_sigma_floor_applied": false,
+   "filter_wfwhm_requested": "90%",
+   "filter_wfwhm_effective": "90%",
+   "filter_wfwhm_loosened": false,
+   "calibration_applied": {
+    "dark": true,
+    "flat": true,
+    "bias": false
+   }
+  }
+ },
+ "imaging_flats_at_another_offset": {
+  "result": null,
+  "scripts": [
+   [
+    "setext fits",
+    "set32bits",
+    "cd <TMP>/work/GoldenTarget__golden_stack/biases",
+    "convert bias -out=../process -fitseq",
+    "cd ../process",
+    "stack bias rej 3 3 -nonorm -out=bias_stacked",
+    "cd <TMP>/work/GoldenTarget__golden_stack/flat_biases",
+    "convert flatbias -out=../process -fitseq",
+    "cd ../process",
+    "stack flatbias rej 3 3 -nonorm -out=flat_bias_stacked",
+    "cd <TMP>/work/GoldenTarget__golden_stack/darks",
+    "convert dark -out=../process -fitseq",
+    "cd ../process",
+    "stack dark rej 3 3 -nonorm -out=dark_stacked",
+    "cd <TMP>/work/GoldenTarget__golden_stack/flats",
+    "convert flat -out=../process -fitseq",
+    "cd ../process",
+    "calibrate flat -bias=flat_bias_stacked",
+    "stack pp_flat rej 3 3 -norm=mul -out=flat_stacked",
+    "cd <TMP>/work/GoldenTarget__golden_stack/lights",
+    "convert light_source -out=../process -fitseq",
+    "cd ../process",
+    "calibrate light_source -dark=dark_stacked -flat=flat_stacked ",
+    "setfindstar -relax=on",
+    "register pp_light_source -2pass",
+    "seqapplyreg pp_light_source -filter-wfwhm=95%",
+    "stack r_pp_light_source rej 2.7414 2.2414 -weight=wfwhm -norm=addscale -out=result_stacked"
+   ]
+  ],
+  "read_output_calls": [
+   {
+    "positional": [
+     "GoldenTarget"
+    ],
+    "keywords": {
+     "generate_rejmap": "False",
+     "library_dest": "<TMP>/frames/lights/GoldenTarget",
+     "output_file": "golden_stack.fits",
+     "registered_seq_name": "pp_light_source"
+    }
+   }
+  ],
+  "diagnostics": {
+   "corrupt_frames_skipped": [],
+   "calibration_mismatch_flags": [],
+   "calibration_blocking_flags": [],
+   "calibration_match_blocking_flags": [],
+   "symlinked_light_paths": [
+    "/frames/light_0000.fits",
+    "/frames/light_0001.fits",
+    "/frames/light_0002.fits",
+    "/frames/light_0003.fits",
+    "/frames/light_0004.fits",
+    "/frames/light_0005.fits",
+    "/frames/light_0006.fits",
+    "/frames/light_0007.fits",
+    "/frames/light_0008.fits",
+    "/frames/light_0009.fits",
+    "/frames/light_0010.fits",
+    "/frames/light_0011.fits",
+    "/frames/light_0012.fits",
+    "/frames/light_0013.fits",
+    "/frames/light_0014.fits",
+    "/frames/light_0015.fits",
+    "/frames/light_0016.fits",
+    "/frames/light_0017.fits",
+    "/frames/light_0018.fits",
+    "/frames/light_0019.fits"
+   ],
+   "debayer_applied": false,
+   "num_lights": 20,
+   "rejection_sigma_low": 2.7414027276049455,
+   "rejection_sigma_high": 2.2414027276049455,
+   "rejection_sigma_mode": "adaptive",
+   "rejection_sigma_floor": 2.0,
+   "rejection_sigma_low_extra": 0.5,
+   "rejection_sigma_floor_applied": false,
+   "filter_wfwhm_requested": "95%",
+   "filter_wfwhm_effective": "95%",
+   "filter_wfwhm_loosened": false,
+   "calibration_applied": {
+    "dark": true,
+    "flat": true,
+    "bias": false
+   }
+  }
+ }
+}

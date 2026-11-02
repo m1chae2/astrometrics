@@ -216,6 +216,7 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
                     selectedFile={selectedFile}
                     onView={handleSelectFile}
                     onShowHeader={onShowHeader}
+                    depthGoalRefreshKey={`${reloadKey}-${isProcessing ? 'busy' : 'idle'}`}
                   />
                   <AnalysisResults results={analysisResults} />
                   <UnifiedFrameAnalysis

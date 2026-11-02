@@ -318,7 +318,51 @@ GATE_DESCRIPTIONS: dict[str, str] = {
         "setting, offset or temperature, or refused for a binning mismatch."
     ),
     "calibration_frame_count": (
-        "Fails when a master bias, dark or flat was built from fewer frames than the configured minimum."
+        "Fails when a master bias, dark or flat was built from fewer frames than the configured "
+        "minimum, or when a dark or bias master holds fewer than `THIN_SET_FRAME_COUNT` different "
+        "frames (copies of one file count once). Not checked when no calibration frame was applied."
+    ),
+    "dark_level": (
+        "Fails when a dark frame's mean level is more than `VALUE_STEP_ALLOWANCE` value steps (plus "
+        "the dark current allowance) from the bias level of the same setting. Not checked when the "
+        "frames' numbers are not measured or no bias frame exists at the setting."
+    ),
+    "dark_noise": (
+        "Fails when the noise of the dark frames is below `NOISE_RATIO_LOW` times the read noise "
+        "in the camera profile (frames cut off at zero, or at another gain). Not checked when the "
+        "profile has no read noise for the setting."
+    ),
+    "dark_zero_pixel_fraction": (
+        "Fails when a dark frame has `ZERO_PIXEL_FRACTION_LIMIT` or more of its pixels at exactly "
+        "zero (cut off at zero). Not checked when the frames' numbers are not measured."
+    ),
+    "dark_light_leak": (
+        "Fails when a dark frame's large-scale pattern exceeds that of the bias frames at the same "
+        "setting by more than `VALUE_STEP_ALLOWANCE` value steps (light reached the sensor). Not "
+        "checked when no bias frame at the setting is measured."
+    ),
+    "bias_level": (
+        "Fails when the bias frames' level is more than `VALUE_STEP_ALLOWANCE` value steps from "
+        "the bias level in the camera profile. Not checked when the profile has no bias level for "
+        "the setting."
+    ),
+    "bias_noise": (
+        "Fails when the noise of the bias frames is outside `NOISE_RATIO_LOW` to "
+        "`NOISE_RATIO_HIGH` times the read noise in the camera profile. Not checked when the "
+        "profile has no read noise for the setting."
+    ),
+    "bias_zero_pixel_fraction": (
+        "Fails when a bias frame has `ZERO_PIXEL_FRACTION_LIMIT` or more of its pixels at exactly "
+        "zero (cut off at zero). Not checked when the frames' numbers are not measured."
+    ),
+    "dark_missing": (
+        "Fails when light frames of an exposure have no dark within `DARK_EXPOSURE_MATCH_SECONDS` "
+        "of it. Not checked when the stacking run did not say which calibration it applied."
+    ),
+    "light_temperature_spread": (
+        "Fails when the sensor temperature of the lights of one exposure spans more than "
+        "`DEFAULT_DARK_TEMPERATURE_TOLERANCE_C`, which the batch mean would hide. Not checked when "
+        "the stack used no dark or the lights record no temperature."
     ),
     "rejected_pixel_fraction": (
         "Fails when the share of pixels rejected as outliers in the stack is above "
@@ -510,8 +554,6 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
         "The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip."
     ),
     "quality_processing_applied": "Whether the quality gates were run.",
-    "flagged": "True if one or more quality gates failed, so a person should look at the run.",
-    "flag_reasons": "One plain sentence for each reason the run was flagged.",
     "gates": "Every quality gate result: passed, failed or not checked.",
     "created_at": "Time the quality summary was made, in UTC.",
     "provenance_activity_id": (
@@ -590,7 +632,6 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     "ambiguous_classification_count": (
         "Number of stars whose classification is ambiguous between spectral classes."
     ),
-    "flagged_spectral_classifications": "Details of each star whose classification is in doubt.",
     "stage_quality_summary": "Summary of the quality metrics at each extraction checkpoint.",
     "gaia_xp_summary": (
         "Comparison with Gaia DR3 synthetic XP spectra (low-resolution spectra from the Gaia space mission)."
@@ -618,7 +659,6 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     "frames_stacked": "Number of light frames (exposures of the target) aligned and stacked.",
     "excluded_frames": "Input frames set aside before stacking, each with its reason.",
     "rejected_pixel_fraction": "Share of pixel values rejected (clipped) while building the stack.",
-    "rejected_fraction_flagged": "True if pixel rejection was above the warning threshold.",
     "background_split_detected": (
         "True if the frames' sky-background levels split into two groups with a sudden jump "
         "between them (gap at least 4 times the spread within a group, checked for each exposure "
@@ -639,13 +679,9 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     "saturated_pixel_fraction": (
         "Share of saturated pixels (clipped at the sensor's maximum) in the final stack."
     ),
-    "saturation_flagged": "True if the stack holds a significant share of saturated pixels.",
     "exposure_groups": "One sub-stack per exposure length, with its details.",
-    "recommended_exposure_seconds": "Estimated exposure, in seconds, that keeps bright stars below clipping.",
     "zero_pixel_fraction": "Share of stack pixels that are exactly zero.",
-    "zero_fraction_flagged": "True if over-subtraction clipped pixels at zero ADU (zero camera counts).",
     "negative_pixel_max_percent": "Largest percentage of negative pixels the stacking engine reported.",
-    "negative_pixels_flagged": "True if the count of negative pixels was above the tolerance.",
     "stacked_fwhm_px": "Measured FWHM of the stacked image.",
     "median_input_fwhm_px": "Median FWHM of all light frames that were kept.",
     "expected_fwhm_px": "Predicted stack FWHM: the RMS of a sample of input-frame FWHMs.",
@@ -673,22 +709,25 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     "gaia_fit_star_count": "Stars used in the Gaia refit.",
     "wcs_refinement_shift_arcsec": "Largest move of the field made by the Gaia refit.",
     "expected_stack_fwhm_px": "Expected stack FWHM: the RMS of a sample of input-frame FWHMs.",
-    "fwhm_degraded": (
-        "True if the stack FWHM over the expected FWHM is above the limit (the stack is blurrier than "
-        "predicted)."
-    ),
     "spectral_registration_flags": (
         "Frames about which the spectral registration (alignment) test raised a concern."
     ),
     "spectral_registration_checked": "Whether the spectral registration (alignment) test ran.",
     "stacking_duration_seconds": "How long the stacking run took, in seconds.",
-    "timed_out": "True if the stacking run timed out.",
     "debayer_applied": (
         "Whether color frames were debayered (turned from the sensor's color-filter mosaic into full-"
         "color pixels)."
     ),
-    "input_quality": "Structured assessment of the raw frames' quality.",
-    "output_quality": "Structured assessment of the final stack's quality.",
+    "frames_accepted": "Number of frames left after the gain, frame-quality and background checks.",
+    "frames_excluded_for_gain": (
+        "Number of frames set aside because their camera gain differed from the rest."
+    ),
+    "frames_excluded_for_background": (
+        "Number of frames set aside because their sky background differed from the rest."
+    ),
+    "frames_quarantined": "Number of frames with clouds or trailed stars moved to the excluded folder.",
+    "dark_unique_frame_count": "Number of different frames (copies counted once) in the master dark.",
+    "bias_unique_frame_count": "Number of different frames (copies counted once) in the master bias.",
 }
 
 
@@ -920,8 +959,8 @@ FITS_INTRO = (
 # Words that open section 4.1 of every guide, before the gate table.
 GATE_INTRO = (
     'A quality gate is an automatic test on a run. It passes, fails, or is "not checked" when the '
-    "data it needs are missing. A failed gate marks the run as flagged (the `flagged` field in "
-    "Section 7) so a person can look at it. The list below is read from the code when this guide is "
+    "data it needs are missing. A failed gate is stored as a warning row, and the job's warnings "
+    "list it so a person can look at it. The list below is read from the code when this guide is "
     "generated."
 )
 
@@ -1070,7 +1109,7 @@ NOTATION_LINK = "../Astrometrics_Library_Architecture.md#appendix-a-notation"
 GUIDE_NOTATION: dict[str, list[tuple[str, str, str]]] = {
     "astrometry": [
         (r"$B_\text{sky}(x, y)$", "Background (sky) level at a pixel", "ADU"),
-        (r"$\sigma_\text{sky}$", "Noise of the background", "ADU"),
+        (r"$\sigma_\text{bkg}$", "Noise of the background", "ADU"),
         (r"$k$", "Detection threshold, in units of the background noise", "none"),
         (r"$s$", "Pixel scale", "arcsec/px"),
         (r"$p_\text{px}$", "Pixel pitch (binned pixel size)", "μm"),
@@ -1106,7 +1145,7 @@ GUIDE_NOTATION: dict[str, list[tuple[str, str, str]]] = {
             "Scatter of a constant star in the field's noise model",
             "mag",
         ),
-        (r"$\sigma_\text{measured}$", "Measured scatter of a star", "mag"),
+        (r"$\sigma_\text{obs}$", "Measured scatter of a star", "mag"),
         (
             r"$\delta_j$, $P_j$",
             "Normalized residual of point $j$, and the product of neighboring residuals",
@@ -1251,7 +1290,7 @@ def build_astrometry_doc() -> str:
     record_quality_module = "astrometricslib.pipelines.astrometry.post_processing.record_quality"
     identifier_module = "astrometricslib.pipelines.astrometry.processing.star_identifier"
     refine_module = "astrometricslib.pipelines.astrometry.processing.wcs_refinement"
-    driver_module = "astrometricslib.drivers.astrometry_net_driver"
+    driver_module = "astrometricslib._internal.drivers.astrometry_net_driver"
     fwhm_module = "astrometricslib.pipelines.astrometry.pre_processing.fwhm"
     detector = require_symbol(
         "astrometricslib.pipelines.astrometry.pre_processing.source_detection", "SourceDetector"
@@ -1289,7 +1328,8 @@ def build_astrometry_doc() -> str:
             "`str` (ISO-8601, UTC)",
             "Time the shutter opened. Used to move Gaia DR3 star positions from the catalog "
             "date to the image date (Eq. 3).",
-            "Gaia positions stay at the catalog date (epoch 2016.0) and the run is flagged.",
+            "Gaia positions stay at the catalog date (epoch 2016.0) and the run records the "
+            "`gaia_epoch_unknown` flag.",
         ],
         [
             "`FOCALLEN`",
@@ -1303,7 +1343,8 @@ def build_astrometry_doc() -> str:
             "Recommended",
             "`float` (μm)",
             "Pixel size after binning (binning joins neighboring sensor pixels into one), "
-            "used as written. If the two values differ, they are averaged and the run is flagged.",
+            "used as written. If the two values differ, they are averaged and the run records the "
+            "`scale_hint_binning_mismatch` flag.",
             "`PIXSIZE1` / `PIXSIZE2` times `XBINNING` / `YBINNING`.",
         ],
         [
@@ -1505,9 +1546,9 @@ estimate. A small image falls back to one sigma-clipped median.
 
 The test below asks how many noise units a pixel stands above the local sky. A large value means
 a real source; a value near zero means only sky. A source is kept when its peak stands above the
-background $B_\text{sky}$ by the threshold $k$, where $\sigma_\text{sky}$ is the noise of the background:
+background $B_\text{sky}$ by the threshold $k$, where $\sigma_\text{bkg}$ is the noise of the background:
 
-$$\frac{I(x, y) - B_\text{sky}(x, y)}{\sigma_\text{sky}} \ge k = <<threshold>> \tag{1}$$
+$$\frac{I(x, y) - B_\text{sky}(x, y)}{\sigma_\text{bkg}} \ge k = <<threshold>> \tag{1}$$
 
 `DAOStarFinder` (a standard star finder from photutils) also checks shape. Sharpness compares a
 peak's height with its spread; roundness compares its width along the two axes, with 0 meaning
@@ -2012,7 +2053,7 @@ per second.
 
 **Its error.** The CCD equation adds up every noise source in electrons: the star's own photon
 noise, the sky, the read noise and the dark current. A large error compared with $F_\text{net}$
-means a noisy measurement. In the symbols of the architecture paper's Equation (7), the 1σ error
+means a noisy measurement. In the symbols of the architecture paper's Equation (11), the 1σ error
 (one standard deviation) in ADU is $\sigma_{\text{ap}} / G$, where
 
 $$\sigma_{\text{ap}}^2 = S_\star + n_\text{pix}\left(s_\text{sky} + \sigma_\text{rd}^2 + D\right)
@@ -2040,7 +2081,7 @@ mean over the session, so a ratio of 1 means "normal". The ensemble signal $L_\t
 the weighted average of those ratios in the frame at time $t$, scaled back to flux units by the
 mean of the comparison stars' session means. The average is inverse-variance weighted: each star
 counts in proportion to one over its squared fractional error, so precise stars count more than
-noisy ones. This is Equation (8) of the paper:
+noisy ones. This is Equation (12) of the paper:
 
 $$L_\text{ens}(t) = \bar{\mu}\,\frac{\sum_c w_c(t) \, F_c(t) / \mu_c}{\sum_c w_c(t)}, \qquad
 w_c(t) = \frac{1}{\epsilon_c(t)^2}, \qquad
@@ -2085,7 +2126,7 @@ errors). It needs at least <<noise_model_stars>> stars.
 
 **The three indices.** In each, $\hat{F}_j$ is point $j$ of one star's light curve, $e_j$ its
 error, $\bar{F}_w$ the error-weighted mean of the points and $n_\text{pts}$ the number of
-points, as in the paper's Equation (9). When a star's errors are smaller than the noise model's
+points, as in the paper's Equation (13). When a star's errors are smaller than the noise model's
 scatter, they are scaled up to it, so a constant star gives the values below.
 
 The reduced chi-square $\chi^2_\nu$ asks whether the points scatter more than their error bars
@@ -2104,7 +2145,7 @@ $$\delta_j = \sqrt{\frac{n_\text{pts}}{n_\text{pts}-1}}\,\frac{\hat{F}_j - \bar{
 The excess scatter $E_\sigma$ compares the star's measured scatter (in magnitudes) with what the noise
 model expects for a star of its brightness. 1 means typical; 2 means twice the usual scatter:
 
-$$E_\sigma = \frac{\sigma_\text{measured}}{\sigma_\text{model}(m_\text{inst})} \tag{7}$$
+$$E_\sigma = \frac{\sigma_\text{obs}}{\sigma_\text{model}(m_\text{inst})} \tag{7}$$
 
 Eq. 6 is the single-band Stetson J (all points in one filter; Stetson also defines a version
 that pairs points taken in two filters), with consecutive pairs and unit weights (Stetson 1996,
@@ -2166,7 +2207,7 @@ A light curve too short to search gets "insufficient data" instead.
 
 **Many searches.** Searching many stars raises the chance that one passes by luck. For $N_s$
 independent searches, the chance that at least one reaches probability $p$ by luck is the
-family-wise false-alarm probability (Equation (11) of the architecture paper)
+family-wise false-alarm probability (Equation (15) of the architecture paper)
 
 $$p_\text{corr} = 1 - (1 - p)^{N_s} \tag{10}$$
 
@@ -2467,7 +2508,7 @@ flowchart TD
     B --> C["Name stars from the matching normal image's sky map, else by their pixel pattern"]
     C --> D["Find the spectrum direction and trace each spectrum trail"]
     D --> E["Sum light across each spectrum trail; subtract sky from two side bands"]
-    E --> F["Remove light spilling over from bright neighbors"]
+    E --> F["Estimate the share of light from close neighbors (spectrum not changed)"]
     F --> G["Turn position along the spectrum trail into wavelength"]
     G --> H["Correct the shift from the air bending light"]
     H --> I["Correct the offset of the wavelength scale"]
@@ -2549,9 +2590,14 @@ mean of their medians. When the two disagree by more than the noise allows, the 
 (the one with the lower median) is used alone: light can only add to a band, so the brighter one
 holds a neighbor's light.
 
-**Neighbors.** A bright neighbor's wings (the faint outer edges of its spectrum trail) are
-removed with a blur profile measured from an isolated star (`neighbor_trail_deblending.py`,
-`neighbor_wing_correction.py`).
+**Neighbors.** A bright neighbor's wings (the faint outer edges of its spectrum trail) can
+reach into a star's box. The pipeline does not take them out: the correction is turned off
+because its fit check did not tell good corrections from bad ones
+([SPE-34](../validation/spectroscopy.md#spe-34)). Each star with a close neighbor instead carries
+a rough estimate of the neighbors' share of its box light, worked out from a blur profile
+measured from an isolated star
+(`neighbor_wing_correction.py`). It is an estimated ratio, not a true fraction, and it changes
+nothing in the spectrum.
 
 ### 3.3 Flux calibration
 
@@ -3064,10 +3110,11 @@ def build_stacking_doc() -> str:
     gates = discover_gate_names("stacking")
     quality_module = "astrometricslib.pipelines.stacking.post_processing.stack_quality"
     flat_module = "astrometricslib.pipelines.stacking.pre_processing.flat_calibration"
+    assessment_module = "astrometricslib.pipelines.stacking.pre_processing.calibration_assessment"
     values = {
         "version_line": VERSION_LINE,
         "dark_tol": require_symbol(
-            "astrometricslib.drivers.calibration_library", "DEFAULT_DARK_TEMPERATURE_TOLERANCE_C"
+            "astrometricslib._internal.drivers.calibration_library", "DEFAULT_DARK_TEMPERATURE_TOLERANCE_C"
         ),
         "degrade": require_symbol(quality_module, "DEFAULT_FWHM_DEGRADATION_RATIO"),
         "rej": require_symbol(quality_module, "DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD"),
@@ -3094,6 +3141,12 @@ def build_stacking_doc() -> str:
             "DEFAULT_GAP_RATIO_THRESHOLD",
         ),
         "flat_noise": require_symbol(flat_module, "MAXIMUM_FLAT_NOISE_FRACTION"),
+        "thin_set": require_symbol(assessment_module, "THIN_SET_FRAME_COUNT"),
+        "zero_share": require_symbol(assessment_module, "ZERO_PIXEL_FRACTION_LIMIT"),
+        "step_allowance": require_symbol(assessment_module, "VALUE_STEP_ALLOWANCE"),
+        "noise_low": require_symbol(assessment_module, "NOISE_RATIO_LOW"),
+        "noise_high": require_symbol(assessment_module, "NOISE_RATIO_HIGH"),
+        "dark_current": require_symbol(assessment_module, "DARK_CURRENT_ALLOWANCE_ADU_PER_SECOND"),
         "flat_low": require_symbol(flat_module, "MINIMUM_FLAT_LEVEL_FRACTION"),
         "flat_high": require_symbol(flat_module, "MAXIMUM_FLAT_LEVEL_FRACTION"),
         "saturation": require_symbol(
@@ -3248,6 +3301,48 @@ def build_stacking_doc() -> str:
             f"`{values['saturation']:g}`",
             design_estimate_cell("STK"),
             "Share of saturated pixels at or above which the stack is flagged (`saturated_pixel_fraction`).",
+        ],
+        [
+            "`ZERO_PIXEL_FRACTION_LIMIT`",
+            f"`{values['zero_share']:g}`",
+            status_cell(STATUS_MEASURED, "STK-47"),
+            "Share of exactly-zero pixels in a dark or bias frame at or above which the frame is cut "
+            "off at zero (`dark_zero_pixel_fraction`, `bias_zero_pixel_fraction`). The library's frames "
+            "have none or at least 72%, so the separation is measured; the exact figure inside the "
+            "gap is a design estimate.",
+        ],
+        [
+            "`VALUE_STEP_ALLOWANCE`",
+            f"`{values['step_allowance']:g}` value steps",
+            status_cell(STATUS_PARTLY_MEASURED, "STK-48", "STK-50", "STK-51"),
+            "Largest distance, in value steps (the smallest step between two pixel values the "
+            "sensor writes), of a dark's level or pattern from its reference, and of a bias's level "
+            "from the camera profile's (`dark_level`, `dark_light_leak`, `bias_level`). The clean "
+            "frames of the library all sit inside it; it is untested on held-out data.",
+        ],
+        [
+            "`NOISE_RATIO_LOW` / `NOISE_RATIO_HIGH`",
+            f"`{values['noise_low']:g}` / `{values['noise_high']:g}`",
+            status_cell(STATUS_PARTLY_MEASURED, "STK-49"),
+            "Band, as a multiple of the camera profile's read noise, that the noise of a bias frame "
+            "must lie in (`bias_noise`); a dark has the lower limit only (`dark_noise`). The ratio "
+            "observed was 0.99 to 1.00; the width is a design choice.",
+        ],
+        [
+            "`DARK_CURRENT_ALLOWANCE_ADU_PER_SECOND`",
+            f"`{values['dark_current']:g}` ADU/s",
+            status_cell(STATUS_PARTLY_MEASURED, "STK-54"),
+            "Dark current added to the allowed level difference of a dark, per second of exposure. "
+            "Measured on the ASI 533 at -10 C; used for every camera because it is below one value "
+            "step for any exposure under about 2,000 s.",
+        ],
+        [
+            "`THIN_SET_FRAME_COUNT`",
+            f"`{values['thin_set']}` frames",
+            design_estimate_cell("STK"),
+            "Fewest different frames a dark or bias master may hold before `calibration_frame_count` "
+            "fails. A master of N frames can add up to 1/N of the noise variance of a light, so "
+            "10 frames is a tenth." + see_also("STK-53"),
         ],
     ])
     template = r"""# Astronomical stacking and image calibration pipeline review guide
@@ -3446,7 +3541,7 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
    discard.
 4. **Stack.** `stack_runner.run_stack` splits the frames by exposure length (and by night for
    spectra) and calls the `StackingDriver`. The Siril driver (`siril_stacking_driver.py`) runs
-   `ImageProcessing` in `siril_interface.py`: masters, calibration, registration (alignment) and
+   `ImageProcessing` in the `siril_interface` package: masters, calibration, registration (alignment) and
    stacking. Spectral registration that loses too many frames is retried with relaxed detection,
    then with phase correlation (aligning whole images by their overall pattern rather than by
    single stars).
@@ -3460,7 +3555,10 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
    patches, scaled by the flux of reference stars. With star-width weighting the frame weights
    are rebuilt from the sequence file's star widths; with noise or star-count weighting they are
    stored as not measured. When the patches' sky coordinates come from a frame header, they are
-   first moved onto the stored reference stars.
+   first shifted and turned a little (up to half a degree) onto the stored reference stars.
+   The same stage stores the ratio of the measured noise to the predicted noise, the noise of the
+   odd–even difference of two half stacks (a direct measure of the random part), the noise at four
+   aperture sizes, and the stack's depth in magnitudes (architecture paper, Section 3.4.3).
 6. **Preview image.** A JPEG for people to look at is made from a copy of the stack; the stack
    itself is never changed. GraXpert, an AI tool, removes the sky's brightness gradient. Siril
    stretches the brightness so faint parts show. Cosmic Clarity, another AI tool, removes noise.
@@ -3583,7 +3681,7 @@ The fifth pipeline, stacking, does not use this interface and has no adapter. It
 `stage.stack_frames` through `stack_runner.run_stack` to a `StackingDriver`: the interface for a
 program that calibrates, aligns and combines frames. The one implementation uses Siril, an
 open-source astronomy image processor, through the `ImageProcessing` class in
-`siril_interface.py`.
+the `siril_interface` package.
 
 ```mermaid
 flowchart LR

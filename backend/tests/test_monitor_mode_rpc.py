@@ -72,6 +72,7 @@ BACKGROUND_COMMANDS_STARTED_BY_QUEUE = frozenset({"sequencer:begin"})
 own test below, because the queue needs a stored session first."""
 
 READ_ONLY_METHODS = frozenset({
+    "advisory:depth_goal",
     "advisory:result",
     "advisory:target_report",
     "advisory:tonight",
@@ -87,6 +88,7 @@ READ_ONLY_METHODS = frozenset({
     "astronomy:stars_by_spectral_class",
     "astronomy:target_data_availability",
     "astronomy:visible",
+    "calibration:assess",
     "calibration:get_stats",
     "calibration:query",
     "docs:get_topic",
@@ -116,6 +118,8 @@ READ_ONLY_METHODS = frozenset({
     "observatory:list_cameras",
     "observatory:safety_status",
     "plan:get",
+    "processing:stack_summary",
+    "quality:set_aside_frames",
     "plan:current_session",
     "plan:list_packages",
     "plan:package_for_target",
@@ -128,6 +132,7 @@ READ_ONLY_METHODS = frozenset({
     "planetarium:get_targets",
     "planetarium:get_visibility",
     "planetarium:list_catalog_drivers",
+    "jobs:query",
     "processing:active_jobs",
     "processing:get_job",
     "processing:job_log_tail",
@@ -177,14 +182,16 @@ READ_ONLY_METHODS = frozenset({
 no device."""
 
 LOCAL_WRITE_METHODS = frozenset({
+    "advisory:set_depth_goal",
     "analysis:analyze_image",
     "analysis:cancel",
     "astronomy:delete",
     "astronomy:save",
+    "calibration:measure_frames",
     "calibration:measure_sensor_noise",
     "execution:abort_session",
     "execution:reconcile_session",
-    "execution:record_divergence",
+    "execution:build_divergence_record",
     "handoff:beam",
     "handoff:send_alert",
     "handoff:share_file",
@@ -210,14 +217,16 @@ LOCAL_WRITE_METHODS = frozenset({
     "plan:tick_checklist_item",
     "processing:cancel",
     "processing:delete_job",
-    "processing:measure_half_difference_noise",
-    "processing:measure_night_contributions",
-    "processing:measure_noise_growth",
-    "processing:record_frame_measurements",
+    "processing:measure_noise",
+    "processing:remake_preview",
+    "quality:measure_stack",
+    "quality:record_frame_measurements",
     "processing:siril_open",
     "processing:stack",
+    "sequencer:abort",
     "sequencer:add",
     "sequencer:modify",
+    "sequencer:pause",
     "sequencer:remove",
     "sequencer:reorder",
     "system:frontend_log",
@@ -349,7 +358,7 @@ async def test_every_service_command_rpc_is_refused_in_monitor_mode(
     """RPC methods that go through a backend service are refused too."""
     from sys import modules
 
-    from wayfindinglib import SkyPosition
+    from wayfindinglib._internal.control import SkyPosition
 
     monkeypatch.setattr(
         modules["wayfindinglib.tasks.control_tasks.hardware_operations"],

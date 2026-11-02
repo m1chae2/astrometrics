@@ -127,13 +127,13 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
 1. **Frame selection and tests.** One camera only, no mix of spectral and imaging frames, frames at a less common gain setting set aside, frames set aside by an earlier run dropped, the quarantine (imaging only), and the background test.
 2. **Skip unchanged.** `stack_inputs.py` takes a fingerprint of the frames, calibration frames, settings and stacking code: a short code that changes whenever any of them changes. A match with the last run keeps the stack on disk, unless `force=True`.
 3. **Previous-stack staging.** The current stack moves to a staging folder. On success it becomes the single `_previous` version (`previous_stack.py`), which a person can swap back or discard.
-4. **Stack.** `stack_runner.run_stack` splits the frames by exposure length (and by night for spectra) and calls the `StackingDriver`. The Siril driver (`siril_stacking_driver.py`) runs `ImageProcessing` in `siril_interface.py`: masters, calibration, registration (alignment) and stacking. Spectral registration that loses too many frames is retried with relaxed detection, then with phase correlation (aligning whole images by their overall pattern rather than by single stars).
-5. **After the stack.** Noisy edges are trimmed (`stack_crop.py`). Frames never line up exactly, so the edges of a stack are covered by fewer frames than the middle and are noisier. The trim measures the noise and cuts each side back to where it matches the interior; a stack with clean edges is left alone. The quality summary and its gates are built (16 run gates). The stage then stores the summary's numbers, the gates, the stack's noise, the effective frame count and time, and one weight per member frame as quality measurements (`record_stacking_quality`). The noise is the scatter of the summed sky in fixed empty patches, scaled by the flux of reference stars. With star-width weighting the frame weights are rebuilt from the sequence file's star widths; with noise or star-count weighting they are stored as not measured. When the patches' sky coordinates come from a frame header, they are first moved onto the stored reference stars.
+4. **Stack.** `stack_runner.run_stack` splits the frames by exposure length (and by night for spectra) and calls the `StackingDriver`. The Siril driver (`siril_stacking_driver.py`) runs `ImageProcessing` in the `siril_interface` package: masters, calibration, registration (alignment) and stacking. Spectral registration that loses too many frames is retried with relaxed detection, then with phase correlation (aligning whole images by their overall pattern rather than by single stars).
+5. **After the stack.** Noisy edges are trimmed (`stack_crop.py`). Frames never line up exactly, so the edges of a stack are covered by fewer frames than the middle and are noisier. The trim measures the noise and cuts each side back to where it matches the interior; a stack with clean edges is left alone. The quality summary and its gates are built (25 run gates). The stage then stores the summary's numbers, the gates, the stack's noise, the effective frame count and time, and one weight per member frame as quality measurements (`record_stacking_quality`). The noise is the scatter of the summed sky in fixed empty patches, scaled by the flux of reference stars. With star-width weighting the frame weights are rebuilt from the sequence file's star widths; with noise or star-count weighting they are stored as not measured. When the patches' sky coordinates come from a frame header, they are first shifted and turned a little (up to half a degree) onto the stored reference stars. The same stage stores the ratio of the measured noise to the predicted noise, the noise of the odd–even difference of two half stacks (a direct measure of the random part), the noise at four aperture sizes, and the stack's depth in magnitudes (architecture paper, Section 3.4.3).
 6. **Preview image.** A JPEG for people to look at is made from a copy of the stack; the stack itself is never changed. GraXpert, an AI tool, removes the sky's brightness gradient. Siril stretches the brightness so faint parts show. Cosmic Clarity, another AI tool, removes noise. Star toning dims the stars in proportion to their brightness, because the stretch makes nearly every star the same white dot. GraXpert and Cosmic Clarity run only when configured, and a failed step never fails the stack. The inputs record is written last.
 
 ### 4.1 Quality gates
 
-A quality gate is an automatic test on a run. It passes, fails, or is "not checked" when the data it needs are missing. A failed gate marks the run as flagged (the `flagged` field in Section 7) so a person can look at it. The list below is read from the code when this guide is generated.
+A quality gate is an automatic test on a run. It passes, fails, or is "not checked" when the data it needs are missing. A failed gate is stored as a warning row, and the job's warnings list it so a person can look at it. The list below is read from the code when this guide is generated.
 
 | Gate | Role | Defined in | What it checks |
 | --- | --- | --- | --- |
@@ -149,10 +149,19 @@ A quality gate is an automatic test on a run. It passes, fails, or is "not check
 | `flat_level` | run gate | `pre_processing/assess_input_quality.py` | Fails when the level of the master flat (the averaged image of an evenly lit surface) is outside `MINIMUM_FLAT_LEVEL_FRACTION` to `MAXIMUM_FLAT_LEVEL_FRACTION` of the sensor's full scale (the largest value a pixel can record). |
 | `flat_noise` | run gate | `pre_processing/assess_input_quality.py` | Fails when the relative noise of the master flat (the averaged image of an evenly lit surface) is above `MAXIMUM_FLAT_NOISE_FRACTION`. |
 | `calibration_metadata` | run gate | `pre_processing/assess_input_quality.py` | Fails when a calibration frame (dark, bias or flat) was applied with a different gain setting, offset or temperature, or refused for a binning mismatch. |
-| `calibration_frame_count` | run gate | `pre_processing/assess_input_quality.py` | Fails when a master bias, dark or flat was built from fewer frames than the configured minimum. |
+| `calibration_frame_count` | run gate | `pre_processing/assess_input_quality.py` | Fails when a master bias, dark or flat was built from fewer frames than the configured minimum, or when a dark or bias master holds fewer than `THIN_SET_FRAME_COUNT` different frames (copies of one file count once). Not checked when no calibration frame was applied. |
 | `background_homogeneity` | run gate | `pre_processing/background_homogeneity.py` | Fails when the sky-background levels of the frames of one exposure length split into two groups with a sudden jump between them (a gap at least `DEFAULT_GAP_RATIO_THRESHOLD` times the spread within a group), as when clouds arrive. Slow changes leave no such gap. Not checked when turned off or with too few measured frames. |
+| `dark_zero_pixel_fraction` | run gate | `pre_processing/calibration_assessment.py` | Fails when a dark frame has `ZERO_PIXEL_FRACTION_LIMIT` or more of its pixels at exactly zero (cut off at zero). Not checked when the frames' numbers are not measured. |
+| `bias_zero_pixel_fraction` | run gate | `pre_processing/calibration_assessment.py` | Fails when a bias frame has `ZERO_PIXEL_FRACTION_LIMIT` or more of its pixels at exactly zero (cut off at zero). Not checked when the frames' numbers are not measured. |
+| `dark_level` | run gate | `pre_processing/calibration_assessment.py` | Fails when a dark frame's mean level is more than `VALUE_STEP_ALLOWANCE` value steps (plus the dark current allowance) from the bias level of the same setting. Not checked when the frames' numbers are not measured or no bias frame exists at the setting. |
+| `bias_level` | run gate | `pre_processing/calibration_assessment.py` | Fails when the bias frames' level is more than `VALUE_STEP_ALLOWANCE` value steps from the bias level in the camera profile. Not checked when the profile has no bias level for the setting. |
+| `dark_noise` | run gate | `pre_processing/calibration_assessment.py` | Fails when the noise of the dark frames is below `NOISE_RATIO_LOW` times the read noise in the camera profile (frames cut off at zero, or at another gain). Not checked when the profile has no read noise for the setting. |
+| `bias_noise` | run gate | `pre_processing/calibration_assessment.py` | Fails when the noise of the bias frames is outside `NOISE_RATIO_LOW` to `NOISE_RATIO_HIGH` times the read noise in the camera profile. Not checked when the profile has no read noise for the setting. |
+| `dark_light_leak` | run gate | `pre_processing/calibration_assessment.py` | Fails when a dark frame's large-scale pattern exceeds that of the bias frames at the same setting by more than `VALUE_STEP_ALLOWANCE` value steps (light reached the sensor). Not checked when no bias frame at the setting is measured. |
 | `gain_homogeneity` | run gate | `pre_processing/frame_homogeneity.py` | Frames taken at a less common gain setting (the camera's amplifier setting) are set aside, which corrects the stack. Not checked when no frame records its gain setting. |
 | `frame_quarantine` | run gate | `pre_processing/frame_quarantine.py` | Fails when a batch had more bad frames (too few stars, or stars not round) than `MAXIMUM_QUARANTINED_FRACTION`, so none were moved. |
+| `dark_missing` | run gate | `pre_processing/stack_calibration_health.py` | Fails when light frames of an exposure have no dark within `DARK_EXPOSURE_MATCH_SECONDS` of it. Not checked when the stacking run did not say which calibration it applied. |
+| `light_temperature_spread` | run gate | `pre_processing/stack_calibration_health.py` | Fails when the sensor temperature of the lights of one exposure spans more than `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C`, which the batch mean would hide. Not checked when the stack used no dark or the lights record no temperature. |
 
 ## 5. Tuned calibration parameters
 
@@ -178,6 +187,11 @@ The labels are defined in the [validation register](../validation/index.md). Eac
 | `MINIMUM_FLAT_LEVEL_FRACTION` / `MAXIMUM_FLAT_LEVEL_FRACTION` | `0.1` / `0.9` | Design estimate ([stacking design estimates](../validation/stacking.md#design-estimates)) | Allowed level of the master flat, as a share of the sensor's full scale (the largest value a pixel can record). Common practice. |
 | `MAXIMUM_FLAT_NOISE_FRACTION` | `0.005` | Partly measured ([STK-05](../validation/stacking.md#stk-05)) | Largest relative noise (standard deviation over mean) of the master flat before it is smoothed and `flat_noise` fails. A flat at the limit adds only a few percent to the variance of a typical stack's sky noise; a noisier flat leaves a fixed pattern, which smoothing removes. |
 | `DEFAULT_SATURATION_FLAG_THRESHOLD` | `0.001` | Design estimate ([stacking design estimates](../validation/stacking.md#design-estimates)) | Share of saturated pixels at or above which the stack is flagged (`saturated_pixel_fraction`). |
+| `ZERO_PIXEL_FRACTION_LIMIT` | `0.001` | Measured ([STK-47](../validation/stacking.md#stk-47)) | Share of exactly-zero pixels in a dark or bias frame at or above which the frame is cut off at zero (`dark_zero_pixel_fraction`, `bias_zero_pixel_fraction`). The library's frames have none or at least 72%, so the separation is measured; the exact figure inside the gap is a design estimate. |
+| `VALUE_STEP_ALLOWANCE` | `2` value steps | Partly measured ([STK-48](../validation/stacking.md#stk-48), [STK-50](../validation/stacking.md#stk-50), [STK-51](../validation/stacking.md#stk-51)) | Largest distance, in value steps (the smallest step between two pixel values the sensor writes), of a dark's level or pattern from its reference, and of a bias's level from the camera profile's (`dark_level`, `dark_light_leak`, `bias_level`). The clean frames of the library all sit inside it; it is untested on held-out data. |
+| `NOISE_RATIO_LOW` / `NOISE_RATIO_HIGH` | `0.9` / `1.1` | Partly measured ([STK-49](../validation/stacking.md#stk-49)) | Band, as a multiple of the camera profile's read noise, that the noise of a bias frame must lie in (`bias_noise`); a dark has the lower limit only (`dark_noise`). The ratio observed was 0.99 to 1.00; the width is a design choice. |
+| `DARK_CURRENT_ALLOWANCE_ADU_PER_SECOND` | `0.002` ADU/s | Partly measured ([STK-54](../validation/stacking.md#stk-54)) | Dark current added to the allowed level difference of a dark, per second of exposure. Measured on the ASI 533 at -10 C; used for every camera because it is below one value step for any exposure under about 2,000 s. |
+| `THIN_SET_FRAME_COUNT` | `10` frames | Design estimate ([stacking design estimates](../validation/stacking.md#design-estimates)) | Fewest different frames a dark or bias master may hold before `calibration_frame_count` fails. A master of N frames can add up to 1/N of the noise variance of a light, so 10 frames is a tenth. Related entry: [STK-53](../validation/stacking.md#stk-53). |
 
 ## 6. Degraded states and fallback pathways
 
@@ -205,15 +219,11 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `resolved_parameters` | `dict[str, Any]` | The settings the run actually used, after defaults were filled in. |
 | `camera_profile` | `astrometricslib.models.applied_camera_profile.AppliedCameraProfile \| None` | The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip. |
 | `quality_processing_applied` | `bool` | Whether the quality gates were run. |
-| `flagged` | `bool` | True if one or more quality gates failed, so a person should look at the run. |
-| `flag_reasons` | `list[str]` | One plain sentence for each reason the run was flagged. |
 | `gates` | `list[astrometricslib.models.quality.gate_result.GateResult]` | Every quality gate result: passed, failed or not checked. |
 | `created_at` | `datetime.datetime` | Time the quality summary was made, in UTC. |
 | `provenance_activity_id` | `str \| None` | Identifier of this run in the provenance record (the IVOA-standard log of which run made which data). |
 | `upstream_entity_id` | `str \| None` | Identifier of the exact database record this run read as its input. |
 | `stacking_metrics` | `astrometricslib.models.quality.quality_summary.StackingPipelineQualityMetrics` | The stacking measurements (Section 7.2). |
-| `input_quality` | `astrometricslib.models.quality.stacking_quality.StackingInputQuality \| None` | Structured assessment of the raw frames' quality. |
-| `output_quality` | `astrometricslib.models.quality.stacking_quality.StackingOutputQuality \| None` | Structured assessment of the final stack's quality. |
 
 ### 7.2 Domain scientific metrics schema (`StackingPipelineQualityMetrics`)
 
@@ -223,31 +233,30 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `frames_submitted` | `int` | Number of frames offered for calibration and stacking. |
 | `frames_stacked` | `int` | Number of light frames (exposures of the target) aligned and stacked. |
 | `excluded_frames` | `list[astrometricslib.models.quality.quality_summary.ExcludedFrame]` | Input frames set aside before stacking, each with its reason. |
+| `frames_accepted` | `int \| None` | Number of frames left after the gain, frame-quality and background checks. |
+| `frames_excluded_for_gain` | `int` | Number of frames set aside because their camera gain differed from the rest. |
+| `frames_excluded_for_background` | `int` | Number of frames set aside because their sky background differed from the rest. |
+| `frames_quarantined` | `int` | Number of frames with clouds or trailed stars moved to the excluded folder. |
 | `rejected_pixel_fraction` | `float \| None` | Share of pixel values rejected (clipped) while building the stack. |
-| `rejected_fraction_flagged` | `bool` | True if pixel rejection was above the warning threshold. |
 | `background_split_detected` | `bool` | True if the frames' sky-background levels split into two groups with a sudden jump between them (gap at least 4 times the spread within a group, checked for each exposure length), for example clouds arriving. The frames outside the larger group are set aside. |
 | `background_split_detail` | `str \| None` | Description of the sky-background jump. |
 | `calibration_mismatch_flags` | `list[str]` | Soft flags for calibration frames applied with a different gain setting, offset or temperature. |
+| `dark_unique_frame_count` | `int \| None` | Number of different frames (copies counted once) in the master dark. |
+| `bias_unique_frame_count` | `int \| None` | Number of different frames (copies counted once) in the master bias. |
 | `flat_frame_count` | `int \| None` | Number of flat exposures (images of an evenly lit surface) in the master flat. |
 | `flat_noise_fraction` | `float \| None` | Relative noise level measured in the master flat. |
 | `flat_smoothing_sigma_px` | `float \| None` | Gaussian smoothing width (sigma, in pixels) applied to the master flat because its relative noise was above 0.5% (`MAXIMUM_FLAT_NOISE_FRACTION`). None when no smoothing was applied, including on color sensors. |
 | `flat_calibration_issues` | `list[str]` | Messages about problems with the flat calibration. |
 | `saturated_pixel_fraction` | `float \| None` | Share of saturated pixels (clipped at the sensor's maximum) in the final stack. |
-| `saturation_flagged` | `bool` | True if the stack holds a significant share of saturated pixels. |
 | `exposure_groups` | `list[astrometricslib.models.quality.quality_summary.ExposureGroupSummary]` | One sub-stack per exposure length, with its details. |
-| `recommended_exposure_seconds` | `float \| None` | Estimated exposure, in seconds, that keeps bright stars below clipping. |
 | `zero_pixel_fraction` | `float \| None` | Share of stack pixels that are exactly zero. |
-| `zero_fraction_flagged` | `bool` | True if over-subtraction clipped pixels at zero ADU (zero camera counts). |
 | `negative_pixel_max_percent` | `int \| None` | Largest percentage of negative pixels the stacking engine reported. |
-| `negative_pixels_flagged` | `bool` | True if the count of negative pixels was above the tolerance. |
 | `stacked_fwhm_px` | `float \| None` | Measured FWHM of the stacked image. |
 | `median_input_fwhm_px` | `float \| None` | Median FWHM of all light frames that were kept. |
 | `expected_stack_fwhm_px` | `float \| None` | Expected stack FWHM: the RMS of a sample of input-frame FWHMs. |
-| `fwhm_degraded` | `bool` | True if the stack FWHM over the expected FWHM is above the limit (the stack is blurrier than predicted). |
 | `spectral_registration_flags` | `list[astrometricslib.models.quality.quality_summary.ExcludedFrame]` | Frames about which the spectral registration (alignment) test raised a concern. |
 | `spectral_registration_checked` | `bool` | Whether the spectral registration (alignment) test ran. |
 | `stacking_duration_seconds` | `float \| None` | How long the stacking run took, in seconds. |
-| `timed_out` | `bool` | True if the stacking run timed out. |
 | `debayer_applied` | `bool \| None` | Whether color frames were debayered (turned from the sensor's color-filter mosaic into full-color pixels). |
 | `stacking_engine` | `str \| None` | Program that did the pixel processing (for example Siril). |
 | `stacking_engine_version` | `str \| None` | Version of the stacking program. |

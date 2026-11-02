@@ -1,6 +1,6 @@
 # Glossary
 
-*Version 1.0 · 2026-10-15 · Status: current*
+*Version 1.1 · 2026-10-15 · Status: current*
 
 These are the terms used across the documentation, in alphabetical order within each library. Every page also defines a term the first time it uses it.
 
@@ -49,6 +49,7 @@ These are the terms used across the documentation, in alphabetical order within 
 | Family-wise correction | A correction for running several tests at once, so that the chance of any false alarm across the whole set (the family) stays at the chosen level. The Šidák correction is one. |
 | Filter | A colored glass placed in front of the sensor that passes only one band of wavelengths. A luminance filter passes all visible light. |
 | FITS / FITS header | The standard file format for astronomical images. The header is a block of named text entries (exposure time, filter, sky solution) stored before the pixel data. |
+| Fixed-pattern noise | The part of a stack's empty-sky noise that stays at the same place on the sky in every frame, so more frames do not reduce it: faint sky structure, flat-field residuals, gradients and the noise of the master calibration frames. It is the measured noise squared minus the random part. |
 | Flag | A soft warning, written as a short sentence and recorded with a result. It marks a result that deserves a closer look but is not a gate verdict. |
 | Flat frame | An exposure of an evenly lit surface. It records how much each part of the image is dimmed by the optics, dust, and pixel-to-pixel differences. |
 | Frame | One exposure from the camera, stored as one file. A light frame is a frame of the sky. Bias, dark, and flat frames are calibration frames. |
@@ -72,12 +73,14 @@ These are the terms used across the documentation, in alphabetical order within 
 | MAD (median absolute deviation) | The median distance of values from their median. A spread measure that a few outliers cannot inflate. |
 | Magnitude | A backwards, logarithmic brightness scale. Lower is brighter, and 5 magnitudes is a factor of 100 in brightness. It is always measured in a named photometric band, such as V. |
 | Master frame | The average of many calibration frames of one kind (a master bias, master dark, or master flat), which has much less noise than any single frame. |
+| Measured-to-predicted noise ratio | A stack's measured empty-sky noise divided by the random noise its frames predict. Near 1 means the stack is as quiet as photon and read noise allow. |
 | Messier, NGC, and IC catalogs | Catalogs of galaxies, star clusters, and nebulae. Messier (M) numbers come from an 18th-century list of about 110 bright objects (M 13, M 81). NGC (New General Catalog) and IC (Index Catalog) are larger lists (NGC 2403, IC 1396). |
 | Moving object | A solar-system body, such as an asteroid or comet, that shifts against the stars from frame to frame. The asteroid detection pipeline finds moving objects. |
 | MPC (Minor Planet Center) | The international clearing house that collects position reports of asteroids and comets. It defines the classic fixed-width and the ADES report formats. |
 | Noise model / predicted noise | In photometry, the noise model is the field's measured scatter against brightness, which gives the scatter of a constant star at each brightness. The predicted noise is what the CCD equation gives for one measurement from its counts, sky, and read noise. |
 | Observation target | One field of sky and everything the pipelines hold for it: raw frames, calibration masters, stacks, the sky solution, stars, and moving objects (Section 2.1). |
 | Observing session | Frames taken in one continuous run with the same setup. Each pipeline groups frames into sessions a little differently and says so where the term first appears (for example, photometry uses one night with one gain setting and offset). |
+| Odd–even difference | The difference of two half stacks, one of the odd-numbered frames and one of the even-numbered frames. What the halves share cancels, so it measures the stack's random noise directly. |
 | Offset | A constant level the camera adds to every pixel so that noise below zero is still recorded instead of being cut off at zero. It is set on the camera; the bias frame records it. |
 | Period verdict | The label a period search gives its best period, from lowest to highest: insufficient data (fewer than two cycles covered), not detected, possible, detected. A failed hold-out or alias check lowers it one level. Unconfirmed is a separate label meaning a check could not run. |
 | Phase / folded light curve | For a trial period, the phase of a measurement is the fraction of a cycle that has elapsed since the cycle began, from 0 to 1. A folded light curve plots brightness against phase, so all cycles lie on top of each other. |
@@ -85,6 +88,7 @@ These are the terms used across the documentation, in alphabetical order within 
 | Photometric band | A fixed range of wavelengths that a standard filter passes. A magnitude is always measured in a named band, such as V. |
 | Pixel scale | How much sky one pixel covers, in arcseconds per pixel. It follows from the pixel size and the telescope's focal length. |
 | Plate solving | Finding exactly where an image points on the sky by matching its star patterns to a catalog. The result is a WCS. |
+| Point-source depth | The magnitude of a star that a stack detects at a stated significance in an aperture one star width in radius. |
 | Proper motion | The slow drift of a star across the sky, in arcseconds (or milliarcseconds) per year. |
 | Provenance | A record of which processing run made a data product, with which software version, settings, and inputs. |
 | PSF (point spread function) | The shape a single point of light takes in the image, set by the optics and the air. A star's image is its PSF. |
@@ -117,6 +121,7 @@ These are the terms used across the documentation, in alphabetical order within 
 | Streak | A straight line of light in an image left by a satellite, meteor, or aircraft, or by a star smeared when the mount drifted (a trailed star). Not a spectrum trail. |
 | Stretch | A brightness curve applied to an image for display that lifts faint detail. Stacked data are linear and look almost black on screen until stretched. |
 | Subtype | The number after the letter of a spectral type (the 2 in G2). One subtype is one step on the spectral-type ladder; ten steps make one letter class. |
+| Surface-brightness limit | The faintest surface brightness, in magnitudes per square arcsecond, that a stack detects at a stated significance over a box of stated size. |
 | Tangent plane | A flat plane that touches the sky's sphere at the image center. Positions near the center are projected onto it so they can be measured as flat x, y offsets. |
 | Telluric bands | Wavelength ranges where Earth's own atmosphere (oxygen, water) absorbs light. They are not part of the star's spectrum. |
 | Transmission grating | A clear plate ruled with many fine parallel lines, placed in front of the camera, that spreads each star's light into a short spectrum. The Star Analyser 200 used here is one. |
@@ -159,6 +164,7 @@ These are the terms used across the documentation, in alphabetical order within 
 | Pointing correction | The mount adjustment computed from the difference between a solved field and the commanded position. |
 | Promotion gate | The recorded-evidence test that a capability must meet before its delegation state advances. |
 | Queued observation package | One placed, time-scoped, self-contained copy of a package in a session's queue. |
+| Recommended additional frames | The count of frames the library suggests taking next for a target ("take N more"). Its status is *not checked* (hidden), *provisional* (a check made from frames already taken agreed) or *confirmed* (a check of two stacks of newly taken frames agreed). |
 | Safe state | The protected observatory configuration reached by the ordered sequence of Table 7. |
 | Safety assessment | The current environmental verdict (safe, marginal, unsafe or unknown) with the rule that produced it. |
 | Settling period | The time that conditions must stay continuously safe before the enclosure may reopen. |

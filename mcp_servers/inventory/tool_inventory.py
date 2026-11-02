@@ -209,15 +209,14 @@ CLASSIFICATION_RULES = (
         "Adds or changes targets in the catalog.",
     ),
     _rule(
-        r"^star_(create|update|save_all|find_or_create_by_position)$",
+        r"^star_(create|update|find_or_create_by_position)$",
         "change-data",
         "high",
         "Adds or changes stars in the catalog.",
     ),
-    _rule(r"^calibration_add$", "change-data", "high", "Adds calibration data."),
-    _rule(r"^calibration_refresh$", "change-data", "medium", "Probably rebuilds stored calibration."),
+    _rule(r"^calibration_reindex_frames$", "change-data", "medium", "Probably rebuilds stored calibration."),
     _rule(
-        r"^processing_(discard_previous_stack|restore_excluded_frames|swap_with_previous_stack|process_target)$",
+        r"^processing_process_target$",
         "change-data",
         "high",
         "Changes frames or stacks on disk or in the database.",
@@ -229,9 +228,10 @@ CLASSIFICATION_RULES = (
         "Pipeline run that writes results to the live catalog or stacks.",
     ),
     _rule(r"^processing_acquire_.+_slot$", "change-data", "low", "Takes a work slot (a lock). Check."),
-    _rule(r"^star_tune_spectroscopy_calibration$", "change-data", "low", "May store a new calibration."),
     _rule(
-        r"^planning_(edit_queue|edit_package|tick_checklist_item)$",
+        r"^planning_(add_to_queue|reorder_queue|remove_from_queue|set_entry_exposures|add_checklist_items"
+        r"|set_framing|update_package|reopen_package|dismiss_package|undismiss_package|delete_package"
+        r"|tick_checklist_item)$",
         "change-data",
         "high",
         "Changes the saved queue or checklist.",
@@ -249,10 +249,16 @@ CLASSIFICATION_RULES = (
         "Builds or stores catalog or plan data.",
     ),
     _rule(
-        r"^planning_create_plan$",
+        r"^planning_create_(package|session)$",
         "change-data",
         "high",
-        "Records packages and sessions. Only kind=sequence writes nothing.",
+        "Records packages and sessions.",
+    ),
+    _rule(
+        r"^planning_create_sequence$",
+        "change-data",
+        "high",
+        "Builds a sequence plan and writes nothing.",
     ),
     _rule(
         r"^observatory_(safety_apply_promotion_decision|equipment_set_active_.+)$",
@@ -260,7 +266,12 @@ CLASSIFICATION_RULES = (
         "high",
         "Writes settings to local storage.",
     ),
-    _rule(r"^execution_record_divergence$", "change-data", "medium", "Records a divergence in session data."),
+    _rule(
+        r"^execution_build_divergence_record$",
+        "compute",
+        "high",
+        "Builds a divergence record and writes nothing.",
+    ),
     _rule(
         r"^observatory_guiding_(drain_external_pulses|refit_spectrum)$",
         "change-data",
@@ -314,7 +325,7 @@ CLASSIFICATION_RULES = (
         "Returns a stored, derived or measured value.",
     ),
     _rule(
-        r"^observatory_history_query$",
+        r"^review_query(_alignment_sessions)?$",
         "compute",
         "high",
         "Reads recorded nights and calculates the analyses.",
@@ -332,13 +343,13 @@ CLASSIFICATION_RULES = (
         "Measures frames and returns statistics. Saves nothing.",
     ),
     _rule(
-        r"^(observatory_history_frame_guiding|planning_get_visibility)$",
+        r"^(review_frame_guiding|planning_get_visibility)$",
         "compute",
         "high",
         "Calculates from stored records and the sky. Saves nothing.",
     ),
     _rule(
-        r"^planning_deep_catalog_status$",
+        r"^planning_get_deep_catalog_status$",
         "compute",
         "high",
         "Reads the catalog file; the estimate queries the Gaia archive. Saves nothing.",
@@ -364,16 +375,11 @@ CLASSIFICATION_RULES = (
     ),
     _rule(r"^star_query$", "observe", "high", "Reads library stars. Row counts are capped."),
     _rule(
-        r"^(target_query|target_imaged_field_centers|planning_find_sources|planning_lookup_coordinates)$",
+        r"^(target_query|target_imaged_field_centers|planning_query_sources|planning_lookup_coordinates"
+        r"|planning_query_plans|planning_query_catalogs)$",
         "observe",
         "high",
         "Reads targets or stars in short, capped records.",
-    ),
-    _rule(
-        r"^quality_check_spectral_frames$",
-        "compute",
-        "high",
-        "Measures raw spectrum frames and returns statistics. Saves nothing.",
     ),
     _rule(
         r"^processing_stack_summary$",

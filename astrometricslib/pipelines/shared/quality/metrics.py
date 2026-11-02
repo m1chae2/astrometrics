@@ -7,10 +7,16 @@ estimator never shares a name with it. Nothing here measures anything: the
 
 The registry (`metric_registry.py`) collects these with the metrics that each
 pipeline declares in its own ``metrics.py``.
+
+Dark and bias frames get their own list, `CALIBRATION_FRAME_METRICS`, so they
+never get the star-width rows of a light frame. Two metrics are shared with the
+light frames because the meaning is the same: `FRAME_BACKGROUND_LEVEL` and
+`FRAME_SATURATED_PIXEL_FRACTION` (see `CALIBRATION_FRAME_METRIC_NAMES`).
 """
 
 import datetime
 
+from astrometricslib.models.quality.limit import LimitTier, QualityLimit
 from astrometricslib.models.quality.measurement import SubjectLevel
 from astrometricslib.models.quality.metric_spec import (
     Checkpoint,
@@ -18,6 +24,10 @@ from astrometricslib.models.quality.metric_spec import (
     MetricPurpose,
     MetricSpec,
     UncertaintyKind,
+)
+from astrometricslib.pipelines.shared.quality.saturation import (
+    SATURATED_BLOB_MINIMUM_PIXELS,
+    SATURATED_FRAME_FRACTION,
 )
 
 FRAME_BACKGROUND_LEVEL = "frame.background_level_adu"
@@ -56,6 +66,13 @@ FRAME_STAR_WIDTH_REGION_PX = {
 FRAME_SKY_RATE_E_PER_S_PER_PX = "frame.sky_rate_e_per_s_per_px"
 FRAME_SKY_NOISE_E = "frame.sky_noise_e"
 FRAME_READ_NOISE_E = "frame.read_noise_e"
+# The metrics that only dark and bias frames get (`CALIBRATION_FRAME_METRICS`).
+FRAME_CLIPPED_MEAN_LEVEL = "frame.clipped_mean_level_adu"
+FRAME_ZERO_PIXEL_FRACTION = "frame.zero_pixel_fraction"
+FRAME_BLOCK_RANGE = "frame.block_range_adu"
+FRAME_NEIGHBOR_NOISE = "frame.neighbor_noise_adu"
+FRAME_PIXEL_CHECKSUM = "frame.pixel_checksum"
+FRAME_VALUE_STEP = "frame.value_step_adu"
 
 _FRAME_ONLY = (SubjectLevel.FRAME,)
 
@@ -145,7 +162,7 @@ def _region_spec(region: str, meaning: str) -> MetricSpec:
         ),
         sample_definition=_REGION_SAMPLE,
         band=_PER_PLANE_BAND,
-        computed_by="pipelines.shared.quality.frame_measurement.measure_field_region_widths",
+        computed_by="pipelines.shared.quality.star_profile_fitting.measure_field_region_widths",
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method=(
             "Standard deviation of the median over 1000 bootstrap resamples of the region's stars (fixed "
@@ -218,6 +235,30 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         purpose_reason=(
             "A frame with many saturated pixels has lost the brightness of those pixels, "
             "and the checks warn about it. No register entry yet backs the limit it is compared with."
+        ),
+        limits=(
+            QualityLimit(
+                value=float(SATURATED_BLOB_MINIMUM_PIXELS),
+                unit="pixels",
+                tier=LimitTier.DESIGN_ESTIMATE,
+                derivation=(
+                    "A star counts as saturated when at least this many connected pixels sit at the frame's "
+                    "ceiling. A single pixel at the ceiling is usually a hot pixel; four (2 x 2) is the "
+                    "smallest blob that is not one. Saturated stars in ASI533 and D5300 frames had cores of "
+                    "9 to over 1700 pixels. A saturated-pixel count is this metric's fraction times the "
+                    "sensor's pixel count (divided by the binning squared)."
+                ),
+            ),
+            QualityLimit(
+                value=SATURATED_FRAME_FRACTION,
+                unit="fraction",
+                tier=LimitTier.DESIGN_ESTIMATE,
+                derivation=(
+                    "An exposure length is called clipped when a star saturates in at least this share of "
+                    "its frames. One clipped frame in three can be a cosmic ray or a satellite trail, not a "
+                    "property of the exposure."
+                ),
+            ),
         ),
     ),
     MetricSpec(
@@ -347,7 +388,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         ),
         sample_definition=_MOFFAT_SAMPLE,
         band=_PER_PLANE_BAND,
-        computed_by="pipelines.shared.quality.frame_measurement.measure_star_profiles",
+        computed_by="pipelines.shared.quality.star_profile_fitting.measure_star_profiles",
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method=(
             "Standard deviation of the median over 1000 bootstrap resamples of the stars (fixed seed). "
@@ -379,7 +420,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         ),
         sample_definition=_MOFFAT_SAMPLE,
         band=_PER_PLANE_BAND,
-        computed_by="pipelines.shared.quality.frame_measurement.measure_star_profiles",
+        computed_by="pipelines.shared.quality.star_profile_fitting.measure_star_profiles",
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method=(
             "The bootstrap error of the pixel width times the pixel scale. The pixel scale is taken as exact."
@@ -415,7 +456,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         ),
         sample_definition=_MOFFAT_SAMPLE,
         band=_PER_PLANE_BAND,
-        computed_by="pipelines.shared.quality.frame_measurement.measure_star_profiles",
+        computed_by="pipelines.shared.quality.star_profile_fitting.measure_star_profiles",
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method="Standard deviation of the median over 1000 bootstrap resamples of the stars.",
         register_entry="AST-17",
@@ -449,7 +490,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         ),
         sample_definition=_MOFFAT_SAMPLE,
         band=_PER_PLANE_BAND,
-        computed_by="pipelines.shared.quality.frame_measurement.measure_star_profiles",
+        computed_by="pipelines.shared.quality.star_profile_fitting.measure_star_profiles",
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method=(
             "Standard deviation of the direction over 1000 bootstrap resamples of the stars. The "
@@ -479,7 +520,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         estimator=_EFFECTIVE_WIDTH_ESTIMATOR,
         sample_definition=_MOFFAT_SAMPLE,
         band=_PER_PLANE_BAND,
-        computed_by="pipelines.shared.quality.frame_measurement.effective_star_width_px",
+        computed_by="pipelines.shared.quality.star_profile_fitting.effective_star_width_px",
         uncertainty_kind=UncertaintyKind.MODEL_DERIVED,
         uncertainty_method=(
             "The bootstrap error of `frame.star_width_moffat_px` carried through the formula (times "
@@ -513,7 +554,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         ),
         sample_definition=_MOFFAT_SAMPLE,
         band=_PER_PLANE_BAND,
-        computed_by="pipelines.shared.quality.frame_measurement.effective_star_width_px",
+        computed_by="pipelines.shared.quality.star_profile_fitting.effective_star_width_px",
         uncertainty_kind=UncertaintyKind.MODEL_DERIVED,
         uncertainty_method=(
             "The error of `frame.star_width_effective_px` times the pixel scale. The pixel scale is taken "
@@ -530,7 +571,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
     ),
     MetricSpec(
         name=FRAME_SKY_RATE_E_PER_S_PER_PX,
-        definition_version=2,
+        definition_version=3,
         unit="e-/s/px",
         checkpoint=Checkpoint.FRAME,
         levels=_FRAME_ONLY,
@@ -553,11 +594,13 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
             "assumed when the gain is not measured, and when the frame records no sensor temperature "
             "(no CCD-TEMP card, as for a DSLR): that camera has no set-point cooling, so its dark "
             "current and amp glow, which are inside the value, are unknown and no dark was subtracted. "
-            "Version 1 used the clipped median."
+            "Version 1 used the clipped median. Version 3 changed no formula: the offset fallback "
+            "(decision D7) lets a frame at another offset use a profile entry, so frames that had no "
+            "gain are measured again."
         ),
         sample_definition="Every pixel of the plane.",
         band=_PER_PLANE_BAND,
-        computed_by="pipelines.shared.quality.frame_measurement.measure_sky_electrons",
+        computed_by="pipelines.shared.quality.sky_electrons.measure_sky_electrons",
         uncertainty_kind=UncertaintyKind.NONE,
         uncertainty_method="No uncertainty is reported.",
         purpose=MetricPurpose.DECISION,
@@ -568,7 +611,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
     ),
     MetricSpec(
         name=FRAME_SKY_NOISE_E,
-        definition_version=2,
+        definition_version=3,
         unit="e-",
         checkpoint=Checkpoint.FRAME,
         levels=_FRAME_ONLY,
@@ -582,13 +625,15 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         estimator=(
             "The square root of the sky electrons in one pixel of one exposure (photon counting "
             "noise): the square root of (clipped-mean background minus bias level, in ADU) times the "
-            "gain, with the same estimators and the same assumed status as `frame.sky_rate_e_per_s_per_px`. "
-            "It does not include the read noise, which is stored apart as `frame.read_noise_e`, or the "
-            "dark current's own noise; the ratio of the two is never stored."
+            "gain, with the same estimators and the same assumed status as "
+            "`frame.sky_rate_e_per_s_per_px`. "
+            "Version 3 changed no formula: the offset fallback (decision D7) makes frames measurable that "
+            "had no gain entry. It does not include the read noise, which is stored apart as "
+            "`frame.read_noise_e`, or the dark current's own noise; the ratio of the two is never stored."
         ),
         sample_definition="Every pixel of the plane (through its sigma-clipped mean).",
         band=_PER_PLANE_BAND,
-        computed_by="pipelines.shared.quality.frame_measurement.measure_sky_electrons",
+        computed_by="pipelines.shared.quality.sky_electrons.measure_sky_electrons",
         uncertainty_kind=UncertaintyKind.NONE,
         uncertainty_method="No uncertainty is reported.",
         purpose=MetricPurpose.DECISION,
@@ -598,7 +643,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
     ),
     MetricSpec(
         name=FRAME_READ_NOISE_E,
-        definition_version=1,
+        definition_version=2,
         unit="e-",
         checkpoint=Checkpoint.FRAME,
         levels=_FRAME_ONLY,
@@ -607,12 +652,15 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         decisions=("exposure length", "noise regime"),
         estimator=(
             "Read from the camera profile entry that matches the frame's gain setting, offset and "
-            "binning exactly; not computed from the frame's pixels. Stored as assumed unless the "
-            "profile's value was measured."
+            "binning; not computed from the frame's pixels. When no entry has the frame's offset and "
+            "the frame is not clipped at zero, the entry of the same gain and binning at the nearest "
+            "other offset is used and the source says 'offset fallback'. Stored as assumed unless the "
+            "profile's value was measured. Version 2 changed no formula: the offset fallback (decision D7) "
+            "makes frames measurable that had no entry."
         ),
         sample_definition="One profile value per frame.",
         band="not applicable",
-        computed_by="pipelines.shared.quality.frame_measurement.look_up_frame_sensor_noise",
+        computed_by="pipelines.shared.quality.sky_electrons.look_up_frame_sensor_noise",
         uncertainty_kind=UncertaintyKind.NONE,
         uncertainty_method="The profile value is taken as given.",
         purpose=MetricPurpose.DECISION,
@@ -643,4 +691,184 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         "The median star width in the corner at the high x (last columns) and high y (last array rows, "
         "row 0 first) end of the field.",
     ),
+)
+
+
+# Wording shared by the calibration frame declarations.
+_CALIBRATION_BAND = "No filter: a dark or bias frame is taken with the shutter closed."
+_CALIBRATION_SAMPLE = (
+    "Every pixel of the frame. A dark or bias frame is read once, in one pass, and the same pixels "
+    "give every metric of this group."
+)
+_CALIBRATION_NO_UNCERTAINTY = "No uncertainty is reported."
+_CALIBRATION_MODULE = "pipelines.shared.quality.calibration_frame_measurement"
+
+CALIBRATION_FRAME_METRICS: tuple[MetricSpec, ...] = (
+    MetricSpec(
+        name=FRAME_CLIPPED_MEAN_LEVEL,
+        definition_version=1,
+        unit="adu",
+        checkpoint=Checkpoint.FRAME,
+        levels=_FRAME_ONLY,
+        better=Direction.NONE,
+        meaning="The mean pixel value of a dark or bias frame, after bright outliers are clipped away.",
+        decisions=("dark level check", "bias level check"),
+        estimator=(
+            "Mean of the pixels left after astropy's `sigma_clipped_stats` (3 sigma, up to 5 passes), the "
+            "same estimator that finds the bias level for the sky metrics. The mean is used, not the "
+            "median, because a 14-bit sensor stores steps of 4 ADU and a median takes only a few values."
+        ),
+        sample_definition=_CALIBRATION_SAMPLE,
+        band=_CALIBRATION_BAND,
+        computed_by=f"{_CALIBRATION_MODULE}.measure_calibration_pixels",
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method=_CALIBRATION_NO_UNCERTAINTY,
+        register_entry="STK-48",
+        purpose=MetricPurpose.DECISION,
+        purpose_reason=(
+            "The dark level is compared with the bias level of the same setting, and the bias level with "
+            "the camera profile's stored value, to find a wrong level before it is subtracted from lights."
+        ),
+    ),
+    MetricSpec(
+        name=FRAME_ZERO_PIXEL_FRACTION,
+        definition_version=1,
+        unit="fraction",
+        checkpoint=Checkpoint.FRAME,
+        levels=_FRAME_ONLY,
+        better=Direction.LOWER,
+        meaning="The share of a frame's pixels that are exactly zero (cut off at zero).",
+        decisions=("zero-clipped calibration check",),
+        estimator="Count of pixels equal to zero, divided by the pixel count, over every plane.",
+        sample_definition=_CALIBRATION_SAMPLE,
+        band=_CALIBRATION_BAND,
+        computed_by="pipelines.shared.quality.frame_measurement.frame_zero_fraction",
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method=_CALIBRATION_NO_UNCERTAINTY,
+        register_entry="STK-47",
+        purpose=MetricPurpose.DECISION,
+        purpose_reason=(
+            "A pixel cut off at zero has lost its noise, so a master built from such frames has the wrong "
+            "mean. The calibration checks warn when the share reaches a limit."
+        ),
+    ),
+    MetricSpec(
+        name=FRAME_BLOCK_RANGE,
+        definition_version=1,
+        unit="adu",
+        checkpoint=Checkpoint.FRAME,
+        levels=_FRAME_ONLY,
+        better=Direction.LOWER,
+        meaning=(
+            "How much the large-scale shape of a dark or bias frame varies. A light leak or a glow raises it."
+        ),
+        decisions=("light-struck dark check",),
+        estimator=(
+            "Every third pixel in both directions is kept. The result is cut into a 12 x 12 grid, and the "
+            "median of each cell is taken. The value is the largest cell median minus the smallest."
+        ),
+        sample_definition="One pixel in nine, spread evenly over the frame (rows and columns 0, 3, 6, ...).",
+        band=_CALIBRATION_BAND,
+        computed_by=f"{_CALIBRATION_MODULE}.measure_block_range",
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method=_CALIBRATION_NO_UNCERTAINTY,
+        register_entry="STK-50",
+        purpose=MetricPurpose.DECISION,
+        purpose_reason=(
+            "A light leak adds a smooth pattern that the master dark then subtracts from every light. "
+            "The range is compared with the range of the bias frames at the same setting."
+        ),
+    ),
+    MetricSpec(
+        name=FRAME_NEIGHBOR_NOISE,
+        definition_version=1,
+        unit="adu",
+        checkpoint=Checkpoint.FRAME,
+        levels=_FRAME_ONLY,
+        better=Direction.NONE,
+        meaning="The pixel-to-pixel noise of one dark or bias frame.",
+        decisions=("read noise check",),
+        estimator=(
+            "The standard deviation of the difference between each pixel and the pixel two columns to its "
+            "right, divided by the square root of 2. Two columns apart keeps pixels of the same color of a "
+            "color sensor together. A smooth pattern cancels in the difference. The plain standard "
+            "deviation is used, not the median absolute deviation, because a 14-bit sensor stores steps of "
+            "4 ADU and the median-based estimate read 13 percent low on real ASI 533 biases."
+        ),
+        sample_definition=_CALIBRATION_SAMPLE,
+        band=_CALIBRATION_BAND,
+        computed_by=f"{_CALIBRATION_MODULE}.measure_neighbor_noise",
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method=_CALIBRATION_NO_UNCERTAINTY,
+        register_entry="STK-49",
+        purpose=MetricPurpose.DECISION,
+        purpose_reason=(
+            "The noise of a bias frame is compared with the camera profile's read noise: too low means the "
+            "frame is clipped, too high means a wrong gain or a fault."
+        ),
+    ),
+    MetricSpec(
+        name=FRAME_VALUE_STEP,
+        definition_version=1,
+        unit="adu",
+        checkpoint=Checkpoint.FRAME,
+        levels=_FRAME_ONLY,
+        better=Direction.NONE,
+        meaning="The smallest step between two different pixel values the sensor writes (its value step).",
+        decisions=("light-struck dark check", "dark level check", "bias level check"),
+        estimator=(
+            "The smallest difference between neighboring distinct pixel values in the top-left 300 x 300 "
+            "pixels of the central 1000 x 1000 pixels. A 14-bit sensor stored as 16-bit steps in 4 ADU, "
+            "and a DSLR in 2 ADU. `None` when that block holds one value only."
+        ),
+        sample_definition="The top-left 300 x 300 pixels of the central 1000 x 1000 pixels of the frame.",
+        band=_CALIBRATION_BAND,
+        computed_by=f"{_CALIBRATION_MODULE}.measure_value_step",
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method=_CALIBRATION_NO_UNCERTAINTY,
+        register_entry="STK-50",
+        purpose=MetricPurpose.CONTEXT,
+        purpose_reason=(
+            "The limits of the level and light-leak checks are written in value steps, so they follow "
+            "the sensor and no camera needs its own number."
+        ),
+    ),
+    MetricSpec(
+        name=FRAME_PIXEL_CHECKSUM,
+        definition_version=1,
+        unit="",
+        checkpoint=Checkpoint.FRAME,
+        levels=_FRAME_ONLY,
+        better=Direction.NONE,
+        meaning=(
+            "A number that identifies the pixel values of a frame, so two copies of one frame can be "
+            "told apart from two exposures."
+        ),
+        decisions=("copied calibration frames",),
+        estimator=(
+            "The CRC-32 checksum of the pixel array as stored, as a whole number below 2^32. Two frames "
+            "with the same checksum hold the same pixels."
+        ),
+        sample_definition=_CALIBRATION_SAMPLE,
+        band=_CALIBRATION_BAND,
+        computed_by=f"{_CALIBRATION_MODULE}.measure_calibration_pixels",
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method=_CALIBRATION_NO_UNCERTAINTY,
+        register_entry="STK-53",
+        purpose=MetricPurpose.CONTEXT,
+        purpose_reason=(
+            "Copies add no information to a master. The set check counts frames with the same checksum "
+            "once. The value has no meaning as a size."
+        ),
+    ),
+)
+
+# The names of the metrics measured on every dark and bias frame, in one list:
+# the five above, the background level and saturated share the light frames
+# also have (the meaning is the same), and the sensor temperature.
+CALIBRATION_FRAME_METRIC_NAMES: tuple[str, ...] = (
+    FRAME_BACKGROUND_LEVEL,
+    FRAME_SATURATED_PIXEL_FRACTION,
+    FRAME_SENSOR_TEMPERATURE,
+    *(spec.name for spec in CALIBRATION_FRAME_METRICS),
 )

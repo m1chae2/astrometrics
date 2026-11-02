@@ -18,7 +18,7 @@ from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.stacking import stage as stacking_tasks
 from astrometricslib.pipelines.stacking.post_processing.previous_stack import previous_stack_path
 
-SIRIL_DRIVER = "astrometricslib.drivers.siril_interface.ImageProcessing"
+SIRIL_DRIVER = "astrometricslib._internal.drivers.siril_interface.ImageProcessing"
 SUMMARY_BUILDER = "astrometricslib.pipelines.stacking.stage._build_stack_quality_summary"
 RUN_STACK = "astrometricslib.pipelines.stacking.stack_runner.run_stack"
 
@@ -85,7 +85,7 @@ def run_stage(fake_run_stack: object) -> str | None:
         patch(RUN_STACK, side_effect=fake_run_stack),
     ):
         with patch.object(stacking_tasks, "write_stack_preview", MagicMock(return_value=None), create=True):
-            return stacking_tasks.stack_frames(make_target(), filter_type=FilterType.L)
+            return stacking_tasks.stack_frames(make_target())
 
 
 def stack_name_used(stacks_folder: Path) -> str:

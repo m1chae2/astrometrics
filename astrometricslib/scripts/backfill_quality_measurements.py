@@ -68,9 +68,7 @@ What it does not do
 -------------------
 
 * It does not copy frame-level measurements. The summaries are run and stack
-  level. The stored per-frame fields ``registrationRmse`` and
-  ``registrationFwhmYPx`` hold Siril's normalized background level and the
-  weighted star width, not what their names say, so they are never copied.
+  level.
 * It does not write measurements that need data the JSON never held:
   empty-aperture noise, frame weights, effective counts, night shares,
   photometry's comparison-star and centroid scatter, and a few gates whose
@@ -109,8 +107,8 @@ from urllib.parse import quote
 from pydantic import ValidationError
 
 from astrometricslib import configure_logging
-from astrometricslib.drivers.local_database import backup_catalog_database, snapshot_sqlite_database
-from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
+from astrometricslib._internal.drivers.local_database import backup_catalog_database, snapshot_sqlite_database
+from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import InvalidArgumentError, StorageError
 from astrometricslib.models.quality.gate_result import GateResult
@@ -1249,17 +1247,37 @@ _STACKING_VALUES: tuple[ValueMapping, ...] = (
         "registrationReferenceStarCount",
         subject=_STACK,
     ),
-    _value("stacking.frames_accepted_count", "inputQuality", "framesAccepted", subject=_STACK),
+    # The four frame counts moved from the `inputQuality` block to
+    # `stackingMetrics` when that block was removed; a summary saved before
+    # keeps them in the old place.
     _value(
-        "stacking.frames_excluded_for_gain_count", "inputQuality", "framesExcludedForGain", subject=_STACK
+        "stacking.frames_accepted_count",
+        "stackingMetrics",
+        "framesAccepted",
+        subject=_STACK,
+        older_path=("inputQuality", "framesAccepted"),
+    ),
+    _value(
+        "stacking.frames_excluded_for_gain_count",
+        "stackingMetrics",
+        "framesExcludedForGain",
+        subject=_STACK,
+        older_path=("inputQuality", "framesExcludedForGain"),
     ),
     _value(
         "stacking.frames_excluded_for_background_count",
-        "inputQuality",
+        "stackingMetrics",
         "framesExcludedForBackground",
         subject=_STACK,
+        older_path=("inputQuality", "framesExcludedForBackground"),
     ),
-    _value("stacking.frames_quarantined_count", "inputQuality", "framesQuarantined", subject=_STACK),
+    _value(
+        "stacking.frames_quarantined_count",
+        "stackingMetrics",
+        "framesQuarantined",
+        subject=_STACK,
+        older_path=("inputQuality", "framesQuarantined"),
+    ),
 )
 
 _STACKING_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(STACKING_GATE_LIMIT_SOURCES)
@@ -1284,27 +1302,62 @@ _STACKING_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(STACKING_G
 # here: the rows would need a stacking run to belong to, which a backfill does
 # not invent, and a stack made before S3 has no such file. The next stacking
 # run stores them.
+# A stack that was abandoned for taking too long: the stored summary of the
+# stack before it holds nothing about it, so no row is made. The timeout step
+# stores `stacking.abandoned_after_s` itself, when it happens.
 # The pattern the two half stacks share comes from the half stacks themselves.
+# The numbers of different dark and bias frames behind the masters come from
+# the stored per-frame numbers of the calibration frames, which a summary made
+# before the dark and bias checks existed never held.
+# The notice rows (warnings that are not gates) are not backfilled either: a
+# stored summary of the time before the flag fields were removed keeps only
+# the sentence in `flagReasons`, with no job and no value, and a row made from
+# it would claim a count the summary never held. The comparison script reports
+# such a flag reason as old data until a new run stores the row (validation
+# register STK-58).
 _STACKING_NOT_HELD: tuple[str, ...] = (
+    "stacking.abandoned_after_s",
+    "stacking.notice_frames_moved_to_excluded",
+    "stacking.notice_single_frame_stack",
+    "stacking.notice_exposure_group_left_out",
+    "stacking.notice_flat_calibration_note",
+    "stacking.notice_preview_step_skipped",
+    "stacking.notice_camera_without_profile",
+    "stacking.dark_unique_frame_count",
+    "stacking.bias_unique_frame_count",
+    "stacking.aperture_set_number",
+    "stacking.odd_even_difference_aperture_set_number",
     "stacking.empty_aperture_noise_stack_unit",
     "stacking.noise_reference_flux_stack_unit",
     "stacking.empty_aperture_noise_normalized",
     "stacking.effective_frame_count",
     "stacking.effective_time_s",
     "stacking.frame_weight",
+    "stacking.group_gain_applied",
+    "stacking.group_reference_exposure_s",
     "stacking.night_weight_fraction",
     "stacking.noise_without_night",
     "stacking.noise_difference_without_night",
     "stacking.subset_expected_noise_ratio",
-    "stacking.half_difference_noise_stack_unit",
-    "stacking.half_difference_noise_normalized",
-    "stacking.half_difference_reference_flux_stack_unit",
-    "stacking.half_difference_variance_factor",
-    "stacking.half_difference_model_variance_ratio",
-    "stacking.half_difference_odd_effective_frame_count",
-    "stacking.half_difference_even_effective_frame_count",
-    "stacking.half_difference_shared_frame_odd_weight_fraction",
-    "stacking.half_difference_shared_frame_even_weight_fraction",
+    "stacking.odd_even_difference_noise_stack_unit",
+    "stacking.odd_even_difference_noise_normalized",
+    "stacking.odd_even_difference_reference_flux_stack_unit",
+    "stacking.odd_even_difference_variance_factor",
+    "stacking.odd_even_difference_model_variance_ratio",
+    "stacking.odd_even_difference_odd_effective_frame_count",
+    "stacking.odd_even_difference_even_effective_frame_count",
+    "stacking.odd_even_difference_shared_frame_odd_weight_fraction",
+    "stacking.odd_even_difference_shared_frame_even_weight_fraction",
+    "stacking.measured_to_predicted_noise_ratio",
+    "stacking.empty_aperture_noise_size_exponent",
+    "stacking.point_source_depth_5sigma_mag",
+    "stacking.surface_brightness_limit_3sigma_10arcsec_mag_per_arcsec2",
+    "stacking.odd_even_difference_aperture_record_count",
+    "stacking.odd_even_difference_row_average_scatter_stack_unit",
+    "stacking.odd_even_difference_column_average_scatter_stack_unit",
+    "stacking.odd_even_sum_row_average_scatter_stack_unit",
+    "stacking.odd_even_sum_column_average_scatter_stack_unit",
+    "stacking.expected_master_dark_noise_stack_unit",
     "stacking.effective_time_read_noise_s",
     "stacking.expected_sky_noise_stack_unit",
     "stacking.expected_read_noise_stack_unit",
@@ -1312,6 +1365,7 @@ _STACKING_NOT_HELD: tuple[str, ...] = (
     "stacking.expected_noise_aperture_area_px",
     "stacking.expected_noise_scale_stack_unit_per_adu",
     "stacking.expected_sky_level_stack_unit",
+    "stacking.normalization_scale",
     "stacking.stack_sky_level_stack_unit",
     "stacking.flat_noise_after_smoothing_fraction",
     "stacking.flat_noise_in_aperture_stack_unit",
@@ -1356,6 +1410,7 @@ _STACKING_NOT_HELD: tuple[str, ...] = (
 # from the raw frames and Siril's registration records, which a summary does
 # not hold.
 _ASTROMETRY_NOT_HELD: tuple[str, ...] = (
+    "astrometry.notice_camera_without_profile",
     "astrometry.frame_target_clipped_fraction",
     "astrometry.frame_target_nonlinear_fraction",
     # The expected residual needs the star finder's peaks and noise of the run
@@ -1455,6 +1510,7 @@ _PHOTOMETRY_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(PHOTOMET
 # run's per-session comparison sets and centroid summaries, and from counts
 # the summary does not keep.
 _PHOTOMETRY_NOT_HELD: tuple[str, ...] = (
+    "photometry.notice_camera_without_profile",
     "photometry.stars_with_light_curve_scatter_count",
     "photometry.noise_model_star_count",
     "photometry.comparison_scatter_over_predicted_worst",
@@ -1676,6 +1732,14 @@ SUMMARY_KINDS: tuple[SummaryKind, ...] = (
         gates=_SPECTROSCOPY_GATES,
         extra_metrics=_SPECTROSCOPY_EXTRA_METRICS,
         extras=_spectroscopy_extras,
+        not_held=(
+            "spectroscopy.notice_camera_without_profile",
+            "spectroscopy.skipped_no_trail_star_count",
+            "spectroscopy.skipped_unidentified_star_count",
+            "spectroscopy.notice_stars_below_feature_limit",
+            "spectroscopy.notice_gaia_xp_download_failed",
+            "spectroscopy.notice_reddening_lookup_failed",
+        ),
     ),
     SummaryKind(
         key="asteroidDetection",
@@ -1689,6 +1753,10 @@ SUMMARY_KINDS: tuple[SummaryKind, ...] = (
         gates=_ASTEROID_GATES,
         extra_metrics=("asteroid_detection.residual_worst_accepted_ratio",),
         extras=_asteroid_extras,
+        not_held=(
+            "asteroid_detection.notice_camera_without_profile",
+            "asteroid_detection.notice_ephemeris_query_cap_reached",
+        ),
         gate_adjuster=_asteroid_gate,
     ),
 )

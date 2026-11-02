@@ -15,7 +15,8 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from astrometricslib import FilterType, InvalidArgumentError
+from astrometricslib import FilterType
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.models.planning.observation_package import ExposureRequest, FrameType
 from wayfindinglib.models.planning.sequence_plan import SequenceItem, SequencePlan
 

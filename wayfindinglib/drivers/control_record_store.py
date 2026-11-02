@@ -36,13 +36,9 @@ from collections.abc import Iterable
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import (
-    InvalidArgumentError,
-    StorageError,
-    connect_db,
-    observing_night_id,
-    parse_coordinate_string,
-)
+from astrometricslib.drivers import connect_db
+from astrometricslib.exceptions import InvalidArgumentError, StorageError
+from astrometricslib.reports import observing_night_id
 
 if TYPE_CHECKING:
     from astrometricslib import AppConfiguration, Target
@@ -524,8 +520,8 @@ class ControlRecordStore:
             if not frame_times:
                 continue
             try:
-                target_ra_deg = parse_coordinate_string(target.ra, is_ra=True) if target.ra else 0.0
-                target_dec_deg = parse_coordinate_string(target.dec, is_ra=False) if target.dec else 0.0
+                target_ra_deg = target.ra_deg if target.ra else 0.0
+                target_dec_deg = target.dec_deg if target.dec else 0.0
             except InvalidArgumentError:
                 continue
             # Coordinates that could not be read are stored as (0, 0).

@@ -12,10 +12,12 @@ the behavior `Wayfinding_Library_Architecture.md` Section 5.7 describes
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from astrometricslib import ConflictError
+from astrometricslib._internal.frames import derive_target_sessions
+from astrometricslib.exceptions import ConflictError
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.planning.observation_package import ExposureRequest, FrameType
 from wayfindinglib.models.session.observation_session import (
@@ -199,6 +201,18 @@ class _FakeTargetRegistry:
             The target, or `None` when no target has this id.
         """
         return self._targets.get(target_id)
+
+    def sessions(self, target: _FakeTarget, night_date: date | None = None) -> list[Any]:
+        """Group a target's frames into sessions, as the library does.
+
+        Returns
+        -------
+        sessions : `list`
+            The target's sessions, only those of `night_date` when given.
+        """
+        target_id = next(key for key, value in self._targets.items() if value is target)
+        found = derive_target_sessions(target_id, target.frames)
+        return [session for session in found if night_date is None or session.night_date == night_date]
 
 
 class _FakeAstrometrics:

@@ -8,16 +8,22 @@ arguments and hand off.
 """
 
 import builtins
-from collections.abc import Callable
-from typing import Any, Literal
+from collections.abc import Callable, Sequence
+from datetime import date
+from typing import Literal
 
-from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
-from astrometricslib.drivers.driver_set import Drivers
+from astropy.io import fits
+
+from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
 from astrometricslib.models.catalog_queries import ReindexReport, TargetQueryResult, TargetReindexChange
-from astrometricslib.models.target import Target, TargetObjectType
+from astrometricslib.models.field_centers import FieldCenter, ImagedFieldCenters
+from astrometricslib.models.image_deletion import FailedDeletion, ImageDeletionResult
+from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.models.target import FrameRecord, Target, TargetObjectType
 from astrometricslib.pipelines.shared.api_arguments import (
     check_choice,
     reject_unused_arguments,
@@ -25,7 +31,7 @@ from astrometricslib.pipelines.shared.api_arguments import (
 )
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.shared.frame_scanning import classify_and_sort_fits_files
-from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
+from astrometricslib.pipelines.shared.target_sessions import TargetSession, derive_target_sessions
 
 __all__ = [
     "TargetCatalog",
@@ -86,7 +92,7 @@ class TargetCatalog:
     ) -> None:
         self._config = config
         self._drivers = drivers or Drivers()
-        self.catalog_access = storage
+        self._catalog_access = storage
         self._targets: list = storage.get("target_catalog", {}) or []
         self._touched_target_ids: set = set()
         self._saved_fingerprints: dict[str, str] = {}
@@ -231,7 +237,7 @@ class TargetCatalog:
         target: str | Target | None = None,
         paths: builtins.list[str] | None = None,
         role: str = "LIGHT",
-        filter_type: str | None = None,
+        filter_name: str | None = None,
         camera_id: str | None = None,
         prune_missing: bool = False,
         refresh_headers: bool = False,
@@ -242,7 +248,7 @@ class TargetCatalog:
         Three forms:
 
         - ``target`` and ``paths``: add only those files to the target, reading
-          each FITS header. ``role``, ``filter_type`` and ``camera_id``
+          each FITS header. ``role``, ``filter_name`` and ``camera_id``
           override what the header says. A file that is already listed is
           updated. A finished picture (``.jpg``, ``.jpeg``, ``.png``,
           ``.tiff`` or ``.tif``) is not a frame: it becomes the target's
@@ -267,7 +273,7 @@ class TargetCatalog:
         role : `str`, optional
             With ``paths``: the frames' role, such as ``"LIGHT"`` (default),
             ``"DARK"``, ``"BIAS"`` or ``"FLAT"``.
-        filter_type : `str`, optional
+        filter_name : `str`, optional
             With ``paths``: the filter, instead of the one in the header.
         camera_id : `str`, optional
             With ``paths``: the camera name, instead of the one in the header.
@@ -301,13 +307,13 @@ class TargetCatalog:
         reject_unused_arguments(
             form,
             {
-                "paths": ("role", "filter_type", "camera_id"),
+                "paths": ("role", "filter_name", "camera_id"),
                 "target": ("prune_missing", "refresh_headers"),
                 "library": ("prune_missing", "refresh_headers", "on_progress"),
             },
             {
                 "role": role != "LIGHT",
-                "filter_type": filter_type is not None,
+                "filter_name": filter_name is not None,
                 "camera_id": camera_id is not None,
                 "prune_missing": prune_missing,
                 "refresh_headers": refresh_headers,
@@ -330,13 +336,13 @@ class TargetCatalog:
                     resolved.stacking.processed_image = path
                     processed_image = path
                     continue
-                record = add_frame(resolved, path, role, filter_type, camera_id)
+                record = add_frame(resolved, path, role, filter_name, camera_id)
                 added.append(record.path)
         else:
             target_records.reindex_frames(
                 resolved,
                 prune_missing=prune_missing,
-                catalog_access=self.catalog_access,
+                catalog_access=self._catalog_access,
                 refresh_headers=refresh_headers,
             )
         self._touched_target_ids.add(resolved.id)
@@ -388,7 +394,7 @@ class TargetCatalog:
             target_records.reindex_frames(
                 resolved,
                 prune_missing=prune_missing,
-                catalog_access=self.catalog_access,
+                catalog_access=self._catalog_access,
                 refresh_headers=refresh_headers,
             )
             self._touched_target_ids.add(resolved.id)
@@ -442,6 +448,205 @@ class TargetCatalog:
 
         return image_conversions.get_fits_header(path)
 
+    def read_frame_header(self, path: str) -> fits.Header:
+        """Read the header of a FITS file with its values typed.
+
+        This reads the first block (HDU 0) of the file, where cameras and
+        capture software write their notes. It does not read the pixels.
+        Unlike `get_header`, it does not check the file against a target,
+        and it keeps each value as a number, text or flag, not as text.
+
+        Parameters
+        ----------
+        path : `str`
+            Path to the FITS file.
+
+        Returns
+        -------
+        header : `astropy.io.fits.Header`
+            A copy of the file's first header. It can be used like a
+            dictionary, for example ``header.get("FILTER")``.
+        """
+        # A missing, cut-off or damaged file raises one of FITS_READ_ERRORS.
+        from astrometricslib._internal.drivers.fits_access import read_header
+
+        return read_header(path, first_hdu_only=True)
+
+    def select_frames(
+        self,
+        target: str | Target,
+        filter_name: str | None = None,
+        first_file: str | None = None,
+        last_file: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        limit: int | None = None,
+    ) -> builtins.list[FrameRecord]:
+        """Pick a target's light frames by filter, file name range and time.
+
+        Only light frames that have a start time are considered. Spectroscopy
+        frames are left out unless ``filter_name`` asks for one.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target to search.
+        filter_name : `str`, optional
+            Keep frames whose filter matches this text, ignoring case.
+        first_file, last_file : `str`, optional
+            Keep frames whose file name sorts from ``first_file`` to
+            ``last_file``. A short bound such as ``"013"`` is matched
+            against the frame number at the end of the name.
+        since, until : `str`, optional
+            Keep frames that began from ``since`` to ``until``. Each is an
+            ISO 8601 time such as ``"2026-10-03T21:30:00-06:00"``; no offset
+            means UTC.
+        limit : `int`, optional
+            How many frames to keep. With a file or time bound these are the
+            first frames in the range; without one they are the newest.
+            Omit it to keep every match.
+
+        Returns
+        -------
+        frames : `list` [`FrameRecord`]
+            The kept frames, oldest first.
+
+        Notes
+        -----
+        Raises `NotFoundError` if the target does not exist, and
+        `InvalidArgumentError` if ``since`` or ``until`` is not an ISO 8601
+        time or ``limit`` is less than 1.
+        """
+        from astrometricslib.pipelines.shared.quality import frame_selection
+
+        resolved = resolve_target(self, target)
+        return frame_selection.select_target_light_frames(
+            resolved.frames,
+            filter_name=filter_name,
+            first_file=first_file,
+            last_file=last_file,
+            since=since,
+            until=until,
+            limit=limit,
+        )
+
+    def resolve(self, target: str | Target) -> Target:
+        """Turn a target id into the `Target` it names.
+
+        A `Target` is returned as it is. An id is matched loosely, as `get`
+        does, after reading the stored targets again so that a target
+        another program added is seen.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            A target id or a `Target`.
+
+        Returns
+        -------
+        resolved : `Target`
+            The target.
+
+        Notes
+        -----
+        Raises `NotFoundError` if no target has that id, and
+        `InvalidArgumentError` if ``target`` is neither text nor a `Target`.
+        """
+        return resolve_target(self, target)
+
+    def get_stars(self, target: str | Target) -> builtins.list[StellarObject]:
+        """Read every star the library holds for a target.
+
+        This is the short form of ``StellarCatalog.query`` with the target
+        selected, the full records asked for and no cap on the count. Use
+        ``StellarCatalog.query`` when you need a filter, an order or a
+        smaller answer. Single-frame detections are left out, as they are
+        in that query.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            A target id or a `Target`.
+
+        Returns
+        -------
+        stars : `list` [`StellarObject`]
+            The target's stars, in id order. Empty if the target has none.
+        """
+        from astrometricslib.pipelines.shared.star_catalog_queries import StarQuery, run_star_query
+
+        resolved = self.resolve(target)
+        answer = run_star_query(
+            self._catalog_access, StarQuery(target_id=resolved.id), "objects", None, 0, None
+        )
+        return answer.objects or []
+
+    def add_frames(self, paths: Sequence[str], target: str | Target, *, telescope: str) -> builtins.list[str]:
+        """Move new image files into the library, under a target.
+
+        Each path is a folder to search or a single FITS file. A file is
+        sorted by its header: a light frame goes under the target, and a dark,
+        bias or flat frame goes to the calibration folders. Frames set aside
+        by the stacking pipeline are skipped. Files are moved, not copied, and
+        a file that cannot be read is left where it is. The call does not
+        update the frame records: call `reindex_frames` with the returned
+        paths for that.
+
+        Parameters
+        ----------
+        paths : `Sequence` [`str`]
+            Folders to search, or FITS files.
+        target : `str` or `Target`
+            The target the light frames belong to.
+        telescope : `str`
+            The name of the telescope the frames were taken with. It is part
+            of the library folder of a light or flat frame.
+
+        Returns
+        -------
+        added_paths : `list` [`str`]
+            The new path of each file that was moved to a place where no file
+            of that name yet existed.
+
+        Notes
+        -----
+        Raises `NotFoundError` if the target does not exist.
+        """
+        from astrometricslib.pipelines.shared.frame_scanning import classify_and_sort_fits_files
+
+        resolved = resolve_target(self, target)
+        added_paths: builtins.list[str] = []
+        classify_and_sort_fits_files(list(paths), resolved.id, self._config, telescope, added_paths)
+        return added_paths
+
+    def sessions(self, target: str | Target, night_date: date | None = None) -> builtins.list[TargetSession]:
+        """Group a target's frames into observing sessions.
+
+        Frames go in the same session when they were taken on the same night
+        (noon to noon, local time) with the same gain and offset. A change of
+        filter or exposure length does not start a new session. Frames with
+        no start time are ignored.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target.
+        night_date : `datetime.date`, optional
+            Only the sessions of this night.
+
+        Returns
+        -------
+        sessions : `list` [`TargetSession`]
+            The sessions, ordered by night.
+
+        Notes
+        -----
+        Raises `NotFoundError` if the target does not exist.
+        """
+        resolved = resolve_target(self, target)
+        found = derive_target_sessions(resolved.id, resolved.frames)
+        return [session for session in found if night_date is None or session.night_date == night_date]
+
     def get_frame(self, target: str | Target, iso: str, exposure: str, index: int = 0) -> str:
         """Find the path of a target's frame by gain, exposure and order.
 
@@ -471,7 +676,9 @@ class TargetCatalog:
         resolved = resolve_target(self, target)
         return image_conversions.get_frame(resolved, iso, exposure, index)
 
-    def delete_images(self, paths: builtins.list[str], target: str | Target | None = None) -> dict:
+    def delete_images(
+        self, paths: builtins.list[str], target: str | Target | None = None
+    ) -> ImageDeletionResult:
         """Delete files from disk, and from a target's frame list if given.
 
         Parameters
@@ -484,14 +691,21 @@ class TargetCatalog:
 
         Returns
         -------
-        result : `dict`
+        result : `ImageDeletionResult`
             ``deleted`` (the paths removed) and ``failed`` (each path that
             could not be removed, with the reason).
         """
         from astrometricslib.pipelines.shared import image_conversions
 
         target_id = resolve_target(self, target).id if target is not None else None
-        return image_conversions.delete_images(paths, self, target_id)
+        outcome = image_conversions.delete_images(paths, self, target_id)
+        return ImageDeletionResult(
+            deleted=[str(path) for path in outcome["deleted"]],
+            failed=[
+                FailedDeletion(path=str(item["path"]), reason=str(item["reason"]))
+                for item in outcome["failed"]
+            ],
+        )
 
     # -- Short descriptions -----------------------------------------------
 
@@ -631,7 +845,7 @@ class TargetCatalog:
         if detail == "nights":
             return TargetQueryResult(detail=detail, nights=target_overview.count_targets_per_night(targets))
         if detail == "camera_index":
-            from astrometricslib.drivers.camera_profile_store import camera_identity
+            from astrometricslib._internal.drivers.camera_profile_store import camera_identity
             from astrometricslib.pipelines.shared.target_camera_index import build_target_camera_index
 
             camera_names = list(self._config.get_available_cameras())
@@ -686,7 +900,7 @@ class TargetCatalog:
     @background_job("diagnostics", grace_period_seconds=20.0)
     def imaged_field_centers(
         self, max_frames_per_target: int = 12, register_job: bool = True
-    ) -> builtins.list[dict[str, Any]]:
+    ) -> ImagedFieldCenters:
         """List the distinct sky positions the library has imaged.
 
         Reads the position from the FITS header of the first few frames of
@@ -702,13 +916,24 @@ class TargetCatalog:
 
         Returns
         -------
-        centers : `list` [`dict`]
+        centers : `ImagedFieldCenters`
             One entry per distinct position, with its coordinates and the
             targets that share it.
         """
         from astrometricslib.pipelines.astrometry.utilities.catalog_seeding import derive_field_centers
 
         with registered_job(enabled=register_job, job_type="diagnostics", target_id="library"):
-            return derive_field_centers(
+            found = derive_field_centers(
                 self._look_at_every_target(), max_frames_per_target=max_frames_per_target
+            )
+            return ImagedFieldCenters(
+                centers=[
+                    FieldCenter(
+                        right_ascension_deg=float(center["right_ascension_deg"]),
+                        declination_deg=float(center["declination_deg"]),
+                        target_ids=[str(target_id) for target_id in center["target_ids"]],
+                        frames_examined=int(center["frames_examined"]),
+                    )
+                    for center in found
+                ]
             )

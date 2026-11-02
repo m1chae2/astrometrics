@@ -56,35 +56,35 @@ def make_star(own_type: str, rms: float, candidates: list[dict], catalog_type: s
     )
 
 
-def test_a_clear_gap_to_the_runner_up_is_not_ambiguous_and_does_not_differ() -> None:
-    """Best 5% off, runner-up 9% off: a 0.04 RMS gap, not ambiguous."""
+def test_a_clear_gap_to_the_runner_up_is_reported_as_a_number() -> None:
+    """A 0.04 gap, and A3V is three steps from an A0V catalog type."""
     candidates = [
         {"spectral_type": "A3V", "rms": 0.05, "correlation": 0.99},
         {"spectral_type": "A5V", "rms": 0.09, "correlation": 0.98},
     ]
     spectrum = summarize_star(make_star("A3V", 0.05, candidates))["spectrum"]
     assert spectrum["rms_gap_to_second_best"] == pytest.approx(0.04)
-    assert spectrum["is_ambiguous"] is False
-    assert spectrum["differs_from_catalog"] is False
+    assert spectrum["catalog_type_steps_apart"] == pytest.approx(3.0)
     assert [item["type"] for item in spectrum["closest_reference_types"]] == ["A3V", "A5V"]
 
 
-def test_a_tiny_gap_to_the_runner_up_is_ambiguous_and_no_confidence_or_probability_is_reported() -> None:
-    """A 0.003 RMS gap is ambiguous; the summary has no confidence score."""
+def test_a_tiny_gap_to_the_runner_up_is_a_number_and_no_confidence_or_probability_is_reported() -> None:
+    """A 0.003 RMS gap is reported as the number, with no verdict or score."""
     candidates = [
         {"spectral_type": "A3V", "rms": 0.05, "correlation": 0.99},
         {"spectral_type": "A5V", "rms": 0.053, "correlation": 0.98},
     ]
     spectrum = summarize_star(make_star("A3V", 0.05, candidates))["spectrum"]
-    assert spectrum["is_ambiguous"] is True
+    assert spectrum["rms_gap_to_second_best"] == pytest.approx(0.003)
     assert not [key for key in spectrum if "confidence" in key or "probability" in key]
+    assert not {"no_good_match", "is_ambiguous", "is_class_ambiguous", "differs_from_catalog"} & set(spectrum)
 
 
-def test_a_far_type_is_called_different_and_a_poor_fit_is_no_good_match() -> None:
-    """M2 against an A0V catalog entry differs; 20% off is no good match."""
+def test_a_far_type_and_a_poor_fit_are_reported_as_numbers() -> None:
+    """M2 against an A0V catalog entry is 42 steps apart; 20% off."""
     spectrum = summarize_star(make_star("M2", 0.2, [], catalog_type="A0V"))["spectrum"]
-    assert spectrum["differs_from_catalog"] is True
-    assert spectrum["no_good_match"] is True
+    assert spectrum["catalog_type_steps_apart"] == pytest.approx(42.0)
+    assert spectrum["own_type_percent_off"] == pytest.approx(20.0)
 
 
 def test_only_findings_are_listed() -> None:

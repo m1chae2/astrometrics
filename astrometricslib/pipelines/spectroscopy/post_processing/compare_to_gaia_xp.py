@@ -91,7 +91,7 @@ import numpy as np
 from scipy.interpolate import PchipInterpolator
 from scipy.ndimage import gaussian_filter1d
 
-from astrometricslib.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
+from astrometricslib._internal.drivers.interfaces.gaia_xp_driver import GaiaXpDownloadError, GaiaXpDriver
 from astrometricslib.models.quality.gaia_xp_comparison import (
     GaiaXpBandResidual,
     GaiaXpBandSummary,
@@ -212,9 +212,11 @@ MINIMUM_STARS_FOR_GATE = 3
 
 REASON_NO_SOURCE_ID = "no Gaia DR3 source id is known for this star"
 REASON_NO_SPECTRUM = (
-    "the star has no response-corrected spectrum (the camera has no stored instrument response)"
+    "the star has no response-corrected spectrum (it is too faint to analyze, or the camera has no stored "
+    "instrument response)"
 )
-REASON_NO_XP = "Gaia DR3 has no XP spectrum for this source, or it could not be downloaded"
+REASON_NO_XP = "Gaia DR3 has no XP spectrum for this source"
+REASON_XP_DOWNLOAD_FAILED = "the Gaia XP spectrum could not be downloaded"
 
 
 def xp_resolution_fwhm_angstrom(wavelength_angstrom: np.ndarray) -> np.ndarray:
@@ -637,7 +639,10 @@ def compare_to_gaia_xp(
 
     This asks the driver for the XP spectrum, so it does no work, and does not
     touch the network, for a star with no known Gaia id or no
-    response-corrected spectrum.
+    response-corrected spectrum. A download that fails
+    (`GaiaXpDownloadError`) is stored as ``not_checked`` with
+    `REASON_XP_DOWNLOAD_FAILED`, not raised, so a spectrum check never stops a
+    pipeline.
 
     Parameters
     ----------
@@ -666,7 +671,10 @@ def compare_to_gaia_xp(
     not_checked = gaia_xp_precheck(gaia_source_id, response_corrected_intensity)
     if not_checked is not None:
         return not_checked
-    xp_spectrum = driver.sampled_spectrum(gaia_source_id)
+    try:
+        xp_spectrum = driver.sampled_spectrum(gaia_source_id)
+    except GaiaXpDownloadError:
+        return _not_checked(REASON_XP_DOWNLOAD_FAILED, gaia_source_id)
     if xp_spectrum is None:
         return _not_checked(REASON_NO_XP, gaia_source_id)
     try:

@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib import HardwareError
+from astrometricslib.exceptions import HardwareError
 from wayfindinglib.tasks.control_tasks.guide_exposure_ladder_tasks import (
     capture_guide_ladder,
     frame_from_blob,

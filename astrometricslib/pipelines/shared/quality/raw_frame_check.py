@@ -29,7 +29,7 @@ from typing import Any
 import numpy as np
 from scipy import ndimage
 
-from astrometricslib.drivers.fits_access import open_primary_hdu
+from astrometricslib._internal.drivers.fits_access import open_primary_hdu
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.pipelines.shared.quality.saturation import resolve_saturation_threshold
 

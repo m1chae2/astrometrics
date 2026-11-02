@@ -18,8 +18,8 @@ from astropy.io import fits
 from astropy.table import Table
 from astropy.wcs import WCS
 
-from astrometricslib.drivers.driver_set import Drivers
-from astrometricslib.drivers.interfaces import PlateSolveDriver, SimbadDriver, plate_solve_driver
+from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.interfaces import PlateSolveDriver, SimbadDriver, plate_solve_driver
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
 FIELD_RA_DEG = 250.42

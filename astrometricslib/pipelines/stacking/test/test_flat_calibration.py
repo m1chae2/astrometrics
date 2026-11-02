@@ -112,7 +112,8 @@ def test_a_single_faint_noisy_flat_is_reported_and_smoothed(tmp_path: Path) -> N
     assert assessment.noise_fraction == pytest.approx(0.045, rel=0.15)
     assert assessment.needs_smoothing
     assert any("faint" in issue for issue in assessment.issues)
-    assert any("take more flats" in issue for issue in assessment.issues)
+    assert any(issue.startswith(fc.NOISY_FLAT_ISSUE_PREFIX) for issue in assessment.issues)
+    assert not any("take more flats" in issue for issue in assessment.issues)
 
 
 def test_a_good_set_of_flats_has_no_issues(tmp_path: Path) -> None:

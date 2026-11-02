@@ -10,8 +10,11 @@ the shared star catalog.
 
 from typing import Any
 
+from pydantic import ValidationError
+
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.moving_object import CascadeStage
-from astrometricslib.models.moving_object_config import MovingObjectConfigLoader
+from astrometricslib.models.moving_object_config import MovingObjectConfig, MovingObjectConfigLoader
 from astrometricslib.models.quality.quality_summary import (
     ASTEROID_DETECTION_PIPELINE_VERSION,
     AsteroidDetectionPipelineQualityMetrics,
@@ -28,6 +31,54 @@ from astrometricslib.pipelines.pipeline_base import (
     run_pipeline,
 )
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
+
+
+def moving_object_config_from_options(values: Any) -> MovingObjectConfig | None:
+    """Turn the ``moving_object_config`` option into the settings model.
+
+    ``process_target(asteroids={"moving_object_config": {...}})`` passes the
+    settings as a plain dictionary. Its keys are the field names of
+    `MovingObjectConfig` (for example ``detection_threshold_sigma``). A key
+    that is left out keeps the model's default value (not the value in the
+    configuration file). A key that names no
+    setting is refused, so a misspelled setting is never ignored. This
+    follows the rule for the other stage options, where an unknown option is
+    refused too.
+
+    Parameters
+    ----------
+    values : `dict` or `None`
+        The settings, or `None` for the settings in the configuration file.
+        An empty dictionary means every setting at its default value.
+
+    Returns
+    -------
+    moving_object_config : `MovingObjectConfig` or `None`
+        The checked settings, or `None` when ``values`` is `None`.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If ``values`` is not a dictionary, names a setting that does not
+        exist, or holds a value of the wrong kind.
+    """
+    if values is None:
+        return None
+    if not isinstance(values, dict):
+        raise InvalidArgumentError(
+            f"moving_object_config must be a dictionary of settings, not {type(values).__name__}."
+        )
+    known = set(MovingObjectConfig.model_fields)
+    unknown = sorted(str(key) for key in values if key not in known)
+    if unknown:
+        raise InvalidArgumentError(
+            f"Unknown moving_object_config setting(s): {', '.join(unknown)}. "
+            f"Choose from: {', '.join(sorted(known))}."
+        )
+    try:
+        return MovingObjectConfig(**values)
+    except ValidationError as error:
+        raise InvalidArgumentError(f"Invalid moving_object_config: {error}") from error
 
 
 class AsteroidDetectionPipelineAdapter(AnalysisPipeline):
@@ -74,7 +125,9 @@ class AsteroidDetectionPipelineAdapter(AnalysisPipeline):
         )
 
         target = request.target
-        pipeline = AsteroidDetectionPipeline(config=request.options.get("moving_object_config"))
+        pipeline = AsteroidDetectionPipeline(
+            config=moving_object_config_from_options(request.options.get("moving_object_config"))
+        )
         light_frames = [
             (frame.path, frame.timestamp)
             for frame in target.frames
@@ -137,9 +190,9 @@ class AsteroidDetectionPipelineAdapter(AnalysisPipeline):
             for candidate in result.candidates
             if candidate.cascade_stage == CascadeStage.RATE_LINEARITY_CONFIRMED
         )
-        moving_object_config = request.options.get("moving_object_config") or (
-            MovingObjectConfigLoader.load_moving_object_config()
-        )
+        moving_object_config = moving_object_config_from_options(
+            request.options.get("moving_object_config")
+        ) or (MovingObjectConfigLoader.load_moving_object_config())
         gates = asteroid_run_gates(
             metrics,
             moving_object_config.min_frames_for_persistence,
@@ -164,7 +217,7 @@ class AsteroidDetectionPipelineAdapter(AnalysisPipeline):
             record_camera_profile,
         )
 
-        record_camera_profile(summary, most_common_camera_name(light_frames))
+        record_camera_profile(summary, most_common_camera_name(light_frames), measurement_context)
         return summary
 
     def to_result_dict(

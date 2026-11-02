@@ -23,12 +23,8 @@ import threading
 import time
 from typing import Any
 
-from astrometricslib import (
-    ConfigurationError,
-    ExternalServiceError,
-    require_mounted_storage,
-    scratch_directory,
-)
+from astrometricslib.drivers import require_mounted_storage, scratch_directory, stop_process_group
+from astrometricslib.exceptions import ConfigurationError, ExternalServiceError
 from wayfindinglib.drivers.interfaces.remote_transfer_driver import RemoteTransferDriver
 
 logger = logging.getLogger(__name__)
@@ -36,8 +32,24 @@ logger = logging.getLogger(__name__)
 _RSYNC_BASE_OPTIONS = ("-avz", "--no-p", "--no-g", "--no-o", "-s")
 """Options every rsync transfer from the telescope computer uses."""
 
-_RSYNC_IDLE_TIMEOUT_SECONDS = 60
-"""Give up a log transfer that moves no data for this long."""
+_RSYNC_STALL_TIMEOUT_SECONDS = 60
+"""Give up a transfer that moves no data for this long (rsync ``--timeout``).
+
+Design estimate. This is the main guard: a healthy transfer keeps moving data,
+so it is never cut off by it, however long it runs. rsync also sends its own
+keep-alive messages while it lists files, so a long file list does not trip
+it. 60 s is far longer than the pauses of a working Wi-Fi link and short
+enough that a dead link frees the thread within a minute.
+"""
+
+_RSYNC_OVERALL_LIMIT_SECONDS = 12 * 3600
+"""End a transfer that runs this long even though data still moves.
+
+Design estimate, and only a safety net for a transfer that moves data but
+never finishes. It is set far above a healthy transfer: a full night from the
+telescope computer is tens of gigabytes, and 100 GB at a slow 5 MB/s over
+Wi-Fi takes about 5.6 hours, so 12 hours leaves more than twice that margin.
+"""
 
 _OFFLINE_REPROBE_SECONDS = 10.0
 """While the host is offline, recheck in the background this often."""
@@ -495,17 +507,25 @@ class StellarMateInterface(RemoteTransferDriver):
         succeeded : `bool`
             `True` if rsync exited with status 0. A failure is logged and
             reported as `False`; it is never retried with another tool
-            (see `download_target_folder`).
+            (see `download_target_folder`). A transfer that stalls for
+            `_RSYNC_STALL_TIMEOUT_SECONDS` fails by itself (rsync's own
+            ``--timeout``), and one that runs past
+            `_RSYNC_OVERALL_LIMIT_SECONDS` is stopped.
         """
         rsync_cmd = [
             "rsync",
             *_RSYNC_BASE_OPTIONS,
+            f"--timeout={_RSYNC_STALL_TIMEOUT_SECONDS}",
             *extra_options,
             f"{self.host_alias}:{remote_path}",
             local_path,
         ]
         logger.info("Starting rsync download: %s:%s -> %s", self.host_alias, remote_path, local_path)
+        overall_limit_reached = threading.Event()
+        limit_timer: threading.Timer | None = None
         try:
+            # Its own process group, so the overall limit ends rsync and the
+            # ssh process it started, not only rsync.
             process = subprocess.Popen(
                 rsync_cmd,
                 stdout=subprocess.PIPE,
@@ -513,7 +533,17 @@ class StellarMateInterface(RemoteTransferDriver):
                 text=True,
                 bufsize=1,
                 universal_newlines=True,
+                start_new_session=True,
             )
+
+            def end_the_transfer() -> None:
+                """Stop rsync and ssh after the overall limit."""
+                overall_limit_reached.set()
+                stop_process_group(process)
+
+            limit_timer = threading.Timer(_RSYNC_OVERALL_LIMIT_SECONDS, end_the_transfer)
+            limit_timer.daemon = True
+            limit_timer.start()
 
             if process.stdout:
                 for line in iter(process.stdout.readline, ""):
@@ -528,6 +558,13 @@ class StellarMateInterface(RemoteTransferDriver):
                     logger.debug("rsync: %s", line)
 
             return_code = process.wait()
+            if overall_limit_reached.is_set():
+                logger.error(
+                    "rsync for %s was ended after the overall limit of %d s.",
+                    description,
+                    _RSYNC_OVERALL_LIMIT_SECONDS,
+                )
+                return False
             if return_code == 0:
                 logger.info("rsync completed successfully for %s", description)
                 return True
@@ -536,6 +573,9 @@ class StellarMateInterface(RemoteTransferDriver):
         except OSError, subprocess.SubprocessError:
             logger.exception("rsync execution error for %s", description)
             return False
+        finally:
+            if limit_timer is not None:
+                limit_timer.cancel()
 
     def _list_remote_files_with_sizes(self, find_command: str) -> dict[str, int]:
         """Run a ``find`` on the telescope computer and return file sizes.
@@ -620,7 +660,6 @@ class StellarMateInterface(RemoteTransferDriver):
                 [
                     *(f"--include={pattern}" for pattern in name_patterns),
                     "--exclude=*",
-                    f"--timeout={_RSYNC_IDLE_TIMEOUT_SECONDS}",
                 ],
                 f"{description}s in {remote_folder}",
             )

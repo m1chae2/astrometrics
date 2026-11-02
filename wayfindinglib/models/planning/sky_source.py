@@ -1,18 +1,52 @@
 """Purpose: One object to draw on the sky map: a star or a target.
 
-Description: `ObservationPlanning.get_sources` and
-`ObservationPlanning.get_online_catalog_sources` return a list of
-`SkySource`. Each one holds the position in degrees, a name, the brightness
-when known, and what data the library holds for it. The field names turn into
-the camelCase keys the app's Planetarium reads. `has_catalog_magnitude` tells
-the map whether the brightness is a real catalog magnitude it can draw by.
+Description: `ObservationPlanning.query_sources` returns a
+`SourceQueryResult`, which holds a list of `SkySource`. Each one holds the
+position in degrees, a name, the brightness when known, and what data the
+library holds for it. The field names turn into the camelCase keys the app's
+Planetarium reads. `has_catalog_magnitude` tells the map whether the
+brightness is a real catalog magnitude it can draw by.
 """
 
+import math
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
-from astrometricslib import has_catalog_magnitude
+BRIGHTEST_CATALOG_MAGNITUDE = -2.0
+"""The brightest value that counts as a catalog magnitude.
+
+A copy of the science library's limit of the same name. A value below it is an
+instrument reading from photometry, not a catalog magnitude. A test checks
+that the two rules still agree.
+"""
+
+
+def has_catalog_magnitude(magnitude: object) -> bool:
+    """Tell whether a star's magnitude is a real catalog magnitude.
+
+    This copies the science library's rule, so that a source that did not come
+    from a `StellarObject` follows the same rule.
+
+    Parameters
+    ----------
+    magnitude : `object`
+        The raw magnitude. It may be a number, `None`, or an empty string.
+
+    Returns
+    -------
+    has_magnitude : `bool`
+        `True` for a finite number at or above `BRIGHTEST_CATALOG_MAGNITUDE`
+        that is not exactly zero. Zero is what is saved for a star whose
+        catalog gave no magnitude, so it means "unknown", not "very bright".
+    """
+    return bool(
+        isinstance(magnitude, int | float)
+        and not isinstance(magnitude, bool)
+        and math.isfinite(magnitude)
+        and magnitude >= BRIGHTEST_CATALOG_MAGNITUDE
+        and magnitude != 0
+    )
 
 
 class SkySource(BaseModel):
@@ -65,6 +99,16 @@ class SkySource(BaseModel):
 
         `False` for a missing magnitude, an instrument reading from
         photometry, or the 0 saved when a catalog gave none (see
-        astrometricslib's `has_catalog_magnitude`).
+        the module function `has_catalog_magnitude`).
         """
         return has_catalog_magnitude(self.magnitude)
+
+
+class SourceQueryResult(BaseModel):
+    """What `ObservationPlanning.query_sources` found near a point."""
+
+    sources: list[SkySource] = Field(
+        ..., description="Targets first, then stars. Stars are brightest first when the answer is limited."
+    )
+    total_stars: int = Field(..., description="How many stars were found, before any cut at the limit.")
+    stars_truncated: bool = Field(..., description="True when the limit cut the star list short.")

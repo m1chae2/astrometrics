@@ -18,8 +18,9 @@ nothing is lost by swapping). The pipeline never deletes a previous stack by
 itself except by replacing it with a newer one.
 
 Companion files are the pictures and tables made with a stack: the rejection
-map, the registration table, the preview, the stretched FITS and the record of
-the inputs the stack was made from (see `stack_inputs.py`).
+map, the registration table, the preview, the stretched FITS, the record of
+what made the preview, and the record of the inputs the stack was made from
+(see `stack_inputs.py`).
 
 A target's folder can hold several stacks (luminance, spectral, one per
 camera). Each keeps its own previous version in the shared `_previous`
@@ -55,6 +56,7 @@ STACK_COMPANION_SUFFIXES = (
     "_Registration.seq",
     "_preview.jpg",
     "_processed.fits",
+    "_preview_settings.json",
     "_inputs.json",
     "_registration_frames.json",
 )

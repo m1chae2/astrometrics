@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { EmptyState } from './EmptyState';
 import '../../common/styles/listCommon.css';
 
@@ -16,6 +16,12 @@ export interface SelectableItem {
     /** Optional sky coordinates, in degrees, for a caller that needs to center a map on this item directly. */
     ra?: number;
     dec?: number;
+    /** Optional star magnitude, so a caller that opens a details card shows the same value as the row. */
+    magnitude?: number;
+    /** The library's verdict that `magnitude` is a real catalog magnitude (not missing, 0 or instrumental). */
+    hasCatalogMagnitude?: boolean;
+    /** Optional catalog spectral type, such as "K3II+B9.5V". */
+    spectralType?: string;
 }
 
 export interface SelectableListProps {
@@ -82,6 +88,11 @@ export const SelectableList: React.FC<SelectableListProps> = ({
     errorMessage = 'Could not load the list.',
     onRetry,
 }) => {
+    // Every list needs ids and a radio group name of its own. Two displays can be mounted
+    // at once (a hidden display stays mounted) and use the same className, so a name built from
+    // the className alone made their rows share ids; clicking a row then switched on the
+    // matching row of the other, hidden list and the visible list never saw the pick.
+    const listInstanceId = useId();
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const [scrollTop, setScrollTop] = useState(0);
     const [viewportHeight, setViewportHeight] = useState(0);
@@ -149,9 +160,7 @@ export const SelectableList: React.FC<SelectableListProps> = ({
             <div className="selectable-list" style={{ position: 'relative', height: totalHeight, display: 'block' }}>
                 {visibleItems.map((item, relativeIndex) => {
                     const idx = startIndex + relativeIndex;
-                    // Use a unique ID based on className or a random-ish string to prevent collisions
-                    const prefix = className ? `${className.trim().replace(/\s+/g, '-')}-` : 'sel-';
-                    const radioId = `${prefix}radio-${idx}`;
+                    const radioId = `${listInstanceId}-radio-${idx}`;
                     const isSelected = item.value === pendingId || item.value === selectedId;
                     const isHighlighted = highlightedIds?.has(item.value);
 
@@ -168,7 +177,7 @@ export const SelectableList: React.FC<SelectableListProps> = ({
                                     id={radioId}
                                     className="radio__input"
                                     type="radio"
-                                    name={`selection-${className}`}
+                                    name={`selection-${listInstanceId}`}
                                     value={item.value}
                                     checked={isSelected}
                                     // A radio's change event never fires for the radio that is

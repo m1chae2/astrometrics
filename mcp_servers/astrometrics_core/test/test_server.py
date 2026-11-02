@@ -99,6 +99,8 @@ def test_frame_quality_has_the_documented_arguments(registry: ToolRegistry) -> N
         "remeasure",
         "camera_id",
         "limit",
+        "exposure_seconds",
+        "predict_exposure_seconds",
     }
     assert not schema.get("required")
 
@@ -115,6 +117,7 @@ def test_jobs_query_has_the_documented_arguments(registry: ToolRegistry) -> None
         "detail",
         "lines",
         "limit",
+        "offset",
     }
     assert not schema.get("required")
 
@@ -163,7 +166,8 @@ def test_the_quality_root_replaces_the_diagnostics_tools(registry: ToolRegistry)
     """Quality tools are named ``quality_*``; none is ``diagnostics_*``."""
     names = set(registry.tools)
     assert not [name for name in names if name.startswith("diagnostics_")]
-    assert {"quality_measure_frames", "quality_check_spectral_frames", "quality_measure_stack"} <= names
+    assert {"quality_measure_frames", "quality_measure_stack"} <= names
+    assert "quality_check_spectral_frames" not in names
 
 
 def test_the_stored_quality_query_has_the_documented_arguments(registry: ToolRegistry) -> None:
@@ -181,6 +185,8 @@ def test_the_stored_quality_query_has_the_documented_arguments(registry: ToolReg
         "latest_only",
         "variant",
         "library_only",
+        "limit",
+        "offset",
     }
     assert not schema.get("required")
 

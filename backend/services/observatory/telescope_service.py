@@ -9,7 +9,8 @@ import logging
 import sqlite3
 from typing import Any
 
-from astrometricslib import AstrometricsError, InvalidArgumentError
+from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError
+from backend.services.coordinate_text import parse_coordinate_text
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,6 @@ class TelescopeService:
 
     def __init__(
         self,
-        driver: Any = None,
         guiding_service: Any = None,
         target_service: Any = None,
         wayfinder: Any = None,
@@ -34,8 +34,6 @@ class TelescopeService:
 
         Parameters
         ----------
-        driver : `Any`, optional
-            Hardware driver injection for tests.
         guiding_service : `Any`, optional
             Service for managing guide camera loops.
         target_service : `Any`, optional
@@ -54,24 +52,10 @@ class TelescopeService:
         else:
             self.wayfinder = wayfinder
 
-        if driver is not None:
-            self.wayfinder.control.driver = driver
-
         self._guiding_service = guiding_service
         self._target_service = target_service
         self._astrometrics_service = astrometrics_service
         self._alignment_service = alignment_service
-
-    @property
-    def indi_interface(self) -> Any:
-        """The INDI hardware interface from the observatory.
-
-        Returns
-        -------
-        driver : `Any`
-            The underlying INDI driver instance orchestrating hardware calls.
-        """
-        return self.wayfinder.control.driver
 
     def get_status(self) -> dict[str, Any]:
         """Retrieve current telescope status.
@@ -91,7 +75,14 @@ class TelescopeService:
 
         logger = logging.getLogger(__name__)
         try:
-            data = self.wayfinder.control.mount.status()
+            data = self.wayfinder.control.mount.status().model_dump(by_alias=True)
+            imaging = self.wayfinder.control.imaging.status(include=["current_filter", "focuser", "camera"])
+            data.update({
+                "cameraStatus": imaging.camera_status,
+                "filter": imaging.current_filter,
+                "focuserPosition": imaging.focuser_position,
+                "cameraTemperature": imaging.camera_temperature,
+            })
         except (AstrometricsError, OSError, RuntimeError) as e:
             logger.warning("Failed to query telescope status (telescope may be offline): %s", e)
             data = {
@@ -119,10 +110,7 @@ class TelescopeService:
         # Inject real alignment attempt history if service is available
         if self._alignment_service:
             try:
-                driver = getattr(self.wayfinder.control, "driver", None) or getattr(
-                    self.wayfinder.control, "_driver", None
-                )
-                self._alignment_service.poll_external_syncs(driver)
+                self._alignment_service.poll_external_syncs()
             except AstrometricsError as e:
                 logger.debug("Failed to poll external syncs: %s", e)
             data.update(self._alignment_service.get_attempts())
@@ -164,11 +152,9 @@ class TelescopeService:
             return None
 
         try:
-            from astrometricslib import parse_coordinate_string
-
             nearest = self._target_service.astrometrics.targets.query(
-                ra_deg=parse_coordinate_string(ra_str, is_ra=True),
-                dec_deg=parse_coordinate_string(dec_str, is_ra=False),
+                ra_deg=parse_coordinate_text(ra_str, is_right_ascension=True),
+                dec_deg=parse_coordinate_text(dec_str, is_right_ascension=False),
                 radius_deg=1.0,  # 1 degree tolerance for sensor FOV match
                 include_empty=True,
                 sort="separation",
@@ -213,9 +199,7 @@ class TelescopeService:
         # REQ: BKD-1.2: The backend SHALL provide a generic interface
         # for Telescope control (Slew, Sync, Park, Track).
         try:
-            from wayfindinglib import SkyPosition
-
-            position = SkyPosition(ra_deg=(float(ra) * 15.0) % 360.0, dec_deg=float(dec))
+            position = {"ra_deg": (float(ra) * 15.0) % 360.0, "dec_deg": float(dec)}
             return self.wayfinder.control.mount.slew(position)
         except ValueError as e:
             raise InvalidArgumentError(str(e)) from e

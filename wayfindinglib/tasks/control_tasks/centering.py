@@ -14,7 +14,7 @@ points is off by some arcminutes. Centering closes that gap in a loop:
    where it really points (a sync) and slew to the target again.
 
 Each iteration is recorded as an alignment attempt in the log database,
-so `control.history.query(kind="alignment")` can show it. A call to
+so `review.query(kind="alignment")` can show it. A call to
 `control.mount.abort_motion` stops the loop before its next step.
 """
 
@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import AstrometricsError, PlateSolveFailedError
+from astrometricslib.exceptions import AstrometricsError, PlateSolveFailedError
 from wayfindinglib.models.session.correction_result import PointingCorrection
 from wayfindinglib.models.sky_position import SkyPosition
 from wayfindinglib.tasks.control_tasks import hardware_operations
@@ -142,7 +142,7 @@ def _solve(context: ControlContext, path: Path) -> tuple[float, float]:
     PlateSolveFailedError
         If the star pattern could not be matched.
     """
-    wcs = context.astrometrics.stars.plate_solve(str(path))
+    wcs = context.astrometrics.processing.plate_solve(str(path))
     if wcs is None:
         raise PlateSolveFailedError(f"No plate solution for {path.name}.")
     return solved_center(wcs)

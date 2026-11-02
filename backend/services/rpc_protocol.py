@@ -10,7 +10,7 @@ from typing import Any
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from astrometricslib import NotFoundError
+from astrometricslib.exceptions import NotFoundError
 
 logger = logging.getLogger(__name__)
 

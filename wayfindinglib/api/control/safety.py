@@ -66,7 +66,7 @@ class SafetyControl(ControlChild):
             If ``divergence`` is asked for without `capability`, or
             `capability` is given without ``divergence``.
         """
-        from astrometricslib import InvalidArgumentError
+        from astrometricslib.exceptions import InvalidArgumentError
         from wayfindinglib.data_access.safety_policy_reader import get_safety_rule_set
         from wayfindinglib.tasks.control_tasks import hardware_operations
         from wayfindinglib.tasks.control_tasks.capability_promotion import summarize_divergence_evidence
@@ -93,7 +93,7 @@ class SafetyControl(ControlChild):
             status.divergence = {**dataclasses.asdict(summary), "agreement_rate": summary.agreement_rate}
         return status
 
-    def assess(self, readings: SensorReadings, now: datetime | None = None) -> SafetyAssessment:
+    def _assess(self, readings: SensorReadings, now: datetime | None = None) -> SafetyAssessment:
         """Judge weather readings against the saved safety rules.
 
         The verdict waits before it turns safe again after an unsafe
@@ -116,7 +116,7 @@ class SafetyControl(ControlChild):
 
         return hardware_operations.assess_safety(self._context, readings, now)
 
-    def save_rule_set(self, rule_set: SafetyRuleSet) -> None:
+    def _save_rule_set(self, rule_set: SafetyRuleSet) -> None:
         """Save `rule_set` as the active safety rules.
 
         Parameters
@@ -128,7 +128,7 @@ class SafetyControl(ControlChild):
 
         save_safety_rule_set(self._context.butler, rule_set)
 
-    def execute_safe_state(self, trigger: str, steps: SafeStateSteps) -> SafeStateOutcome:
+    def _execute_safe_state(self, trigger: str, steps: SafeStateSteps) -> SafeStateOutcome:
         """Run the ordered safe-state sequence and record it.
 
         Parameters
@@ -147,7 +147,7 @@ class SafetyControl(ControlChild):
 
         return execute(trigger, steps)
 
-    def open_enclosure(self) -> bool:
+    def _open_enclosure(self) -> bool:
         """Open the enclosure.
 
         Returns
@@ -159,7 +159,7 @@ class SafetyControl(ControlChild):
 
         return hardware_operations.open_enclosure(self._context)
 
-    def close_enclosure(self) -> bool:
+    def _close_enclosure(self) -> bool:
         """Close the enclosure, refusing if the mount is not clear of it.
 
         Returns

@@ -1,7 +1,7 @@
 """Purpose: Review the quality of one observing night.
 
 Description: `build_night_quality` is the work behind
-`control.history.query(kind="night_quality", session_id=...)`
+`review.query(kind="night_quality", session_id=...)`
 (`QUALITY_METRICS_PLAN.md` Section 6.1, use case UC1). For each target imaged
 that night it states where the time went: frames set aside, and the efficiency
 lost in the frames kept, against the user's own best nights with the same
@@ -42,15 +42,14 @@ from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import (
+from astrometricslib import FilterType, Target
+from astrometricslib.exceptions import NotFoundError
+from astrometricslib.reports import (
     CaptureSetting,
-    FilterType,
     MeasurementReference,
     MeasurementStatus,
-    NotFoundError,
     QualityMeasurement,
     SubjectLevel,
-    Target,
 )
 from wayfindinglib.analytics.result_quality.aggregates import DataSummary, SetAsideInput, night_summary
 from wayfindinglib.analytics.result_quality.allowed_capture_values import filter_names_match
@@ -137,8 +136,7 @@ def _guiding_summary(context: ControlContext, night_id: str) -> GuidingNightSumm
     performance = analysis.performance
     return GuidingNightSummary(
         available=True,
-        flagged=analysis.flagged,
-        flag_reasons=list(analysis.flag_reasons),
+        statements=list(analysis.recommendations),
         rms_per_axis_arcsec=performance.rms_per_axis_arcsec,
         expected_star_widening_fraction=performance.expected_star_widening_fraction,
         lost_fraction=quality.lost_fraction,
@@ -477,7 +475,7 @@ def build_night_quality(context: ControlContext, night_id: str) -> NightQuality:
     """
     astrometrics = context.astrometrics
     capture_settings = astrometrics.quality.capture_settings()
-    night_rows = astrometrics.quality.query(observing_night_id=night_id, library_only=True)
+    night_rows = astrometrics.quality.query(observing_night_id=night_id, library_only=True).rows
     guiding = _guiding_summary(context, night_id)
     if not night_rows and not guiding.available:
         raise NotFoundError(
@@ -540,7 +538,7 @@ def build_night_quality(context: ControlContext, night_id: str) -> NightQuality:
             moonless or None,
         )
         target_night_rows = rows_by_target[target_id]
-        stack_rows = astrometrics.quality.query(target_id=target_id, level="stack", library_only=True)
+        stack_rows = astrometrics.quality.query(target_id=target_id, level="stack", library_only=True).rows
         statements = _target_statements(
             target_night_rows, stack_rows, capture_settings, _main_setting_id(target_night_rows)
         )

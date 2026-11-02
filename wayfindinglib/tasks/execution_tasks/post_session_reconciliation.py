@@ -23,7 +23,7 @@ queue entry carries.
 
 from typing import Any
 
-from astrometricslib import ConflictError
+from astrometricslib.exceptions import ConflictError
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.equipment_and_site.calibration import CalibrationEntry, CalibrationStats
 from wayfindinglib.models.planning.observation_package import FrameType
@@ -106,8 +106,6 @@ def attach_target_session_ids(session: ObservationSession, astrometrics: Any) ->
         `TargetSession` derived for `session.night_date` across every
         target with at least one `COMPLETED` queue entry.
     """
-    from astrometricslib import derive_target_sessions
-
     target_ids = {entry.target_id for entry in session.queue if entry.status == QueueEntryStatus.COMPLETED}
 
     session_ids: set[str] = set()
@@ -115,9 +113,8 @@ def attach_target_session_ids(session: ObservationSession, astrometrics: Any) ->
         target = astrometrics.targets.get(target_id)
         if target is None:
             continue
-        for target_session in derive_target_sessions(target_id, target.frames):
-            if target_session.night_date == session.night_date:
-                session_ids.add(target_session.id)
+        for target_session in astrometrics.targets.sessions(target, night_date=session.night_date):
+            session_ids.add(target_session.id)
 
     session.target_session_ids = sorted(session_ids)
     return session

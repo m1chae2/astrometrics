@@ -1,7 +1,7 @@
 """Tests for the flattened, stretched picture written beside a finished stack.
 
 Neither Siril nor GraXpert is started. Stand-ins replace the functions that
-run them, or the `subprocess.run` call inside them, so the tests check what
+run them, or the `run_registered` call inside them, so the tests check what
 the module asks each program to do and how it reacts when one succeeds or
 fails.
 """
@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for
+from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for, preview_settings_path_for
 from astrometricslib.pipelines.stacking.post_processing import stack_preview
 from astrometricslib.pipelines.stacking.post_processing.bright_object import BrightObjectStretch
 from astrometricslib.pipelines.stacking.post_processing.sky_level import SkyLevelChoice
@@ -30,6 +30,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
     flatten_background,
     has_plate_solution,
     is_colour_image,
+    read_preview_settings,
     run_preview_script,
     write_stack_preview,
 )
@@ -281,6 +282,32 @@ def test_a_failed_graxpert_still_gives_a_picture(
 
     assert write_stack_preview(str(stack)) is not None
     assert 'load "stack.fits"' in programs.siril_calls[0][1]
+
+
+def test_a_failed_graxpert_is_reported_as_a_skipped_step(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a skipped step reaches the caller, so it can store a notice."""
+    _configure(monkeypatch, "siril-cli", "graxpert-gpu")
+    _Programs(flatten_result=False).install(monkeypatch)
+    skipped: list[stack_preview.SkippedPreviewStep] = []
+
+    assert write_stack_preview(str(stack), skipped_steps=skipped) is not None
+
+    assert skipped == [stack_preview.SkippedPreviewStep("GraXpert", "GraXpert did not finish")]
+
+
+def test_a_working_graxpert_reports_no_skipped_step(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify nothing is reported when every step worked."""
+    _configure(monkeypatch, "siril-cli", "graxpert-gpu")
+    _Programs().install(monkeypatch)
+    skipped: list[stack_preview.SkippedPreviewStep] = []
+
+    assert write_stack_preview(str(stack), skipped_steps=skipped) is not None
+
+    assert skipped == []
 
 
 def test_a_graxpert_that_cannot_start_still_gives_a_picture(
@@ -603,7 +630,7 @@ def test_no_configured_siril_gives_no_picture(
 
 
 def _record_subprocess(monkeypatch: pytest.MonkeyPatch) -> dict:
-    """Replace `subprocess.run` inside the module with a recorder.
+    """Replace `run_registered` inside the module with a recorder.
 
     Returns
     -------
@@ -613,7 +640,9 @@ def _record_subprocess(monkeypatch: pytest.MonkeyPatch) -> dict:
     """
     captured: dict = {}
 
-    def fake_subprocess_run(arguments: list[str], **_: object) -> stack_preview.subprocess.CompletedProcess:
+    def fake_subprocess_run(
+        arguments: list[str], _timeout_seconds: float
+    ) -> stack_preview.subprocess.CompletedProcess:
         """Record the command line, and the script file if there is one.
 
         Returns
@@ -626,7 +655,7 @@ def _record_subprocess(monkeypatch: pytest.MonkeyPatch) -> dict:
             captured["script"] = Path(arguments[-1]).read_text(encoding="utf-8")
         return stack_preview.subprocess.CompletedProcess(arguments, 0, "", "")
 
-    monkeypatch.setattr(stack_preview.subprocess, "run", fake_subprocess_run)
+    monkeypatch.setattr(stack_preview, "run_registered", fake_subprocess_run)
     monkeypatch.setattr(stack_preview, "siril_process_lock", nullcontext)
     return captured
 
@@ -679,7 +708,7 @@ def cosmic_clarity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def _fake_denoise_program(
     monkeypatch: pytest.MonkeyPatch, returncode: int = 0, writes_output: bool = True
 ) -> list[list[str]]:
-    """Replace `subprocess.run` with a program that denoises its `input`.
+    """Replace `run_registered` with a program that denoises its `input`.
 
     Returns
     -------
@@ -688,7 +717,7 @@ def _fake_denoise_program(
     """
     calls: list[list[str]] = []
 
-    def fake_run(arguments: list[str], **_: object) -> stack_preview.subprocess.CompletedProcess:
+    def fake_run(arguments: list[str], _timeout_seconds: float) -> stack_preview.subprocess.CompletedProcess:
         """Write a ``_denoised`` copy of each input file, as the program does.
 
         Returns
@@ -703,7 +732,7 @@ def _fake_denoise_program(
                 (folder / "output" / f"{staged.stem}_denoised.fits").write_bytes(b"denoised")
         return stack_preview.subprocess.CompletedProcess(arguments, returncode, "", "")
 
-    monkeypatch.setattr(stack_preview.subprocess, "run", fake_run)
+    monkeypatch.setattr(stack_preview, "run_registered", fake_run)
     return calls
 
 
@@ -1313,3 +1342,100 @@ def test_starnet_is_not_used_unless_asked_for(
     write_stack_preview(str(stack))
 
     assert not any("starnet -stretch" in call[1] for call in programs.siril_calls)
+
+
+def test_a_preview_writes_a_record_of_the_settings_it_used(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The record holds the settings used, the steps and the custom flag."""
+    _configure(monkeypatch, "siril-cli", None, "/opt/cc/denoise", strength=0.5, star_tone=True)
+    _Programs().install(monkeypatch)
+    steps: list[str] = []
+
+    assert write_stack_preview(str(stack), PreviewSettings(denoise_strength=0.8), steps) is not None
+
+    record = read_preview_settings(str(stack))
+    assert record is not None
+    assert record["settings_used"] == {
+        "denoise": True,
+        "denoise_strength": 0.8,
+        "star_toning": True,
+        "starnet": False,
+        "bright_object": False,
+    }
+    assert record["custom"] is True
+    assert record["steps_run"] == steps
+    assert record["made_at"]
+
+
+def test_a_preview_with_no_overrides_is_not_custom(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The configured values are recorded, and custom is false."""
+    _configure(monkeypatch, "siril-cli", None, None, star_tone=False)
+    _Programs().install(monkeypatch)
+
+    assert write_stack_preview(str(stack)) is not None
+
+    record = read_preview_settings(str(stack))
+    assert record is not None
+    assert record["custom"] is False
+    assert record["settings_used"]["denoise"] is False
+    assert record["settings_used"]["denoise_strength"] is None
+
+
+def test_a_bright_object_record_says_the_cleanup_was_skipped(
+    tmp_path: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The record shows no denoise and no star toning for a bright object."""
+    y, x = np.mgrid[0:300, 0:300]
+    disc = 0.0002 + 0.00004 * np.random.default_rng(4).standard_normal((300, 300))
+    disc[np.hypot(y - 150, x - 150) < 70] += 0.4
+    path = tmp_path / "Moon_L_Stacked.fits"
+    fits.writeto(path, disc.astype(np.float32))
+    _configure(monkeypatch, "siril-cli", "graxpert-gpu", "/opt/cc/denoise", star_tone=True)
+    _Programs().install(monkeypatch)
+
+    assert write_stack_preview(str(path), PreviewSettings(denoise=True)) is not None
+
+    record = read_preview_settings(str(path))
+    assert record is not None
+    assert record["settings_used"]["bright_object"] is True
+    assert record["settings_used"]["denoise"] is False
+    assert record["settings_used"]["star_toning"] is False
+    assert record["custom"] is True
+
+
+def test_a_failed_preview_leaves_no_record_and_removes_the_old_one(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed run deletes the old record with the old pictures."""
+    _configure(monkeypatch, "siril-cli", None)
+    record_path = Path(preview_settings_path_for(str(stack)))
+    record_path.write_text("{}")
+    _Programs(siril_result=False).install(monkeypatch)
+
+    assert write_stack_preview(str(stack)) is None
+
+    assert not record_path.exists()
+    assert read_preview_settings(str(stack)) is None
+
+
+def test_a_record_that_cannot_be_saved_does_not_fail_the_preview(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A write error is logged and the picture still counts."""
+    _configure(monkeypatch, "siril-cli", None)
+    _Programs().install(monkeypatch)
+    unwritable = str(stack.parent / "no" / "x.json")
+    monkeypatch.setattr(stack_preview, "preview_settings_path_for", lambda path: unwritable)
+
+    assert write_stack_preview(str(stack)) is not None
+    assert read_preview_settings(str(stack)) is None
+
+
+def test_a_missing_or_broken_record_reads_as_unknown(stack: Path) -> None:
+    """None means unknown, never a default."""
+    assert read_preview_settings(str(stack)) is None
+    Path(preview_settings_path_for(str(stack))).write_text("not json")
+    assert read_preview_settings(str(stack)) is None

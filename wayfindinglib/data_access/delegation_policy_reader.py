@@ -22,7 +22,7 @@ state it is passed against the requested new state, which is the one
 place both are actually available together.
 """
 
-from astrometricslib import ConfigurationError
+from astrometricslib.exceptions import ConfigurationError
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.policy.delegation import (
     CapabilityDelegation,

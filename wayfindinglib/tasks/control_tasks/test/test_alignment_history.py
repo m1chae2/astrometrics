@@ -1,4 +1,4 @@
-"""Purpose: Tests for `control.history.query(kind="alignment")`.
+"""Purpose: Tests for `review.query(kind="alignment")`.
 
 Description: The alignment history lists one summary per night, built on
 the log database's `get_alignment_sessions`, with the night's mean
@@ -12,7 +12,8 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import NotFoundError, TargetQueryResult
+from astrometricslib._internal.catalog import TargetQueryResult
+from astrometricslib.exceptions import NotFoundError
 from wayfindinglib.tasks.control_tasks import night_history
 
 

@@ -1,7 +1,7 @@
 """Purpose: Say how far to trust one star's science result.
 
 Description: `judge_star_result` is the work behind
-`ObservationPlanning.get_advisory(kind="result", target_id=..., object_id=...)`
+`ObservationReview.get_advisory(kind="result", target=..., object_id=...)`
 (`QUALITY_METRICS_PLAN.md` Section 6.1, use case UC5). It reads the star's
 record through the public root of the science library (`stars.get`), finds
 which per-star results exist (a spectrum, a period search, a repeating-dip
@@ -20,7 +20,7 @@ Control.
 
 from typing import Any
 
-from astrometricslib import NotFoundError
+from astrometricslib.exceptions import NotFoundError
 from wayfindinglib.analytics.result_quality.judge_results import order_statements
 from wayfindinglib.analytics.result_quality.star_result_rules import judge_star_record
 from wayfindinglib.models.quality.statements import TargetStatement

@@ -33,8 +33,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import NotFoundError, StorageError
 
 logger = logging.getLogger(__name__)
@@ -372,7 +372,7 @@ def assess_flats(flat_paths: list[str], camera: str | None = None) -> FlatAssess
         if sigma is not None:
             issues.append(
                 f"{NOISY_FLAT_ISSUE_PREFIX} {noise_fraction:.2%} from {frame_count} frame(s), above the "
-                f"{MAXIMUM_FLAT_NOISE_FRACTION:.1%} limit; take more flats"
+                f"{MAXIMUM_FLAT_NOISE_FRACTION:.1%} limit"
             )
     return FlatAssessment(
         frame_count,

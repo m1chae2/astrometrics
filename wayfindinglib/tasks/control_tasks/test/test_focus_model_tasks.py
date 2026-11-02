@@ -7,7 +7,7 @@ the behavior `Wayfinding_Library_Architecture.md` Section 3.2 describes.
 
 import pytest
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.tasks.control_tasks.focus_model_tasks import (
     fit_thermal_coefficient_steps_per_c,
     measure_backlash_steps,

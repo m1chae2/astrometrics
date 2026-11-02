@@ -1167,6 +1167,8 @@
   border-radius: 4px;
   border: 1px solid var(--grey-medium, #333333);
   overflow: hidden;
+  /* Keep its full height, so the stack summary is not cut off; the tab scrolls. */
+  flex-shrink: 0;
 }
 
 .stacked-image-panel__row {
@@ -1416,4 +1418,187 @@
 .filter-expand-icon {
   font-size: 0.8em;
   color: var(--text-muted);
+}
+
+.depth-goal-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 6px var(--space-3);
+  border-top: 1px solid var(--grey-medium, #333333);
+  font-size: var(--compact-font-size);
+}
+
+.depth-goal-row__choice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.depth-goal-row__info {
+  cursor: help;
+  color: var(--text-dim);
+}
+
+.depth-goal-row__message,
+.depth-goal-row--muted {
+  color: var(--text-muted);
+}
+
+.depth-goal-row--error {
+  color: var(--danger-red);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Stack Summary (Data tab)                                                   */
+
+.stack-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 6px var(--space-3);
+  border-top: 1px solid var(--grey-medium, #333333);
+  font-size: var(--compact-font-size);
+}
+
+.stack-summary__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+.stack-summary__title:focus-visible {
+  outline: 2px solid var(--primary-blue, #007acc);
+  outline-offset: 2px;
+}
+
+.stack-summary[open] > .stack-summary__title {
+  margin-bottom: var(--space-2);
+}
+
+.stack-summary__made-at,
+.stack-summary--muted {
+  color: var(--text-muted);
+}
+
+.stack-summary--error {
+  color: var(--danger-red);
+}
+
+.stack-summary__list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+}
+
+.stack-summary__list dt {
+  color: var(--text-muted);
+}
+
+.stack-summary__list dd {
+  margin: 0;
+}
+
+.stack-summary__flag {
+  color: var(--warning-amber);
+}
+
+.stack-summary__flag-list {
+  display: inline-block;
+  margin: 0;
+  padding-left: var(--space-3);
+  vertical-align: top;
+}
+
+.stack-summary__details summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.stack-summary__details summary:focus-visible {
+  outline: 2px solid var(--primary-blue, #007acc);
+  outline-offset: 2px;
+}
+
+.stack-summary__groups {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.stack-summary__groups caption {
+  text-align: left;
+  color: var(--text-muted);
+  padding-bottom: var(--space-1);
+}
+
+.stack-summary__groups th,
+.stack-summary__groups td {
+  padding: 2px var(--space-2);
+  border-top: 1px solid var(--grey-medium, #333333);
+  font-weight: normal;
+  vertical-align: top;
+}
+
+.stack-summary__groups thead th {
+  color: var(--text-muted);
+  font-size: var(--section-label-size);
+}
+
+/* The "Make the picture again" disclosure in the Stack Summary block. */
+.preview-remake {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.preview-remake__fields {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-2) 0;
+}
+
+.preview-remake__hint {
+  grid-column: 2;
+}
+
+.preview-remake__status {
+  min-height: 1.2em;
+}
+
+.preview-remake__result ul {
+  margin: var(--space-1) 0;
+  padding-left: var(--space-3);
+}
+
+/* The list of frames set aside before stacking, opened from the Stack Summary block. */
+.set-aside-list {
+  max-height: 16em;
+  overflow-y: auto;
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-3);
+}
+
+.set-aside-list__item {
+  margin-bottom: var(--space-2);
+}
+
+/* The "Compare with the previous stack" disclosure in the Stack Summary block. */
+.stack-comparison {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.stack-comparison__status {
+  min-height: 1.2em;
+}
+
+.stack-comparison__status ul {
+  margin: var(--space-1) 0;
+  padding-left: var(--space-3);
 }

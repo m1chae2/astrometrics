@@ -4,7 +4,7 @@ Description: Every plate solve that checks the mount's pointing is
 recorded as an alignment attempt: the centering loop of
 ``control.mount.slew(center=True)``, the syncs another program sends to
 the mount, and the solves read back from downloaded frames. This module
-answers `control.history.query(kind="alignment")` from those records,
+answers `review.query(kind="alignment")` from those records,
 through the log database's `get_alignment_sessions` and
 `get_session_alignment_attempts`, so "alignment session" has one
 definition.
@@ -24,7 +24,7 @@ from __future__ import annotations
 import sqlite3
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import AstrometricsError, NotFoundError
+from astrometricslib.exceptions import AstrometricsError, NotFoundError
 from wayfindinglib.analytics.alignment_sessions import (
     group_alignment_attempts,
     mean_position_deg,

@@ -6,7 +6,8 @@ metric the pipeline declares. This file builds one finished stack summary whose
 every number is filled, with two exposure groups, all sixteen gates, a noise
 measurement and two member frames, and runs the stacking record step on it.
 It adds the two rows of one leave-one-night-out stack and the seventeen rows of
-the half-difference noise, which the subset jobs store (`subset_noise_run.py`).
+the odd–even difference noise, which the subset jobs store
+(`subset_noise_run.py`).
 The two quarantine metrics are frame metrics that the frame measurement run
 (`frame_measurement_run.py`) stores, so the fixture adds the rows it would add.
 """
@@ -22,12 +23,19 @@ from astrometricslib.models.quality.quality_summary import (
     StackingPipelineQualityMetrics,
     StackQualitySummary,
 )
-from astrometricslib.models.quality.stacking_quality import StackingInputQuality
 from astrometricslib.models.quality.subset_stacks import SubsetStackResult
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.stacking.frame_measurement_run import quarantine_measurements_for_frame
 from astrometricslib.pipelines.stacking.metrics import GATE_METRIC_BY_NAME
+from astrometricslib.pipelines.stacking.odd_even_difference_run import (
+    OddEvenResult,
+    odd_even_difference_measurements,
+)
+from astrometricslib.pipelines.stacking.post_processing.aperture_size_noise import (
+    ApertureSizeNoise,
+    ApertureSizeNoiseOutcome,
+)
 from astrometricslib.pipelines.stacking.post_processing.expected_noise import (
     ExpectedNoise,
     ExpectedNoiseOutcome,
@@ -44,7 +52,15 @@ from astrometricslib.pipelines.stacking.post_processing.half_pattern import (
     HalfPatternOutcome,
     HalfPatternResult,
 )
+from astrometricslib.pipelines.stacking.post_processing.normalization_scale import (
+    NormalizationScale,
+    NormalizationScaleOutcome,
+)
+from astrometricslib.pipelines.stacking.post_processing.preview_notices import (
+    preview_step_skipped_measurements,
+)
 from astrometricslib.pipelines.stacking.post_processing.record_quality import (
+    abandoned_stack_measurements,
     frame_geometry_measurements,
     stacking_measurements,
 )
@@ -57,9 +73,9 @@ from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     StackNoiseOutcome,
     StackNoiseResult,
 )
+from astrometricslib.pipelines.stacking.post_processing.stack_preview import SkippedPreviewStep
 from astrometricslib.pipelines.stacking.subset_noise_run import (
     expected_ratio_measurement,
-    half_difference_measurements,
     night_measurements,
 )
 
@@ -86,6 +102,17 @@ def fixture_noise_outcome() -> StackNoiseOutcome:
             normalized_uncertainty=0.0004,
             wcs_source="stack header",
             apertures_created=False,
+            aperture_identity="v3-156104df543d",
+            size_noise=ApertureSizeNoiseOutcome(
+                ApertureSizeNoise(
+                    radii_px=(2.0, 4.0, 6.0, 8.0),
+                    pixel_counts=(12.6, 50.3, 113.1, 201.1),
+                    noises=(0.0008, 0.002, 0.0034, 0.0049),
+                    exponent=0.65,
+                    exponent_error=0.08,
+                    aperture_count=100,
+                )
+            ),
         )
     )
 
@@ -115,6 +142,9 @@ def fixture_science() -> StackScience:
         ),
         flat_noise=FlatNoiseOutcome(FlatNoiseContribution(0.004, 0.00003, 0.006)),
         stack_sky_level=0.006,
+        normalization_scale=NormalizationScaleOutcome(
+            NormalizationScale(1.35, 0.01, 9, "Siril's normalization scale, measured on 9 reference stars.")
+        ),
     )
 
 
@@ -188,17 +218,14 @@ def fixture_summary() -> StackQualitySummary:
         expectedStackFwhmPx=3.05,
         stackingDurationSeconds=95.0,
         registrationReferenceStarCount=150,
+        framesAccepted=18,
+        framesExcludedForGain=1,
+        framesExcludedForBackground=0,
+        framesQuarantined=1,
     )
     summary = StackQualitySummary(
         targetId="M 99",
         stackingMetrics=metrics,
-        inputQuality=StackingInputQuality(
-            framesSubmitted=20,
-            framesAccepted=18,
-            framesExcludedForGain=1,
-            framesExcludedForBackground=0,
-            framesQuarantined=1,
-        ),
     )
     for gate_name in GATE_METRIC_BY_NAME:
         summary.record_gate(passed_gate(gate_name, 0.01, 0.1, "fixture limit"))
@@ -322,7 +349,8 @@ def stacking_emitted_measurements() -> list[QualityMeasurement]:
     Returns
     -------
     measurements : `list` of `QualityMeasurement`
-        What the record step emits, plus the two quarantine rows of one frame.
+        What the record step emits, plus the two quarantine rows of one frame
+        and the row of an abandoned stack.
     """
     context = PipelineRunContext("M 99", "stacking", "1.3.0", "job-1", "job-1", FIXTURE_TIME)
     measurements = stacking_measurements(
@@ -335,6 +363,12 @@ def stacking_emitted_measurements() -> list[QualityMeasurement]:
     )
     frame = FrameRecord(path="/frames/lights/M 99/Scope/Cam/a.fits", camera="Cam", exposure="60")
     measurements.extend(fixture_frame_geometry_rows(context))
+    measurements.extend(abandoned_stack_measurements(context, 3600.5, 3600))
+    measurements.extend(
+        preview_step_skipped_measurements(
+            [SkippedPreviewStep("GraXpert", "GraXpert did not finish")], context, "M99_Stacked.fits"
+        )
+    )
     measurements.extend(
         flat_match_measurements(
             FlatMatchOutcome(
@@ -383,19 +417,17 @@ def stacking_emitted_measurements() -> list[QualityMeasurement]:
         )
     )
     measurements.extend(
-        half_difference_measurements(
+        odd_even_difference_measurements(
             context,
             context.stack_subject("M99_L_Stacked.fits"),
-            fixture_noise_outcome(),
-            "",
-            "",
-            (9.0, 9.5),
-            "",
-            0.2,
-            (0.1, 0.12),
-            1.5,
-            "",
-            fixture_pattern_outcome(),
+            OddEvenResult(
+                noise=fixture_noise_outcome(),
+                counts=(9.0, 9.5),
+                variance_factor=0.2,
+                shared_fractions=(0.1, 0.12),
+                model_ratio=1.5,
+                pattern=fixture_pattern_outcome(),
+            ),
         )
     )
     measurements.extend(

@@ -16,7 +16,8 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import AppConfiguration, NotFoundError
+from astrometricslib import AppConfiguration
+from astrometricslib.exceptions import NotFoundError
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.session.observation_session import ObservationSession, SessionStatus
 from wayfindinglib.models.session.telemetry import GuidingSample

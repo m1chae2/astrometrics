@@ -29,7 +29,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from astrometricslib import CaptureSetting
+from astrometricslib.reports import CaptureSetting
 from wayfindinglib.analytics.result_quality.efficiency import SKY_LIMITED_VARIANCE_RATIO
 from wayfindinglib.analytics.result_quality.rules import TARGET_PEAK_FRACTION
 from wayfindinglib.models.planning.target_report import StartingPoint

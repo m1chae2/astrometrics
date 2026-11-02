@@ -15,6 +15,7 @@ from wayfindinglib.session_analysis.capture.pre_processing.assess_capture_input_
     assess_capture_input_quality,
     match_captures_to_frames,
 )
+from wayfindinglib.session_analysis.capture.test.conftest import CAPTURE_LIMITS
 
 
 def test_each_exposure_matches_the_frame_that_began_when_it_did(make_frame: Any, make_capture: Any) -> None:
@@ -79,7 +80,9 @@ def test_a_night_with_every_exposure_in_the_library_has_no_gap(
     frames = [make_frame(index) for index in range(12)]
     captures = [make_capture(index) for index in range(12)]
 
-    quality = assess_capture_input_quality(frames, captures, 0, True, make_envelope(), "exact")
+    quality = assess_capture_input_quality(
+        frames, captures, 0, True, make_envelope(), "exact", CAPTURE_LIMITS
+    )
 
     assert quality.captures_without_frame == 0
     assert quality.frames_without_capture == 0
@@ -96,7 +99,9 @@ def test_only_light_kind_exposures_count_as_missing(
     captures.append(make_capture(21, file_path="/home/stellarmate/Pictures/Dark/Dark_001.fits"))
     captures.append(make_capture(22, file_path=""))  # No logged path: kind unknown.
 
-    quality = assess_capture_input_quality(frames, captures, 0, True, make_envelope(), "exact")
+    quality = assess_capture_input_quality(
+        frames, captures, 0, True, make_envelope(), "exact", CAPTURE_LIMITS
+    )
 
     assert quality.ekos_calibration_captures == 1
     assert quality.captures_without_frame == 1
@@ -107,7 +112,7 @@ def test_no_ekos_record_skips_the_comparison_with_ekos(make_frame: Any, make_env
     """Verify checks that need Ekos's list report nothing without it."""
     frames = [make_frame(index) for index in range(12)]
 
-    quality = assess_capture_input_quality(frames, [], 0, False, make_envelope(), "exact")
+    quality = assess_capture_input_quality(frames, [], 0, False, make_envelope(), "exact", CAPTURE_LIMITS)
 
     assert not quality.has_ekos_record
     assert quality.captures_without_frame is None
@@ -123,8 +128,8 @@ def test_frequent_aborts_are_judged_against_the_equipments_own_nights(
     envelope = make_envelope()
     limit = envelope.value("capture_abort_fraction_high_limit")
 
-    few = assess_capture_input_quality(frames, captures, 0, True, envelope, "exact")
-    many = assess_capture_input_quality(frames, captures, 8, True, envelope, "exact")
+    few = assess_capture_input_quality(frames, captures, 0, True, envelope, "exact", CAPTURE_LIMITS)
+    many = assess_capture_input_quality(frames, captures, 8, True, envelope, "exact", CAPTURE_LIMITS)
 
     assert limit is not None
     assert few.has_frequent_aborts is False
@@ -139,7 +144,9 @@ def test_aborts_are_not_judged_without_a_baseline(
     frames = [make_frame(index) for index in range(12)]
     captures = [make_capture(index) for index in range(12)]
 
-    quality = assess_capture_input_quality(frames, captures, 8, True, make_envelope(baseline=None), "exact")
+    quality = assess_capture_input_quality(
+        frames, captures, 8, True, make_envelope(baseline=None), "exact", CAPTURE_LIMITS
+    )
 
     assert quality.abort_fraction_limit is None
     assert quality.has_frequent_aborts is None
@@ -151,7 +158,7 @@ def test_missing_measurements_are_counted_per_measurement(make_frame: Any, make_
     frames[0] = make_frame(0, saturated_pixel_fraction=None)
     frames[1] = make_frame(1, saturated_pixel_fraction=None, pixel_scale_arcsec=None)
 
-    quality = assess_capture_input_quality(frames, [], 0, False, make_envelope(), "exact")
+    quality = assess_capture_input_quality(frames, [], 0, False, make_envelope(), "exact", CAPTURE_LIMITS)
 
     assert quality.has_missing_measurements
     assert quality.frames_missing_measurements == {"saturated_pixel_fraction": 2, "pixel_scale_arcsec": 1}
@@ -161,7 +168,7 @@ def test_star_width_is_never_counted_as_a_missing_measurement(make_frame: Any, m
     """Verify frames the science library did not register are not faulted."""
     frames = [make_frame(index, star_width_arcsec=None, roundness=None) for index in range(12)]
 
-    quality = assess_capture_input_quality(frames, [], 0, False, make_envelope(), "exact")
+    quality = assess_capture_input_quality(frames, [], 0, False, make_envelope(), "exact", CAPTURE_LIMITS)
 
     assert not quality.has_missing_measurements
 
@@ -174,7 +181,7 @@ def test_sensor_temperature_spread_counts_frames_outside_the_dark_tolerance(
     frames.append(make_frame(10, sensor_temperature_c=0.0))
     frames.append(make_frame(11, sensor_temperature_c=-5.0))
 
-    quality = assess_capture_input_quality(frames, [], 0, False, make_envelope(), "exact")
+    quality = assess_capture_input_quality(frames, [], 0, False, make_envelope(), "exact", CAPTURE_LIMITS)
 
     assert quality.sensor_temperature_spread_c == pytest.approx(10.0)
     assert quality.dark_temperature_tolerance_c == pytest.approx(3.0)
@@ -184,7 +191,7 @@ def test_sensor_temperature_spread_counts_frames_outside_the_dark_tolerance(
 def test_too_few_frames_is_not_enough_to_analyse(make_frame: Any, make_envelope: Any) -> None:
     """Verify a night of a few frames is reported as not analysable."""
     quality = assess_capture_input_quality(
-        [make_frame(index) for index in range(3)], [], 0, False, make_envelope(), "exact"
+        [make_frame(index) for index in range(3)], [], 0, False, make_envelope(), "exact", CAPTURE_LIMITS
     )
 
     assert not quality.has_enough_frames
@@ -194,6 +201,6 @@ def test_spectral_and_imaging_frames_are_counted_separately(make_frame: Any, mak
     """Verify the frame totals split by purpose."""
     frames = [make_frame(index, is_spectral=index < 4) for index in range(12)]
 
-    quality = assess_capture_input_quality(frames, [], 0, False, make_envelope(), "exact")
+    quality = assess_capture_input_quality(frames, [], 0, False, make_envelope(), "exact", CAPTURE_LIMITS)
 
     assert (quality.light_frames, quality.spectral_frames, quality.imaging_frames) == (12, 4, 8)

@@ -11,7 +11,7 @@ moment.
 `record_frame_pointing_errors` runs after `control.remote.sync_frames`
 brings new frames into the library. It records one alignment attempt per
 new frame that has both positions, so
-`control.history.query(kind="alignment")` shows them. Each attempt names
+`review.query(kind="alignment")` shows them. Each attempt names
 its frame (``source_frame``, the file name), so a frame that comes into
 the library again, for example after a re-download, or that has been
 solved again, updates its one record instead of adding another.
@@ -25,7 +25,8 @@ import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import FITS_READ_ERRORS, InvalidArgumentError, parse_coordinate_string
+from astrometricslib.exceptions import FITS_READ_ERRORS, InvalidArgumentError
+from wayfindinglib._internal.coordinates import parse_coordinate_string
 from wayfindinglib.astronomy.coordinate_transforms import signed_offset_components_arcsec
 
 if TYPE_CHECKING:
@@ -153,15 +154,13 @@ def record_frame_pointing_errors(context: ControlContext, paths: list[str]) -> i
     recorded : `int`
         How many alignment attempts were recorded.
     """
-    from astropy.io import fits
-
     recorded = 0
     for path in paths:
         if not path.lower().endswith((".fits", ".fit")):
             continue
         try:
-            with fits.open(path, memmap=False) as frame:
-                attempt = pointing_error_from_header(frame[0].header, path)
+            header = context.astrometrics.targets.read_frame_header(path)
+            attempt = pointing_error_from_header(header, path)
         except FITS_READ_ERRORS as error:
             logger.debug("Skipping %s: %s", path, error)
             continue

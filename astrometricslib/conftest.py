@@ -91,7 +91,7 @@ def _seed_synthetic_test_library(directories: SimpleNamespace) -> None:
 
     # 2. Seed SQLite database
     from astrometricslib import Target
-    from astrometricslib.drivers.local_database import save_target
+    from astrometricslib._internal.drivers.local_database import save_target
     from astrometricslib.foundation.config import AppConfiguration
 
     app_config = AppConfiguration()
@@ -132,6 +132,32 @@ mock_astroquery.exceptions.TimeoutError = type("TimeoutError", (Exception,), {})
 sys.modules["astroquery.exceptions"] = mock_astroquery.exceptions
 
 
+@pytest.fixture
+def gaia_module(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Give one test its own stand-in for the ``astroquery.gaia`` module.
+
+    The session-wide stand-in above is shared by every test. A test that
+    patches an attribute of a shared mock (``monkeypatch.setattr`` on it)
+    makes pytest 9.2 and later delete that attribute when the patch is undone,
+    and every later test then finds it missing. Code under test imports
+    ``Gaia`` from ``astroquery.gaia`` when it runs, so a fresh mock in
+    ``sys.modules`` is found there, and it is thrown away after the test.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        Puts the stand-in into ``sys.modules`` for this test only.
+
+    Returns
+    -------
+    module : `unittest.mock.MagicMock`
+        The stand-in module. Its ``Gaia`` attribute is the client to patch.
+    """
+    own_module = MagicMock(name="astroquery.gaia")
+    monkeypatch.setitem(sys.modules, "astroquery.gaia", own_module)
+    return own_module
+
+
 def pytest_configure(config) -> None:  # ruff: ignore[missing-type-function-argument]
     """Register custom markers to stop pytest from printing warnings."""
     config.addinivalue_line("markers", "slow: marks tests as slow subprocess integration tests")
@@ -153,6 +179,41 @@ def synthetic_test_library(test_directories: SimpleNamespace, isolate_config_sin
         Makes sure the shared settings object exists and is the test one.
     """
     _seed_synthetic_test_library(test_directories)
+
+
+@pytest.fixture(autouse=True)
+def no_stack_plate_solve(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stop tests from plate-solving a stack that has no coordinate solution.
+
+    The noise step solves the stack itself as its last source of a solution
+    (`stack_noise._plate_solve_stack_wcs`), which would start the real solver.
+    Tests that stack or measure a stack without a solution get a failed solve
+    instead. Tests of the fallback replace this stand-in with their own.
+    """
+    from astrometricslib.pipelines.stacking.post_processing import stack_noise
+
+    def failed_solve(stack_path: str, drivers: object = None) -> tuple[None, str]:
+        """Give the answer of a solve that was not run.
+
+        Parameters
+        ----------
+        stack_path : `str`
+            The stack that would have been solved (unused).
+        drivers : `Drivers`, optional
+            The caller's drivers (unused).
+
+        Returns
+        -------
+        wcs : `None`
+            Never a solution.
+        reason : `str`
+            Says the solve was not run.
+        """
+        return None, "plate-solving the stack itself was not run in this test"
+
+    # The real function stays reachable for the test of its own error handling.
+    failed_solve.real_function = stack_noise._plate_solve_stack_wcs  # type: ignore[attr-defined]
+    monkeypatch.setattr(stack_noise, "_plate_solve_stack_wcs", failed_solve)
 
 
 @pytest.fixture(autouse=True)

@@ -15,7 +15,7 @@ Two tasks feed the monitor, both through the active guiding driver
   `control.guiding.status(include=["live"])` calls it.
 - `run_loop` runs this app's own guide loop until asked to stop or until
   the mount stops tracking: one `run_cycle` of the driver after another.
-  Every pulse goes through `control.guiding.pulse`, so it needs
+  Every pulse goes through `control.guiding._pulse`, so it needs
   `AUTOGUIDING` to be `AUTHORITATIVE`. The loop's samples are shown but
   not recorded, because only the simulator can run it today.
 """
@@ -30,7 +30,7 @@ from collections import deque
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from astrometricslib import ConflictError, ExternalServiceError, HardwareError
+from astrometricslib.exceptions import ConflictError, ExternalServiceError, HardwareError
 from wayfindinglib.analytics.guide_pulses import rms_arcsec
 from wayfindinglib.drivers.interfaces.guiding_driver import GuideCommands
 from wayfindinglib.models.session.telemetry import GuidingSample, GuidingStats, LiveGuidingStatus
@@ -169,7 +169,7 @@ def poll(context: ControlContext) -> None:
     if not reading.samples:
         return
     monitor.add(reading.samples)
-    target_name = hardware_operations.mount_status(context, ["mount"]).get("targetName")
+    target_name = hardware_operations.mount_status(context).target_name
     context.records.record_guiding_samples([
         {
             **sample.model_dump(),
@@ -193,7 +193,7 @@ def _tracking_status(context: ControlContext) -> str:
     status : `str`
         Such as ``"Tracking"``, ``"Idle"`` or ``"Parked"``.
     """
-    return hardware_operations.mount_status(context, ["mount"]).get("trackingStatus", "Unknown")
+    return hardware_operations.mount_status(context).tracking_status
 
 
 def _wait_for_tracking(context: ControlContext, sleep: Callable[[float], None]) -> None:

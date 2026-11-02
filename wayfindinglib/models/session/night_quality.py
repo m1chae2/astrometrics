@@ -1,6 +1,6 @@
 """Purpose: The quality of one observing night, for the night review.
 
-Description: `control.history.query(kind="night_quality", session_id=...)`
+Description: `review.query(kind="night_quality", session_id=...)`
 returns a `NightQuality` (`QUALITY_METRICS_PLAN.md` Section 6.1, use case UC1).
 It lists each target imaged that night with where its time went (the loss
 account against a stated goal and reference), the warnings the night's
@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrometricslib import MeasurementReference
+from astrometricslib.reports import MeasurementReference
 from wayfindinglib.models.quality.capture_summary import CaptureSettingSummary
 from wayfindinglib.models.quality.efficiency import LossAccount, ScienceGoal
 from wayfindinglib.models.quality.statements import NeedsAttention, TargetStatement
@@ -92,10 +92,9 @@ class GuidingNightSummary(BaseModel):
         Whether the night has guiding data to summarize.
     reason : `str`
         Why it is not available. Empty when it is.
-    flagged : `bool` or `None`
-        True when the guiding analysis raised a warning.
-    flag_reasons : `list` [`str`]
-        The kinds of those warnings.
+    statements : `list` [`TargetStatement`]
+        What the guiding analysis says about the night: its warnings,
+        advice and missing-data notes. Each names its rule.
     rms_per_axis_arcsec : `float` or `None`
         The robust guiding error per axis, in arcseconds.
     expected_star_widening_fraction : `float` or `None`
@@ -113,8 +112,7 @@ class GuidingNightSummary(BaseModel):
 
     available: bool
     reason: str = ""
-    flagged: bool | None = None
-    flag_reasons: list[str] = Field(default_factory=list, alias="flagReasons")
+    statements: list[TargetStatement] = Field(default_factory=list)
     rms_per_axis_arcsec: float | None = Field(default=None, alias="rmsPerAxisArcsec")
     expected_star_widening_fraction: float | None = Field(default=None, alias="expectedStarWideningFraction")
     lost_fraction: float | None = Field(default=None, alias="lostFraction")

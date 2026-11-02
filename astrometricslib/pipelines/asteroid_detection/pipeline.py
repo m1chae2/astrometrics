@@ -20,7 +20,12 @@ from astropy.wcs import WCS, FITSFixedWarning
 from astropy.wcs.utils import proj_plane_pixel_scales
 from scipy.spatial import cKDTree
 
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib._internal.drivers.fits_access import (
+    FITS_READ_ERRORS,
+    read_data,
+    read_header,
+    read_header_and_data,
+)
 from astrometricslib.foundation.errors import ConflictError
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate, CascadeStage, FrameDetection
 from astrometricslib.models.moving_object_config import (
@@ -370,6 +375,29 @@ def _read_exposure_seconds(frame_header: fits.Header) -> float | None:
     return exposure_seconds
 
 
+def _pixels_to_sky_positions(
+    wcs: WCS, pixel_positions: list[tuple[float, float]]
+) -> list[tuple[float, float]]:
+    """Convert pixel positions to sky positions with one WCS call.
+
+    Parameters
+    ----------
+    wcs : `astropy.wcs.WCS`
+        The solution that maps pixels to the sky.
+    pixel_positions : `list` [`tuple` [`float`, `float`]]
+        (x, y) pixel positions, counted from 1 as FITS does.
+
+    Returns
+    -------
+    sky_positions : `list` [`tuple` [`float`, `float`]]
+        (Right Ascension, Declination) in degrees, in the same order.
+    """
+    if not pixel_positions:
+        return []
+    sky = wcs.wcs_pix2world(np.asarray(pixel_positions, dtype=float), 1)
+    return [(float(ra_deg), float(dec_deg)) for ra_deg, dec_deg in sky]
+
+
 def _detect_sources_in_one_frame(
     frame_path: str,
     frame_timestamp: float,
@@ -412,10 +440,8 @@ def _detect_sources_in_one_frame(
         A list of all the possible stars/asteroids we found in this photo.
     """
     try:
-        with fits.open(frame_path, memmap=False) as hdul:
-            frame_header = hdul[0].header
-            frame_data = hdul[0].data
-            exposure_seconds = _read_exposure_seconds(frame_header)
+        frame_header, frame_data = read_header_and_data(frame_path, first_hdu_only=True)
+        exposure_seconds = _read_exposure_seconds(frame_header)
     except FITS_READ_ERRORS as read_error:
         logger.warning("Failed to read frame '%s' for asteroid detection: %s", frame_path, read_error)
         return "read_failed", []
@@ -436,18 +462,19 @@ def _detect_sources_in_one_frame(
     brightness_values = [float(source["flux"]) for source in sources if source.get("flux") is not None]
     picture_brightness_level = float(np.median(brightness_values)) if brightness_values else None
 
-    raw_positions = []
-    pixel_positions = []
-    fluxes = []
+    # Sources without a centroid are skipped. The rest are converted to the
+    # sky in one WCS call for the whole picture, which gives the same
+    # numbers as converting them one at a time.
+    centroid_sources = []
     for source in sources:
         pixel_x = source.get("xcentroid", source.get("x_centroid"))
         pixel_y = source.get("ycentroid", source.get("y_centroid"))
         if pixel_x is None or pixel_y is None:
             continue
-        sky_position = frame_wcs.wcs_pix2world([[float(pixel_x), float(pixel_y)]], 1)[0]
-        raw_positions.append((float(sky_position[0]), float(sky_position[1])))
-        pixel_positions.append((float(pixel_x), float(pixel_y)))
-        fluxes.append(source.get("flux"))
+        centroid_sources.append((float(pixel_x), float(pixel_y), source.get("flux")))
+    pixel_positions = [(pixel_x, pixel_y) for pixel_x, pixel_y, _flux in centroid_sources]
+    fluxes = [flux for _pixel_x, _pixel_y, flux in centroid_sources]
+    raw_positions = _pixels_to_sky_positions(frame_wcs, pixel_positions)
 
     ra_offset_deg, dec_offset_deg = 0.0, 0.0
     position_error = None
@@ -518,6 +545,8 @@ class AsteroidDetectionPipeline:
         # How many SkyBoT questions the last run asked and how many failed.
         self._ephemeris_queries_attempted = 0
         self._ephemeris_queries_failed = 0
+        # Confirmed movers the SkyBoT question limit left unchecked.
+        self._ephemeris_unchecked_candidate_ids: list[str] = []
 
     def process(
         self, target_id: str, stacked_image_path: str, frames: list[tuple[str, float]]
@@ -557,7 +586,7 @@ class AsteroidDetectionPipeline:
                 f"Target '{target_id}' has no stacked_image; run analyze_target(type='astrometry') first."
             )
 
-        stack_header = fits.getheader(stacked_image_path)
+        stack_header = read_header(stacked_image_path, first_hdu_only=True)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", FITSFixedWarning)
             stack_wcs = WCS(stack_header, naxis=2)
@@ -582,6 +611,7 @@ class AsteroidDetectionPipeline:
 
         self._ephemeris_queries_attempted = 0
         self._ephemeris_queries_failed = 0
+        self._ephemeris_unchecked_candidate_ids = []
         candidates = self._cross_match_ephemeris(candidates)
         residual_summary = detector.last_residual_summary
 
@@ -603,6 +633,7 @@ class AsteroidDetectionPipeline:
             ),
             "ephemeris_queries_attempted": self._ephemeris_queries_attempted,
             "ephemeris_queries_failed": self._ephemeris_queries_failed,
+            "ephemeris_candidates_unchecked": len(self._ephemeris_unchecked_candidate_ids),
             # How the straight-line (residual) test went. The ratio is the
             # largest RMS-to-error ratio among accepted tracks; it is 0.0
             # when none was accepted.
@@ -638,20 +669,19 @@ class AsteroidDetectionPipeline:
             `_build_reference_star_tree`'s return -- `(tree,
             reference_ra_deg, reference_dec_deg, cos_declination)`.
         """
-        with fits.open(stacked_image_path, memmap=False) as hdul:
-            stack_data = np.asarray(hdul[0].data, dtype=float)
+        stack_data = np.asarray(read_data(stacked_image_path, first_hdu_only=True), dtype=float)
         source_detector = SourceDetector(
             fwhm=self.config.detection_fwhm_px, threshold_sigma=self.config.detection_threshold_sigma
         )
         sources = source_detector.detect(stack_data)
-        reference_positions_deg = []
+        reference_pixels = []
         for source in sources:
             pixel_x = source.get("xcentroid", source.get("x_centroid"))
             pixel_y = source.get("ycentroid", source.get("y_centroid"))
             if pixel_x is None or pixel_y is None:
                 continue
-            sky_position = stack_wcs.wcs_pix2world([[float(pixel_x), float(pixel_y)]], 1)[0]
-            reference_positions_deg.append((float(sky_position[0]), float(sky_position[1])))
+            reference_pixels.append((float(pixel_x), float(pixel_y)))
+        reference_positions_deg = _pixels_to_sky_positions(stack_wcs, reference_pixels)
         return _build_reference_star_tree(reference_positions_deg)
 
     def _detect_frame_sources(
@@ -753,4 +783,5 @@ class AsteroidDetectionPipeline:
         matched_candidates = cross_matcher.cross_match_candidates(candidates)
         self._ephemeris_queries_attempted = cross_matcher.queries_attempted
         self._ephemeris_queries_failed = cross_matcher.queries_failed
+        self._ephemeris_unchecked_candidate_ids = list(cross_matcher.unchecked_candidate_ids)
         return matched_candidates

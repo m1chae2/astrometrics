@@ -23,8 +23,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
-from astrometricslib.drivers.driver_set import Drivers
-from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError, ProcessingError
+from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib.foundation.errors import NotFoundError, ProcessingError
 from astrometricslib.foundation.jobs.runner import registered_job
 from astrometricslib.foundation.logging import get_log_context
 from astrometricslib.models.processing_results import StackResult
@@ -34,7 +34,7 @@ from astrometricslib.pipelines.shared.quality.frame_selection import FrameSelect
 from astrometricslib.pipelines.stacking.post_processing.stack_preview import PreviewSettings
 from astrometricslib.pipelines.stacking.pre_processing.camera_selection import (
     choose_camera_frames,
-    describe_cameras,
+    ensure_single_camera,
     split_frames_by_camera,
 )
 
@@ -129,34 +129,8 @@ def choose_frames_to_stack(
         raise NotFoundError(
             f"No {kind} light frames of {target.id!r} match that selection.", details={"target": target.id}
         )
-    check_one_camera(target, chosen)
+    ensure_single_camera(chosen, target_id=target.id)
     return chosen
-
-
-def check_one_camera(target: Target, frames: list[FrameRecord]) -> None:
-    """Refuse frames that come from more than one camera.
-
-    Parameters
-    ----------
-    target : `Target`
-        The target the frames belong to, for the message.
-    frames : `list` [`FrameRecord`]
-        The frames about to be stacked.
-
-    Raises
-    ------
-    InvalidArgumentError
-        If the frames come from more than one camera. The message names
-        each camera and how many frames it took.
-    """
-    cameras = split_frames_by_camera(frames)
-    if len(cameras) > 1:
-        raise InvalidArgumentError(
-            f"The selected frames of {target.id!r} come from more than one camera: "
-            f"{describe_cameras(cameras)}. Frames from different cameras are never stacked together. "
-            "Pass camera_id to choose one.",
-            details={"target": target.id, "cameras": {name: len(group) for name, group in cameras.items()}},
-        )
 
 
 def run_stack(
@@ -278,8 +252,6 @@ def run_stack(
     return result.model_copy(
         update={
             "stacked_path": stacked_path,
-            "flagged": getattr(quality, "flagged", None),
-            "flag_reasons": list(getattr(quality, "flag_reasons", []) or []),
             "quality_summary": quality,
             "note": "To compare this stack with the previous one, use QualityRecords.measure_stack.",
         }

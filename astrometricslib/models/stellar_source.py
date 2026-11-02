@@ -30,8 +30,8 @@ from astrometricslib.models.quality.photometry_quality import (
 )
 from astrometricslib.models.quality.spectroscopy_quality import (
     CatalogComparison,
+    DetectionLabelLimits,
     InputQualityAssessment,
-    OutputQualityAssessment,
     StageQualityCheckpoint,
 )
 from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
@@ -90,7 +90,8 @@ within three steps scored 0.61 and 0.64), and stars matched to the wrong type
 scored 0.181 to 0.283. A low RMS means the reference is close to the
 spectrum, not that the type is right: two known-wrong matches (K2 matched as
 M0 at 0.086, and A2 matched as F2 at 0.048) score below this limit. The model
-field, the run gate and the star summary all read this one value."""
+field, the run gate and the checkpoint metric all compare the best reference's
+RMS with this one value."""
 
 UNRELIABLE_MATCH_RMS = 0.45
 """No-match limit. Unit: relative RMS, as for `NO_GOOD_MATCH_RMS`. When even
@@ -109,10 +110,9 @@ are 0.019 apart; the median neighbouring pair is 0.043 apart and the 10th
 percentile is 0.024, at resolutions from 25 to 70 Angstroms). A gap below it
 means the spectrum cannot prefer one rung over its neighbour even by the
 margin that a perfect match to the closest-spaced rung would show. The same
-limit is applied to two gaps: `rms_gap_to_second_best` (the subtype level,
-`is_ambiguous`) and `rms_gap_to_next_class` (the best reference of another
-spectral class letter, `is_class_ambiguous`). The run gate fails only on the
-class-level one."""
+limit is applied to two gaps: `rms_gap_to_second_best` (the subtype level)
+and `rms_gap_to_next_class` (the best reference of another spectral class
+letter). The run gate fails only on the class-level one."""
 
 DIFFERS_FROM_CATALOG_SUBTYPES = 20.0
 """Catalog-disagreement limit. Unit: subtype steps on the O-to-M ladder (ten
@@ -268,7 +268,7 @@ def is_rms_gap_ambiguous(gap: float | None) -> bool | None:
 
     Returns
     -------
-    is_ambiguous : `bool` or `None`
+    is_below_limit : `bool` or `None`
         `True` when the gap is below `AMBIGUOUS_RMS_GAP`. `None` when there
         is no gap (fewer than two references), which is not the same as
         "clearly separated".
@@ -854,6 +854,10 @@ class SpectroscopyResult(BaseModel):
     # Named emission lines (or blends of lines) found in this spectrum, most
     # convincing first -- see emission_line_detector.detect_emission_lines.
     emission_lines: list[dict[str, Any]] = Field(default_factory=list, alias="emissionLines")
+    # The limits and register entries that turned the statistics above into
+    # labels, stored once for the whole spectrum instead of on each feature
+    # or line. `None` on rows saved before this record existed.
+    detection_label_limits: DetectionLabelLimits | None = Field(default=None, alias="detectionLabelLimits")
     # True when at least two emission lines or blends were detected, so the
     # spectrum looks like glowing gas rather than a star.
     is_emission_line_source: bool = Field(default=False, alias="isEmissionLineSource")
@@ -918,13 +922,25 @@ class SpectroscopyResult(BaseModel):
     # An audit record for the neighbour-wing correction (see
     # neighbor_trail_deblending). For each sample of the spectrum above, the
     # share of this star's box light that came from a neighbouring star's
-    # blur and was taken out, from 0 to 1. `None` when the correction was not
-    # run (the switch is off, or there was no neighbour to correct for).
+    # blur and was taken out, from 0 to 1. `None` unless the correction was
+    # run. The correction is turned off (validation entry SPE-34), so this is
+    # `None` for new spectra; an older spectrum may hold it.
     neighbor_wing_fraction: list[float] | None = Field(default=None, alias="neighborWingFraction")
     # What the neighbour-wing correction did for this star, in words:
-    # "applied", or "skipped: ..." with the reason (for example the fit was
-    # not trustworthy). `None` when the correction was not run.
+    # "applied", "skipped: ..." with the reason, or "not applied: the
+    # correction is turned off" for a star that has a neighbor. `None` when
+    # the star has no neighbor or the correction was not looked at.
     neighbor_wing_status: str | None = Field(default=None, alias="neighborWingStatus")
+    # A rough estimate of the neighbors' share of this star's box light,
+    # worked out from the camera's stored blur and the neighbors' own box
+    # light (see `neighbor_share_estimate`). An estimated ratio, not a true
+    # fraction: it can be above 1 or below 0. `None` when the star has no
+    # neighbor within reach, or the camera has no stored blur. Changes
+    # nothing in the spectrum. Not validated near the image edge (SPE-34).
+    neighbor_share_estimate: float | None = Field(default=None, alias="neighborShareEstimate")
+    # How many neighbors have a streak running alongside this star's, close
+    # enough to count for `neighbor_share_estimate`. 0 when there is none.
+    neighbor_overlap_count: int = Field(default=0, alias="neighborOverlapCount")
     # An audit warning: wavelength windows where a different, independently
     # detected star's own known position lands inside this star's reading
     # box (see `find_neighbor_contamination_windows`), each with the
@@ -952,10 +968,6 @@ class SpectroscopyResult(BaseModel):
     # found in it (see `pre_processing.assess_input_quality`). `None` for a
     # spectrum saved before this was recorded.
     input_quality: InputQualityAssessment | None = Field(default=None, alias="inputQuality")
-    # How much to trust the classification above, given everything found
-    # (see `post_processing.assess_output_quality`). `None` for a spectrum
-    # saved before this was recorded, or one that was never classified.
-    output_quality: OutputQualityAssessment | None = Field(default=None, alias="outputQuality")
     # The four quality checkpoints this spectrum passed, in stage order: raw
     # frame, pre-processing, processing and post-processing (see
     # `StageQualityCheckpoint`). Each lists its measured numbers against their
@@ -1009,18 +1021,6 @@ class SpectroscopyResult(BaseModel):
     # written outside a tracked job.
     generated_by_job_id: str | None = Field(default=None, alias="generatedByJobId")
 
-    @computed_field(alias="isPoorMatch")
-    @property
-    def is_poor_match(self) -> bool:
-        """Check if even the closest reference spectrum fits badly.
-
-        `True` when the best reference differs from the spectrum by more
-        than `NO_GOOD_MATCH_RMS` (0.15), so its type should not be claimed.
-        `False` when the fit is good or no type was matched.
-        """
-        rms = self.self_determined_spectral_type_rms
-        return rms is not None and rms > NO_GOOD_MATCH_RMS
-
     @computed_field(alias="rmsGapToSecondBest")
     @property
     def rms_gap_to_second_best(self) -> float | None:
@@ -1042,21 +1042,6 @@ class SpectroscopyResult(BaseModel):
             if isinstance(c.get("rms"), int | float)
         )
 
-    @computed_field(alias="isAmbiguous")
-    @property
-    def is_ambiguous(self) -> bool | None:
-        """Check if the best reference barely beats the runner-up.
-
-        Returns
-        -------
-        is_ambiguous : `bool` or `None`
-            `True` when `rms_gap_to_second_best` is below `AMBIGUOUS_RMS_GAP`.
-            `None` when there is no gap to judge. The runner-up is usually a
-            neighbouring subtype of the same class, so this says the subtype
-            is uncertain, not necessarily the class.
-        """
-        return is_rms_gap_ambiguous(self.rms_gap_to_second_best)
-
     @computed_field(alias="rmsGapToNextClass")
     @property
     def rms_gap_to_next_class(self) -> float | None:
@@ -1077,20 +1062,6 @@ class SpectroscopyResult(BaseModel):
             for c in self.self_determined_spectral_type_candidates
             if isinstance(c.get("rms"), int | float)
         )
-
-    @computed_field(alias="isClassAmbiguous")
-    @property
-    def is_class_ambiguous(self) -> bool | None:
-        """Check if another spectral class fits almost as well as the best.
-
-        Returns
-        -------
-        is_class_ambiguous : `bool` or `None`
-            `True` when `rms_gap_to_next_class` is below `AMBIGUOUS_RMS_GAP`,
-            so the class letter itself is uncertain. `None` when there is no
-            gap to judge.
-        """
-        return is_rms_gap_ambiguous(self.rms_gap_to_next_class)
 
 
 class StellarObject(BaseModel):
@@ -1272,18 +1243,6 @@ class StellarObject(BaseModel):
         See the module function `has_catalog_magnitude` for the rule.
         """
         return has_catalog_magnitude(self.magnitude)
-
-    @computed_field(alias="differsFromCatalog")
-    @property
-    def differs_from_catalog(self) -> bool | None:
-        """Check if the spectrum's matched type disagrees with the catalog.
-
-        `True` when the two types are more than
-        `DIFFERS_FROM_CATALOG_SUBTYPES` (20) steps apart on the O-to-M
-        ladder. `None` when either type is missing or not on the ladder.
-        """
-        own_type = self.spectroscopy.self_determined_spectral_type if self.spectroscopy else None
-        return types_differ_on_ladder(own_type, self.spectral_type)
 
     @computed_field(alias="canRunPeriodSearch")
     @property

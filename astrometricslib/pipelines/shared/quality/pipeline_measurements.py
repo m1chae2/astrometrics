@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.foundation.errors import AstrometricsError, StorageError
 from astrometricslib.models.quality.gate_result import GateResult, GateStatus
 from astrometricslib.models.quality.limit import LimitTier, QualityLimit

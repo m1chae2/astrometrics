@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib import AppConfiguration, ConfigurationError
+from astrometricslib import AppConfiguration
+from astrometricslib.exceptions import ConfigurationError
 from wayfindinglib.data_access.equipment_catalog_reader import (
     get_active_camera_id,
     get_active_guide_scope_id,

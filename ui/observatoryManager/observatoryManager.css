@@ -15,13 +15,14 @@
     height: 100%;
 }
 
-/* Alignment table: time and target on the left, status symbol, then the deltas lined up on the right. */
+/* Alignment table: time and target on the left, status symbol, then the deltas lined up on the right.
+   The delta columns are wide enough for a five-digit value such as -19152.94. */
 .alignment__header--time { width: 96px; }
 .alignment__header--status { width: 48px; text-align: center; }
-.alignment__header--number { width: 66px; text-align: right; }
+.alignment__header--number { width: 92px; text-align: right; }
 .alignment__cell--time { color: var(--text-muted); white-space: nowrap; padding-left: 4px; padding-right: 4px; }
 .alignment__cell--target { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.alignment__cell--number { text-align: right; font-variant-numeric: tabular-nums; }
+.alignment__cell--number { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; padding-left: 4px; padding-right: 4px; }
 .alignment__symbol { width: auto; font-size: var(--control-font-size); }
 /* On a narrow panel the Time column gives way, so the target name keeps its room. */
 @container (max-width: 400px) {
@@ -82,6 +83,15 @@
 .calibration-summary { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); background: var(--surface-inset-strong); border-radius: var(--radius-sm); }
 .calibration-summary-item { display: flex; align-items: center; gap: 4px; padding: 0 4px; border-radius: var(--radius-sm); }
 .calibration-summary-item--highlight { background: var(--surface-highlight); outline: 1px solid var(--accent-blue); }
+.calibration-tab { background: transparent; border: 1px solid transparent; color: inherit; cursor: pointer; font: inherit; }
+.calibration-tab--active { background: var(--surface-highlight); border-color: var(--accent-blue); }
+.calibration-tab:focus-visible, .calibration-health-button:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 1px; }
+.calibration-health-button { background: transparent; border: none; padding: 0; cursor: pointer; color: inherit; font: inherit; }
+.calibration-health-row td { background: var(--surface-inset-strong); white-space: normal; }
+.calibration-health-detail { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--compact-font-size); color: var(--text-primary); }
+.calibration-health-summary { margin: 0; font-weight: 600; }
+.calibration-health-checks, .calibration-health-files ul { margin: 0; padding-left: var(--space-4); }
+.calibration-check-message { margin-bottom: var(--space-1); font-size: var(--compact-font-size); color: var(--text-muted); }
 .calibration-label { color: var(--text-muted); font-size: var(--compact-font-size); }
 .calibration-value { color: var(--text-bright); font-weight: 600; font-size: var(--compact-font-size); }
 .calibration-no-match { display: flex; gap: 8px; align-items: center; border: 1px solid var(--danger-red); border-radius: var(--radius-sm); padding: 4px 8px; margin-bottom: 8px; font-size: var(--compact-font-size); }
@@ -114,9 +124,9 @@
 /*
  * Row budget. The page never scrolls: the panel group has a fixed height and each panel scrolls inside itself.
  * The group is about 900px tall at 1870x1040 and about 560px at 1024x700.
- *   Top row (Telescope Control, Tracking Settings, Calibration Library): fixed, about 150px (Telescope Control's three
- *     button rows set it); never shrinks. Telescope Control and Tracking Settings are as wide as their content; the
- *     Calibration Library takes the rest; its Darks table fills the row's height and scrolls inside itself, never growing the row.
+ *   Top row (Telescope Control, Tracking Settings, Calibration Library): about 285px, set by the Calibration Library
+ *     (its header, two control lines and a table with room for four full rows); never shrinks. Telescope Control and
+ *     Tracking Settings stretch to the same height. The Calibration Library takes the most width; its table scrolls inside itself.
  *   Middle row (Camera Profiles, Manual Guide, Safety Limits): wants up to 290px (Safety Limits needs about 280px), may shrink to 90px, then scrolls inside.
  *     Safety Limits needs about 200px: header with Apply, telescope line, tab strip, a checkbox and two fields.
  *   Guiding row (Guiding Trends, Alignment and Guiding): takes all that is left and never goes below 150px.
@@ -134,11 +144,11 @@
 .observatory-top-row > .observatory-top-row__fit { flex: 3 1 0; min-width: 0; }
 .observatory-top-row > .observatory-top-row__fit + .observatory-top-row__fit { flex: 2 1 0; }
 .observatory-top-row > .calibration-panel { flex: 3 1 0; min-width: 240px; }
-/* The Darks table keeps room for its header and four rows (about Telescope Control's height, so neither
-   panel has much empty space), grows into any extra height the row has, and scrolls inside itself. */
+/* The Darks table keeps room for its header and four full rows (26px header, 25px rows, 2px of border: 128px,
+   plus a little spare), which makes this panel set the top row's height. It grows into any extra height the row has, and scrolls inside itself. */
 .calibration-panel > .panel__content { display: flex; flex-direction: column; overflow: hidden; flex: 1 0 auto; }
 .calibration-panel .calibration-section { flex: 1 0 auto; }
-.calibration-panel .calibration-table-container { flex: 1 1 0; height: 0; min-height: 110px; max-height: none; }
+.calibration-panel .calibration-table-container { flex: 1 1 0; height: 0; min-height: 132px; max-height: none; }
 .observatory-guiding-row { flex: 1 1 150px; min-height: 150px; flex-wrap: nowrap; }
 
 /* The guiding panels fill the row's height and pass it down to the plots (percent heights alone collapse). */
@@ -172,6 +182,7 @@
 .calibration-controls .btn--square { width: 32px; min-width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: var(--control-font-size); }
 
 /* Tracking Settings: shorter labels; the two tabs share the panel body. */
+.tracking-settings__hint { margin: 0; color: var(--text-muted); font-size: var(--control-font-size); }
 .tracking-settings { --parameter-label-width: 88px; display: flex; flex-direction: column; gap: var(--space-2); }
 
 /* Manual Guide: the pad fills the panel height; the slew-speed slider sits beside it (below it on a narrow panel). */

@@ -2,7 +2,7 @@
 
 Description: The app's sequencer queue is the queue of one observing
 session in the wayfinding library. Adding a sequence records an
-observation package and queues it (`ObservationPlanning.edit_queue`);
+observation package and queues it (`ObservationPlanning.add_to_queue`);
 removing, reordering and changing entries edit the same queue; and
 starting the sequencer runs `ObservationExecution.advance_session` on a
 background thread until the queue is done. Each cycle checks safety,
@@ -23,11 +23,17 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
-from astrometricslib import observing_night_id
+from astrometricslib.reports import observing_night_id
 from backend.services.observatory.plan_service import PlanService
-from wayfindinglib import ObservationSession, QueueRequest, StartTimeMode, Wayfinder
+from wayfindinglib import ObservationSession, Wayfinder
 
 logger = logging.getLogger(__name__)
+
+FIXED_START = "FIXED"
+"""The start mode of a queue entry that waits for a set time."""
+
+SOONEST_START = "SOONEST"
+"""The start mode of a queue entry that may start as soon as it can."""
 
 SHOWN_STATUSES = {"PENDING": "queued", "RUNNING": "active"}
 """Entry statuses the queue shows, and the word the app uses for each.
@@ -67,7 +73,7 @@ class TargetImagingExecutor:
         session : `ObservationSession`
             The session whose queue the sequencer shows.
         """
-        return self._wayfinder.planning.create_plan("empty_session", night_id=observing_night_id(time.time()))
+        return self._wayfinder.planning.create_session(observing_night_id=observing_night_id(time.time()))
 
     def _existing_session(self) -> ObservationSession | None:
         """Return tonight's session if it exists, without creating one.
@@ -77,10 +83,10 @@ class TargetImagingExecutor:
         session : `ObservationSession` or `None`
             Tonight's session, or `None` when none was made yet.
         """
-        return self._wayfinder.planning.get_plan(night_id=observing_night_id(time.time()))
+        return self._wayfinder.planning.get_plan(observing_night_id=observing_night_id(time.time()))
 
     @staticmethod
-    def _request(package_id: str, timing: dict[str, Any] | None) -> QueueRequest:
+    def _request(package_id: str, timing: dict[str, Any] | None) -> dict[str, Any]:
         """Turn the app's timing choice into a queue request.
 
         Parameters
@@ -92,24 +98,25 @@ class TargetImagingExecutor:
 
         Returns
         -------
-        request : `QueueRequest`
-            A request that may start now, or at the given time.
+        request : `dict` [`str`, `Any`]
+            A queue request that may start now, or at the given time. The
+            library checks it.
         """
         timing = timing or {"mode": "soonest"}
         if timing.get("mode") == "at" and timing.get("time"):
             start = datetime.fromisoformat(str(timing["time"]).replace("Z", "+00:00"))
             start = start if start.tzinfo else start.replace(tzinfo=UTC)
-            return QueueRequest(
-                package_id=package_id,
-                start_time_mode=StartTimeMode.FIXED,
-                requested_start_time=start,
-                computed_start_time=start,
-            )
-        return QueueRequest(
-            package_id=package_id,
-            start_time_mode=StartTimeMode.SOONEST,
-            computed_start_time=datetime.now(UTC),
-        )
+            return {
+                "package_id": package_id,
+                "start_time_mode": FIXED_START,
+                "requested_start_time": start.isoformat(),
+                "computed_start_time": start.isoformat(),
+            }
+        return {
+            "package_id": package_id,
+            "start_time_mode": SOONEST_START,
+            "computed_start_time": datetime.now(UTC).isoformat(),
+        }
 
     def _queue_sequence(self, sequence: dict[str, Any], timing: dict[str, Any] | None) -> str:
         """Record a sequence as a package and add it to the queue.
@@ -127,9 +134,7 @@ class TargetImagingExecutor:
             The new queue entry's id.
         """
         package = self._plan_service.create_package(sequence["target_name"], plan_items=sequence["items"])
-        change = self._plan_service.edit_plan(
-            self._session().id, add=[self._request(package.id, timing).model_dump(mode="json")]
-        )
+        change = self._plan_service.edit_plan(self._session().id, add=[self._request(package.id, timing)])
         return change.session.queue[-1].id
 
     def enqueue_sequence(self, sequence: dict[str, Any], timing: dict[str, Any]) -> dict[str, str]:
@@ -184,12 +189,13 @@ class TargetImagingExecutor:
         old = queue[ids.index(sequence_id)]
         timing = sequence.get("timing") or (
             {"mode": "at", "time": old.requested_start_time.isoformat()}
-            if old.start_time_mode == StartTimeMode.FIXED and old.requested_start_time
+            if old.start_time_mode == FIXED_START and old.requested_start_time
             else {"mode": "soonest"}
         )
         new_id = self._queue_sequence(sequence, timing)
         order = [new_id if entry_id == sequence_id else entry_id for entry_id in ids]
-        self._plan_service.edit_plan(session.id, remove=[sequence_id], order=order)
+        self._plan_service.edit_plan(session.id, remove=[sequence_id])
+        self._plan_service.edit_plan(session.id, order=order)
         return True
 
     def reorder(self, sequence_ids: list[str]) -> bool:
@@ -226,7 +232,7 @@ class TargetImagingExecutor:
         plan : `SequencePlan`
             The sequence plan from the wayfinding library's planning.
         """
-        return self._wayfinder.planning.create_plan("sequence", target=target_name, plan_items=items)
+        return self._wayfinder.planning.create_sequence(target=target_name, plan_items=items)
 
     def get_queue(self) -> list[dict[str, Any]]:
         """Return the queue as the sequences the app shows.
@@ -254,7 +260,7 @@ class TargetImagingExecutor:
                 }
                 for request in entry.exposure_requests
             ]
-            fixed = entry.start_time_mode == StartTimeMode.FIXED and entry.requested_start_time is not None
+            fixed = entry.start_time_mode == FIXED_START and entry.requested_start_time is not None
             timing = (
                 {"mode": "at", "time": entry.requested_start_time.isoformat()}
                 if fixed

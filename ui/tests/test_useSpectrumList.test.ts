@@ -72,6 +72,29 @@ describe('useSpectrumList Filtering Suite', () => {
     });
 
     /**
+     * Test case verifying each row carries the star's magnitude, the library's catalog-magnitude
+     * verdict and its spectral type, so a card opened from the row can show the same values.
+     */
+    it('carries magnitude, catalog verdict and spectral type on each row', () => {
+        vi.mocked(useAstronomyListQuery).mockReturnValue({
+            data: [
+                { id: 'Albireo', name: 'Albireo', ra: 292.68, dec: 27.96, magnitude: 3.08, hasCatalogMagnitude: true, spectralType: 'K3II+B9.5V' },
+                { id: 'HD 1', name: 'HD 1', ra: 1, dec: 2, magnitude: 0, hasCatalogMagnitude: false, spectralType: 'Unknown' },
+            ] as Spectrum[],
+            isLoading: false,
+            error: null,
+            refetch: vi.fn(),
+        } as any);
+
+        const { result } = renderHook(() => useSpectrumList());
+
+        const byId = Object.fromEntries(result.current.items.map((i) => [i.id, i]));
+        expect(byId['Albireo']).toMatchObject({ magnitude: 3.08, hasCatalogMagnitude: true, spectralType: 'K3II+B9.5V' });
+        expect(byId['HD 1'].hasCatalogMagnitude).toBe(false);
+        expect(byId['HD 1'].spectralType).toBeUndefined();
+    });
+
+    /**
      * Test case verifying that useSpectrumList caps rendered items at 100.
      */
     it('should cap rendered items to 100 when more than 100 stars are returned', () => {

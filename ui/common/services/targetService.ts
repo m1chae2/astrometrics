@@ -167,7 +167,7 @@ export async function deleteTarget(objectId: string): Promise<unknown | null> {
         }
 
         // Try Delete Stellar Object from Library
-        const deletedStellar = await callBackend("astronomy:delete", { object_id: objectId });
+        const deletedStellar = await callBackend("astronomy:delete", { star_id: objectId });
         if (deletedStellar) {
             emitToast(`Deleted stellar object ${objectId}`, 'success', 'backend');
             return { deleted: true };

@@ -38,12 +38,11 @@ from datetime import datetime
 from typing import Any
 
 import numpy as np
-from astropy.io import fits
 from astropy.stats import mad_std, sigma_clip
 from scipy.stats import median_abs_deviation
 
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-from astrometricslib.drivers.fits_access import collapse_to_2d
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_header_and_data
 from astrometricslib.foundation.observatory_site import ObservatorySite
 from astrometricslib.models.quality.photometry_quality import InputQualityAssessment
 from astrometricslib.models.quality.quality_summary import ExcludedFrame, FrameEnsembleComposition
@@ -834,55 +833,52 @@ class VariabilityAnalyzer:
         reference_path = image_paths[0]
         logger.info("[1/%s] Processing Reference %s...", len(image_paths), os.path.basename(reference_path))
 
-        with fits.open(reference_path, memmap=False) as fits_handle:
-            reference_data = collapse_to_2d(fits_handle[0].data.astype(float))
-            reference_header = fits_handle[0].header
-            # Every later frame is lined up with this one pixel for pixel,
-            # so they are assumed to come from the same camera. That makes
-            # the reference frame's camera decide the saturation threshold.
-            camera_profile = resolve_camera_profile(
-                reference_header.get("INSTRUME", reference_header.get("CAMERA"))
+        reference_header, reference_raw_data = read_header_and_data(reference_path, first_hdu_only=True)
+        reference_data = collapse_to_2d(reference_raw_data.astype(float))
+        # Every later frame is lined up with this one pixel for pixel,
+        # so they are assumed to come from the same camera. That makes
+        # the reference frame's camera decide the saturation threshold.
+        camera_profile = resolve_camera_profile(
+            reference_header.get("INSTRUME", reference_header.get("CAMERA"))
+        )
+        saturation_threshold_adu = camera_profile.pixel_saturation_level_adu.value
+        self.photometric_linearity_limit_adu = (
+            float(camera_profile.photometric_linearity_limit_adu.value)
+            if camera_profile.photometric_linearity_limit_adu is not None
+            else None
+        )
+        # The gain and read noise behind the flux errors, for the reference
+        # frame's own gain, offset and binning. Every later frame is
+        # assumed to come from the same camera at the same settings, like
+        # the saturation threshold above.
+        self.detector_noise = resolve_detector_noise(camera_profile, reference_header)
+        if self.detector_noise.profile_gap_reason:
+            logger.warning(
+                "The camera profile gave no gain or read noise for the reference frame: %s.",
+                self.detector_noise.profile_gap_reason,
             )
-            saturation_threshold_adu = camera_profile.saturation_threshold_adu.value
-            self.photometric_linearity_limit_adu = (
-                float(camera_profile.photometric_linearity_limit_adu.value)
-                if camera_profile.photometric_linearity_limit_adu is not None
-                else None
-            )
-            # The gain and read noise behind the flux errors, for the reference
-            # frame's own gain, offset and binning. Every later frame is
-            # assumed to come from the same camera at the same settings, like
-            # the saturation threshold above.
-            self.detector_noise = resolve_detector_noise(camera_profile, reference_header)
-            if self.detector_noise.profile_gap_reason:
-                logger.warning(
-                    "The camera profile gave no gain or read noise for the reference frame: %s.",
-                    self.detector_noise.profile_gap_reason,
-                )
-            try:
-                reference_timestamp = read_observation_time(reference_header)
-            except ObservationTimeError as error:
-                # Without a capture time the reference frame cannot anchor
-                # the session. Record why and stop; never use the clock.
-                logger.warning("Reference frame %s rejected: %s", reference_path, error)
-                self.frames_without_usable_date_obs.append(
-                    ExcludedFrame(path=reference_path, reason=str(error))
-                )
-                return
-            reference_exposure_seconds = _read_exposure_seconds(reference_header)
-            self.frame_exposure_seconds[reference_timestamp] = reference_exposure_seconds
-            # Seeded below alongside the reference frame's flux. Leaving
-            # it out started every light curve with one fewer airmass
-            # than flux, and since the per-frame worker appends to both
-            # thereafter, airmasses[i] described the frame at fluxes[i+1]
-            # for the whole run -- so airmass detrending read the wrong
-            # airmass for every point.
-            reference_airmass = compute_frame_airmass(reference_header)
-            # The reference frame is what every later frame is aligned
-            # against, so it has no computed offset of its own -- its
-            # drift is zero by definition.
-            self.frame_registration_drift[reference_timestamp] = (0.0, 0.0)
-            self.frame_paths_in_order.append(reference_path)
+        try:
+            reference_timestamp = read_observation_time(reference_header)
+        except ObservationTimeError as error:
+            # Without a capture time the reference frame cannot anchor
+            # the session. Record why and stop; never use the clock.
+            logger.warning("Reference frame %s rejected: %s", reference_path, error)
+            self.frames_without_usable_date_obs.append(ExcludedFrame(path=reference_path, reason=str(error)))
+            return
+        reference_exposure_seconds = _read_exposure_seconds(reference_header)
+        self.frame_exposure_seconds[reference_timestamp] = reference_exposure_seconds
+        # Seeded below alongside the reference frame's flux. Leaving
+        # it out started every light curve with one fewer airmass
+        # than flux, and since the per-frame worker appends to both
+        # thereafter, airmasses[i] described the frame at fluxes[i+1]
+        # for the whole run -- so airmass detrending read the wrong
+        # airmass for every point.
+        reference_airmass = compute_frame_airmass(reference_header)
+        # The reference frame is what every later frame is aligned
+        # against, so it has no computed offset of its own -- its
+        # drift is zero by definition.
+        self.frame_registration_drift[reference_timestamp] = (0.0, 0.0)
+        self.frame_paths_in_order.append(reference_path)
 
         # Retry with different parameters if detection fails
         detector = None

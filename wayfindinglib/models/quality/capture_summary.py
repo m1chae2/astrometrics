@@ -9,7 +9,7 @@ stored.
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrometricslib import CaptureSetting
+from astrometricslib.reports import CaptureSetting
 from wayfindinglib.models.quality.efficiency import LossAccount, ScienceGoal
 
 

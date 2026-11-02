@@ -389,7 +389,7 @@ def test_the_search_recovers_a_known_shift_and_rotation(
     assert outcome.flat_shadow_count is not None and outcome.flat_shadow_count >= 3
 
 
-def test_the_uncertainty_holds_the_method_error_as_well_as_the_split_half_difference(
+def test_the_uncertainty_holds_the_method_error_as_well_as_the_split_half_disagreement(
     tmp_path: Path, donuts: list, flats: list[str], biases: list[str]
 ) -> None:
     """The odd/even difference sees noise only; the method error joins it."""
@@ -951,7 +951,7 @@ def _record_with_captured_rows(
     )
     monkeypatch.setattr(record_quality, "determine_stack_members", lambda *_: None)
     monkeypatch.setattr(record_quality, "compute_stack_science", lambda *_a, **_k: None)
-    monkeypatch.setattr(record_quality, "stacking_measurements", lambda *_: [])
+    monkeypatch.setattr(record_quality, "stacking_measurements", lambda *_, **__: [])
     monkeypatch.setattr(
         record_quality,
         "frame_geometry_measurements",

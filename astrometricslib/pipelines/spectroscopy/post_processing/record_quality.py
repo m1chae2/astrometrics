@@ -15,7 +15,7 @@ wavelength zero points scatter (see `wavelength_scale`). A ninth,
 
 Each check is returned as a `GateResult`. A check that could not look (no
 zero-order measurement, no catalog type to compare with) is ``not_checked``;
-it is not a pass. The failed gates' sentences are the run's flag reasons.
+it is not a pass. The failed gates' sentences are the run's warnings.
 
 The run is summarised first as a few plain counts (`spectrum_facts`), so the
 single-image runner and the parallel batch workers, which cannot pass whole
@@ -39,7 +39,7 @@ from typing import Any
 
 from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.models.quality.limit import LimitTier
-from astrometricslib.models.quality.measurement import QualityMeasurement
+from astrometricslib.models.quality.measurement import QualityMeasurement, QualitySubject
 from astrometricslib.models.quality.metric_spec import MetricSpec
 from astrometricslib.models.quality.quality_summary import SpectroscopyPipelineQualityMetrics
 from astrometricslib.models.quality.spectroscopy_quality import (
@@ -51,8 +51,11 @@ from astrometricslib.models.stellar_source import (
     AMBIGUOUS_RMS_GAP,
     DIFFERS_FROM_CATALOG_SUBTYPES,
     NO_GOOD_MATCH_RMS,
+    is_rms_gap_ambiguous,
+    types_differ_on_ladder,
 )
 from astrometricslib.models.wavelength_scale import WavelengthScaleSummary
+from astrometricslib.pipelines.shared.quality.notices import notice_measurement
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     GateLimitSource,
     PipelineRunContext,
@@ -84,6 +87,8 @@ from astrometricslib.pipelines.spectroscopy.metrics import (
     SPECTROSCOPY_METRICS,
     SPECTROSCOPY_POOR_MATCH_CLASSIFICATION_COUNT,
     SPECTROSCOPY_POSITION_ONLY_STAR_COUNT,
+    SPECTROSCOPY_SKIPPED_NO_TRAIL_STAR_COUNT,
+    SPECTROSCOPY_SKIPPED_UNIDENTIFIED_STAR_COUNT,
     SPECTROSCOPY_TRAIL_WIDTH_MEDIAN,
     SPECTROSCOPY_UNRESOLVED_STAR_COUNT,
     SPECTROSCOPY_WAVELENGTH_SCALE_APPLIED_COUNT,
@@ -95,7 +100,10 @@ from astrometricslib.pipelines.spectroscopy.metrics import (
     SPECTROSCOPY_ZERO_ORDER_SATURATED_FRACTION_MAX,
     STAGE_METRIC_KEYS,
     STAGE_NAMES,
+    below_feature_limit_notice_spec,
     gaia_xp_band_metric_name,
+    gaia_xp_download_failed_notice_spec,
+    reddening_lookup_failed_notice_spec,
     stage_metric_name,
     stage_spectrum_count_name,
 )
@@ -103,6 +111,9 @@ from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp i
 from astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale import (
     WAVELENGTH_SCALE_GATE_NAME,
     wavelength_scale_gate,
+)
+from astrometricslib.pipelines.spectroscopy.processing.spectrum_signal import (
+    MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE,
 )
 
 SPECTRA_GATE_NAME = "spectra_extracted"
@@ -164,12 +175,14 @@ def spectrum_facts(stellar_objects: Iterable[Any]) -> dict[str, int]:
         spectral_type = spectroscopy.self_determined_spectral_type
         if spectral_type and spectral_type not in _UNCLASSIFIED_TYPES:
             facts["classified"] += 1
-            if getattr(spectroscopy, "is_ambiguous", None):
+            if is_rms_gap_ambiguous(spectroscopy.rms_gap_to_second_best):
                 facts["subtype_ambiguous"] += 1
-        comparison = spectroscopy.catalog_comparison
-        if comparison is not None and comparison.spectral_type_agrees is not None:
+        # The two types are compared on the O-to-M ladder; `None` means one
+        # of them is missing, so there was nothing to compare.
+        differs_from_catalog = types_differ_on_ladder(spectral_type, getattr(star, "spectral_type", None))
+        if differs_from_catalog is not None:
             facts["catalog_compared"] += 1
-            if comparison.spectral_type_agrees is False:
+            if differs_from_catalog:
                 facts["catalog_disagree"] += 1
         methods = [
             feature.get("p_value_method")
@@ -545,6 +558,7 @@ _NO_STAGE_VALUE_REASON = "No spectrum of the run had a value for this metric at 
 _NO_WAVELENGTH_SCALE_REASON = "No spectrum of the run had a measured wavelength zero-point offset."
 _NO_GAIA_XP_REASON = "No star of the run was compared with a Gaia XP spectrum."
 _NOT_COUNTED_REASON = "This run path does not count star identification."
+_NO_SKIPPING_REASON = "This run path does not leave stars out before extraction."
 
 
 def _optional_float(value: float | int | None) -> float | None:
@@ -618,6 +632,18 @@ def _summary_values(
             SPECTROSCOPY_UNRESOLVED_STAR_COUNT,
             float(metrics.unresolved_star_count) if star_identification_counted else None,
             identification_reason,
+            None,
+        ),
+        (
+            SPECTROSCOPY_SKIPPED_NO_TRAIL_STAR_COUNT,
+            float(metrics.skipped_no_trail_star_count) if star_identification_counted else None,
+            _NO_SKIPPING_REASON,
+            None,
+        ),
+        (
+            SPECTROSCOPY_SKIPPED_UNIDENTIFIED_STAR_COUNT,
+            float(metrics.skipped_unidentified_star_count) if star_identification_counted else None,
+            _NO_SKIPPING_REASON,
             None,
         ),
         (
@@ -754,6 +780,102 @@ def _stage_values(
     return values
 
 
+def below_feature_limit_notice_measurement(
+    star_count: int, context: PipelineRunContext, subject: QualitySubject
+) -> QualityMeasurement:
+    """Build the row that says some spectra were below the feature limit.
+
+    Parameters
+    ----------
+    star_count : `int`
+        How many extracted spectra were below the limit.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The run.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        A failed notice whose value is the number of spectra. Those stars keep
+        their spectrum and their emission-line test, and have no
+        absorption-feature detection or classification.
+    """
+    return notice_measurement(
+        below_feature_limit_notice_spec(),
+        float(star_count),
+        context,
+        subject,
+        f"{star_count} spectrum(s) have a signal-to-noise below {MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE:g} "
+        "per resolution element, too low to find an absorption line; each keeps its spectrum and its "
+        "emission-line test and has no absorption-feature detection or classification",
+        action_taken="kept the spectra and skipped the absorption-feature detection and classification",
+    )
+
+
+def gaia_xp_download_failed_notice_measurement(
+    star_count: int, context: PipelineRunContext, subject: QualitySubject
+) -> QualityMeasurement:
+    """Build the row that says some Gaia XP downloads failed.
+
+    Parameters
+    ----------
+    star_count : `int`
+        How many stars could not be compared with Gaia because the download
+        failed.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The run.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        A failed notice whose value is the number of stars. Their spectra are
+        unaffected; they only have no Gaia comparison.
+    """
+    return notice_measurement(
+        gaia_xp_download_failed_notice_spec(),
+        float(star_count),
+        context,
+        subject,
+        f"{star_count} star(s) could not be compared with Gaia because the download of their Gaia XP "
+        "spectrum failed; their spectra are otherwise unaffected",
+        action_taken="left the stars without a Gaia comparison and went on",
+    )
+
+
+def reddening_lookup_failed_notice_measurement(
+    star_count: int, context: PipelineRunContext, subject: QualitySubject
+) -> QualityMeasurement:
+    """Build the row that says some Gaia reddening lookups failed.
+
+    Parameters
+    ----------
+    star_count : `int`
+        How many stars had no catalog reddening because the lookup failed.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The run.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        A failed notice whose value is the number of stars. They were
+        classified as observed, without the dust correction.
+    """
+    return notice_measurement(
+        reddening_lookup_failed_notice_spec(),
+        float(star_count),
+        context,
+        subject,
+        f"{star_count} star(s) have no catalog reddening because the Gaia lookup failed; they were "
+        "classified on the observed spectrum, without the dust correction",
+        action_taken="classified the stars without the catalog reddening and went on",
+    )
+
+
 def spectroscopy_run_measurements(
     metrics: SpectroscopyPipelineQualityMetrics,
     gates: Sequence[GateResult],
@@ -796,6 +918,24 @@ def spectroscopy_run_measurements(
         )
     for name, value, reason in _stage_values(metrics):
         measurements.append(build_measurement(_SPEC_BY_NAME[name], value, context, subject, reason=reason))
+
+    if metrics.below_feature_limit_star_count > 0:
+        measurements.append(
+            below_feature_limit_notice_measurement(metrics.below_feature_limit_star_count, context, subject)
+        )
+    if metrics.gaia_xp_download_failed_star_count > 0:
+        measurements.append(
+            gaia_xp_download_failed_notice_measurement(
+                metrics.gaia_xp_download_failed_star_count, context, subject
+            )
+        )
+
+    if metrics.reddening_lookup_failed_star_count > 0:
+        measurements.append(
+            reddening_lookup_failed_notice_measurement(
+                metrics.reddening_lookup_failed_star_count, context, subject
+            )
+        )
 
     gates_by_name = {gate.name: gate for gate in gates}
     for gate_name, limit_source in GATE_LIMIT_SOURCES.items():

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from astrometricslib import ConfigurationError
+from astrometricslib.exceptions import ConfigurationError
 from backend.services.infrastructure import phone_share
 
 MANAGED_OBJECTS = (

@@ -2,11 +2,9 @@
 
 A camera records only so much light per pixel. A star bright enough to reach
 that ceiling is clipped: its true brightness is lost, and in a spectrum the
-clipped part of the trail reads too faint. This module answers two questions
-about one raw frame, so a user can adjust an imaging session:
-
-* is a star saturated at this exposure length (a yes or no per exposure), and
-* what exposure length would keep the brightest star below the ceiling.
+clipped part of the trail reads too faint. This module answers one question
+about one raw frame: is a star saturated at this exposure length (a yes or
+no per exposure)? Choosing a better exposure length is left to wayfindinglib.
 
 Everything here works on arrays. Reading frames, and finding the camera's
 clipping value (its `CameraProfile.clip_ceiling_adu`), is left to the caller.
@@ -23,32 +21,17 @@ import numpy as np
 from scipy.ndimage import binary_dilation, label, minimum_filter
 
 from astrometricslib.foundation.camera_names import normalize_camera_name
-from astrometricslib.pipelines.shared.quality.saturation import CLIP_CEILING_TOLERANCE_FRACTION
-
-# A star counts as saturated when at least this many connected pixels sit at
-# the frame's ceiling. Single pixels at the ceiling are common and are not
-# stars: a Nikon D5300 frame had 188 to 481 isolated ones, hot pixels. The
-# saturated stars in the same frames had cores of 9 to over 1700 pixels
-# (ASI533 frames of Vega, NGC 2403 and Arcturus; D5300 frames of NGC 2244 and
-# M 42). Four pixels (2 x 2) is the smallest blob that is not one hot pixel.
-SATURATED_BLOB_MINIMUM_PIXELS = 4
+from astrometricslib.pipelines.shared.quality.saturation import (
+    CLIP_CEILING_TOLERANCE_FRACTION,
+    SATURATED_BLOB_MINIMUM_PIXELS,
+    SATURATED_FRAME_FRACTION,
+)
 
 # A pixel is at the ceiling when it is within this fraction of it. Saturated
 # frames pile up at exactly one value, so a small tolerance only allows for the
 # last count or two.
 CEILING_TOLERANCE_FRACTION = CLIP_CEILING_TOLERANCE_FRACTION
 
-# A frame is described as saturated when a star clips in at least this share of
-# the frames sampled from an exposure group. One clipped frame in three can be
-# a cosmic ray or a satellite trail; it is not a property of the exposure.
-SATURATED_FRAME_FRACTION = 0.5
-
-# The exposure recommended is the one that puts the brightest star's peak at
-# this fraction of the room between the sky and the ceiling. It is the same
-# 80% used when planning spectroscopy exposures (2026-09-21): far enough below
-# the ceiling that seeing changes do not clip the star, near enough that the
-# star is well exposed.
-TARGET_PEAK_FRACTION = 0.8
 
 # A star's peak is a real star, not a hot pixel, when its four nearest
 # neighbours are at least this fraction of the way from the sky to the peak.
@@ -312,65 +295,3 @@ def group_is_saturated(frames: list[FrameSaturation]) -> bool:
     if not frames:
         return False
     return sum(frame.saturated for frame in frames) / len(frames) >= SATURATED_FRAME_FRACTION
-
-
-def recommend_exposure_seconds(exposure_seconds: float, frames: list[FrameSaturation]) -> float | None:
-    """Work out the exposure that puts the brightest star at the target.
-
-    The brightness above the sky grows in proportion to the exposure, so the
-    exposure is scaled by how far the peak is from the level wanted.
-
-    Parameters
-    ----------
-    exposure_seconds : `float`
-        The exposure length of the frames.
-    frames : `list` [`FrameSaturation`]
-        The frames sampled at that exposure length.
-
-    Returns
-    -------
-    recommended : `float` or `None`
-        The exposure length in seconds that puts the median peak at
-        `TARGET_PEAK_FRACTION` of the room above the sky, or `None` when no
-        frame gave a peak.
-    """
-    peaks = [frame.peak_above_sky_adu for frame in frames if frame.peak_above_sky_adu]
-    if not peaks or exposure_seconds <= 0:
-        return None
-    room = float(np.median([frame.ceiling_adu - frame.sky_adu for frame in frames]))
-    return exposure_seconds * TARGET_PEAK_FRACTION * room / float(np.median(peaks))
-
-
-def recommend_stack_exposure_seconds(
-    exposure_seconds: list[float], group_frames: list[list[FrameSaturation]]
-) -> float | None:
-    """Choose one recommended exposure for a stack made of several groups.
-
-    A group whose stars are not clipped gives a measured peak, so it is trusted
-    over one that has to be estimated from wings. Among those, the longest
-    exposure gives the peak with the best signal. If every group is clipped,
-    the median of the estimates is used.
-
-    Parameters
-    ----------
-    exposure_seconds : `list` [`float`]
-        The exposure length of each group.
-    group_frames : `list` [`list` [`FrameSaturation`]]
-        The sampled frames of each group, in the same order.
-
-    Returns
-    -------
-    recommended : `float` or `None`
-        The recommended exposure in seconds, or `None` when no group gave one.
-    """
-    measured, estimated = [], []
-    for exposure, frames in zip(exposure_seconds, group_frames, strict=True):
-        recommendation = recommend_exposure_seconds(exposure, frames)
-        if recommendation is None:
-            continue
-        (estimated if group_is_saturated(frames) else measured).append((exposure, recommendation))
-    if measured:
-        return max(measured)[1]
-    if estimated:
-        return float(np.median([recommendation for _, recommendation in estimated]))
-    return None

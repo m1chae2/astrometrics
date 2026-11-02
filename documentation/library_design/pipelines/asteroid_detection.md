@@ -138,7 +138,7 @@ Symbols follow the architecture paper's [list of symbols](../Astrometrics_Librar
 
 ### 4.1 Quality gates
 
-A quality gate is an automatic test on a run. It passes, fails, or is "not checked" when the data it needs are missing. A failed gate marks the run as flagged (the `flagged` field in Section 7) so a person can look at it. The list below is read from the code when this guide is generated.
+A quality gate is an automatic test on a run. It passes, fails, or is "not checked" when the data it needs are missing. A failed gate is stored as a warning row, and the job's warnings list it so a person can look at it. The list below is read from the code when this guide is generated.
 
 A failed gate here does not always mean the run went wrong. `unmatched_movers` fails on purpose when a confirmed mover matches no known body: the failure flags the run so that a person looks at what may be a new object, or at a known one the match missed.
 
@@ -201,8 +201,6 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `resolved_parameters` | `dict[str, Any]` | The settings the run actually used, after defaults were filled in. |
 | `camera_profile` | `astrometricslib.models.applied_camera_profile.AppliedCameraProfile \| None` | The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip. |
 | `quality_processing_applied` | `bool` | Whether the quality gates were run. |
-| `flagged` | `bool` | True if one or more quality gates failed, so a person should look at the run. |
-| `flag_reasons` | `list[str]` | One plain sentence for each reason the run was flagged. |
 | `gates` | `list[astrometricslib.models.quality.gate_result.GateResult]` | Every quality gate result: passed, failed or not checked. |
 | `created_at` | `datetime.datetime` | Time the quality summary was made, in UTC. |
 | `provenance_activity_id` | `str \| None` | Identifier of this run in the provenance record (the IVOA-standard log of which run made which data). |

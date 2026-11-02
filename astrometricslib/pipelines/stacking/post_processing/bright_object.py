@@ -27,7 +27,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import NotFoundError, StorageError
 from astrometricslib.pipelines.shared.image_scaling import (
     measure_sky,

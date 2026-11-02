@@ -6,8 +6,8 @@ more than a client can read in one reply. This module builds the short forms
 the Targets list and the Image Processing screen show: a row per target
 (name, position, frame counts, cameras, last night imaged, whether it has a
 stack), and one target's record with its frames grouped by night, filter,
-exposure and camera, and its quality summaries boiled down to their flags
-and headline numbers.
+exposure and camera, and its quality summaries boiled down to their
+headline numbers.
 
 Everything here only reads. Nothing is marked as changed, so a later save
 never writes a target because it was looked at.
@@ -56,18 +56,6 @@ def _exposure(frame: Any) -> float:
         return 0.0
 
 
-def _stack_flag(stacking: Any) -> bool | None:
-    """Say whether a stack's saved summary flagged a problem.
-
-    Returns
-    -------
-    flagged : `bool` or `None`
-        The flag, or `None` when the stack has no summary.
-    """
-    quality = getattr(stacking, "quality_summary", None)
-    return None if quality is None else bool(quality.flagged)
-
-
 def summarize_target(target: Any) -> dict[str, Any]:
     """Describe one target in a short row.
 
@@ -110,7 +98,6 @@ def summarize_target(target: Any) -> dict[str, Any]:
         "has_stack": bool(stack.stacked_image),
         "has_spectral_stack": bool(target.spectral_stacking.stacked_image),
         "has_processed_picture": bool(stack.processed_image),
-        "stack_flagged": _stack_flag(stack),
     }
 
 
@@ -166,7 +153,7 @@ def group_frames(frames: list[Any]) -> list[dict[str, Any]]:
 
 
 def condense_quality(summary: Any) -> dict[str, Any] | None:
-    """Boil a quality summary down to its flags and headline numbers.
+    """Boil a quality summary down to its headline numbers.
 
     The full summary can hold long lists (every frame, every candidate).
     This keeps single values and short lists, and reports how long each

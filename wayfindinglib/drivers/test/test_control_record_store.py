@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import InvalidArgumentError, StorageError
+from astrometricslib.exceptions import InvalidArgumentError, StorageError
 from wayfindinglib.drivers.control_record_store import ControlRecordStore
 
 

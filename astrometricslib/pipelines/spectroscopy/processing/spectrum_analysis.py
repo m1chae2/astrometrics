@@ -14,10 +14,10 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from astrometricslib.drivers.interfaces.reddening_driver import ReddeningEstimate
+from astrometricslib._internal.drivers.interfaces.reddening_driver import ReddeningEstimate
 from astrometricslib.models.quality.spectroscopy_quality import CatalogComparison
 from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
-from astrometricslib.models.stellar_source import ladder_steps_between
+from astrometricslib.models.stellar_source import NO_GOOD_MATCH_RMS, ladder_steps_between
 from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_catalog import compare_to_catalog
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction import ExtinctionCorrection
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
@@ -51,6 +51,7 @@ from astrometricslib.pipelines.spectroscopy.processing.spectral_line_indices imp
     classify_by_line_indices,
 )
 from astrometricslib.pipelines.spectroscopy.processing.spectrum_signal import (
+    MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE,
     MINIMUM_SPECTRUM_SIGNAL_TO_NOISE,
     estimate_spectrum_signal_to_noise,
 )
@@ -396,6 +397,14 @@ def analyze_spectrum(
     -------
     analysis : `SpectrumAnalysis`
         The classification, the feature results and the emission lines.
+        A star whose signal-to-noise is below
+        `MINIMUM_SPECTRUM_SIGNAL_TO_NOISE` gets an "Unknown" classification
+        that says so, and no features or emission lines. A star between that
+        and `MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE` gets an "Unknown"
+        classification and no absorption features or response-corrected
+        spectrum, but its emission lines are still tested and reported. The
+        signal-to-noise is in the result in both cases. An extended target is
+        not held to the second limit.
         When `is_extended_target` is set, the stellar classification is
         replaced by an "Unknown" result saying so and the absorption
         features are left empty, since neither describes a nebula or a
@@ -431,6 +440,10 @@ def analyze_spectrum(
             signal_to_noise,
         )
 
+    # Emission lines are tested for every spectrum that passed the cut above,
+    # including a faint one. The emission-line detector was measured on its
+    # own (validation register SPE-32), and it keeps working below the
+    # absorption-feature limit, so it gets a lower floor than the feature test.
     half_width_angstrom = (
         line_half_width_angstrom(wavelength_angstrom, extraction_box_width_px)
         if extraction_box_width_px is not None
@@ -443,6 +456,34 @@ def analyze_spectrum(
         resolution_element_angstrom=resolution_element_angstrom,
     )
     is_emission_source = is_emission_line_source(emission_lines)
+
+    # A star above the cut above but below the feature limit has a continuum,
+    # yet too little signal for an absorption line to be found (see
+    # `MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE`). Its spectrum and its
+    # emission lines are kept, and the absorption-feature test, the
+    # classification and the response-corrected spectrum are not run. An
+    # extended target goes on to the extended-target branches below as before.
+    if (
+        signal_to_noise is not None
+        and signal_to_noise < MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE
+        and not is_extended_target
+    ):
+        return SpectrumAnalysis(
+            unclassified_result(
+                "spectrum kept without feature analysis or classification: its signal-to-noise is "
+                f"{signal_to_noise:.1f} per resolution element and at least "
+                f"{MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE:g} is needed to find an absorption line; "
+                "emission lines were still tested"
+            ),
+            [],
+            False,
+            resolution_element_angstrom,
+            is_resolution_measured,
+            signal_to_noise,
+            emission_lines,
+            is_emission_source,
+        )
+
     if is_emission_source and is_extended_target:
         return SpectrumAnalysis(
             unclassified_result(
@@ -628,7 +669,7 @@ def analyze_spectrum(
     if (
         expected_reference_type is None
         and classification["spectral_type"] != "Unknown"
-        and classification["match_quality"] == "good"
+        and float(classification["classification_rms"]) <= NO_GOOD_MATCH_RMS
     ):
         features = detect_named_features(
             wavelength_angstrom,

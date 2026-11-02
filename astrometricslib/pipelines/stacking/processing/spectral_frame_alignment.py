@@ -23,7 +23,7 @@ import os
 
 import numpy as np
 
-from astrometricslib.drivers.fits_access import read_data, read_header, write_image
+from astrometricslib._internal.drivers.fits_access import read_data, read_header, write_image
 from astrometricslib.pipelines.stacking.processing.group_alignment import align_images_to_reference
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,8 @@ logger = logging.getLogger(__name__)
 # The basename this module writes its own aligned copies under:
 # `<basename>_00001.fits`, `<basename>_00002.fits`, and so on. Deliberately
 # not the same name as the Siril sequence built from them afterward
-# (`ALIGNED_SIRIL_SEQUENCE_NAME` in `drivers/siril_interface.py`): Siril's
+# (`ALIGNED_SIRIL_SEQUENCE_NAME` in
+# `drivers/siril_interface/spectral_stacker.py`): Siril's
 # own `convert` picks up every image file already sitting in its target
 # directory and relinks it under its own numbering, and pointed at a
 # directory where the sequence name and the files already share one

@@ -65,6 +65,14 @@ class FrameMeasurements(BaseModel):
     # hasn't been aligned or stacked yet.
     background_level: float | None = Field(default=None, alias="backgroundLevel")
     saturated_pixel_fraction: float | None = Field(default=None, alias="saturatedPixelFraction")
+    # The level, in ADU, at or above which a pixel was counted as saturated
+    # when `saturated_pixel_fraction` was measured. Records written before
+    # this field existed leave it empty, so the stacking stage measures the
+    # fraction again when this is missing or no longer matches the camera
+    # profile's pixel-saturation level.
+    saturated_pixel_fraction_limit_adu: float | None = Field(
+        default=None, alias="saturatedPixelFractionLimitAdu"
+    )
     # Star sharpness measured directly by the code, rather than by Siril.
     # This number cannot be directly compared to `registration_fwhm_x_px`.
     measured_fwhm_px: float | None = Field(default=None, alias="measuredFwhmPx")
@@ -75,9 +83,6 @@ class FrameMeasurements(BaseModel):
     # Siril's plain FWHM in pixels. The name says "x" for history; Siril
     # reports one FWHM, not one per axis.
     registration_fwhm_x_px: float | None = Field(default=None, alias="registrationFwhmXPx")
-    # No longer filled. Stored values written before the fix were Siril's
-    # weighted FWHM, not a width along y. Removal belongs to issue #97.
-    registration_fwhm_y_px: float | None = Field(default=None, alias="registrationFwhmYPx")
     # Siril's weighted FWHM in pixels (stars counted by fit quality).
     registration_weighted_fwhm_px: float | None = Field(default=None, alias="registrationWeightedFwhmPx")
     # How round the stars look after alignment (1.0 is a perfect circle).
@@ -90,10 +95,6 @@ class FrameMeasurements(BaseModel):
     # Rotation of this picture relative to the reference, in degrees,
     # from the registration transform.
     registration_rotation_deg: float | None = Field(default=None, alias="registrationRotationDeg")
-    # No longer filled. Stored values written before the fix were the sky
-    # background level (0.02 or so), not an alignment error in pixels.
-    # Removal belongs to issue #97.
-    registration_rmse: float | None = Field(default=None, alias="registrationRmse")
     registration_star_count: int | None = Field(default=None, alias="registrationStarCount")
     registration_dx_px: float | None = Field(default=None, alias="registrationDxPx")
     registration_dy_px: float | None = Field(default=None, alias="registrationDyPx")
@@ -197,6 +198,20 @@ class FrameRecord(BaseModel):
         migrated["measurements"] = found
         return migrated
 
+    @property
+    def is_spectral(self) -> bool:
+        """Whether this is a spectroscopy frame.
+
+        This is worked out from the filter every time and is not saved with
+        the record.
+
+        Returns
+        -------
+        is_spectral : `bool`
+            `True` when the filter is the spectroscopy grating.
+        """
+        return self.filter == FilterType.SPEC
+
     @field_validator("filter", mode="before")
     @classmethod
     def normalize_filter(cls, v: Any) -> Any:
@@ -269,6 +284,24 @@ class TargetStackingResult(BaseModel):
     )
     quality_summary: StackQualitySummary | None = Field(default=None, alias="qualitySummary")
 
+    @property
+    def preview_path(self) -> str | None:
+        """Where the stack's preview picture (JPEG) is, or would be.
+
+        The name comes from the stack's file name, so this is worked out
+        every time and is not saved. The file may not exist.
+
+        Returns
+        -------
+        preview_path : `str` or `None`
+            The preview picture's path, or `None` when there is no stack.
+        """
+        if not self.stacked_image:
+            return None
+        from astrometricslib.utilities.stack_preview_path import preview_path_for
+
+        return preview_path_for(self.stacked_image)
+
 
 class AsteroidDetectionResult(BaseModel):
     """One asteroid-detection run's candidates and quality assessment."""
@@ -334,6 +367,12 @@ class Target(BaseModel):
     # outside the image, or its id and common name disagreed). That point is
     # where the camera looked, not necessarily where the object is.
     position_unverified: bool = Field(default=False, alias="positionUnverified")
+    # SIMBAD's main object type code for the object ("G" galaxy, "GlC"
+    # globular cluster, "PN" planetary nebula, "*" star, ...), or None when it
+    # is not known. It is filled in when the position is looked up in SIMBAD,
+    # and by `astrometricslib.scripts.backfill_target_object_types` for targets
+    # saved before it was recorded. `target_object_category` groups the codes.
+    simbad_object_type: str | None = Field(default=None, alias="simbadObjectType")
     field_of_view: str = Field(default="0′", alias="fieldOfView")
     main_camera: str = Field(default="", alias="mainCamera")
     main_scope: str = Field(default="", alias="mainScope")
@@ -457,6 +496,83 @@ class Target(BaseModel):
         from astrometricslib.utilities.target_classification import classify_target_name
 
         return classify_target_name(self.id)
+
+    @property
+    def object_category(self) -> str | None:
+        """The broad kind of sky object, from SIMBAD's type code and the id.
+
+        This is worked out every time and is not saved.
+
+        Returns
+        -------
+        category : `str` or `None`
+            ``"galaxy"``, ``"nebula"``, ``"cluster"``, ``"star"``,
+            ``"solar_system"``, or `None` when the type is not known.
+        """
+        from astrometricslib.utilities.target_object_category import target_object_category
+
+        return target_object_category(self.simbad_object_type, self.id)
+
+    @property
+    def ra_deg(self) -> float:
+        """The right ascension (the east-west sky coordinate) in degrees.
+
+        This is read from the text in `ra` every time and is not saved.
+
+        Returns
+        -------
+        ra_degrees : `float`
+            The right ascension, in decimal degrees.
+
+        Notes
+        -----
+        Raises `InvalidArgumentError` if `ra` cannot be read as an angle.
+        """
+        from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
+
+        return parse_coordinate_string(self.ra, is_ra=True)
+
+    @property
+    def dec_deg(self) -> float:
+        """The declination (the north-south sky coordinate) in degrees.
+
+        This is read from the text in `dec` every time and is not saved.
+
+        Returns
+        -------
+        dec_degrees : `float`
+            The declination, in decimal degrees.
+
+        Notes
+        -----
+        Raises `InvalidArgumentError` if `dec` cannot be read as an angle
+        or lies outside -90 to 90 degrees.
+        """
+        from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
+
+        return parse_coordinate_string(self.dec, is_ra=False)
+
+    def frame_subject_id(self, frame: FrameRecord | str) -> str:
+        """Name one of this target's frames the way quality rows name it.
+
+        The id is the target's id followed by the part of the frame's path
+        below the target's lights folder, so it does not change when the
+        frames root moves to another mount. It is the ``subject_id`` of the
+        frame's quality rows.
+
+        Parameters
+        ----------
+        frame : `FrameRecord` or `str`
+            The frame, or its path.
+
+        Returns
+        -------
+        subject_id : `str`
+            ``"<target id>/<path below the target's lights folder>"``.
+        """
+        from astrometricslib.utilities.frame_identity import frame_subject_id
+
+        return frame_subject_id(frame if isinstance(frame, str) else frame.path, self.id)
 
     def serialize(self) -> dict[str, Any]:
         """Package the target's data into a basic dictionary format.

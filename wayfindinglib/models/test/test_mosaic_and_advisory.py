@@ -34,4 +34,13 @@ def test_science_outcomes_default_to_zero() -> None:
     assert outcomes.variable_star_candidate_count == 0
     assert outcomes.asteroid_candidate_count == 0
     assert outcomes.confirmed_asteroid_candidate_count == 0
-    assert outcomes.flagged_pipelines == []
+
+
+def test_a_stored_science_outcome_with_flagged_pipelines_still_loads() -> None:
+    """An older saved report holds `flaggedPipelines`; it is ignored."""
+    outcomes = ScienceOutcomeSummary.model_validate({
+        "variableStarCandidateCount": 2,
+        "flaggedPipelines": ["stacking"],
+    })
+    assert outcomes.variable_star_candidate_count == 2
+    assert not hasattr(outcomes, "flagged_pipelines")

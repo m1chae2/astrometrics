@@ -1,19 +1,23 @@
 """Purpose: Tests for grouping plate-solve attempts into target sessions.
 
-Description: Checks `group_alignment_attempts`, which the package root
-exports. Jitter is the scatter around the settled offset, not the offset
-itself; runs split at long gaps; a single sync has no jitter; right
-ascension stays in degrees; the average right ascension wraps at 0h/24h;
-unnamed solves group across 0h; and the drift rates and the pooled night
-jitter come out right.
+Description: Checks `group_alignment_attempts`, which
+`ObservationReview.query_alignment_sessions` uses. Jitter is the scatter
+around the settled offset, not the offset itself; runs split at long gaps;
+a single sync has no jitter; right ascension stays in degrees; the average
+right ascension wraps at 0h/24h; unnamed solves group across 0h; and the
+drift rates and the pooled night jitter come out right.
 """
 
 import math
 
 import pytest
 
-from wayfindinglib import AlignmentAttempt, group_alignment_attempts
-from wayfindinglib.analytics.alignment_sessions import mean_position_deg, pooled_jitter_arcsec
+from wayfindinglib._internal.review import AlignmentAttempt
+from wayfindinglib.analytics.alignment_sessions import (
+    group_alignment_attempts,
+    mean_position_deg,
+    pooled_jitter_arcsec,
+)
 
 
 def _solve(name: str | None, ra: float, dec: float, d_ra: float, d_dec: float, t: float) -> AlignmentAttempt:

@@ -33,7 +33,9 @@ import logging
 import sys
 from typing import Any
 
-from astrometricslib import FITS_READ_ERRORS, Astrometrics, configure_logging
+from astrometricslib import Astrometrics, configure_logging
+from astrometricslib._internal.drivers.fits_access import read_header
+from astrometricslib.exceptions import FITS_READ_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -108,8 +110,6 @@ def find_frames_missing_focal_length(targets: list, cutoff_date: datetime.date) 
         One entry per eligible frame, with ``path``, ``target_id`` and
         ``captured`` (`datetime.date`).
     """
-    from astropy.io import fits
-
     candidates: list[dict[str, Any]] = []
     for target in targets:
         for frame in target.frames or []:
@@ -123,7 +123,7 @@ def find_frames_missing_focal_length(targets: list, cutoff_date: datetime.date) 
             if captured >= cutoff_date:
                 continue
             try:
-                if fits.getheader(frame.path).get("FOCALLEN") is not None:
+                if read_header(frame.path, first_hdu_only=True).get("FOCALLEN") is not None:
                     continue
             except FITS_READ_ERRORS as header_error:
                 logger.debug("Skipping unreadable frame %s: %s", frame.path, header_error)
@@ -158,20 +158,35 @@ def apply_focal_length(path: str, focal_length_mm: float) -> bool:
     """
     from astropy.io import fits
 
-    try:
-        with fits.open(path, mode="update") as hdul:
-            header = hdul[0].header
-            if header.get("FOCALLEN") is not None:
-                return False
-            header["FOCALLEN"] = (
-                focal_length_mm,
-                "Focal length [mm] (inferred, see HISTORY)",
-            )
-            header.add_history(
-                f"{BACKFILL_HISTORY_PREFIX} as {focal_length_mm:g}mm on {datetime.date.today().isoformat()}"
-            )
-            hdul.flush()
+    from astrometricslib._internal.drivers.fits_access import update_first_header
+
+    def _add_focal_length(header: fits.Header) -> bool:
+        """Add the focal length and a history note.
+
+        Parameters
+        ----------
+        header : `astropy.io.fits.Header`
+            The header of HDU 0.
+
+        Returns
+        -------
+        changed : `bool`
+            `True` if the header was changed, `False` if it already had a
+            focal length.
+        """
+        if header.get("FOCALLEN") is not None:
+            return False
+        header["FOCALLEN"] = (
+            focal_length_mm,
+            "Focal length [mm] (inferred, see HISTORY)",
+        )
+        header.add_history(
+            f"{BACKFILL_HISTORY_PREFIX} as {focal_length_mm:g}mm on {datetime.date.today().isoformat()}"
+        )
         return True
+
+    try:
+        return update_first_header(path, _add_focal_length)
     except FITS_READ_ERRORS as write_error:
         logger.warning("Could not write FOCALLEN into %s: %s", path, write_error)
         return False

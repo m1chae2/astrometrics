@@ -10,9 +10,9 @@ import os
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import (
+from astrometricslib import AppConfiguration
+from astrometricslib.exceptions import (
     FITS_READ_ERRORS,
-    AppConfiguration,
     AstrometricsError,
     ConfigurationError,
     ExternalServiceError,
@@ -43,7 +43,7 @@ class IngestionService(BaseBackgroundService):
         self,
         target_service: TargetService | None = None,
         config_service: AppConfiguration | None = None,
-        calibration_library: Any = None,
+        calibration: Any = None,
         stellar_service: StellarService | None = None,
         job_service: JobService | None = None,
         image_processing_service: ImageProcessingService | None = None,
@@ -54,7 +54,7 @@ class IngestionService(BaseBackgroundService):
         self._quality_measurement_service = quality_measurement_service
         self._target_service = target_service
         self._config_service = config_service
-        self._calibration_library = calibration_library
+        self._calibration = calibration
         self._stellar_service = stellar_service
         self._image_processing_service = image_processing_service
         self._wayfinder = wayfinder
@@ -308,7 +308,7 @@ class IngestionService(BaseBackgroundService):
         success : `bool`
             `True` once re-indexing completes.
         """
-        from astrometricslib import capture_job_logs
+        from astrometricslib.jobs import capture_job_logs
 
         with capture_job_logs(
             job_id=job_id,
@@ -343,16 +343,16 @@ class IngestionService(BaseBackgroundService):
 
         # 3. Refresh calibration frames
         self._log(job_id, "Scanning dark frames...")
-        self._calibration_library.refresh_dark_frames(prune_missing=True)
+        self._calibration.reindex_frames("dark", prune_missing=True)
 
         self._log(job_id, "Scanning bias frames...")
-        self._calibration_library.refresh_bias_frames(prune_missing=True)
+        self._calibration.reindex_frames("bias", prune_missing=True)
 
         self._log(job_id, "Scanning flat frames...")
-        self._calibration_library.refresh_flat_frames(prune_missing=True)
+        self._calibration.reindex_frames("flat", prune_missing=True)
 
         self._log(job_id, "Calibration frames indexed. Saving library...")
-        self._calibration_library.save_library()
+        self._calibration.save()
 
         # 4. Migrate Stellar Objects to SQLite
         if hasattr(self._target_service, "stellar_service") and self._target_service.stellar_service:
@@ -446,7 +446,7 @@ class IngestionService(BaseBackgroundService):
         success : `bool`
             `True` once ingestion completes.
         """
-        from astrometricslib import capture_job_logs
+        from astrometricslib.jobs import capture_job_logs
 
         # Flip the job out of its initial "started" row the moment work
         # actually begins -- without this the status the UI polls never
@@ -617,7 +617,7 @@ class IngestionService(BaseBackgroundService):
                     sync_result = self._wayfinder.control.remote.sync_frames(
                         target_name, files=selected_files, log_callback=ingest_log_callback
                     )
-                    measurement_results = list((sync_result or {}).get("measurements") or [])
+                    measurement_results = list(sync_result.measurements or [])
                     self._log(job_id, "Download complete.")
                 except AstrometricsError as e:
                     self._log(job_id, f"Download failed: {e}")
@@ -636,7 +636,7 @@ class IngestionService(BaseBackgroundService):
             # Local ingestion goes through the same library entry point
             # as remote downloads.
             sync_result = self._wayfinder.control.remote.sync_frames(target_name, local_path=source_dir)
-            measurement_results = list((sync_result or {}).get("measurements") or [])
+            measurement_results = list(sync_result.measurements or [])
             self._log(job_id, "Local frames ingested successfully.")
 
         # The sync already measured the frames it added. Announce that run's
@@ -651,11 +651,10 @@ class IngestionService(BaseBackgroundService):
         if self._target_service:
             # 1. Update Calibration Library
             try:
-                if self._calibration_library:
-                    self._calibration_library.refresh_dark_frames()
-                    self._calibration_library.refresh_bias_frames()
-                    self._calibration_library.refresh_flat_frames()
-                    self._calibration_library.save_library()
+                if self._calibration:
+                    for kind in ("dark", "bias", "flat"):
+                        self._calibration.reindex_frames(kind)
+                    self._calibration.save()
             except (AstrometricsError, *FITS_READ_ERRORS) as e:
                 logger.warning("Failed to refresh calibration library in ingestion job: %s", e)
 

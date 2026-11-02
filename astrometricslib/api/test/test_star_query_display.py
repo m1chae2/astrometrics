@@ -15,8 +15,8 @@ import pytest
 from astropy.io import fits
 from astropy.wcs import WCS
 
+from astrometricslib._internal.drivers.catalog_access import CatalogAccess
 from astrometricslib.api.stars import StellarCatalog
-from astrometricslib.drivers.catalog_access import CatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.stellar_source import (
@@ -99,7 +99,7 @@ def catalog(tmp_path: Path) -> StellarCatalog:
     stars[2].spectral_type = "G5"
     stars[4].spectral_type = "G0"
     stars[5].spectral_type = "K1"
-    catalog.catalog_access.put(stars, "stellar_catalog", {})
+    catalog._catalog_access.put(stars, "stellar_catalog", {})
     return catalog
 
 
@@ -217,7 +217,7 @@ def test_overlay_places_stars_through_the_image_wcs(catalog: StellarCatalog, tmp
     image = tmp_path / "m13_stack.fits"
     _write_reference_image(image)
     target = Target(id="M 13", stacking=TargetStackingResult(stacked_image=str(image)))
-    catalog.catalog_access.put([target], "target_catalog", {})
+    catalog._catalog_access.put([target], "target_catalog", {})
 
     overlay = catalog.query(target_id="M_13", detail="overlay", limit=10).overlay
 
@@ -236,7 +236,7 @@ def test_overlay_uses_saved_centers_when_the_image_has_no_wcs(tmp_path: Path) ->
         id="HD 5", name="Delta", target_ids=["M 13"], magnitude=7.0, is_catalog_identified=True, radius_px=3.5
     )
     centered.star_data = {"xcentroid": 12.25, "ycentroid": 40.0}
-    catalog.catalog_access.put(
+    catalog._catalog_access.put(
         [centered, StellarObject(id="HD 6", name="Unplaced", target_ids=["M 13"], magnitude=6.0)],
         "stellar_catalog",
         {},
@@ -265,7 +265,7 @@ def test_overlay_never_labels_clusters_or_field_detections(tmp_path: Path) -> No
     """Cluster entries, single-frame detections and Star_ ids get no label."""
     catalog = _catalog(tmp_path)
     centers = {"xcentroid": 50.0, "ycentroid": 60.0}
-    catalog.catalog_access.put(
+    catalog._catalog_access.put(
         [
             StellarObject(
                 id="M_13_Cluster", target_ids=["M 13"], stellar_spectral_type="Cluster", star_data=centers
@@ -304,7 +304,7 @@ def test_overlay_puts_catalog_identified_stars_first_and_respects_the_limit(tmp_
         magnitude=2.56,
         star_data={"xcentroid": 800.0, "ycentroid": 600.0},
     )
-    catalog.catalog_access.put([*field_stars, identified], "stellar_catalog", {})
+    catalog._catalog_access.put([*field_stars, identified], "stellar_catalog", {})
 
     overlay = catalog.query(target_id="M 13", detail="overlay", limit=3).overlay
 

@@ -1,6 +1,6 @@
 """Purpose: The imaging sequence plan the app's sequencer queue runs.
 
-Description: `ObservationPlanning.create_plan(kind="sequence")` turns a
+Description: `ObservationPlanning.create_sequence` turns a
 list of ``{count, exposure, filter}`` items for one target into a
 `SequencePlan`, adding each item's duration and the plan's total. The
 plan is not stored; the backend's sequencer keeps it in its own queue.

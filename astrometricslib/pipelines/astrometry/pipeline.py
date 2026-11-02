@@ -9,8 +9,8 @@ import logging
 import os
 from typing import Any
 
-from astrometricslib.drivers.driver_set import Drivers
-from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ConfigurationError, ExternalServiceError, InvalidArgumentError
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier

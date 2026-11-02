@@ -46,13 +46,12 @@ import sys
 import numpy as np
 
 from astrometricslib import Astrometrics, configure_logging
-from astrometricslib.drivers.local_database import backup_catalog_database
+from astrometricslib._internal.drivers.local_database import backup_catalog_database
 from astrometricslib.models.stellar_source import (
     ExtinctionCorrectionRecord,
     SpectroscopyResult,
     StellarObject,
 )
-from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import assess_output_quality
 from astrometricslib.pipelines.spectroscopy.pre_processing.assess_input_quality import assess_input_quality
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction import (
     apply_extinction_correction,
@@ -65,6 +64,9 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response i
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
     ResolutionProfile,
     load_line_spread_profile,
+)
+from astrometricslib.pipelines.spectroscopy.processing.detection_label_limits import (
+    build_detection_label_limits,
 )
 from astrometricslib.pipelines.spectroscopy.processing.spectrum_analysis import (
     EXTENDED_TARGET_SPECTRAL_TYPE,
@@ -288,6 +290,7 @@ def recompute_star(
         else None
     )
     spectroscopy.emission_lines = analysis.emission_lines
+    spectroscopy.detection_label_limits = build_detection_label_limits()
     spectroscopy.is_emission_line_source = analysis.is_emission_line_source
     spectroscopy.response_corrected_intensities = analysis.response_corrected_intensity
     spectroscopy.resolution_element_angstrom = (
@@ -306,9 +309,6 @@ def recompute_star(
         zero_order_saturated_pixel_fraction=None,
         valid_fraction=spectroscopy.valid_fraction,
         signal_to_noise=analysis.signal_to_noise,
-    )
-    spectroscopy.output_quality = assess_output_quality(
-        classification, analysis.catalog_comparison, analysis.resolution_element_angstrom
     )
     return True
 
@@ -366,7 +366,7 @@ def run_recompute(argv: list[str] | None = None) -> int:
 
     star_ids = [
         summary.id
-        for summary in astrometrics.catalog_access.list_star_summaries(target_id=arguments.target)
+        for summary in astrometrics._catalog_access.list_star_summaries(target_id=arguments.target)
         if summary.has_spectra and not summary.id.endswith("::spectroscopy")
     ]
     if not star_ids:
@@ -376,7 +376,7 @@ def run_recompute(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    stars = astrometrics.catalog_access.get_by_ids("stellar_catalog", star_ids)
+    stars = astrometrics._catalog_access.get_by_ids("stellar_catalog", star_ids)
     print(
         f"{len(stars)} star(s) with spectra, camera {camera_name} "
         f"({minimum_wavelength_angstrom:.0f}-{maximum_wavelength_angstrom:.0f} A):"
@@ -418,7 +418,7 @@ def run_recompute(argv: list[str] | None = None) -> int:
         )
         return 1
     print(f"\nBacked up the catalog database to {backup_path}.")
-    astrometrics.catalog_access.merge_and_record(
+    astrometrics._catalog_access.merge_and_record(
         "stellar_catalog", changed_stars, lambda _existing, updated: updated
     )
     print(f"Saved {len(changed_stars)} star(s).")

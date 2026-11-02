@@ -68,9 +68,12 @@ What this module does NOT do:
   7900 A on real stars, 0.81-0.85 on the synthetic pair in the tests), partly
   because the blur beyond the measured window is taken to be zero.
 
-Not connected to the pipeline yet. It is meant to be switched on by a config
-option, off by default, once it has been checked on isolated stars, synthetic
-pairs and real pairs.
+The pipeline does not use the correction. It is turned off (see
+`NEIGHBOR_WING_CORRECTION_IS_ON` in `neighbor_wing_correction`), because the
+fit's own residual limit did not tell good corrections from bad ones when
+model neighbors were injected into real images (validation entry SPE-34).
+The code stays so it is easy to switch back on. `sky_aware_neighbor_wing_flux`
+is used for the rough neighbor-share estimate that replaces it.
 """
 
 from dataclasses import dataclass
@@ -78,6 +81,13 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.interpolate import CubicSpline
 from scipy.optimize import least_squares
+
+from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor import (
+    MEDIAN_STANDARD_ERROR_FACTOR,
+    SKY_BAND_GAP_PX,
+    SKY_BAND_WIDTH_PX,
+    SKY_CONTAMINATION_SIGMA,
+)
 
 # How finely the blur is sampled when the light inside a stretch is worked
 # out, in samples per pixel. Twelve is far finer than the blur, so the sums
@@ -100,6 +110,13 @@ _CENTROID_HALF_WIDTH_PX = 4
 # in pixels. The centre lines are measured, so this is only a small correction.
 _MAXIMUM_CENTRE_SHIFT_PX = 2.0
 
+# How many places along the streak `sky_aware_neighbor_wing_flux` works out
+# the sky strips at. The light in the strips changes slowly along the streak,
+# and the values between these places are read off a straight line, so 20
+# places keep the cost small. Chosen with the estimate tested in validation
+# entry SPE-34; it was not varied there.
+_SKY_AWARE_PLACE_COUNT = 20
+
 # How much the measured blur may be stretched or squeezed to match the crowded
 # image. Across the 2026-09-25 stars the stretch needed was 1.0-1.4 for a
 # 4 C change of focuser temperature; a fit that reaches either limit is
@@ -113,6 +130,11 @@ MAXIMUM_DILATION = 2.0
 # stars and 1.3-1.7% on the real Albireo pair. 2% leaves a little room above
 # the worst of those. It has not been checked against a fit that is wrong
 # in a way the profile cannot show.
+# The correction is now turned off. When model neighbors were injected into
+# real images, fits within this limit did not give smaller flux errors than
+# no correction (validation entry SPE-34), so the limit does not tell good
+# corrections from bad ones. It is kept for the day the correction is
+# switched back on.
 MAXIMUM_TRUSTED_RELATIVE_RESIDUAL = 0.02
 
 
@@ -262,7 +284,35 @@ def _profile_at(blur: EmpiricalBlur, position_px: float) -> np.ndarray:
     return (1.0 - weight) * blur.profiles[lower] + weight * blur.profiles[upper]
 
 
-def _evaluate_profile(blur: EmpiricalBlur, position_px: float, offsets_px: np.ndarray) -> np.ndarray:
+def _profile_spline(blur: EmpiricalBlur, position_px: float) -> CubicSpline:
+    """Build the cubic curve through the measured shape at one place.
+
+    The curve depends only on the measured blur and the place along the
+    streak, not on the stretch or the star's position. The fit therefore
+    builds it once per band and reuses it for every trial.
+
+    Parameters
+    ----------
+    blur : `EmpiricalBlur`
+        The measured blur.
+    position_px : `float`
+        Distance along the streak from the zero-order star, in pixels.
+
+    Returns
+    -------
+    spline : `scipy.interpolate.CubicSpline`
+        The curve, `None` outside the measured window (it does not
+        extrapolate).
+    """
+    return CubicSpline(blur.offsets_px, _profile_at(blur, position_px), extrapolate=False)
+
+
+def _evaluate_profile(
+    blur: EmpiricalBlur,
+    position_px: float,
+    offsets_px: np.ndarray,
+    spline: CubicSpline | None = None,
+) -> np.ndarray:
     """Read the measured shape at any offsets, between the measured pixels.
 
     A straight line between neighbouring pixels flattens a narrow core (a core
@@ -278,13 +328,17 @@ def _evaluate_profile(blur: EmpiricalBlur, position_px: float, offsets_px: np.nd
         Distance along the streak from the zero-order star, in pixels.
     offsets_px : `numpy.ndarray`
         The offsets, in pixels, to read the shape at.
+    spline : `scipy.interpolate.CubicSpline`, optional
+        The curve from `_profile_spline` for this blur and position, when
+        the caller has already built it. Built here when omitted.
 
     Returns
     -------
     values : `numpy.ndarray`
         The measured shape at those offsets; 0 outside the measured window.
     """
-    spline = CubicSpline(blur.offsets_px, _profile_at(blur, position_px), extrapolate=False)
+    if spline is None:
+        spline = _profile_spline(blur, position_px)
     return np.nan_to_num(spline(offsets_px), nan=0.0)
 
 
@@ -347,6 +401,32 @@ def enclosed_fraction(
         The fraction of the star's light between the two ends, from 0 to 1.
     """
     grid_px, cumulative = _cumulative_light(blur, position_px, dilation)
+    return _fraction_between(grid_px, cumulative, source_offset_px, interval_low_px, interval_high_px)
+
+
+def _fraction_between(
+    grid_px: np.ndarray,
+    cumulative: np.ndarray,
+    source_offset_px: float,
+    interval_low_px: float,
+    interval_high_px: float,
+) -> float:
+    """Read the light between two ends off a star's cumulative curve.
+
+    Parameters
+    ----------
+    grid_px, cumulative : `numpy.ndarray`
+        The curve from `_cumulative_light`.
+    source_offset_px : `float`
+        Where the star's streak is, across the streak, in pixels.
+    interval_low_px, interval_high_px : `float`
+        The two ends of the stretch, in the same coordinates.
+
+    Returns
+    -------
+    fraction : `float`
+        The fraction of the star's light between the two ends.
+    """
     at_low = np.interp(interval_low_px - source_offset_px, grid_px, cumulative, left=0.0, right=1.0)
     at_high = np.interp(interval_high_px - source_offset_px, grid_px, cumulative, left=0.0, right=1.0)
     return float(at_high - at_low)
@@ -358,6 +438,7 @@ def pixel_profile(
     dilation: float,
     source_offset_px: float,
     pixel_centres_px: np.ndarray,
+    spline: CubicSpline | None = None,
 ) -> np.ndarray:
     """Give the light one star puts into each pixel across the streak.
 
@@ -373,6 +454,9 @@ def pixel_profile(
         Where the star's streak is, in pixels.
     pixel_centres_px : `numpy.ndarray`
         The centre of each pixel, in the same coordinates.
+    spline : `scipy.interpolate.CubicSpline`, optional
+        The curve from `_profile_spline` for this blur and position, when
+        the caller has already built it.
 
     Returns
     -------
@@ -386,7 +470,10 @@ def pixel_profile(
     # fitted as 1.03 in the tests).
     return (
         _evaluate_profile(
-            blur, position_px, (np.asarray(pixel_centres_px, dtype=float) - source_offset_px) / dilation
+            blur,
+            position_px,
+            (np.asarray(pixel_centres_px, dtype=float) - source_offset_px) / dilation,
+            spline,
         )
         / dilation
     )
@@ -447,6 +534,70 @@ def build_band_profiles(
     return offsets_px, profiles, band_positions
 
 
+# Each trial of the fitter needs one shape per star, and a finite-difference
+# step revisits the base point, so a few trials' worth is enough. Dropping
+# entries never changes a number, only how often a shape is rebuilt.
+_MAXIMUM_CACHED_STAR_SHAPES = 64
+
+
+def _star_shape_in_bands(
+    blur: EmpiricalBlur,
+    dilation: float,
+    star_offset_px: float,
+    offsets_px: np.ndarray,
+    band_positions_px: np.ndarray,
+    band_splines: list[CubicSpline] | None,
+    column_cache: dict[tuple[float, float], np.ndarray] | None,
+) -> np.ndarray:
+    """Give one star's shape in every band, building it only once per trial.
+
+    The fitter's finite-difference step moves one number at a time, so most
+    stars keep the same stretch and position from one trial to the next.
+    Their shapes are read from `column_cache` instead of being rebuilt.
+
+    Parameters
+    ----------
+    blur : `EmpiricalBlur`
+        The measured blur.
+    dilation : `float`
+        How much to stretch the measured shape.
+    star_offset_px : `float`
+        Where the star's streak is, in pixels.
+    offsets_px : `numpy.ndarray`
+        Offsets across the streak, in pixels.
+    band_positions_px : `numpy.ndarray`
+        How far along the streak each band is.
+    band_splines : `list` [`scipy.interpolate.CubicSpline`] or `None`
+        One curve per band, or `None` to build them in `pixel_profile`.
+    column_cache : `dict` or `None`
+        The shapes built so far, or `None` to build every time.
+
+    Returns
+    -------
+    shape : `numpy.ndarray`
+        The star's light in each pixel, shape (bands, offsets).
+    """
+    key = (float(dilation), float(star_offset_px))
+    if column_cache is not None and key in column_cache:
+        return column_cache[key]
+    shape = np.stack([
+        pixel_profile(
+            blur,
+            float(band_positions_px[band_index]),
+            dilation,
+            star_offset_px,
+            offsets_px,
+            None if band_splines is None else band_splines[band_index],
+        )
+        for band_index in range(len(band_positions_px))
+    ])
+    if column_cache is not None:
+        if len(column_cache) > _MAXIMUM_CACHED_STAR_SHAPES:
+            column_cache.clear()
+        column_cache[key] = shape
+    return shape
+
+
 def _solve_amplitudes(
     blur: EmpiricalBlur,
     dilation: float,
@@ -455,6 +606,8 @@ def _solve_amplitudes(
     band_positions_px: np.ndarray,
     star_offsets_px: np.ndarray,
     weights: np.ndarray,
+    band_splines: list[CubicSpline] | None = None,
+    column_cache: dict[tuple[float, float], np.ndarray] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Find, for a given stretch and positions, the best amplitudes and sky.
 
@@ -478,6 +631,14 @@ def _solve_amplitudes(
         Where each star's streak is, in pixels.
     weights : `numpy.ndarray`
         How much each point counts, same shape as `profiles`.
+    band_splines : `list` [`scipy.interpolate.CubicSpline`], optional
+        One curve per band from `_profile_spline`, so a fit that calls this
+        many times builds them once. Built here when omitted.
+    column_cache : `dict`, optional
+        Shapes already built, keyed by (stretch, star position), each an
+        array of shape (bands, offsets). A fit that tries a star at the
+        same stretch and position again reads it from here. Shapes this
+        call builds are added. The numbers are the same with or without it.
 
     Returns
     -------
@@ -492,11 +653,14 @@ def _solve_amplitudes(
     amplitudes = np.zeros((n_bands, len(star_offsets_px)))
     sky_levels = np.zeros(n_bands)
     residuals = np.zeros_like(profiles)
+    star_shapes = [
+        _star_shape_in_bands(
+            blur, dilation, float(offset), offsets_px, band_positions_px, band_splines, column_cache
+        )
+        for offset in star_offsets_px
+    ]
     for band_index in range(n_bands):
-        columns = [
-            pixel_profile(blur, float(band_positions_px[band_index]), dilation, float(offset), offsets_px)
-            for offset in star_offsets_px
-        ]
+        columns = [shape[band_index] for shape in star_shapes]
         design = np.column_stack([*columns, np.ones(len(offsets_px))])
         weighted_design = design * weights[band_index][:, None]
         solution, *_ = np.linalg.lstsq(
@@ -516,6 +680,7 @@ def fit_neighbor_amplitudes(
     band_positions_px: np.ndarray,
     star_offsets_px: np.ndarray,
     noise_floor: float,
+    reuse_star_shapes: bool = True,
 ) -> NeighborFit:
     """Fit the measured blur to the band profiles of a crowded image.
 
@@ -537,6 +702,10 @@ def fit_neighbor_amplitudes(
         profile's units. Points are weighted as one over the larger of this
         and the square root of the profile, so the faint wings count as much
         as the bright core.
+    reuse_star_shapes : `bool`, optional
+        Build each star's shape once per stretch and position and reuse it
+        across the fitter's trials. The fit is the same with `False`, only
+        slower; the switch exists so a test can show that.
 
     Returns
     -------
@@ -546,6 +715,10 @@ def fit_neighbor_amplitudes(
     star_offsets_px = np.asarray(star_offsets_px, dtype=float)
     n_stars = len(star_offsets_px)
     weights = 1.0 / np.sqrt(noise_floor**2 + np.clip(profiles, 0.0, None))
+    # The curve through the measured shape depends only on the band, so it is
+    # built once here, not on every trial of the fitter.
+    band_splines = [_profile_spline(blur, float(position)) for position in band_positions_px]
+    column_cache: dict[tuple[float, float], np.ndarray] | None = {} if reuse_star_shapes else None
 
     def shifts_from(parameters: np.ndarray) -> np.ndarray:
         """Give the star position corrections that go with the free numbers.
@@ -573,6 +746,8 @@ def fit_neighbor_amplitudes(
             band_positions_px,
             star_offsets_px + shifts_from(parameters),
             weights,
+            band_splines,
+            column_cache,
         )
         return residuals.ravel()
 
@@ -582,22 +757,35 @@ def fit_neighbor_amplitudes(
     dilation = float(result.x[0])
     shifts = shifts_from(result.x)
     amplitudes, sky_levels, _ = _solve_amplitudes(
-        blur, dilation, offsets_px, profiles, band_positions_px, star_offsets_px + shifts, weights
+        blur,
+        dilation,
+        offsets_px,
+        profiles,
+        band_positions_px,
+        star_offsets_px + shifts,
+        weights,
+        band_splines,
+        column_cache,
     )
 
     # Judge the fit on the plain (unweighted) misfit, as a fraction of the
     # brightest star's peak, so the number means the same for every image.
     misfit = np.zeros_like(profiles)
+    final_shapes = [
+        _star_shape_in_bands(
+            blur,
+            dilation,
+            float(star_offsets_px[star_index] + shifts[star_index]),
+            offsets_px,
+            band_positions_px,
+            band_splines,
+            column_cache,
+        )
+        for star_index in range(n_stars)
+    ]
     for band_index in range(profiles.shape[0]):
         model = sky_levels[band_index] + sum(
-            amplitudes[band_index, star_index]
-            * pixel_profile(
-                blur,
-                float(band_positions_px[band_index]),
-                dilation,
-                float(star_offsets_px[star_index] + shifts[star_index]),
-                offsets_px,
-            )
+            amplitudes[band_index, star_index] * final_shapes[star_index][band_index]
             for star_index in range(n_stars)
         )
         misfit[band_index] = profiles[band_index] - model
@@ -623,6 +811,7 @@ def neighbor_wing_flux(
     neighbor_offset_px: np.ndarray,
     target_box_half_width_px: np.ndarray,
     target_offset_px: np.ndarray,
+    cumulative_light_cache: dict[tuple[float, float], tuple[np.ndarray, np.ndarray]] | None = None,
 ) -> np.ndarray:
     """Work out how much of a neighbour's light lands in the target's box.
 
@@ -649,6 +838,11 @@ def neighbor_wing_flux(
     target_offset_px : `numpy.ndarray`
         Where the target's streak is across the streak at each sample, in
         the same coordinates as `neighbor_offset_px`.
+    cumulative_light_cache : `dict`, optional
+        A dictionary the caller keeps between calls for the same blur, so
+        neighbours of one target, which share their positions along the
+        streak and the stretch, build each cumulative curve once. Filled in
+        place. Without it each call builds its own.
 
     Returns
     -------
@@ -658,27 +852,126 @@ def neighbor_wing_flux(
     """
     count = len(neighbor_box_flux)
     wing_flux = np.zeros(count)
+    if cumulative_light_cache is None:
+        cumulative_light_cache = {}
     for sample in range(count):
-        own = enclosed_fraction(
-            blur,
-            float(positions_px[sample]),
-            dilation,
+        # Both fractions read the same curve (same blur, place and stretch),
+        # so it is built once per sample, not once per fraction.
+        key = (float(positions_px[sample]), float(dilation))
+        if key not in cumulative_light_cache:
+            cumulative_light_cache[key] = _cumulative_light(blur, key[0], key[1])
+        grid_px, cumulative = cumulative_light_cache[key]
+        own = _fraction_between(
+            grid_px,
+            cumulative,
             float(neighbor_offset_px[sample]),
             float(neighbor_offset_px[sample] - neighbor_box_half_width_px[sample]),
             float(neighbor_offset_px[sample] + neighbor_box_half_width_px[sample]),
         )
         if own <= 0:
             continue
-        inside_target = enclosed_fraction(
-            blur,
-            float(positions_px[sample]),
-            dilation,
+        inside_target = _fraction_between(
+            grid_px,
+            cumulative,
             float(neighbor_offset_px[sample]),
             float(target_offset_px[sample] - target_box_half_width_px[sample]),
             float(target_offset_px[sample] + target_box_half_width_px[sample]),
         )
         wing_flux[sample] = neighbor_box_flux[sample] / own * inside_target
     return wing_flux
+
+
+def sky_aware_neighbor_wing_flux(
+    blur: EmpiricalBlur,
+    dilation: float,
+    positions_px: np.ndarray,
+    neighbor_box_flux: np.ndarray,
+    neighbor_box_half_width_px: np.ndarray,
+    neighbor_offset_px: np.ndarray,
+    target_box_half_width_px: np.ndarray,
+    sky_scatter_px: float,
+) -> np.ndarray:
+    """Work out a neighbour's light left in the target's box after the sky.
+
+    The spectrum extractor measures the sky in two strips beside the box and
+    takes it off every sample. A bright neighbour's wing also falls in those
+    strips, so part of its light is taken off with the sky. This function
+    finds the neighbour's light in the box from the measured blur alone, as
+    `neighbor_wing_flux` does, and then takes off the sky level the extractor
+    would have used (`measure_sky` in `spectrum_extractor`: the mean of the two
+    strips, or the lower one when they differ by more than
+    `SKY_CONTAMINATION_SIGMA` times the noise of their difference).
+
+    Parameters
+    ----------
+    blur : `EmpiricalBlur`
+        The measured blur.
+    dilation : `float`
+        How much to stretch the measured shape.
+    positions_px : `numpy.ndarray`
+        Distance along the streak from the zero-order star at each sample.
+    neighbor_box_flux : `numpy.ndarray`
+        The neighbour's sky-subtracted box flux at each sample.
+    neighbor_box_half_width_px : `numpy.ndarray`
+        Half-width of the neighbour's box at each sample, in pixels.
+    neighbor_offset_px : `numpy.ndarray`
+        Where the neighbour's streak is across the streak at each sample,
+        measured from the target's streak.
+    target_box_half_width_px : `numpy.ndarray`
+        Half-width of the target's box at each sample.
+    sky_scatter_px : `float`
+        The scatter of single pixels of sky near the target, in the units of
+        the box flux. It sets how big a difference between the two strips
+        counts as contamination.
+
+    Returns
+    -------
+    wing_flux : `numpy.ndarray`
+        The neighbour's light that stays in the target's box at each sample.
+        It can be negative where the sky level taken off is larger than the
+        light in the box.
+    """
+    sample_count = positions_px.size
+    places = np.linspace(0, sample_count - 1, _SKY_AWARE_PLACE_COUNT).astype(int)
+    strip_noise_limit = (
+        SKY_CONTAMINATION_SIGMA
+        * MEDIAN_STANDARD_ERROR_FACTOR
+        * np.sqrt(2.0 / SKY_BAND_WIDTH_PX)
+        * sky_scatter_px
+    )
+    lower_strip, upper_strip, inside_target, inside_neighbor = [], [], [], []
+    for place in places:
+        position = float(positions_px[place])
+        offset = float(neighbor_offset_px[place])
+        nearest_edge = int(np.ceil(target_box_half_width_px[place])) + SKY_BAND_GAP_PX
+        lower_pixels = np.arange(-(nearest_edge + SKY_BAND_WIDTH_PX), -nearest_edge, dtype=float)
+        upper_pixels = np.arange(nearest_edge + 1, nearest_edge + SKY_BAND_WIDTH_PX + 1, dtype=float)
+        spline = _profile_spline(blur, position)
+        lower_strip.append(np.median(pixel_profile(blur, position, dilation, offset, lower_pixels, spline)))
+        upper_strip.append(np.median(pixel_profile(blur, position, dilation, offset, upper_pixels, spline)))
+        grid_px, cumulative = _cumulative_light(blur, position, dilation)
+        half_width = float(target_box_half_width_px[place])
+        inside_target.append(_fraction_between(grid_px, cumulative, offset, -half_width, half_width))
+        neighbor_half_width = float(neighbor_box_half_width_px[place])
+        inside_neighbor.append(
+            _fraction_between(
+                grid_px, cumulative, offset, offset - neighbor_half_width, offset + neighbor_half_width
+            )
+        )
+    samples = np.arange(sample_count)
+    total_light = np.nan_to_num(neighbor_box_flux) / np.maximum(
+        np.interp(samples, places, inside_neighbor), 1e-6
+    )
+    lower_level = total_light * np.interp(samples, places, lower_strip)
+    upper_level = total_light * np.interp(samples, places, upper_strip)
+    sky_level = np.where(
+        np.abs(upper_level - lower_level) > strip_noise_limit,
+        np.minimum(lower_level, upper_level),
+        0.5 * (lower_level + upper_level),
+    )
+    return (
+        total_light * np.interp(samples, places, inside_target) - 2.0 * target_box_half_width_px * sky_level
+    )
 
 
 def subtract_neighbor_wings(

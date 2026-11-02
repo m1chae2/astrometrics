@@ -17,7 +17,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from astrometricslib import CaptureSetting, MeasurementReference
+from astrometricslib.reports import CaptureSetting, MeasurementReference
 from wayfindinglib.models.quality.capture_summary import CaptureSettingSummary
 from wayfindinglib.models.quality.statements import Confidence, NeedsAttention, TargetStatement
 
@@ -29,6 +29,33 @@ class ForecastOutcome(StrEnum):
     SHORT_KNOWN_REASON = "short_known_reason"
     SHORT_UNKNOWN_REASON = "short_unknown_reason"
     NOT_CHECKABLE = "not_checkable"
+
+
+class ForecastBasis(StrEnum):
+    """What the later stack of a forecast check is compared with.
+
+    ``later_stack`` is a check of two library stacks, the later one holding
+    new frames. ``earlier_nights_subset`` is a check made from frames already
+    taken: the stack of all observing nights but the last against the library
+    stack of all nights.
+    """
+
+    LATER_STACK = "later_stack"
+    EARLIER_NIGHTS_SUBSET = "earlier_nights_subset"
+
+
+class RecommendedAdditionalFramesStatus(StrEnum):
+    """Whether "take N more" may be shown for a target, and on what footing.
+
+    ``not_checked`` hides the count. ``provisional`` shows it after a check
+    made from frames already taken agreed; the next real stack confirms or
+    withdraws it. ``confirmed`` shows it after a check of two library stacks
+    agreed.
+    """
+
+    NOT_CHECKED = "not_checked"
+    PROVISIONAL = "provisional"
+    CONFIRMED = "confirmed"
 
 
 class ForecastedChange(BaseModel):
@@ -75,6 +102,10 @@ class ForecastCheck(BaseModel):
         arrived as forecast.
     evidence : `list` [`MeasurementReference`]
         The measurements the check used.
+    basis : `ForecastBasis`
+        Whether the check compared two library stacks (``later_stack``) or an
+        earlier-nights subset with the library stack
+        (``earlier_nights_subset``).
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -88,6 +119,7 @@ class ForecastCheck(BaseModel):
     outcome: ForecastOutcome
     reason: str = ""
     evidence: list[MeasurementReference] = Field(default_factory=list)
+    basis: ForecastBasis = ForecastBasis.LATER_STACK
 
     @model_validator(mode="after")
     def _require_reason_unless_as_forecast(self) -> Self:
@@ -123,8 +155,6 @@ class ScienceOutcomeSummary(BaseModel):
         Asteroid candidates the detection run found.
     confirmed_asteroid_candidate_count : `int`
         Asteroid candidates that match a known orbit.
-    flagged_pipelines : `list` [`str`]
-        Names of the pipelines whose own quality summary is flagged.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -132,7 +162,6 @@ class ScienceOutcomeSummary(BaseModel):
     variable_star_candidate_count: int = Field(default=0, ge=0, alias="variableStarCandidateCount")
     asteroid_candidate_count: int = Field(default=0, ge=0, alias="asteroidCandidateCount")
     confirmed_asteroid_candidate_count: int = Field(default=0, ge=0, alias="confirmedAsteroidCandidateCount")
-    flagged_pipelines: list[str] = Field(default_factory=list, alias="flaggedPipelines")
 
 
 class ContextReading(BaseModel):

@@ -9,11 +9,12 @@ the same way.
 """
 
 import logging
+import math
 import os
 from typing import Any
 
-from astrometricslib.foundation.enums import FilterType
 from astrometricslib.models.target import FrameRecord
+from astrometricslib.utilities.frame_identity import frame_is_spectral
 
 logger = logging.getLogger(__name__)
 
@@ -120,56 +121,6 @@ def frames_missing_focal_length(target: Any, camera_name: str | None = None) -> 
         if (not camera_name or camera_name.lower() in (frame.camera or "").lower())
         and frame_configuration_key(frame) is None
     ]
-
-
-def select_frames_for_configuration(target: Any, configuration_key: str) -> list:
-    """Select the frames belonging to one camera-and-optic configuration.
-
-    Parameters
-    ----------
-    target : `Any`
-        The target whose `frames` are filtered.
-    configuration_key : `str`
-        A key as produced by `frame_configuration_key`.
-
-    Returns
-    -------
-    configuration_frames : `list`
-        The matching frames, in their original order.
-    """
-    return [frame for frame in target.frames or [] if frame_configuration_key(frame) == configuration_key]
-
-
-def frame_is_spectral(frame: Any) -> bool:
-    """Decide whether a frame is a spectroscopy frame.
-
-    A frame's filter can show up as an already-normalized `FilterType`
-    member, a bare string that skipped normalization, or the catalog
-    value itself ("Star Analyzer 200") rather than the "SPEC" alias --
-    checking all three keeps spectral frames recognized the same way
-    everywhere they're classified, instead of each caller growing its
-    own slightly different test.
-
-    Parameters
-    ----------
-    frame : `Any`
-        The frame record (or anything with a `.filter` attribute or
-        `"filter"` key) to check.
-
-    Returns
-    -------
-    is_spectral : `bool`
-        True if the frame is a spectroscopy frame.
-    """
-    if isinstance(frame, dict):
-        frame_filter = frame.get("filter")
-    else:
-        frame_filter = getattr(frame, "filter", None)
-    return (
-        frame_filter == FilterType.SPEC
-        or getattr(frame_filter, "name", None) == "SPEC"
-        or str(frame_filter).upper() in ("SPEC", "STAR ANALYZER 200", "SPECTROSCOPY")
-    )
 
 
 def select_frames_for_processing(
@@ -306,3 +257,32 @@ def add_frame(
     target.frames.append(record)
     target.recalculate_total_exposure()
     return record
+
+
+def frame_exposure_seconds(frame: Any) -> float | None:
+    """Read a frame's exposure length in seconds.
+
+    This is the one reader of a frame record's exposure. Stacking, the frame
+    measurements and the stack membership all use it, so they agree on which
+    exposures are usable.
+
+    Parameters
+    ----------
+    frame : `Any`
+        A frame record, or a dictionary of one, with an ``exposure`` (a
+        number or a string such as ``"0.5"``).
+
+    Returns
+    -------
+    exposure_seconds : `float` or `None`
+        The exposure length, or `None` when it is missing, not a number, not
+        finite, or not positive.
+    """
+    raw = frame.get("exposure") if isinstance(frame, dict) else getattr(frame, "exposure", None)
+    try:
+        value = float(raw)
+    except TypeError, ValueError:
+        return None
+    if not math.isfinite(value) or value <= 0:
+        return None
+    return value

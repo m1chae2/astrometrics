@@ -1,6 +1,6 @@
 """Purpose: Count the calibration frames already held for one request.
 
-Description: `ObservationPlanning.get_advisory(kind="calibration")` uses
+Description: `ObservationPlanning.get_calibration_advice` uses
 this to look up how many dark, bias or flat frames of a given exposure,
 filter, gain setting, offset, binning and sensor temperature the inventory
 already holds for a camera. It is an inventory view only: the advice about
@@ -12,12 +12,13 @@ An entry matches when every setting that both the request and the entry
 state agrees. A setting that one side leaves out is not compared, so an
 inventory written before the gain setting, offset, binning and temperature
 were recorded still counts. Darks match a temperature within
-`DEFAULT_DARK_TEMPERATURE_TOLERANCE_C`.
+the dark temperature tolerance that the caller passes in (it is the
+tolerance the library's calibration query reports).
 """
 
 from typing import Any
 
-from astrometricslib import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C, FilterType
+from astrometricslib import FilterType
 from wayfindinglib.models.equipment_and_site.calibration import (
     CalibrationAdvisory,
     CalibrationEntry,
@@ -55,6 +56,7 @@ def build_calibration_advisory(
     offset: int | None = None,
     binning: int | None = None,
     sensor_temperature_c: float | None = None,
+    dark_temperature_tolerance_c: float | None = None,
 ) -> CalibrationAdvisory:
     """Look up the existing count for a requested calibration entry.
 
@@ -81,6 +83,10 @@ def build_calibration_advisory(
     sensor_temperature_c : `float`, optional
         The requested sensor temperature, in degrees Celsius. Only darks
         are matched on it.
+    dark_temperature_tolerance_c : `float`, optional
+        How far a dark's temperature may differ from `sensor_temperature_c`
+        and still match, in degrees Celsius. Needed to match darks on
+        temperature; without it, temperature is not compared.
 
     Returns
     -------
@@ -115,7 +121,8 @@ def build_calibration_advisory(
             frame_type == FrameType.DARK
             and entry.sensor_temperature_c is not None
             and sensor_temperature_c is not None
-            and abs(entry.sensor_temperature_c - sensor_temperature_c) > DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
+            and dark_temperature_tolerance_c is not None
+            and abs(entry.sensor_temperature_c - sensor_temperature_c) > dark_temperature_tolerance_c
         ):
             continue
         existing_count += entry.count

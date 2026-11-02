@@ -36,7 +36,8 @@ def make_star(
     spectral_type : `str`, optional
         The star's measured spectral type.
     agrees : `bool`, optional
-        Whether the type agrees with the catalog, or `None` for no comparison.
+        Whether the type is within the catalog limit of the catalog type,
+        or `None` for a star with no catalog type.
     methods : `tuple` [`str`], optional
         The p-value method of each tested feature.
     resolution : `float`, optional
@@ -49,11 +50,14 @@ def make_star(
     star : `SimpleNamespace`
         A star whose ``spectroscopy`` carries those fields.
     """
-    comparison = None if agrees is None else SimpleNamespace(spectral_type_agrees=agrees)
+    # The catalog type is the same as the measured one when they agree, and
+    # three classes away when they do not.
+    catalog_type = None if agrees is None else (spectral_type if agrees else "B0V")
     return SimpleNamespace(
+        spectral_type=catalog_type,
         spectroscopy=SimpleNamespace(
             self_determined_spectral_type=spectral_type,
-            catalog_comparison=comparison,
+            rms_gap_to_second_best=None,
             probable_spectral_features=[{"p_value_method": method} for method in methods],
             resolution_element_angstrom=resolution,
             dispersion_angle=0.0,
@@ -66,7 +70,7 @@ def make_star(
                     ],
                 )
             ],
-        )
+        ),
     )
 
 
@@ -256,6 +260,11 @@ def test_the_real_validate_output_records_the_gates() -> None:
     stars = [make_star(agrees=False)]
     spectroscopy = SimpleNamespace(
         last_run_zero_order_saturation_fractions=[0.02],
+        last_run_skipped_no_trail_count=0,
+        last_run_skipped_unidentified_count=0,
+        last_run_below_feature_limit_count=0,
+        last_run_gaia_xp_download_failed_count=0,
+        last_run_reddening_lookup_failed_count=0,
         config=SimpleNamespace(camera=SimpleNamespace(name="ZWO ASI 533MM Pro")),
     )
     result = Result(
@@ -272,8 +281,9 @@ def test_the_real_validate_output_records_the_gates() -> None:
 
     summary = runner.SpectroscopyPipelineAdapter().validate_output(request, result)
 
-    assert summary.flagged is True
-    assert "zero-order saturated in at least one processed star" in summary.flag_reasons
+    assert (
+        summary.gate(rg.ZERO_ORDER_GATE_NAME).detail == "zero-order saturated in at least one processed star"
+    )
     assert summary.gate(rg.ZERO_ORDER_GATE_NAME).status is GateStatus.FAILED
     assert summary.gate(rg.CATALOG_GATE_NAME).status is GateStatus.FAILED
     assert summary.gate(rg.SPECTRA_GATE_NAME).status is GateStatus.PASSED
@@ -345,6 +355,11 @@ def test_the_real_validate_output_records_the_stage_quality_summary() -> None:
     stars = [make_star(processing_failed=True), make_star()]
     spectroscopy = SimpleNamespace(
         last_run_zero_order_saturation_fractions=[0.0],
+        last_run_skipped_no_trail_count=0,
+        last_run_skipped_unidentified_count=0,
+        last_run_below_feature_limit_count=0,
+        last_run_gaia_xp_download_failed_count=0,
+        last_run_reddening_lookup_failed_count=0,
         config=SimpleNamespace(camera=SimpleNamespace(name="ZWO ASI 533MM Pro")),
     )
     result = Result(

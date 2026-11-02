@@ -44,6 +44,7 @@ from astrometricslib.models.quality.metric_spec import (
     MetricSpec,
     UncertaintyKind,
 )
+from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_spec
 
 PHOTOMETRY_STARS_PROCESSED = "photometry.stars_processed_count"
 PHOTOMETRY_STARS_FOUND = "photometry.stars_found_count"
@@ -1112,4 +1113,5 @@ PHOTOMETRY_METRICS: tuple[MetricSpec, ...] = (
     *_NOISE_MODEL_METRICS,
     *_WINDOW_METRICS,
     *_AMPLITUDE_METRICS,
+    camera_without_profile_spec("photometry"),
 )

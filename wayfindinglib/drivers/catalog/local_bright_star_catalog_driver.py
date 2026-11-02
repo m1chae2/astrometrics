@@ -19,7 +19,8 @@ from pathlib import Path
 
 import numpy as np
 
-from astrometricslib import StellarObject, connect_db
+from astrometricslib import StellarObject
+from astrometricslib.drivers import connect_db
 from wayfindinglib.drivers.catalog.base_catalog_driver import CatalogDriver
 
 logger = logging.getLogger(__name__)

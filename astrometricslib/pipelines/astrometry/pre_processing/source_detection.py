@@ -16,7 +16,7 @@ from astropy.stats import SigmaClip, sigma_clipped_stats
 from photutils.background import Background2D, MedianBackground
 from scipy.ndimage import zoom
 
-from astrometricslib.drivers.fits_access import collapse_to_2d
+from astrometricslib._internal.drivers.fits_access import collapse_to_2d
 from astrometricslib.pipelines.shared.star_finding import find_sources_above_background
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 

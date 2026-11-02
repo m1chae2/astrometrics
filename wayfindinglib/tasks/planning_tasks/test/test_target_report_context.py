@@ -14,15 +14,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from astrometricslib import (
-    Astrometrics,
-    MeasurementOrigin,
-    MeasurementStatus,
-    MetricPurpose,
-    QualityMeasurement,
-    QualitySubject,
-    SubjectLevel,
-)
+from astrometricslib import Astrometrics
+from astrometricslib._internal.quality import MeasurementOrigin, MetricPurpose, QualitySubject
+from astrometricslib.reports import MeasurementStatus, QualityMeasurement, SubjectLevel
 from wayfindinglib.tasks.planning_tasks.target_report_tasks import context_readings
 
 NOW = datetime(2026, 10, 20, 22, 0, tzinfo=UTC)

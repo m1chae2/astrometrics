@@ -10,7 +10,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib import NotFoundError, PhotometryResult, SpectroscopyResult, StellarObject
+from astrometricslib import StellarObject
+from astrometricslib._internal.results import PhotometryResult, SpectroscopyResult
+from astrometricslib.exceptions import NotFoundError
 from wayfindinglib.models.quality.statements import StatementKind
 from wayfindinglib.tasks.planning_tasks.result_judgment_tasks import judge_star_result
 

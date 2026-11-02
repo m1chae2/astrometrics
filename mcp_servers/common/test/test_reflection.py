@@ -11,7 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib import background_job, get_configuration, registered_job
+from astrometricslib import get_configuration
+from astrometricslib.jobs import background_job, registered_job
 from mcp_servers.common.reflection import (
     generate_tool_schema,
     parse_docstring_params,

@@ -799,7 +799,8 @@ class AppConfiguration:
         the middle value can outvote one bad frame.
 
         A master built from fewer frames is still built, and the stack is
-        flagged (see `calibration_count_flags` in `siril_interface.py`).
+        flagged (see `calibration_count_flags` in
+        `siril_interface/script_builders.py`).
 
         Returns
         -------
@@ -827,8 +828,8 @@ class AppConfiguration:
         camera is linear. When the bright end of a group is compressed (near
         full well) or clipped, they differ. If either quarter's ratio is
         farther from the scale than this setting, as a fraction of the scale,
-        the group is left out of the combined image and the stack is flagged
-        with the "exposure_group_linearity" gate.
+        the group is left out of the combined image and the
+        "exposure_group_linearity" gate fails.
 
         Returns
         -------
@@ -988,8 +989,7 @@ class AppConfiguration:
         When on, a restack first moves the current stack and its pictures into
         a ``_previous`` folder beside it (see
         `pipelines/stacking/post_processing/previous_stack.py`). Only one
-        previous version is kept; the next restack replaces it. Nothing
-        deletes it until the user calls `discard_previous_stack`.
+        previous version is kept; the next restack replaces it.
 
         Returns
         -------
@@ -1208,12 +1208,37 @@ class AppConfiguration:
         -------
         filters : `list` [`FilterType`]
             Configured filters, in the order listed under
-            ``[Observatory.Filters] available``.
+            ``[Observatory.Filters] available``. Older configuration
+            files name the same list ``owned``; it is used when
+            ``available`` is missing. Each name may be a
+            `FilterType` member name (``L``, ``Ha``, ``SPEC``) or value
+            (``Luminance``), in any case. A name that matches no filter is
+            left out and logged.
         """
-        filters_str = self.app_config.get("Observatory.Filters", "available", fallback="")
-        if not filters_str:
-            return []
-        return [FilterType[name.strip().upper()] for name in filters_str.split(",") if name.strip()]
+        filters_str = self.app_config.get("Observatory.Filters", "available", fallback=None)
+        if filters_str is None:
+            # Older configuration files called this list "owned".
+            filters_str = self.app_config.get("Observatory.Filters", "owned", fallback="")
+        filters: list[FilterType] = []
+        for raw_name in filters_str.split(","):
+            wanted = raw_name.strip().lower()
+            if not wanted:
+                continue
+            match = next(
+                (
+                    member
+                    for member_name, member in FilterType.__members__.items()
+                    if wanted in (member_name.lower(), member.value.lower())
+                ),
+                None,
+            )
+            if match is None:
+                logging.getLogger(__name__).warning(
+                    "Ignoring unknown filter %r in [Observatory.Filters] available.", raw_name.strip()
+                )
+            elif match not in filters:
+                filters.append(match)
+        return filters
 
     def get_all_config(self) -> dict[str, Any]:
         """Return the entire configuration as a dictionary of sections.
@@ -1580,7 +1605,7 @@ class AppConfiguration:
         """Return the configured remote file-transfer protocol name.
 
         Selects which `RemoteTransferDriver` implementation
-        `ObservatoryControl.remote_transfer_driver` builds
+        `ObservatoryControl._remote_transfer_driver` builds
         (`wayfindinglib/drivers/interfaces/remote_transfer_driver.py`) --
         a separate, pluggable choice from the hardware-control protocol,
         since pulling files off a telescope host is not part of INDI or

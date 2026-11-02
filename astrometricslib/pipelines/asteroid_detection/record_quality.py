@@ -28,7 +28,7 @@ from astrometricslib.models.quality.gate_result import (
     unchecked_gate,
 )
 from astrometricslib.models.quality.limit import LimitTier
-from astrometricslib.models.quality.measurement import QualityMeasurement
+from astrometricslib.models.quality.measurement import QualityMeasurement, QualitySubject
 from astrometricslib.models.quality.metric_spec import MetricSpec
 from astrometricslib.pipelines.asteroid_detection.metrics import (
     ASTEROID_CANDIDATES_DETECTED,
@@ -50,7 +50,9 @@ from astrometricslib.pipelines.asteroid_detection.metrics import (
     ASTEROID_RESIDUAL_CHAINS_REJECTED,
     ASTEROID_RESIDUAL_CHAINS_TESTED,
     ASTEROID_RESIDUAL_WORST_ACCEPTED_RATIO,
+    ephemeris_query_cap_notice_spec,
 )
+from astrometricslib.pipelines.shared.quality.notices import notice_measurement
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     GateLimitSource,
     PipelineRunContext,
@@ -132,6 +134,7 @@ def asteroid_run_gates(
     confirmed = int(metrics.get("candidates_rate_linearity_confirmed", 0))
     attempted = int(metrics.get("ephemeris_queries_attempted", 0))
     failed = int(metrics.get("ephemeris_queries_failed", 0))
+    unchecked = int(metrics.get("ephemeris_candidates_unchecked", 0))
     matched = int(metrics.get("candidates_ephemeris_matched", 0))
     ephemeris_source = "SkyBoT cone searches at the first and last detection of each mover"
     if confirmed == 0:
@@ -155,6 +158,17 @@ def asteroid_run_gates(
                 ephemeris_source,
             )
         )
+    elif unchecked > 0:
+        gates.append(
+            failed_gate(
+                EPHEMERIS_GATE_NAME,
+                f"the limit on questions to the known-asteroid database was reached after {attempted}, so "
+                f"{unchecked} confirmed mover(s) were not checked against known asteroids",
+                float(unchecked),
+                0.0,
+                ephemeris_source,
+            )
+        )
     else:
         gates.append(
             passed_gate(
@@ -165,16 +179,28 @@ def asteroid_run_gates(
             )
         )
 
+    # A mover the question limit left unchecked is not known to be new, so
+    # it is not counted here as unmatched.
+    unmatched_after_check = candidates_awaiting_recovery - unchecked
     if confirmed == 0:
         gates.append(unchecked_gate(UNMATCHED_MOVERS_GATE_NAME, "no mover was confirmed"))
-    elif candidates_awaiting_recovery > 0:
+    elif unmatched_after_check > 0:
+        unchecked_note = f" ({unchecked} more were not checked)" if unchecked > 0 else ""
         gates.append(
             failed_gate(
                 UNMATCHED_MOVERS_GATE_NAME,
-                f"{candidates_awaiting_recovery} candidate(s) confirmed as movers but not "
-                "matched to a known body -- worth a manual look",
-                float(candidates_awaiting_recovery),
+                f"{unmatched_after_check} candidate(s) confirmed as movers but not "
+                f"matched to a known body{unchecked_note} -- worth a manual look",
+                float(unmatched_after_check),
                 0.0,
+            )
+        )
+    elif unchecked > 0:
+        gates.append(
+            unchecked_gate(
+                UNMATCHED_MOVERS_GATE_NAME,
+                f"the {unchecked} confirmed mover(s) not matched to a known body were not checked "
+                "against the known-asteroid database, so none is known to be new",
             )
         )
     else:
@@ -282,7 +308,9 @@ GATE_LIMIT_SOURCES: dict[str, GateLimitSource] = {
 _SPEC_BY_NAME: dict[str, MetricSpec] = {spec.name: spec for spec in ASTEROID_DETECTION_METRICS}
 
 
-def gate_for_measurement(gate: GateResult, ephemeris_queries_failed: float | None) -> GateResult | None:
+def gate_for_measurement(
+    gate: GateResult, ephemeris_queries_failed: float | None, ephemeris_candidates_unchecked: float = 0.0
+) -> GateResult | None:
     """Adjust a gate so its number means one thing in every outcome.
 
     Two gates quote a different number depending on how they ended. The
@@ -301,6 +329,9 @@ def gate_for_measurement(gate: GateResult, ephemeris_queries_failed: float | Non
     ephemeris_queries_failed : `float` or `None`
         How many known-asteroid queries failed. `None` when unknown (only a
         stored summary can lack it).
+    ephemeris_candidates_unchecked : `float`, optional
+        How many confirmed movers the question limit left unchecked. A summary
+        saved before the limit existed reads it as 0.
 
     Returns
     -------
@@ -308,15 +339,50 @@ def gate_for_measurement(gate: GateResult, ephemeris_queries_failed: float | Non
         A copy for the measurement. The known-asteroid gate carries the number
         of failed queries and the limit 0 unless it was not checked; the
         residual gate carries no number unless it passed. `None` when the
-        number is needed and unknown.
+        number is needed and unknown. When the question limit was reached the
+        known-asteroid gate carries the number of movers left unchecked
+        instead when no query failed.
     """
     if gate.name == EPHEMERIS_GATE_NAME and gate.status is not GateStatus.NOT_CHECKED:
         if ephemeris_queries_failed is None:
             return None
-        return gate.model_copy(update={"measured_value": float(ephemeris_queries_failed), "limit": 0.0})
+        number = ephemeris_queries_failed if ephemeris_queries_failed else ephemeris_candidates_unchecked
+        return gate.model_copy(update={"measured_value": float(number), "limit": 0.0})
     if gate.name == RESIDUAL_CRITERION_GATE_NAME and gate.status is GateStatus.FAILED:
         return gate.model_copy(update={"measured_value": None})
     return gate
+
+
+def ephemeris_query_cap_notice_measurement(
+    unchecked_count: int, context: PipelineRunContext, subject: QualitySubject
+) -> QualityMeasurement:
+    """Build the row that says the known-asteroid question limit was reached.
+
+    Parameters
+    ----------
+    unchecked_count : `int`
+        How many confirmed movers were left without a check.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The run.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        A failed notice whose value is the number of movers not checked.
+        Those movers keep their stage and have no match, but they are not
+        known to be new. Their ids are in the log warning.
+    """
+    return notice_measurement(
+        ephemeris_query_cap_notice_spec(),
+        float(unchecked_count),
+        context,
+        subject,
+        f"the limit on questions to the known-asteroid database was reached; {unchecked_count} "
+        "confirmed mover(s) were not checked, so none of them is known to be new",
+        action_taken="left the movers unchecked; their ids are in the log",
+    )
 
 
 def asteroid_run_measurements(
@@ -358,6 +424,10 @@ def asteroid_run_measurements(
             )
         )
 
+    unchecked = int(metrics.get("ephemeris_candidates_unchecked", 0))
+    if unchecked > 0:
+        measurements.append(ephemeris_query_cap_notice_measurement(unchecked, context, subject))
+
     ratio = float(metrics.get("residual_worst_accepted_ratio", 0.0))
     ratio_missing = int(metrics.get("residual_chains_tested", 0)) == 0 or ratio <= 0.0
     measurements.append(
@@ -376,7 +446,11 @@ def asteroid_run_measurements(
         if gate is None:
             continue
         spec = _SPEC_BY_NAME[limit_source.metric_name]
-        adjusted = gate_for_measurement(gate, metrics.get("ephemeris_queries_failed", 0))
+        adjusted = gate_for_measurement(
+            gate,
+            metrics.get("ephemeris_queries_failed", 0),
+            metrics.get("ephemeris_candidates_unchecked", 0),
+        )
         measurements.append(
             gate_measurement(
                 gate if adjusted is None else adjusted,

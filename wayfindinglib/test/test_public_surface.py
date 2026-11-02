@@ -1,8 +1,8 @@
-"""Purpose: Pin the public surface of wayfindinglib and its three sub-APIs.
+"""Purpose: Pin the public surface of wayfindinglib and its four sub-APIs.
 
 Description: `wayfindinglib/__init__.py` is the only door into this library
 that code outside it should use. `Wayfinder.control` is split into a root
-and seven children named by topic, and `planning` and `execution` are
+and six children named by topic, and `planning` and `execution` are
 single classes. Renaming, adding or removing a public name is a change to
 the library's contract with the backend, the MCP servers and the UI, so it
 must be a deliberate edit to the lists below rather than a side effect of
@@ -12,115 +12,78 @@ moving code. The tests also check that every export resolves, that
 arguments its `kind` does not use.
 """
 
+import importlib
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
 import wayfindinglib
-from astrometricslib import AppConfiguration, ExternalServiceError, InvalidArgumentError, NotFoundError
-from wayfindinglib import ObservationExecution, ObservationPlanning, ObservatoryControl, SkyPosition
+from astrometricslib import AppConfiguration
+from astrometricslib.exceptions import ExternalServiceError, InvalidArgumentError, NotFoundError
+from wayfindinglib import ObservationExecution, ObservationPlanning, ObservationReview, ObservatoryControl
+from wayfindinglib._internal.control import SkyPosition
 from wayfindinglib.drivers.butler import DiskButler
 
 EXPECTED_EXPORTS = frozenset({
-    # The root object, the sub-APIs and the drivers callers put in.
-    "Wayfinder",
-    "ObservatoryControl",
-    "ObservationPlanning",
     "ObservationExecution",
-    "IndiInterface",
-    "SimulatorIndiInterface",
-    "ControlRecordStore",
-    # Models.
-    "AlignmentAttempt",
-    "AlignmentTargetSession",
-    "CalibrationAdvisory",
-    "CaptureResult",
-    "DeepCatalogEstimate",
-    "DeepCatalogStatus",
-    "ChecklistItem",
-    "DitherConfig",
-    "EquipmentConfiguration",
-    "EquipmentStatus",
-    "ExposureRequest",
-    "FrameType",
-    "Framing",
-    "GuidingStatus",
-    "HorizonZone",
-    "ImagingStatus",
-    "LiveGuidingStatus",
-    "LiveSessionStatus",
-    "MeridianStatus",
-    "NightListEntry",
-    "NightQuality",
-    "PlanChange",
-    "PlanChangeItem",
-    "PlanRevisionConflictError",
-    "SequenceSummary",
-    "TargetChange",
-    "MosaicPanel",
-    "MosaicPlan",
-    "MountPointingModel",
-    "NightConditions",
-    "ObjectVisibility",
     "ObservationPackage",
-    "PackageStatus",
-    "PackageSuggestion",
-    "PackageChange",
-    "SuggestionLogEntry",
-    "RunState",
-    "SessionProgress",
-    "EntryProgress",
-    "ObservationSessionWithProgress",
-    "ObservatoryCapability",
+    "ObservationPlanning",
+    "ObservationReview",
     "ObservationSession",
-    "ObservationSessionSummary",
-    "PolarAlignmentStatus",
-    "QueueRequest",
-    "SafetyStatus",
-    "SequenceItem",
-    "SequencePlan",
-    "SkySource",
-    "SiteProfile",
-    "SkyPosition",
-    "StartTimeMode",
-    "TargetDatasetReport",
-    "TargetStatement",
-    "TonightRanking",
-    "Telescope",
-    "VisibilityReport",
-    "VisibilitySpan",
-    # The pure functions.
-    "group_alignment_attempts",
-    "fit_reply_to_budget",
-    # The library's own error class.
-    "DelegationPolicyValidationError",
+    "ObservatoryControl",
+    "Wayfinder",
 })
 """What `from wayfindinglib import ...` offers."""
 
+EXPECTED_MODULE_NAMES = {
+    "wayfindinglib.exceptions": frozenset({
+        "DelegationPolicyValidationError",
+        "PlanRevisionConflictError",
+    }),
+    "wayfindinglib.reports": frozenset({
+        "DepthGoalState",
+        "DepthLevel",
+        "PackageStatus",
+        "RunState",
+    }),
+}
+"""Names each public module of wayfindinglib offers (its `__all__`)."""
+
 PLANNING_MEMBERS = frozenset({
     "get_visibility",
-    "get_advisory",
+    "get_tonight_advice",
+    "get_calibration_advice",
+    "get_depth_goal",
+    "set_depth_goal",
     "calculate_panels",
     "tick_checklist_item",
     "create_mosaic",
-    "create_plan",
-    "edit_queue",
-    "edit_package",
+    "create_sequence",
+    "create_package",
+    "create_session",
+    "add_to_queue",
+    "reorder_queue",
+    "remove_from_queue",
+    "set_entry_exposures",
+    "add_checklist_items",
+    "set_framing",
+    "update_package",
+    "reopen_package",
+    "dismiss_package",
+    "undismiss_package",
+    "delete_package",
     "refresh_suggestions",
     "get_plan",
-    "deep_catalog_status",
+    "query_plans",
+    "get_package_for_target",
+    "get_deep_catalog_status",
     "build_deep_star_catalog",
     # Sky browsing around a point, and name lookups.
-    "find_sources",
-    "get_sources",
-    "get_library_star_summaries",
-    "get_online_catalog_sources",
-    "list_catalog_driver_metadata",
+    "query_sources",
+    "query_catalogs",
     "get_constellation_lines",
-    "get_imaged_field_centers",
     "lookup_coordinates",
-    "resolve_target_coordinates",
 })
 """The public members of `ObservationPlanning`."""
 
@@ -128,28 +91,21 @@ EXECUTION_MEMBERS = frozenset({
     "advance_session",
     "abort_session",
     "reconcile_session",
-    "execute_meridian_flip",
-    "recover_fault",
-    "recover_guide_star_loss",
-    "record_divergence",
+    "build_divergence_record",
     "create_recorder",
 })
 """The public members of `ObservationExecution`."""
 
-ROOT_DRIVERS = frozenset({
-    "driver",
-    "mount_driver",
-    "focuser_driver",
-    "filter_wheel_driver",
-    "camera_driver",
-    "guide_camera_driver",
-    "enclosure_driver",
-    "switch_driver",
-    "weather_driver",
-    "remote_transfer_driver",
-    "guiding_driver",
+REVIEW_MEMBERS = frozenset({
+    "query",
+    "query_alignment_sessions",
+    "query_alignment_records",
+    "get_advisory",
+    "get_live_session_status",
+    "frame_guiding",
+    "get_performance_envelope",
 })
-"""The driver properties `control` keeps for injecting drivers."""
+"""The public members of `ObservationReview`."""
 
 ROOT_LIFECYCLE = frozenset({"close"})
 """Lifecycle methods on `control` itself, outside the operation count.
@@ -164,8 +120,9 @@ argument.
 CHILDREN = {
     "mount": {
         "status",
+        "poll_external_alignment",
+        "get_polar_alignment",
         "slew",
-        "sync",
         "park",
         "unpark",
         "set_tracking",
@@ -173,49 +130,23 @@ CHILDREN = {
         "abort_motion",
         "cancel_centering",
         "set_slew_rate",
-        "compute_pointing_correction",
-        "run_polar_alignment_assist",
     },
     "imaging": {
         "status",
         "capture_image",
         "set_filter",
         "focus_move",
-        "compute_focus_correction",
-        "save_focus_model",
     },
     "guiding": {
         "status",
-        "pulse",
         "expose",
-        "get_image",
-        "drain_external_pulses",
-        "compute_correction",
-        "run_calibration",
-        "run_backlash_calibration",
-        "run_exposure_test",
         "refit_spectrum",
-        "save_calibration",
-        "save_spectrum_analysis",
-        "save_run",
         "run_loop",
         "stop_loop",
     },
     "remote": {"list", "check_connection", "frame_status", "sync_frames", "sync_logs"},
-    "history": {
-        "query",
-        "get_live_session_status",
-        "frame_guiding",
-        "get_performance_envelope",
-        "save_ekos_session_context",
-    },
     "safety": {
         "status",
-        "assess",
-        "save_rule_set",
-        "execute_safe_state",
-        "open_enclosure",
-        "close_enclosure",
         "apply_promotion_decision",
         "enter_monitoring_mode",
         "enter_controller_mode",
@@ -224,12 +155,10 @@ CHILDREN = {
         "status",
         "connect",
         "disconnect",
+        "apply_configuration",
         "set_active_telescope",
         "set_active_camera",
         "set_device_property",
-        "cooling_ramp_rate",
-        "summarize_device",
-        "save_commissioning_run",
     },
 }
 """Each child of `control` and its public members."""
@@ -289,6 +218,18 @@ def test_execution_offers_exactly_its_pinned_members() -> None:
     assert _public_names(ObservationExecution) == EXECUTION_MEMBERS
 
 
+def test_review_offers_exactly_its_pinned_members(control: ObservatoryControl) -> None:
+    """`ObservationReview` offers exactly the pinned methods."""
+    assert _public_names(ObservationReview(control)) == REVIEW_MEMBERS
+
+
+def test_review_shares_the_context_of_control(control: ObservatoryControl) -> None:
+    """Review reads through control's context and holds no reference to it."""
+    review = ObservationReview(control)
+    assert review._context is control._context
+    assert control not in vars(review).values()
+
+
 def test_background_jobs_can_skip_registering_a_job() -> None:
     """Every `@background_job` method of planning takes `register_job`."""
     import inspect
@@ -300,8 +241,8 @@ def test_background_jobs_can_skip_registering_a_job() -> None:
 
 
 def test_control_root_holds_only_the_drivers_and_the_children(control: ObservatoryControl) -> None:
-    """The root offers only the driver properties, the children and `close`."""
-    assert _public_names(control) == ROOT_DRIVERS | ROOT_LIFECYCLE | set(CHILDREN)
+    """The root offers only the children and `close`."""
+    assert _public_names(control) == ROOT_LIFECYCLE | set(CHILDREN)
 
 
 @pytest.mark.parametrize("child", sorted(CHILDREN))
@@ -321,14 +262,14 @@ def test_children_hold_the_shared_context_not_control(control: ObservatoryContro
 def test_setting_a_driver_on_control_reaches_every_child(control: ObservatoryControl) -> None:
     """Injecting a driver on the root updates the shared context."""
     marker = object()
-    control.mount_driver = marker
+    control._mount_driver = marker
     assert control._context.mount_driver is marker
-    assert control.mount_driver is marker
+    assert control._mount_driver is marker
 
 
 def test_control_stays_under_its_size_limit(control: ObservatoryControl) -> None:
-    """The drivers plus the children's operations number 72 or fewer."""
-    total = len(ROOT_DRIVERS) + sum(len(_public_names(getattr(control, child))) for child in CHILDREN)
+    """The children's operations number 72 or fewer."""
+    total = sum(len(_public_names(getattr(control, child))) for child in CHILDREN)
     assert total <= MAXIMUM_CONTROL_MEMBERS
 
 
@@ -384,3 +325,13 @@ def test_remote_list_files_tells_unreachable_from_missing_folder(
     monkeypatch.setattr(tasks, "check_remote_connection", lambda context: is_reachable)
     with pytest.raises(error_type, match=message):
         control.remote.list("files", folder_name="NGC 7331")
+
+
+def test_each_public_module_offers_exactly_its_pinned_names() -> None:
+    """Verify each public module's `__all__` is exactly its pinned set."""
+    for module_name, expected in EXPECTED_MODULE_NAMES.items():
+        module = importlib.import_module(module_name)
+        actual = frozenset(module.__all__)
+        assert not actual - expected, f"{module_name} offers new name(s): {sorted(actual - expected)}"
+        assert not expected - actual, f"{module_name} lost name(s): {sorted(expected - actual)}"
+        assert all(hasattr(module, name) for name in actual), module_name

@@ -13,7 +13,7 @@ from collections import Counter
 
 import pytest
 
-from astrometricslib import CaptureSetting, MeasurementReference
+from astrometricslib.reports import CaptureSetting, MeasurementReference
 from wayfindinglib.analytics.result_quality import report_rules as rr
 from wayfindinglib.analytics.result_quality.capture_overheads import CaptureOverheads
 from wayfindinglib.analytics.result_quality.efficiency import (
@@ -25,6 +25,7 @@ from wayfindinglib.analytics.result_quality.efficiency import (
 )
 from wayfindinglib.analytics.result_quality.noise_growth import (
     StackFrame,
+    StackGroup,
     StopSignal,
     TakeMoreResult,
     WeightingMode,
@@ -136,6 +137,15 @@ def test_frames_lost_reports_frames_no_measurement_could_place() -> None:
     assert "Measure the target's frames again" in statements[0].reason
 
 
+def test_frames_lost_gives_no_total_when_no_frame_was_measured() -> None:
+    """With no measured frames, the statement must not read "29 of 29"."""
+    statements = rr.frames_lost_statements([], {}, {}, Counter({"trailed": 29}), 0)
+    assert len(statements) == 1
+    assert statements[0].message == "29 frames were set aside (trailed 29)."
+    assert " of 29" not in statements[0].plain_message
+    assert statements[0].plain_message.startswith("29 of your frames were left out")
+
+
 # -- sky cost ----------------------------------------------------------------
 
 
@@ -156,6 +166,23 @@ def test_sky_cost_without_a_split_uses_the_whole_sky_loss_and_says_so() -> None:
     assert len(statements) == 1
     assert "Moon, twilight or light pollution" in statements[0].message
     assert "No sky model" in statements[0].reason
+
+
+def test_sky_cost_needs_the_minimum_captured_time() -> None:
+    """One short frame cannot say the sky lost 100% of the time."""
+    tiny = rr.SKY_COST_MINIMUM_CAPTURED_SECONDS - 1.0
+    assert rr.sky_cost_statements([_summary(captured_seconds=tiny, account=_account(tiny, None))]) == []
+    enough = rr.SKY_COST_MINIMUM_CAPTURED_SECONDS
+    statements = rr.sky_cost_statements([_summary(captured_seconds=enough, account=_account(enough, None))])
+    assert len(statements) == 1
+
+
+def test_sky_cost_reason_writes_short_times_in_seconds() -> None:
+    """Under two minutes the reason says seconds, never "0 min of 0 min"."""
+    assert rr._short_duration_text(45.0) == "45 s"
+    assert rr._short_duration_text(2100.0) == "35 min"
+    (statement,) = rr.sky_cost_statements([_summary(account=_account(900.0, None))])
+    assert "15 min of 100 min" in statement.reason
 
 
 def test_sky_cost_needs_a_loss_account() -> None:
@@ -240,7 +267,81 @@ def test_sharpness_tradeoff_is_quiet_when_the_frames_are_alike_or_few() -> None:
     )
 
 
+def test_sharpness_tradeoff_is_not_made_for_a_group_stack_on_one_setting() -> None:
+    """The ``group`` mode is refused: use the group form instead."""
+    widths = [2.0 + 0.1 * index for index in range(20)]
+
+    assert rr.find_sharpness_tradeoff(_frames(20), widths, WeightingMode.GROUP) is None
+
+
+def _stack_group(count: int, exposure: float, frame_noise: float) -> StackGroup:
+    """Make one exposure group of frames with a spread of star widths.
+
+    Returns
+    -------
+    group : `StackGroup`
+        The group.
+    """
+    frames = tuple(
+        StackFrame(
+            frame_id=f"g{exposure:g}_{index}",
+            exposure_seconds=exposure,
+            sky_rate_e_per_s_per_px=1.0,
+            read_noise_e=3.0,
+            star_width=2.0 + 0.1 * index,
+        )
+        for index in range(count)
+    )
+    return StackGroup(frames=frames, frame_noise_adu=frame_noise)
+
+
+def test_the_group_sharpness_tradeoff_is_diluted_by_the_other_groups() -> None:
+    """Dropping frames of one group changes the stack less than the group."""
+    groups = [_stack_group(10, 30.0, 20.0), _stack_group(20, 60.0, 30.0)]
+    widths = [frame.star_width or 0.0 for frame in groups[1].frames]
+
+    in_stack = rr.find_sharpness_tradeoff_in_groups(groups, 1, widths)
+    alone = rr.find_sharpness_tradeoff(list(groups[1].frames), widths, WeightingMode.WFWHM)
+
+    assert in_stack is not None and alone is not None
+    assert in_stack.kept_count == 14
+    assert in_stack.star_width_change == pytest.approx(alone.star_width_change)
+    assert 0.0 < in_stack.noise_change < alone.noise_change
+
+
+def test_the_group_sharpness_tradeoff_needs_enough_frames() -> None:
+    """A group of 19 frames is below the minimum, as for one setting."""
+    groups = [_stack_group(19, 60.0, 30.0), _stack_group(10, 30.0, 20.0)]
+
+    assert rr.find_sharpness_tradeoff_in_groups(groups, 0, [2.0 + 0.1 * i for i in range(19)]) is None
+
+
+def test_fixed_pattern_limited_statement_says_the_fixed_pattern_noise_in_place_of_a_count() -> None:
+    """The warning names the fixed-pattern share and the best cut."""
+    result = TakeMoreResult(
+        target_noise_ratio=0.707,
+        fixed_pattern_limited=True,
+        fixed_pattern_noise=2.9e-3,
+        fixed_pattern_variance_share=0.88,
+        lowest_reachable_ratio=0.95,
+        reason="More frames of this kind will not reach the target.",
+    )
+
+    statement = rr.fixed_pattern_limited_statement(result, SETTING, [MeasurementReference(row_id=5)])
+
+    assert statement.rule == "more_frames_will_not_help"
+    assert statement.kind == StatementKind.WARNING
+    assert "fixed-pattern noise (0.0029 in stack units, 88% of the noise)" in statement.message
+    assert "only 5%" in statement.message
+    assert statement.proposed_action is None
+    assert [reference.row_id for reference in statement.evidence] == [5]
+    assert_plain_message_is_sound(statement)
+
+
 # -- calibration gap ---------------------------------------------------------
+
+DARK_TEMPERATURE_TOLERANCE_C = 3.0
+"""The dark temperature tolerance the library's calibration query reports."""
 
 DARK_OK = {
     "camera": "ASI533MM Pro",
@@ -274,7 +375,7 @@ def _group(temperature: float | None = -10.0) -> rr.LightFrameGroup:
 
 def test_calibration_gap_is_quiet_when_darks_and_flats_match() -> None:
     """A dark and a flat that match in every setting leave no gap."""
-    assert rr.find_calibration_gaps([_group()], [DARK_OK], [FLAT_OK]) == []
+    assert rr.find_calibration_gaps([_group()], [DARK_OK], [FLAT_OK], DARK_TEMPERATURE_TOLERANCE_C) == []
 
 
 @pytest.mark.parametrize(
@@ -289,7 +390,9 @@ def test_calibration_gap_is_quiet_when_darks_and_flats_match() -> None:
 )
 def test_calibration_gap_names_the_setting_that_differs(change: dict, differs: str) -> None:
     """A dark that differs in one setting does not match."""
-    findings = rr.find_calibration_gaps([_group()], [{**DARK_OK, **change}], [FLAT_OK])
+    findings = rr.find_calibration_gaps(
+        [_group()], [{**DARK_OK, **change}], [FLAT_OK], DARK_TEMPERATURE_TOLERANCE_C
+    )
     assert [finding.frame_type for finding in findings] == ["dark"]
     statement = rr.calibration_gap_statement(findings[0])
     assert statement.kind == StatementKind.RECOMMENDATION
@@ -305,15 +408,22 @@ def test_calibration_gap_names_the_setting_that_differs(change: dict, differs: s
 
 def test_calibration_gap_accepts_a_temperature_within_the_tolerance() -> None:
     """A dark 2 degrees from the lights still matches (the tolerance is 3)."""
-    assert rr.find_calibration_gaps([_group()], [{**DARK_OK, "temperature_c": -8.0}], [FLAT_OK]) == []
+    assert (
+        rr.find_calibration_gaps(
+            [_group()], [{**DARK_OK, "temperature_c": -8.0}], [FLAT_OK], DARK_TEMPERATURE_TOLERANCE_C
+        )
+        == []
+    )
 
 
 def test_calibration_gap_flat_needs_the_filter_and_says_when_a_camera_has_none() -> None:
     """A flat for another filter is a gap; a camera with no flats says so."""
-    findings = rr.find_calibration_gaps([_group()], [DARK_OK], [{**FLAT_OK, "filter": "Ha"}])
+    findings = rr.find_calibration_gaps(
+        [_group()], [DARK_OK], [{**FLAT_OK, "filter": "Ha"}], DARK_TEMPERATURE_TOLERANCE_C
+    )
     assert [finding.frame_type for finding in findings] == ["flat"]
     assert "differs in filter" in findings[0].nearest_row_text
-    none = rr.find_calibration_gaps([_group()], [DARK_OK], [])
+    none = rr.find_calibration_gaps([_group()], [DARK_OK], [], DARK_TEMPERATURE_TOLERANCE_C)
     assert "no flats for the camera ASI533MM Pro" in none[0].nearest_row_text
 
 
@@ -346,8 +456,8 @@ def test_more_frames_statement_gives_the_count_the_time_and_the_noise() -> None:
     assert statement.proposed_action.frame_count == 20
     assert statement.proposed_action.exposure_seconds == pytest.approx(90.0)
     assert (
-        statement.message
-        == "Take 20 more at 90 s (about 32 min with downloads) to cut the noise by about 29%."
+        statement.message == "Recommended additional frames: 20 at 90 s (about 32 min with downloads), "
+        "which cuts the noise by about 29%."
     )
     assert statement.expected_effect.wall_clock_seconds == pytest.approx(1900.0)
     assert rr.more_frames_statement(TakeMoreResult(target_noise_ratio=0.707), SETTING, overheads, []) is None
@@ -590,7 +700,9 @@ def test_every_statement_this_module_builds_has_a_sound_plain_message() -> None:
     tradeoff = rr.find_sharpness_tradeoff(_frames(20), widths, WeightingMode.EQUAL)
     assert tradeoff is not None
     statements.append(rr.sharpness_statement(tradeoff, SETTING, []))
-    for finding in rr.find_calibration_gaps([_group()], [{**DARK_OK, "binning": "2x2"}], [FLAT_OK]):
+    for finding in rr.find_calibration_gaps(
+        [_group()], [{**DARK_OK, "binning": "2x2"}], [FLAT_OK], DARK_TEMPERATURE_TOLERANCE_C
+    ):
         statements.append(rr.calibration_gap_statement(finding))
     result = TakeMoreResult(
         frames_needed=20,
@@ -624,3 +736,121 @@ def test_every_statement_this_module_builds_has_a_sound_plain_message() -> None:
     for statement in statements:
         assert_plain_message_is_sound(statement)
     assert "roughly 29%" in next(s for s in statements if s.rule == "more_frames").plain_message
+
+
+def _m13_result(*, doubling_cut: float = 0.137, worthwhile: bool = True) -> TakeMoreResult:
+    """Make the answer for the M 13 case (fixed-pattern noise: 49 percent).
+
+    Parameters
+    ----------
+    doubling_cut : `float`, optional
+        The noise cut by doubling.
+    worthwhile : `bool`, optional
+        Whether doubling is worth asking for.
+
+    Returns
+    -------
+    result : `TakeMoreResult`
+        The diminishing-returns answer for 44 frames of 30 s.
+    """
+    return TakeMoreResult(
+        target_noise_ratio=0.707,
+        added_exposure_seconds=44 * 30.0,
+        new_exposure_seconds=30.0,
+        fixed_pattern_noise=0.583e-3,
+        fixed_pattern_variance_share=0.49,
+        lowest_reachable_ratio=0.704,
+        practical_limit_applied=True,
+        doubling_frames=44,
+        doubling_noise_cut=doubling_cut,
+        most_reachable_cut=0.296,
+        doubling_worthwhile=worthwhile,
+        reason="A design estimate.",
+    )
+
+
+_NO_EXTRA_OVERHEADS = CaptureOverheads(
+    download_seconds=5.0,
+    dither_settle_seconds=20.0,
+    autofocus_seconds=120.0,
+    download_from_records=False,
+    dither_from_records=False,
+    autofocus_from_records=False,
+    gaps_used=0,
+)
+
+
+def test_beyond_the_practical_limit_the_statement_gives_one_doubling() -> None:
+    """The M 13 numbers give the diminishing-returns shape, not a count."""
+    statement = rr.more_frames_statement(
+        _m13_result(), SETTING, _NO_EXTRA_OVERHEADS, [MeasurementReference(row_id=3)]
+    )
+
+    assert statement is not None
+    assert statement.rule == "more_frames"
+    assert statement.kind == StatementKind.RECOMMENDATION
+    assert "Recommended additional frames: 44 at 30 s (about " in statement.message
+    assert "as many frames again as the stack holds, which cuts the noise by about 14%" in statement.message
+    assert "at most about 30% in all" in statement.message
+    assert (
+        "fixed-pattern noise of 0.000583 (stack units) makes up about 49% of the noise" in statement.message
+    )
+    assert rr.FIXED_PATTERN_CAUSE_TEXT in statement.message
+    assert statement.message.endswith(rr.FIXED_PATTERN_NOT_REMOVED_TEXT)
+    assert statement.proposed_action.frame_count == 44
+    assert statement.expected_effect.noise_change_fraction == pytest.approx(-0.137)
+    assert statement.values["practical_limit_applied"] == pytest.approx(1.0)
+    assert statement.values["doubling_frames"] == pytest.approx(44.0)
+    assert_plain_message_is_sound(statement)
+
+
+def test_a_worthless_doubling_gives_the_stop_warning_in_the_new_shape() -> None:
+    """Under 5 percent: a warning, no proposed frames, same sentences."""
+    result = _m13_result(doubling_cut=0.03, worthwhile=False)
+    result = result.model_copy(update={"fixed_pattern_variance_share": 0.88, "most_reachable_cut": 0.06})
+
+    statement = rr.fixed_pattern_limited_statement(result, SETTING, [MeasurementReference(row_id=5)])
+
+    assert statement.rule == "more_frames_will_not_help"
+    assert statement.proposed_action is None
+    assert "only about 3%" in statement.message
+    assert "at most about 6% in all" in statement.message
+    assert rr.FIXED_PATTERN_CAUSE_TEXT in statement.message
+    assert_plain_message_is_sound(statement)
+
+
+def test_a_possible_fixed_pattern_gives_a_range_and_says_the_low_end_is_not_proven() -> None:
+    """D18: 44 frames at 30 s cut the noise by about 13% to 29%."""
+    result = TakeMoreResult(
+        frames_needed=44,
+        predicted_noise_ratio=0.707,
+        target_noise_ratio=0.707,
+        added_exposure_seconds=1320.0,
+        new_exposure_seconds=30.0,
+        possible_fixed_pattern_sigmas=1.9,
+        possible_low_noise_cut=0.134,
+        possible_low_doubling_cut=0.134,
+    )
+
+    statement = rr.more_frames_statement(result, SETTING, _NO_EXTRA_OVERHEADS, [])
+
+    assert statement is not None
+    assert statement.message.startswith("Recommended additional frames: 44 at 30 s")
+    assert "cuts the noise by about 13% to 29%." in statement.message
+    assert "The low end assumes the possible fixed-pattern noise (1.9\u03c3, not proven) is real." in (
+        statement.message
+    )
+    assert "will not help" not in statement.message
+    assert statement.proposed_action.frame_count == 44
+
+    flagged = rr.more_frames_statement(
+        result.model_copy(
+            update={"possible_low_end_not_worthwhile": True, "possible_low_doubling_cut": 0.01}
+        ),
+        SETTING,
+        _NO_EXTRA_OVERHEADS,
+        [],
+    )
+    assert flagged is not None
+    assert "If it is real, more frames will not help much" in flagged.message
+    assert flagged.proposed_action.frame_count == 44

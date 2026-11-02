@@ -5,8 +5,9 @@ runs inside the backend, where it could reach the app's internal services,
 the database, the file system or the shell. This module checks the code
 before it runs and allows only:
 
-* the public names of ``astrometricslib`` and ``wayfindinglib`` (what they
-  list in ``__all__``), reached through the ``astrometrics`` and ``wayfinder``
+* the public names of ``astrometricslib`` and ``wayfindinglib`` and their
+  public modules (what each lists in ``__all__``),
+  reached through the ``astrometrics`` and ``wayfinder``
   objects or imported by name;
 * analysis packages (NumPy, SciPy, pandas, Matplotlib, Astropy and a few
   standard modules) for working with the results.
@@ -40,6 +41,18 @@ AGENT_VISIBLE_NAMES = frozenset({
 
 LIBRARY_ROOTS = frozenset({"astrometricslib", "wayfindinglib"})
 """Packages whose public (``__all__``) names may be imported."""
+
+PUBLIC_MODULES = frozenset({
+    "astrometricslib",
+    "astrometricslib.exceptions",
+    "astrometricslib.reports",
+    "astrometricslib.jobs",
+    "astrometricslib.drivers",
+    "wayfindinglib",
+    "wayfindinglib.exceptions",
+    "wayfindinglib.reports",
+})
+"""Library modules that agent code may import from (roots and public)."""
 
 ANALYSIS_ROOTS = frozenset(
     {
@@ -91,8 +104,8 @@ def _import_reason(node: ast.Import | ast.ImportFrom) -> str | None:
     if isinstance(node, ast.Import):
         for alias in node.names:
             root = alias.name.split(".")[0]
-            if root in LIBRARY_ROOTS and alias.name != root:
-                return f"Import {alias.name!r} reaches past the public API; import {root!r} instead."
+            if root in LIBRARY_ROOTS and alias.name not in PUBLIC_MODULES:
+                return f"Import {alias.name!r} reaches past the public API; use a public module of {root!r}."
             if root not in LIBRARY_ROOTS | ANALYSIS_ROOTS:
                 return f"Importing {alias.name!r} is not allowed."
         return None
@@ -101,9 +114,11 @@ def _import_reason(node: ast.Import | ast.ImportFrom) -> str | None:
     if node.level or root not in LIBRARY_ROOTS | ANALYSIS_ROOTS:
         return f"Importing from {module_name!r} is not allowed."
     if root in LIBRARY_ROOTS:
-        if module_name != root:
-            return f"Import from {module_name!r} reaches past the public API; use 'from {root} import ...'."
-        public_names = _library_public_names(root)
+        if module_name not in PUBLIC_MODULES:
+            return (
+                f"Import from {module_name!r} reaches past the public API; use a public module of {root!r}."
+            )
+        public_names = _library_public_names(module_name)
         for alias in node.names:
             if alias.name not in public_names:
                 return f"{alias.name!r} is not part of the public {root} API."

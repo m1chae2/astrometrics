@@ -130,6 +130,19 @@ export interface HandoffState {
 }
 
 /**
+ * What `calibration:measure_frames` answers: the measuring job's id, and its
+ * result when it finished at once (a library that was measured before).
+ */
+export interface CalibrationMeasurementStart {
+    jobId: string | null;
+    /** Set when the job finished within the first seconds; absent while it runs. */
+    result?: import('../types/backendTypes').CalibrationMeasurementReport;
+    /** "running" while the job goes on in the background. */
+    status?: string;
+    message?: string;
+}
+
+/**
  * The payload and response of every RPC method the backend serves.
  *
  * The keys must be exactly the generated `RpcMethod` names from
@@ -158,9 +171,9 @@ export interface ActionRegistry {
     "astronomy:visible": { payload: Record<string, never>; response: ObjectVisibility[] };
     "astronomy:list": { payload: { target_id?: string; limit?: number; search?: string; filter_type?: string }; response: Spectrum[] };
     "astronomy:count": { payload: { target_id?: string; search?: string; filter_type?: string }; response: number };
-    "astronomy:get": { payload: { object_id: string }; response: Spectrum | null };
-    "astronomy:analyze_periodicity": { payload: { object_id: string }; response: Spectrum | null };
-    "astronomy:delete": { payload: { object_id: string }; response: boolean };
+    "astronomy:get": { payload: { star_id: string }; response: Spectrum | null };
+    "astronomy:analyze_periodicity": { payload: { star_id: string }; response: Spectrum | null };
+    "astronomy:delete": { payload: { star_id: string }; response: boolean };
     "astronomy:save": { payload: Record<string, never>; response: void };
     "astronomy:get_stellar_objects": { payload: { target_id?: string }; response: Spectrum[] };
     "astronomy:get_overlay_stars": { payload: { target_id: string; limit?: number }; response: any[] };
@@ -251,7 +264,7 @@ export interface ActionRegistry {
     "execution:get_session": { payload: { session_id: string }; response: Record<string, any> };
     "execution:abort_session": { payload: { session_id: string; reason: string }; response: Record<string, any> };
     "execution:reconcile_session": { payload: { session_id: string }; response: Record<string, any> };
-    "execution:record_divergence": { payload: { record_id: string; observation_session_id: string; capability: string; comparison_input_id: string; intended_value: number; observed_value: number; tolerance: number; divergence_unit: string; queued_observation_package_id?: string | null; converged?: boolean | null; detail?: string }; response: Record<string, any> };
+    "execution:build_divergence_record": { payload: { record_id: string; observation_session_id: string; capability: string; comparison_input_id: string; intended_value: number; observed_value: number; tolerance: number; divergence_unit: string; queued_observation_package_id?: string | null; converged?: boolean | null; detail?: string }; response: Record<string, any> };
 
     // Night plan (#95). `plan:get` without a session id lists every session.
     // `plan:list_packages` lists the package library;
@@ -291,22 +304,29 @@ export interface ActionRegistry {
     // Backed by JobService.get_active_jobs(), which returns full ProcessingJob
     // records (with progressCurrent/progressTotal), not the lighter ProcessStatus.
     "processing:active_jobs": { payload: Record<string, never>; response: ProcessingJob[] };
-    "processing:record_frame_measurements": { payload: { target_id: string; limit?: number }; response: { started: boolean; target_id: string } };
+    "quality:record_frame_measurements": { payload: { target_id: string; limit?: number }; response: { started: boolean; target_id: string } };
     // Stack some of a target's frames apart from its library stack and measure the noise of each result.
-    "processing:measure_half_difference_noise": { payload: { target_id: string }; response: { started: boolean; target_id: string } };
-    "processing:measure_noise_growth": { payload: { target_id: string; maximum_steps?: number; include_night_contributions?: boolean; include_half_difference?: boolean }; response: { started: boolean; target_id: string } };
-    "processing:measure_night_contributions": { payload: { target_id: string }; response: { started: boolean; target_id: string } };
+    "processing:measure_noise": { payload: { target_id: string; kind?: 'growth' | 'night_contributions' | 'odd_even_difference'; maximum_steps?: number; include?: Array<'night_contributions' | 'odd_even_difference'>; keep_halves?: boolean }; response: { started: boolean; target_id: string } };
     "processing:job_log_tail": { payload: { job_id: string; lines?: number }; response: string[] };
+    "processing:stack_summary": { payload: { target: string; kind?: 'imaging' | 'spectral' }; response: import('../types/backendTypes').StackSummary };
+    // Makes a stack's preview picture again (a background job): the answer is the result, or the job to follow.
+    "processing:remake_preview": { payload: { target_id: string; kind?: 'imaging' | 'spectral'; denoise?: boolean; denoise_strength?: number; star_toning?: boolean }; response: import('../types/backendTypes').StackReviewStart };
+    // Compares a stack with the previous one (a background job): the answer is the report, or the job to follow.
+    "quality:measure_stack": { payload: { target_id: string; kind?: 'imaging' | 'spectral' }; response: import('../types/backendTypes').StackReviewStart };
+    // The frames the stacker set aside for a target, each with the reason it has on record.
+    "quality:set_aside_frames": { payload: { target: string }; response: import('../types/backendTypes').SetAsideFrameRecord[] };
 
     // Quality measurements: the stored ones, and what each metric means.
     // Parameter names are snake_case (target_id, not targetId); the router
     // drops names it does not know, so a misspelled filter is ignored.
     "quality:query": { payload: { metric?: string; level?: import('../types/backendTypes').SubjectLevel; target_id?: string; observing_night_id?: string; camera?: string; telescope?: string; since?: string; row_ids?: number[]; latest_only?: boolean; variant?: string; library_only?: boolean }; response: import('../types/backendTypes').QualityMeasurement[] };
+    // The job history, read-only. detail 'warnings' lists the warnings one job detected (job_id required).
+    "jobs:query": { payload: { job_id?: string; target_id?: string; job_type?: string; status?: string; active_only?: boolean; detail?: 'summary' | 'log_tail' | 'result' | 'lineage' | 'warnings'; lines?: number; limit?: number; offset?: number }; response: import('../types/backendTypes').JobQueryResult };
     "quality:resolve_rows": { payload: { row_ids: number[] }; response: import('../types/backendTypes').QualityRowResolution };
     "quality:metrics": { payload: { name?: string; checkpoint?: import('../types/backendTypes').Checkpoint; detail?: 'summary' | 'full' }; response: import('../types/backendTypes').MetricSummary[] | import('../types/backendTypes').MetricSpec[] };
 
     // Analysis
-    "analysis:analyze_image": { payload: { target_id: string; filter_type?: string; image_files?: string[]; type?: string }; response: AnalysisResult };
+    "analysis:analyze_image": { payload: { target_id: string; filter_name?: string; image_files?: string[]; type?: string }; response: AnalysisResult };
     "analysis:get_results": { payload: { target_id: string }; response: AnalysisResult | null };
     "analysis:cancel": { payload: { target_id: string }; response: boolean };
 
@@ -327,7 +347,7 @@ export interface ActionRegistry {
 
     // Calibration
     "calibration:get_stats": { payload: Record<string, never>; response: CalibrationStats };
-    "calibration:measure_sensor_noise": { payload: { camera_id: string; gain: string | number; offset: string | number; binning?: string; temperature?: number; exposure_seconds?: number; telescope?: string; filter_type?: string; save?: boolean }; response: import('../types/backendTypes').SensorNoiseMeasurement };
+    "calibration:measure_sensor_noise": { payload: { camera_id: string; gain: string | number; offset: string | number; binning?: string; temperature_c?: number; exposure_seconds?: number; telescope?: string; filter_name?: string; save?: boolean }; response: import('../types/backendTypes').SensorNoiseMeasurement };
 
 
 
@@ -342,6 +362,8 @@ export interface ActionRegistry {
     "sequencer:remove": { payload: { sequence_id: string }; response: boolean };
     "sequencer:reorder": { payload: { sequence_ids: string[] }; response: boolean };
     "sequencer:begin": { payload: Record<string, never>; response: void };
+    "sequencer:pause": { payload: Record<string, never>; response: void };
+    "sequencer:abort": { payload: Record<string, never>; response: void };
     "sequencer:modify": { payload: { sequence_id: string; sequence: SequenceItem }; response: boolean };
 
     // Terminal, Console & Documentation
@@ -366,11 +388,15 @@ export interface ActionRegistry {
     "advisory:target_report": { payload: { target: string }; response: import('../types/backendTypes').TargetDatasetReport };
     "advisory:tonight": { payload: { at?: string }; response: import('../types/backendTypes').TonightRanking };
     "advisory:result": { payload: { target: string; object_id: string }; response: import('../types/backendTypes').TargetStatement[] };
+    "advisory:depth_goal": { payload: { target: string }; response: import('../types/backendTypes').DepthGoalStatus };
+    "advisory:set_depth_goal": { payload: { target: string; level: 'quick_look' | 'good' | 'deep' }; response: import('../types/backendTypes').DepthGoalStatus };
     "history:nights": { payload: { limit?: number }; response: import('../types/backendTypes').NightListEntry[] };
     "history:night_quality": { payload: { session_id: string }; response: import('../types/backendTypes').NightQuality };
     "history:target_changes": { payload: { session_id?: string; limit?: number }; response: import('../types/backendTypes').TargetChange[] };
     "history:live_session_status": { payload: { window_minutes?: number; include?: string[]; limit?: number }; response: import('../types/backendTypes').LiveSessionStatus };
     "observatory:safety_status": { payload: Record<string, never>; response: import('../types/backendTypes').SafetyStatus };
+    "calibration:assess": { payload: { kind: 'dark' | 'bias' | 'flat'; camera_id?: string; gain?: string | number; offset?: number; binning?: string | number; temperature_c?: number; exposure_seconds?: number; telescope?: string; filter_name?: string }; response: import('../types/backendTypes').CalibrationSetHealth[] };
+    "calibration:measure_frames": { payload: { kind?: 'dark' | 'bias'; camera_id?: string; force?: boolean }; response: CalibrationMeasurementStart };
     "calibration:query": { payload: { kind?: 'dark' | 'bias' | 'flat'; detail?: 'counts' | 'target_match' | 'target_frames' | 'match'; target?: string; camera_id?: string; refresh?: boolean; gain?: string | number; offset?: number; binning?: string | number; temperature_c?: number }; response: import('../types/backendTypes').CalibrationQueryResult };
 
     // Hand-off of the workspace to a paired phone
@@ -524,6 +550,9 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'advisory:target_report',
     'advisory:tonight',
     'advisory:result',
+    'advisory:depth_goal',
+    'processing:stack_summary',
+    'quality:set_aside_frames',
     'history:nights',
     'history:night_quality',
     'history:target_changes',
@@ -958,8 +987,14 @@ export function resolveImageSrc(absolutePath: string | null | undefined): string
  * or open a WebSocket, so every other module downloads files through here.
  * @param url The file's address, from `resolveImageSrc`.
  * @param signal Cancels the download when signalled.
+ * @param revalidate Asks the server whether the file changed before the browser reuses
+ *     its saved copy. Use it for a picture the backend can rewrite at the same path.
  * @return The HTTP response.
  */
-export async function fetchImageFile(url: string, signal?: AbortSignal): Promise<Response> {
-    return fetch(url, { method: 'GET', signal });
+export async function fetchImageFile(
+    url: string,
+    signal?: AbortSignal,
+    revalidate: boolean = false
+): Promise<Response> {
+    return fetch(url, { method: 'GET', signal, cache: revalidate ? 'no-cache' : 'default' });
 }

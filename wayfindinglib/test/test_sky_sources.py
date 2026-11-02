@@ -1,6 +1,6 @@
 """Tests for the Planetarium's sky sources (`planning_tasks/sky_sources`).
 
-`ObservationPlanning.get_sources` turns library targets, library stars and
+`ObservationPlanning.query_sources` turns library targets, library stars and
 online catalog objects into `SkySource` records, and applies the map's
 magnitude limits. These tests run the stars through a real star catalog over
 an empty temporary library, with a stand-in for the region search that finds
@@ -13,15 +13,9 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import (
-    AppConfiguration,
-    CatalogAccess,
-    FrameRecord,
-    StellarCatalog,
-    StellarObject,
-    Target,
-)
-from wayfindinglib import SkySource
+from astrometricslib import AppConfiguration, FrameRecord, StellarCatalog, StellarObject, Target
+from astrometricslib._internal.drivers import CatalogAccess
+from wayfindinglib._internal.planning import SkySource
 from wayfindinglib.tasks.planning_tasks import resolution_operations, sky_sources
 
 
@@ -41,7 +35,7 @@ def _sky(tmp_path: Path, stars: list[StellarObject], targets: list[Target]) -> S
     config.update_config({"Image Library": {"path": str(library_path)}})
     catalog = StellarCatalog(config, CatalogAccess(config))
     if stars:
-        catalog.catalog_access.put(stars, "stellar_catalog", {})
+        catalog._catalog_access.put(stars, "stellar_catalog", {})
     astrometrics = SimpleNamespace(stars=catalog, targets=SimpleNamespace(list=lambda: targets))
     return SimpleNamespace(_astrometrics=astrometrics)
 
@@ -122,6 +116,41 @@ def test_magnitude_limits_thin_faint_and_uncataloged_stars(
     assert drawn(6.0, True) == ["Bright", "Instrumental", "NoMagnitude"]
     assert drawn(None, False) == ["Bright", "Faint"]
     assert drawn(6.0, False) == ["Bright"]
+
+
+def test_a_brightest_magnitude_drops_brighter_stars_and_uncataloged_ones(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A brightest magnitude drops brighter and uncataloged stars."""
+    sky = _sky(
+        tmp_path,
+        [
+            StellarObject(id="Bright", ra=10.0, dec=10.0, magnitude=1.0),
+            StellarObject(id="Middle", ra=10.1, dec=10.1, magnitude=5.0),
+            StellarObject(id="NoMagnitude", ra=10.3, dec=10.3),
+        ],
+        [],
+    )
+    _found(monkeypatch, [])
+
+    sources = sky_sources.collect_sky_sources(
+        sky, 10.0, 10.0, 5.0, True, False, None, True, magnitude_min=3.0
+    )
+
+    assert _ids(sources) == ["Middle"]
+
+
+def test_targets_can_be_left_out_of_a_region_search(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """include_targets=False lists the stars only."""
+    target = Target(id="M 57", ra="18 55 54", dec="32 37 45")
+    sky = _sky(tmp_path, [StellarObject(id="Vega", ra=279.2, dec=38.8, magnitude=0.03)], [target])
+    _found(monkeypatch, [target])
+
+    sources = sky_sources.collect_sky_sources(
+        sky, 279.0, 38.0, 5.0, True, False, None, True, include_targets=False
+    )
+
+    assert _ids(sources) == ["Vega"]
 
 
 def test_a_star_source_uses_the_planetarium_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

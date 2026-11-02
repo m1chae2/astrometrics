@@ -64,7 +64,7 @@ def test_align_calibrated_frames_recovers_a_known_shift_and_writes_a_sequence(tm
         "raw_aligned_00002.fits",
     ]
 
-    from astrometricslib.drivers.fits_access import read_data
+    from astrometricslib._internal.drivers.fits_access import read_data
 
     realigned_b = np.asarray(read_data(aligned_paths[1]))
     # Undoing a real shift and resampling loses a little precision at the

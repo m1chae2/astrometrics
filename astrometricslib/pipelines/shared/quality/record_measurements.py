@@ -17,7 +17,7 @@ safeguard 3). A measured row never uses 0.
 
 from collections.abc import Sequence
 
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.quality.measurement import MeasurementOrigin, QualityMeasurement
 from astrometricslib.models.quality.metric_spec import UncertaintyKind

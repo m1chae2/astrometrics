@@ -19,6 +19,7 @@ Guidelines and operational rules for Claude Code operating on the `astrometrics`
 
 ## 2. Architecture & Unidirectional Layering Rules
 - **Domain Library Layer (`astrometricslib/`, `wayfindinglib/`)**: Pure algorithms, spherical trig, and FITS processing. NEVER import `backend` or `mcp_servers`. `astrometricslib` never imports `wayfindinglib`.
+  - **Public names and `_internal`**: each library offers its package root plus a few public modules (`astrometricslib`: `exceptions`, `reports`, `jobs`, `drivers`; `wayfindinglib`: `exceptions`, `reports`). Everything else is private. Only the owning library, and the tests of either library, may import its `_internal`; `wayfindinglib`, the backend and the MCP servers use public names only. Result models are private: read their fields, do not import the classes.
 - **Application Service Layer (`backend/services/`)**: Stateful orchestration, DB, hardware drivers. NEVER import from `backend.container` or `backend.routers`.
 - **Delivery Layer (`backend/routers/`)**: HTTP and WebSocket serialization (`/api/rpc`). Registration only; business logic lives in services. Start-up work lives in `backend/startup.py`.
 - **MCP Layer (`mcp_servers/`)**: The AI-agent adapters. They use only the libraries' public API; the backend server calls the running backend over `/api/rpc` and imports only the backend's guard functions. The backend never imports `mcp_servers`.

@@ -26,7 +26,7 @@ import sqlite3
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
-from astrometricslib.drivers.catalog_access import POSITION_ONLY_STAR_ID_PREFIX
+from astrometricslib._internal.drivers.catalog_access import POSITION_ONLY_STAR_ID_PREFIX
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.pipelines.shared.catalog_star_identity import (
     CATALOG_MATCH_RADIUS_ARCSEC,
@@ -60,6 +60,29 @@ class StarIdentificationBreakdown(NamedTuple):
     catalog_matched: int
     position_only: int
     unresolved: int
+
+
+def is_unresolved_star(stellar_object: Any) -> bool:
+    """Tell whether a star has no identity that could be saved.
+
+    A star is unresolved when it still carries the placeholder id given to a
+    detection that was never matched to a catalog star or given a
+    position-derived name. `record_pipeline_stars` drops such a star right
+    before saving, so a pipeline can use this to skip work on a star whose
+    result would be thrown away.
+
+    Parameters
+    ----------
+    stellar_object : `Any`
+        A star with an ``id`` text.
+
+    Returns
+    -------
+    is_unresolved : `bool`
+        `True` when the id is a placeholder, so the star would be dropped at
+        save.
+    """
+    return _UNRESOLVED_STAR_ID_PATTERN.match(stellar_object.id) is not None
 
 
 def _drop_unresolved_stars(
@@ -106,7 +129,7 @@ def _drop_unresolved_stars(
     position_only = 0
     unresolved = 0
     for stellar_object in stellar_objects:
-        if _UNRESOLVED_STAR_ID_PATTERN.match(stellar_object.id):
+        if is_unresolved_star(stellar_object):
             unresolved += 1
             continue
         if stellar_object.is_catalog_identified:

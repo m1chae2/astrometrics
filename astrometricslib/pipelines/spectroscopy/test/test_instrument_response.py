@@ -12,6 +12,7 @@ import pytest
 from scipy.ndimage import gaussian_filter1d
 
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.models.stellar_source import NO_GOOD_MATCH_RMS
 from astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response import (
     apply_instrument_response,
     derive_instrument_response,
@@ -103,7 +104,7 @@ def test_analysis_recovers_the_type_of_a_spectrum_the_instrument_would_record() 
 
     assert analysis.response_applied is True
     assert analysis.classification["spectral_type"] == "K2V"
-    assert analysis.classification["match_quality"] == "good"
+    assert analysis.classification["classification_rms"] <= NO_GOOD_MATCH_RMS
     assert len(analysis.features) == 8
 
 

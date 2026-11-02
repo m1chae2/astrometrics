@@ -13,7 +13,7 @@ extractor use the other band and say so.
 import numpy as np
 import pytest
 
-from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor import (
     SpectrumExtractor,
     measure_sky_level_per_pixel,

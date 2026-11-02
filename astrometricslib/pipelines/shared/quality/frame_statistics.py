@@ -141,7 +141,7 @@ def measure_frame_input_quality(
         A dictionary showing how many images were "measured", "skipped",
         or "failed" (because they couldn't be read).
     """
-    from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
+    from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
     from astrometricslib.pipelines.shared.quality.quality_metrics import (
         measure_frame_input_quality as measure_one_frame,
     )
@@ -155,7 +155,7 @@ def measure_frame_input_quality(
             counts["skipped"] += 1
             continue
 
-        saturation_threshold_adu = resolve_camera_profile(frame.camera).saturation_threshold_adu.value
+        saturation_threshold_adu = resolve_camera_profile(frame.camera).pixel_saturation_level_adu.value
         metrics = measure_one_frame(
             frame.path, measure_fwhm=measure_fwhm, saturation_threshold_adu=saturation_threshold_adu
         )
@@ -197,7 +197,7 @@ def get_frame_stats_grouped(target: Any, calibration: Any, camera: str | None = 
     ----------
     target : `Any`
         The target to summarize.
-    calibration : `Any`
+    calibration : `CalibrationLibrary`
         The library of calibration frames (dark frames, flat frames, etc).
     camera : `str`, optional
         Only check images from this camera.
@@ -244,7 +244,7 @@ def get_frame_stats_grouped(target: Any, calibration: Any, camera: str | None = 
         count = aggregates[key]
         cam = cameras_by_group.get(key, camera or "Unknown")
 
-        darks = calibration.get("dark", camera=cam, exposure=e)
+        darks = calibration.get_dark_frames(camera=cam, exposure=e)
 
         results.append({
             "filter": f,

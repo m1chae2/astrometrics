@@ -21,7 +21,8 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-from astrometricslib import InvalidArgumentError, NotFoundError, scratch_directory
+from astrometricslib.drivers import scratch_directory
+from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from backend.services.infrastructure.agent_code_policy import AGENT_VISIBLE_NAMES, check_agent_code
 
 logger = logging.getLogger(__name__)

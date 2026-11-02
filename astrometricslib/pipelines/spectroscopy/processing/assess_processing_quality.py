@@ -54,6 +54,7 @@ from astrometricslib.pipelines.spectroscopy.processing.second_order_risk import 
 from astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector import (
     VERDICT_DETECTED,
     VERDICT_POSSIBLE,
+    count_shared_dips_once,
 )
 
 STAGE = "processing"
@@ -105,9 +106,10 @@ def _feature_metrics(features: Sequence[Mapping[str, object]]) -> list[StageQual
             metric("best_feature_p_value", None, "probability"),
             metric("uncalibrated_feature_count", None, "features"),
         ]
-    significant = [
+    # Two names sharing one dip both keep their verdicts; count it once.
+    significant = count_shared_dips_once([
         feature for feature in tested if feature.get("verdict") in (VERDICT_DETECTED, VERDICT_POSSIBLE)
-    ]
+    ])
     p_values = [value for feature in tested if (value := _optional_float(feature.get("p_value"))) is not None]
     uncalibrated = [
         feature for feature in tested if feature.get("p_value_method") == _UNCALIBRATED_P_VALUE_METHOD
@@ -117,7 +119,7 @@ def _feature_metrics(features: Sequence[Mapping[str, object]]) -> list[StageQual
             "significant_feature_count",
             float(len(significant)),
             "features",
-            note="features whose verdict is detected or possible",
+            note="features whose verdict is detected or possible (a dip shared by two names counts once)",
         ),
         metric(
             "best_feature_p_value",
@@ -237,7 +239,10 @@ def _equivalent_width_metrics(features: Sequence[Mapping[str, object]]) -> list[
         Angstroms. A value is `None` when no feature has a width.
     """
     relative_errors = []
-    for feature in features:
+    reported = count_shared_dips_once([
+        feature for feature in features if feature.get("verdict") in (VERDICT_DETECTED, VERDICT_POSSIBLE)
+    ])
+    for feature in reported:
         width = _optional_float(feature.get("equivalent_width_angstrom"))
         error = _optional_float(feature.get("equivalent_width_error_angstrom"))
         if (

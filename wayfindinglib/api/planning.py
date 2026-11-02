@@ -2,17 +2,20 @@
 
 Description: `Wayfinder.planning` is an `ObservationPlanning`. It answers
 where objects are in the sky (`get_visibility`), advises on targets and
-calibration frames (`get_advisory`), lays out mosaics
-(`calculate_panels`, `create_mosaic`), writes plans (`create_plan`,
-`edit_queue`, `edit_package`, `tick_checklist_item`) and reads them back
-(`get_plan`). `refresh_suggestions` keeps the library's suggested
-observation packages up to date and marks finished packages complete. It
-also browses the library and online catalogs around a point in the sky and
-reports on the downloaded deep-star catalog.
+calibration frames (`get_tonight_advice`,
+`get_calibration_advice`), lays out mosaics
+(`calculate_panels`, `create_mosaic`), writes plans (`create_sequence`,
+`create_package`, `create_session`, the queue verbs such as
+`add_to_queue`, the package verbs such as `update_package`, and
+`tick_checklist_item`) and reads them back (`get_plan`, `query_plans`).
+`refresh_suggestions` keeps the library's suggested observation packages up
+to date and marks finished packages complete. It also browses the library
+and online catalogs around a point in the sky and reports on the downloaded
+deep-star catalog.
 
-Planning never talks to hardware. A plan made by hand (`create_plan`
-with ``kind="empty_session"``, then `edit_queue`) and a plan placed
-automatically (``kind="scheduled_session"``) write the same queue
+Planning never talks to hardware. A plan made by hand (`create_session`
+with no `requests`, then `add_to_queue`) and a plan placed
+automatically (`create_session` with `requests`) write the same queue
 structure, so `ObservationExecution` runs either one.
 
 Each method checks its arguments and hands the work to a function under
@@ -23,8 +26,9 @@ directly.
 import logging
 import threading
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime
+from functools import partial
 from typing import Any, Literal
 
 from astropy.time import Time
@@ -33,20 +37,13 @@ from pydantic import ValidationError
 from astrometricslib import (
     AppConfiguration,
     Astrometrics,
-    AstrometricsError,
     FilterType,
-    InvalidArgumentError,
-    NotFoundError,
     StellarObject,
     Target,
-    background_job,
-    check_choice,
-    check_include,
-    get_current_job,
-    registered_job,
-    reject_unused_arguments,
-    resolve_target,
 )
+from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, NotFoundError
+from astrometricslib.jobs import background_job, get_current_job, registered_job
+from wayfindinglib._internal.arguments import check_choice, check_include, reject_unused_arguments
 from wayfindinglib.analytics.frame_counting import (
     EquipmentNames,
     TargetFrameReader,
@@ -57,7 +54,13 @@ from wayfindinglib.drivers.butler import DiskButler, pick_session_for_night
 from wayfindinglib.models.equipment_and_site.calibration import CalibrationAdvisory
 from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration, Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
-from wayfindinglib.models.planning.deep_catalog import DeepCatalogEstimate, DeepCatalogStatus
+from wayfindinglib.models.planning.coordinate_lookup import CoordinateLookup
+from wayfindinglib.models.planning.deep_catalog import (
+    DeepCatalogBuildReport,
+    DeepCatalogEstimate,
+    DeepCatalogStatus,
+)
+from wayfindinglib.models.planning.depth_goal import DepthGoalStatus, DepthLevel
 from wayfindinglib.models.planning.mosaic import MosaicPanel, MosaicPlan
 from wayfindinglib.models.planning.observation_package import (
     DismissedRow,
@@ -69,13 +72,13 @@ from wayfindinglib.models.planning.observation_package import (
 )
 from wayfindinglib.models.planning.planning_config import PlanningConfig
 from wayfindinglib.models.planning.sequence_plan import SequencePlan
-from wayfindinglib.models.planning.sky_source import SkySource
+from wayfindinglib.models.planning.sky_catalogs import CatalogDriverInfo, ConstellationLineSegment
+from wayfindinglib.models.planning.sky_source import SkySource, SourceQueryResult
 from wayfindinglib.models.planning.suggestion_log import (
     PackageChange,
     SuggestionEvent,
     SuggestionLogEntry,
 )
-from wayfindinglib.models.planning.target_report import TargetDatasetReport
 from wayfindinglib.models.planning.tonight_ranking import TonightRanking
 from wayfindinglib.models.planning.visibility import HorizonZone, VisibilityReport
 from wayfindinglib.models.quality.statements import TargetStatement
@@ -105,68 +108,20 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 MAXIMUM_SOURCES = 300
-"""Most stars one `ObservationPlanning.find_sources` answer lists."""
-
-AdvisoryKind = Literal["quality", "calibration", "tonight", "result"]
-"""The kinds of advice `ObservationPlanning.get_advisory` gives."""
-
-ADVISORY_ARGUMENTS = {
-    "quality": ("target",),
-    "calibration": (
-        "camera_id",
-        "frame_type",
-        "exposure_seconds",
-        "filter",
-        "gain_setting",
-        "offset",
-        "binning",
-        "sensor_temperature_c",
-    ),
-    "tonight": ("at",),
-    "result": ("target", "object_id"),
-}
-"""The arguments each advisory kind uses."""
-
-PlanKind = Literal["sequence", "package", "empty_session", "scheduled_session"]
-"""The kinds of plan `ObservationPlanning.create_plan` writes."""
-
-PLAN_ARGUMENTS = {
-    "sequence": ("target", "plan_items"),
-    "package": (
-        "target",
-        "exposure_requests",
-        "plan_items",
-        "dither_config",
-        "minimum_altitude_deg",
-        "priority",
-        "quality_weighting_enabled",
-        "notes",
-    ),
-    "empty_session": ("site_profile", "telescope", "camera_id", "night_id"),
-    "scheduled_session": ("requests", "site_profile", "telescope", "camera_id", "night_id"),
-}
-"""The arguments each plan kind uses."""
-
-PLAN_REQUIRED_ARGUMENTS = {
-    "sequence": ("target", "plan_items"),
-    "package": ("target",),
-    "empty_session": ("night_id",),
-    "scheduled_session": ("requests", "site_profile", "telescope", "camera_id", "night_id"),
-}
-"""The arguments each plan kind cannot do without."""
+"""Most stars one `ObservationPlanning.query_sources` answer lists."""
 
 PlanListKind = Literal["sessions", "packages", "suggestion_log"]
-"""What `ObservationPlanning.get_plan` lists."""
+"""What `ObservationPlanning.query_plans` lists."""
 
-GET_PLAN_ARGUMENTS = {
-    "sessions": ("session_id", "night_id", "include"),
-    "packages": ("status", "target", "include_dismissed", "pick"),
+QUERY_PLANS_ARGUMENTS = {
+    "sessions": ("include",),
+    "packages": ("status", "target", "include_dismissed"),
     "suggestion_log": ("target",),
 }
-"""The arguments each `get_plan` kind uses."""
+"""The arguments each `query_plans` kind uses."""
 
 GET_PLAN_SECTIONS = ("progress",)
-"""Optional sections `ObservationPlanning.get_plan` can add to a session."""
+"""Optional sections `get_plan` and `query_plans` can add."""
 
 DEEP_CATALOG_SECTIONS = ("estimate",)
 """Optional sections `ObservationPlanning.deep_catalog_status` can add."""
@@ -352,7 +307,7 @@ class ObservationPlanning:
         target : `Target`
             The library target.
         """
-        return resolve_target(self._astrometrics.targets, target)
+        return self._astrometrics.targets.resolve(target)
 
     def _package(self, package_id: str) -> ObservationPackage:
         """Load one recorded observation package.
@@ -424,7 +379,7 @@ class ObservationPlanning:
         ConfigurationError
             If no telescope or camera is given and none is active.
         """
-        from astrometricslib import ConfigurationError
+        from astrometricslib.exceptions import ConfigurationError
         from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
         from wayfindinglib.data_access.site_profile_reader import get_or_seed_default_site_profile
 
@@ -505,27 +460,12 @@ class ObservationPlanning:
 
     # -- Sky browsing (name lookup and catalogs) ----------------------------
 
-    def resolve_target_coordinates(self, name: str) -> Target | StellarObject:
-        """Resolve a target or star by name, through the library or SIMBAD.
-
-        Parameters
-        ----------
-        name : `str`
-            A target id or common name, or a star name.
-
-        Returns
-        -------
-        resolved : `Target` or `StellarObject`
-            The whole record of the object found.
-        """
-        return self._sky_engine.resolve_target_coordinates(name)
-
-    def lookup_coordinates(self, name: str) -> dict[str, Any]:
+    def lookup_coordinates(self, name: str) -> CoordinateLookup:
         """Find where a named object is, from the library or SIMBAD.
 
-        Gives a short answer. `resolve_target_coordinates` returns the
-        whole target record, frames and all, which is far more than a
-        position needs.
+        Looks in the library first. A name the library does not know goes
+        to SIMBAD, so the call can use the network. A name neither knows
+        raises the lookup's own error.
 
         Parameters
         ----------
@@ -534,123 +474,51 @@ class ObservationPlanning:
 
         Returns
         -------
-        position : `dict` [`str`, `Any`]
-            ``id``, ``name``, ``kind`` (``"target"`` or ``"star"``), and
-            the position in degrees (``ra_deg``, ``dec_deg``) and as text.
+        position : `CoordinateLookup`
+            The ``id``, ``name`` and ``kind`` (``"target"`` or ``"star"``),
+            and the position in degrees (``ra_deg``, ``dec_deg``). A target
+            also has its position as saved text; a star has its magnitude
+            and spectral type.
         """
-        from astrometricslib import parse_coordinate_string
-
         found = self._sky_engine.resolve_target_coordinates(name)
         if isinstance(found, StellarObject):
-            return {
-                "id": found.id,
-                "name": found.name,
-                "kind": "star",
-                "ra_deg": round(float(found.right_ascension), 6),
-                "dec_deg": round(float(found.declination), 6),
-                "magnitude": found.magnitude,
-                "spectral_type": found.spectral_type,
-            }
-        return {
-            "id": found.id,
-            "name": found.common_name or None,
-            "kind": "target",
-            "ra_deg": round(parse_coordinate_string(found.ra, True), 6),
-            "dec_deg": round(parse_coordinate_string(found.dec, False), 6),
-            "ra": found.ra,
-            "dec": found.dec,
-        }
+            return CoordinateLookup(
+                id=found.id,
+                name=found.name,
+                kind="star",
+                ra_deg=round(float(found.right_ascension), 6),
+                dec_deg=round(float(found.declination), 6),
+                magnitude=found.magnitude,
+                spectral_type=found.spectral_type,
+            )
+        return CoordinateLookup(
+            id=found.id,
+            name=found.common_name or None,
+            kind="target",
+            ra_deg=round(found.ra_deg, 6),
+            dec_deg=round(found.dec_deg, 6),
+            ra=found.ra,
+            dec=found.dec,
+        )
 
-    def find_sources(
+    def query_sources(
         self,
         ra_deg: float,
         dec_deg: float,
         radius_deg: float,
+        source: Sequence[str] = ("targets", "stars"),
         magnitude_min: float | None = None,
         magnitude_max: float | None = None,
-        include: Sequence[str] = ("targets",),
-        limit: int = 100,
-    ) -> dict[str, Any]:
-        """List the library's stars, and optionally targets, near a point.
-
-        Stars come brightest first and the list is cut at ``limit``, with
-        the total reported so the cut is never silent.
-
-        Parameters
-        ----------
-        ra_deg : `float`
-            Right ascension of the center, in degrees.
-        dec_deg : `float`
-            Declination of the center, in degrees.
-        radius_deg : `float`
-            Search radius, in degrees.
-        magnitude_min : `float`, optional
-            Keep stars at least this magnitude (numerically).
-        magnitude_max : `float`, optional
-            Keep stars no fainter than this magnitude.
-        include : `list` [`str`], optional
-            ``"targets"`` also lists the library targets in the circle.
-            Defaults to ``["targets"]``; pass ``[]`` for stars only.
-        limit : `int`, optional
-            Most stars to list, from 1 to 300. Defaults to 100.
-
-        Returns
-        -------
-        answer : `dict` [`str`, `Any`]
-            ``stars`` (the summary rows), ``stars_total``, whether the star
-            list was cut, and ``targets`` (id, name, position) when asked.
-        """
-        from astrometricslib import parse_coordinate_string
-
-        sections = check_include(include, ("targets",))
-        limit = max(1, min(int(limit), MAXIMUM_SOURCES))
-        magnitude_range = None
-        if magnitude_min is not None or magnitude_max is not None:
-            magnitude_range = (
-                magnitude_min if magnitude_min is not None else -30.0,
-                magnitude_max if magnitude_max is not None else 60.0,
-            )
-        stars = list(
-            self._sky_engine.get_library_star_summaries(ra_deg, dec_deg, radius_deg, magnitude_range)
-        )
-        stars.sort(key=lambda row: (row.get("magnitude") is None, row.get("magnitude") or 0.0))
-        answer: dict[str, Any] = {
-            "stars_total": len(stars),
-            "stars_truncated": len(stars) > limit,
-            "stars": stars[:limit],
-        }
-        if "targets" in sections:
-            targets = []
-            for target in self._sky_engine.get_sources(ra_deg, dec_deg, radius_deg, False, False):
-                try:
-                    ra = parse_coordinate_string(target.ra, True)
-                    dec = parse_coordinate_string(target.dec, False)
-                except InvalidArgumentError:
-                    ra = dec = None
-                targets.append({
-                    "id": target.id,
-                    "name": getattr(target, "common_name", None) or None,
-                    "ra_deg": ra,
-                    "dec_deg": dec,
-                })
-            answer["targets"] = targets
-        return answer
-
-    def get_sources(
-        self,
-        ra_deg: float,
-        dec_deg: float,
-        radius_deg: float,
-        include: Sequence[str] = ("stars",),
-        limiting_magnitude: float | None = None,
         include_stars_without_catalog_magnitude: bool = True,
-    ) -> list[SkySource]:
-        """List the targets, and optionally stars, to draw in a sky region.
+        catalog_drivers: Sequence[str] | None = None,
+        limit: int | None = 100,
+    ) -> SourceQueryResult:
+        """List the targets and stars near a point, from the places you name.
 
         Targets show their stacked image, or their longest LIGHT frame when
-        they have no stack. Stars are read from the library's indexed
-        summaries, so a wide region stays fast. Single-frame photometry
-        detections are never listed.
+        they have no stack. Library stars are read from the library's
+        indexed summaries, so a wide region stays fast. Single-frame
+        photometry detections are never listed.
 
         Parameters
         ----------
@@ -660,147 +528,123 @@ class ObservationPlanning:
             Declination of the center, in degrees.
         radius_deg : `float`
             Search radius, in degrees.
-        include : `list` [`str`], optional
-            ``"stars"`` adds the library's own stars; ``"online"`` adds
-            SIMBAD's objects that the library does not hold. Defaults to
-            ``["stars"]``; pass ``[]`` for library targets only.
-        limiting_magnitude : `float`, optional
-            Leave out stars whose catalog magnitude is fainter than this.
-            Targets are never left out. Needs ``"stars"`` or ``"online"``.
+        source : `list` [`str`], optional
+            Where to look. ``"targets"`` lists the library's targets.
+            ``"stars"`` lists the library's own stars. ``"simbad"`` adds
+            SIMBAD's objects that the library does not hold. ``"catalogs"``
+            asks the online catalog drivers named in ``catalog_drivers``;
+            it never reads the library. Defaults to targets and stars.
+        magnitude_min : `float`, optional
+            Brightest star magnitude to keep. Stars with no catalog
+            magnitude are then left out.
+        magnitude_max : `float`, optional
+            Faintest star magnitude to keep. Targets are never left out.
+            Online catalog drivers that can use it fetch fewer stars.
         include_stars_without_catalog_magnitude : `bool`, optional
-            Keep stars that have no real catalog magnitude (missing, zero,
-            or an instrumental value from photometry). Defaults to `True`.
-            A wide map view passes `False`, because most library stars are
-            field detections that the magnitude limit cannot thin out.
-            Needs ``"stars"`` or ``"online"``.
+            Keep library and SIMBAD stars that have no real catalog
+            magnitude (missing, zero, or an instrumental value from
+            photometry). Defaults to `True`. A wide map view passes
+            `False`, because most library stars are field detections that
+            the magnitude limit cannot thin out.
+        catalog_drivers : `list` [`str`], optional
+            The online catalog drivers to ask, such as ``["deep_stars"]``.
+            Needed with ``"catalogs"``, and allowed only with it.
+        limit : `int`, optional
+            Most stars to list, from 1 to 300, brightest first. Targets are
+            never cut. Defaults to 100. `None` lists every star in the order
+            found, which can be very long.
 
         Returns
         -------
-        sources : `list` [`SkySource`]
-            Library targets, then library stars, then online objects.
+        result : `SourceQueryResult`
+            The sources, the number of stars found before the cut, and
+            whether the cut dropped any.
 
         Raises
         ------
         InvalidArgumentError
-            If ``include`` names an unknown section, or a star limit is
-            given with no stars asked for.
+            If ``source`` names an unknown place, ``"catalogs"`` has no
+            ``catalog_drivers`` (or the reverse), or a star limit is given
+            with no stars asked for.
         """
         from wayfindinglib.tasks.planning_tasks import sky_sources
 
-        sections = check_include(include, ("stars", "online"))
-        if not sections and (limiting_magnitude is not None or not include_stars_without_catalog_magnitude):
+        sections = check_include(source, ("targets", "stars", "simbad", "catalogs"))
+        if ("catalogs" in sections) != bool(catalog_drivers):
             raise InvalidArgumentError(
-                "limiting_magnitude and include_stars_without_catalog_magnitude only apply when "
-                "include has 'stars' or 'online'."
+                "catalog_drivers goes with source 'catalogs', and 'catalogs' needs it."
             )
-        return sky_sources.collect_sky_sources(
-            self._sky_engine,
-            ra_deg,
-            dec_deg,
-            radius_deg,
-            include_stars="stars" in sections,
-            include_online="online" in sections,
-            limiting_magnitude=limiting_magnitude,
-            include_stars_without_catalog_magnitude=include_stars_without_catalog_magnitude,
+        asks_for_stars = bool(sections & {"stars", "simbad", "catalogs"})
+        if not asks_for_stars and (
+            magnitude_min is not None
+            or magnitude_max is not None
+            or not include_stars_without_catalog_magnitude
+        ):
+            raise InvalidArgumentError(
+                "The magnitude limits only apply when source has 'stars', 'simbad' or 'catalogs'."
+            )
+        found: list[SkySource] = []
+        if sections & {"targets", "stars", "simbad"}:
+            found.extend(
+                sky_sources.collect_sky_sources(
+                    self._sky_engine,
+                    ra_deg,
+                    dec_deg,
+                    radius_deg,
+                    include_stars="stars" in sections,
+                    include_online="simbad" in sections,
+                    limiting_magnitude=magnitude_max,
+                    include_stars_without_catalog_magnitude=include_stars_without_catalog_magnitude,
+                    include_targets="targets" in sections,
+                    magnitude_min=magnitude_min,
+                )
+            )
+        if "catalogs" in sections:
+            from_catalogs = sky_sources.online_catalog_sources(
+                self._sky_engine, ra_deg, dec_deg, radius_deg, list(catalog_drivers), magnitude_max
+            )
+            found.extend(
+                catalog_source
+                for catalog_source in from_catalogs
+                if magnitude_min is None
+                or (catalog_source.has_catalog_magnitude and catalog_source.magnitude >= magnitude_min)
+            )
+        targets = [item for item in found if item.type == "target"]
+        stars = [item for item in found if item.type == "star"]
+        total_stars = len(stars)
+        if limit is not None:
+            limit = max(1, min(int(limit), MAXIMUM_SOURCES))
+            stars.sort(key=lambda item: (item.magnitude is None, item.magnitude or 0.0))
+        truncated = limit is not None and total_stars > limit
+        return SourceQueryResult(
+            sources=[*targets, *(stars[:limit] if limit is not None else stars)],
+            total_stars=total_stars,
+            stars_truncated=truncated,
         )
 
-    def get_library_star_summaries(
-        self,
-        ra_deg: float,
-        dec_deg: float,
-        radius_deg: float,
-        magnitude_range: tuple[float, float] | None = None,
-    ) -> list[dict[str, Any]]:
-        """Return quick summaries of the user's own stars near a point.
-
-        ``magnitude_range`` keeps only stars whose magnitude is between
-        the two values, ends included; stars with no saved magnitude are
-        left out. Every star is kept when it is omitted.
+    def query_catalogs(self) -> list[CatalogDriverInfo]:
+        """List the registered online catalog drivers, with details for each.
 
         Returns
         -------
-        summaries : `list` [`dict`]
-            One dict per library star inside the search radius, with keys
-            ``id``, ``name``, ``ra``, ``dec``, ``targetIds``,
-            ``hasSpectra``, ``hasPhotometry``, ``magnitude`` and
-            ``spectralType``.
+        drivers : `list` [`CatalogDriverInfo`]
+            One entry for every registered online catalog driver.
         """
-        return self._sky_engine.get_library_star_summaries(ra_deg, dec_deg, radius_deg, magnitude_range)
+        return [
+            CatalogDriverInfo.model_validate(row) for row in self._sky_engine.list_catalog_driver_metadata()
+        ]
 
-    def get_online_catalog_sources(
-        self,
-        ra_deg: float,
-        dec_deg: float,
-        radius_deg: float,
-        enabled_driver_names: list[str],
-        magnitude_limit: float | None = None,
-    ) -> list[SkySource]:
-        """Ask the enabled online catalog drivers for the stars in a region.
-
-        Only the online catalogs are asked; the library is neither read nor
-        changed.
-
-        Parameters
-        ----------
-        ra_deg : `float`
-            Right ascension of the center, in degrees.
-        dec_deg : `float`
-            Declination of the center, in degrees.
-        radius_deg : `float`
-            Search radius, in degrees.
-        enabled_driver_names : `list` [`str`]
-            The drivers to ask, such as ``["deep_stars"]``.
-        magnitude_limit : `float`, optional
-            Faintest magnitude wanted. Drivers that can use it fetch fewer
-            stars.
+    def get_constellation_lines(self) -> list[ConstellationLineSegment]:
+        """Return the constellation stick-figure line segments.
 
         Returns
         -------
-        sources : `list` [`SkySource`]
-            One source per star found, marked global, with
-            ``catalog_source`` naming the driver.
+        lines : `list` [`ConstellationLineSegment`]
+            Every straight piece of every constellation's stick figure.
         """
-        from wayfindinglib.tasks.planning_tasks import sky_sources
-
-        return sky_sources.online_catalog_sources(
-            self._sky_engine, ra_deg, dec_deg, radius_deg, enabled_driver_names, magnitude_limit
-        )
-
-    def list_catalog_driver_metadata(self) -> list[dict[str, Any]]:
-        """Return metadata describing each registered online catalog driver.
-
-        Returns
-        -------
-        metadata : `list` [`dict`]
-            Metadata for every registered online catalog driver.
-        """
-        return self._sky_engine.list_catalog_driver_metadata()
-
-    def get_constellation_lines(self) -> list[dict[str, Any]]:
-        """Return constellation stick-figure line segment definitions.
-
-        Returns
-        -------
-        lines : `list` [`dict`]
-            Every constellation's stick-figure line segment definition.
-        """
-        return self._sky_engine.get_constellation_lines()
-
-    def get_imaged_field_centers(self) -> list[dict[str, Any]]:
-        """List the sky positions of every target the library has imaged.
-
-        Used to download the deep-star catalog only around the fields
-        actually imaged, instead of the whole sky (see
-        `build_deep_star_catalog`'s ``pixels`` argument).
-
-        Returns
-        -------
-        field_centers : `list` [`dict`]
-            One entry per unique imaged field, with keys
-            ``right_ascension_deg``, ``declination_deg``, ``target_ids``
-            and ``frames_examined``.
-        """
-        return self._astrometrics.targets.imaged_field_centers(register_job=False)
+        return [
+            ConstellationLineSegment.model_validate(row) for row in self._sky_engine.get_constellation_lines()
+        ]
 
     # -- Visibility ---------------------------------------------------------
 
@@ -910,141 +754,98 @@ class ObservationPlanning:
 
     # -- Advice -------------------------------------------------------------
 
-    def get_advisory(
-        self,
-        kind: AdvisoryKind,
-        target: str | Target | None = None,
-        camera_id: str | None = None,
-        frame_type: FrameType | None = None,
-        exposure_seconds: float | None = None,
-        filter: FilterType | None = None,
-        *,
-        at: datetime | str | None = None,
-        object_id: str | None = None,
-        gain_setting: int | None = None,
-        offset: int | None = None,
-        binning: int | None = None,
-        sensor_temperature_c: float | None = None,
-    ) -> TargetDatasetReport | CalibrationAdvisory | TonightRanking | list[TargetStatement]:
-        """Give planning advice about data, a result, tonight or calibration.
+    def get_tonight_advice(self, at: datetime | str | None = None) -> TonightRanking:
+        """Rank the targets by what the next hour of each would add.
 
-        The advice is worked out on demand and never stored.
+        The ranking is worked out on demand and never stored.
 
         Parameters
         ----------
-        kind : `str`
-            ``"quality"``: the target dataset report. It summarizes each
-            capture setting, lists warnings and recommendations in priority
-            order, and gives a starting point when the target has no frames.
-            Uses `target`.
-            ``"calibration"``: how many calibration frames of one kind the
-            library already holds for a camera. Uses `camera_id`,
-            `frame_type`, `exposure_seconds`, `filter` and, to narrow the
-            match, `gain_setting`, `offset`, `binning` and
-            `sensor_temperature_c`.
-            ``"tonight"``: the targets ranked by what the next hour of
-            each would add. Uses `at`.
-            ``"result"``: how far one per-star science result can be
-            trusted, as statements. Uses `target` and `object_id`.
-        target : `str` or `Target`, optional
-            The target, by id or as a `Target`.
-        camera_id : `str`, optional
+        at : `datetime` or `str`, optional
+            The time to rank for (ISO 8601; no offset means UTC). Defaults
+            to now. `InvalidArgumentError` is raised for text that is not an
+            ISO 8601 time.
+
+        Returns
+        -------
+        ranking : `TonightRanking`
+            The ranked candidate targets.
+        """
+        from wayfindinglib.tasks.planning_tasks.tonight_ranking_tasks import rank_tonight
+
+        return rank_tonight(
+            _advisory_time(at),
+            astrometrics=self._astrometrics,
+            butler=self._butler,
+            config=self._config,
+        )
+
+    def get_calibration_advice(
+        self,
+        camera_id: str,
+        frame_type: FrameType,
+        exposure_seconds: float | None = None,
+        filter_name: FilterType | None = None,
+        *,
+        gain: int | None = None,
+        offset: int | None = None,
+        binning: int | None = None,
+        temperature_c: float | None = None,
+    ) -> CalibrationAdvisory:
+        """Say how many calibration frames of one kind the library holds.
+
+        The count is worked out on demand and never stored.
+
+        Parameters
+        ----------
+        camera_id : `str`
             The camera whose calibration frames are counted.
-        frame_type : `FrameType`, optional
+        frame_type : `FrameType`
             ``DARK``, ``FLAT`` or ``BIAS``.
         exposure_seconds : `float`, optional
             Count only frames of this exposure, when the frame type has one.
-        filter : `FilterType`, optional
+        filter_name : `FilterType`, optional
             Count only frames taken through this filter.
-        at : `datetime` or `str`, optional
-            The time to rank for (ISO 8601; no offset means UTC). Defaults
-            to now.
-        object_id : `str`, optional
-            The star whose result is judged.
-        gain_setting : `int`, optional
-            Count only calibration frames taken at this gain setting.
+        gain : `int`, optional
+            Count only frames taken at this gain setting.
         offset : `int`, optional
-            Count only calibration frames taken at this offset.
+            Count only frames taken at this offset.
         binning : `int`, optional
-            Count only calibration frames taken at this binning.
-        sensor_temperature_c : `float`, optional
+            Count only frames taken at this binning.
+        temperature_c : `float`, optional
             Count only darks within the dark temperature tolerance of this
             sensor temperature, in degrees Celsius.
 
         Returns
         -------
-        advice : `TargetDatasetReport`, `CalibrationAdvisory`, `TonightRanking`
-            or `list` [`TargetStatement`]. The advice for the chosen kind.
-
-        Raises
-        ------
-        InvalidArgumentError
-            If `kind` is unknown, an argument the kind does not use is
-            given, or a required argument is missing.
+        advice : `CalibrationAdvisory`
+            How many matching frames the library holds, and what is missing.
         """
-        check_choice("kind", kind, tuple(ADVISORY_ARGUMENTS))
-        given = {
-            "target": target is not None,
-            "camera_id": camera_id is not None,
-            "frame_type": frame_type is not None,
-            "exposure_seconds": exposure_seconds is not None,
-            "filter": filter is not None,
-            "at": at is not None,
-            "object_id": object_id is not None,
-            "gain_setting": gain_setting is not None,
-            "offset": offset is not None,
-            "binning": binning is not None,
-            "sensor_temperature_c": sensor_temperature_c is not None,
-        }
-        reject_unused_arguments(kind, ADVISORY_ARGUMENTS, given)
-        if kind == "quality":
-            if target is None:
-                raise InvalidArgumentError('kind="quality" needs a target.')
-            from wayfindinglib.tasks.planning_tasks.target_report_tasks import build_target_dataset_report
-
-            return build_target_dataset_report(
-                self._target(target),
-                astrometrics=self._astrometrics,
-                butler=self._butler,
-                config=self._config,
-            )
-        if kind == "tonight":
-            from wayfindinglib.tasks.planning_tasks.tonight_ranking_tasks import rank_tonight
-
-            return rank_tonight(
-                _advisory_time(at),
-                astrometrics=self._astrometrics,
-                butler=self._butler,
-                config=self._config,
-            )
-        if kind == "result":
-            if target is None or object_id is None:
-                raise InvalidArgumentError('kind="result" needs a target and an object_id.')
-            from wayfindinglib.tasks.planning_tasks.result_judgment_tasks import judge_star_result
-
-            return judge_star_result(self._target(target).id, object_id, astrometrics=self._astrometrics)
-        if camera_id is None or frame_type is None:
-            raise InvalidArgumentError('kind="calibration" needs camera_id and frame_type.')
         from wayfindinglib.tasks.planning_tasks.calibration_advisory_tasks import build_calibration_advisory
 
+        tolerance = None
+        if FrameType(frame_type) == FrameType.DARK and temperature_c is not None:
+            answer = self._astrometrics.processing.calibration.query(kind="dark")
+            tolerance = answer.dark_temperature_tolerance_c
         return build_calibration_advisory(
             self._butler,
             camera_id,
             FrameType(frame_type),
             exposure_seconds,
-            filter,
-            gain_setting=gain_setting,
+            filter_name,
+            gain_setting=gain,
             offset=offset,
             binning=binning,
-            sensor_temperature_c=sensor_temperature_c,
+            sensor_temperature_c=temperature_c,
+            dark_temperature_tolerance_c=tolerance,
         )
 
     # -- Mosaics -------------------------------------------------------------
 
     def calculate_panels(
         self,
-        center_ra: str,
-        center_dec: str,
+        ra_deg: float,
+        dec_deg: float,
         rows: int,
         cols: int,
         overlap_percent: float,
@@ -1058,10 +859,10 @@ class ObservationPlanning:
 
         Parameters
         ----------
-        center_ra : `str`
-            Right ascension of the grid center, as text (hours) or degrees.
-        center_dec : `str`
-            Declination of the grid center, as text or degrees.
+        ra_deg : `float`
+            Right ascension of the grid center, in degrees.
+        dec_deg : `float`
+            Declination of the grid center, in degrees, from -90 to 90.
         rows : `int`
             Number of panel rows.
         cols : `int`
@@ -1084,7 +885,7 @@ class ObservationPlanning:
         from wayfindinglib.tasks.planning_tasks.mosaic_tasks import calculate_panels
 
         return calculate_panels(
-            self._config, center_ra, center_dec, rows, cols, overlap_percent, equipment, rotation_deg
+            self._config, ra_deg, dec_deg, rows, cols, overlap_percent, equipment, rotation_deg
         )
 
     def create_mosaic(
@@ -1159,169 +960,181 @@ class ObservationPlanning:
 
     # -- Plans and queues --------------------------------------------------
 
-    def create_plan(
+    def create_sequence(self, target: str | Target, plan_items: list[dict[str, Any]]) -> SequencePlan:
+        """Build a sequence plan for the app's sequencer queue.
+
+        Nothing is stored.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target, by id or as a `Target`.
+        plan_items : `list` [`dict`]
+            The sequence items, each with ``count``, ``exposure`` (seconds)
+            and ``filter``.
+
+        Returns
+        -------
+        plan : `SequencePlan`
+            The plan for the target.
+        """
+        from wayfindinglib.tasks.planning_tasks.planning_operations import build_sequence_plan
+
+        return build_sequence_plan(self._target(target).id, plan_items)
+
+    def create_package(
         self,
-        kind: PlanKind,
-        target: str | Target | None = None,
+        target: str | Target,
+        exposure_requests: list[ExposureRequest | dict[str, Any]] | None = None,
         plan_items: list[dict[str, Any]] | None = None,
-        exposure_requests: list[ExposureRequest] | None = None,
-        dither_config: DitherConfig | None = None,
+        dither_config: DitherConfig | dict[str, Any] | None = None,
         minimum_altitude_deg: float | None = None,
         priority: int | None = None,
         quality_weighting_enabled: bool | None = None,
         notes: str | None = None,
-        requests: list[QueueRequest] | None = None,
-        site_profile: SiteProfile | None = None,
-        telescope: Telescope | None = None,
-        camera_id: str | None = None,
-        night_id: str | None = None,
-    ) -> SequencePlan | ObservationPackage | ObservationSession:
-        """Write a plan: a sequence, a package, or an observing session.
+    ) -> ObservationPackage:
+        """Record a reusable imaging request for a target.
 
         Parameters
         ----------
-        kind : `str`
-            ``"sequence"``: a sequence plan for the app's sequencer queue,
-            from `target` and `plan_items`. Nothing is stored.
-            ``"package"``: a reusable imaging request for `target`, from
-            `exposure_requests` (or the sequence items `plan_items`) and
-            the optional `dither_config`, `minimum_altitude_deg`,
-            `priority`, `quality_weighting_enabled` and `notes`. Recorded.
-            ``"empty_session"``: an observing session with an empty queue
-            for the night `night_id`, to fill by hand with `edit_queue`.
-            Uses `site_profile`, `telescope` and `camera_id`, which
-            default to the recorded site and the active telescope and
-            camera. Recorded.
-            ``"scheduled_session"``: an observing session for the night
-            `night_id` with every package in `requests` placed
-            automatically, using `site_profile`, `telescope` and
-            `camera_id`. Packages that cannot be placed are listed with
-            the reason. No device is contacted. Recorded.
-        target : `str` or `Target`, optional
+        target : `str` or `Target`
             The target, by id or as a `Target`.
+        exposure_requests : `list` [`dict`], optional
+            The exposures the package asks for. Each is a dictionary with
+            ``frame_type``, ``exposure_sec`` and ``count``, and optionally a
+            filter, gain setting, offset and binning. The library checks
+            them. Leave out for a package with none.
         plan_items : `list` [`dict`], optional
-            Sequence items, each with ``count``, ``exposure`` (seconds)
-            and ``filter``, and for a package an optional frame ``type``
-            (``LIGHT`` by default).
-        exposure_requests : `list` [`ExposureRequest`], optional
-            The exposures a package asks for.
-        dither_config : `DitherConfig`, optional
-            How a package dithers.
+            The exposures as sequence items (``count``, ``exposure``,
+            ``filter`` and an optional frame ``type``, ``LIGHT`` by
+            default), instead of `exposure_requests`.
+        dither_config : `dict`, optional
+            How the package dithers.
         minimum_altitude_deg : `float`, optional
-            The lowest altitude a package may be imaged at.
+            The lowest altitude the package may be imaged at.
         priority : `int`, optional
-            A package's priority; higher is placed first. Defaults to 0.
+            The package's priority; higher is placed first. Defaults to 0.
         quality_weighting_enabled : `bool`, optional
-            Let the target's dataset report raise the package's
-            priority during automatic placement. Defaults to `False`.
+            Let the target's dataset report raise the package's priority
+            during automatic placement. Defaults to `False`.
         notes : `str`, optional
-            Free text kept with a package.
-        requests : `list` [`QueueRequest`], optional
-            The recorded packages to place, each with its start mode.
-        site_profile : `SiteProfile`, optional
-            The observing site.
-        telescope : `Telescope`, optional
-            The telescope, whose pointing limits the placement respects.
-        camera_id : `str`, optional
-            The camera, recorded on the session.
-        night_id : `str`, optional
-            The observing night, named for the local date on which it
-            began, such as ``"2026-09-24"``.
+            Free text kept with the package.
 
         Returns
         -------
-        plan : `SequencePlan`, `ObservationPackage` or `ObservationSession`
-            The plan for the chosen kind.
+        package : `ObservationPackage`
+            The recorded package.
 
         Raises
         ------
         InvalidArgumentError
-            If `kind` is unknown, an argument the kind does not use is
-            given, or a required argument is missing.
+            If both `exposure_requests` and `plan_items` are given, or a
+            value is malformed.
         NotFoundError
-            If a package's target is neither in the library nor known to
-            the catalog. A catalog name that is not in the library yet is
-            added to the library, with its position, before the package
-            is recorded.
+            If the target is neither in the library nor known to the
+            catalog. A catalog name that is not in the library yet is added
+            to the library, with its position, before the package is
+            recorded.
         """
-        check_choice("kind", kind, tuple(PLAN_ARGUMENTS))
-        arguments = {
-            "target": target,
-            "plan_items": plan_items,
-            "exposure_requests": exposure_requests,
-            "dither_config": dither_config,
-            "minimum_altitude_deg": minimum_altitude_deg,
-            "priority": priority,
-            "quality_weighting_enabled": quality_weighting_enabled,
-            "notes": notes,
-            "requests": requests,
-            "site_profile": site_profile,
-            "telescope": telescope,
-            "camera_id": camera_id,
-            "night_id": night_id,
-        }
-        reject_unused_arguments(
-            kind, PLAN_ARGUMENTS, {name: value is not None for name, value in arguments.items()}
-        )
-        missing = [name for name in PLAN_REQUIRED_ARGUMENTS[kind] if arguments[name] is None]
-        if missing:
-            raise InvalidArgumentError(
-                f"kind={kind!r} needs: {', '.join(missing)}.", details={"missing": missing}
-            )
+        from wayfindinglib.tasks.planning_tasks.planning_operations import exposure_requests_from_items
 
-        if kind == "sequence":
-            from wayfindinglib.tasks.planning_tasks.planning_operations import build_sequence_plan
-
-            return build_sequence_plan(self._target(target).id, plan_items)
-        if kind == "package":
-            from wayfindinglib.tasks.planning_tasks.planning_operations import exposure_requests_from_items
-
-            if exposure_requests is not None and plan_items is not None:
-                raise InvalidArgumentError("kind='package' takes exposure_requests or plan_items, not both.")
+        if exposure_requests is not None and plan_items is not None:
+            raise InvalidArgumentError("Give exposure_requests or plan_items, not both.")
+        try:
+            resolved = self._target(target)
+        except NotFoundError:
+            # Not in the library: make it from the catalog, with its
+            # position. `create` raises NotFoundError when the catalog
+            # does not know the name.
             try:
-                resolved = self._target(target)
-            except NotFoundError:
-                # Not in the library: make it from the catalog, with its
-                # position. `create` raises NotFoundError when the catalog
-                # does not know the name.
-                try:
-                    resolved = self._astrometrics.targets.create(target, from_catalog=True)
-                except NotFoundError as error:
-                    raise NotFoundError(
-                        f"No target '{target}' in the library or the catalog: {error}"
-                    ) from error
-            if plan_items is not None:
-                requests_for_package = exposure_requests_from_items(plan_items)
-            else:
-                # No exposures is allowed: "New package" and the
-                # Planetarium's "Add" start empty.
-                requests_for_package = list(exposure_requests or [])
-            # Frames count toward a row only from its last update, so a new
-            # row starts counting now.
-            moment = _utc_now()
-            requests_for_package = [
-                row if row.counted_from is not None else row.model_copy(update={"counted_from": moment})
-                for row in requests_for_package
-            ]
+                resolved = self._astrometrics.targets.create(target, from_catalog=True)
+            except NotFoundError as error:
+                raise NotFoundError(f"No target '{target}' in the library or the catalog: {error}") from error
+        if plan_items is not None:
+            requests_for_package = exposure_requests_from_items(plan_items)
+        else:
+            # No exposures is allowed: "New package" and the
+            # Planetarium's "Add" start empty.
+            requests_for_package = list(exposure_requests or [])
+        # Frames count toward a row only from its last update, so a new
+        # row starts counting now.
+        moment = _utc_now()
+        try:
+            checked_rows = [ExposureRequest.model_validate(item) for item in requests_for_package]
             package = ObservationPackage(
                 id=str(uuid.uuid4()),
                 name=resolved.id,
                 target_id=resolved.id,
-                exposure_requests=requests_for_package,
-                dither_config=dither_config,
+                exposure_requests=[
+                    row if row.counted_from is not None else row.model_copy(update={"counted_from": moment})
+                    for row in checked_rows
+                ],
+                dither_config=None if dither_config is None else DitherConfig.model_validate(dither_config),
                 minimum_altitude_deg=minimum_altitude_deg,
                 priority=priority or 0,
                 quality_weighting_enabled=bool(quality_weighting_enabled),
                 notes=notes or "",
             )
-            self._butler.put(package, "observation_package", {"id": package.id})
-            return package
-        if kind == "empty_session":
-            night = _night_date(night_id)
+        except ValidationError as error:
+            raise InvalidArgumentError(
+                "A package value is not valid.", details={"error": str(error)}
+            ) from error
+        self._butler.put(package, "observation_package", {"id": package.id})
+        return package
+
+    def create_session(
+        self,
+        observing_night_id: str,
+        requests: list[QueueRequest | dict[str, Any]] | None = None,
+        site_profile: SiteProfile | dict[str, Any] | None = None,
+        telescope: Telescope | dict[str, Any] | None = None,
+        camera_id: str | None = None,
+    ) -> ObservationSession:
+        """Record an observing session for one night.
+
+        With no `requests` the session starts with an empty queue, to fill
+        by hand with `add_to_queue`. With `requests`, every package in them
+        is placed automatically, and the packages that cannot be placed are
+        listed with the reason. No device is contacted. A night that already
+        has an empty session gets that session back. A night that already
+        has a session gets the new placement written into it. An
+        `InvalidArgumentError` says the night is not a date or a value is
+        malformed. A `ConflictError` says an entry of the night's session
+        has already started.
+
+        Parameters
+        ----------
+        observing_night_id : `str`
+            The observing night, named for the local date on which it
+            began, such as ``"2026-09-24"``.
+        requests : `list` [`dict`], optional
+            The recorded packages to place, each a dictionary with a
+            ``package_id`` and its start mode.
+        site_profile : `dict`, optional
+            The observing site. Defaults to the recorded site.
+        telescope : `dict`, optional
+            The telescope, whose pointing limits the placement respects.
+            Defaults to the active telescope.
+        camera_id : `str`, optional
+            The camera, recorded on the session. Defaults to the active
+            camera.
+
+        Returns
+        -------
+        session : `ObservationSession`
+            The recorded session.
+        """
+        night = _night_date(observing_night_id)
+        if site_profile is not None:
+            site_profile = SiteProfile.model_validate(site_profile)
+        if telescope is not None:
+            telescope = Telescope.model_validate(telescope)
+        if requests is None:
             existing = self._session_for_night(night)
             if existing is not None:
                 return existing
-            site_profile, telescope, camera_id = self._session_equipment(site_profile, telescope, camera_id)
+        site_profile, telescope, camera_id = self._session_equipment(site_profile, telescope, camera_id)
+        if requests is None:
             session = ObservationSession(
                 id=str(uuid.uuid4()),
                 night_date=night,
@@ -1333,7 +1146,6 @@ class ObservationPlanning:
             # Check and insert in one transaction: a second caller gets
             # this session back.
             return self._butler.insert_session_for_night(session)
-        night = _night_date(night_id)
         placed = self._schedule_session(requests, site_profile, telescope, camera_id, night)
         existing = self._session_for_night(night)
         if existing is None:
@@ -1389,7 +1201,7 @@ class ObservationPlanning:
         PlanRevisionConflictError
             If the session changed while this was running.
         """
-        from astrometricslib import ConflictError
+        from astrometricslib.exceptions import ConflictError
 
         started = [entry.id for entry in existing.queue if entry.status != QueueEntryStatus.PENDING]
         if started:
@@ -1491,10 +1303,207 @@ class ObservationPlanning:
 
         # A library with no quality records gives an empty dictionary.
         return allowed_capture_values_for_camera(
-            session.camera_id, self._config, self._astrometrics.quality.capture_settings().values()
+            self._astrometrics, session.camera_id, self._astrometrics.quality.capture_settings().values()
         )
 
-    def edit_queue(
+    def add_to_queue(
+        self,
+        session_id: str,
+        requests: list[QueueRequest | dict[str, Any]],
+        *,
+        expected_revision: int | None = None,
+    ) -> PlanChange:
+        """Add recorded packages to the end of an observing session's queue.
+
+        Each added entry freezes a copy of its package (exposures,
+        dithering, altitude limit and priority), the same way automatic
+        placement does, so a session built by hand and one placed
+        automatically run the same way. A suggested package that is added
+        becomes planned.
+
+        Every exposure request is checked against the camera: a gain
+        setting, offset or binning the camera profile did not measure is
+        refused with the reason, and a camera with no measured setting
+        accepts the request and notes "setting not measured". Exact
+        duplicate requests in one entry merge (their counts add);
+        requests that differ only in delay are refused.
+
+        The write is one database step. When `expected_revision` is given,
+        it must be the revision last read, or nothing is written.
+
+        Parameters
+        ----------
+        session_id : `str`
+            The session to change.
+        requests : `list` [`dict`]
+            The packages to append. Each is a dictionary with a
+            ``package_id`` and a start mode, any start and end worked out
+            by hand, and optionally its own exposure requests instead of
+            the package's.
+        expected_revision : `int`, optional
+            The plan revision the caller last read. Leave out to write
+            over whatever is stored.
+
+        Returns
+        -------
+        change : `PlanChange`
+            The new revision, what changed, notes on accepted settings and
+            the stored session. An `InvalidArgumentError` says a request is
+            malformed or an exposure request is refused. A
+            `PlanRevisionConflictError` says the stored revision is not
+            `expected_revision`; its details hold the current revision.
+        """
+        return self._edit_queue(session_id, add=requests, expected_revision=expected_revision)
+
+    def reorder_queue(
+        self, session_id: str, entry_ids: list[str], *, expected_revision: int | None = None
+    ) -> PlanChange:
+        """Put the entries of an observing session's queue in a new order.
+
+        Parameters
+        ----------
+        session_id : `str`
+            The session to change.
+        entry_ids : `list` [`str`]
+            Every entry id in the queue, in the new order. It must name
+            exactly the entries in the queue, or `InvalidArgumentError` is
+            raised.
+        expected_revision : `int`, optional
+            The plan revision the caller last read. Leave out to write
+            over whatever is stored.
+
+        Returns
+        -------
+        change : `PlanChange`
+            The new revision, what changed and the stored session. A
+            `PlanRevisionConflictError` says the stored revision is not
+            `expected_revision`.
+        """
+        return self._edit_queue(session_id, order=entry_ids, expected_revision=expected_revision)
+
+    def remove_from_queue(
+        self, session_id: str, entry_ids: list[str], *, expected_revision: int | None = None
+    ) -> PlanChange:
+        """Take entries out of an observing session's queue.
+
+        Parameters
+        ----------
+        session_id : `str`
+            The session to change.
+        entry_ids : `list` [`str`]
+            The ids of the entries to remove. `NotFoundError` is raised for
+            an id that is not in the queue, and `ConflictError` for an
+            entry that is running.
+        expected_revision : `int`, optional
+            The plan revision the caller last read. Leave out to write
+            over whatever is stored.
+
+        Returns
+        -------
+        change : `PlanChange`
+            The new revision, what changed and the stored session. A
+            `PlanRevisionConflictError` says the stored revision is not
+            `expected_revision`.
+        """
+        return self._edit_queue(session_id, remove=entry_ids, expected_revision=expected_revision)
+
+    def set_entry_exposures(
+        self,
+        session_id: str,
+        exposures: dict[str, list[ExposureRequest | dict[str, Any]]],
+        *,
+        expected_revision: int | None = None,
+    ) -> PlanChange:
+        """Replace the exposure requests of entries in a session's queue.
+
+        The requests are checked against the camera and merged the same
+        way `add_to_queue` does.
+
+        Parameters
+        ----------
+        session_id : `str`
+            The session to change.
+        exposures : `dict` [`str`, `list` [`dict`]]
+            The new exposure requests for each entry, by entry id. Each
+            request is a dictionary with ``frame_type``, ``exposure_sec``
+            and ``count``. An entry that is running or done cannot change
+            (`ConflictError`), and an id that is not in the queue raises
+            `NotFoundError`.
+        expected_revision : `int`, optional
+            The plan revision the caller last read. Leave out to write
+            over whatever is stored.
+
+        Returns
+        -------
+        change : `PlanChange`
+            The new revision, what changed, notes on accepted settings and
+            the stored session. A `PlanRevisionConflictError` says the
+            stored revision is not `expected_revision`.
+        """
+        return self._edit_queue(session_id, set_exposures=exposures, expected_revision=expected_revision)
+
+    def add_checklist_items(
+        self,
+        session_id: str,
+        items: list[ChecklistItem | dict[str, Any]],
+        *,
+        expected_revision: int | None = None,
+    ) -> PlanChange:
+        """Add checklist items to an observing session.
+
+        An item with the same rule and capture setting as one already on the
+        list is not added again, and a write that adds nothing keeps the
+        revision.
+
+        Parameters
+        ----------
+        session_id : `str`
+            The session to change.
+        items : `list` [`dict`]
+            The items to add. Each is a dictionary with a ``rule``.
+        expected_revision : `int`, optional
+            The plan revision the caller last read. Leave out to write
+            over whatever is stored.
+
+        Returns
+        -------
+        change : `PlanChange`
+            The new revision, what changed and the stored session. A
+            `PlanRevisionConflictError` says the stored revision is not
+            `expected_revision`.
+        """
+        return self._edit_queue(session_id, add_checklist=items, expected_revision=expected_revision)
+
+    def set_framing(
+        self,
+        session_id: str,
+        framing: Framing | dict[str, Any],
+        *,
+        expected_revision: int | None = None,
+    ) -> PlanChange:
+        """Store where the camera points for an observing session.
+
+        Parameters
+        ----------
+        session_id : `str`
+            The session to change.
+        framing : `dict`
+            The field center (``center_ra_deg``, ``center_dec_deg``), the
+            camera rotation and any mosaic panels.
+        expected_revision : `int`, optional
+            The plan revision the caller last read. Leave out to write
+            over whatever is stored.
+
+        Returns
+        -------
+        change : `PlanChange`
+            The new revision, what changed and the stored session. A
+            `PlanRevisionConflictError` says the stored revision is not
+            `expected_revision`.
+        """
+        return self._edit_queue(session_id, framing=framing, expected_revision=expected_revision)
+
+    def _edit_queue(
         self,
         session_id: str,
         add: list[QueueRequest | dict[str, Any]] | None = None,
@@ -1506,7 +1515,11 @@ class ObservationPlanning:
         framing: Framing | dict[str, Any] | None = None,
         expected_revision: int | None = None,
     ) -> PlanChange:
-        """Change an observing session's night plan by hand.
+        """Apply one change to an observing session's night plan.
+
+        The public calls `add_to_queue`, `reorder_queue`,
+        `remove_from_queue`, `set_entry_exposures`, `add_checklist_items`
+        and `set_framing` each pass one change here.
 
         Added entries freeze a copy of their package (exposures,
         dithering, altitude limit and priority), the same way automatic
@@ -1615,7 +1628,7 @@ class ObservationPlanning:
             return merged
 
         if remove:
-            from astrometricslib import ConflictError
+            from astrometricslib.exceptions import ConflictError
 
             entries_by_id = {entry.id: entry for entry in session.queue}
             missing = [entry_id for entry_id in remove if entry_id not in entries_by_id]
@@ -1673,7 +1686,7 @@ class ObservationPlanning:
             if entry is None:
                 raise NotFoundError("That entry is not in the queue.", details={"set_exposures": entry_id})
             if entry.status != QueueEntryStatus.PENDING:
-                from astrometricslib import ConflictError
+                from astrometricslib.exceptions import ConflictError
 
                 raise ConflictError(
                     "Only an entry that has not started can change its exposures.",
@@ -1783,7 +1796,189 @@ class ObservationPlanning:
                 self._log_suggestion_event(SuggestionEvent.PROMOTED, package, "added to a session")
                 return
 
-    def edit_package(
+    def update_package(
+        self,
+        package_id: str,
+        *,
+        exposure_requests: list[ExposureRequest | dict[str, Any]] | None = None,
+        dither_config: DitherConfig | dict[str, Any] | None = None,
+        minimum_altitude_deg: float | None = None,
+        priority: int | None = None,
+        notes: str | None = None,
+        name: str | None = None,
+        framing: Framing | dict[str, Any] | None = None,
+        expected_revision: int | None = None,
+    ) -> ObservationPackage:
+        """Change the values of one observation package.
+
+        Values are checked the same way `create_package` checks them. A
+        change counts as one write and adds one to the package's revision. A
+        value left out (`None`) is not changed, so this call cannot clear
+        the dither or the altitude limit.
+
+        A new or changed exposure row starts counting frames from now. A row
+        whose frame type, filter, length, gain, offset and binning are the
+        same as a row already in the package keeps its counting time (a
+        change of its count alone does not restart the count).
+
+        Parameters
+        ----------
+        package_id : `str`
+            The package to change.
+        exposure_requests : `list` [`dict`], optional
+            The new full list of exposures, replacing the old list. An empty
+            list clears them.
+        dither_config : `dict`, optional
+            The new dithering.
+        minimum_altitude_deg : `float`, optional
+            The new lowest altitude the package may be imaged at.
+        priority : `int`, optional
+            The new priority.
+        notes : `str`, optional
+            The new free text.
+        name : `str`, optional
+            The new package name.
+        framing : `dict`, optional
+            Where the camera points: the field center, the camera rotation
+            and any mosaic panels. The Planetarium's "Send framing to
+            package" sets it.
+        expected_revision : `int`, optional
+            The package revision the caller last read. Leave out to write
+            over whatever is stored.
+
+        Returns
+        -------
+        package : `ObservationPackage`
+            The stored package. An `InvalidArgumentError` says nothing to
+            change was given or a value is malformed. `NotFoundError` says
+            no package has that id. A `PlanRevisionConflictError` says the
+            stored revision is not `expected_revision`; its details hold
+            the current revision.
+        """
+        return self._edit_package(
+            package_id,
+            expected_revision=expected_revision,
+            exposure_requests=exposure_requests,
+            dither_config=dither_config,
+            minimum_altitude_deg=minimum_altitude_deg,
+            priority=priority,
+            notes=notes,
+            name=name,
+            framing=framing,
+        )
+
+    def reopen_package(self, package_id: str, *, expected_revision: int | None = None) -> ObservationPackage:
+        """Set a complete observation package back to planned.
+
+        For each light row, this stores how many matching frames are
+        already captured, so those frames do not complete the package
+        again. When the frames cannot be counted (the package is in no
+        session, or the library cannot be read), each row starts counting
+        from now instead.
+
+        Parameters
+        ----------
+        package_id : `str`
+            The package to reopen.
+        expected_revision : `int`, optional
+            The package revision the caller last read. Leave out to write
+            over whatever is stored.
+
+        Returns
+        -------
+        package : `ObservationPackage`
+            The stored package. A `ConflictError` says the package is not
+            complete. A `PlanRevisionConflictError` says the stored revision
+            is not `expected_revision`.
+        """
+        return self._edit_package(package_id, expected_revision=expected_revision, reopen=True)
+
+    def dismiss_package(
+        self,
+        package_id: str,
+        *,
+        source_key: str | None = None,
+        expected_revision: int | None = None,
+    ) -> ObservationPackage:
+        """Hide a suggested package until the evidence for it changes.
+
+        The next refresh shows the suggestion again if its evidence has
+        changed. `undismiss_package` takes a dismissal back.
+
+        Parameters
+        ----------
+        package_id : `str`
+            The suggested package to dismiss.
+        source_key : `str`, optional
+            Dismiss only this row of the suggestion, and take that row out
+            of the package. `NotFoundError` is raised for a key that names
+            no row.
+        expected_revision : `int`, optional
+            The package revision the caller last read. Leave out to write
+            over whatever is stored.
+
+        Returns
+        -------
+        package : `ObservationPackage`
+            The stored package. A `ConflictError` says the package is not a
+            library suggestion. A `PlanRevisionConflictError` says the
+            stored revision is not `expected_revision`.
+        """
+        return self._edit_package(
+            package_id, expected_revision=expected_revision, dismiss=True, source_key=source_key
+        )
+
+    def undismiss_package(
+        self,
+        package_id: str,
+        *,
+        source_key: str | None = None,
+        expected_revision: int | None = None,
+    ) -> ObservationPackage:
+        """Bring back a suggested package that was dismissed.
+
+        Parameters
+        ----------
+        package_id : `str`
+            The suggested package to bring back.
+        source_key : `str`, optional
+            Bring back only this row of the suggestion.
+        expected_revision : `int`, optional
+            The package revision the caller last read. Leave out to write
+            over whatever is stored.
+
+        Returns
+        -------
+        package : `ObservationPackage`
+            The stored package. A `ConflictError` says the package is not a
+            library suggestion. A `PlanRevisionConflictError` says the
+            stored revision is not `expected_revision`.
+        """
+        return self._edit_package(
+            package_id, expected_revision=expected_revision, undismiss=True, source_key=source_key
+        )
+
+    def delete_package(self, package_id: str, *, expected_revision: int | None = None) -> ObservationPackage:
+        """Remove one observation package.
+
+        Parameters
+        ----------
+        package_id : `str`
+            The package to remove.
+        expected_revision : `int`, optional
+            The package revision the caller last read. Leave out to remove
+            whatever is stored.
+
+        Returns
+        -------
+        package : `ObservationPackage`
+            The package as it was when removed. `NotFoundError` says no
+            package has that id. A `PlanRevisionConflictError` says the
+            stored revision is not `expected_revision`.
+        """
+        return self._edit_package(package_id, expected_revision=expected_revision, delete=True)
+
+    def _edit_package(
         self,
         package_id: str,
         *,
@@ -1801,12 +1996,16 @@ class ObservationPlanning:
         source_key: str | None = None,
         expected_revision: int | None = None,
     ) -> ObservationPackage:
-        """Change, reopen, dismiss or delete one observation package.
+        """Apply one change to an observation package.
 
-        Values are checked the same way `create_plan` with ``kind="package"``
-        checks them. A change counts as one write and adds one to the
-        package's revision. A value left out (`None`) is not changed, so
-        this call cannot clear the dither or the altitude limit.
+        The public calls `update_package`, `reopen_package`,
+        `dismiss_package`, `undismiss_package` and `delete_package` each
+        pass one change here.
+
+        Values are checked the same way `create_package` checks them. A
+        change counts as one write and adds one to the package's revision.
+        A value left out (`None`) is not changed, so this call cannot clear
+        the dither or the altitude limit.
 
         A new or changed exposure row starts counting frames from now. A row
         whose frame type, filter, length, gain, offset and binning are the
@@ -1882,7 +2081,7 @@ class ObservationPlanning:
             If the stored revision is not `expected_revision`. Its details
             hold the current revision.
         """
-        from astrometricslib import ConflictError
+        from astrometricslib.exceptions import ConflictError
 
         changes = {
             "exposure_requests": exposure_requests,
@@ -1961,7 +2160,7 @@ class ObservationPlanning:
     def _changed_package(
         self, package: ObservationPackage, changes: dict[str, Any], reopen: bool
     ) -> ObservationPackage:
-        """Apply the plain changes of `edit_package` to a copy of a package.
+        """Apply the plain changes of `update_package` to a copy of a package.
 
         Parameters
         ----------
@@ -2219,115 +2418,132 @@ class ObservationPlanning:
         self,
         session_id: str | None = None,
         *,
-        kind: PlanListKind = "sessions",
-        night_id: str | None = None,
-        status: PackageStatus | str | None = None,
-        target: str | Target | None = None,
+        observing_night_id: str | None = None,
         include: list[str] | None = None,
-        include_dismissed: bool = False,
-        pick: Literal["all", "one"] = "all",
-    ) -> (
-        ObservationSession
-        | list[ObservationSessionSummary]
-        | list[ObservationPackage]
-        | list[SuggestionLogEntry]
-        | ObservationPackage
-        | None
-    ):
-        """Read recorded sessions, observation packages or the suggestion log.
+    ) -> ObservationSession | ObservationSessionWithProgress | None:
+        """Read one recorded observing session, by id or by night.
+
+        Give `session_id` or `observing_night_id`, not both. `query_plans`
+        lists sessions, packages and the suggestion log.
 
         Parameters
         ----------
         session_id : `str`, optional
-            ``kind="sessions"`` only. The session to read.
+            The session to read. `NotFoundError` is raised when no session
+            has that id.
+        observing_night_id : `str`, optional
+            The observing night, such as ``"2026-09-24"``. Gives that
+            night's session, or `None` when the night has none. A night with
+            several old sessions gives the one with the most queue entries,
+            then the newest.
+        include : `list` [`str`], optional
+            ``"progress"`` counts the frames that arrived. The session then
+            comes back as an `ObservationSessionWithProgress` (its
+            `progress` holds, for each entry, the frames requested and
+            captured, flagged and not judged, the entry being imaged now and
+            a typed run state, including "not run" for a night that passed
+            with nothing captured).
+
+        Returns
+        -------
+        session : `ObservationSession` or `ObservationSessionWithProgress`
+            The whole session, or `None` for a night with none.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If neither or both of `session_id` and `observing_night_id`
+            are given, or `include` names an unknown section.
+        """
+        sections = check_include(include, GET_PLAN_SECTIONS)
+        if (session_id is None) == (observing_night_id is None):
+            raise InvalidArgumentError("Give session_id or observing_night_id, not both and not neither.")
+        if session_id is not None:
+            session = self._session(session_id)
+        else:
+            session = self._session_for_night(_night_date(observing_night_id))
+        if session is None:
+            return None
+        session = self._with_checklist_labels(session)
+        if "progress" not in sections:
+            return session
+        return self._with_progress(session)
+
+    def get_package_for_target(self, target: str | Target) -> ObservationPackage | None:
+        """Read the package that stands for a target.
+
+        That is the target's newest planned package, else its newest
+        suggested one that is not dismissed. A complete package is never
+        picked. The target is matched ignoring case, with ``_`` read as a
+        space.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target, by id or as a `Target`.
+
+        Returns
+        -------
+        package : `ObservationPackage` or `None`
+            The package, or `None` when the target has none to pick.
+        """
+        return self._package_for_target(target)
+
+    def query_plans(
+        self,
+        kind: PlanListKind = "sessions",
+        *,
+        include: list[str] | None = None,
+        status: PackageStatus | str | None = None,
+        target: str | Target | None = None,
+        include_dismissed: bool = False,
+    ) -> list[ObservationSessionSummary] | list[ObservationPackage] | list[SuggestionLogEntry]:
+        """List recorded sessions, observation packages or the suggestion log.
+
+        Parameters
+        ----------
         kind : `str`, optional
-            ``"sessions"`` (default): one session when `session_id` or
-            `night_id` is given, otherwise one line per session.
-            ``"packages"``: the package library, newest first, narrowed by
-            `status` and `target`. ``"suggestion_log"``: the suggestion
-            lifecycle log (created, updated, deleted with the cause,
-            dismissed, completed), newest first, narrowed by `target`.
-        night_id : `str`, optional
-            ``kind="sessions"`` only. The observing night, such as
-            ``"2026-09-24"``. Gives that night's session, or `None` when the
-            night has none. A night with several old sessions gives the one
-            with the most queue entries, then the newest.
+            ``"sessions"`` (default): one line per session, newest night
+            first. ``"packages"``: the package library, newest first,
+            narrowed by `status` and `target`. ``"suggestion_log"``: the
+            suggestion lifecycle log (created, updated, deleted with the
+            cause, dismissed, completed), newest first, narrowed by
+            `target`.
+        include : `list` [`str`], optional
+            ``kind="sessions"`` only. ``"progress"`` gives each line's
+            `run_state`.
         status : `PackageStatus` or `str`, optional
             ``kind="packages"`` only. Keep packages with this status.
         target : `str` or `Target`, optional
             ``kind="packages"`` or ``"suggestion_log"``. Keep only this
             target.
-        include : `list` [`str`], optional
-            ``kind="sessions"`` only. ``"progress"`` counts the frames that
-            arrived. One session then comes back as an
-            `ObservationSessionWithProgress` (its `progress` holds, for each
-            entry, the frames requested and captured, flagged and not
-            judged, the entry being imaged now and a typed run state,
-            including "not run" for a night that passed with nothing
-            captured). A list of sessions then has each line's `run_state`.
         include_dismissed : `bool`, optional
             ``kind="packages"`` only. Also list suggestions the user
             dismissed. They are left out by default.
-        pick : `str`, optional
-            ``kind="packages"`` only. ``"all"`` (default) lists the packages.
-            ``"one"`` needs `target` and gives that target's package: the
-            newest planned one, else the newest suggested one that is not
-            dismissed, else `None`. Complete packages are never picked. The
-            target is matched like the list does (ignoring case, with ``_``
-            read as a space).
 
         Returns
         -------
-        plan : `ObservationSession`, `list` or `None`
-            A whole session (or `None` for a night with none), one line per
-            session newest night first, the packages newest first, or the
-            log lines newest first.
-
-        Raises
-        ------
-        InvalidArgumentError
-            If `kind`, `status` or `include` is unknown, an argument the kind
-            does not use is given, or both `session_id` and `night_id` are
-            given.
+        plans : `list`
+            The session lines, the packages or the log lines. An
+            `InvalidArgumentError` says `kind`, `status` or `include` is
+            unknown or an argument the kind does not use is given.
         """
-        check_choice("kind", kind, tuple(GET_PLAN_ARGUMENTS))
+        check_choice("kind", kind, tuple(QUERY_PLANS_ARGUMENTS))
         reject_unused_arguments(
             kind,
-            GET_PLAN_ARGUMENTS,
+            QUERY_PLANS_ARGUMENTS,
             {
-                "session_id": session_id is not None,
-                "night_id": night_id is not None,
+                "include": include is not None,
                 "status": status is not None,
                 "target": target is not None,
-                "include": include is not None,
                 "include_dismissed": include_dismissed,
-                "pick": pick != "all",
             },
         )
         sections = check_include(include, GET_PLAN_SECTIONS)
-        check_choice("pick", pick, ("all", "one"))
-        if kind == "packages" and pick == "one":
-            if target is None:
-                raise InvalidArgumentError("pick='one' needs a target.")
-            return self._package_for_target(target)
         if kind == "packages":
             return self._list_packages(status, target, include_dismissed)
         if kind == "suggestion_log":
             return self._suggestion_log(target)
-        if session_id is not None and night_id is not None:
-            raise InvalidArgumentError("Give session_id or night_id, not both.")
-        session = None
-        if session_id is not None:
-            session = self._session(session_id)
-        elif night_id is not None:
-            session = self._session_for_night(_night_date(night_id))
-        if session_id is not None or night_id is not None:
-            if session is None:
-                return None
-            session = self._with_checklist_labels(session)
-            if "progress" not in sections:
-                return session
-            return self._with_progress(session)
         reader = TargetFrameReader(self._astrometrics) if "progress" in sections else None
         summaries = []
         for recorded in self._butler.get_all("observation_session"):
@@ -2488,11 +2704,76 @@ class ObservationPlanning:
         packages.sort(key=lambda package: package.created_at, reverse=True)
         return packages
 
+    # -- Depth goal --------------------------------------------------------
+
+    def get_depth_goal(self, target: str | Target) -> DepthGoalStatus:
+        """Say how close a target's image is to its chosen depth level.
+
+        The depth levels are Quick look, Good (the default) and Deep. Each is a
+        depth in magnitudes that depends on the kind of object (register row
+        WAY-D94). The status gives the chosen level, the newest library
+        stack's depth, the level that depth reaches, and the time to reach the
+        chosen level, forecast with the "take N more" machinery.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target, by id or as a `Target`.
+
+        Returns
+        -------
+        status : `DepthGoalStatus`
+            The status, with a sentence for a novice in ``message``.
+        """
+        from wayfindinglib.tasks.planning_tasks.depth_goal_tasks import build_depth_goal_status
+        from wayfindinglib.tasks.planning_tasks.target_report_tasks import build_target_dataset_report
+
+        resolved = self._target(target)
+        return build_depth_goal_status(
+            resolved.id,
+            astrometrics=self._astrometrics,
+            butler=self._butler,
+            report_for_noise_ratio=lambda ratio: build_target_dataset_report(
+                resolved,
+                astrometrics=self._astrometrics,
+                butler=self._butler,
+                config=self._config,
+                target_noise_ratio=ratio,
+            ),
+        )
+
+    def set_depth_goal(self, target: str | Target, level: DepthLevel | str) -> DepthGoalStatus:
+        """Choose the depth level of a target.
+
+        The level is kept in wayfindinglib's own database, not in the
+        configuration file. A level that is not one of the three raises
+        `InvalidArgumentError`.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target, by id or as a `Target`.
+        level : `DepthLevel` or `str`
+            ``"quick_look"``, ``"good"`` or ``"deep"``.
+
+        Returns
+        -------
+        status : `DepthGoalStatus`
+            The status for the new level.
+
+        """
+        from wayfindinglib.tasks.planning_tasks.depth_goal_tasks import coerce_level, store_chosen_level
+
+        chosen = coerce_level(level)
+        resolved = self._target(target)
+        store_chosen_level(self._butler, resolved.id, chosen)
+        return self.get_depth_goal(resolved)
+
     # -- Suggestions -------------------------------------------------------
 
     @background_job("planning", grace_period_seconds=20.0)
     def refresh_suggestions(
-        self, target_ids: list[str] | None = None, register_job: bool = True
+        self, target: str | list[str] | None = None, register_job: bool = True
     ) -> PackageChange:
         """Update suggested packages, the checklist and finished packages.
 
@@ -2515,7 +2796,7 @@ class ObservationPlanning:
           tonight's ranking become suggested packages with no rows, tied to
           tonight, labeled a design estimate. They are deleted when the
           night ends or the target falls out of the top. The ranking is read
-          only when `target_ids` is `None`.
+          only when `target` is `None`.
         * **Completion.** A planned package whose light rows are all
           captured and judged becomes complete. A complete package that is
           no longer met (frames were set aside) becomes planned again.
@@ -2525,14 +2806,15 @@ class ObservationPlanning:
         suggestion stays hidden until its evidence changes. Every write
         checks the revision it read, so an edit made at the same time is
         never overwritten (a lost race is read again, up to three times).
-        Every change is written to the suggestion log (see `get_plan` with
+        Every change is written to the suggestion log (see `query_plans` with
         ``kind="suggestion_log"``).
 
         Parameters
         ----------
-        target_ids : `list` [`str`], optional
-            Refresh only these targets (after new frames were measured).
-            `None` refreshes every library target and the ranking.
+        target : `str` or `list` [`str`], optional
+            One target id, or a list of ids, to refresh (after new frames
+            were measured). `None` refreshes every library target and the
+            ranking.
         register_job : `bool`, optional
             Record the run as a job in the job history, with its log.
             Defaults to `True`.
@@ -2549,7 +2831,53 @@ class ObservationPlanning:
             job_type="planning",
             target_id="package_suggestions",
         ):
-            return self._refresh_suggestions(target_ids)
+            return self._refresh_suggestions([target] if isinstance(target, str) else target)
+
+    @staticmethod
+    def _refresh_rule_package_of(
+        tasks: Any,
+        target_id: str,
+        reading: Any,
+        noise: Any,
+        depth_met: bool | None,
+        held_keys: Callable[[], set[str]],
+        writer: Any,
+        packages: list[ObservationPackage],
+    ) -> None:
+        """Refresh one target's suggested package of rule rows.
+
+        Parameters
+        ----------
+        tasks : `module`
+            The suggestion tasks module.
+        target_id : `str`
+            The target.
+        reading : `RuleReading`
+            What the target's statements ask for.
+        noise : `TargetNoise` or `None`
+            The target's noise.
+        depth_met : `bool` or `None`
+            Whether the target reached its chosen depth level, or `None`
+            when it has no depth goal.
+        held_keys : `Callable`
+            Gives the source keys no suggestion may take now.
+        writer : `PackageWriter`
+            Writes with revision checks and logs.
+        packages : `list` [`ObservationPackage`]
+            Every package, freshly read.
+        """
+        from wayfindinglib.analytics.package_suggestions import DEFAULT_NOISE_GOAL
+
+        tasks.refresh_rule_package(
+            writer,
+            packages,
+            target_id,
+            reading,
+            noise,
+            DEFAULT_NOISE_GOAL,
+            held_keys(),
+            depth_goal_met=depth_met,
+        )
 
     def _refresh_suggestions(self, target_ids: list[str] | None) -> PackageChange:
         """Run the suggestion refresh. See `refresh_suggestions`.
@@ -2566,14 +2894,15 @@ class ObservationPlanning:
         """
         import sqlite3
 
-        from astrometricslib import observing_night_id
+        from astrometricslib.reports import observing_night_id
         from wayfindinglib.analytics.package_suggestions import (
-            DEFAULT_NOISE_GOAL,
             RANKING_SUGGESTIONS_PER_USE,
             read_target_noise,
         )
         from wayfindinglib.analytics.result_quality.all_rules import ALL_RULES
+        from wayfindinglib.tasks.planning_tasks import advisory_tasks
         from wayfindinglib.tasks.planning_tasks import suggestion_tasks as tasks
+        from wayfindinglib.tasks.planning_tasks.depth_goal_tasks import depth_goal_met
 
         now = _utc_now()
         change = PackageChange(as_of=now)
@@ -2653,7 +2982,13 @@ class ObservationPlanning:
             if exposure_request_from_statement is None:
                 break
             try:
-                report = self.get_advisory(kind="quality", target=target_id)
+                report = advisory_tasks.build_advisory(
+                    "quality",
+                    target_id,
+                    astrometrics=self._astrometrics,
+                    butler=self._butler,
+                    config=self._config,
+                )
             except (AstrometricsError, OSError, sqlite3.Error, ValueError) as error:
                 logger.warning("Suggestions: no report for %s: %s", target_id, error)
                 change.notes.append(
@@ -2665,11 +3000,16 @@ class ObservationPlanning:
             )
             checklist_statements.extend(reading.checklist)
             noise = noise_for(target_id)
+            depth_met = depth_goal_met(self._astrometrics, self._butler, target_id)
             retrying(
-                lambda writer, packages, target_id=target_id, reading=reading, noise=noise: (
-                    tasks.refresh_rule_package(
-                        writer, packages, target_id, reading, noise, DEFAULT_NOISE_GOAL, held_keys()
-                    )
+                partial(
+                    self._refresh_rule_package_of,
+                    tasks,
+                    target_id,
+                    reading,
+                    noise,
+                    depth_met,
+                    held_keys,
                 ),
                 target_id,
             )
@@ -2677,7 +3017,7 @@ class ObservationPlanning:
         ranking = None
         if target_ids is None:
             try:
-                ranking = self.get_advisory(kind="tonight", at=now)
+                ranking = self.get_tonight_advice(at=now)
             except (AstrometricsError, OSError, sqlite3.Error, ValueError) as error:
                 logger.warning("Suggestions: no ranking: %s", error)
                 change.notes.append(
@@ -2732,7 +3072,7 @@ class ObservationPlanning:
             return
         for _attempt in range(3):
             try:
-                result = self.edit_queue(session.id, add_checklist=items)
+                result = self.add_checklist_items(session.id, items)
             except PlanRevisionConflictError:
                 continue
             change.checklist_item_ids.extend(
@@ -2746,11 +3086,11 @@ class ObservationPlanning:
     # -- Deep-star catalog -------------------------------------------------
 
     @background_job("planning", grace_period_seconds=20.0)
-    def deep_catalog_status(
+    def get_deep_catalog_status(
         self,
         include: list[str] | None = None,
         healpix_level: int | None = None,
-        magnitude_limit: float | None = None,
+        magnitude_max: float | None = None,
         sample_count: int | None = None,
         query_timeout_seconds: float | None = None,
         request_delay_seconds: float | None = None,
@@ -2770,7 +3110,7 @@ class ObservationPlanning:
             ``"estimate"`` adds the size estimate.
         healpix_level : `int`, optional
             How finely the estimate cuts the sky. Estimate only.
-        magnitude_limit : `float`, optional
+        magnitude_max : `float`, optional
             Count only stars brighter than this Gaia G magnitude. Estimate
             only.
         sample_count : `int`, optional
@@ -2798,7 +3138,7 @@ class ObservationPlanning:
         sections = check_include(include, DEEP_CATALOG_SECTIONS)
         settings = {
             "healpix_level": healpix_level,
-            "magnitude_limit": magnitude_limit,
+            "magnitude_limit": magnitude_max,
             "sample_count": sample_count,
             "query_timeout_seconds": query_timeout_seconds,
             "request_delay_seconds": request_delay_seconds,
@@ -2825,7 +3165,7 @@ class ObservationPlanning:
             status.estimate = DeepCatalogEstimate.model_validate(estimate)
         return status
 
-    def build_deep_star_catalog(self, **kwargs: Any) -> dict[str, Any]:
+    def build_deep_star_catalog(self, **kwargs: Any) -> DeepCatalogBuildReport:
         """Download the deep-star catalog the Planetarium draws from.
 
         A thin pass-through to
@@ -2835,12 +3175,13 @@ class ObservationPlanning:
 
         Returns
         -------
-        report : `dict`
-            The download report. See
-            `deep_star_catalog_builder.build_deep_star_catalog`.
+        report : `DeepCatalogBuildReport`
+            What the download did: the chunks asked for, downloaded and
+            failed, the stars added, the time taken and whether it stopped
+            early.
         """
         from wayfindinglib.drivers.catalog.deep_star_catalog_builder import (
             build_deep_star_catalog as _build_deep_star_catalog,
         )
 
-        return _build_deep_star_catalog(self._config, **kwargs)
+        return DeepCatalogBuildReport.model_validate(_build_deep_star_catalog(self._config, **kwargs))

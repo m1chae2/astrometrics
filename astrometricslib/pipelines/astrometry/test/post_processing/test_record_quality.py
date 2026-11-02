@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 from pytest_mock import MockerFixture
 
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.foundation.errors import StorageError
 from astrometricslib.models.quality.gate_result import GateStatus, failed_gate, passed_gate
 from astrometricslib.models.quality.limit import LimitTier
@@ -291,9 +291,10 @@ def _declared_names() -> set[str]:
     Returns
     -------
     names : `set` [`str`]
-        The declared metric names.
+        The declared metric names, less the notice metric, whose row is
+        stored only when the condition occurs (see `test_notices.py`).
     """
-    return {spec.name for spec in ASTROMETRY_METRICS} - _FRAME_TARGET_METRICS
+    return {spec.name for spec in ASTROMETRY_METRICS if ".notice_" not in spec.name} - _FRAME_TARGET_METRICS
 
 
 def _context(job_id: str | None = "job-1") -> PipelineRunContext:

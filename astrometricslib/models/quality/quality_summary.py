@@ -14,9 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrometricslib.models.applied_camera_profile import AppliedCameraProfile
 from astrometricslib.models.quality.gaia_xp_comparison import GaiaXpRunSummary
-from astrometricslib.models.quality.gate_result import GateResult, GateStatus
+from astrometricslib.models.quality.gate_result import GateResult
 from astrometricslib.models.quality.spectroscopy_quality import StageQualityRollup
-from astrometricslib.models.quality.stacking_quality import StackingInputQuality, StackingOutputQuality
 from astrometricslib.models.wavelength_scale import WavelengthScaleSummary
 
 
@@ -76,6 +75,12 @@ class ExposureGroupSummary(BaseModel):
     # abs(bright end ratio - mid-range gain). Divided by the gain, as a
     # fraction (0.05 is 5%). `None` when either ratio could not be measured.
     gain_disagreement: float | None = Field(default=None, alias="gainDisagreement")
+    # The gain the final combination applied to this group (see
+    # `combine_exposure_group_images`): 1 for the reference group, `None` for a
+    # group left out of the combination and for a group whose gain the
+    # combination could not measure. It is measured again inside the combine,
+    # over the groups kept, so it can differ from `gain_mid_range`. No unit.
+    gain_applied: float | None = Field(default=None, alias="gainApplied")
     # True when `gain_disagreement` is above the configured tolerance
     # (`exposure_group_gain_tolerance`). The group is then left out of the
     # combined image and `left_out_reason` names both ratios.
@@ -156,7 +161,7 @@ class PipelineQualitySummaryBase(BaseModel):
     """Basic information recorded by every processing pipeline.
 
     This includes things like the pipeline's name, the target being processed,
-    and any flags indicating potential problems.
+    and the result of each quality check (gate).
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -182,13 +187,11 @@ class PipelineQualitySummaryBase(BaseModel):
     # camera profiles existed, or when the run has no frames to name a camera.
     camera_profile: AppliedCameraProfile | None = Field(default=None, alias="cameraProfile")
     quality_processing_applied: bool = Field(default=True, alias="qualityProcessingApplied")
-    flagged: bool = Field(default=False, alias="flagged")
-    flag_reasons: list[str] = Field(default_factory=list, alias="flagReasons")
-    # One record per quality check that this pipeline has moved onto the gate
-    # record (see `gate_result.py`). Unlike `flag_reasons`, it also shows
-    # the checks that passed and the ones that could not run. Empty on a
-    # summary saved before gates were recorded, and for checks a pipeline
-    # has not yet moved over, which still report only through `flag_reasons`.
+    # One record per quality check of this pipeline (see `gate_result.py`),
+    # including the checks that passed and the ones that could not run. A
+    # failed gate, and each notice, is also stored as a warning row that
+    # `Jobs.query(job_id=..., detail="warnings")` lists. Empty on a summary
+    # saved before gates were recorded.
     gates: list[GateResult] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="createdAt")
     # The id of the IVOA provenance Activity (see
@@ -206,13 +209,10 @@ class PipelineQualitySummaryBase(BaseModel):
     upstream_entity_id: str | None = Field(default=None, alias="upstreamEntityId")
 
     def record_gate(self, result: GateResult) -> None:
-        """Add one gate's result, keeping `flagged` and `flag_reasons` in step.
+        """Add one gate's result to the summary.
 
-        A failed gate flags the run and adds its sentence to `flag_reasons`
-        (once, even if the same sentence is already there). A passed gate
-        and a gate that was not checked are only recorded; they never flag
-        the run. A second result with the same name replaces the first, so
-        re-running a check does not leave two answers.
+        A second result with the same name replaces the first, so re-running
+        a check does not leave two answers.
 
         Parameters
         ----------
@@ -221,10 +221,6 @@ class PipelineQualitySummaryBase(BaseModel):
         """
         self.gates = [existing for existing in self.gates if existing.name != result.name]
         self.gates.append(result)
-        if result.status is GateStatus.FAILED:
-            self.flagged = True
-            if result.detail and result.detail not in self.flag_reasons:
-                self.flag_reasons.append(result.detail)
 
     def gate(self, name: str) -> GateResult | None:
         """Look up a recorded gate by name.
@@ -263,14 +259,31 @@ class StackingPipelineQualityMetrics(BaseModel):
     frames_submitted: int = Field(alias="framesSubmitted")
     frames_stacked: int = Field(alias="framesStacked")
     excluded_frames: list[ExcludedFrame] = Field(default_factory=list, alias="excludedFrames")
+    # How many frames were left after the gain, frame-quality and background
+    # checks, so how many the stacking engine was given. `None` on a summary
+    # saved before it was recorded.
+    frames_accepted: int | None = Field(default=None, alias="framesAccepted")
+    # Frames set aside because their camera gain differed from the rest, and
+    # because their sky background was at a different level from the rest
+    # (clouds, twilight, a lamp).
+    frames_excluded_for_gain: int = Field(default=0, alias="framesExcludedForGain")
+    frames_excluded_for_background: int = Field(default=0, alias="framesExcludedForBackground")
+    # Frames with clouds or trailed stars that the stage moved into the
+    # `_excluded` folder before stacking.
+    frames_quarantined: int = Field(default=0, alias="framesQuarantined")
 
     rejected_pixel_fraction: float | None = Field(default=None, alias="rejectedPixelFraction")
-    rejected_fraction_flagged: bool = Field(default=False, alias="rejectedFractionFlagged")
 
     background_split_detected: bool = Field(default=False, alias="backgroundSplitDetected")
     background_split_detail: str | None = Field(default=None, alias="backgroundSplitDetail")
 
     calibration_mismatch_flags: list[str] = Field(default_factory=list, alias="calibrationMismatchFlags")
+
+    # How many different frames (copies counted once) the master dark and the
+    # master bias were built from. `None` when the stack used none of that
+    # kind, or the frames' numbers were not available.
+    dark_unique_frame_count: int | None = Field(default=None, alias="darkUniqueFrameCount")
+    bias_unique_frame_count: int | None = Field(default=None, alias="biasUniqueFrameCount")
 
     # The flat frames the stack was calibrated with. The master flat's noise
     # is copied into every light frame, so a set with few or faint frames
@@ -285,34 +298,26 @@ class StackingPipelineQualityMetrics(BaseModel):
     flat_calibration_issues: list[str] = Field(default_factory=list, alias="flatCalibrationIssues")
 
     saturated_pixel_fraction: float | None = Field(default=None, alias="saturatedPixelFraction")
-    saturation_flagged: bool = Field(default=False, alias="saturationFlagged")
 
     # One entry per exposure length in the stack (a single entry when every
     # frame has the same length).
     exposure_groups: list[ExposureGroupSummary] = Field(default_factory=list, alias="exposureGroups")
-    # The exposure length, in seconds, that would keep the brightest star
-    # below the camera's ceiling; `None` when it cannot be worked out (for
-    # example a star clipped too heavily to estimate).
-    recommended_exposure_seconds: float | None = Field(default=None, alias="recommendedExposureSeconds")
 
     # The share of the stack's pixels that are exactly zero. A stack that is
     # mostly zero has been over-subtracted (its calibration removed more than
     # the sky), and is blank.
     zero_pixel_fraction: float | None = Field(default=None, alias="zeroPixelFraction")
-    zero_fraction_flagged: bool = Field(default=False, alias="zeroFractionFlagged")
     # Siril warns when calibration leaves a large share of a frame below zero;
     # this is the worst percentage it reported, or `None` if it did not warn.
     negative_pixel_max_percent: int | None = Field(default=None, alias="negativePixelMaxPercent")
-    negative_pixels_flagged: bool = Field(default=False, alias="negativePixelsFlagged")
 
     # Standard-imaging-only.
     stacked_fwhm_px: float | None = Field(default=None, alias="stackedFwhmPx")
     median_input_fwhm_px: float | None = Field(default=None, alias="medianInputFwhmPx")
     # The star width the stack should have given its input frames: the root
-    # mean square of a sample of their widths. The degradation flag compares
+    # mean square of a sample of their widths. The sharpness gate compares
     # the stack with this, not with the median.
     expected_stack_fwhm_px: float | None = Field(default=None, alias="expectedStackFwhmPx")
-    fwhm_degraded: bool = Field(default=False, alias="fwhmDegraded")
 
     # Spectral-only.
     spectral_registration_flags: list[ExcludedFrame] = Field(
@@ -323,10 +328,9 @@ class StackingPipelineQualityMetrics(BaseModel):
     # when its three per-frame lists do not line up.
     spectral_registration_checked: bool = Field(default=False, alias="spectralRegistrationChecked")
 
-    # Technical details about the stacking run itself, such as whether
-    # the process timed out or if color-conversion (debayering) was applied.
+    # Technical details about the stacking run itself, such as how long it
+    # took or if color-conversion (debayering) was applied.
     stacking_duration_seconds: float | None = Field(default=None, alias="stackingDurationSeconds")
-    timed_out: bool = Field(default=False, alias="timedOut")
     debayer_applied: bool | None = Field(default=None, alias="debayerApplied")
     # The program that did the pixel work (calibration, registration and
     # combination) and its version, so a stack can be traced to the tool that
@@ -351,11 +355,46 @@ class StackQualitySummary(PipelineQualitySummaryBase):
     pipeline_name: str = Field(default="stacking", alias="pipelineName")
     pipeline_version: str = Field(default=STACKING_PIPELINE_VERSION, alias="pipelineVersion")
     stacking_metrics: StackingPipelineQualityMetrics = Field(alias="stackingMetrics")
-    # The same judgement split in two: was the input sound, and did the
-    # stack come out well. Both are `None` on a summary saved before they
-    # existed.
-    input_quality: StackingInputQuality | None = Field(default=None, alias="inputQuality")
-    output_quality: StackingOutputQuality | None = Field(default=None, alias="outputQuality")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _read_counts_from_the_older_input_quality(cls, data: object) -> object:
+        """Lift the frame counts of an older summary's `inputQuality` block.
+
+        Summaries saved before `inputQuality` was removed kept these counts
+        there. They now live in `stackingMetrics`, so a stored summary keeps
+        its numbers. The block's flag fields, and the `outputQuality` block,
+        are ignored.
+
+        Parameters
+        ----------
+        data : `object`
+            The raw value being validated.
+
+        Returns
+        -------
+        data : `object`
+            The same value, with the counts copied into ``stackingMetrics``
+            where it does not already hold them.
+        """
+        if not isinstance(data, dict) or not isinstance(data.get("inputQuality"), dict):
+            return data
+        metrics = data.get("stackingMetrics")
+        if not isinstance(metrics, dict):
+            return data
+        older = data["inputQuality"]
+        lifted = dict(metrics)
+        for key in (
+            "framesAccepted",
+            "framesExcludedForGain",
+            "framesExcludedForBackground",
+            "framesQuarantined",
+            "darkUniqueFrameCount",
+            "biasUniqueFrameCount",
+        ):
+            if key in older and key not in lifted:
+                lifted[key] = older[key]
+        return {**data, "stackingMetrics": lifted}
 
 
 # ---------------------------------------------------------------------------
@@ -597,33 +636,7 @@ class PhotometryQualitySummary(PipelineQualitySummaryBase):
 
 # Bumped whenever SpectroscopyPipelineQualityMetrics's shape changes
 # meaningfully.
-SPECTROSCOPY_PIPELINE_VERSION = "1.6.0"
-
-
-class SpectralClassificationConcern(BaseModel):
-    """One star whose self-determined spectral type shouldn't be trusted as-is.
-
-    Names exactly which stars a spectroscopy run's own classification is
-    shaky for, and why, rather than only reporting how many -- so a user
-    building a personal catalog from self-determined types knows which
-    entries to double-check instead of taking every one at face value.
-    """
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    star_id: str = Field(alias="starId")
-    # "poor_match", "class_ambiguous", or both joined by a comma -- see
-    # assess_output_quality.is_classification_poor_match and
-    # .is_classification_class_ambiguous for what each means. A star that is
-    # ambiguous only between neighbouring subtypes is not listed.
-    reason: str = Field(alias="reason")
-    spectral_type: str = Field(alias="spectralType")
-    # The best reference's relative RMS (lower is closer). Not a probability.
-    classification_rms: float | None = Field(default=None, alias="classificationRms")
-    # The RMS of the best reference of a different spectral class letter
-    # minus the best RMS, in relative RMS units; `None` when no other class
-    # was compared. Not a probability.
-    rms_gap_to_next_class: float | None = Field(default=None, alias="rmsGapToNextClass")
+SPECTROSCOPY_PIPELINE_VERSION = "1.7.0"
 
 
 class SpectroscopyPipelineQualityMetrics(StarIdentificationMetrics):
@@ -649,12 +662,33 @@ class SpectroscopyPipelineQualityMetrics(StarIdentificationMetrics):
     median_trail_width_px: float | None = Field(default=None, alias="medianTrailWidthPx")
     # How many classified stars had a best match above `NO_GOOD_MATCH_RMS`, or
     # a gap to the best reference of another spectral class below
-    # `AMBIGUOUS_RMS_GAP` -- see SpectralClassificationConcern.
+    # `AMBIGUOUS_RMS_GAP`. Each star's own match number and gap are on the
+    # star (`self_determined_spectral_type_rms`, `rms_gap_to_next_class`).
     poor_match_classification_count: int = Field(default=0, alias="poorMatchClassificationCount")
     ambiguous_classification_count: int = Field(default=0, alias="ambiguousClassificationCount")
-    flagged_spectral_classifications: list[SpectralClassificationConcern] = Field(
-        default_factory=list, alias="flaggedSpectralClassifications"
-    )
+    # How many detected stars the run left out before extraction: stars with
+    # no part of their trail on the image, and stars with no catalog identity
+    # (which are dropped at save anyway). A summary saved before these were
+    # recorded reads 0.
+    skipped_no_trail_star_count: int = Field(default=0, alias="skippedNoTrailStarCount")
+    skipped_unidentified_star_count: int = Field(default=0, alias="skippedUnidentifiedStarCount")
+    # How many extracted spectra were below the signal-to-noise limit for
+    # absorption-feature detection and classification (see
+    # `MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE`). Those stars keep their
+    # spectrum and their emission-line test and get no absorption-feature
+    # detection or classification. The single-
+    # image run counts them; a summary saved before this was recorded reads 0.
+    below_feature_limit_star_count: int = Field(default=0, alias="belowFeatureLimitStarCount")
+    # How many stars could not be compared with Gaia XP because the download of
+    # their XP spectrum failed (a star with no XP spectrum is not counted).
+    # Their spectra are otherwise unaffected. The single-image run counts them;
+    # a summary saved before this was recorded reads 0.
+    gaia_xp_download_failed_star_count: int = Field(default=0, alias="gaiaXpDownloadFailedStarCount")
+    # How many stars had no catalog reddening because the Gaia lookup failed
+    # (a star Gaia holds no reddening for is not counted). Those stars were
+    # classified as observed. The single-image run counts them; a summary
+    # saved before this was recorded reads 0.
+    reddening_lookup_failed_star_count: int = Field(default=0, alias="reddeningLookupFailedStarCount")
     # How each quality checkpoint went across the run's spectra, in stage
     # order: for each of the four stages, how many spectra were checked, how
     # many had a failed metric, and the median of each numeric metric (see

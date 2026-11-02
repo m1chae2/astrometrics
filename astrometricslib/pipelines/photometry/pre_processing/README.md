@@ -97,7 +97,7 @@ The error does not change the flux. `measure_aperture_photometry` returns both, 
 
 `detector_noise.py` picks the gain (electrons per ADU) and read noise (electrons):
 
-1. The camera's profile: the `sensor_noise` entry in `models/camera_profile.py` for the frame's own gain setting, offset and binning. The setting comes from the header (`ISOSPEED` or `GAIN`, `OFFSET` or `BLKLEVEL`, `XBINNING` and `YBINNING`) or is passed in from a frame record. Each value carries its source (datasheet, measured or assumed). Only an exact match counts. A frame at any other setting gets nothing from the profile, and `DetectorNoise.profile_gap_reason` says why. A profile still holding the old single gain and read noise is treated the same way until it is migrated (`scripts/migrate_camera_profiles.py`).
+1. The camera's profile: the `sensor_noise` entry in `models/camera_profile.py` for the frame's own gain setting, offset and binning. The setting comes from the header (`ISOSPEED` or `GAIN`, `OFFSET` or `BLKLEVEL`, `XBINNING` and `YBINNING`) or is passed in from a frame record. Each value carries its source (datasheet, measured or assumed). An exact match counts. When the caller passes `clipped_at_zero=False`, an entry of the same gain and binning at another offset may stand in (see `models/README.md`); by default no caller does, so a frame at any other setting gets nothing from the profile, and `DetectorNoise.profile_gap_reason` says why. A profile still holding the old single gain and read noise is treated the same way until it is migrated (`scripts/migrate_camera_profiles.py`).
 2. The frame's `EGAIN` card (electrons per ADU) and `RDNOISE` card (electrons).
 3. An assumption: 1 electron per ADU and no read noise.
 
@@ -127,14 +127,14 @@ Once a star's full set of measurements for a session is ready, `assess_input_qua
 - How often this star's measurement was saturated.
 - How far the frame-to-frame drift got, at its worst, across every frame this star was measured in.
 
-From these numbers, the report also flags two possible problems: coverage that is too low to trust, and drift large enough that the telescope's tracking, rather than the star's own brightness, is the more likely explanation for anything unusual in the data. This report travels with the star's brightness history into the later processing and post-processing steps.
+The report holds numbers only. It sets no yes/no flag for low coverage or unstable tracking. Any reading of the numbers as good or bad is done later, in wayfindinglib. This report travels with the star's brightness history into the later processing and post-processing steps.
 
 ## Settings
 
 - **Alignment anchors.** The limits are 20 times the sky noise, skipping the brightest 5%, 50 anchors and a minimum of 10 (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)).
 - **Shift and rotation fit.** The minimum of 5 anchors for a shift, the 7% spread for a rotation fit, the 4-pixel second-try reach and the three repeats are tuned values (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)).
 - **Aperture and re-centering.** The aperture radius of 4 pixels, the 11-pixel re-centering box, the three re-centering passes and the largest move of 1.5 pixels (`MAX_CENTROID_SHIFT_PX`) are tuned values (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)).
-- **Input-quality limits.** `LOW_COVERAGE_THRESHOLD` is 0.5 and `UNSTABLE_TRACKING_DRIFT_PX` is 20 pixels (design estimates; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)).
+- **Input-quality limits.** `UNSTABLE_TRACKING_DRIFT_PX` is 20 pixels. The `registration_drift` gate compares the drift with it (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)).
 - **Camera numbers and times.** The gain and read noise come from the camera profile or the frame header (see [Flux uncertainties](#flux-uncertainties)). `latitude`, `longitude` and `elevation` in `[Observatory.Location]` set the observer for BJD_TDB.
 
 ## Quality metrics
@@ -145,13 +145,11 @@ The assessment builds one record per star.
 | --- | --- | --- | --- | --- |
 | `frames_measured` | frames | None | High: more frames gave a usable measurement for this star | `coverage_fraction` |
 | `frames_available` | frames | None | The number of frames in the session | `coverage_fraction` |
-| `coverage_fraction` | none (0 to 1) | At least 0.5 (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)) | Low: the brightness history has many gaps | `is_low_coverage` |
+| `coverage_fraction` | none (0 to 1) | None | Low: the brightness history has many gaps | Reviewers |
 | `saturated_fraction` | none (0 to 1) | None | High: more measurements were too bright to measure accurately | Reviewers |
-| `max_registration_drift_px` | pixels | At most 20 (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)) | High: tracking, not the star, is the likely cause of anything unusual | `is_tracking_unstable`; `registration_drift` gate |
-| `is_low_coverage` | flag | Set when `coverage_fraction` is below 0.5 | Set: fewer than half of the session's frames measured this star | Reviewers |
-| `is_tracking_unstable` | flag | Set when the drift is above 20 pixels | Set: tracking is the likely explanation for anything unusual | Reviewers |
+| `max_registration_drift_px` | pixels | At most 20 (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)) | High: tracking, not the star, is the likely cause of anything unusual | `registration_drift` gate |
 
-A reviewer can use these values to tell a thin, gap-filled or poorly tracked brightness history apart from a solid one, before trusting what the later stages conclude about that star. The wide centroid search box reaches 40 pixels from a star's expected position, so 20 pixels flags the problem well before stars start to fall outside it.
+A reviewer can use these values to tell a thin, gap-filled or poorly tracked brightness history apart from a solid one, before trusting what the later stages conclude about that star. The wide centroid search box reaches 40 pixels from a star's expected position, so the gate's 20-pixel limit trips well before stars start to fall outside it.
 
 ## Files
 

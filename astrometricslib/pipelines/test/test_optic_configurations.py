@@ -18,7 +18,6 @@ from astrometricslib.pipelines.shared.frame_grouping import (
     frame_configuration_key,
     frames_missing_focal_length,
     group_frames_by_configuration,
-    select_frames_for_configuration,
 )
 
 
@@ -104,19 +103,6 @@ def test_unassignable_frames_are_reported_not_hidden() -> None:
 
     assert sum(len(group) for group in grouped.values()) == 1
     assert len(frames_missing_focal_length(_Target(frames))) == 1
-
-
-def test_selecting_one_configuration_excludes_the_other() -> None:
-    """A stack must receive one optic's frames and no others."""
-    frames = [
-        _Frame(focal_length_mm=300.0, path="/a.fits"),
-        _Frame(focal_length_mm=405.0, path="/b.fits"),
-        _Frame(focal_length_mm=300.0, path="/c.fits"),
-    ]
-
-    selected = select_frames_for_configuration(_Target(frames), "Nikon D5300@300mm")
-
-    assert [frame.path for frame in selected] == ["/a.fits", "/c.fits"]
 
 
 def test_a_single_optic_target_forms_one_group() -> None:

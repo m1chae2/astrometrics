@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
-from astrometricslib.drivers.fits_access import write_image
+from astrometricslib._internal.drivers.fits_access import write_image
 from astrometricslib.pipelines.stacking.post_processing.stack_comparison import (
     combined_stack_excluded_mask,
 )

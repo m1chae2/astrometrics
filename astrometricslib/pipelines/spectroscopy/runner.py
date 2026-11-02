@@ -64,6 +64,28 @@ REGISTRATION_REFERENCE_FIELD_RADIUS_DEG = 1.5
 _CATALOG_SLICE_SIZE = 2000
 
 
+def spectrum_star_limit(options: dict[str, Any]) -> int | None:
+    """Return how many of the brightest stars a run analyzes.
+
+    There is no default cap. The user removed the top-10 default on
+    2026-11-01, together with the cap on how many neighbors the wing fit
+    gives their own position shift (`MAXIMUM_FITTED_NEIGHBORS`), so every
+    usable identified star is processed unless the caller sets a limit.
+
+    Parameters
+    ----------
+    options : `dict` [`str`, `Any`]
+        The stage's options. ``limit`` caps the count; left out or `None`,
+        every candidate star is processed.
+
+    Returns
+    -------
+    limit : `int` or `None`
+        The caller's cap, or `None` for no cap.
+    """
+    return options.get("limit")
+
+
 def _recover_extended_source_hint(
     astrometry: Any,
     context: Any,
@@ -152,7 +174,7 @@ def _field_center_for_registration(
     """
     if hint_ra is not None and hint_dec is not None:
         return float(hint_ra), float(hint_dec)
-    from astrometricslib.drivers.fits_access import read_header
+    from astrometricslib._internal.drivers.fits_access import read_header
 
     try:
         header = read_header(stack_path)
@@ -409,15 +431,17 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         reference_stellar_objects = _registration_reference_candidates(target, catalog_access, field_center)
         if reference_stellar_objects:
             from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration import (
-                identify_spectral_stars_via_registration,
+                identify_spectral_stars_via_registered_sky_map,
                 identify_spectral_stars_via_solution,
+                set_sky_positions_of_unnamed_detections,
+                solution_shifted_onto_spectral_image,
             )
 
             # Prefer the plate solution of the target's solved standard
             # stack: it places every catalog star, saturated ones included,
-            # by sky position. Matching stored pixel positions by geometry
-            # is the fallback, for a target with no solved stack or whose
-            # star fields do not agree on one shift.
+            # by sky position. The fallback, for a target with no solved stack
+            # or whose star fields do not agree on one shift, matches stored
+            # pixel positions by geometry and fits a sky map from those stars.
             reference_wcs = resolve_solved_stack_wcs(target, request.path)
             matched_from_solution = (
                 identify_spectral_stars_via_solution(
@@ -426,21 +450,24 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
                 if reference_wcs is not None
                 else None
             )
-            if not matched_from_solution:
-                identify_spectral_stars_via_registration(context.stellar_objects, reference_stellar_objects)
+            if matched_from_solution:
+                spectral_image_wcs = solution_shifted_onto_spectral_image(
+                    context.stellar_objects, reference_stellar_objects, reference_wcs
+                )
+            else:
+                _, spectral_image_wcs = identify_spectral_stars_via_registered_sky_map(
+                    context.stellar_objects, reference_stellar_objects
+                )
+            # A sky position lets a strong spectrum with no catalog name be
+            # stored under a position-based id. Without a map none can be.
+            if spectral_image_wcs is not None:
+                set_sky_positions_of_unnamed_detections(context.stellar_objects, spectral_image_wcs)
             _recover_extended_source_hint(
                 astrometry, context, target, request.path, reference_stellar_objects, hint_ra, hint_dec
             )
 
         spectroscopy = SpectroscopyPipeline(drivers=request.options.get("drivers"))
-        # No fixed count here: every candidate that clears the point-source
-        # detector's own 5-sigma threshold (`source_detection.py`) and the
-        # spurious-trail filter gets an extraction attempt. A caller can
-        # still pass `options["limit"]` to deliberately cap a run (for
-        # example a quick interactive check), but production runs should
-        # not silently drop real, fainter, already-identified stars past
-        # an arbitrary top-N count the way a fixed default of 10 used to.
-        limit = request.options.get("limit")
+        limit = spectrum_star_limit(request.options)
         stellar_objects, star_id_breakdown, flagged_spectral_classifications = (
             record_and_flag_spectroscopy_stars(
                 spectroscopy.process(context, limit=limit),
@@ -517,10 +544,17 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
                 median_trail_width_px=median_trail_width_px,
                 catalog_matched_star_count=star_id_breakdown.catalog_matched,
                 position_only_star_count=star_id_breakdown.position_only,
-                unresolved_star_count=star_id_breakdown.unresolved,
+                # Unidentified stars left out before extraction would have been
+                # dropped at save, so they are counted here as before.
+                unresolved_star_count=star_id_breakdown.unresolved
+                + spectroscopy.last_run_skipped_unidentified_count,
+                skipped_no_trail_star_count=spectroscopy.last_run_skipped_no_trail_count,
+                skipped_unidentified_star_count=spectroscopy.last_run_skipped_unidentified_count,
+                below_feature_limit_star_count=spectroscopy.last_run_below_feature_limit_count,
+                gaia_xp_download_failed_star_count=spectroscopy.last_run_gaia_xp_download_failed_count,
+                reddening_lookup_failed_star_count=spectroscopy.last_run_reddening_lookup_failed_count,
                 poor_match_classification_count=poor_match_count,
                 ambiguous_classification_count=ambiguous_count,
-                flagged_spectral_classifications=flagged_spectral_classifications,
                 stage_quality_summary=summarize_stage_quality(quality_rows) or None,
                 gaia_xp_summary=summarize_gaia_xp(gaia_rows),
                 wavelength_scale_summary=wavelength_scale,
@@ -550,7 +584,7 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
 
         from astrometricslib.pipelines.shared.applied_camera_profile import record_camera_profile
 
-        record_camera_profile(summary, spectroscopy.config.camera.name)
+        record_camera_profile(summary, spectroscopy.config.camera.name, measurement_context)
         return summary
 
     def to_result_dict(

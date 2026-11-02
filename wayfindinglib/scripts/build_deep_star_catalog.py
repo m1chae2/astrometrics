@@ -41,7 +41,8 @@ import logging
 import sys
 import time
 
-from astrometricslib import ConflictError, ExternalServiceError, InvalidArgumentError, configure_logging
+from astrometricslib import Astrometrics, configure_logging
+from astrometricslib.exceptions import ConflictError, ExternalServiceError, InvalidArgumentError
 from wayfindinglib import Wayfinder
 from wayfindinglib.drivers.catalog import deep_star_store
 from wayfindinglib.drivers.catalog.deep_star_catalog_builder import (
@@ -166,7 +167,7 @@ def _build_argument_parser() -> argparse.ArgumentParser:
 
 
 def _choose_search_circles(
-    arguments: argparse.Namespace, planning: object
+    arguments: argparse.Namespace, config: object
 ) -> list[tuple[float, float, float]] | None:
     """Work out which places of sky the user asked to be downloaded.
 
@@ -174,8 +175,9 @@ def _choose_search_circles(
     ----------
     arguments : `argparse.Namespace`
         The parsed command-line arguments.
-    planning : `wayfindinglib.ObservationPlanning`
-        Used to look up imaged field centers for ``--near-targets``.
+    config : `astrometricslib.AppConfiguration`
+        The configuration of the library whose imaged fields
+        ``--near-targets`` looks up.
 
     Returns
     -------
@@ -189,11 +191,11 @@ def _choose_search_circles(
 
     circles = [(ra, dec, radius) for ra, dec, radius in arguments.near or []]
     if arguments.near_targets:
-        field_centers = planning.get_imaged_field_centers()
+        field_centers = Astrometrics(config).targets.imaged_field_centers(register_job=False).centers
         for field_center in field_centers:
             circles.append((
-                field_center["right_ascension_deg"],
-                field_center["declination_deg"],
+                field_center.right_ascension_deg,
+                field_center.declination_deg,
                 arguments.near_targets_radius_degrees,
             ))
         print(f"\nFound {len(field_centers)} imaged field(s) in the library.")
@@ -260,10 +262,10 @@ def _run_estimate(planning: object, arguments: argparse.Namespace) -> int:
     """
     print("Counting a sample of chunks (this asks ESA for a few dozen small answers)...")
     try:
-        estimate = planning.deep_catalog_status(
+        estimate = planning.get_deep_catalog_status(
             include=["estimate"],
             healpix_level=arguments.healpix_level,
-            magnitude_limit=arguments.magnitude_limit,
+            magnitude_max=arguments.magnitude_limit,
             query_timeout_seconds=arguments.timeout_seconds,
             request_delay_seconds=arguments.request_delay_seconds,
             register_job=False,
@@ -309,7 +311,7 @@ def run_catalog_build(argv: list[str] | None = None) -> int:
 
     _print_status(config)
 
-    circles = _choose_search_circles(arguments, planning)
+    circles = _choose_search_circles(arguments, config)
     chosen_pixels = None
     if circles is not None:
         if not circles:
@@ -392,13 +394,13 @@ def run_catalog_build(argv: list[str] | None = None) -> int:
 
     print("\n==========================================")
     print("DEEP-STAR CATALOG DOWNLOAD FINISHED")
-    print(f"Chunks downloaded this run: {report['pixels_downloaded']:,}")
-    print(f"Chunks failed: {len(report['pixels_failed']):,}")
-    print(f"Time: {_format_duration(report['elapsed_seconds'])}")
+    print(f"Chunks downloaded this run: {report.pixels_downloaded:,}")
+    print(f"Chunks failed: {len(report.pixels_failed):,}")
+    print(f"Time: {_format_duration(report.elapsed_seconds)}")
     _print_status(config)
     status = deep_star_store.read_catalog_status(config)
     if chosen_pixels is not None:
-        chosen_are_finished = not report["pixels_failed"] and not report["stopped_early"]
+        chosen_are_finished = not report.pixels_failed and not report.stopped_early
         if chosen_are_finished:
             print("The chosen chunks are finished. Restart Astrometrics to use them.")
         else:
@@ -414,7 +416,7 @@ def run_catalog_build(argv: list[str] | None = None) -> int:
             f"{deep_star_store.BRIGHT_TIER_MAX_MAGNITUDE}), {counts['faint']:,} in the faint grid"
         )
         print("The catalog is complete. Restart Astrometrics to use it.")
-    elif report["pixels_failed"] or report["stopped_early"]:
+    elif report.pixels_failed or report.stopped_early:
         print("The catalog is not complete yet. Run the same command again to fetch what is missing.")
     print("==========================================")
 

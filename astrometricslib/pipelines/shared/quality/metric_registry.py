@@ -16,7 +16,7 @@ from functools import cache
 from types import MappingProxyType
 
 from astrometricslib.models.quality.metric_spec import MetricSpec
-from astrometricslib.pipelines.shared.quality.metrics import FRAME_METRICS
+from astrometricslib.pipelines.shared.quality.metrics import CALIBRATION_FRAME_METRICS, FRAME_METRICS
 
 # The units that a metric declaration may use. "" is a unitless ratio.
 # Convention for rates: the unit is written "1/d" (per day) and the metric
@@ -37,6 +37,7 @@ KNOWN_UNITS: frozenset[str] = frozenset({
     "e-",
     "e-/s/px",
     "mag",
+    "mag/arcsec2",
     "angstrom",
     "stack_unit",
     "stack_unit^2",
@@ -141,7 +142,7 @@ def get_metric_registry() -> MetricRegistry:
     registry : `MetricRegistry`
         The registry of the frame metrics and every pipeline's metrics.
     """
-    specs = list(FRAME_METRICS)
+    specs = [*FRAME_METRICS, *CALIBRATION_FRAME_METRICS]
     for pipeline in PIPELINES_WITH_METRICS:
         specs.extend(load_pipeline_metrics(pipeline))
     return MetricRegistry(tuple(specs))

@@ -17,7 +17,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from astrometricslib import QualityLimit
+from astrometricslib.reports import QualityLimit
 from wayfindinglib.models.quality.statements import ActionClass, Confidence, Severity, StatementKind
 
 
@@ -31,12 +31,19 @@ class MetricRequirement(BaseModel):
     definition_version : `int`
         The definition version the rule was written against. Rows measured
         under another version are not used.
+    optional : `bool`
+        `True` when the rule can say something with only some of its metrics.
+        A rule whose requirements are all optional makes an
+        ``insufficient_data`` statement only when none of them has a usable
+        row. A rule with a required metric makes one when that metric is
+        missing, whatever the optional ones hold.
     """
 
     model_config = ConfigDict(populate_by_name=True)
 
     name: str
     definition_version: int = Field(ge=1, alias="definitionVersion")
+    optional: bool = False
 
 
 class QualityRule(BaseModel):

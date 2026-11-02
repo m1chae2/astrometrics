@@ -10,20 +10,19 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
-from astrometricslib import (
-    FilterType,
-    FrameRecord,
+from astrometricslib import FilterType, FrameRecord, Target
+from astrometricslib._internal.frames import frame_subject_id
+from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
+from astrometricslib.exceptions import NotFoundError
+from astrometricslib.reports import (
     LimitTier,
-    MeasurementOrigin,
     MeasurementStatus,
     QualityLimit,
     QualityMeasurement,
-    QualitySubject,
     SubjectLevel,
-    Target,
-    frame_subject_id,
 )
 from wayfindinglib.analytics.frame_counting import EquipmentNames
+from wayfindinglib.test.camera_profile_support import no_camera_profiles_processing
 
 NIGHT_START = datetime(2026, 10, 24, 22, 0, tzinfo=UTC)
 """A time during the night of 2026-10-24, used as frame time zero."""
@@ -155,20 +154,55 @@ class FakeLibrary:
         The frames of each target.
     rows : `list` [`QualityMeasurement`], optional
         Every stored row. `quality.query` filters them.
+    object_types : `dict` [`str`, `str`], optional
+        The stored SIMBAD object type of each target. A target left out has
+        none.
     """
 
     def __init__(
-        self, frames_by_target: dict[str, list[FrameRecord]], rows: list[QualityMeasurement] | None = None
+        self,
+        frames_by_target: dict[str, list[FrameRecord]],
+        rows: list[QualityMeasurement] | None = None,
+        object_types: dict[str, str] | None = None,
     ) -> None:
         self.frames_by_target = frames_by_target
         self.rows = rows or []
+        self.object_types = object_types or {}
         self.read_failures: set[str] = set()
-        self.targets = SimpleNamespace(get=self._get_target, list=self._list_targets)
+        self.targets = SimpleNamespace(
+            get=self._get_target, list=self._list_targets, resolve=self._resolve_target
+        )
+        self.processing = no_camera_profiles_processing()
         self.quality = SimpleNamespace(
             query=self._query,
             set_aside_frames=lambda _target: [],
             capture_settings=lambda ids=None: {},
         )
+
+    def _resolve_target(self, target: str | Target) -> Target:
+        """Turn a target id into its `Target`, as the library does.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            A target id or a target.
+
+        Returns
+        -------
+        resolved : `Target`
+            The target.
+
+        Raises
+        ------
+        NotFoundError
+            If no target has the id.
+        """
+        if isinstance(target, Target):
+            return target
+        found = self._get_target(target, refresh=True)
+        if found is None:
+            raise NotFoundError(f"No target with id {target!r} in the library.")
+        return found
 
     def _get_target(self, target_id: str, refresh: bool = False) -> Target | None:
         """Give a target holding the frames, or `None` for an unknown id.
@@ -194,7 +228,11 @@ class FakeLibrary:
             raise OSError("disk unreadable")
         if target_id not in self.frames_by_target:
             return None
-        return Target(id=target_id, frames=list(self.frames_by_target[target_id]))
+        return Target(
+            id=target_id,
+            frames=list(self.frames_by_target[target_id]),
+            simbad_object_type=self.object_types.get(target_id),
+        )
 
     def _list_targets(self) -> list[Target]:
         """Give every target.
@@ -206,7 +244,7 @@ class FakeLibrary:
         """
         return [Target(id=target_id) for target_id in self.frames_by_target]
 
-    def _query(self, **arguments: Any) -> list[QualityMeasurement]:
+    def _query(self, **arguments: Any) -> QualityQueryResult:
         """Filter the stored rows the way `quality.query` does.
 
         Parameters
@@ -217,13 +255,15 @@ class FakeLibrary:
 
         Returns
         -------
-        rows : `list` [`QualityMeasurement`]
+        answer : `QualityQueryResult`
             The matching rows.
         """
-        return [
-            row
-            for row in self.rows
-            if (arguments.get("metric") is None or row.metric == arguments["metric"])
-            and (arguments.get("level") is None or row.subject.level.value == arguments["level"])
-            and (arguments.get("target_id") is None or row.subject.target_id == arguments["target_id"])
-        ]
+        return QualityQueryResult(
+            rows=[
+                row
+                for row in self.rows
+                if (arguments.get("metric") is None or row.metric == arguments["metric"])
+                and (arguments.get("level") is None or row.subject.level.value == arguments["level"])
+                and (arguments.get("target_id") is None or row.subject.target_id == arguments["target_id"])
+            ]
+        )

@@ -40,9 +40,11 @@ import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import ConflictError, InvalidArgumentError, ProcessingError
-from astrometricslib.foundation.jobs.runner import registered_job
+from astrometricslib.foundation.jobs.runner import current_job_id, registered_job, report_started_jobs
+from astrometricslib.foundation.run_abandonment import RunAbandonedError, RunAbandonment, bind_abandonment
+from astrometricslib.foundation.run_tally import RunTally
 from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
 from astrometricslib.models.processing_results import ProcessTargetResult
 from astrometricslib.models.target import FrameRecord, Target
@@ -84,6 +86,14 @@ STACKING_TIMEOUT_SECONDS = 600
 # this much, while still letting the deadline pick up lock waits that
 # accrue after the wait began.
 _STACKING_TIMEOUT_POLL_SECONDS = 2.0
+
+# How long to wait, after giving up on a stack and stopping its Siril, for the
+# stack's thread to end and give its slot back. Stopping Siril takes about a
+# quarter of a second (see `run_abandonment.STOP_GRACE_SECONDS`) and the
+# thread's clean-up removes a scratch folder, so ten seconds is generous. A
+# chosen bound, not a measured one: if it passes, the thread is simply left to
+# finish on its own.
+_ABANDONED_THREAD_JOIN_SECONDS = 10.0
 
 
 def compute_stacking_timeout_seconds(frame_count: int) -> int:
@@ -159,6 +169,63 @@ def _stack_with_job_tracking(
         return stacked_path
 
 
+def _record_abandoned_stack(
+    target: Target,
+    measured_at: datetime | None,
+    quality_recording: FrameQualityRecording | None,
+    *,
+    working_seconds: float,
+    budget_seconds: float,
+    job_id: str | None = None,
+) -> None:
+    """Store the quality row that says a stack was abandoned.
+
+    The row is a processing-decision measurement (`stacking.abandoned_after_s`)
+    on the stacking run. Its check outcome is ``failed``, so it is a warning
+    of the stacking job. It is stored even when the target has no stack
+    summary yet. Nothing is stored when the caller gave no time or no
+    recording information, as in tests. A failure to store never reaches the
+    caller.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target whose stack was abandoned.
+    measured_at : `datetime` or `None`
+        When the run started, with a time zone.
+    quality_recording : `FrameQualityRecording` or `None`
+        The configuration that locates the quality database.
+    working_seconds : `float`
+        How long the stack worked, not counting time waiting for the Siril
+        lock.
+    budget_seconds : `float`
+        The time budget the stack ran past.
+    job_id : `str`, optional
+        The stacking job that was abandoned. The row carries it, so the job
+        can list the timeout as one of its warnings.
+    """
+    if measured_at is None or quality_recording is None:
+        return
+    from astrometricslib.models.quality.quality_summary import STACKING_PIPELINE_VERSION
+    from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
+        PipelineRunContext,
+        record_run_measurements,
+    )
+    from astrometricslib.pipelines.stacking.post_processing.record_quality import (
+        abandoned_stack_measurements,
+    )
+
+    context = PipelineRunContext.from_options(
+        target.id, "stacking", STACKING_PIPELINE_VERSION, {"job_id": job_id, "measured_at": measured_at}
+    )
+    if context is None:
+        return
+    record_run_measurements(
+        abandoned_stack_measurements(context, working_seconds, budget_seconds),
+        config=quality_recording.configuration,
+    )
+
+
 def stack_frames_with_timeout(
     target: Target,
     frames_to_stack: list[FrameRecord],
@@ -169,7 +236,9 @@ def stack_frames_with_timeout(
     """Run the image stacker with a time limit so it doesn't freeze forever.
 
     The Siril stacking program can sometimes get stuck. This function
-    runs it in the background and will kill it if it takes too long.
+    runs it in the background. If it takes too long, this function stops
+    that stack's own Siril processes (no others), so the background thread
+    ends and gives back its place in the job queue, and returns.
     The time limit only counts time spent actually working, not time
     spent waiting in line for the CPU.
 
@@ -202,18 +271,35 @@ def stack_frames_with_timeout(
     """  # ruff: ignore[docstring-extraneous-exception] -- `raise
     # outcome["error"]` re-raises a captured exception object,
     # which pydoclint cannot resolve to a declared type statically.
-    from astrometricslib.drivers import siril_interface
+    from astrometricslib._internal.drivers import siril_interface
 
     if timeout_seconds is None:
         timeout_seconds = compute_stacking_timeout_seconds(len(frames_to_stack))
 
     outcome: dict[str, Any] = {}
+    # This stack's own total of Siril-lock waiting. The stacking thread binds
+    # it, so the waits of other stacks in the process are not mixed in.
+    lock_wait = RunTally()
+    # This stack's own Siril processes. Giving up on the stack stops them (and
+    # only them), so the thread ends and gives its slot back.
+    abandonment = RunAbandonment()
+    # Filled by the stacking thread with the id of its job (see below).
+    stacking_job_ids: list[str | None] = []
 
     def _run_stacking() -> None:
         try:
-            outcome["path"] = _stack_with_job_tracking(
-                target, frames_to_stack, measured_at, quality_recording
-            )
+            with (
+                siril_interface.bind_lock_wait(lock_wait),
+                bind_abandonment(abandonment),
+                report_started_jobs(lambda handle: stacking_job_ids.append(handle.job_id)),
+            ):
+                outcome["path"] = _stack_with_job_tracking(
+                    target, frames_to_stack, measured_at, quality_recording
+                )
+        except RunAbandonedError:
+            # The caller gave up and already returned; there is nobody to
+            # report to, and nothing may be recorded as a result.
+            logger.info("[%s] The abandoned stacking thread has stopped.", target.id)
         except Exception as stacking_error:
             # This runs in its own thread, so any error is kept here and
             # raised again in the calling thread below. The traceback is
@@ -221,7 +307,6 @@ def stack_frames_with_timeout(
             logger.debug("[%s] Stacking thread raised an error.", target.id, exc_info=True)
             outcome["error"] = stacking_error
 
-    siril_interface.reset_siril_lock_wait_seconds()
     stacking_thread = threading.Thread(target=_run_stacking, daemon=True)
     started_at = time.monotonic()
     stacking_thread.start()
@@ -235,11 +320,11 @@ def stack_frames_with_timeout(
         if not stacking_thread.is_alive():
             break
         elapsed_seconds = time.monotonic() - started_at
-        if elapsed_seconds >= timeout_seconds + siril_interface.get_siril_lock_wait_seconds():
+        if elapsed_seconds >= timeout_seconds + lock_wait.total:
             break
 
     if stacking_thread.is_alive():
-        lock_wait_seconds = siril_interface.get_siril_lock_wait_seconds()
+        lock_wait_seconds = lock_wait.total
         logger.warning(
             "[%s] Stacking timed out after %s seconds of working time (%.0fs of Siril-lock wait "
             "excluded). Abandoning this stack.",
@@ -247,18 +332,21 @@ def stack_frames_with_timeout(
             timeout_seconds,
             lock_wait_seconds,
         )
-        # A timeout is a quality event, not just a log line: recorded on
-        # the target's existing stack summary when there is one, so the
-        # abandoned stack is queryable rather than only discoverable by
-        # reading the run's output. The summary may be absent entirely --
-        # stack_frames builds it, and this stack never got that far -- in
-        # which case the timeout stays a log-only fact.
-        summary = target.stacking.quality_summary
-        metrics = getattr(summary, "stacking_metrics", None) if summary else None
-        if metrics is not None:
-            metrics.timed_out = True
-            summary.flagged = True
-            summary.flag_reasons.append(f"stacking timed out after {timeout_seconds}s")
+        # Stop this stack's Siril, so its thread ends and gives up its slot.
+        abandonment.abandon()
+        # Let the thread unwind, so the slot is free when this returns.
+        stacking_thread.join(_ABANDONED_THREAD_JOIN_SECONDS)
+        # A timeout is a quality event, not just a log line. It is recorded
+        # as a row on this run (`stacking.abandoned_after_s`), never on the
+        # target's earlier stack summary, which describes a different run.
+        _record_abandoned_stack(
+            target,
+            measured_at,
+            quality_recording,
+            working_seconds=max(0.0, time.monotonic() - started_at - lock_wait_seconds),
+            budget_seconds=timeout_seconds,
+            job_id=next((job_id for job_id in stacking_job_ids if job_id), None),
+        )
         return None
 
     if "error" in outcome:
@@ -319,7 +407,7 @@ def analyze_target(
         the right images needed to run it.
     """
     if catalog_access is None:
-        from astrometricslib.drivers.catalog_access import CatalogAccess
+        from astrometricslib._internal.drivers.catalog_access import CatalogAccess
 
         catalog_access = CatalogAccess()
 
@@ -355,7 +443,11 @@ def analyze_target(
                     f" on target {target.id}."
                 )
 
-        kwargs["job_id"] = job.job_id
+        # The rows this run stores carry the id of the job that made them,
+        # so `Jobs.query(detail="warnings")` can list them. With no job of its
+        # own (register_job=False), the run uses the job it is running inside,
+        # such as a caller's batch job. With neither, the rows have no job.
+        kwargs["job_id"] = job.job_id or kwargs.get("job_id") or current_job_id()
         kwargs["measured_at"] = measured_at
         return _run_analysis_pipeline_match(
             target, frames, pipeline_type, filter_type, catalog_access, path, **kwargs
@@ -387,7 +479,7 @@ DEFAULT_ANALYSIS_STAGES = ("astrometry", "photometry", "spectroscopy")
 
 STAGE_OPTIONS = {
     "astrometry": frozenset({"path"}),
-    "photometry": frozenset({"frames", "filter_type", "use_astrometry_seed", "max_workers"}),
+    "photometry": frozenset({"frames", "filter_name", "use_astrometry_seed", "max_workers"}),
     "spectroscopy": frozenset({"path", "limit"}),
     "asteroids": frozenset({"moving_object_config"}),
 }
@@ -456,7 +548,10 @@ def run_target_stages(
         if stage not in stages:
             continue
         options = dict(stage_options.get(stage) or {})
-        if drivers is not None and stage in ("astrometry", "spectroscopy"):
+        if "filter_name" in options:
+            # The stage runner still names this argument ``filter_type``.
+            options["filter_type"] = options.pop("filter_name")
+        if drivers is not None and stage in ("astrometry", "photometry", "spectroscopy"):
             options["drivers"] = drivers
         if stage == "photometry" and frame_selection is not None:
             options.setdefault("frames", frame_selection.frames)
@@ -721,7 +816,7 @@ def _run_photometry_stage(
         The photometry pipeline's result dict.
     """
     logger.info("[%s] Running Photometry/Variability Analysis...", target.id)
-    with acquire_resource_slot(config, "job", max_concurrent_jobs):
+    with acquire_resource_slot(config, "job", max_concurrent_jobs, work_name=f"photometry {target.id}"):
         photometry_results = analyze_target(
             target,
             pipeline_type="photometry",
@@ -758,7 +853,7 @@ def _run_spectroscopy_stage(
         return
 
     logger.info("[%s] Running Spectroscopy Analysis...", target.id)
-    with acquire_resource_slot(config, "job", max_concurrent_jobs):
+    with acquire_resource_slot(config, "job", max_concurrent_jobs, work_name=f"spectroscopy {target.id}"):
         spectroscopy_results = analyze_target(
             target,
             pipeline_type="spectroscopy",

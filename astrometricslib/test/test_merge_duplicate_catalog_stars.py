@@ -8,7 +8,7 @@ merge end to end on a throwaway catalog -- never the real one.
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from astrometricslib.drivers.catalog_access import CatalogAccess, StarSummary
+from astrometricslib._internal.drivers.catalog_access import CatalogAccess, StarSummary
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.stellar_source import (
     PhotometryResult,

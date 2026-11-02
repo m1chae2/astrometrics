@@ -11,7 +11,7 @@ point is.
 
 Each check is returned as a `GateResult`. A check that could not look (for
 example, no star recorded its alignment drift) is ``not_checked``; it is not
-a pass. The failed gates' sentences are the run's flag reasons.
+a pass. The failed gates' sentences are the run's warnings.
 
 The same module turns the run's counts, measurements and gates into quality
 measurements (`photometry_run_measurements`) and stores them

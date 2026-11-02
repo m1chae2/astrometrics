@@ -43,4 +43,35 @@ describe('SelectableList picks', () => {
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith('a');
   });
+
+  it('reports a pick to its own list when another list with the same class name is mounted', () => {
+    // A hidden display stays mounted beside the visible one, and both use the same class name.
+    // Clicking a row's label must reach the row's own radio, not the same-numbered row of the
+    // other list.
+    const onSelectHidden = vi.fn();
+    const onSelectVisible = vi.fn();
+    render(
+      <>
+        <SelectableList className="shared-list" items={items} onSelect={onSelectHidden} />
+        <SelectableList className="shared-list" items={items} onSelect={onSelectVisible} />
+      </>,
+    );
+
+    fireEvent.click(screen.getAllByText('Beta')[1]);
+
+    expect(onSelectVisible).toHaveBeenCalledWith('b');
+    expect(onSelectHidden).not.toHaveBeenCalled();
+  });
+
+  it('gives each list its own radio ids and group name', () => {
+    const { container } = render(
+      <>
+        <SelectableList className="shared-list" items={items} onSelect={vi.fn()} />
+        <SelectableList className="shared-list" items={items} onSelect={vi.fn()} />
+      </>,
+    );
+    const inputs = Array.from(container.querySelectorAll('input[type="radio"]'));
+    expect(new Set(inputs.map((input) => input.id)).size).toBe(inputs.length);
+    expect(new Set(inputs.map((input) => (input as HTMLInputElement).name)).size).toBe(2);
+  });
 });

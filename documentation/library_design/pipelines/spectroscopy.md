@@ -28,7 +28,7 @@ flowchart TD
     B --> C["Name stars from the matching normal image's sky map, else by their pixel pattern"]
     C --> D["Find the spectrum direction and trace each spectrum trail"]
     D --> E["Sum light across each spectrum trail; subtract sky from two side bands"]
-    E --> F["Remove light spilling over from bright neighbors"]
+    E --> F["Estimate the share of light from close neighbors (spectrum not changed)"]
     F --> G["Turn position along the spectrum trail into wavelength"]
     G --> H["Correct the shift from the air bending light"]
     H --> I["Correct the offset of the wavelength scale"]
@@ -84,7 +84,7 @@ where $\sigma_\text{trail}$ is the fitted Gaussian sigma, smoothed over 61 steps
 
 **The sky.** Two sky bands, each 10 pixels wide and 6 pixels from the box, are sigma-clipped (pixels far from the median, such as stars, are dropped). The sky level is the mean of their medians. When the two disagree by more than the noise allows, the fainter band (the one with the lower median) is used alone: light can only add to a band, so the brighter one holds a neighbor's light.
 
-**Neighbors.** A bright neighbor's wings (the faint outer edges of its spectrum trail) are removed with a blur profile measured from an isolated star (`neighbor_trail_deblending.py`, `neighbor_wing_correction.py`).
+**Neighbors.** A bright neighbor's wings (the faint outer edges of its spectrum trail) can reach into a star's box. The pipeline does not take them out: the correction is turned off because its fit check did not tell good corrections from bad ones ([SPE-34](../validation/spectroscopy.md#spe-34)). Each star with a close neighbor instead carries a rough estimate of the neighbors' share of its box light, worked out from a blur profile measured from an isolated star (`neighbor_wing_correction.py`). It is an estimated ratio, not a true fraction, and it changes nothing in the spectrum.
 
 ### 3.3 Flux calibration
 
@@ -147,7 +147,7 @@ A session of raw frames runs through `batch.py` instead. It names the stars in o
 
 ### 4.1 Quality gates
 
-A quality gate is an automatic test on a run. It passes, fails, or is "not checked" when the data it needs are missing. A failed gate marks the run as flagged (the `flagged` field in Section 7) so a person can look at it. The list below is read from the code when this guide is generated.
+A quality gate is an automatic test on a run. It passes, fails, or is "not checked" when the data it needs are missing. A failed gate is stored as a warning row, and the job's warnings list it so a person can look at it. The list below is read from the code when this guide is generated.
 
 The count covers only these run gates. Some quality tests are not gates. Two travel with each spectrum: the extinction record (whether the airmass correction ran, and why not) and the share of sky readings disturbed by a neighbor. The third, the rejection of a wavelength fit that leaves too large an error, happens when the instrument is calibrated (`calibration_tuner.py`).
 
@@ -211,8 +211,6 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `resolved_parameters` | `dict[str, Any]` | The settings the run actually used, after defaults were filled in. |
 | `camera_profile` | `astrometricslib.models.applied_camera_profile.AppliedCameraProfile \| None` | The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip. |
 | `quality_processing_applied` | `bool` | Whether the quality gates were run. |
-| `flagged` | `bool` | True if one or more quality gates failed, so a person should look at the run. |
-| `flag_reasons` | `list[str]` | One plain sentence for each reason the run was flagged. |
 | `gates` | `list[astrometricslib.models.quality.gate_result.GateResult]` | Every quality gate result: passed, failed or not checked. |
 | `created_at` | `datetime.datetime` | Time the quality summary was made, in UTC. |
 | `provenance_activity_id` | `str \| None` | Identifier of this run in the provenance record (the IVOA-standard log of which run made which data). |
@@ -233,7 +231,11 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `median_trail_width_px` | `float \| None` | Median Gaussian sigma (not FWHM) of the spectrum trail cross-section, in pixels. |
 | `poor_match_classification_count` | `int` | Number of stars whose classification misfit (RMS) is above the rejection limit. |
 | `ambiguous_classification_count` | `int` | Number of stars whose classification is ambiguous between spectral classes. |
-| `flagged_spectral_classifications` | `list[astrometricslib.models.quality.quality_summary.SpectralClassificationConcern]` | Details of each star whose classification is in doubt. |
+| `skipped_no_trail_star_count` | `int` | Quality metric attribute. |
+| `skipped_unidentified_star_count` | `int` | Quality metric attribute. |
+| `below_feature_limit_star_count` | `int` | Quality metric attribute. |
+| `gaia_xp_download_failed_star_count` | `int` | Quality metric attribute. |
+| `reddening_lookup_failed_star_count` | `int` | Quality metric attribute. |
 | `stage_quality_summary` | `list[astrometricslib.models.quality.spectroscopy_quality.StageQualityRollup] \| None` | Summary of the quality metrics at each extraction checkpoint. |
 | `gaia_xp_summary` | `astrometricslib.models.quality.gaia_xp_comparison.GaiaXpRunSummary \| None` | Comparison with Gaia DR3 synthetic XP spectra (low-resolution spectra from the Gaia space mission). |
 | `wavelength_scale_summary` | `astrometricslib.models.wavelength_scale.WavelengthScaleSummary \| None` | Scatter and drift of the wavelength zero points (offsets of the wavelength scale). |

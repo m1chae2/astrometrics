@@ -71,7 +71,7 @@ def run_pipeline(target_id: str = "M 13") -> None:
     photometry_result = astrometrics.processing.process_target(
         target,
         stages=["photometry"],
-        photometry={"filter_type": "L", "frames": l_frames, "use_astrometry_seed": True},
+        photometry={"filter_name": "L", "frames": l_frames, "use_astrometry_seed": True},
     ).results["photometry"]
     logger.info("Photometry status: %s", photometry_result.get("status"))
 
@@ -80,7 +80,7 @@ def run_pipeline(target_id: str = "M 13") -> None:
         "spectroscopy"
     ]
     spectral_stars = spectroscopy_result.get("stellar_objects", [])
-    matched = sum(1 for star in spectral_stars if star.id.endswith("::spectroscopy"))
+    matched = sum(1 for star in spectral_stars if astrometrics.stars.get_spectrum(star.id) is not None)
     logger.info(
         "Spectroscopy: %s stars extracted, %s registered against astrometry.", len(spectral_stars), matched
     )

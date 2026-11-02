@@ -445,3 +445,41 @@ def test_stage_moves_progress_and_keeps_a_finished_status(isolated_logs: str) ->
         job.mark("failed", 100)
         job.stage(80, "Too late")
         assert JobStore(isolated_logs).get_job(job.job_id).status == "failed"
+
+
+def test_current_job_id_is_none_outside_any_job() -> None:
+    """Outside a job there is no id to put on stored rows."""
+    from astrometricslib.foundation.jobs.runner import current_job_id
+
+    assert current_job_id() is None
+
+
+def test_current_job_id_reads_the_job_named_in_the_log_context() -> None:
+    """A job created by the backend names itself in the log context."""
+    from astrometricslib.foundation.jobs.runner import current_job_id
+    from astrometricslib.foundation.logging import log_context
+
+    with log_context(job_id="job-from-backend"):
+        assert current_job_id() == "job-from-backend"
+
+
+def test_current_job_id_ignores_a_parallel_batch_item() -> None:
+    """A batch item tag is not a job in the job list."""
+    from astrometricslib.foundation.jobs.runner import current_job_id
+    from astrometricslib.foundation.logging import log_context
+
+    with log_context(job_id="batch-item:7"):
+        assert current_job_id() is None
+
+
+def test_report_started_jobs_gives_the_caller_the_handle() -> None:
+    """Tell the caller of threaded work the id of the job it records."""
+    from types import SimpleNamespace
+
+    from astrometricslib.foundation.jobs import runner
+
+    seen: list[str] = []
+    with runner.report_started_jobs(lambda handle: seen.append(handle.job_id)):
+        runner._job_started_listener.get()(SimpleNamespace(job_id="job-1"))
+    assert seen == ["job-1"]
+    assert runner._job_started_listener.get() is None

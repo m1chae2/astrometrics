@@ -29,7 +29,6 @@ references to the exact rows. Counts and values that are not rows go in
 `values`. Confidence is the register status of the capture rules (WAY-46).
 """
 
-from astrometricslib import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C, SATURATED_BLOB_MINIMUM_PIXELS
 from wayfindinglib.analytics.performance_envelope import MINIMUM_FRAMES_PER_NIGHT
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
 from wayfindinglib.models.quality.statements import TargetStatement
@@ -215,8 +214,8 @@ def _temperature_spread(input_quality: CaptureInputQuality) -> TargetStatement |
             design_limit(
                 input_quality.dark_temperature_tolerance_c,
                 "degC",
-                "How far a dark frame's temperature may differ from a light frame's and still calibrate it "
-                f"(the library default is {DEFAULT_DARK_TEMPERATURE_TOLERANCE_C:g}).",
+                "How far a dark frame's temperature may differ from a light frame's and still calibrate it, "
+                "as the science library's matcher judges it.",
                 "WAY-D47",
             )
         ],
@@ -294,13 +293,15 @@ def _spectral_star_clipped(performance: CapturePerformance) -> list[TargetStatem
                 },
                 limits=[
                     design_limit(
-                        float(SATURATED_BLOB_MINIMUM_PIXELS),
+                        float(performance.limits.saturated_star_minimum_pixels),
                         "px",
                         "Fewest saturated pixels that make a frame's star count as clipped; an exposure "
                         "length clips when at least half its frames do.",
                         "WAY-D48",
                     )
-                ],
+                ]
+                if performance.limits is not None
+                else [],
                 confidence=rule_confidence("capture"),
             )
         )

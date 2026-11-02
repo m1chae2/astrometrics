@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from astrometricslib.drivers.catalog_access import CatalogAccess
+from astrometricslib._internal.drivers.catalog_access import CatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.stellar_source import (
     PhotometryResult,

@@ -1,0 +1,187 @@
+# Drivers
+
+This folder holds the code that talks to something outside the pipeline logic itself: disk files, external processes, external databases, and external astronomy services. Pipelines and the API layer call into these drivers rather than opening files or databases themselves, so there is one place responsible for each outside dependency.
+
+Terms are defined in the [glossary](../../../documentation/Glossary.md). This document also defines each term the first time it appears.
+
+Several terms recur below:
+
+- FITS is the standard astronomy image file format. Its text header holds named cards such as `CCD-TEMP` (the sensor temperature).
+- A light frame (a "light") is a frame of the sky. Siril is the external program that stacks lights (aligns and averages many frames into one).
+- Calibration frames measure the camera itself: bias frames (its fixed electronic offset), darks (the signal heat adds, taken with the shutter closed) and flats (frames of an evenly lit surface, showing how sensitive each pixel is). A master is the combination of many frames of one kind.
+- The gain setting is the camera's amplifier setting, a unitless number in the FITS `GAIN` card. It is not the same as the gain in electrons per ADU (analog-to-digital unit, one count of the camera's output) that photometry uses.
+- The offset is a constant the camera adds to every pixel, so that noise below zero is still recorded.
+- A camera profile is the stored description of one camera model (see `camera_profile_store.py`), including its clip ceiling: the pixel value at which the sensor saturates.
+- The stacking README is `../pipelines/stacking/README.md`.
+
+## How a driver gets its settings
+
+A driver that needs the configuration takes an `AppConfiguration` when it is built and keeps it as `self.config`. If none is passed, it uses the shared one. Its methods read `self.config` and never fetch the shared configuration themselves. A module-level driver function that needs settings takes an optional `config` argument in the same way.
+
+## What each file is for
+
+- `image.py`, `fits_access.py` — `AstrometricsImage`, the main data container for a loaded astronomical image, and the lower-level functions that read pixel data and metadata out of a FITS file.
+  - `AstrometricsImage` fixes header keywords that older software writes. It renames `RADECSYS` (a retired spelling of `RADESYS`, the card that names the sky coordinate frame) and fills in a missing `MJD-OBS` (the observation start as a Modified Julian Date, a running day count) from `DATE-OBS`. It makes these fixes in memory only and never rewrites a frame, so a frame on a backed-up network drive stays as it was downloaded.
+  - `fits_access.read_header`, `read_data` and `read_header_and_data` read a file's header and pixels. They look for the pixel data in HDU 0, then HDU 1. Pass `first_hdu_only=True` to read HDU 0 alone. `update_first_header` changes the header of HDU 0 in place. Code outside `fits_access.py` should use these instead of calling `fits.open`.
+  - `fits_access.FITS_READ_ERRORS` names the errors that reading a damaged or missing FITS file can raise. Code that reads a file catches that tuple instead of every exception.
+- `filter_detection.py` — reads an image's settings to work out what kind of frame it is: which filter (the colored or clear glass in front of the camera), and whether it is a light, dark, flat or bias.
+- `interfaces/` — the abstract base classes (`*Driver`) the rest of the library uses instead of a particular program or service:
+  - `StackingDriver` — a stacking program. It comes with the `StackSettings` it takes and the `StackRunResult` it returns. It also takes a `PipelineSteps`: two of the stacking pipeline's own steps (the flat check and the alignment of spectral frames) that the stacking program must call partway through its run, between its own commands.
+  - `PlateSolveDriver` — a plate solver, which works out which part of the sky an image shows. It returns a `PlateSolveHeader`, a FITS header with two optional extra fields, `fit_residual_rms_arcsec` and `matched_star_count`. A driver that cannot report them returns a plain header, and `read_fit_statistics` reads both cases.
+  - `SimbadDriver` — the SIMBAD database of named astronomical objects.
+  - `GaiaXpDriver` — Gaia DR3's low-resolution XP spectra, which the spectroscopy pipeline compares its spectra with.
+  - `ReddeningDriver` — a catalog of interstellar reddening values. It returns a `ReddeningEstimate`: an E(B-V) in magnitudes (the color excess that dust adds; see `astroquery_gaia_reddening_driver.py` below), a note on its source and the Gaia id used.
+- `driver_set.py` — `Drivers`, a frozen record of the plate solver, stacking program, SIMBAD driver, Gaia XP driver and reddening driver a caller chose, with `None` for "use the built-in one". Its `plate_solve_or_default`, `stacking_or_default`, `simbad_or_default`, `gaia_xp_or_default` and `reddening_or_default` methods return the chosen driver or build the built-in one. Code in `pipelines/` and `api/` gets a driver through these methods and does not name a built-in driver class itself (see "Injecting drivers" below). The one listed exception is `pipelines/stacking/stack_runner.py`, which wraps a Siril session its caller already holds.
+- `frame_prefetch.py` — reads a run's staged frames (the lights and calibration frames gathered into the run's working folder) before Siril does. Raw frames can sit on a network drive whose mount keeps a local disk cache. Reading them ahead, several at once, puts them in that cache, so Siril does not wait for each download in turn. See "Optional pre-fetch" in the stacking README.
+- `siril_stacking_driver.py` — `SirilStackingDriver`, Siril as the stacking program. It wraps the `siril_interface/` package and turns Siril's files into the plain values the interface names.
+- `siril_interface/` (a package of one module per job: `script_builders.py`, `session.py`, `staging.py`, `spectral_stacker.py`, `imaging_stacker.py`, `run_models.py` and `image_processing.py`, which joins them as `ImageProcessing`; `process_target` takes one `SirilStackRequest`), `siril_output_parsing.py` — run the external Siril program to stack images, and parse the files Siril writes describing what it did (its text logs and star lists, and the rejection map `measure_rejected_fraction` reads). `parse_seq_file` reads each registration line by Siril's own field order: FWHM, weighted FWHM, roundness, quality, background level, star count and the 3 by 3 transform (from which it derives the shift, rotation and scale). The line holds no registration error. Earlier code read the background level as `rmse` and the weighted FWHM as `fwhm_y`; both names were wrong. `siril_interface/script_builders.py` also writes the Siril script that builds the master calibration frames and applies them to the lights. The rules for that script follow this list, under "The Siril calibration script".
+- `astrometry_net_driver.py` — `AstrometryNetPlateSolveDriver`, Astrometry.net as the plate solver.
+  - The local `solve-field` program writes a `.corr` table next to its solved image. Each row is one field star (a star in the image) that the solver matched to a reference star. The row holds the field star's fitted sky position (`field_ra`, `field_dec`) and the reference star's sky position (`index_ra`, `index_dec`), in degrees.
+  - `read_corr_fit_statistics` opens that table (with `memmap=False`), drops rows with a missing position, and returns two numbers: the fit residual (the root mean square of the sky distance between each pair, in arcseconds) and the matched-star count. The driver returns them on a `PlateSolveHeader`.
+  - The online service writes no match table, so an online solve returns a plain header and the statistics read as unknown (`None`).
+- `gaia_xp_driver.py` — `AstroqueryGaiaXpDriver`, the Gaia XP driver.
+  - It downloads the sampled XP spectrum of a Gaia DR3 source with astroquery (3360 to 10,200 Å in 20 Å steps, flux in W m⁻² nm⁻¹).
+  - It keeps each answer in one compressed `.npz` file per source id, with the download date, in `~/.cache/astrometrics/catalogs/gaia_xp/`. The Gaia star cache in `catalog_store.py` sits in the same `catalogs` folder. Both hold only downloads, so deleting the folder is safe.
+  - A source without an XP spectrum is cached as empty. A failed download raises `GaiaXpDownloadError`, is logged once and is not cached, and the driver then skips downloads for 10 minutes (it raises at once during that pause). Only a missing spectrum gives `None`. The Gaia comparison catches the error, so a spectrum check never stops a pipeline.
+- `astroquery_simbad_driver.py` — `AstroquerySimbadDriver`, the SIMBAD driver. It owns the process's one astroquery client for SIMBAD. When one of SIMBAD's two servers (Strasbourg and its Harvard mirror) cannot be reached, it asks the other and keeps using the one that answered. A failed query is raised as `ExternalServiceError`. After a connection failure or timeout it also stops calling SIMBAD for 120 seconds (`SIMBAD_COOLDOWN_SECONDS`) and fails each call in that time at once, so a stage does not wait out the 30-second timeout on every lookup. The pause is temporary, and one good reply clears it.
+- `gaia_cone_driver.py` — downloads the Gaia DR3 stars in a circle on the sky.
+  - It asks VizieR (an online service hosting copies of many catalogs; `query_gaia_cone_vizier`, catalog `I/355/gaiadr3`) or the ESA Gaia archive (`query_gaia_cone_esa`, table `gaiadr3.gaia_source`).
+  - Both return the same columns, brightest first: `source_id`, `ra` and `dec` (right ascension and declination, the sky's longitude and latitude) at epoch 2016.0 (the date the positions refer to), `phot_g_mean_mag`, `designation`, `pmra` and `pmdec`.
+  - They do not retry. The star identifier (see the astrometry README, `../pipelines/astrometry/README.md`) decides which service to ask first and how long to wait for each.
+- `astroquery_gaia_reddening_driver.py` — `AstroqueryGaiaReddeningDriver`, the reddening driver.
+  - Gaia measures brightness in three broad bands: G (most of the visible and near-infrared light), BP (the blue part) and RP (the red part). Dust between Earth and a star dims it (extinction) and dims blue light more than red (reddening).
+  - The driver asks the Gaia DR3 table `gaiadr3.astrophysical_parameters` for one star's `ebpminrp_gspphot` and `ag_gspphot`, both in magnitudes. The first is the color excess E(BP-RP): how much redder dust has made the star, as the change in the BP − RP magnitude difference. The second is A(G), the extinction in the G band.
+  - It converts to E(B-V), the color excess in the standard blue (B) and visual (V) bands. It divides E(BP-RP) by 1.339 and falls back to A(G) divided by 2.740 (ratios for a typical star from Casagrande and VandenBerg 2018, MNRAS 479, L102).
+  - It keeps answers in memory, including "no value", because the local Gaia catalog cache (`catalog_store.py`) has no column for either value. A failed query is raised as `ExternalServiceError`.
+  - A run asks for all its stars at once. `prefetch_reddening` takes every Gaia id the run needs and sends one query per `GAIA_BATCH_SIZE` (200) ids, so a run is usually one query instead of one for each star. Each later `get_reddening` is a lookup in memory, and a star gets the same value as from a one-star query. One-star queries were slow and erratic: each is a job on the Gaia archive, which allows only a few running jobs per user, and a timed-out query keeps running in an abandoned thread. The archive's answer time is erratic (see SPE-21 in the spectroscopy validation register), so the batch wait is longer than the one-star wait of 60 seconds.
+  - A failed batch costs one wait of at most `GAIA_BATCH_TIMEOUT_SECONDS` (180) per run, because the prefetch stops at the first failed chunk. The ids it did not answer fail at once for the rest of the run, with no new query; ids it did answer stay usable. The next prefetch tries again, and a success clears the failure count. For an id that was not prefetched, `get_reddening` still sends a one-star query and stops asking after three failures in a row. The log line for a failure includes the reason (for example an HTTP 503 reply). The spectroscopy pipeline counts the stars that went without reddening and stores the notice `spectroscopy.notice_reddening_lookup_failed`, which appears in the job's warnings.
+- `camera_profile_store.py` — finds and loads the stored camera profile (sensor characteristics, saturation threshold, gain and read noise for each camera setting) for a given camera. `save_sensor_setting_noise` writes one setting's gain and read noise back to the config file, after copying the file to a timestamped `.bak` file. A config that still holds the old single gain and read noise loads, but those values are never applied, and a warning is logged once per camera. A save copies the config to a timestamped `.bak` first and keeps at most 10 of them (`MAXIMUM_CONFIG_BACKUPS`), and the whole read-modify-write holds the config's write lock. An entry also keeps the gain spread, each flat pair's gain, the robust read noise and each bias pair's read noise.
+- `camera_profile_migration.py` — `migrate_camera_profiles`, which moves a camera's old single gain and read noise into a setting-keyed entry for the setting you state. It reports only (a dry run) unless told to write, backs the config up first, and refuses a camera that already has setting-keyed entries.
+- `calibration_library.py` — the model of the library of dark, bias and flat frames, and the rules that pick frames for a batch of lights. It can also list the flats as sets, one per telescope, camera, filter, gain setting, offset and binning (`list_flat_groups`), so each set is checked on its own. It lists the dark and bias sets too (`list_calibration_sets`) and keeps the stamp of each measured dark and bias frame (`measurement_stamps`), because those frames have no target to hold it. The section "The setting key and picking darks" below gives the filing and picking rules.
+- `local_database.py`, `catalog_store.py` — the local SQLite databases holding the target and star catalog and the cached Gaia star catalog.
+  - The Gaia cache stores each star's epoch 2016.0 position, G magnitude, designation and proper motion: the star's slow drift across the sky, in milliarcseconds per year. `pmdec` is the drift in declination. `pmra` is the drift in right ascension multiplied by the cosine of the declination. Lines of equal right ascension crowd together toward the poles, so the cosine turns an angle of right ascension into a true angle on the sky.
+  - A cache file written before the proper motion columns existed gets them added when it is next opened, and its old rows read as `None` (unknown). Callers that ask `query_gaia_sources_in_bounds` for `include_proper_motion` get the two values at the end of each row.
+  - The cache also keeps a `gaia_cache_regions` table: one row per downloaded region with its center, radius, magnitude limit and whether the download hit the row limit. The cache answers a request only when a recorded region covers the whole request, is at least as deep, and was not truncated. Otherwise the pipeline downloads. A cache written before this table existed holds rows of unknown depth, so each region is refreshed once and then recorded.
+- `catalog_access.py` — reads and writes catalog data (targets, stars) to and from the local database. It also answers the plain star listings and counts inside the database (`query_star_summary_page`), so a listing of the star catalog reads one page, not every star.
+- `provenance_store.py` — repository for the IVOA (International Virtual Observatory Alliance) provenance graph, which records which run, at what version, produced a result (see `astrometricslib/models/provenance.py`). It is stored next to the job records (`astrometricslib/foundation/jobs/`) in `astrometrics_log.db`. Its tables are made by an ordered list of migration steps (`_MIGRATION_STEPS`), one per table with its indexes; opening a database adds any table that is missing and changes nothing else. A schema change is a new step at the end of the list.
+- `quality_store.py` — `QualityStore`, the append-only store of quality measurements (see `astrometricslib/models/quality/measurement.py`) in `astrometrics.db`. Each field of a measurement is its own column. A second write of the same run, metric, subject and channel is ignored (the insert says `ON CONFLICT ... DO NOTHING`, so any other constraint error still raises), never replaced, and nothing deletes rows. The view `quality_measurements_latest` gives the newest row for each subject, metric and channel. Capture settings (`CaptureSetting`) are stored once in `quality_capture_setting` and measurements point at them by id. Reading and writing are separate paths. `query` and `get_capture_setting` open the file read-only, take no write lock and never migrate; a missing file or missing tables read as empty, and a database written by newer code raises `StorageError`. Only a write (`write_measurements` or `get_or_create_capture_setting`) creates the file and the tables. A batch commits whole or not at all. Times are stored as UTC with `+00:00`. A stored row that fails the model checks raises `StorageError` naming the row. `query` filters the rows; given `row_ids` it returns exactly those rows, even if newer ones exist. The schema version is kept in its own one-row table, `quality_schema_version`; the store never reads or writes `PRAGMA user_version`, which is shared by the whole file. A database from the first release (quality tables but no version table) is recognized as version 1 and gets the table. Version 2 adds the column `variant` (the label of a subset stack; empty for a library stack). The first write to a version 1 file adds the column, fills it for the rows whose subject id holds `/_subsets/<label>/`, and rebuilds the latest view. `query` reads library and subset rows alike unless given `variant=<label>` or `library_only=True`. Version 3 adds the side table `quality_calibration_identity` (one row per run and library stack: the flat, bias and dark masters, optic, camera, Siril version and stacking algorithm version). `write_calibration_identities` adds a row and ignores a repeat of the same run and subject; `get_calibration_identities` reads by run ids or target, and gives an empty list for a file older than version 3. The move from version 2 only creates the table. Version 4 rounds the pixel scale in `quality_capture_setting` to the same 4 significant figures `CaptureSetting` uses (`round_pixel_scale`), because frame headers write one scale with different precision and each value had become its own setting. The move from version 3 merges the rows that then match on every field (NULL matches NULL) into the one with the smallest id, points their measurements at it, and deletes the others, all in the write's one transaction; only `quality_measurements` refers to a setting id. A second run changes nothing. Version 6 adds the nullable column `flat_bias_masters` to `quality_calibration_identity`; older rows keep NULL, meaning not recorded. Version 7 adds the index `quality_measurements_job_id` on `job_id`, so reading the warnings of one job (`Jobs.query` with `detail="warnings"`) does not scan the table; the move only creates the index. A read never migrates, so a file is upgraded by its first write; until then the read still works, only slower. Run `scripts/backup_library_databases.py` first. A database error is raised as `StorageError`.
+
+## The Siril calibration script
+
+The `siril_interface/` package writes one Siril script per run that builds the master calibration frames and applies them to the lights. It follows these rules.
+
+### Script start and bit depth
+
+Every script starts with `setext fits` and `set32bits` (`SIRIL_SCRIPT_PREAMBLE`). The second command makes Siril save 32-bit floating-point pixels.
+
+**Why.** Without it, Siril uses the bit depth in the user's own preferences. A 16-bit preference rounds the normalized stack to 65536 levels. That loses faint signal and breaks the linear link between pixel value and light collected after `-norm=addscale` (Siril's normalization, which matches each frame's background level and spread before combining).
+
+The command lasts for the whole Siril session, so it comes before every `convert` and `stack` line. The calibration run and the stacking run of spectral frames each start with it. (Spectral frames are aligned by phase correlation, which finds the shift between two images from their Fourier transforms; see the stacking README.) Siril 1.2 and later have the command.
+
+### Bias and dark masters
+
+Several frames are stacked with sigma rejection, which throws out pixel values far from the rest, such as cosmic-ray hits. The command `rej 3 3` sets the low and high limits to 3σ from the middle value (design estimate; see [stacking design estimates](../../../documentation/library_design/validation/stacking.md#design-estimates)). A lone frame has nothing to compare with, so it becomes the master unchanged.
+
+### Flat master
+
+The bias master comes off every flat, including a lone one.
+
+**Why.** A flat holds the bias level (the camera's offset) on top of the light. If the offset stays in, every pixel of the master flat is raised by the same amount, so the flat looks more uniform than the optics really are. The vignette (dimming toward the corners) then looks shallower than it is, and the lights come out under-corrected.
+
+- Several flats go through `calibrate` (with the bias master when there is one) and `stack`.
+- A lone flat goes through `calibrate_single`, because Siril's `convert` writes no sequence file for one frame. Without a bias master, a lone flat is used as it is.
+
+### Flat check
+
+Before Siril builds the master flat, `assess_staged_flats` measures the staged flats with the stacking pipeline's `assess_flats`, which the pipeline passes in as `PipelineSteps.assess_flats`. The check judges each flat's brightness against the clip ceiling in the camera profile of the lights' camera.
+
+The check can also smooth the master flat.
+
+**Why.** Dividing a light by the master flat copies the flat's own noise into every light, as the same pattern each time, so stacking does not average it away. When the master flat would be noisier than the limit, Siril blurs it with a light Gaussian. Vignetting and dust shadows are many pixels wide, so the blur keeps them and removes the pixel-to-pixel noise (see `pipelines/stacking/pre_processing/flat_calibration.py`).
+
+Without `PipelineSteps.assess_flats`, the flats are neither checked nor smoothed.
+
+### Lights
+
+Every light is calibrated with the dark and flat masters, and with the bias master when there is no dark. A stack of one light uses `calibrate_single` with the same masters, so a lone light is never recorded as a calibrated stack without being calibrated.
+
+### Matching the calibration frames to the lights
+
+`CalibrationLibrary` files each frame under a setting key (see the next section) and picks frames for a batch of lights in `select_dark_frames`, `select_bias_frames` and `select_flat_frames`. `build_directories` calls them with the batch's settings:
+
+- gain setting and offset;
+- binning, read from the first readable light's `XBINNING` and `YBINNING`;
+- exposure;
+- mean `CCD-TEMP`.
+
+Each call returns the frames and two lists of one-sentence flags. The driver copies both lists into `last_run_diagnostics`:
+
+- `calibration_mismatch_flags` (soft). The frames are still applied. One sentence says either:
+  - that no frame matched the lights' gain setting and offset, naming the gain setting and offset applied and the lights they were applied to; or
+  - that no dark was within 3 C (`DEFAULT_DARK_TEMPERATURE_TOLERANCE_C`, partly measured; see [STK-06](../../../documentation/library_design/validation/stacking.md#stk-06)) of the lights, naming the lights' temperature, the master's temperature and the tolerance.
+- `calibration_match_blocking_flags` (blocking). No frame of that kind is applied. One sentence says that the lights' binning has no calibration frames and names the binning the library holds. Frames binned differently have different pixels, so they cannot calibrate the lights.
+
+The stacking pipeline reads both lists and fails its `calibration_metadata` gate (see the stacking README).
+
+The driver also records the flat and bias files it chose and linked into the work folder (the ones that were readable). They go into `last_run_diagnostics` as lists of paths under `flat_frame_paths` and `bias_frame_paths` (`FLAT_FRAME_PATHS_KEY` and `BIAS_FRAME_PATHS_KEY`). Recording them where `select_flat_frames` and `select_bias_frames` pick them spares the quality step from guessing from the work folder. The stacking pipeline's flat-to-light match reads both lists (see the stacking README). A run that applied no flats or no biases leaves the key out.
+
+A kind of calibration frame that the library does not hold at all raises neither flag, because both flags describe frames that do not match, and there is no frame to compare. The run records which kinds it applied in `last_run_diagnostics["calibration_applied"]`. When no kind was applied, the `calibration_metadata` gate reads `not_checked`.
+
+### Frame counts
+
+A master built from fewer frames than `minimum_calibration_frames` (default 3, in `[Processing.Siril]`) is still built, because the library can legitimately hold a single flat or dark. The run records one sentence per short master in `last_run_diagnostics["calibration_blocking_flags"]` and logs a warning.
+
+The stacking pipeline reads that list and fails its `calibration_frame_count` gate (see the stacking README), which flags the stack. The flag tells the reader that the masters are weak; it does not mean the pixels are unusable.
+
+## The setting key and picking darks
+
+### The setting key
+
+`CalibrationLibrary` files each frame under a setting key, built by `calibration_setting_key` and written `gain[@offset=N][@bin=AxB][@temp=T]`. The key holds:
+
+- **Gain setting and offset.** A frame at one gain setting or offset cannot calibrate lights at another. A key with no `@offset` means offset 0.
+- **Binning** (`XBINNING`, `YBINNING`). Binning merges neighboring pixels, so a 2x2 frame has different pixels from a 1x1 frame. Darks, bias frames and flats all key on it. A key with no `@bin` means 1x1, which is also what a header with no binning cards gets.
+- **Temperature slot** (darks only). Dark current (the signal heat adds to each pixel) changes with temperature, so darks in different slots never stack into one master.
+  - The dark's `CCD-TEMP` (or `SET-TEMP` when there is no `CCD-TEMP`) rounds to `round(T / tolerance) * tolerance`, with the tolerance `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C` (3 C).
+  - With the default tolerance, -10.2 C and -9.0 C share the -9 C slot, and +5 C is in the +6 C slot.
+  - Bias and flat frames have no temperature slot.
+
+Two settings are not in the key:
+
+- **Exposure** (darks only). Darks are filed by key first, and then by exposure within each key. A dark matches the lights when their exposures differ by less than 0.1 s.
+- **Readout mode** (a setting on some cameras that chooses between ways of reading out the sensor). The ZWO ASI533MM Pro frames in the sample data carry no readout-mode card, so there is nothing to read.
+
+### Picking darks
+
+The library narrows the darks in this order:
+
+1. **Exposure.**
+2. **Binning.** It must match exactly; otherwise the darks are blocked.
+3. **Gain setting and offset.** Without a match, it uses the darks at the other settings, with a soft flag.
+4. **Temperature.** The slot nearest the lights' temperature wins. The colder slot wins a tie, because a warmer dark over-subtracts.
+
+After choosing a slot, the library checks it:
+
+- It reads the `CCD-TEMP` of every dark in that slot, not only the first, and compares their mean with the lights' temperature. It flags the master when the two differ by more than the tolerance.
+- When the lights record no temperature and the darks span several slots, the slot with the most darks wins, with a soft flag.
+- Darks with no temperature are used only when no dark has one.
+
+### Libraries saved with shorter keys
+
+A rescan (`refresh_dark_frames`, `refresh_bias_frames` and `refresh_flat_frames`) moves a frame filed under an older, shorter key to its new key. A library saved before binning and temperature were tracked therefore updates on its next rescan. Until then its frames count as 1x1.
+
+Its darks are still not pooled across temperatures. When a dark's key has no temperature, the library reads that dark's own `CCD-TEMP` and places it in a slot before choosing. Without this rule, lights would receive a master pooled from darks of two temperatures, with no flag. The test `test_a_library_saved_before_temperatures_does_not_pool_them` covers a real case (partly measured; see [STK-06](../../../documentation/library_design/validation/stacking.md#stk-06)).
+
+## Injecting drivers
+
+Only a test replaces a built-in driver. `Astrometrics(...)` takes no driver arguments. A test builds the root with `astrometrics_with_drivers` (in `_internal/testing.py`) and passes a subclass of `PlateSolveDriver`, `StackingDriver`, `SimbadDriver`, `GaiaXpDriver` or `ReddeningDriver` (`plate_solve_driver=`, `stacking_driver=`, `simbad_driver=`, `gaia_xp_driver=`, `reddening_driver=`). The root wraps them in a `Drivers` and hands that to the sub-APIs, which pass it to the pipelines. See `api/README.md` for which calls use which driver.
+
+To add a pipeline step that needs a driver:
+
+1. Take a `drivers: Drivers | None = None` keyword.
+2. Ask `(drivers or Drivers())` for the driver, for example `.simbad_or_default()`.
+3. Do not import or call a built-in driver class in `pipelines/`. `test/test_driver_construction.py` fails if a pipeline module does.
+
+A built-in driver class is not public. It lives in `astrometricslib._internal.drivers`, which only `astrometricslib` may import, and code inside the library goes through `Drivers`.
+
+For exact behavior, read the code.

@@ -171,10 +171,10 @@ def test_every_error_class_maps_to_an_rpc_code() -> None:
     would leave the adapters unable to report it. Importing both libraries
     first makes their classes visible.
     """
-    import astrometricslib
+    import astrometricslib.exceptions
     import wayfindinglib.data_access.delegation_policy_reader  # ruff: ignore[unused-import]
 
     subclasses = _all_subclasses(AstrometricsError)
-    assert astrometricslib.PlateSolveFailedError in subclasses
+    assert astrometricslib.exceptions.PlateSolveFailedError in subclasses
     for subclass in subclasses:
         assert subclass.code in RPC_CODES, f"{subclass.__name__} has an unknown code {subclass.code!r}"

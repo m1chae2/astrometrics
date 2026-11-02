@@ -14,8 +14,8 @@ from typing import Any
 import pytest
 from pytest_mock import MockerFixture
 
+from astrometricslib._internal.drivers.catalog_access import CatalogAccess
 from astrometricslib.api.stars import StellarCatalog
-from astrometricslib.drivers.catalog_access import CatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 
@@ -74,7 +74,7 @@ def _make_catalog(tmp_path: Path) -> StellarCatalog:
         if number % 4 == 0:
             star.photometry = {"timestamps": ["2026-01-01T00:00:00Z"], "magnitudes": [0.5]}
         stars.append(star)
-    catalog.catalog_access.put(stars, "stellar_catalog", {})
+    catalog._catalog_access.put(stars, "stellar_catalog", {})
     return catalog
 
 
@@ -203,8 +203,8 @@ def test_count_reads_no_rows(catalog: StellarCatalog, mocker: MockerFixture) -> 
     database path must not call it, and must read at most the page size.
     """
     load_everything = mocker.spy(CatalogAccess, "list_star_summaries")
-    list_projected = mocker.spy(type(catalog.catalog_access._generic), "list_projected")
-    select_where = mocker.spy(type(catalog.catalog_access._generic), "select_where")
+    list_projected = mocker.spy(type(catalog._catalog_access._generic), "list_projected")
+    select_where = mocker.spy(type(catalog._catalog_access._generic), "select_where")
     answer = catalog.query(detail="ids", limit=1, has_spectra=True)
     assert answer.total_matching > 1
     assert len(answer.ids) == 1
@@ -215,7 +215,7 @@ def test_count_reads_no_rows(catalog: StellarCatalog, mocker: MockerFixture) -> 
 
 def test_page_reads_only_the_page(catalog: StellarCatalog, mocker: MockerFixture) -> None:
     """Verify a page of ten stars reads ten rows from the database."""
-    select_where = mocker.spy(type(catalog.catalog_access._generic), "select_where")
+    select_where = mocker.spy(type(catalog._catalog_access._generic), "select_where")
     answer = catalog.query(limit=10, offset=20, order="useful")
     assert len(answer.stars) == 10
     assert len(select_where.spy_return) == 10
@@ -226,7 +226,7 @@ def test_non_ascii_search_falls_back_to_python(catalog: StellarCatalog, mocker: 
     """Verify a non-ASCII search, which SQLite cannot case-fold, works."""
     answer = catalog.query(search="Ünknown", limit=None)
     assert answer.total_matching == 0
-    assert catalog.catalog_access.query_star_summary_page(search="Ünknown") is None
+    assert catalog._catalog_access.query_star_summary_page(search="Ünknown") is None
 
 
 def test_other_selectors_and_match_order_still_use_the_python_path(

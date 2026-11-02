@@ -190,12 +190,12 @@ Every Python example assumes the library is installed and configured with your o
   assessment = assess_flats(flats, camera="ZWO ASI533MM Pro")
   print(assessment.frame_count, assessment.noise_fraction, assessment.smoothing_sigma_pixels, assessment.issues)
   report = astro.quality.measure_stack("M 101", compare_to="previous")
-  print(report.comparison.before.noise_fraction, report.comparison.after.noise_fraction)
+  print(report.comparison.before.fine_grain_noise_fraction, report.comparison.after.fine_grain_noise_fraction)
   ```
 
-  `assess_flats` is an internal function, not part of the public API; may change. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.flat_calibration.assess_flats --> `CalibrationCatalog.assess_flats` is the public form for flats already in the calibration library. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess_flats --> The comparison uses `QualityRecords.measure_stack`. <!-- impl: astrometricslib.api.quality.QualityRecords.measure_stack -->
+  `assess_flats` is an internal function, not part of the public API; may change. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.flat_calibration.assess_flats --> `CalibrationCatalog.assess` (with `kind="flat"`) is the public form for flats already in the calibration library. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess --> The comparison uses `QualityRecords.measure_stack`. <!-- impl: astrometricslib.api.quality.QualityRecords.measure_stack -->
 - **Acceptance criterion:** If the flat's noise squared is small next to the stack's noise squared, the flat adds nothing visible.
-- **What to look at:** `noise_fraction` of the master flat (standard deviation over mean; 0.005 is 0.5%). The stack's `noise_fraction` (pixel-to-pixel noise over the sky level; lower is cleaner). If the flat's noise squared is small next to the stack's noise squared, the flat adds nothing visible.
+- **What to look at:** `noise_fraction` of the master flat (standard deviation over mean; 0.005 is 0.5%). The stack's `fine_grain_noise_fraction` (pixel-to-pixel noise over the sky level; lower is cleaner; it is not the noise number of the target report, which `measure_stack` now reports as `normalized_noise`, see STK-36). If the flat's noise squared is small next to the stack's noise squared, the flat adds nothing visible.
 - **Our result:** The sky noise of the ZWO ASI533MM Pro stacks of 20 targets was 3% to 6% of the sky level. The master flat of the single-flat library measured 4.5%, and its fixed pattern made up 86% of the fine-scale noise of the undithered M 101 stack. Smoothing that flat halved the stack's noise. Dates not recorded.
 - **Verdict:** Not judged.
 - **Limits:** One bad flat on one stack. A dithered stack hides the pattern, so the same flat would look harmless there.
@@ -210,7 +210,7 @@ Every Python example assumes the library is installed and configured with your o
 
 - **Claim:** Darks taken more than a few degrees from the lights over- or under-subtract, and mixing darks of two temperatures into one master gives a stack with many negative pixels. A slot 3 °C wide keeps such darks apart.
 - **Settings it supports:**
-  - code constant `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C` = 3.0 in `drivers/calibration_library.py` (changing it means editing the code). Relation: sanity check only. <!-- impl: astrometricslib.drivers.calibration_library.DEFAULT_DARK_TEMPERATURE_TOLERANCE_C -->
+  - code constant `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C` = 3.0 in `drivers/calibration_library.py` (changing it means editing the code). Relation: sanity check only. <!-- impl: astrometricslib._internal.drivers.calibration_library.DEFAULT_DARK_TEMPERATURE_TOLERANCE_C -->
 - **Status:** Partly measured. Two real incidents show the harm of mixing temperatures; the 3 °C width itself is not fitted to the camera's dark-current curve.
 - **Data you need:** Darks of one exposure and gain at several sensor temperatures (for example 0, -5, -10 and -15 °C), and lights at one of them.
 - **Procedure:**
@@ -236,7 +236,7 @@ Every Python example assumes the library is installed and configured with your o
 - **Limits:** Two incidents; no dark-current curve measured.
 - **To tune for your setup:** Measure your camera's dark current against temperature. If it doubles in fewer than about 3 °C, narrow the slot; if your cooler holds within 1 °C and dark current changes slowly, the slot can stay as it is.
 - **Regenerate with:** No script.
-- **Guarded by tests:** `test_a_library_saved_before_temperatures_does_not_pool_them` in `astrometricslib/drivers/test/test_calibration_matching.py` reproduces the 2026-10-03 case.
+- **Guarded by tests:** `test_a_library_saved_before_temperatures_does_not_pool_them` in `astrometricslib/_internal/drivers/test/test_calibration_matching.py` reproduces the 2026-10-03 case.
 - **Raw record:** None kept.
 
 ### STK-07
@@ -257,8 +257,8 @@ Every Python example assumes the library is installed and configured with your o
 
   ```python
   from astrometricslib import Astrometrics
-  from astrometricslib.pipelines.stacking.pre_processing import exposure_weighting
-  from astrometricslib.pipelines.stacking.processing.exposure_groups import frame_exposure_seconds
+  from astrometricslib.pipelines.stacking.pre_processing import exposure_weighting  # internal
+  from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_seconds  # internal
 
   astro = Astrometrics()
   target = astro.targets.get("M 27")
@@ -276,9 +276,11 @@ Every Python example assumes the library is installed and configured with your o
 - **What to look at:** P (no units; 1.17 means 17% more noise with equal weights) and the relative change in `noise_fraction` between the two stacks (a negative change means the weighted stack is quieter). The measured gain should approach 1 − 1/P.
 - **Our result:** M 27, 26 frames of 30 s, 33 of 60 s, 22 of 120 s and 1 of 300 s: P = 1.17. Noise weighting (`-weight=noise`) lowered the measured pixel noise by 13% (date not recorded).
 
-  Frame weights on real data: with `-weight=wfwhm`, the weights rebuilt from Siril's formula on the M 57 stack of 61 frames (night of 2026-10-03, 2026-10-23) have mean 1. The blurriest frame (6.93 px) gets weight 0 and the sharpest (2.09 px, the registration reference) gets 3.18. The effective frame count is 40.8 of 61. The formula is Siril's `compute_wfwhm_weights`, read from its source; it was not compared with weights printed by Siril, which prints none. This part is a design estimate until it is compared with a Siril build that prints them. Weights for `-weight=noise` and `-weight=nbstars` are not rebuilt and are stored as not measured (Siril's noise weight needs a scale factor it does not save in the sequence file).
+  Frame weights on real data: with `-weight=wfwhm`, the weights rebuilt from Siril's formula on the M 57 stack of 61 frames (night of 2026-10-03, 2026-10-23) have mean 1. The blurriest frame (6.93 px) gets weight 0 and the sharpest (2.09 px, the registration reference) gets 3.18. The effective frame count is 40.8 of 61. The formula is Siril's `compute_wfwhm_weights`, read from its source. Siril prints no weights, so [STK-59](#stk-59) recovered them from known tiles on made-up frames with `-nonorm`, and they match the formula within 2e-6. On these real frames, with normalization on, each frame's contribution is not yet shown: see [STK-60](#stk-60). Weights for `-weight=noise` and `-weight=nbstars` are not rebuilt and are stored as not measured (Siril's noise weight needs a scale factor it does not save in the sequence file).
+
+  Folded groups (2026-10-26, decision D10 of the plan `IMAGED_TARGET_SUGGESTIONS_PLAN.md`; library copy, code of branch `134-group-weights-nikon` after commit 30f53f77, uncommitted; one run each, in-sample). A group that holds frames folded in from a short exposure length (fewer than 5 frames) now gets frame weights like any group: Siril weights by star width inside the group, not by exposure, so the folded frame's raw weight is the group's weight times its share. It is refused, with a reason, only when a frame has no usable exposure (0 s) or the group's registration reference frame cannot be named. M 27 (a 120 s group of 23 frames that holds one 300 s frame): 79 of 79 frame weights measured and the 300 s frame stacked with raw weight 6.9; the same restack before D10 stored no weights. M 42 (21 x 30 s and one 300 s) and M 81 (three folded frames) had weights for every frame (21 of 21 and 42 of 42), but Siril did not stack the folded frames, so the folded path ran on M 27 only. Weights are as in the table above: not compared with weights Siril prints.
 - **Verdict:** Not judged.
-- **Limits:** One stack. Frames limited by read noise rather than sky noise follow a different rule: read noise weights a frame by 1/t² where sky noise weights it by 1/t. The stack therefore stores both effective times, `stacking.effective_time_s` (sky noise) and `stacking.effective_time_read_noise_s` (read noise), so a forecast over frames of unlike lengths can use the read noise of [PHO-03](photometry.md#pho-03). The read-noise time has not been compared with a measurement; it is a design estimate.
+- **Limits:** One stack, plus one folded group on M 27. Frames limited by read noise rather than sky noise follow a different rule: read noise weights a frame by 1/t² where sky noise weights it by 1/t. The stack therefore stores both effective times, `stacking.effective_time_s` (sky noise) and `stacking.effective_time_read_noise_s` (read noise), so a forecast over frames of unlike lengths can use the read noise of [PHO-03](photometry.md#pho-03). The read-noise time has not been compared with a measurement; it is a design estimate.
 - **To tune for your setup:** If small exposure differences in your sessions trigger weighting with no visible gain, raise `MINIMUM_PENALTY_TO_WEIGHT`; to force a weighting, set `stack_weight`.
 - **Regenerate with:** No script.
 - **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_exposure_weighting.py`.
@@ -425,7 +427,7 @@ Every Python example assumes the library is installed and configured with your o
 
 - **Claim:** Stacking frames of very different exposure lengths in one batch, with Siril's normalization and sigma clipping, throws away the longest frames' values as outliers. Stacking each length on its own and combining the group stacks gives a much less noisy result.
 - **Settings it supports:**
-  - the split itself (`split_frames_by_exposure`) <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.split_frames_by_exposure --> and the combination (`combine_exposure_group_images`). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.combine_exposure_group_images -->
+  - the split itself (`split_frames_by_exposure`) <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.split_frames_by_exposure --> and the combination (`combine_exposure_group_images`). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.processing.group_combination.combine_exposure_group_images -->
   - code constant `MINIMUM_FRAMES_PER_EXPOSURE_GROUP` = 5 in `pipelines/stacking/processing/exposure_groups.py`. Relation: sanity check only. <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.MINIMUM_FRAMES_PER_EXPOSURE_GROUP -->
 - **Status:** Measured. On one session (the comparison with a plain sum).
 - **Data you need:** A bracketed session: many frames of one bright star at several exposure lengths (for example 0.5, 1, 2, 3 and 5 s), slitless spectra or imaging.
@@ -701,10 +703,10 @@ Every Python example assumes the library is installed and configured with your o
 
 - **Claim:** The median flux ratio of isolated, unclipped stars measures the scale between two group stacks correctly; the median pixel ratio is pulled by sky gradients and star-width differences. Dropping stars below 10 times their ratio noise removes a bias in the faintest quarter.
 - **Settings it supports:**
-  - code constant `STAR_GAIN_MINIMUM_SIGNAL_TO_NOISE` = 10 <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.STAR_GAIN_MINIMUM_SIGNAL_TO_NOISE --> in `pipelines/stacking/processing/exposure_groups.py` (changing it means editing the code). Relation: derived from this entry.
-  - code constant `STAR_GAIN_APERTURE_RADIUS_PIXELS` = 14 <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.STAR_GAIN_APERTURE_RADIUS_PIXELS --> in `pipelines/stacking/processing/exposure_groups.py` (changing it means editing the code). Relation: sanity check only.
-  - code constant `STAR_GAIN_MINIMUM_STARS` = 16 <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.STAR_GAIN_MINIMUM_STARS --> in `pipelines/stacking/processing/exposure_groups.py` (changing it means editing the code). Relation: sanity check only.
-  - code constant `STAR_GAIN_CLIP_FRACTION_OF_CEILING` = 0.5 <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.STAR_GAIN_CLIP_FRACTION_OF_CEILING --> in `pipelines/stacking/processing/exposure_groups.py` (changing it means editing the code). Relation: sanity check only.
+  - code constant `STAR_GAIN_MINIMUM_SIGNAL_TO_NOISE` = 10 <!-- impl: astrometricslib.pipelines.stacking.processing.group_star_gains.STAR_GAIN_MINIMUM_SIGNAL_TO_NOISE --> in `pipelines/stacking/processing/group_star_gains.py` (changing it means editing the code). Relation: derived from this entry.
+  - code constant `STAR_GAIN_APERTURE_RADIUS_PIXELS` = 14 <!-- impl: astrometricslib.pipelines.stacking.processing.group_star_gains.STAR_GAIN_APERTURE_RADIUS_PIXELS --> in `pipelines/stacking/processing/group_star_gains.py` (changing it means editing the code). Relation: sanity check only.
+  - code constant `STAR_GAIN_MINIMUM_STARS` = 16 <!-- impl: astrometricslib.pipelines.stacking.processing.group_star_gains.STAR_GAIN_MINIMUM_STARS --> in `pipelines/stacking/processing/group_star_gains.py` (changing it means editing the code). Relation: sanity check only.
+  - code constant `STAR_GAIN_CLIP_FRACTION_OF_CEILING` = 0.5 <!-- impl: astrometricslib.pipelines.stacking.processing.group_star_gains.STAR_GAIN_CLIP_FRACTION_OF_CEILING --> in `pipelines/stacking/processing/group_star_gains.py` (changing it means editing the code). Relation: sanity check only.
 - **Status:** Measured. On three Nikon D5300 targets.
 - **Data you need:** An imaging target stacked in two or more exposure groups, with a few hundred stars per frame.
 - **Procedure:**
@@ -720,7 +722,7 @@ Every Python example assumes the library is installed and configured with your o
       print(group.exposure_seconds, group.gain_mid_range, group.gain_bright_end_ratio, group.gain_disagreement)
   ```
 
-  The two methods are `measure_group_gains_with_stars` <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.measure_group_gains_with_stars --> and `measure_group_gains` <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.measure_group_gains -->, both internal functions, not part of the public API; may change. `measure_star_flux_ratios` gives the per-quarter ratios. <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.measure_star_flux_ratios -->
+  The two methods are `measure_group_gains_with_stars` <!-- impl: astrometricslib.pipelines.stacking.processing.group_star_gains.measure_group_gains_with_stars --> and `measure_group_gains` <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.measure_group_gains -->, both internal functions, not part of the public API; may change. `measure_star_flux_ratios` gives the per-quarter ratios. <!-- impl: astrometricslib.pipelines.stacking.processing.group_star_gains.measure_star_flux_ratios -->
 - **Acceptance criterion:** Not recorded (set after the result).
 - **What to look at:** `gain_mid_range` (the scale factor, a ratio of two counts-per-second values; no units) from each method, and the ratio of the faintest quarter. A scale factor close to the sky ratio rather than to the star ratio means the pixel method is measuring sky, not stars.
 - **Our result:** NGC 6888 60 s: pixel method 1.39, star fluxes 1.04. M 51 60 s: pixel method 1.007, equal to its sky ratio (1.00), while its stars read 2.15. M 106, without the signal-to-noise cut: the faintest quarter of 1,600 stars read 1.62 against 1.137 overall. On the D5300 stacks the 10-noise floor of the pixel method sits at 5% to 8% of the sky level, so the source pixels are mostly sky gradients. Dates not recorded.
@@ -737,7 +739,7 @@ Every Python example assumes the library is installed and configured with your o
 
 - **Claim:** On good group pairs, the faint- and bright-quarter star ratios sit within 4.5% of the group scale factor, so a tolerance of 5% passes them and catches a group that one scale factor cannot describe.
 - **Settings it supports:**
-  - config key `[Processing.Siril] exposure_group_gain_tolerance` (default 0.05). Relation: confirmed by this entry. <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.DEFAULT_GAIN_DISAGREEMENT_TOLERANCE -->
+  - config key `[Processing.Siril] exposure_group_gain_tolerance` (default 0.05). Relation: confirmed by this entry. <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.DEFAULT_GAIN_DISAGREEMENT_TOLERANCE -->
 - **Status:** Partly measured. The good-pair spread and one failing group are measured; the 5% value is a design choice inside that range.
 - **Data you need:** Imaging targets stacked in two or more exposure groups.
 - **Procedure:** Stack each target (STK-19) and collect `gain_disagreement` for every non-reference group. `report_gate_limits` reads the same values from every saved stack.
@@ -763,8 +765,8 @@ Every Python example assumes the library is installed and configured with your o
 
 - **Claim:** Good groups have a sky brightness per second within a factor of 0.5 to 2 of the reference group; a group with a flooded or foreign sky reads 3.9 or more. A scale factor outside 0.25 to 4 is a failed measurement, not a real scale.
 - **Settings it supports:**
-  - code constant `SKY_RATIO_LIMIT` = 3.0 <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.SKY_RATIO_LIMIT --> in `pipelines/stacking/processing/exposure_groups.py` (changing it means editing the code). Relation: derived from this entry.
-  - code constant `PLAUSIBLE_GAIN_RANGE` = (0.25, 4.0) <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.PLAUSIBLE_GAIN_RANGE --> in `pipelines/stacking/processing/exposure_groups.py` (changing it means editing the code). Relation: sanity check only.
+  - code constant `SKY_RATIO_LIMIT` = 3.0 <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.SKY_RATIO_LIMIT --> in `pipelines/stacking/processing/group_gains.py` (changing it means editing the code). Relation: derived from this entry.
+  - code constant `PLAUSIBLE_GAIN_RANGE` = (0.25, 4.0) <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.PLAUSIBLE_GAIN_RANGE --> in `pipelines/stacking/processing/group_gains.py` (changing it means editing the code). Relation: sanity check only.
 - **Status:** Partly measured. Two bad groups set the sky limit; the scale range is a judgment placed far from two failed measurements.
 - **Data you need:** Imaging targets stacked in exposure groups, including one group shot into twilight or moonlight.
 - **Procedure:** Stack each target and read each group's sky ratio and left-out reason.
@@ -778,7 +780,7 @@ Every Python example assumes the library is installed and configured with your o
       print(group.get("exposureSeconds"), group.get("gainMidRange"), group.get("leftOutReason"))
   ```
 
-  `ProcessingPipelines.stack_summary` <!-- impl: astrometricslib.api.processing.ProcessingPipelines.stack_summary --> reads what the stage saved. The sky ratio itself is on the internal `GroupGainMeasurement.sky_ratio` <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.GroupGainMeasurement --> (not part of the public API; may change) and is quoted in the left-out reason.
+  `ProcessingPipelines.stack_summary` <!-- impl: astrometricslib.api.processing.ProcessingPipelines.stack_summary --> reads what the stage saved. The sky ratio itself is on the internal `GroupGainMeasurement.sky_ratio` <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.GroupGainMeasurement --> (not part of the public API; may change) and is quoted in the left-out reason.
 - **Acceptance criterion:** Not recorded (set after the result).
 - **What to look at:** The sky ratio (group sky per second over the reference's; no units) and the scale factor of each group.
 - **Our result:** Good Nikon groups: sky ratio 0.5 to 2.0. Groups with a flooded or foreign sky: 3.9 and 7.6. On Albireo, two short groups clipped at zero measured scale factors of 1.4e-18 and 6e-31. Dates not recorded.
@@ -795,22 +797,22 @@ Every Python example assumes the library is installed and configured with your o
 
 - **Claim:** When the camera offset is below the read noise, a share of raw pixels reads exactly zero and the measured frame noise reads too low. A zero share of 20% separates clipped groups from unclipped ones.
 - **Settings it supports:**
-  - code constant `CLIPPED_FRAME_ZERO_FRACTION` = 0.2 in `pipelines/stacking/processing/exposure_groups.py` (changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.CLIPPED_FRAME_ZERO_FRACTION -->
+  - code constant `CLIPPED_FRAME_ZERO_FRACTION` = 0.2 in `pipelines/stacking/processing/group_gains.py` (changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.CLIPPED_FRAME_ZERO_FRACTION -->
 - **Status:** Partly measured. One session on one camera and offset.
 - **Data you need:** A session at several short exposure lengths at low gain and offset, such as a bright-star spectral bracket.
 - **Procedure:** Measure the noise and zero share of a few raw frames per exposure length.
 
   ```python
-  from astrometricslib.pipelines.stacking.processing.exposure_groups import measure_frame_noise
+  from astrometricslib.pipelines.stacking.processing.group_combination import measure_frame_noise
 
   for path in ["/path/to/Vega_0.5s_001.fits", "/path/to/Vega_1s_001.fits", "/path/to/Vega_2s_001.fits"]:
       print(path, measure_frame_noise(path))
   ```
 
-  `measure_frame_noise` is an internal function, not part of the public API; may change. It returns the frame noise in counts and the zero share. <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.measure_frame_noise --> After a stack, the `raw_frame_clipping` gate reports the worst group's share.
+  `measure_frame_noise` is an internal function, not part of the public API; may change. It returns the frame noise in counts and the zero share. <!-- impl: astrometricslib.pipelines.stacking.processing.group_combination.measure_frame_noise --> After a stack, the `raw_frame_clipping` gate reports the worst group's share.
 - **Acceptance criterion:** Not recorded (set after the result).
 - **What to look at:** The zero share (0 to 1) and the noise in counts per exposure length. Noise that rises with exposure until it levels off marks the clipped lengths.
-- **Our result:** Vega session (ZWO ASI533MM Pro, gain 0): zero share 71% at 0.5 s, 31% at 1 s, 1% at 2 s, 0.2% at 3 s, 0.02% at 5 s; measured noise 0, 4.2 and 8.4 counts (2, 3 and 5 s all gave 8.4). 0.2 sits between the 1 s group (clipped) and the 2 s group (not).
+- **Our result:** Vega session (ZWO ASI533MM Pro, gain 0), measured with the earlier estimator (1.4826 times the median absolute deviation of neighbor differences, before 2026-10-26; the zero shares are unaffected): zero share 71% at 0.5 s, 31% at 1 s, 1% at 2 s, 0.2% at 3 s, 0.02% at 5 s; measured noise 0, 4.2 and 8.4 counts (2, 3 and 5 s all gave 8.4). 0.2 sits between the 1 s group (clipped) and the 2 s group (not).
 - **Verdict:** Not judged.
 - **Limits:** One camera, one offset.
 - **To tune for your setup:** Measure your shortest exposures at your usual gain and offset; place the limit between the clipped and unclipped lengths. Better still, raise the camera offset until no length clips.
@@ -877,6 +879,7 @@ Every Python example assumes the library is installed and configured with your o
 - **Claim:** On normal sessions the stacker rejects well under 10% of pixel values, so a flag at 15% does not fire on a normal stack. A high rejected share is a weaker signal of trouble than star width.
 - **Settings it supports:**
   - code constant `DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD` = 0.15 in `pipelines/stacking/post_processing/stack_quality.py` (changing it means editing the code); false-positive side: normal sessions stay below the limit. Relation: confirmed by this entry. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD -->
+  - code constant `REJECTED_PIXEL_FRACTION_LIMIT` = 0.15 in `wayfindinglib/analytics/result_quality/rules.py`, a copy the rule `stack_rejected_fraction_high` compares the stored rejected share with; `test_the_copied_stack_limits_agree_with_the_stacking_pipeline` fails if the copy and the constant above differ (changing the limit means editing both). Relation: derived from this entry. <!-- impl: wayfindinglib.analytics.result_quality.rules.REJECTED_PIXEL_FRACTION_LIMIT -->
   - the same constant, detection side: whether the limit catches a session with a genuinely high rejected share (none was available). Relation: sanity check only.
 - **Status:** Partly measured. The normal range is measured on three sessions; no session with a genuinely high rejected share was available, so the detection side is not measured.
 - **Data you need:** Several stacks made with the rejection map on (`generate_rejmap`, default on), including one partly clouded session.
@@ -907,6 +910,7 @@ Every Python example assumes the library is installed and configured with your o
 - **Claim:** A stack's expected star width is the root mean square of a sample of its input frames' widths. Normal stacks measure 0.77 to 1.16 times that, so a limit of 1.2 does not fire on them.
 - **Settings it supports:**
   - code constant `DEFAULT_FWHM_DEGRADATION_RATIO` = 1.2 in `pipelines/stacking/post_processing/stack_quality.py` (changing it means editing the code); false-positive side: normal stacks stay below the limit. Relation: confirmed by this entry. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.DEFAULT_FWHM_DEGRADATION_RATIO -->
+  - code constant `STACK_SHARPNESS_RATIO_LIMIT` = 1.2 in `wayfindinglib/analytics/result_quality/rules.py`, a copy the rule `stack_sharpness_poor` compares the ratio of the stored stack width to the stored predicted width with; the same test fails if the copy and the constant above differ (changing the limit means editing both). Relation: derived from this entry. <!-- impl: wayfindinglib.analytics.result_quality.rules.STACK_SHARPNESS_RATIO_LIMIT -->
   - the same constant, detection side: whether the limit catches a real failed alignment (the library holds no such session). Relation: sanity check only.
   - the prediction `expected_stack_fwhm`. Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.expected_stack_fwhm -->
 - **Status:** Partly measured. The false-positive side is measured on six stacks; whether 1.2 catches a real failed alignment is untested, because the library holds no such session.
@@ -923,7 +927,6 @@ Every Python example assumes the library is installed and configured with your o
       metrics.stacked_fwhm_px,
       metrics.median_input_fwhm_px,
       metrics.expected_stack_fwhm_px,
-      metrics.fwhm_degraded,
   )
   print(metrics.stacked_fwhm_px / metrics.expected_stack_fwhm_px)
   ```
@@ -1286,7 +1289,7 @@ Every Python example assumes the library is installed and configured with your o
 
   astro = Astrometrics()
   result = astro.processing.calibration.measure_sensor_noise(
-      "ZWO ASI 533MM Pro", 0, 10, "1x1", temperature=-10, telescope="Apertura 75Q", filter_type="L"
+      "ZWO ASI 533MM Pro", 0, 10, "1x1", temperature_c=-10, telescope="Apertura 75Q", filter_name="L"
   )
   print(result.gain_e_per_adu, result.gain_spread_e_per_adu, result.read_noise_adu, result.read_noise_e)
   ```
@@ -1323,11 +1326,12 @@ Every Python example assumes the library is installed and configured with your o
 
 - **Claim:** The noise of a stack, measured as the scatter of the summed sky in up to 100 empty patches of 4 pixels radius (chosen by a pixel mask made before placement, away from bright stars and from faint sources found in the stack's own pixels), divided by the flux of 10 reference stars (each measured in an aperture 3 times the star width, as a ratio to its value on the first stack), falls as one over the square root of the effective number of frames. The requirement is agreement within 5% for stacks of 15 to 61 frames. The data in hand cannot test that precision: each spread of 100 patches has an error of 11.7%, and a 5% error needs about 540 independent patches.
 - **Settings it supports:**
-  - code constants `NOISE_APERTURE_COUNT` = 100 in `pipelines/stacking/post_processing/empty_apertures.py` and `APERTURE_RADIUS_PX` = 4.0 in `pipelines/stacking/post_processing/stack_image.py`. Relation: sanity check only. One target and one night were measured, with these values only. <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.NOISE_APERTURE_COUNT --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_image.APERTURE_RADIUS_PX -->
-  - code constant `REFERENCE_STAR_COUNT` = 10 (with `MINIMUM_USABLE_REFERENCE_STARS` = 5) in `pipelines/stacking/post_processing/empty_apertures.py`. Relation: sanity check only. <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.REFERENCE_STAR_COUNT -->
-  - code constants `REFERENCE_APERTURE_FWHM_MULTIPLE` = 3.0 in `pipelines/stacking/post_processing/empty_apertures.py` and `MAXIMUM_ROTATION_DEG` = 0.1 in `pipelines/stacking/post_processing/stack_noise.py`. Relation: sanity check only. They are design estimates. <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.REFERENCE_APERTURE_FWHM_MULTIPLE --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.MAXIMUM_ROTATION_DEG -->
-  - code constants `FAINT_SOURCE_THRESHOLD_SIGMAS` = 3.5, `FAINT_SOURCE_SMOOTHING_SIGMAS_PX` = (1.5, 3.0, 6.0), `FAINT_SOURCE_HIGH_PASS_SIGMA_PX` = 12 and `FAINT_SOURCE_CLEARANCE_PX` = 13 (the sky ring's outer radius plus 1 px, for the rounding of the aperture's center to a pixel) in `pipelines/stacking/post_processing/empty_apertures.py`. Relation: sanity check only. The injection and bias tests below used synthetic fields and one real stack, so the values stay design estimates. At 3.5 the rule changed the noise of pure noise by under 1% (paired against the old placement, measured again with the current code); 3.0 pulled it down by 1 to 2% and 2.5 by 8% (an earlier run), so 3.5 was kept. <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.FAINT_SOURCE_HIGH_PASS_SIGMA_PX --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.FAINT_SOURCE_THRESHOLD_SIGMAS --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.FAINT_SOURCE_SMOOTHING_SIGMAS_PX --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.FAINT_SOURCE_HIGH_PASS_SIGMA_PX --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.FAINT_SOURCE_CLEARANCE_PX -->
-  - code constant `REPLACEMENT_DEPTH_FACTOR` = 2 in `pipelines/stacking/post_processing/empty_apertures.py`. Relation: sanity check only. It is a design estimate. A stored set is replaced when a library stack has at least twice the effective frame count of the stack that chose it; no data tested the factor. <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.REPLACEMENT_DEPTH_FACTOR -->
+  - code constants `NOISE_APERTURE_COUNT` = 100 in `pipelines/stacking/post_processing/aperture_placement.py` and `APERTURE_RADIUS_PX` = 4.0 in `pipelines/stacking/post_processing/stack_image.py`. Relation: sanity check only. One target and one night were measured, with these values only. <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.NOISE_APERTURE_COUNT --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_image.APERTURE_RADIUS_PX -->
+  - code constant `REFERENCE_STAR_COUNT` = 10 (with `MINIMUM_USABLE_REFERENCE_STARS` = 5) in `pipelines/stacking/post_processing/aperture_placement.py`. Relation: sanity check only. <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.REFERENCE_STAR_COUNT -->
+  - code constants `REFERENCE_APERTURE_FWHM_MULTIPLE` = 3.0 in `pipelines/stacking/post_processing/aperture_placement.py` and `MAXIMUM_ROTATION_DEG` = 0.5 (with `ROTATION_STEP_PX` = 1) in `pipelines/stacking/post_processing/stack_noise.py`. Relation: sanity check only. They are design estimates. Since 2026-10-26 the stored reference stars are matched by a shift and a rotation about the image center (up to 0.5°, trial steps of 1 px at the farthest corner, about 37 trials for a 3000 px stack) instead of a shift alone (limit 0.1°), and a stack that may not choose apertures uses the set its library stack recorded instead of the deepest one. Motivating observation, M 81 on the copy: the earlier-nights subset stack was lined up on a frame whose header rotation was about 0.2° off, and a shift alone gave 3 of 10 agreeing stars (refused), while a rotation of 0.16 to 0.24° gave 9 of 10. M 81's file held a stale `exp=60` set (effective count 22.1) and the current `exp=300` set (9.2, unequal folded weights); the odd–even difference picked the deeper stale set and refused (0 usable reference stars in the 300 s frame). The header rotation errors of 0.07 to 0.21° are from M 81's 2026-01 frames against real plate solves (the data set and the dates of the solves are not recorded here). Checked on synthetic stacks only (`test_stack_noise.py`); the real-data run is not recorded. Status: Design estimate. <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.REFERENCE_APERTURE_FWHM_MULTIPLE --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.MAXIMUM_ROTATION_DEG -->
+  - code constants `FAINT_SOURCE_THRESHOLD_SIGMAS` = 3.5, `FAINT_SOURCE_SMOOTHING_SIGMAS_PX` = (1.5, 3.0, 6.0), `FAINT_SOURCE_HIGH_PASS_SIGMA_PX` = 12 and `FAINT_SOURCE_CLEARANCE_PX` = 13 (the sky ring's outer radius plus 1 px, for the rounding of the aperture's center to a pixel) in `pipelines/stacking/post_processing/aperture_placement.py`. Relation: sanity check only. The injection and bias tests below used synthetic fields and one real stack, so the values stay design estimates. At 3.5 the rule changed the noise of pure noise by under 1% (paired against the old placement, measured again with the current code); 3.0 pulled it down by 1 to 2% and 2.5 by 8% (an earlier run), so 3.5 was kept. <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.FAINT_SOURCE_HIGH_PASS_SIGMA_PX --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.FAINT_SOURCE_THRESHOLD_SIGMAS --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.FAINT_SOURCE_SMOOTHING_SIGMAS_PX --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.FAINT_SOURCE_HIGH_PASS_SIGMA_PX --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.FAINT_SOURCE_CLEARANCE_PX -->
+  - code constant `REPLACEMENT_DEPTH_FACTOR` = 2 in `pipelines/stacking/post_processing/empty_apertures.py`. Relation: sanity check only. It is a design estimate. A stored set is replaced when a library stack has at least twice the effective frame count of the stack that chose it; no data tested the factor. <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.REPLACEMENT_DEPTH_FACTOR --> Since 2026-10-26 a set is kept per camera, optic and exposure length of the frame the stack is lined up on, and the factor applies within one such set. The reason, on a copy of M 27: a three-group stack lined up on a 120 s frame kept the set chosen on the 60 s stack, its 10 reference stars all saturated in the 120 s frame, and no noise was stored. The fix is checked on synthetic stacks only (`test_stack_noise.py`); the real-data check waits for the forced restack. <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_storage.find_library_set_key -->
+  - code properties `CameraProfile.usable_peak_level_adu` and `CameraProfile.pixel_saturation_level_adu` in `models/camera_profile.py`, which set the registration reference frame's saturation check (`_saturation_check` in `pipelines/stacking/post_processing/stack_noise.py`) and the saturated pixel count. Relation: sanity check only. The pixel-saturation level is the profile's saturation threshold capped at its clip ceiling, and an assumed clip ceiling still caps. The usable peak is that level capped again at the photometric linearity limit when the profile has one. For the ASI533MM Pro (threshold 65,000 ADU, ceiling 65,532 ADU, linearity limit 60,000 ADU) the pixel-saturation level is 65,000 ADU and the usable peak 60,000 ADU. For the D5300 the profile's threshold is an assumed 65,000 ADU above the measured clip of 16,383 ADU, so both levels are 16,383 ADU, and the check fires only at the clip itself. A saturated pixel fraction is stored with the level it was counted at, and the stage measures it again when that level differs. These are design rules, not measured values. No data set tests them. <!-- impl: astrometricslib.models.camera_profile.CameraProfile.usable_peak_level_adu --> <!-- impl: astrometricslib.models.camera_profile.CameraProfile.pixel_saturation_level_adu -->
   - code constant `SEED_SEARCH_RADIUS_PX` = 500 in `pipelines/stacking/post_processing/stack_noise.py`. Relation: sanity check only. The value was chosen from the one night below, where frame headers disagreed with the true star positions by up to 82 px. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.SEED_SEARCH_RADIUS_PX -->
 - **Status:** Partly measured. One target, one night and one camera. The aperture count, aperture radius, reference star count and the 500 px search radius are design estimates (the stacking table). The synthetic test recovers a known noise, with and without faint stars and a nebula, within 10% where the mask's scale is raised by at most about 2 times, and fails where sources dominate that scale (see the masked-regime table). The 5% criterion is not tested at the required precision: on M 57 the three subsets lie 9 to 31% below the prediction, with errors of 14 to 20% on each ratio, and the subsets are nested and share frames with the library stack. The numbers on M 57 used a set defined by the 61-frame library stack (effective count 40.8).
 - **Data you need:** A target with at least 40 light frames of one setting from one night, stacked with the stacking pipeline, and the same frames available to stack again as subsets.
@@ -1340,14 +1344,16 @@ Every Python example assumes the library is installed and configured with your o
   from astrometricslib import Astrometrics
 
   astro = Astrometrics()
-  astro.processing.measure_noise_growth("M 57")
-  for row in astro.quality.query(metric="stacking.empty_aperture_noise_normalized", target_id="M 57"):
+  astro.processing.measure_noise("M 57")
+  for row in astro.quality.query(metric="stacking.empty_aperture_noise_normalized", target_id="M 57").rows:
       print(row.subject.subject_id, row.value, row.uncertainty)
   ```
 
-  To see the placement, call `analyze_faint_sources` <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.analyze_faint_sources --> on the stack's pixels (the distance of every pixel to the nearest flagged pixel, the mask's noise scale at each smoothing, and the flagged and excluded shares) and `place_empty_apertures` <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.place_empty_apertures --> for the positions; to repeat the bias test, call `place_empty_apertures` on pure noise with and without the mask. To repeat the paired test, call `measure_stack_noise` on the library stack (with `depth=StackDepth(frames, effective_frames)`) and on each subset (with `may_choose_apertures=False`), then `paired_noise_ratio` <!-- impl: astrometricslib.pipelines.stacking.post_processing.difference_noise.paired_noise_ratio --> on their `aperture_sums`, reference fluxes and `aperture_identity`. Delete the target's `quality_apertures.json` (or call `reset_apertures`) so the next stack chooses new apertures with the current rule. A set is also replaced by itself when a library stack has twice the effective frame count of the stack that chose it; the new set has a new identity, and the stored rows of the old and new sets are never compared.
+  To see the placement, call `analyze_faint_sources` <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.analyze_faint_sources --> on the stack's pixels (the distance of every pixel to the nearest flagged pixel, the mask's noise scale at each smoothing, and the flagged and excluded shares) and `place_empty_apertures` <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.place_empty_apertures --> for the positions; to repeat the bias test, call `place_empty_apertures` on pure noise with and without the mask. To repeat the paired test, call `measure_stack_noise` on the library stack (with `depth=StackDepth(frames, effective_frames)`) and on each subset (with `may_choose_apertures=False`), then `paired_noise_ratio` <!-- impl: astrometricslib.pipelines.stacking.post_processing.difference_noise.paired_noise_ratio --> on their `aperture_sums`, reference fluxes and `aperture_identity`. Delete the target's `quality_apertures.json` (or call `reset_apertures`) so the next stack chooses new apertures with the current rule. A set is also replaced by itself when a library stack has twice the effective frame count of the stack that chose it; the new set has a new identity, and the stored rows of the old and new sets are never compared.
 
-  `ProcessingPipelines.measure_noise_growth` <!-- impl: astrometricslib.api.processing.ProcessingPipelines.measure_noise_growth --> splits the library stack's frames by night and stacks subsets with `stack_frame_subset` <!-- impl: astrometricslib.pipelines.stacking.subset_stack.stack_frame_subset -->. The noise comes from `measure_stack_noise`. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.measure_stack_noise -->
+  `ProcessingPipelines.measure_noise` <!-- impl: astrometricslib.api.processing.ProcessingPipelines.measure_noise --> splits the library stack's frames by night and stacks subsets with `stack_frame_subset` <!-- impl: astrometricslib.pipelines.stacking.subset_stack.stack_frame_subset -->. The noise comes from `measure_stack_noise`. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.measure_stack_noise -->
+  The aperture set a stack used is stored as the metric `stacking.aperture_set_number` (definition version 1) on every noise stack subject, so that a later comparison of two stacks can tell whether they share one set. The set's identity is the text `v<version>-<12 hex digits>`. It is stored as the whole number `file_version * 2**48 + int(hex, 16)`, which is exact below `2**53` (the version is capped at 31). `aperture_identity_to_number` <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.aperture_identity_to_number --> and `aperture_identity_from_number` <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.aperture_identity_from_number --> convert both ways, and `aperture_set_measurement` <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.aperture_set_measurement --> builds the row. The number has no size or direction and is only compared for equality. Stacks made before this row existed have none, and it cannot be added later: the identity was kept only in the text of a row's reason. A pair of stacks with one of them is therefore not checkable by the forecast check ([WAY-70](wayfinding.md#way-70)). Status: design estimate. Only unit tests have run it (round trip, the 2**53 limit, one row per noise stack); no real stack has been re-measured with it.
+
 - **Acceptance criterion:** Each subset's noise is within 5% of the 1/sqrt(n) prediction made from the full stack.
 - **What to look at:** The normalized noise (noise in the empty patches divided by the flux of the reference stars; no units) of the stack and of each subset, with the stated uncertainty. The error of the noise is 1.1664 times the noise divided by sqrt(n) for n patches (the error of a spread taken as 1.4826 times the median absolute deviation); the earlier formula, 1 / sqrt(2 (n - 1)), is that of a standard deviation and was a third too small, 7% instead of 12% for 100 patches.
 - **Our result:** Two placements are reported. The aperture placement paragraph at the end of this result is the current one; the table before it was measured with the first placement (apertures away from the 400 brightest stars only) and no longer describes the code. M 57, night of 2026-10-03, 61 frames, ZWO ASI 533MM Pro, 3008 by 3008 pixels. Stack run on 2026-10-23 on scratch copies of the frames with the frame quarantine off; the light frames were not changed. The numbers below were measured again on 2026-10-23 with the corrected error and the new flux scale (reference stars in an aperture of 3 times the star width, as a ratio to the first stack). The stack's normalized noise was 2.65e-4 with an uncertainty of 3.1e-5 (100 patches of 4 px; 11.7% from the noise, the flux scale adds nothing on the stack that defines it). The earlier table used the old scale (4.245e-4), which is not comparable.
@@ -1399,9 +1405,14 @@ Every Python example assumes the library is installed and configured with your o
 
   What the rule does not remove: on the real stack the noise stays at 1.5 to 2.5 times the model with a shared part between the halves. Lowering the threshold to 3.0, 2.5 or 2.0 did not lower the library stack's noise by more than 11% in the first pass (9.3e-4 to 9.3e-4, 8.3e-4 and 8.5e-4) while the pure-noise bias reached -8% at 2.5. The separating tests of [STK-38](#stk-38) (sign of the flagged structure, skewness, growth with aperture radius, the flat) were run on these data and do not point to one cause.
 
+  Sky positions of the set (2026-10-27, #134, code uncommitted on `134-group-weights-nikon` after e27261d0; design estimate for the fix, Measured for the fault). On the copy of the library, 9 of 11 stored sets had `wcs_source` "registration reference frame", and for them the stored reference-star positions were 11 to 50 arcsec from the nearest Gaia stars (NGC 7331 among them), against 0.1 to 0.9 arcsec for the two sets chosen by plate solve (M 13 and M 101). The header solution does not match the stack's pixel grid; the noise still worked because each later stack fits the stored stars to its own, but the depth zero point found no Gaia star within 3 arcsec, and a stack with another scale or reference frame failed the match (M 81's earlier-nights stack). Now a library stack that creates or replaces a set plate-solves itself first (`_plate_solve_stack_wcs`, once per set) and the set records `sky_positions_from_plate_solve`; if the solve fails the set is still created, marked not trusted, and the depth rows say the positions do not come from a plate solve; the next library stack replaces an untrusted set when its own solve works (new identity), and keeps it when not. The zero point also says "the stored reference-star positions do not land on Gaia stars" when fewer than 3 stars match and their median nearest separation is above 9 arcsec (three match radii; a design estimate). Unit tests only; no real stack has been re-measured with it. To repeat the check: read each set in `quality_apertures.json`, convert its `reference_stars_ra_dec_deg` to the nearest Gaia stars with `cached_gaia_lookup`, and compare the separations.
+
   Memory of the mask (3008 by 3008 and 6000 by 4000 pixel stacks, a float64 plane passed in, each case in a fresh process): the rise of the peak over the process size after the plane was made was 519 MB and 1,374 MB before the change (float64 arrays) and 346 MB and 917 MB after (32-bit working copies, arrays freed as they are used). The Euclidean distance transform is the likely remaining peak; it was not profiled. The test call is in the procedure; the scripts are in the session's scratch folder (`science/aperture/`).
+
+  Use of the model's spread (2026-10-26, #134, code uncommitted on `134-group-weights-nikon` after 9ed5af01; design estimate). The 9% to 31% spread of the M 57 subsets below the prediction now has a named constant: half of it, 11% as noise (22% as variance), is `EXPECTED_NOISE_MODEL_RELATIVE_ERROR`, the model's own one-standard-error. It is added in quadrature to the aperture error (`total_variance_ratio_error`) in the loss account's "cause unknown" test and in the one-stack fixed-pattern noise's model test, so the two agree (WAY-D34 in `wayfinding.md`). One target, one night; the 11% is not tuned on other data.
+  Stored from 2026-10-26 (#134 decisions D15, D20, D1; code uncommitted on `134-group-weights-nikon` after 817c7da4; unit tests only, no real library stack measured; design estimates STK-D30, STK-D32 and STK-D34). Three rows are added beside the noise: `stacking.measured_to_predicted_noise_ratio` (the measured noise over the predicted noise, both in the stack's units, with the prediction already scaled by the normalization scale), `stacking.empty_aperture_noise_size_exponent` (the same apertures measured at radii of 0.5, 1, 1.5 and 2 times the noise aperture's, the slope of log noise against log pixel count, with an error from 1000 resamples of the apertures; the prediction is not changed by it) and two depth rows. <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_science.noise_ratio_measurements --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_size_noise.measure_aperture_size_noise --> The point-source depth is the magnitude whose 5σ flux equals the noise in a circle one star width in radius, and the surface-brightness limit is the 3σ noise over a 10 arcsec by 10 arcsec box (the circle of equal area), both scaled from the nearest measured aperture area with the measured exponent (0.5 when none, marked assumed). The zero point is the median of Gaia G + 2.5 log10(flux) over the target's stored reference stars matched to Gaia DR3 within 3 arcsec, left out when a companion within 3 mag lies in the large measuring aperture, with at least 3 stars. <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.measure_depth_limits --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.gaia_zero_point --> Stated biases, not corrected: the aperture holds about 94% of a star's light (the point-source depth reads about 0.07 mag shallow); a contaminating companion adds up to 0.03 mag to the zero point; the band is Gaia G, not the stack's filter, with no color term. The depth has not been checked against an independent depth such as injected-star recovery; sample size, uncertainty and held-out status are not recorded. The reference-star match now searches a rotation as well as a shift, applies a negligible fit as none, and a stack that may not choose apertures uses the set its library stack recorded (`record_library_set_key`); the earlier M 81 and M 13 observations are in the settings above and in [STK-42](#stk-42). <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_storage.record_library_set_key --> The frame metrics for the sky rate, the sky noise and the read noise were raised to versions 3, 3 and 2, and a frame is measured again when its stored sky rate says the camera profile had no entry that the profile now has, because a rerun on the copy had left M 57 without a predicted noise (`frames_whose_camera_profile_gap_closed`). <!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.frames_whose_camera_profile_gap_closed -->
 - **Verdict:** Not judged.
-- **Limits:** One target, one night, one camera. The faint-source mask removes sources found in the stack itself, so it cannot remove structure below its threshold, and it is tuned (3.5σ) on one stack and on synthetic fields only; the injection test used Gaussian stars and a smooth nebula. A very crowded or very nebulous field may leave fewer than 20 clean apertures, and then the noise is not measured (never the first placement); the reason gives the share of the image the mask flagged and the share its clearance excludes. The 500 px search radius comes from this one night. The subsets share frames with the full stack, so their agreement with 1/sqrt(n) is not an independent test of the noise estimate. A translation is applied; a rotation is only estimated, and a stack rotated by more than 0.1 degree is refused (a design estimate, never met on real data). The flux scale and the large reference aperture have been run on this one target only. Definition versions (2026-10-23): `stacking.empty_aperture_noise_stack_unit`, `stacking.noise_reference_flux_stack_unit`, `stacking.empty_aperture_noise_normalized`, `stacking.noise_without_night` and `stacking.noise_difference_without_night` are at definition version 3: the uncertainty is 1.1664 × spread / √n, apertures are at least 24 px apart, the reference flux is measured in a large aperture and scaled by each star's ratio to the first stack, the apertures are placed away from faint sources, and every set of apertures has an identity that the stored rows name. Rows of versions 1 and 2 (scratch copies only) are not comparable. Rows of different sets are never compared: a set is replaced when a library stack has at least twice the effective frame count of the stack that chose it, and a subset stack never chooses or replaces a set (it reports that the apertures are missing or predate version 3). The sample for the mask's noise scale is the pixels that hold data; on a crowded or nebulous field the scale is raised by the sources themselves and the mask then misses them (see the masked-regime rows). The mask's noise scale at each smoothing and its flagged share are kept with each set. Readers can leave subset stacks out with `quality.query(library_only=True)` or pick one with `variant=`.
+- **Limits:** One target, one night, one camera. The faint-source mask removes sources found in the stack itself, so it cannot remove structure below its threshold, and it is tuned (3.5σ) on one stack and on synthetic fields only; the injection test used Gaussian stars and a smooth nebula. A very crowded or very nebulous field may leave fewer than 20 clean apertures, and then the noise is not measured (never the first placement); the reason gives the share of the image the mask flagged and the share its clearance excludes. The 500 px search radius comes from this one night. The subsets share frames with the full stack, so their agreement with 1/sqrt(n) is not an independent test of the noise estimate. A translation is applied; a rotation is only estimated, and a stack rotated by more than 0.1 degree is refused (a design estimate, never met on real data). The flux scale and the large reference aperture have been run on this one target only. Definition versions (2026-10-23): `stacking.empty_aperture_noise_stack_unit`, `stacking.noise_reference_flux_stack_unit`, `stacking.empty_aperture_noise_normalized`, `stacking.noise_without_night` and `stacking.noise_difference_without_night` are at definition version 3: the uncertainty is 1.1664 × spread / √n, apertures are at least 24 px apart, the reference flux is measured in a large aperture and scaled by each star's ratio to the first stack, the apertures are placed away from faint sources, and every set of apertures has an identity that the stored rows name. Rows of versions 1 and 2 (scratch copies only) are not comparable. Rows of different sets are never compared: a set is replaced when a library stack has at least twice the effective frame count of the stack that chose it, and a subset stack never chooses or replaces a set (it reports that the apertures are missing or predate version 3). The sample for the mask's noise scale is the pixels that hold data; on a crowded or nebulous field the scale is raised by the sources themselves and the mask then misses them (see the masked-regime rows). The mask's noise scale at each smoothing and its flagged share are kept with each set. Readers can leave subset stacks out with `quality.query(library_only=True).rows` or pick one with `variant=`. **Where the noise step takes its sky coordinates (#134, design estimate; code uncommitted on `134-group-weights-nikon` after dacb635a, 2026-10-26).** The step uses the stack header, then the registration reference frame, then a member frame (STK-D28). When none gives a solution, or a frame's solution fails the check against the stored reference stars, it plate-solves the stack itself in memory with the astrometry pipeline (`PLATE_SOLVE_WCS_SOURCE`, "plate solve of the stack") and does not write the stack header. A failed solve keeps the not-measured result with both reasons, and can take up to about 10 minutes. Copy evidence, one run each, in-sample, no uncertainty recorded: M 13 and M 101 restacked with "no WCS for this stack" before the fallback. After it, M 13's stack solved (18 stars, 0.767 arcsec rms) and so did its earlier-nights subset (23 stars, 0.941 arcsec), whose frames carry a capture-program solution. M 101 has not been rerun. To repeat: restack a target whose frames carry no solution with `astro.processing.stack(target, force=True)` and read the stack's noise rows and their reason.
 - **To tune for your setup:** If the check of the reference stars fails on your stacks, raise `SEED_SEARCH_RADIUS_PX` to the largest disagreement between your frame headers and the stars. More apertures make the noise estimate steadier.
 - **Regenerate with:** The call in the procedure.
 - **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_stack_noise.py` recovers a known white noise within its stated uncertainty on a synthetic stack, keeps apertures away from a source far below the star finder's limit, checks that the mask leaves pure noise unbiased, recovers the noise under faint stars and a nebula within 10% where the old placement is 15% or more high, refuses to fall back to the old placement when no clean apertures remain and stores the masked share in the not-measured row, keeps the mask's noise scale from being pulled down by an empty border, and covers the set identity, the replacement of a set by a stack with twice the depth, the refusal of a subset stack to choose or to read a version-2 file, and the refusal to pair sums of different sets (`test_subset_noise_run.py` and `test_stacking_record_quality.py` cover the subset and the stored rows). The real-data run has no test.
@@ -1418,20 +1429,20 @@ Every Python example assumes the library is installed and configured with your o
 - **Status:** Design estimate. The growth series of one night is measured in [STK-36](#stk-36); leaving a night out has been run on synthetic frames only, and no real target with several nights has been run. The comparison with the library stack uses the paired error (apertures resampled together), the night's share is stored as assumed when the library stack's member list is, and each leave-out stack stores the ratio its own effective frame count predicts (`stacking.subset_expected_noise_ratio`). None of these has been run on real frames of several nights.
 - **Data you need:** A target with frames from at least two observing nights, stacked once, with its aperture file beside the stacks.
 - **Procedure:**
-  1. Call `measure_night_contributions` for the target.
+  1. Call `measure_noise` with `kind="night_contributions"` for the target.
   2. Read `stacking.noise_without_night` and `stacking.night_weight_fraction` for each night.
 
   ```python
   from astrometricslib import Astrometrics
 
   astro = Astrometrics()
-  astro.processing.measure_night_contributions("M 13")
+  astro.processing.measure_noise("M 13", kind="night_contributions")
   for name in ("stacking.noise_without_night", "stacking.night_weight_fraction"):
-      for row in astro.quality.query(metric=name, target_id="M 13"):
+      for row in astro.quality.query(metric=name, target_id="M 13").rows:
           print(name, row.subject.subject_id, row.value)
   ```
 
-  `ProcessingPipelines.measure_night_contributions` <!-- impl: astrometricslib.api.processing.ProcessingPipelines.measure_night_contributions --> runs `run_night_contributions`. <!-- impl: astrometricslib.pipelines.stacking.subset_noise_run.run_night_contributions -->
+  `ProcessingPipelines.measure_noise` <!-- impl: astrometricslib.api.processing.ProcessingPipelines.measure_noise --> runs `run_night_contributions`. <!-- impl: astrometricslib.pipelines.stacking.subset_noise_run.run_night_contributions -->
 - **Acceptance criterion:** Not recorded (set after the first real result).
 - **What to look at:** The noise without the night against the noise of the full stack (a higher noise without the night means the night helped), and the night's weight share.
 - **Our result:** Synthetic test only (`test_subset_noise_run.py`: a stacker with noise 6/sqrt(n); the two-night subset has 0.71 times the one-night subset's noise, within 30%). Not yet run on a real target.
@@ -1461,9 +1472,9 @@ Every Python example assumes the library is installed and configured with your o
   from astrometricslib import Astrometrics
 
   astro = Astrometrics()
-  astro.processing.record_frame_measurements("M 57")
+  astro.quality.record_frame_measurements("M 57")
   astro.processing.stack("M 57", force=True)
-  astro.processing.measure_noise_growth("M 57")
+  astro.processing.measure_noise("M 57")
   for name in (
       "stacking.empty_aperture_noise_stack_unit",
       "stacking.expected_sky_noise_stack_unit",
@@ -1472,7 +1483,7 @@ Every Python example assumes the library is installed and configured with your o
       "stacking.expected_sky_level_stack_unit",
       "stacking.stack_sky_level_stack_unit",
   ):
-      for row in astro.quality.query(metric=name, target_id="M 57"):
+      for row in astro.quality.query(metric=name, target_id="M 57").rows:
           print(name, row.subject.subject_id, row.value, row.status)
   ```
 
@@ -1516,13 +1527,16 @@ Every Python example assumes the library is installed and configured with your o
   - Spread against aperture radius (2 to 6 px, same positions and ring). For white noise the spread grows as the square root of the effective area, a factor 1.00, 1.61, 2.29, 3.06, 3.93 from radius 2 to 6 px (a log-log slope of 1.24). The measured spread of the library stack grows 1.00, 1.80, 2.96, 4.05, 4.85 (slope 1.47), that of half A 1.00, 2.09, 3.22, 4.42, 6.07 (slope 1.62) and that of A minus B 1.00, 2.15, 3.21, 4.47, 5.98 (slope 1.60). The difference, which cancels shared sky, grows as steeply as the stack, and the ratio of the difference's spread to the library stack's is 0.91, 1.08, 0.99, 1.00 and 1.12 across the radii. So the pixel noise is correlated over a few pixels (the aperture sums add up faster than for independent pixels), which raises the sums above the white-noise model without any shared structure. This test does not separate structure from correlated noise. Faint stars (2 px wide) would add a part that stops growing beyond about 3 px; none is seen between 4 and 6 px.
   - The flat. The master flat's random noise adds 5.1e-5 to an aperture sum ([STK-39](#stk-39)): 4.8% of the measured noise (1.07e-3) and 12% of the expected (4.3e-4). The excess variance of the stack over the model is 9.6e-7, and the flat's variance (2.6e-9) is 0.27% of it. The flat's random noise is therefore not the cause. A systematic mismatch of the flat (dust, illumination) is not part of that budget and was not tested.
   - What the numbers support: the master flat's random noise is excluded (0.3% of the excess variance); correlated pixel noise accounts for at most a factor of about 1.3 over the white-noise model (A minus B is 1.32 times it, and it may hold other changes between the halves too) and is not enough for the stack, which is 2.5 times; the structure left is two-signed at the mask's scale and a modest positive tail remains in the sums. A single cause is not identified, and no test here separates a flat or background residual from extended nebulosity.
-  - The difference as a stored measurement (2026-10-23, [STK-42](#stk-42)). The half-difference job measures the noise of the difference in the same apertures, with the shared frame's effect on the variance included (variance factor 0.0845 instead of 0.108). The random noise it implies for the library stack is 5.68e-4, 1.32 times the 4.30e-4 expected, and the library stack's empty-aperture noise is 1.88 times that. Letting each frame have its own modeled noise (the variance ratio R of STK-42, 3.442 against 3.445 for equal frames) gives the same 5.68e-4, so the frames' unequal sky does not explain the excess. An injection test with known noise on shared structure recovers the noise within 12% on average where the plain noise reads up to 8.5 times too high. So the part of the stack's noise that more frames remove sits 1.32 times above the white-noise model, and about half of the measured empty-aperture noise is shared structure.
+  - The difference as a stored measurement (2026-10-23, [STK-42](#stk-42)). The odd–even difference job measures the noise of the difference in the same apertures, with the shared frame's effect on the variance included (variance factor 0.0845 instead of 0.108). The random noise it implies for the library stack is 5.68e-4, 1.32 times the 4.30e-4 expected, and the library stack's empty-aperture noise is 1.88 times that. Letting each frame have its own modeled noise (the variance ratio R of STK-42, 3.442 against 3.445 for equal frames) gives the same 5.68e-4, so the frames' unequal sky does not explain the excess. An injection test with known noise on shared structure recovers the noise within 12% on average where the plain noise reads up to 8.5 times too high. So the part of the stack's noise that more frames remove sits 1.32 times above the white-noise model, and about half of the measured empty-aperture noise is shared structure.
 
+  - Siril's normalization scale (2026-10-26, decision D9; library copy, code of branch `134-group-weights-nikon` after commit cbd4229e, in-sample). Siril's `-norm=addscale` multiplies each registered frame by an unsaved scale that matches its pixel spread to the reference frame's; resampling lowers a frame's spread, so the scale is above 1 for every frame but the reference. The library now measures the stack's scale as the median, over 10 unsaturated reference stars, of their flux in the stack over their flux in the registration reference frame, divided by the ratio with no scaling, and multiplies the expected noise by it (`stacking.normalization_scale`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.normalization_scale.measure_normalization_scale --> On the 60 s stacks the scale was 1.193 ± 0.006 (M 27, 33 frames), 1.385 ± 0.007 (M 57, 61 frames) and 1.339 ± 0.005 (M 81, 30 frames). The odd–even difference job's random part over the unscaled frame prediction gave 1.14 ± 0.13, 1.37 ± 0.16 and 1.34 ± 0.16 (error from the aperture error 1.17 / sqrt(100) per value): agreement within 0.4, 0.1 and 0.0 combined errors. The scaled prediction over the odd–even difference random part is 1.01, 1.05 and 1.02. The scale's error is star scatter only; frames dimmed by cloud or haze bias it low. A group stack is corrected with its reference group's scale, checked on synthetic stacks only and on the M 27 stack below. Each frame's own scale is not recorded, so `stacking.frame_weight` stays the star-width share; that biases noise ratios by under about 3% (design estimate). This check compares whole-stack scales. It does not test each frame's contribution, which failed in [STK-60](#stk-60).
+
+  - Folded exposure groups (2026-10-26, decision D10; library copy `134-validation`, code of branch `134-group-weights-nikon` after commit 30f53f77, uncommitted; one run each, in-sample; uncertainties of the unit-noise numbers not recomputed). A group that holds frames folded in from a short length is stacked like any group, but Siril matches each of its frames to the group's registration reference frame, so frame `i` of length `t_i` is multiplied by about `k_i = t_ref / t_i` and its noise grows by `k_i`. The expected noise multiplies that frame's variance term by `k_i` squared; `k_i` is 1 for every frame of an unfolded group, so older results do not change. The `k_i` from exposure ratios are a design estimate: Siril fits the scale from the frame's stars, which also absorbs the frame's transparency, and the fitted scale was not read back. The reference frame is the group's one zero-shift kept frame, read from Siril's registration lines (`group_registration_reference`), not assumed to have the group's main length. Its exposure is stored as `stacking.group_reference_exposure_s` (version 1, unit s) on the group's own subject; a stack of one group stores it on the stack file, as the reference frame's exposure when the frames differ in length, else the common length. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.group_references --> The normalization scale (above) now decides whether the reference frame belongs to the reference group by the frame's path, and divides its expected ratio by the group's exposure `t_g`, which the combine divides by, not by the reference frame's exposure (the group's mean exposure, 127.8 s for 22 frames of 120 s and one of 300 s, differs from any frame's). M 27 (82 imaging frames in groups of 30 s x 26, 60 s x 33 and 120 s x 23 with one 300 s frame; 20 of the 120 s group stacked): 79 of 79 frame weights measured, group reference exposures 30, 60 and 120 s, normalization scale 1.117 ± 0.004 (star scatter only), predicted empty-aperture noise 0.477e-3 stack units after that scale, measured 1.972e-3, effective frame count 27.9. The restack before D10 stored no weights, no prediction and no scale. The measured noise is 4.1 times the prediction, as for a stack with fixed-pattern noise (the part of the noise that more frames do not remove, [WAY-D70](wayfinding.md#design-estimates)); this run does not separate the fixed-pattern noise from an error in `k_i`. M 42 (21 x 30 s and one 300 s; Siril stacked 21) had weights 21 of 21, predicted 0.723e-3 against measured 1.017e-3, scale 1.334 ± 0.010. M 81 (60 s x 30 with one 30 s folded in; 300 s x 12 with two 600 s folded in) had weights 42 of 42; Siril did not stack the three folded frames, and the prediction is not measured because four 300 s frames have no stored sky measurement on the copy. So the folded path ran on M 27 only. Open: compare the M 27 floor across stacks in normalized noise (noise over the stars' flux) before trusting the fixed-pattern noise from the three-group stack; the 60 s single stack earlier gave 3.097e-3 measured against 1.048e-3 scaled predicted, a different stack and scale, so the stack-unit numbers are not comparable. To repeat: run `astro.processing.stack("M 27", force=True)` on a copy and read `stacking.group_reference_exposure_s`, `stacking.frame_weight`, `stacking.normalization_scale` and `stacking.expected_empty_aperture_noise_stack_unit` with `astro.quality.query`.
 - **Verdict:** Not judged.
-- **Limits:** One target, one night, one camera, one Galactic field. The model leaves out Siril's normalization of each frame, debayering of color stacks, the noise of the master dark, bias and flat, fixed patterns, the data that pixel rejection removes and faint stars in the apertures. It treats the pixels of an aperture as independent and assumes the stack is the weighted mean with the reported weights. A stack combined from several exposure groups gets no expected noise (the combine divides each group by its exposure, which the weights leave out), a spectral stack gets none, and a stack whose member list is uncertain gets an assumed one. A stack whose weights Siril does not report (noise or star-count weighting) has none. The expected rows are assumed when the gain in the camera profile or the sky is not measured. No uncertainty is reported, because the errors of the gain and the sky are not propagated. The unit scale is checked by the stored pair of sky levels on every stack, but was compared on this one stack only.
+- **Limits:** One target, one night, one camera, one Galactic field. The model leaves out Siril's normalization of each frame, debayering of color stacks, the noise of the master dark, bias and flat, fixed patterns, the data that pixel rejection removes and faint stars in the apertures. It treats the pixels of an aperture as independent and assumes the stack is the weighted mean with the reported weights. A stack combined from several exposure groups gets the group formula (2026-10-25, issue #134: each frame counts W_g w_i / (sum W x G_g) in counts per second, the noise is scaled by the mean exposure per frame, the predicted sky is the heaviest group's sky per second times that mean). It is computed, not yet validated against a held-out stack: status unchanged. A group with folded frames is predicted with the design-estimate `k_i` above. The half-stack and leave-one-night-out subset jobs predict with `k_i = 1`, so their predictions for mixed-length subsets are slightly off. A stack with a group clipped at zero gets none, and a clipped single-group stack too, on purpose. A spectral stack gets none, and a stack whose member list is uncertain gets an assumed one. A stack whose weights Siril does not report (noise or star-count weighting) has none. The expected rows are assumed when the gain in the camera profile or the sky is not measured. No uncertainty is reported, because the errors of the gain and the sky are not propagated. The unit scale is checked by the stored pair of sky levels on every stack, but was compared on this one stack only. **Rows of a subset stack (#134 decision D11, design estimate; code uncommitted on `134-group-weights-nikon` after dacb635a, 2026-10-26).** `stack_subset(pipelines, target, frames, label=EARLIER_NIGHTS_VARIANT, record_forecast_rows=True)` (an internal function that `scripts/run_all_target_processing.py` calls) stores what a library stack stores for the forecast check: one frame weight per frame on the subject `<frame id>#<label>` (so it never hides the library stack's weight of that frame), the exposure-group rows under `_subsets/<label>/groups/`, the predicted noise (with each frame's folding scale `k_i` and the normalization scale), the aperture-set row in the library stack's apertures, and a calibration record. Copy evidence on M 13 (two nights), one run, in-sample, no uncertainty recorded: the earlier-nights subset has 4 frames (effective 2.13), normalized noise 0.778e-3, measured over predicted 0.98 and normalization scale 1.234; the library stack has 44 frames (effective 35.9), normalized noise 0.206e-3, measured over predicted 1.40 and scale 1.472. The difference between the two scales is not explained. To repeat: `astro.processing.stack_subset(target, frames, label="earlier-nights", record_forecast_rows=True)` with the frames of all nights but the last, then read the rows with `astro.quality.query(variant="earlier-nights").rows`.
 - **To tune for your setup:** Run the frame measurement job first. Add your camera's gain and read noise at your setting with `CalibrationCatalog.measure_sensor_noise`. To see how much of your stack's noise is shared structure, stack two disjoint halves of your frames on one registration reference and compare their difference with the prediction.
 - **Regenerate with:** The call in the procedure.
-- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/post_processing/test_expected_noise.py` recovers a known noise from a simulated stack within 8% (it came out 2% low) and checks every missing-input path; `test_record_science.py` checks the join with the stored sky rows and the camera profile with a fake store, the multiple-exposure, spectral and uncertain-member cases and the failure paths.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/post_processing/test_expected_noise.py` recovers a known noise from a simulated stack within 8% (it came out 2% low) and checks every missing-input path; `test_group_frame_weights.py` and `test_normalization_scale.py` cover folded groups (reference named by path, `k_i`, refusals); `test_record_science.py` checks the join with the stored sky rows and the camera profile with a fake store, the group, clipped, spectral and uncertain-member cases (the group formula against an independent sum, and its reduction to the single-group result) and the failure paths.
 - **Raw record:** None kept; the rows were stored in the quality store of the run. The scripts and their output are in the session's scratch folder (`science/half_stack/` and `science/single_frame/`).
 
 ### STK-39
@@ -1550,7 +1564,7 @@ Every Python example assumes the library is installed and configured with your o
       "stacking.flat_noise_in_aperture_stack_unit",
       "stacking.empty_aperture_noise_stack_unit",
   ):
-      for row in astro.quality.query(metric=name, target_id="M 57", library_only=True):
+      for row in astro.quality.query(metric=name, target_id="M 57", library_only=True).rows:
           print(name, row.value)
   ```
 
@@ -1558,6 +1572,7 @@ Every Python example assumes the library is installed and configured with your o
 - **Acceptance criterion:** Not recorded.
 - **What to look at:** The flat's noise in the aperture next to the stack's measured noise and next to the expected noise ([STK-38](#stk-38)). A flat whose figure is a large share of the stack's noise is limiting the stack, and more flat frames or a wider blur would help.
 - **Our result:** M 57 library stack, 2026-10-23: 30 flat frames, noise of the average 0.119% of the flat's level before any blur (below the 0.5% limit, so no blur: the figure after the blur is the same, 0.119%), stack sky level 0.006278 (411 ADU). The flat adds 5.1e-5 to an aperture sum. The stack's measured noise is 1.66e-3 and the expected noise 4.3e-4. So the flat is 3.1% of the measured noise and 12% of the expected noise, and adds about 0.1% to the measured variance. In simulation, the blur factor for a blur width of 2 px is 0.141, which equals 1 / (2 × width × sqrt(pi)) to 0.003%; the aperture figure for a flat noise of 2% on a sky of 0.006 is 8.1e-4 against 9.1e-4 simulated without a blur and 6.5e-4 against 6.9e-4 simulated with a 1.5 px blur.
+  The master dark's noise (#134 decision D22, 2026-10-26; code uncommitted on `134-group-weights-nikon` after 817c7da4; design estimate, unit tests only, no real stack measured): `stacking.expected_master_dark_noise_stack_unit` is the read noise of one dark frame at the stack's gain, divided by the square root of the number of dark frames, summed over the aperture's pixels as for independent pixels and scaled to the stack's units. It enters every light alike, so it is fixed-pattern noise the library can predict. The dark current's shot noise is not included (the camera profile holds no dark-current rate), so the value is a lower bound for a warm sensor, and a stack of several exposure groups gets no value. <!-- impl: astrometricslib.pipelines.stacking.post_processing.expected_noise.expected_master_dark_noise -->
 - **Verdict:** Not judged.
 - **Limits:** The master flat is not kept by the stacking step, so its noise after the blur is derived (the assessment's noise times the blur factor), not measured on the master. The figure takes the whole pattern to stay (no dithering) and leaves out the sky ring, which in simulation put the sum 7% to 11% above it. The flat assessment's noise rests on the first two flat frames and on a cap of 32 frames averaged. One stack and one flat set were run.
 - **To tune for your setup:** Take more flat frames if the figure is more than a few percent of your stack's noise.
@@ -1572,7 +1587,7 @@ Every Python example assumes the library is installed and configured with your o
 - **Claim:** At the exposure that was used, the brightest star's peak above the sky, divided by the room between the sky and the ceiling, says how close the exposure came to clipping. A value below 1 is a measured peak. A clipped star's peak is estimated from the pixels around its core: it says that the star clipped, and its size is stated only inside the range that [STK-41](#stk-41) checked.
 - **Settings it supports:**
   - code constants `CHECKED_ESTIMATE_RANGE_ROOM_MULTIPLES_BY_CAMERA`, `CHECKED_ESTIMATE_ERROR_FRACTION`, `CHECKED_ESTIMATE_SHARE_WITHIN_ERROR` and `CHECKED_ESTIMATE_AGAINST_MEASURED_RATIOS` in `pipelines/stacking/post_processing/exposure_saturation.py`. Relation: derived from [STK-41](#stk-41). <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.CHECKED_ESTIMATE_RANGE_ROOM_MULTIPLES_BY_CAMERA --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.CHECKED_ESTIMATE_ERROR_FRACTION --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.CHECKED_ESTIMATE_SHARE_WITHIN_ERROR --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.CHECKED_ESTIMATE_AGAINST_MEASURED_RATIOS -->
-  - code constant `MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO` = 100 in the same file, which stops a frame's estimate from being used at all beyond 100 times the room. Relation: sanity check only. [STK-41](#stk-41) finds the proportionality of estimates holding to 80 times the room on the ASI533MM Pro, so 100 is a little lenient, and it holds nowhere on the D5300. It is not changed here, because the old recommended exposure uses it. <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO -->
+  - code constant `MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO` = 100 in the same file, which stops a frame's estimate from being used at all beyond 100 times the room. Relation: sanity check only. [STK-41](#stk-41) finds the proportionality of estimates holding to 80 times the room on the ASI533MM Pro, so 100 is a little lenient, and it holds nowhere on the D5300. It is not changed here. <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO -->
 - **Status:** Partly measured. An unclipped frame gives a measured peak. A clipped frame gives an estimate. Inside the range checked for the camera it is stored as assumed, with the error of the check in the reason. Beyond that range (and for any camera with no range) the fraction and the peak are stored as not measured, with the size of the estimate, and only the count of clipped frames is stored.
 - **Data you need:** A stack with the raw frames still on disk, and a camera profile that gives the clip ceiling.
 - **Procedure:**
@@ -1592,7 +1607,7 @@ Every Python example assumes the library is installed and configured with your o
       "stacking.group_peak_estimated_frame_count",
       "stacking.group_clipped_frame_count",
   ):
-      for row in astro.quality.query(metric=name, target_id="M 57", library_only=True):
+      for row in astro.quality.query(metric=name, target_id="M 57", library_only=True).rows:
           print(name, row.value, row.status, row.sample_count, row.reason)
   ```
 
@@ -1745,14 +1760,14 @@ Every Python example assumes the library is installed and configured with your o
 
 ### STK-42
 
-**The noise of the difference of two half stacks**
+**The noise of the difference of two half stacks (the odd–even difference)**
 
 - **Claim:** The difference of two stacks made from disjoint halves of the library stack's frames, registered to one reference frame, cancels what the frames share (sky structure, faint stars, nebula) and keeps their random noise. Measured in the target's empty apertures, it recovers a known injected noise within 12% on average (single fields 17% low to 20% high) where the plain empty-aperture noise of one half reads up to 8.5 times too high. On the M 57 library stack the random noise it implies is 1.32 times the noise the frames' light predicts ([STK-38](#stk-38)), where the empty-aperture noise is 2.48 times.
 - **Settings it supports:** None. The fewest frames in a half is the design estimate STK-D25.
 - **Status:** Partly measured. One synthetic grid (ten cases, six stacks each), one injection of the implied-noise formulas on frames of unequal noise and weight, and one real target, one night, one camera. The real stack has no independent truth, so only its agreement with the model is known; the injections show the difference and the formulas follow the injected noise, not that the M 57 value is right.
 - **Data you need:** A target with a library stack of at least 16 light frames of one setting, stacked by the current code (so the stack's apertures, noise sums, frame weights and registration reference frame are recorded), and the raw frames on disk.
 - **Procedure:**
-  1. Run the job (or `measure_noise_growth`, which runs it by default). Nothing starts it after a stack; a caller does. It splits the library stack's frames by capture time into the odd and the even places, puts the registration reference frame into both halves and hands it to the stacker as the frame to line up with (a half cannot choose its own; the job still refuses when a half reports another one), stacks each half (normal settings, no edge trim, no quarantine), subtracts them and measures the noise of the difference in the stack's stored apertures. Pixels that either half does not cover are left out. The halves are deleted afterwards.
+  1. Run the job (or `measure_noise` with the default kind `growth`, which runs it by default). Nothing starts it after a stack; a caller does. It splits the library stack's frames by capture time into the odd and the even places, puts the registration reference frame into both halves and hands it to the stacker as the frame to line up with (a half cannot choose its own; the job still refuses when a half reports another one), stacks each half (normal settings, no edge trim, no quarantine), subtracts them and measures the noise of the difference in the stack's stored apertures. Pixels that either half does not cover are left out. The halves are deleted afterwards.
   2. Read the nine rows it stores on the library stack and the result it returns.
   3. Compare the library stack's random noise that the difference implies with the model's expected noise and with the empty-aperture noise.
 
@@ -1760,28 +1775,30 @@ Every Python example assumes the library is installed and configured with your o
   from astrometricslib import Astrometrics
 
   astro = Astrometrics()
-  astro.processing.measure_half_difference_noise("M 57")
+  astro.processing.measure_noise("M 57", kind="odd_even_difference")
   for name in (
-      "stacking.half_difference_noise_stack_unit",
-      "stacking.half_difference_noise_normalized",
-      "stacking.half_difference_reference_flux_stack_unit",
-      "stacking.half_difference_odd_effective_frame_count",
-      "stacking.half_difference_even_effective_frame_count",
-      "stacking.half_difference_shared_frame_odd_weight_fraction",
-      "stacking.half_difference_shared_frame_even_weight_fraction",
-      "stacking.half_difference_variance_factor",
-      "stacking.half_difference_model_variance_ratio",
+      "stacking.odd_even_difference_noise_stack_unit",
+      "stacking.odd_even_difference_noise_normalized",
+      "stacking.odd_even_difference_reference_flux_stack_unit",
+      "stacking.odd_even_difference_odd_effective_frame_count",
+      "stacking.odd_even_difference_even_effective_frame_count",
+      "stacking.odd_even_difference_shared_frame_odd_weight_fraction",
+      "stacking.odd_even_difference_shared_frame_even_weight_fraction",
+      "stacking.odd_even_difference_variance_factor",
+      "stacking.odd_even_difference_model_variance_ratio",
       "stacking.effective_frame_count",
       "stacking.empty_aperture_noise_stack_unit",
       "stacking.expected_empty_aperture_noise_stack_unit",
   ):
-      for row in astro.quality.query(metric=name, target_id="M 57", library_only=True):
+      for row in astro.quality.query(metric=name, target_id="M 57", library_only=True).rows:
           print(name, row.value, row.status, row.reason)
   ```
 
-  `ProcessingPipelines.measure_half_difference_noise` <!-- impl: astrometricslib.api.processing.ProcessingPipelines.measure_half_difference_noise --> calls `run_half_difference_noise` <!-- impl: astrometricslib.pipelines.stacking.subset_noise_run.run_half_difference_noise -->. The split is `split_into_halves` <!-- impl: astrometricslib.pipelines.stacking.subset_noise_run.split_into_halves -->, each half is stacked by `stack_frame_subset` <!-- impl: astrometricslib.pipelines.stacking.subset_stack.stack_frame_subset --> without the edge trim, and the difference is measured by `measure_difference_noise` <!-- impl: astrometricslib.pipelines.stacking.post_processing.difference_noise.measure_difference_noise -->, which puts the stored apertures on the first half's stars and sums the difference image. The library stack's random noise that the difference implies is `full_stack_noise_equivalent` <!-- impl: astrometricslib.pipelines.stacking.subset_noise_run.full_stack_noise_equivalent --> from `difference_variance_factor` <!-- impl: astrometricslib.pipelines.stacking.subset_noise_run.difference_variance_factor -->. It is returned in the result and not stored; every part of it is. The version with each frame's own noise is `model_variance_ratio` <!-- impl: astrometricslib.pipelines.stacking.subset_noise_run.model_variance_ratio --> and `full_stack_noise_equivalent_from_model` <!-- impl: astrometricslib.pipelines.stacking.subset_noise_run.full_stack_noise_equivalent_from_model -->. The grid injection is `injection.py`, the injection of the implied-noise formulas is `implied_noise.py` and the real run `real_m57.py` in the session's scratch folder (`science/halfdiff/`).
+  `ProcessingPipelines.measure_noise` <!-- impl: astrometricslib.api.processing.ProcessingPipelines.measure_noise --> calls `run_odd_even_difference_noise` <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.run_odd_even_difference_noise -->. The split is `split_into_halves` <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.split_into_halves -->, each half is stacked by `stack_frame_subset` <!-- impl: astrometricslib.pipelines.stacking.subset_stack.stack_frame_subset --> without the edge trim, and the difference is measured by `measure_difference_noise` <!-- impl: astrometricslib.pipelines.stacking.post_processing.difference_noise.measure_difference_noise -->, which puts the stored apertures on the first half's stars and sums the difference image. The library stack's random noise that the difference implies is `full_stack_noise_equivalent` <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.full_stack_noise_equivalent --> from `difference_variance_factor` <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.difference_variance_factor -->. It is returned in the result and not stored; every part of it is. The version with each frame's own noise is `model_variance_ratio` <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.model_variance_ratio --> and `full_stack_noise_equivalent_from_model` <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.full_stack_noise_equivalent_from_model -->. The grid injection is `injection.py`, the injection of the implied-noise formulas is `implied_noise.py` and the real run `real_m57.py` in the session's scratch folder (`science/halfdiff/`).
 
   The formula. If every frame had the same noise sigma, a half with weight shares a (adding up to 1) has the variance sigma^2 x sum(a^2) = sigma^2 / N_eff, and the difference of the odd half (shares a) and the even half (shares b) has sigma^2 x F, with F = sum((a - b)^2) over all frames (a frame in one half only has 0 in the other). The library stack has sigma^2 / N_eff,library. So its random noise is the difference divided by sqrt(N_eff,library x F). For two disjoint halves of N equal frames F = 2 / N and N_eff,library = 2N, so the factor is 1 / 2. A frame in both halves lowers F by twice the product of its two shares. Frames differ in noise and the star-width weights are not noise weights, so this is an estimate. The second version lets frames differ: with the frame's variance v = (sky electrons + read noise squared) / gain squared in ADU squared, from its stored sky rate, exposure and camera profile (the model of [STK-38](#stk-38)), R = sum((a - b)^2 v) / sum(s^2 v), where s is the frame's share in the library stack, and the library stack's random noise is the difference divided by sqrt(R). With equal v, R = N_eff,library x F. Both are stored as parts: the two shares of the shared frame (so F = 1 / N_eff,odd + 1 / N_eff,even - 2 a b can be rebuilt from the counts), F, R, and the reference flux that the normalized difference divides by.
+  The job also stores `stacking.odd_even_difference_aperture_set_number` (definition version 1) on the difference rows, in the same encoding as `stacking.aperture_set_number` in [STK-36](#stk-36). It records which aperture set measured the difference, so that the forecast check can compare it only with a stack that used the same set. When the apertures cannot be read, the row is stored as missing with the reason. It is a tenth row beside the nine listed above. Status: design estimate; unit tests only.
+
 - **Acceptance criterion:** Derived from the errors stated here, before the numbers are read against it. The grid injection reads each case as the ratio of the mean difference to sqrt(2) times a truth. Each estimate of a spread from n apertures has a relative error of 1.1664 / sqrt(n) (the factor in `MAD_SIGMA_ERROR_FACTOR`). A field has 100 apertures and three realizations, so its mean difference has an error of 1.1664 / sqrt(300) = 6.7%; the truth pools 300 sums, also 6.7%; the ratio of a field has 9.5%, and the mean of the two fields of a case 6.7%. The criterion is two standard errors: the mean of each case within 13.5% of 1, and a single field within 19%. Two runs on the same frames agree within 1%. For the implied noise of the formulas (the second injection, below), a spread of M pixels has a relative error of 1 / sqrt(2 M), so the ratio of two such spreads from the same noise images has an error of at most 2 / sqrt(2 M); the criterion is three times that (0.67% for 400,000 pixels). The earlier version of this entry used 15%, "set at the first run", which is not a derived bound; this one replaces it.
 - **What to look at:** The difference noise next to the empty-aperture noise and the expected noise, all in stack units or all normalized. The empty-aperture noise holds what the frames share; the difference does not. The difference keeps the noise that registration adds: each frame is resampled on its own, so the correlation between neighboring pixels is in both halves and does not cancel, and the model leaves it out. What cancels is everything the halves hold in common, including the calibration frames' noise (the master dark, bias and flat are the same in both; the master flat's random noise is 4.8% of the measured noise on M 57, [STK-39](#stk-39)). A gap between the model and the difference is random noise the model leaves out (correlated pixel noise from registration); a larger gap between the difference and the empty-aperture noise is structure the frames share.
 - **Our result:** Injection, 2026-10-23: 900 by 900 pixel stacks with bright stars to place the apertures, shared structure (300 faint stars and a smooth texture of 3 px scale, with an amplitude of 0 to 1.6 times one half's pixel noise) and noise fresh for each half, white or correlated over 0.8 px. For each of ten cases, two structure seeds, the apertures were chosen on a library stack by the current code (faint-source mask on), and three realizations of two halves were measured. The truth is the empty-aperture noise of structure-free stacks with the same noise in the same apertures (pooled over three realizations, about 300 sums). Ratios to the truth, as mean (lowest to highest of the two fields):
@@ -1815,16 +1832,19 @@ Every Python example assumes the library is installed and configured with your o
   | Library stack's random noise implied, per-frame model R | 5.68e-4 | 1.32 |
   | Empty-aperture noise / the implied random noise | 1.88 | |
 
-  The halves' effective frame counts were 18.49 and 18.63. The variance factor F was 0.08449, against 0.1082 (1 / 18.49 + 1 / 18.63) without the shared frame, whose weight shares in the two halves were 0.1075 and 0.1083 (1 / 18.49 + 1 / 18.63 - 2 x 0.1075 x 0.1083 = 0.08449, so the stored parts rebuild F). The variance ratio with each frame's own modeled noise, R, was 3.442, against N_eff,library x F = 3.445 (the frames' modeled variances, from their stored sky rates, differ little through this night, so the two implied noises agree to 0.05%: 9.131e-5 and 9.136e-5 normalized). The normalized difference was 1.695e-4 (+-2.0e-5), against 1.714e-4 (+-2.0e-5) for the library stack's empty-aperture noise. The reference flux it divides by, stored as `stacking.half_difference_reference_flux_stack_unit`, was 6.216, against 6.231 for the library stack (the ratio 0.998 shows that Siril put the half on the library stack's flux scale). Two runs on the same frames gave identical values (a ratio of 1.000000 for the noise and for the implied noise; the second stored no new rows because they were the same). The halves were deleted afterwards (the first run kept them, the second removed them).
+  The halves' effective frame counts were 18.49 and 18.63. The variance factor F was 0.08449, against 0.1082 (1 / 18.49 + 1 / 18.63) without the shared frame, whose weight shares in the two halves were 0.1075 and 0.1083 (1 / 18.49 + 1 / 18.63 - 2 x 0.1075 x 0.1083 = 0.08449, so the stored parts rebuild F). The variance ratio with each frame's own modeled noise, R, was 3.442, against N_eff,library x F = 3.445 (the frames' modeled variances, from their stored sky rates, differ little through this night, so the two implied noises agree to 0.05%: 9.131e-5 and 9.136e-5 normalized). The normalized difference was 1.695e-4 (+-2.0e-5), against 1.714e-4 (+-2.0e-5) for the library stack's empty-aperture noise. The reference flux it divides by, stored as `stacking.odd_even_difference_reference_flux_stack_unit`, was 6.216, against 6.231 for the library stack (the ratio 0.998 shows that Siril put the half on the library stack's flux scale). Two runs on the same frames gave identical values (a ratio of 1.000000 for the noise and for the implied noise; the second stored no new rows because they were the same). The halves were deleted afterwards (the first run kept them, the second removed them).
 
   So about half of the empty-aperture noise of the M 57 stack (1.88 times the implied random noise) is structure the frames share, which the mask for faint sources ([STK-36](#stk-36)) did not find, and the random noise itself sits 1.32 times above the white-noise model. That excess is consistent with correlated pixel noise from the registration (at most a factor of about 1.3 in the separating tests of [STK-38](#stk-38)), but the model and the difference share the assumption that frames are equally noisy, so this is agreement, not proof.
 
-  Cost, on the copy: 55 s for the first run and 67 s for the second, for the two half stacks (32 and 30 frames), the difference and the measurement, against 69 s for the library stack of 61 frames. Siril's temporary disk use was not measured; the M 106 run noted in `drivers/siril_interface.py` measured 65 GB for 238 frames (0.27 GB a frame), so a half of 30 frames needs about 8 GB, which Siril frees after each half. The halves are deleted afterwards, so the job leaves nothing in the library.
+  Cost, on the copy: 55 s for the first run and 67 s for the second, for the two half stacks (32 and 30 frames), the difference and the measurement, against 69 s for the library stack of 61 frames. Siril's temporary disk use was not measured; the M 106 run noted in `drivers/siril_interface/imaging_stacker.py` measured 65 GB for 238 frames (0.27 GB a frame), so a half of 30 frames needs about 8 GB, which Siril frees after each half. The halves are deleted afterwards, so the job leaves nothing in the library.
+
+  Use by the fixed-pattern noise test and the loss account (2026-10-26, #134, code uncommitted on `134-group-weights-nikon` after 9ed5af01; design estimate). When the library stack has these rows (made after its noise row, in the same aperture set, both noises measured), the fixed-pattern noise's random part and the loss account's "cause unknown" comparison both read them instead of the model: `stacking.odd_even_difference_noise_normalized`, `stacking.odd_even_difference_aperture_set_number`, `stacking.odd_even_difference_variance_factor`, `stacking.odd_even_difference_model_variance_ratio` and `stacking.effective_frame_count`, version 1. The random noise is the difference over `sqrt(N_eff x F)` in normalized noise, or the model ratio when either is missing. On M 13 it agrees with the model to 0.02% and the stack shows a fixed-pattern noise of about half its variance ([WAY-76](wayfinding.md#way-76)). The restack runs the job for every target (decision D19; an earlier window of 1.1 to 2.0 times the predicted noise is retired).
+  Records added on 2026-10-26 (#134 decisions D16, D19 to D22; code uncommitted on `134-group-weights-nikon` after 817c7da4; unit tests only, not run on the real library; design estimates, STK-D31 and STK-D33). The job also writes `<stack>_odd_even_apertures.json` beside the library stack: for each usable aperture its position, its distance from the image center and from the target, its sum value (on A + B) and its difference value (on A - B), and stores the count as `stacking.odd_even_difference_aperture_record_count`. <!-- impl: astrometricslib.pipelines.stacking.post_processing.odd_even_apertures.save_odd_even_aperture_record --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.odd_even_apertures.load_odd_even_aperture_record --> Four more rows hold the scatter of the row averages and of the column averages of the empty sky in the difference image and in the sum image, with a running mean taken off, so that wayfindinglib can test for banding ([WAY-76](wayfinding.md#way-76)). <!-- impl: astrometricslib.pipelines.stacking.post_processing.odd_even_apertures.measure_line_pattern --> The injection test of the bias is `scripts/measure_odd_even_bias.py` (STK-D31, STK-D35): every frame of a library stack is replaced by a simulated frame with the real stars and calibration and Gaussian noise of the frame's predicted size, and the ratio of the difference's implied noise to the whole simulated stack's true noise is the bias. It has not been run, so the bias divisor stays 1.0. <!-- impl: astrometricslib.pipelines.stacking.odd_even_bias.measure_odd_even_bias -->
 - **Verdict:** Not judged.
-- **Limits:** One target and one night; the injection is one synthetic field of 900 by 900 pixels. The difference cancels only structure that is the same in both halves. A change that differs between them (a sky gradient that moves, seeing that changes, a moving object) stays in it; the alternating split puts a slow change in both halves, and the mask keeps the apertures 13 px from the stars, so the stars' own residuals are mostly out. The shared frame is in both halves, so the halves are not fully independent, which F accounts for under equal frame noise. The implied noise from the variance factor F assumes equal noise in every frame; the version with R lets the frames differ in sky and read noise but uses the model of [STK-38](#stk-38), so it is only as good as that model, and it was tested on synthetic frames of unequal sky only, not on frames of different length. The weights of a half are Siril's star-width weights rebuilt, and are not stored as measurements when they cannot be rebuilt (then the counts, the factor and the implied noise are missing, and the noise rows remain). It does not include noise that the frames share (the noise of the master dark, bias and flat is the same in both halves and cancels). A target with a library stack of an older code version, or without the recorded reference frame or noise sums, is not measured, with the reason; no other number takes the place.
+- **Limits:** One target and one night; the injection is one synthetic field of 900 by 900 pixels. The difference cancels only structure that is the same in both halves. A change that differs between them (a sky gradient that moves, seeing that changes, a moving object) stays in it; the alternating split puts a slow change in both halves, and the mask keeps the apertures 13 px from the stars, so the stars' own residuals are mostly out. The shared frame is in both halves, so the halves are not fully independent, which F accounts for under equal frame noise. The implied noise from the variance factor F assumes equal noise in every frame; the version with R lets the frames differ in sky and read noise but uses the model of [STK-38](#stk-38), so it is only as good as that model, and it was tested on synthetic frames of unequal sky only, not on frames of different length. The weights of a half are Siril's star-width weights rebuilt, and are not stored as measurements when they cannot be rebuilt (then the counts, the factor and the implied noise are missing, and the noise rows remain). It does not include noise that the frames share (the noise of the master dark, bias and flat is the same in both halves and cancels). A target with a library stack of an older code version, or without the recorded reference frame or noise sums, is not measured, with the reason; no other number takes the place. The model ratio applies each frame's folding scale `k_i` squared (#134, design estimate; unit tests only, no real folded target measured); the scale is read from the half stack that holds the frame.
 - **To tune for your setup:** Run the job on a target with a deep or crowded field and read the difference next to the empty-aperture noise. If the difference is close to the model and the empty-aperture noise is far above it, the excess is shared structure. If they are close to each other and both above the model, the excess is random noise the model leaves out.
 - **Regenerate with:** The call in the procedure.
-- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_half_difference_noise.py` checks the split (disjoint, alternating in time, only the reference frame shared, odd counts), the formulas (half the difference for equal halves, the shared frame's effect, the variance ratio R, no value from a missing weight), a synthetic field in which the difference recovers the injected noise where the plain noise does not, the injection of the implied-noise formulas on frames of unequal noise and weight, the nine rows on the library stack's subject (with the reference flux and the shared frame's two shares, from which F is rebuilt), that the library stack's reference is handed to both halves (a stacker that would pick its own first frame is told which one to use, and a stacker that ignores it is refused), the deletion of the halves after success and after a stacker failure, that a running library stack of the target stops the job with a `ConflictError`, the zero-edge mask (an aperture or ring holding an uncovered pixel gives no sum, in either half), and each refusal (spectral, too few frames, no recorded reference, no noise sums or apertures, other apertures, halves on different references, a stacker failure) storing not-measured rows with a reason. `astrometricslib/api/test/test_subset_stack_api.py` checks the job through `ProcessingPipelines` (with and without a job record, and inside the growth job), `astrometricslib/drivers/test/test_siril_frame_filter_placement.py` checks the `setref` command, and `backend/tests/test_quality_measurement_service.py` the RPCs. The real-data run has no test.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_odd_even_difference_noise.py` checks the split (disjoint, alternating in time, only the reference frame shared, odd counts), the formulas (half the difference for equal halves, the shared frame's effect, the variance ratio R, no value from a missing weight), a synthetic field in which the difference recovers the injected noise where the plain noise does not, the injection of the implied-noise formulas on frames of unequal noise and weight, the nine rows on the library stack's subject (with the reference flux and the shared frame's two shares, from which F is rebuilt), that the library stack's reference is handed to both halves (a stacker that would pick its own first frame is told which one to use, and a stacker that ignores it is refused), the deletion of the halves after success and after a stacker failure, that a running library stack of the target stops the job with a `ConflictError`, the zero-edge mask (an aperture or ring holding an uncovered pixel gives no sum, in either half), and each refusal (spectral, too few frames, no recorded reference, no noise sums or apertures, other apertures, halves on different references, a stacker failure) storing not-measured rows with a reason. `astrometricslib/api/test/test_subset_stack_api.py` checks the job through `ProcessingPipelines` (with and without a job record, and inside the growth job), `astrometricslib/_internal/drivers/test/test_siril_frame_filter_placement.py` checks the `setref` command, and `backend/tests/test_quality_measurement_service.py` the RPCs. The real-data run has no test.
 - **Raw record:** None kept in the repository. The scripts and their output are in the session's scratch folder (`science/halfdiff/`); the rows were stored in the quality store of the copy.
 
 ### STK-43
@@ -1843,12 +1863,12 @@ Every Python example assumes the library is installed and configured with your o
   from astrometricslib import Astrometrics
 
   astro = Astrometrics()
-  rows = astro.quality.query(metric="stacking.frame_registration_rotation_deg", target_id="M 57")
+  rows = astro.quality.query(metric="stacking.frame_registration_rotation_deg", target_id="M 57").rows
   for row in rows:
       print(row.subject.subject_id, row.subject.observing_night_id, row.value, row.status.value)
   ```
 
-  `field_rotation_measurements` <!-- impl: astrometricslib.pipelines.stacking.post_processing.field_rotation.field_rotation_measurements --> builds the rows from the registration table that `parse_seq_file` <!-- impl: astrometricslib.drivers.siril_output_parsing.parse_seq_file --> reads, and `rotation_from_homography` <!-- impl: astrometricslib.pipelines.stacking.post_processing.field_rotation.rotation_from_homography --> takes the angle out of each transform. `record_stacking_quality` stores the rows in their own call, after the stack's rows, so a failure while building or storing them cannot undo the stack's rows.
+  `field_rotation_measurements` <!-- impl: astrometricslib.pipelines.stacking.post_processing.field_rotation.field_rotation_measurements --> builds the rows from the registration table that `parse_seq_file` <!-- impl: astrometricslib._internal.drivers.siril_output_parsing.parse_seq_file --> reads, and `rotation_from_homography` <!-- impl: astrometricslib.pipelines.stacking.post_processing.field_rotation.rotation_from_homography --> takes the angle out of each transform. `record_stacking_quality` stores the rows in their own call, after the stack's rows, so a failure while building or storing them cannot undo the stack's rows.
 - **Acceptance criterion:** Not recorded. A conversion to a polar-alignment error needs several nights with known errors and directions.
 - **What to look at:** The rows against time within a night: a steady slope is a drift of the field. A jump is a meridian flip or a re-centering. The reference frame reads 0 by construction.
 - **Our result:** 2026-10-23, M 57, night of 2026-10-03 to 04, 61 frames over 1.20 hours (ASI533MM Pro), registered by Siril to frame 39 of the sequence. The angle ran from -0.0075 to +0.0092 degrees. A straight line against the frame times (DATE-OBS) gave +0.01221 degrees per hour (residual rms 0.00122 degrees); the angle rose from the first frame to the last without a jump. The scale ran from 0.99996 to 1.00017.
@@ -1899,7 +1919,7 @@ Every Python example assumes the library is installed and configured with your o
       "stacking.registration_drift_direction_deg",
       "stacking.registration_drift_extent_px",
   ):
-      for row in astro.quality.query(metric=name, target_id="M 57"):
+      for row in astro.quality.query(metric=name, target_id="M 57").rows:
           print(name, row.value, row.uncertainty, row.sample_count, row.status.value, row.reason)
   ```
 
@@ -1969,7 +1989,7 @@ Every Python example assumes the library is installed and configured with your o
   from astrometricslib import Astrometrics
 
   astro = Astrometrics()
-  result = astro.processing.measure_half_difference_noise("M 57")
+  result = astro.processing.measure_noise("M 57", kind="odd_even_difference")
   print(
       result.shared_fine_scale_variance_ratio,
       result.walking_noise_correlation_excess,
@@ -1985,7 +2005,7 @@ Every Python example assumes the library is installed and configured with your o
       "stacking.walking_noise_across_drift_correlation",
       "stacking.walking_noise_correlation_excess",
   ):
-      for row in astro.quality.query(metric=name, target_id="M 57", library_only=True):
+      for row in astro.quality.query(metric=name, target_id="M 57", library_only=True).rows:
           print(name, row.value, row.uncertainty, row.status.value, row.reason)
   ```
 
@@ -2057,7 +2077,7 @@ Every Python example assumes the library is installed and configured with your o
 - **Limits:** The shared variance is the part of any fixed pattern that stays coherent in both halves plus faint sky, and it is dominated by sky structure on every field tried; it is not an upper limit of the sensor pattern. The excess is the only part that points to the sensor, and it needs a drift of 12 px or more along one axis within a night. Its sensitivity (a variance ratio of about 0.5 for a white pattern, on M 57's geometry) is 25 times above the grain a flat is expected to leave, so a null excess is expected and says little about the flat. Stars elongated along the drift add a positive excess, so a positive excess is not alone a sensor pattern. A pattern that does not move with the pointing (a fixed ghost, a pattern in the optics) is not smeared and would be counted with the sky. A pattern correlated over more than the 6 px lag is not told from sky. The equal-frame-noise model for the shared reference frame's noise is the one of [STK-42](#stk-42); the correction is not small (0.47 in ratio units, 20% of the uncorrected ratio on M 57), and the reference has the heaviest weight, so the model is weakest for it. The errors treat the 64 px tiles as independent; a smear 84 px long is longer than a tile, so the errors of a long drift are somewhat too small, and they leave out the uncertainty of F and N. Interpolating the second half at a non-integer lag smooths its residuals a little, the same for the two directions only on average. Nothing was tuned: the filter width, the lag and the clearance were chosen once, with reasons in the code. Spectral stacks are not measured (the job refuses them).
 - **To tune for your setup:** None.
 - **Regenerate with:** The call in the procedure.
-- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/post_processing/test_half_pattern.py` checks that noise alone shares nothing, that a shared pixel pattern is recovered in size, that a smeared pattern is more correlated along the drift than across for three drift directions (0, 90 and 37 degrees), that the wrong axis gives a negative excess, that smooth sky structure leaves the excess at zero, the removal of the shared frame's noise, that the stored parts rebuild the ratio, that pixels are counted from the mask, every not-measured case and the eight rows. `astrometricslib/pipelines/stacking/test/test_half_difference_noise.py` checks that the job stores them, that each half is read once as 32-bit and shared, and that a failure while building the pattern rows leaves the nine difference rows.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/post_processing/test_half_pattern.py` checks that noise alone shares nothing, that a shared pixel pattern is recovered in size, that a smeared pattern is more correlated along the drift than across for three drift directions (0, 90 and 37 degrees), that the wrong axis gives a negative excess, that smooth sky structure leaves the excess at zero, the removal of the shared frame's noise, that the stored parts rebuild the ratio, that pixels are counted from the mask, every not-measured case and the eight rows. `astrometricslib/pipelines/stacking/test/test_odd_even_difference_noise.py` checks that the job stores them, that each half is read once as 32-bit and shared, and that a failure while building the pattern rows leaves the nine difference rows.
 - **Raw record:** None kept in the repository. The scripts and their output are in the session's scratch folder (`science/s4/`); the rows were stored in the quality store of the copy.
 
 ### STK-46
@@ -2078,7 +2098,7 @@ Every Python example assumes the library is installed and configured with your o
 
   astro = Astrometrics()
   for name in ("stacking.flat_light_best_correlation", "stacking.flat_light_search_excess_sigmas"):
-      for row in astro.quality.query(metric=name, target_id="M 57"):
+      for row in astro.quality.query(metric=name, target_id="M 57").rows:
           print(name, row.value, row.status.value)
   ```
 
@@ -2122,8 +2142,498 @@ Every Python example assumes the library is installed and configured with your o
 - **Limits:** The shadow count depends on its limits (0.15%, 25 cells, 5 noise deviations): at 0.1% and 9 cells the M 57 flat gives 71. It gates nothing. The camera does not enter: the shadows sit on the camera window, so the shift and rotation are those of the shadow pattern on the sensor and say nothing about the camera's rotation relative to the optics. The placement limit comes from 101 unrelated pairs, so its own uncertainty is large (one pair more or less above it moves the false-alarm rate by 1 point); the 8 displaced searches give a sample standard deviation from 8 values. The control correlation leaves a faint halo around each shadow that the mask does not cover, so with deep dust it stays positive: read it against the value with the shadows. The bias level of the lights is subtracted and the flats' is not. A bias offset makes a shadow shallower by the fraction bias / (bias + signal): 0.4% of its depth in a flat of 28,000 ADU with a bias of 100 ADU (negligible), but 14% in lights of 600 ADU of sky with the same bias, which is probably why the earlier numbers without the subtraction were lower (not checked by a separate run). The bias level comes from the stack's bias frames; with none the rows are not measured (the camera profile holds no bias level). The sky requirement (10 times the read noise above the bias) needs the profile's gain and read noise at the frames' gain, offset and binning; the ASI 533MM's profile has them only for gain 0, offset 10, so for the other settings, and for the Nikon, which has none, the rows are stored as not measured. A disc of 25 cells (200 pixels, 6.4 arcminutes) around the frame center is set aside as the target; a larger target, or one off the center, can still reach the light map. Cell-level masks (this disc, the star masks) cannot reuse the stacking step's empty-aperture mask, which is made on the stack in stack pixels. The flats are read twice per stack (once for the flat assessment, once here). The chance spread of the zero-offset correlation is large for a few broad shadows (up to 0.25 on the Nikon). The rotation is least certain for shadows near the sensor center. The light map holds whatever repeats from frame to frame besides dust (the sensor's fixed pattern, stars too faint to find), so the correlation is below the split-half value even for a perfect flat. A spectral stack is not measured. Lights of a different size than the flat's, fewer than 8 usable lights, and a time limit reached give not-measured rows with the reason. Only the first usable frame's size is used. The placement search covers 160 pixels and 3 degrees (no half turn); a larger displacement puts the peak at the edge and the rows are not measured.
 - **To tune for your setup:** None. If your dust shadows are much smaller or larger than 300 pixels, change the cell size and the band pass widths in `pipelines/stacking/post_processing/flat_match.py` and repeat the injection.
 - **Regenerate with:** The call in the procedure.
-- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/post_processing/test_flat_match.py` checks the recovery of a known shift and rotation (both signs, a color mosaic), the unrelated-dust, half-turn and no-dust cases, the control correlation, the uncertainty in quadrature, the bias subtraction, the sky requirement and the frames it leaves out, the target disc, the time limit with a fake clock, the member list and its order, every not-measured case, the band pass against a vignetting that is not a polynomial, and that the record step stores the rows in their own call and stores no match row when the step fails. `astrometricslib/drivers/test/test_calibration_matching.py` checks that the staging step records the flat and bias files it linked.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/post_processing/test_flat_match.py` checks the recovery of a known shift and rotation (both signs, a color mosaic), the unrelated-dust, half-turn and no-dust cases, the control correlation, the uncertainty in quadrature, the bias subtraction, the sky requirement and the frames it leaves out, the target disc, the time limit with a fake clock, the member list and its order, every not-measured case, the band pass against a vignetting that is not a polynomial, and that the record step stores the rows in their own call and stores no match row when the step fails. `astrometricslib/_internal/drivers/test/test_calibration_matching.py` checks that the staging step records the flat and bias files it linked.
 - **Raw record:** None kept.
+
+### STK-47
+
+**Dark and bias frames cut off at zero**
+
+- **Claim:** A dark or bias frame with 0.1% or more of its pixels at exactly zero has lost its noise, and the mean of a master built from such frames is biased. In the library the frames fall into two groups with nothing between: none have a zero pixel, or at least 72% do. Any limit in that gap separates them.
+- **Settings it supports:**
+  - code constant `ZERO_PIXEL_FRACTION_LIMIT` = 0.001 in `pipelines/stacking/pre_processing/calibration_assessment.py` (changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.calibration_assessment.ZERO_PIXEL_FRACTION_LIMIT -->
+- **Status:** Measured. The separation is a direct pixel count on every frame; where 0.1% sits inside the gap is a design choice that follows the offset test of 2026-10-02.
+- **Data you need:** Dark and bias frames at several camera offsets, including offset 0 if you use it.
+- **Procedure:**
+  1. Measure every dark and bias frame.
+  2. List the share of exactly-zero pixels per setting group, and check that no group has a share between 0 and the limit.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.calibration.measure_frames()
+  for health in astro.processing.calibration.assess("bias", camera_id="ZWO ASI 533MM Pro"):
+      print(health.row_key, health.status, health.summary)
+      for check in health.checks:
+          print("   ", check.name, check.status.value, check.measured_value, check.limit)
+  ```
+
+  `CalibrationCatalog.measure_frames` measures and stores the frames, and `CalibrationCatalog.assess` judges each set from the stored rows. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_frames --> <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess -->
+- **Acceptance criterion:** No frame has a zero share between 0 and the limit, so the limit does not decide any frame.
+- **What to look at:** `frame.zero_pixel_fraction` per frame, and the `dark_zero_pixel_fraction` and `bias_zero_pixel_fraction` checks of each set.
+- **Our result:** Code: commit 07894ef1 (tip of `134-integration`). Data: the validation copy of the library: 2,367 dark and bias frames in 73 setting groups (291 biases, 2,076 darks; ZWO ASI 533MM Pro and Nikon D5300), every frame measured, 0 read errors, 2026-10-31. 38 of the 73 groups are cut off at zero: the ASI 533 sets at offset 0 (1 bias set and 37 dark sets, 1,398 frames), with 72% to 97% of their pixels at zero. The other 969 frames have no zero pixel at all, so the two groups do not overlap. 2,170 of the 5,888 lights (37%) are at offset 0 and can only use the clipped sets; 802 of them have sky at exactly 0 as well. No frame was viewed: the flags are pixel counts.
+- **Verdict:** Not judged. The limit was chosen after seeing this library, and no held-out data exists.
+- **Limits:** One camera of the two has clipped frames. The cure for the clipped sets is new frames at a non-zero offset; they cannot be repaired.
+- **To tune for your setup:** Raise the limit only if your library has a frame with a few stray zero pixels that you want to accept.
+- **Regenerate with:** `CalibrationCatalog.measure_frames(force=True)` then `CalibrationCatalog.assess`.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_calibration_assessment.py` and `astrometricslib/pipelines/shared/quality/test/test_calibration_frame_measurement.py`.
+- **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: `frames.jsonl` (one line per frame), `groups.jsonl` (per setting group), `match.jsonl` and `flats.jsonl`.
+
+### STK-48
+
+**The bias level of a camera setting**
+
+- **Claim:** The bias level of the ASI 533MM Pro at gain 0 follows the camera offset at 40 ADU per offset unit, less about 5 ADU, and is the same in different sessions. A bias set whose level differs from the level stored in the camera profile by more than two value steps was taken at another offset or was already calibrated.
+- **Settings it supports:**
+  - code constant `VALUE_STEP_ALLOWANCE` = 2 value steps in `pipelines/stacking/pre_processing/calibration_assessment.py` (changing it means editing the code). Relation: confirmed by. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.calibration_assessment.VALUE_STEP_ALLOWANCE -->
+  - config key `[Observatory.Camera.<name>] bias_levels` (the camera profile; the example config holds the measured levels). Relation: derived from this entry. <!-- impl: astrometricslib.models.camera_profile.CameraProfile.bias_level_for -->
+- **Status:** Partly measured. The levels are measured on 20 frames per setting for the ASI 533 and 22 and 89 frames for the Nikon, and agree across sessions; the limit of two steps is untested on new frames.
+- **Data you need:** At least 20 bias frames at each gain and offset you use.
+- **Procedure:**
+  1. Measure the bias frames.
+  2. Compare each set's level with the profile's `bias_levels` entry.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.calibration.measure_frames()
+  for health in astro.processing.calibration.assess("bias", camera_id="ZWO ASI 533MM Pro"):
+      print(health.row_key, health.status, health.summary)
+      for check in health.checks:
+          print("   ", check.name, check.status.value, check.measured_value, check.limit)
+  ```
+
+  `CalibrationCatalog.measure_frames` measures and stores the frames, and `CalibrationCatalog.assess` judges each set from the stored rows. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_frames --> <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess -->
+- **Acceptance criterion:** The set's level is within two value steps of the profile's value.
+- **What to look at:** The `bias_level` check (its value is the distance in value steps) and `measurements['mean_level_adu']`.
+- **Our result:** Code: commit 07894ef1 (tip of `134-integration`). ASI 533MM Pro, gain 0, 20 biases per setting: level 394.85 ADU at offset 10 (frame-to-frame spread 0.33), 794.83 at 20, 1194.86 at 30 and 1994.83 at 50; the level follows temperature by 0.075 ADU per degree (r = 0.994, n = 20), 0.75 ADU over 9.8 C, so no temperature limit is needed for biases ([STK-56](#stk-56)). Nikon D5300 (value step 2): 597.93 ADU at ISO 100 (22 biases) and 599.08 at ISO 800 (89 biases); two sessions 5 months apart gave 599.01 and 599.15. No offset between 0 and 10 was measured. The limit was chosen after seeing this library, and no held-out data exists.
+- **Verdict:** Not judged. The limit was chosen after seeing this library, and no held-out data exists.
+- **Limits:** A setting with no entry in the profile reports `not_checked`; no default is used. The Nikon has no offset setting, so its entries use offset 0.
+- **To tune for your setup:** Measure your own camera's levels and add them to its `bias_levels` list; the config needs no other change.
+- **Regenerate with:** `CalibrationCatalog.measure_frames(force=True)` then `CalibrationCatalog.assess`.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_calibration_assessment.py` and `astrometricslib/_internal/drivers/test/test_camera_profile_store.py`.
+- **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: `frames.jsonl` (one line per frame), `groups.jsonl` (per setting group), `match.jsonl` and `flats.jsonl`.
+
+### STK-49
+
+**Noise as a check on bias and dark frames**
+
+- **Claim:** The noise of a bias frame lies within 0.9 to 1.1 times the camera profile's read noise. A lower value means the frame is cut off at zero; a higher one means another gain or a fault. A dark's noise grows with exposure from hot pixels, so only the lower limit applies to it.
+- **Settings it supports:**
+  - code constant `NOISE_RATIO_LOW` = 0.9 in `pipelines/stacking/pre_processing/calibration_assessment.py` (changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.calibration_assessment.NOISE_RATIO_LOW -->
+  - code constant `NOISE_RATIO_HIGH` = 1.1 in `pipelines/stacking/pre_processing/calibration_assessment.py` (changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.calibration_assessment.NOISE_RATIO_HIGH -->
+- **Status:** Partly measured. The ratio was 0.99 to 1.00 at ASI 533 offsets 10 to 50; the width of the band is a design choice. The per-frame estimator replaces the pair estimator of the first measurement and has been checked on synthetic frames only.
+- **Data you need:** Bias frames at an offset that is not cut off, and a camera profile with a measured read noise for the setting.
+- **Procedure:**
+  1. Measure the bias frames.
+  2. Compare the median frame noise with the profile's read noise in ADU (read noise divided by gain).
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.calibration.measure_frames()
+  for health in astro.processing.calibration.assess("bias", camera_id="ZWO ASI 533MM Pro"):
+      print(health.row_key, health.status, health.summary)
+      for check in health.checks:
+          print("   ", check.name, check.status.value, check.measured_value, check.limit)
+  ```
+
+  `CalibrationCatalog.measure_frames` measures and stores the frames, and `CalibrationCatalog.assess` judges each set from the stored rows. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_frames --> <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess -->
+- **Acceptance criterion:** The ratio lies within 0.9 to 1.1.
+- **What to look at:** The `bias_noise` and `dark_noise` checks (the value is the ratio) and `measurements['noise_adu']`.
+- **Our result:** Code: commit 07894ef1 (tip of `134-integration`). ASI 533MM Pro, 20 biases per setting, pair noise from up to 9 pairs: 4.84 to 4.86 ADU RMS at offsets 10 to 50 (within 1% of the profile's 4.88 ADU) and 1.58 ADU at offset 0, where clipping removes the noise. Nikon D5300: 1.51 ADU at ISO 100 and 7.19 at ISO 800 (the profile holds no read noise for the Nikon, so its noise checks report `not_checked`). A dark's pair noise grew to 9 ADU at 120 s from flickering hot pixels. The stored metric `frame.neighbor_noise_adu` is the standard deviation of the difference of pixels two columns apart, divided by the square root of 2; on the first measurement's frames it read 4.83 ADU on ASI biases (a median-based version read 4.19, 13% low, because the sensor writes steps of 4 ADU) and 7.65 on Nikon ISO 800 (6% above the pair value). The limit was chosen after seeing this library, and no held-out data exists.
+- **Verdict:** Not judged. The limit was chosen after seeing this library, and no held-out data exists.
+- **Limits:** The neighbor estimator includes fixed column patterns that a pair of frames cancels; they are small on the ASI 533 and larger on the Nikon, where the check is not run.
+- **To tune for your setup:** Measure the read noise of each setting you use with `CalibrationCatalog.measure_sensor_noise` and save it to the profile.
+- **Regenerate with:** `CalibrationCatalog.measure_frames(force=True)` then `CalibrationCatalog.assess`.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_calibration_assessment.py`.
+- **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: `frames.jsonl` (one line per frame), `groups.jsonl` (per setting group), `match.jsonl` and `flats.jsonl`.
+
+### STK-50
+
+**Light striking a dark frame**
+
+- **Claim:** A light leak adds a smooth pattern to a dark frame, and the master dark then subtracts that pattern from every light. A dark whose large-scale pattern exceeds the bias frames' at the same setting by more than two value steps was struck by light.
+- **Settings it supports:**
+  - code constant `VALUE_STEP_ALLOWANCE` = 2 value steps in `pipelines/stacking/pre_processing/calibration_assessment.py` (changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.calibration_assessment.VALUE_STEP_ALLOWANCE -->
+- **Status:** Partly measured. 13 of 13 flagged frames were real on inspection, but misses are known and the limit is untested on new frames.
+- **Data you need:** Bias and dark frames at the same setting, and one dark you know is struck by light as a positive control.
+- **Procedure:**
+  1. Measure the bias and dark frames.
+  2. Look at the dark frames the `dark_light_leak` check names, and at some just below the limit.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.calibration.measure_frames()
+  for health in astro.processing.calibration.assess("dark", camera_id="ZWO ASI 533MM Pro"):
+      print(health.row_key, health.status, health.summary)
+      for check in health.checks:
+          print("   ", check.name, check.status.value, check.measured_value, check.limit)
+  ```
+
+  `CalibrationCatalog.measure_frames` measures and stores the frames, and `CalibrationCatalog.assess` judges each set from the stored rows. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_frames --> <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess -->
+- **Acceptance criterion:** Every flagged frame shows a pattern a light leak would make, and a deliberately struck frame is flagged.
+- **What to look at:** The `dark_light_leak` check (the value is the excess over the bias range in value steps) and `measurements['block_range_adu']`.
+- **Our result:** Code: commit 07894ef1 (tip of `134-integration`). The check flagged 13 of 438 Nikon darks and 0 of 1,929 ZWO frames (the ZWO's largest range is 4 ADU, one step). I looked at all 13: one is a picture of a star field, one is 35% saturated, and 11 show a bright band with a hard edge across the upper half. They sit in four sets: ISO 800 at 180 s (8 of 43), 120 s (1 of 1) and 600 s (2 of 2), and ISO 100 at 300 s (2 of 20). No header shows it; all 13 are labeled as darks. The Nikon ISO 800 120 s set is one struck frame used as its whole master, matched to 176 lights in 8 targets. Of the 11 frames at range 8, 2 are weak leaks (one flagged, one missed by the ISO 800 limit) and 9 are clean; the clean ones show a sensor glow at the bottom and right edges, which sets how low the limit can go. Precision is 13 of 13 by eye (exact one-sided 95% lower bound 79%); recall is not known, because most frames at range 6 or below were not viewed. With imitated 3σ rejection a master changes by +1.0 ADU in the top half with the 8 struck 180 s frames (median) against +128 ADU for a plain mean; this was done in NumPy on every 16th pixel and has not been confirmed in Siril. The limit was chosen after seeing this library, and no held-out data exists.
+- **Verdict:** Not judged. The limit was chosen after seeing this library, and no held-out data exists.
+- **Limits:** A shape test for the hard edge would find more but would be specific to one camera. Struck frames are reported and not left out of masters (decision D3 of the plan). No ZWO frame was viewed.
+- **To tune for your setup:** The limit is written in value steps and the reference is your own bias frames, so it follows the camera. Test it with one deliberately lit dark.
+- **Regenerate with:** `CalibrationCatalog.measure_frames(force=True)` then `CalibrationCatalog.assess`.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_calibration_assessment.py`.
+- **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: `frames.jsonl` (one line per frame), `groups.jsonl` (per setting group), `match.jsonl` and `flats.jsonl`.
+
+### STK-51
+
+**The level of a dark frame against its bias**
+
+- **Claim:** A dark frame sits at the bias level of its own setting, plus the dark current. A dark whose mean differs from the bias mean by more than two value steps plus the dark current allowance has a wrong level, or was calibrated already (a calibrated master reads near zero), and the subtraction would be wrong.
+- **Settings it supports:**
+  - code constant `VALUE_STEP_ALLOWANCE` = 2 value steps in `pipelines/stacking/pre_processing/calibration_assessment.py` (changing it means editing the code). Relation: confirmed by. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.calibration_assessment.VALUE_STEP_ALLOWANCE -->
+- **Status:** Partly measured. The largest difference among the clean frames sits well inside the limit; the limit flags 10 of the 13 struck darks and no others.
+- **Data you need:** Bias and dark frames at the same setting.
+- **Procedure:**
+  1. Measure the bias and dark frames.
+  2. Read the `dark_level` check of each dark set.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.calibration.measure_frames()
+  for health in astro.processing.calibration.assess("dark", camera_id="ZWO ASI 533MM Pro"):
+      print(health.row_key, health.status, health.summary)
+      for check in health.checks:
+          print("   ", check.name, check.status.value, check.measured_value, check.limit)
+  ```
+
+  `CalibrationCatalog.measure_frames` measures and stores the frames, and `CalibrationCatalog.assess` judges each set from the stored rows. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_frames --> <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess -->
+- **Acceptance criterion:** The clean darks all pass, and a dark that was calibrated already is flagged.
+- **What to look at:** The `dark_level` check (the value is the excess in value steps) and `measurements['mean_level_adu']`.
+- **Our result:** Code: commit 07894ef1 (tip of `134-integration`). The largest difference among the clean darks was 3.15 ADU on the Nikon (limit 4) and 0.57 ADU on the ASI 533 (limit 8). The check flagged 10 of the 13 struck Nikon darks and no clean ones. Darks pooled within 0.1 s of exposure differ by about 0.1 ADU or less (21 batches, 617 lights). The limit was chosen after seeing this library, and no held-out data exists.
+- **Verdict:** Not judged. The limit was chosen after seeing this library, and no held-out data exists.
+- **Limits:** A dark with no bias frames measured at its setting reports `not_checked`.
+- **To tune for your setup:** Nothing to tune if the bias frames are measured.
+- **Regenerate with:** `CalibrationCatalog.measure_frames(force=True)` then `CalibrationCatalog.assess`.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_calibration_assessment.py`.
+- **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: `frames.jsonl` (one line per frame), `groups.jsonl` (per setting group), `match.jsonl` and `flats.jsonl`.
+
+### STK-52
+
+**Saturated pixels in a dark frame**
+
+- **Claim:** A dark should have almost no pixel at the camera's saturation level. A frame with 0.1% or more of its pixels there was struck by light.
+- **Settings it supports:**
+  - code constant `CEILING_SHARE_LIMIT` = 0.001 in `pipelines/stacking/pre_processing/calibration_assessment.py` (changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.calibration_assessment.CEILING_SHARE_LIMIT -->
+- **Status:** Partly measured. The separation is large (35% against at most 8.3e-5) but only one frame is on the bad side.
+- **Data you need:** Dark frames, and one deliberately lit dark as a positive control.
+- **Procedure:**
+  1. Measure the dark frames.
+  2. Read the `dark_ceiling_share` check of each dark set.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.calibration.measure_frames()
+  for health in astro.processing.calibration.assess("dark", camera_id="ZWO ASI 533MM Pro"):
+      print(health.row_key, health.status, health.summary)
+      for check in health.checks:
+          print("   ", check.name, check.status.value, check.measured_value, check.limit)
+  ```
+
+  `CalibrationCatalog.measure_frames` measures and stores the frames, and `CalibrationCatalog.assess` judges each set from the stored rows. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_frames --> <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess -->
+- **Acceptance criterion:** No clean dark reaches the limit and a lit one does.
+- **What to look at:** The `dark_ceiling_share` check and `measurements['saturated_pixel_fraction_max']`.
+- **Our result:** Code: commit 07894ef1 (tip of `134-integration`). One Nikon dark has 35% of its pixels saturated (mean 10,491 ADU); the largest share among all other frames was 8.3e-5. The limit was chosen after seeing this library, and no held-out data exists.
+- **Verdict:** Not judged. The limit was chosen after seeing this library, and no held-out data exists.
+- **Limits:** One positive case. The shared metric `frame.saturated_pixel_fraction` counts pixels at the profile's saturation level, which sits at or below the clip ceiling the first measurement used. This check is part of the set health; the stack has no gate of its own for it.
+- **To tune for your setup:** None needed.
+- **Regenerate with:** `CalibrationCatalog.measure_frames(force=True)` then `CalibrationCatalog.assess`.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_calibration_assessment.py`.
+- **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: `frames.jsonl` (one line per frame), `groups.jsonl` (per setting group), `match.jsonl` and `flats.jsonl`.
+
+### STK-53
+
+**How many frames a master needs**
+
+- **Claim:** A master built from N frames adds the noise of one frame divided by the square root of N to every light. When read noise dominates this is the worst case, a share 1/N of the noise variance: 33% at N = 3, 10% at N = 10, 3.3% at N = 30. For undithered frames the pattern does not average down. Copies of one file add no information, so a set counts a frame once however many files hold it.
+- **Settings it supports:** None. The limit of 10 different frames is a design estimate ([STK-D36](#design-estimates)); the minimum of 3 is [STK-D01](#design-estimates).
+- **Status:** Partly measured. The 1/N share is arithmetic and the copies were found by a checksum of the pixels; the limit of 10 is a design choice.
+- **Data you need:** Dark and bias sets, and the stored pixel checksum of each frame.
+- **Procedure:**
+  1. Measure the frames.
+  2. Read the `calibration_frame_count` check of each set.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.calibration.measure_frames()
+  for health in astro.processing.calibration.assess("dark", camera_id="ZWO ASI 533MM Pro"):
+      print(health.row_key, health.status, health.summary)
+      for check in health.checks:
+          print("   ", check.name, check.status.value, check.measured_value, check.limit)
+  ```
+
+  `CalibrationCatalog.measure_frames` measures and stores the frames, and `CalibrationCatalog.assess` judges each set from the stored rows. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_frames --> <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess -->
+- **Acceptance criterion:** No set holds copies, and a set under 10 different frames is named.
+- **What to look at:** `unique_frame_count` against `frame_count` of each set.
+- **Our result:** Code: commit 07894ef1 (tip of `134-integration`). 49 copies found by a checksum of the pixels: the ASI 533 offset-0, -12 C, 30 s darks hold 98 files and 49 unique frames, because each file is in both a `0.0/30.0` and an `800/30.0` folder (that camera has no gain 800 frames in its headers; the index files them correctly by header). Sets under 3 frames: Nikon 800/120 s (1), 800/600 s (2), 1600/20 s (2) and ASI offset 10/300 s (1), covering 218 Nikon lights and 1 ZWO light. Thin sets (under 10): ASI offset 0, -3 C slot, 2 s (9 frames), 21 ZWO lights. The bias count that matters for flats depends on the flat level: master bias noise on a bright ASI flat at N = 20 is 1.08 ADU against about 29,000 ADU (0.004%), but the Nikon Apertura flats have only about 500 ADU above the pedestal, where N = 89 gives 0.15% (a design estimate that it stay under 0.16%).
+- **Verdict:** Not judged. The limit was chosen after seeing this library, and no held-out data exists.
+- **Limits:** A frame with no stored checksum counts as unique. The files are not moved or removed by the library; that is for you to do.
+- **To tune for your setup:** Raise the limit to 33 frames for a 3% share, which is stricter than the data needs.
+- **Regenerate with:** `CalibrationCatalog.measure_frames(force=True)` then `CalibrationCatalog.assess`.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_calibration_assessment.py` and `astrometricslib/pipelines/stacking/test/test_stack_calibration_health.py`.
+- **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: `frames.jsonl` (one line per frame), `groups.jsonl` (per setting group), `match.jsonl` and `flats.jsonl`.
+
+### STK-54
+
+**Dark current of the ASI 533MM Pro**
+
+- **Claim:** At about -10 C, gain 0 and offset 10, the dark current of the ASI 533MM Pro is 0.0020 ADU per second (0.0016 e-/s), far below read noise for any exposure up to several minutes.
+- **Settings it supports:**
+  - code constant `DARK_CURRENT_ALLOWANCE_ADU_PER_SECOND` = 0.002 in `pipelines/stacking/pre_processing/calibration_assessment.py` (changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.calibration_assessment.DARK_CURRENT_ALLOWANCE_ADU_PER_SECOND -->
+- **Status:** Partly measured. Eight exposure groups at one temperature and setting; no fit error was computed.
+- **Data you need:** Dark frames at one temperature and setting over a range of exposures.
+- **Procedure:**
+  1. Measure the dark frames.
+  2. Fit the mean level of each exposure group against the exposure.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.calibration.measure_frames()
+  for health in astro.processing.calibration.assess("dark", camera_id="ZWO ASI 533MM Pro"):
+      print(health.row_key, health.status, health.summary)
+      for check in health.checks:
+          print("   ", check.name, check.status.value, check.measured_value, check.limit)
+  ```
+
+  `CalibrationCatalog.measure_frames` measures and stores the frames, and `CalibrationCatalog.assess` judges each set from the stored rows. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_frames --> <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess -->
+- **Acceptance criterion:** The fitted rate is far below the read noise over the exposures you use.
+- **What to look at:** `measurements['mean_level_adu']` of each dark set against its exposure.
+- **Our result:** Code: commit 07894ef1 (tip of `134-integration`). Offset 10, about -10 C, 2 to 120 s (8 groups of 30 frames; each group mean good to about 0.01 ADU): 0.0020 ADU/s, or 0.0016 e-/s. Adding the one 300 s frame gives 0.0014 ADU/s, so the range is 0.0011 to 0.0016 e-/s. In 120 s this is 0.24 ADU. A step of +0.40 ADU appears between 1 s and 2 s (394.34 to 394.74) and row banding falls from about 1.8 to 1.2 ADU there; it may be a readout mode change, the cause is not recorded, and the 0.1 s exposure match never pools across it. Persistent pixels above 25 ADU (offset 0, 10-frame sample, central crop) at about -10 C and about 0 C: 3.0e-5 and 2.7e-4 at 60 s, 1.9e-4 and 7.6e-4 at 120 s, 7.3e-4 and 1.4e-3 at 300 s.
+- **Verdict:** Not judged. The limit was chosen after seeing this library, and no held-out data exists.
+- **Limits:** One camera, one temperature at a non-clipped offset. The allowance is used for every camera because it is below one value step for exposures under about 2,000 s. Hot pixels and dark current are recorded and have no limit: no failing case was seen.
+- **To tune for your setup:** Measure your own rate at the temperatures you use; the allowance matters only for exposures over about 2,000 s.
+- **Regenerate with:** `CalibrationCatalog.measure_frames(force=True)` then `CalibrationCatalog.assess`.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_calibration_assessment.py`.
+- **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: `frames.jsonl` (one line per frame), `groups.jsonl` (per setting group), `match.jsonl` and `flats.jsonl`.
+
+### STK-55
+
+**Temperature of the dark against the lights**
+
+- **Claim:** Hot pixels grow with temperature, so a dark has to be taken near the temperature of the lights. A batch of lights whose temperature moves by more than the dark's tolerance of 3 C is matched badly by any one dark, and the batch mean can hide the drift.
+- **Settings it supports:**
+  - code constant `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C` = 3.0 in `drivers/calibration_library.py`, used here for the spread of the lights too (changing it means editing the code). Relation: sanity check only. <!-- impl: astrometricslib._internal.drivers.calibration_library.DEFAULT_DARK_TEMPERATURE_TOLERANCE_C -->
+- **Status:** Design estimate. The growth of hot pixels with temperature supports having a limit, not the value 3 C; only two temperatures exist in the library.
+- **Data you need:** Dark frames at several temperatures at one non-clipped setting, and lights whose temperature drifts.
+- **Procedure:**
+  1. Measure the frames.
+  2. Read the `light_temperature_spread` gate of a stack, and the ratio of persistent pixels at two temperatures.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.calibration.measure_frames()
+  for health in astro.processing.calibration.assess("dark", camera_id="ZWO ASI 533MM Pro"):
+      print(health.row_key, health.status, health.summary)
+      for check in health.checks:
+          print("   ", check.name, check.status.value, check.measured_value, check.limit)
+  ```
+
+  `CalibrationCatalog.measure_frames` measures and stores the frames, and `CalibrationCatalog.assess` judges each set from the stored rows. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_frames --> <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess -->
+- **Acceptance criterion:** The spread at which the stack's negative-pixel warning or noise worsens is known.
+- **What to look at:** The `light_temperature_spread` gate (the value is the widest span in degrees C).
+- **Our result:** Code: commit 07894ef1 (tip of `134-integration`). The ratio of persistent pixels above 25 ADU between about 0 C and about -10 C: 9 at 60 s, 4 at 120 s and 1.9 at 300 s (offset 0, 10-frame sample). 10 batches (146 lights) are more than 3 C from their dark by the batch mean; the largest gaps are Vega 5 s at 10.0 C and Arcturus 30 s at 8.0 C. Another 9 batches (227 lights) drift more than 3 C inside the batch, for example Arcturus 0.5 s (59 lights, -10.7 to -2.9 C). The cooler's -10 C is 0.5 C from the edge of a slot at -10.5 C, and 98 indexed frames (49 unique) fall past it.
+- **Verdict:** Not judged. The limit was chosen after seeing this library, and no held-out data exists.
+- **Limits:** Only two temperatures were measured, so 3 C cannot be derived from the data.
+- **To tune for your setup:** Take offset-10 darks at two more temperatures and compare the stack noise; the limit is in `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C`.
+- **Regenerate with:** `CalibrationCatalog.measure_frames(force=True)` then `CalibrationCatalog.assess`.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_stack_calibration_health.py`.
+- **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: `frames.jsonl` (one line per frame), `groups.jsonl` (per setting group), `match.jsonl` and `flats.jsonl`.
+
+### STK-56
+
+**Bias frames and temperature**
+
+- **Claim:** On the ASI 533MM Pro the bias level depends on the sensor temperature by only 0.076 ADU per degree, so no temperature limit is needed for biases.
+- **Settings it supports:** None.
+- **Status:** Measured. One set of 20 biases taken while the camera cooled down.
+- **Data you need:** Bias frames taken over a range of sensor temperatures at one setting.
+- **Procedure:**
+  1. Measure the biases.
+  2. Fit the mean level against the sensor temperature.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.calibration.measure_frames()
+  for health in astro.processing.calibration.assess("bias", camera_id="ZWO ASI 533MM Pro"):
+      print(health.row_key, health.status, health.summary)
+      for check in health.checks:
+          print("   ", check.name, check.status.value, check.measured_value, check.limit)
+  ```
+
+  `CalibrationCatalog.measure_frames` measures and stores the frames, and `CalibrationCatalog.assess` judges each set from the stored rows. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_frames --> <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess -->
+- **Acceptance criterion:** The slope over the temperatures you use is small against a value step.
+- **What to look at:** `measurements['mean_level_adu']` against `frame.sensor_temperature_degc` of each frame.
+- **Our result:** Code: commit 07894ef1 (tip of `134-integration`). 20 biases at gain 0, offset 10, from -10.3 to -0.5 C: the level follows temperature (r = 0.994) but changes by only 0.75 ADU over 9.8 C, or 0.076 ADU per degree. One set, one camera.
+- **Verdict:** Not judged. The limit was chosen after seeing this library, and no held-out data exists.
+- **Limits:** One set during a cooldown; the Nikon records no sensor temperature at all (438 frames).
+- **To tune for your setup:** Repeat on your camera if you use a wide temperature range.
+- **Regenerate with:** `CalibrationCatalog.measure_frames(force=True)` then `CalibrationCatalog.assess`.
+- **Guarded by tests:** None; the bias check has no temperature term.
+- **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: `frames.jsonl` (one line per frame), `groups.jsonl` (per setting group), `match.jsonl` and `flats.jsonl`.
+
+### STK-57
+
+**Which bias calibrates the flats**
+
+- **Claim:** A master flat keeps a pedestal when the bias subtracted from it was taken at another offset than the flats. On the ASI 533MM Pro an offset step of 10 is about 396 ADU. With a flat level of about 29,600 ADU that is 1.3% of the level, and a dust shadow d deep is under-corrected by about 1.3% of d. The stack now subtracts a bias taken at the flats' own gain and offset, and keys the master flat on that bias.
+- **Settings it supports:** None. The rule has no tuned number.
+- **Status:** Partly measured. The fault was measured on one cached master flat. The fix is guarded by tests only; the before-and-after run on real data has not been done.
+- **Data you need:** Flats taken at one offset, lights at another, and bias sets at both offsets, for the same camera and gain.
+- **Procedure:**
+  1. Find a stack whose lights and flats were taken at different offsets.
+  2. Compare the median of the first raw flat with the median of the cached master flat. The master is normalized to the first flat, so the difference is the bias that was removed.
+  3. Stack the same target again and compare the two differences.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.calibration.measure_frames()
+  for health in astro.processing.calibration.assess("bias", camera_id="ZWO ASI 533MM Pro"):
+      print(health.row_key, health.status, health.summary)
+      for check in health.checks:
+          print("   ", check.name, check.status.value, check.measured_value, check.limit)
+  ```
+
+  `CalibrationCatalog.measure_frames` measures and stores the frames, and `CalibrationCatalog.assess` judges each set from the stored rows; the bias level of each set at each offset is the quantity to compare. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_frames --> <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess -->
+- **Acceptance criterion:** The difference between the first raw flat and the master flat equals the level of the bias at the flats' offset, within the noise of the medians.
+- **What to look at:** The difference in ADU, and the soft flag that names the bias used when no bias exists at the flats' offset.
+- **Our result:** Code: this change (the commit that raised `FLAT_MASTER_RECIPE` to `flat-recipe-6`). On the copy of the library, the cached L master flat built 2026-10-25 had a median 21.7 ADU below the first raw flat, where a subtracted offset-10 bias would give about 396 and an offset-0 bias about 0. So the pedestal was left in. The same flat master was shared by an offset-0 run and an offset-10 run, which depended on run order. Corner to center ratio of the L master flat: 0.9711 now, 0.9707 with the pedestal removed, so the error at the corners is about 0.04% (about 0.07% for the spectral flat). Not measured: dust depth, and the effect on a stack.
+- **Verdict:** Not judged. The fix was written after seeing this library, and no held-out data exists.
+- **Limits:** One camera, one filter measured. When no bias exists at the flats' offset, the lights' bias is still used, with a flag, so the pedestal remains in that case.
+- **To tune for your setup:** Take bias frames at the offset you use for flats.
+- **Regenerate with:** `CalibrationCatalog.measure_frames(force=True)` then `CalibrationCatalog.assess`.
+- **Guarded by tests:** `astrometricslib/_internal/drivers/test/test_flat_bias_matching.py` and the golden case `imaging_flats_at_another_offset` in `astrometricslib/_internal/drivers/test/test_siril_script_golden.py`.
+- **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: see `CALIBRATION_SET_ASIDE_LIST.md`, section 5.
+
+### STK-58
+
+**Warnings of a job: notice rows and the time budget**
+
+- **Claim:** Every warning a pipeline raises is a stored quality row whose check failed, and a job can list its warnings. A warning that is not a gate (frames moved to the excluded folder, a stack of one frame, an exposure group left out, a flat issue no gate reports, a camera with no profile, a preview step that failed and was skipped, a stack abandoned for taking too long) is stored as a notice row with a limit of zero, because it is raised on any occurrence. The stack time budget is the limit of the abandoned-stack row.
+- **Settings it supports:** None. The notice rule has no tuned number. The time budget is listed as a design estimate (STK-D37).
+- **Status:** Design estimate. The rows and the read were written and tested on made-up rows. No restack has stored them yet, so no stored stack on the library holds a notice row.
+- **Data you need:** A stack that raised a warning of each kind (frames moved by the quarantine, a camera with no profile, a group left out), or the run of a target with a camera that has no profile.
+- **Procedure:**
+  1. Stack or analyze the target as a job and note the job's id.
+  2. Ask the job for its warnings.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  answer = astro.jobs.query(job_id="<job id>", detail="warnings")
+  print(answer.measurement_count, answer.checks_not_run_count)
+  for warning in answer.warnings:
+      print(
+          warning.pipeline, warning.metric, warning.reason, warning.value, warning.limit, warning.register_entry
+      )
+  ```
+
+  `Jobs.query` lists the stored rows of the job whose check failed. An empty list with a nonzero `measurement_count` means the job was checked and nothing failed; a zero count means the job stored no rows; an unknown id raises `NotFoundError`. <!-- impl: astrometricslib.api.jobs.Jobs.query -->
+- **Acceptance criterion:** Each flag reason stored in a summary from before the field was removed appears as the reason of a warning row of the same pipeline. The comparison script `wayfindinglib/scripts/shadow_compare_verdicts.py` reads the reasons from the raw stored JSON, since the models no longer have the field, checks this word for word and counts the reasons that have no row.
+- **What to look at:** The count of flag reasons with no warning row in the script's report, separated into old data (stored before the notice rows existed) and rows that should exist.
+- **Our result:** Code: this change (issue 97, phase 1b). Unit tests on made-up rows show each notice is stored with the outcome `failed`, a limit of zero and the job id, and that the abandoned-stack row carries the time budget as its limit. The comparison on the data copy is reported in the pull request; stored summaries there predate the notice rows. Not measured: a restack that stores the rows.
+- **Verdict:** Not judged. No limit was compared with data.
+- **Limits:** A notice states that something happened, not how bad it is. Rows stored before this change have no notice rows and no job ids. A run called with no job, and a run with no time stamp, store no job id or no rows at all.
+- **To tune for your setup:** Nothing to tune. Change the stack time budget by editing the constants named in STK-D37.
+- **Regenerate with:** `wayfindinglib/scripts/shadow_compare_verdicts.py --report <file>` on a copy of the library, after a restack.
+- **Guarded by tests:** `astrometricslib/pipelines/shared/quality/test/test_notices.py`, `astrometricslib/api/test/test_jobs_warnings.py`, `astrometricslib/pipelines/stacking/test/test_abandoned_stack.py` and `wayfindinglib/scripts/test/test_shadow_compare_verdicts.py`.
+- **Raw record:** None kept.
+
+### STK-59
+
+**Siril's star-width weights, recovered from known tiles**
+
+- **Claim:** With `-weight=wfwhm -nonorm`, Siril weights the frames as `wfwhm_weights` predicts. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.wfwhm_weights --> The widths it uses depend on the selection. Without `-filter-included`, Siril stacks the images marked excluded and takes the formula's widest and narrowest widths from all the images. With `-filter-included`, it stacks and computes from the included images only.
+- **Settings it supports:** None. The formula has no tuned value.
+- **Status:** Measured. Each frame's weight was recovered from its own tile on made-up frames, with normalization off. Real frames and normalization are outside this entry.
+- **Data you need:** No telescope frames. Eight constant-valued frames made for the test, each with its own small tile, and a Siril sequence whose registration lines hold hand-set star widths.
+- **Procedure:**
+  1. Make the frames and convert them to a Siril sequence. Write identity registration lines with the widths 2.0, 2.3, 2.6, 3.0, 3.4, 4.0, 1.5 and 6.0 px, and mark the last two images excluded. These are the narrowest and the widest, so they would change the weights if Siril used them.
+  2. Stack with `-nonorm` and no rejection, with and without `-weight=wfwhm` and with and without `-filter-included`.
+  3. Read each tile's level in the stack, which is that frame's weight share, and compare it with the formula on all eight widths and on the six included widths.
+- **Acceptance criterion:** The plan asked to confirm that Siril applies `wfwhm` with `-nonorm` and to include an excluded image. It set no number for the agreement.
+- **What to look at:** The largest relative difference between a recovered share and the formula. A value near the rounding error of the stack's numbers means Siril uses the formula. A large value against one set of widths shows which set Siril did not use.
+- **Our result:** Siril 1.4.4, 2026-10-26 UTC. Code version: branch `134-group-weights-nikon` after commit 73faef14; the exact tree was not recorded. Sample size: 8 made-up frames, one run of each option. Uncertainty: none estimated; the frames hold no noise. Data split: not applicable, because nothing was tuned on these frames.
+
+  | Stack options | Images stacked | Largest difference from the formula |
+  | --- | --- | --- |
+  | `-weight=wfwhm`, no filter | 8 (the excluded image of width 1.5 px gets 0.380, the one of width 6.0 px gets 0) | 1.5e-6 on all eight widths; 0.49 on the six included widths |
+  | `-weight=wfwhm -filter-included` | 6 (shares add up to 1.0000003) | 1.8e-6 on the six included widths; 1.0 on all eight widths |
+  | No weight, no filter | 8 | Each share 0.125 |
+  | No weight, `-filter-included` | 6 | Each share 0.1667 |
+
+  A run with `-norm=addscale` stopped with Siril's "Normalization failed" message, so it gave no weights. The made-up frames have constant backgrounds.
+- **Verdict:** Pass. Siril applies `wfwhm` with `-nonorm` as the formula says, and the excluded image behaves as stated in the claim.
+- **Limits:** Made-up frames and one Siril version. Normalization was off, while the library's science stacks use `-norm=addscale`, so this entry does not show how weights and normalization act together on real frames ([STK-60](#stk-60)). The library drops frames at `seqapplyreg`, so its registered sequence does not hold the excluded frames that this test keeps.
+- **To tune for your setup:** Nothing to tune. Repeat it after a Siril upgrade.
+- **Regenerate with:** No script in the repository. The script was kept in the local validation folder, as `scripts/siril_weight_test.py`. It follows the procedure above.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_stack_membership.py`
+- **Raw record:** None kept in the repository. The results are in `siril_weight_test/result.json` in the local validation folder.
+
+### STK-60
+
+**The impulse test: each frame's contribution to an exposure-group stack**
+
+- **Claim:** A small known tile added to one frame should reach the stack with the coefficient the group weighting rule predicts. On the one run so far it did not: the rule does not predict each frame's contribution within 2%. The recorded cause, Siril's unsaved per-frame normalization scale, is inferred and not yet shown. The per-group coefficients have not been shown to pass. The fix is tracked in issue #146.
+- **Settings it supports:** None. `stacking.frame_weight` stays the star-width share and no tuned value rests on this entry.
+- **Status:** Partly measured. The failure was measured on one target, but no per-frame scale has been measured to confirm its cause, and no fix has been tested.
+- **Data you need:** A copy of the library holding a target with at least two exposure groups, whose frames may be changed on the copy. Never add tiles to the real frames.
+- **Procedure:**
+  1. Restack the copy unchanged and keep the result.
+  2. Add a 48 by 48 pixel tile to chosen frames on the copy, including the brightest-sky and darkest-sky frame of each group. Use frames not sampled for the group frame noise, and places away from stars. Keep the amplitude well inside the rejection limit.
+  3. Restack and subtract the first stack. Measure each tile's inner 32 by 32 pixels against a ring around it.
+  4. Compare the result with the rule: amplitude x `W_g ŵ_i / (ΣW · G_g)` x `t̄ / t_g`, divided by the master flat's relative level at the tile. Then restore the frames.
+- **Acceptance criterion:** Each recovered coefficient is within 2% of the rule, as set in section 3.4 of the plan `IMAGED_TARGET_SUGGESTIONS_PLAN.md` before the run. Both runs must show the same `W_g` and `G_g`.
+- **What to look at:** Recovered level over predicted level, with no units. A value of 1 means the rule is right for that frame. A spread between frames in one group means a per-frame factor is missing from the rule.
+- **Our result:** M 57, ZWO ASI533MM, 2026-10-26 UTC. Code version: branch `134-group-weights-nikon` at about commit 73faef14; the exact tree was not recorded. Sample size: 10 frames of 30 s and 61 of 60 s, with 7 tiles of 12 ADU in one injected restack. Uncertainty: the scatter of the tile's pixels, which ignores the correlation that resampling adds, so the errors are too small. Data split: not applicable, because nothing was tuned on this run.
+
+  | Frame | Group and role | Predicted (ADU) | Recovered (ADU) | Recovered / predicted |
+  | --- | --- | --- | --- | --- |
+  | 8 | 30 s, normal sky | 0.128 | 0.182 | 1.42 ± 0.05 |
+  | 2 | 30 s, brightest sky | 0.124 | 0.222 | 1.80 ± 0.07 |
+  | 5 | 30 s, darkest sky | 0.252 | 0.245 | 0.97 ± 0.03 |
+  | 9 | 30 s, weight 0 | 0 | −0.0001 ± 0.0005 | No ratio; matches 0 |
+  | 61 | 60 s, normal sky | 0.138 | 0.214 | 1.55 ± 0.08 |
+  | 22 | 60 s, brightest sky | 0.041 | 0.029 | 0.71 ± 0.20 |
+  | 14 | 60 s, darkest sky | 0.419 | 0.525 | 1.26 ± 0.04 |
+
+  The six nonzero ratios range from 0.71 to 1.80, with a mean of 1.28. The `W_g` values are the same in both runs and `G_g` differs by 0.009% in the 30 s group. Frame weights differ by at most 5e-5. These are far too small to explain the result.
+
+  Recorded cause (inferred): Siril's `-norm=addscale` multiplies each frame by a scale that it does not save, and the rule leaves that scale out. Support: the notes in `normalization_scale.py` give M 57 scales of 1.00 to 1.34 for 60 s frames and about 1.39 for the stack. Against a full explanation: no scale was measured for the injected frames or for the 30 s group, the rule's other factors were not tested on their own, and the 1.80 of frame 2 lies above that range.
+
+  Decision D9 (2026-10-26, option B) measures the whole stack's scale from reference stars and applies it to the predicted noise. Its check on 60 s stacks gave scales 1.193 ± 0.006 (M 27), 1.385 ± 0.007 (M 57) and 1.339 ± 0.005 (M 81), against half-stack factors 1.14 ± 0.13, 1.37 ± 0.16 and 1.34 ± 0.16, which agree within 0.4 combined errors ([STK-38](#stk-38)). That check concerns the whole stack's noise. It does not change a frame's or a group's coefficient, and this test has not been rerun since. The per-frame bias of under about 3% on ratios in D9 is a design estimate, and this test does not confirm it.
+- **Verdict:** Fail. Five of the six nonzero ratios differ from 1 by more than the 2% limit plus the error, and the sixth (frame 5) is 0.97 ± 0.03.
+- **Limits:** One target, one night, one run, and only M 57: M 27 was not run. A later restack of the same injected frames was kept but never analyzed. A restack with a tile in every frame also has no analysis. No fix has been tested, so this entry does not say whether 2% can be reached.
+- **To tune for your setup:** Nothing to tune until the fix is settled. Run the procedure on a copy of your own multi-group target, and treat the per-frame weights as star-width shares only.
+- **Regenerate with:** No script in the repository. The scripts `task2_inject.py` and `task2_analyze.py` were kept with the local validation files, and the procedure above repeats them.
+- **Guarded by tests:** None.
+- **Raw record:** None kept in the repository. The results are in `snapshots/m57_inject/analysis.json` in the local validation folder.
 
 ## Design estimates
 
@@ -2132,7 +2642,7 @@ These tuned values have not been measured. Each is a reasoned choice; the last c
 | ID | Setting | Value | Where | Risk if wrong | How you could measure it on your data |
 | --- | --- | --- | --- | --- | --- |
 | STK-D01 | Fewest frames per master calibration frame | 3 | config key `[Processing.Siril] minimum_calibration_frames` | Noisy master calibration frames add noise to every stack. | Build masters from 1, 3, 5 and 10 frames and compare stack noise with `QualityRecords.measure_stack(path, compare_to=...)`; the minimum is where the gain stops mattering. |
-| STK-D02 | Rejection limits for bias and dark masters | `rej 3 3` | Siril script in `drivers/siril_interface.py` | Masters with more noise or leftover hot pixels. | Stack masters at 2.5 and 3.5 and compare their noise and hot-pixel counts. |
+| STK-D02 | Rejection limits for bias and dark masters | `rej 3 3` | Siril script in `drivers/siril_interface/script_builders.py` | Masters with more noise or leftover hot pixels. | Stack masters at 2.5 and 3.5 and compare their noise and hot-pixel counts. |
 | STK-D03 | Fewest frames in an exposure group | 5 | code constant `MINIMUM_FRAMES_PER_EXPOSURE_GROUP` in `pipelines/stacking/processing/exposure_groups.py` | Groups that register poorly or reject too many pixels. | Stack groups of 3, 5 and 8 frames with `ProcessingPipelines.stack(frames=...)` and check the registration share and rejected fraction. |
 | STK-D04 | Saturated pixel share that flags a stack | 0.1% | code constant `DEFAULT_SATURATION_FLAG_THRESHOLD` in `pipelines/shared/quality/saturation.py` | Normal stacks flagged as saturated, or saturated stacks missed. | Run `report_gate_limits` across your stacks and see where normal stacks sit. |
 | STK-D05 | Flat level limits | 10% and 90% of full scale | code constants `MINIMUM_FLAT_LEVEL_FRACTION`, `MAXIMUM_FLAT_LEVEL_FRACTION` in `pipelines/stacking/pre_processing/flat_calibration.py` | Flats that are too dim or too bright give uneven flatness. | Take flats at 5% to 95% of full scale, stack lights with each, and compare flatness with `QualityRecords.measure_stack(..., compare_to=...)`. |
@@ -2140,7 +2650,7 @@ These tuned values have not been measured. Each is a reasoned choice; the last c
 | STK-D07 | Dark exposure match | within 0.1 s | `CalibrationLibrary.select_dark_frames` in `drivers/calibration_library.py` | Mismatched darks over- or under-subtract. | Compare masters of nearby exposures with `CalibrationCatalog.query` and the stack's negative-pixel warning. |
 | STK-D08 | Noise penalty that switches on weighting | 1.05 | code constant `MINIMUM_PENALTY_TO_WEIGHT` (STK-07) | Weighting switched on when it does not help, or off when it does. | Stack mixed sessions with P between 1.0 and 1.2 both ways and compare the noise. |
 | STK-D09 | Spectral registration share before a retry | 0.9 | code constant `MINIMUM_REGISTERED_FRACTION` (STK-12) | Spectral groups retried too often or too late. | Read the per-group frames stacked and submitted on your spectral sessions. |
-| STK-D10 | Brightness-scale pixel method | 20th to 80th percentile; brightest 1% | code constants `GAIN_MID_RANGE_PERCENTILES`, `GAIN_BRIGHTEST_FRACTION` in `pipelines/stacking/processing/exposure_groups.py` | A wrong brightness scale between exposure groups. | Compare `measure_group_gains` with `measure_group_gains_with_stars` on imaging groups (STK-19). |
+| STK-D10 | Brightness-scale pixel method | 20th to 80th percentile; brightest 1% | code constants `GAIN_MID_RANGE_PERCENTILES`, `GAIN_BRIGHTEST_FRACTION` in `pipelines/stacking/processing/group_gains.py` | A wrong brightness scale between exposure groups. | Compare `measure_group_gains` with `measure_group_gains_with_stars` on imaging groups (STK-19). |
 | STK-D11 | Saturation level of a group stack | 0.95 of full scale | code constant `SATURATION_FRACTION_OF_FULL_SCALE` in the same file | Saturated pixels treated as good data, or good pixels masked. | Read the plateau of a saturated star in your group stacks with `estimate_saturation_mask_level`. |
 | STK-D12 | Clipping floor for clipped groups | 2 frame-noise widths | code constant `CLIPPING_FLOOR_SIGMAS` in the same file | Clipped groups mis-weighted at faint pixels. | Compare a clipped group with an unclipped one of the same field at faint pixels. |
 | STK-D13 | Session gap for the quarantine | 4 hours | code constant `SESSION_GAP_SECONDS` in `pipelines/stacking/pre_processing/frame_quarantine.py` | Frames from one session judged against another session's median. | List the gaps between your frames with `QualityRecords.measure_frames(kind="raw_check")`. |
@@ -2152,7 +2662,19 @@ These tuned values have not been measured. Each is a reasoned choice; the last c
 | STK-D19 | Raw-frame check: high star count | 1.4 times the batch median | code constant `HIGH_STAR_MULTIPLE` in `pipelines/shared/quality/raw_frame_check.py` | Good frames flagged for a high count, or frames with trails and light leaks missed. | Run the raw check on many clean batches (`QualityRecords.measure_frames(kind="raw_check")`) and set the limit above the largest normal ratio. |
 | STK-D20 | Raw-frame check: faint-trail detector | 4 px blocks; 3σ block threshold; 60σ star mask; trail at least 0.25 of the frame diagonal | code constants `TRAIL_BLOCK_PIXELS`, `TRAIL_THRESHOLD_SIGMA`, `TRAIL_STAR_SIGMA`, `TRAIL_MIN_DIAGONAL_FRACTION` in `pipelines/shared/quality/raw_frame_check.py` | Faint trails missed, or star chains and noise flagged as trails. | Add synthetic trails of known brightness to clean frames and count how many `line_trail_px` finds; run it on clean frames to count false trails. |
 | STK-D21 | Frame-trend limits | at least 4 frames; at least 70% of steps in one direction | code constants `MINIMUM_FRAMES`, `STEADY_STEP_FRACTION` in `pipelines/shared/quality/frame_trends.py` | Slow drifts missed, or noise reported as a trend. | Run the trend check on sessions with a known drift (dew, focus) and on steady ones, and count false and missed trends. |
-| STK-D22 | Frame measurement job: frames measured at once (worker processes); bias frames read per setting; frames measured in one stack | 4; 5; 40 | code constants `MEASUREMENT_WORKER_COUNT`, `BIAS_FRAMES_FOR_LEVEL`, `STACKING_STAGE_MEASUREMENT_LIMIT` in `pipelines/stacking/frame_measurement_run.py` <!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.MEASUREMENT_WORKER_COUNT --> <!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.BIAS_FRAMES_FOR_LEVEL --> <!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.STACKING_STAGE_MEASUREMENT_LIMIT --> | A slow job that makes the app sluggish, a bias level thrown off by one odd frame, or a first stack that waits too long. | Measured 2026-10-22 on the two golden M 13 frames (3008 by 3008 px, 8 frames per row, 12 cores): seconds per frame with 1, 2 and 4 worker threads 14.1, 10.6 and 11.2; with 2 and 4 worker processes 8.8 and 5.9. Threads stop gaining at two because the fitting holds Python's global lock, so the job uses processes. Re-time `ProcessingPipelines.record_frame_measurements` on 40 frames with 1, 4 and 8 workers while the app is open; compare the bias level of one setting from 1, 5 and 10 bias frames. |
-| STK-D23 | Stack noise measurement: apertures; aperture radius; reference stars; sky ring; clearance from stars; shift search radius; faint-source threshold; smoothing widths; background subtraction width; clearance from faint sources; depth factor for replacing a set | 100; 4 px; 10; 7 to 12 px; 24 px; 500 px; 3.5σ; 1.5, 3 and 6 px; 12 px; 13 px; 2 | code constants `NOISE_APERTURE_COUNT`, `APERTURE_RADIUS_PX`, `REFERENCE_STAR_COUNT`, `RING_INNER_PX`, `RING_OUTER_PX`, `STAR_CLEARANCE_PX`, `SEED_SEARCH_RADIUS_PX`, `FAINT_SOURCE_THRESHOLD_SIGMAS`, `FAINT_SOURCE_SMOOTHING_SIGMAS_PX`, `FAINT_SOURCE_HIGH_PASS_SIGMA_PX`, `FAINT_SOURCE_CLEARANCE_PX`, `REPLACEMENT_DEPTH_FACTOR` in `pipelines/stacking/post_processing/empty_apertures.py` (`APERTURE_RADIUS_PX`, `RING_INNER_PX` and `RING_OUTER_PX` are in `stack_image.py` and `SEED_SEARCH_RADIUS_PX` is in `stack_noise.py`, same folder) (STK-36) <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.STAR_CLEARANCE_PX --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.FAINT_SOURCE_HIGH_PASS_SIGMA_PX --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.REPLACEMENT_DEPTH_FACTOR --> | A noisy or biased stack noise value, or apertures placed on the wrong stars. | Repeat the STK-36 run on another target and camera with 50, 100 and 200 apertures, and check the shift against the true star offsets. |
+| STK-D22 | Frame measurement job: frames measured at once (worker processes); bias frames read per setting; frames measured in one stack | 4; 5; 40 | code constants `MEASUREMENT_WORKER_COUNT`, `BIAS_FRAMES_FOR_LEVEL`, `STACKING_STAGE_MEASUREMENT_LIMIT` in `pipelines/stacking/frame_measurement_run.py` <!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.MEASUREMENT_WORKER_COUNT --> <!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.BIAS_FRAMES_FOR_LEVEL --> <!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.STACKING_STAGE_MEASUREMENT_LIMIT --> | A slow job that makes the app sluggish, a bias level thrown off by one odd frame, or a first stack that waits too long. | Measured 2026-10-22 on the two golden M 13 frames (3008 by 3008 px, 8 frames per row, 12 cores): seconds per frame with 1, 2 and 4 worker threads 14.1, 10.6 and 11.2; with 2 and 4 worker processes 8.8 and 5.9. Threads stop gaining at two because the fitting holds Python's global lock, so the job uses processes. Re-time `QualityRecords.record_frame_measurements` on 40 frames with 1, 4 and 8 workers while the app is open; compare the bias level of one setting from 1, 5 and 10 bias frames. |
+| STK-D23 | Stack noise measurement: apertures; aperture radius; reference stars; sky ring; clearance from stars; shift search radius; faint-source threshold; smoothing widths; background subtraction width; clearance from faint sources; depth factor for replacing a set | 100; 4 px; 10; 7 to 12 px; 24 px; 500 px; 3.5σ; 1.5, 3 and 6 px; 12 px; 13 px; 2 | code constants `NOISE_APERTURE_COUNT`, `APERTURE_RADIUS_PX`, `REFERENCE_STAR_COUNT`, `RING_INNER_PX`, `RING_OUTER_PX`, `STAR_CLEARANCE_PX`, `SEED_SEARCH_RADIUS_PX`, `FAINT_SOURCE_THRESHOLD_SIGMAS`, `FAINT_SOURCE_SMOOTHING_SIGMAS_PX`, `FAINT_SOURCE_HIGH_PASS_SIGMA_PX`, `FAINT_SOURCE_CLEARANCE_PX`, `REPLACEMENT_DEPTH_FACTOR` in `pipelines/stacking/post_processing/aperture_placement.py` (`REPLACEMENT_DEPTH_FACTOR` is in `empty_apertures.py`; `APERTURE_RADIUS_PX`, `RING_INNER_PX` and `RING_OUTER_PX` are in `stack_image.py` and `SEED_SEARCH_RADIUS_PX` is in `stack_noise.py`, same folder) (STK-36) <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.STAR_CLEARANCE_PX --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.FAINT_SOURCE_HIGH_PASS_SIGMA_PX --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.REPLACEMENT_DEPTH_FACTOR --> | A noisy or biased stack noise value, or apertures placed on the wrong stars. | Repeat the STK-36 run on another target and camera with 50, 100 and 200 apertures, and check the shift against the true star offsets. |
 | STK-D24 | Subset stacks: fewest frames in a subset; growth steps | 4; 4 | code constants `MINIMUM_SUBSET_FRAMES`, `DEFAULT_GROWTH_STEPS` (STK-37) | Subsets too small to reject outliers, or a growth curve with too few points. | Stack subsets of 3, 4 and 6 frames and compare how many pixels each rejects. |
-| STK-D25 | Half-difference noise: fewest frames in each half, counting the shared reference frame | 8 | code constant `HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF` in `pipelines/stacking/subset_noise_run.py` (STK-42) <!-- impl: astrometricslib.pipelines.stacking.subset_noise_run.HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF --> | Halves too small to reject outliers, or with the shared frame too large a part of each half. | Run the job on subsets of 16, 24 and 40 frames of one night and check that the difference noise scaled by the formula stays constant. |
+| STK-D25 | Odd–even difference noise: fewest frames in each half, counting the shared reference frame | 8 | code constant `ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF` in `pipelines/stacking/odd_even_difference_run.py` (STK-42) <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF --> | Halves too small to reject outliers, or with the shared frame too large a part of each half. | Run the job on subsets of 16, 24 and 40 frames of one night and check that the difference noise scaled by the formula stays constant. |
+| STK-D26 | Group frame noise `s_g`: clip limit around the median of neighbor differences | 4 rough (median absolute deviation) scales | code constant `NOISE_CLIP_SIGMAS` in `pipelines/stacking/processing/group_gains.py` <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.NOISE_CLIP_SIGMAS --> | Star pixels raise `s_g` in a crowded field (cut too wide), or real noise is cut (too narrow), which moves the group weights. | On synthetic Gaussian noise rounded to steps of 1 and 4 ADU the estimate is within 0.1% of the true value (tests in `test_exposure_groups.py`). On real frames, compare `s_g` with the noise model on star-poor and crowded fields. |
+| STK-D27 | Gain and read noise at another offset: which frames may use the entry of the same gain and binning at the nearest other offset | frames with under 20% exact zeros (`CLIPPED_FRAME_ZERO_FRACTION`, [STK-22](#stk-22)) | method `CameraProfile.sensor_noise_for` in `models/camera_profile.py` <!-- impl: astrometricslib.models.camera_profile.CameraProfile.sensor_noise_for --> | The offset is assumed to change neither gain nor read noise. If it does, offset-0 frames get the wrong read noise and sky rate. | Measure the gain from flat pairs at both offsets (flats are not clipped), and compare the noise model with the measured frame noise at both offsets. |
+| STK-D28 | Stack noise plate solution: member frames of the reference group tried when no reference frame is named; then a plate solve of the stack itself (source `PLATE_SOLVE_WCS_SOURCE`, also tried when a frame's solution fails the reference-star check) | 5; one solve | code constant `MEMBER_FRAME_ATTEMPTS` in `pipelines/stacking/post_processing/stack_noise.py` <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.MEMBER_FRAME_ATTEMPTS --> | Too few: the noise is not measured when the first frames have no solution. Too many: slow on a stack that cannot be solved. | Restack a group target whose reference group dropped a frame, and compare the noise measured through a member frame with the noise of the same stack after it is plate solved. The plate solve of the stack is described in [STK-36](#stk-36). |
+| STK-D29 | Capture setting: significant figures kept of the pixel scale (the merge of stored settings follows from it) | 4 | code constant `PIXEL_SCALE_SIGNIFICANT_FIGURES` in `models/quality/capture_setting.py` <!-- impl: astrometricslib.models.quality.capture_setting.PIXEL_SCALE_SIGNIFICANT_FIGURES --> | Too many: one setting splits when headers round differently, and its frames are counted as separate settings. Too few: two optics with close scales merge. | Compare the pixel scales your headers write for one camera and optic, and the scales of your optics. Headers disagreed beyond the sixth figure on M 13 (1.915279 and 1.9152790075, which split one 30 s setting into 40 and 4 frames); four figures is 0.05% near 2 arcsec/pixel, far finer than the 25% between 300 mm and 405 mm. Schema version 4 of the quality store (`QualityStore._migrate_from_version_3`) rounds the stored scales and merges settings that become equal (keeps the smallest id, repoints `quality_measurements.capture_setting_id`); it changes stored data on first open, so back up with `scripts/backup_library_databases.py` first. Design estimate, #134, uncommitted on `134-group-weights-nikon` after dacb635a (2026-10-26); unit tests, not run on the real library. |
+| STK-D30 | Reference-star match: largest rotation searched; trial step at the farthest corner; shift and rotation applied as none below; rms above which the fit is poor | 0.5°; 1 px; 0.05 px and 0.001°; 0.5 px | code constants `MAXIMUM_ROTATION_DEG`, `ROTATION_STEP_PX`, `NEGLIGIBLE_SHIFT_PX`, `NEGLIGIBLE_ROTATION_DEG`, `POOR_ALIGNMENT_RMS_PX` in `pipelines/stacking/post_processing/stack_noise.py` (STK-36); the shift is the median over the matched stars; 0.5 px is 1/8 of the 4 px aperture radius, and when a plate-solved aperture set fits worse than that the stack is plate-solved and moved again, and a second fit that also stays above the limit is used anyway with a note saying so and giving its rms, not refused (plate-solved placements fit to 0.00 px; frame-solution fits on real stacks measured 0.18 px on NGC 2244, kept, and 1.42 to 2.11 px on M 27, M 57 and M 81, retried; Design estimate) <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.MAXIMUM_ROTATION_DEG --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.ROTATION_STEP_PX --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.NEGLIGIBLE_SHIFT_PX --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.NEGLIGIBLE_ROTATION_DEG --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.POOR_ALIGNMENT_RMS_PX --> | Too small a rotation limit: a stack lined up on a frame with a wrong header rotation is refused (M 81, header rotation about 0.2° off). Too large: more wrong matches. Too large a poor-fit limit: apertures stay off their stars (M 81 had apertures up to 8.9 px off a 4 px radius and noise 0.001256 against 0.000985); too small: needless plate solves. Too large a negligible shift: apertures miss their stars by a few hundredths of a pixel; too small: reruns do not reproduce (M 13's odd–even difference moved 5% between two runs on the same frames). | Solve a few stacks and compare the fitted shift and rotation with the plate solution, then rerun one stack twice and compare the noise. Code uncommitted on `134-group-weights-nikon` after 817c7da4 (#134, 2026-10-26); unit tests only, not run on the real library. |
+| STK-D31 | Odd–even difference: bias divisor | 1.0 (no correction) | code constant `ODD_EVEN_DIFFERENCE_NOISE_BIAS` in `pipelines/stacking/post_processing/difference_noise.py` (STK-42) <!-- impl: astrometricslib.pipelines.stacking.post_processing.difference_noise.ODD_EVEN_DIFFERENCE_NOISE_BIAS --> | The difference reads low (Planck found about 1%, from correlation between the halves and from rejection clipping the positive tail), so fixed-pattern noise looks too large. | Run `python -m astrometricslib.scripts.measure_odd_even_bias` on the library copy for one target of each camera, with `--repeats`, and set the constant to the ratio it prints; run it again when the stacker's rejection settings change. Two injection runs have been reported, neither recorded in full (Partly measured). *Earlier script version:* the difference was compared with the noise measured on the whole simulated stack, which keeps smoothed real sky and so real fixed pattern; it gave a ratio of 0.74 (made with an earlier version of the script; target, camera, date, repeats, uncertainty and number of apertures not recorded). That reference was wrong for this test, and the script no longer uses it. *Current script version:* the difference is compared with the noise that was injected, worked out with the production prediction's arithmetic and Siril normalization scale (`injected_stack_noise`); it gave 1.47e-4 injected and 1.57e-4 recovered, a ratio of about 1.06 (target, camera, date, repeats, uncertainty and number of apertures not recorded; the run is the user's report, not rerun with the code of this commit). Because the ratio is above 1, no correction is justified and the constant stays 1.0; it is not held out and no uncertainty is stored. Code of the injection test changed on `134-group-weights-nikon` (F3 of the image-processing audit, 2026-10-30); unit tests only, not rerun on the real library. |
+| STK-D32 | Empty-aperture noise at several sizes: aperture radii as multiples of the noise aperture's radius; clearance from faint sources at the largest radius | 0.5, 1, 1.5 and 2; 17 px | code constant `SIZE_RADIUS_MULTIPLES` in `pipelines/stacking/post_processing/aperture_size_noise.py` (the clearance is the largest ring's outer radius plus 1 px; the fewest apertures is `MINIMUM_USABLE_APERTURES`, STK-D23) <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_size_noise.SIZE_RADIUS_MULTIPLES --> | Too few sizes or too narrow a span: the exponent cannot tell 0.5 from 1.0. Too wide: the largest ring overlaps its neighbors. | Fit the exponent on a stack with injected correlated noise of a known exponent and check that it comes back, then compare it across your targets. Code uncommitted on `134-group-weights-nikon` after 817c7da4 (#134, 2026-10-26); unit tests only, not run on the real library. |
+| STK-D33 | Line pattern of the odd–even halves: fewest usable pixels for a row or column mean; lines in the running mean taken off; fewest lines for a scatter | 100; 31; 20 | code constants `MINIMUM_PIXELS_PER_LINE`, `RUNNING_MEAN_LINES`, `MINIMUM_LINES` in `pipelines/stacking/post_processing/odd_even_apertures.py` <!-- impl: astrometricslib.pipelines.stacking.post_processing.odd_even_apertures.MINIMUM_PIXELS_PER_LINE --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.odd_even_apertures.RUNNING_MEAN_LINES --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.odd_even_apertures.MINIMUM_LINES --> | Banding is missed (the running mean too short removes it) or a gradient is read as banding (too long). | Add a known band of a few lines to a stack's halves and check that the sum's row scatter rises over the difference's. Code uncommitted on `134-group-weights-nikon` after 817c7da4 (#134, 2026-10-26); unit tests only, not run on the real library. |
+| STK-D34 | Depth limits: Gaia match radius for a reference star; companion magnitude margin; fewest stars for the zero point; detection thresholds; surface-brightness box | 3 arcsec; 3 mag; 3; 5σ and 3σ; 10 arcsec | code constants `STAR_MATCH_RADIUS_ARCSEC`, `CONTAMINATION_MAGNITUDE_MARGIN`, `MINIMUM_ZERO_POINT_STARS`, `POINT_SOURCE_SIGMA`, `SURFACE_BRIGHTNESS_SIGMA`, `SURFACE_BRIGHTNESS_BOX_ARCSEC` in `pipelines/stacking/post_processing/depth_limits.py` (the thresholds and the box follow mission practice, Beckwith et al. 2006 and the Euclid preparation XVI paper) <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.STAR_MATCH_RADIUS_ARCSEC --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.CONTAMINATION_MAGNITUDE_MARGIN --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.MINIMUM_ZERO_POINT_STARS --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.POINT_SOURCE_SIGMA --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.SURFACE_BRIGHTNESS_SIGMA --> | Stated biases: the 94% aperture reads the point-source depth about 0.07 mag shallow; the zero point carries up to 0.03 mag from a contaminating companion; the band is Gaia G with no color term; without a measured exponent the depth is optimistic. A wrong match radius gives a wrong star or no star. | Inject stars of known magnitude into a stack and measure the share recovered at the stated depth, and compare the zero point with a photometry run on the same field. Code uncommitted on `134-group-weights-nikon` after 817c7da4 (#134, 2026-10-26); unit tests only, not run on the real library. |
+| STK-D35 | Odd–even bias test: width of the Gaussian that smooths a real frame's sky; radius kept around flagged pixels | 3 px; 4 px | code constants `SMOOTHING_SIGMA_PX`, `KEEP_RADIUS_PX` in `pipelines/stacking/odd_even_bias.py` <!-- impl: astrometricslib.pipelines.stacking.odd_even_bias.SMOOTHING_SIGMA_PX --> <!-- impl: astrometricslib.pipelines.stacking.odd_even_bias.KEEP_RADIUS_PX --> | Too narrow a smoothing leaves real noise behind (9.4% of the white noise, under 1% of the variance, at 3 px; the added noise is lowered by that amount); too wide flattens real sky structure. A star core smoothed away breaks registration. | Run the bias test with 2, 3 and 4 px and check that the ratio does not move. Code uncommitted on `134-group-weights-nikon` after 817c7da4 (#134, 2026-10-26); unit tests only, not run on the real library. |
+| STK-D36 | Fewest different frames in a dark or bias master before it counts as thin | 10 | code constant `THIN_SET_FRAME_COUNT` in `pipelines/stacking/pre_processing/calibration_assessment.py` (STK-53) <!-- impl: astrometricslib.pipelines.stacking.pre_processing.calibration_assessment.THIN_SET_FRAME_COUNT --> | A master that adds up to a tenth of its noise variance to every light is let through, or a good master is flagged. | Build masters from 5, 10, 20 and 33 frames and compare the stack noise with `QualityRecords.measure_stack(path, compare_to="previous")`. |
+| STK-D37 | Stack time budget (the limit of the abandoned-stack warning) | 300 s plus 30 s per frame, at least 600 s | code constants `STACKING_TIMEOUT_BASE_SECONDS`, `STACKING_TIMEOUT_PER_FRAME_SECONDS`, `STACKING_TIMEOUT_SECONDS` in `pipelines/tasks.py` <!-- impl: astrometricslib.pipelines.tasks.STACKING_TIMEOUT_BASE_SECONDS --> <!-- impl: astrometricslib.pipelines.tasks.STACKING_TIMEOUT_PER_FRAME_SECONDS --> <!-- impl: astrometricslib.pipelines.tasks.STACKING_TIMEOUT_SECONDS --> | A slow but healthy stack is abandoned, or a stuck Siril run holds its slot for a long time. | Read the working seconds of your stacks from the `stacking.duration_s` rows and set the budget a few times above the longest healthy stack. |

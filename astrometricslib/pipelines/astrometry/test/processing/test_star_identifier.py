@@ -250,7 +250,9 @@ def test_no_stellar_matches_leaves_generic_name_and_logs_warning(
     assert any("no stellar-type simbad entries" in record.message.lower() for record in caplog.records)
 
 
-def test_query_gaia_region_pins_dr3_table_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_query_gaia_region_pins_dr3_table_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gaia_module: MagicMock
+) -> None:
     """Verify _query_gaia_region pins Gaia DR3's table and limits the search.
 
     astroquery's cone search defaults to whichever table the ESA archive
@@ -261,8 +263,6 @@ def test_query_gaia_region_pins_dr3_table_name(tmp_path: Path, monkeypatch: pyte
     also carries the magnitude limit and the row limit, and asks for proper
     motions.
     """
-    import astroquery.gaia as gaia_module
-
     import astrometricslib.foundation.config as config_loader_module
     from astrometricslib.foundation.config import AppConfiguration
 
@@ -357,11 +357,9 @@ class TestGaiaCircuitBreaker:
         assert star_identifier_module._gaia_remote_queries_disabled() is False
 
     def test_open_breaker_skips_the_remote_cone_search(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gaia_module: MagicMock
     ) -> None:
         """With the breaker open, no network call is attempted."""
-        import astroquery.gaia as gaia_module
-
         import astrometricslib.foundation.config as config_loader_module
         from astrometricslib.foundation.config import AppConfiguration
 
@@ -382,11 +380,9 @@ class TestGaiaCircuitBreaker:
         remote_query_spy.assert_not_called()
 
     def test_open_breaker_skips_the_cache_seed_download(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gaia_module: MagicMock
     ) -> None:
         """The seed path is gated by the same breaker."""
-        import astroquery.gaia as gaia_module
-
         import astrometricslib.foundation.config as config_loader_module
         from astrometricslib.foundation.config import AppConfiguration
 
@@ -406,7 +402,7 @@ class TestGaiaCircuitBreaker:
         launch_job_spy.assert_not_called()
 
     def test_open_breaker_still_serves_locally_cached_gaia_data(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gaia_module: MagicMock
     ) -> None:
         """The breaker must not disable the local cache.
 
@@ -417,10 +413,8 @@ class TestGaiaCircuitBreaker:
         """
         import sqlite3
 
-        import astroquery.gaia as gaia_module
-
         import astrometricslib.foundation.config as config_loader_module
-        from astrometricslib.drivers import catalog_store
+        from astrometricslib._internal.drivers import catalog_store
         from astrometricslib.foundation.config import AppConfiguration
 
         config = AppConfiguration()

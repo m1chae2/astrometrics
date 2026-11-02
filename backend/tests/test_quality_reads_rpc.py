@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, create_autospec
 
 import pytest
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib.exceptions import InvalidArgumentError
 from backend.public_interface import RPC_METHODS
 from backend.routers.rpc_router import rpc_registry
 from backend.services.data.stellar_service import StellarService
@@ -26,9 +26,9 @@ from backend.services.infrastructure.handoff_service import HandoffService
 from backend.services.observatory.advisory_service import AdvisoryService
 from backend.services.observatory.mosaic_service import MosaicService
 from backend.services.observatory.plan_service import PlanService
-from wayfindinglib.api.control.history import HistoryControl
 from wayfindinglib.api.control.safety import SafetyControl
 from wayfindinglib.api.planning import ObservationPlanning
+from wayfindinglib.api.review import ObservationReview
 
 
 def _wayfinder() -> SimpleNamespace:
@@ -37,19 +37,22 @@ def _wayfinder() -> SimpleNamespace:
     Returns
     -------
     wayfinder : `types.SimpleNamespace`
-        With ``planning``, and ``control`` holding ``history`` and ``safety``.
+        With ``planning``, ``review``, and ``control`` holding ``safety``.
     """
-    control = SimpleNamespace(
-        history=create_autospec(HistoryControl, instance=True),
-        safety=create_autospec(SafetyControl, instance=True),
+    control = SimpleNamespace(safety=create_autospec(SafetyControl, instance=True))
+    return SimpleNamespace(
+        planning=create_autospec(ObservationPlanning, instance=True),
+        review=create_autospec(ObservationReview, instance=True),
+        control=control,
     )
-    return SimpleNamespace(planning=create_autospec(ObservationPlanning, instance=True), control=control)
 
 
 NEW_READS = {
     "advisory:target_report": "get_target_report",
     "advisory:tonight": "get_tonight_ranking",
     "advisory:result": "get_result_statements",
+    "advisory:depth_goal": "get_depth_goal",
+    "advisory:set_depth_goal": "set_depth_goal",
     "history:nights": "list_nights",
     "history:night_quality": "get_night_quality",
     "history:target_changes": "list_target_changes",
@@ -74,28 +77,38 @@ def test_target_report_asks_for_the_quality_kind() -> None:
     """The target report passes only the target."""
     wayfinder = _wayfinder()
     AdvisoryService(wayfinder).get_target_report("M 81")
-    wayfinder.planning.get_advisory.assert_called_once_with(kind="quality", target="M 81")
+    wayfinder.review.get_advisory.assert_called_once_with(kind="quality", target="M 81")
 
 
 def test_tonight_ranking_passes_the_planning_time() -> None:
     """The ranking passes only the moment."""
     wayfinder = _wayfinder()
     AdvisoryService(wayfinder).get_tonight_ranking("2026-10-24T22:00:00-06:00")
-    wayfinder.planning.get_advisory.assert_called_once_with(kind="tonight", at="2026-10-24T22:00:00-06:00")
+    wayfinder.planning.get_tonight_advice.assert_called_once_with(at="2026-10-24T22:00:00-06:00")
 
 
 def test_result_statements_pass_target_and_object() -> None:
     """The result read passes the target and the star."""
     wayfinder = _wayfinder()
     AdvisoryService(wayfinder).get_result_statements("M 81", "star-1")
-    wayfinder.planning.get_advisory.assert_called_once_with(kind="result", target="M 81", object_id="star-1")
+    wayfinder.review.get_advisory.assert_called_once_with(kind="result", target="M 81", object_id="star-1")
+
+
+def test_depth_goal_methods_pass_the_target_and_the_level() -> None:
+    """The depth goal read passes the target; the write adds the level."""
+    wayfinder = _wayfinder()
+    service = AdvisoryService(wayfinder)
+    service.get_depth_goal("NGC 7331")
+    wayfinder.planning.get_depth_goal.assert_called_once_with("NGC 7331")
+    service.set_depth_goal("NGC 7331", "deep")
+    wayfinder.planning.set_depth_goal.assert_called_once_with("NGC 7331", "deep")
 
 
 def test_history_reads_register_no_job() -> None:
     """Each history read passes ``register_job=False`` and its arguments."""
     wayfinder = _wayfinder()
     service = AdvisoryService(wayfinder)
-    history = wayfinder.control.history
+    history = wayfinder.review
     service.list_nights()
     history.query.assert_called_with(kind="nights", limit=10, register_job=False)
     service.get_night_quality("2026-10-23")
@@ -110,7 +123,7 @@ def test_live_status_does_not_refresh_the_logs() -> None:
     """The live status reads the logs on disk and copies no new ones."""
     wayfinder = _wayfinder()
     AdvisoryService(wayfinder).get_live_session_status(window_minutes=5.0, include=["captures"])
-    wayfinder.control.history.get_live_session_status.assert_called_once_with(
+    wayfinder.review.get_live_session_status.assert_called_once_with(
         window_minutes=5.0, refresh=False, include=["captures"], limit=10
     )
 
@@ -123,10 +136,10 @@ def test_safety_status_asks_only_for_the_policy() -> None:
 
 
 def test_plan_create_makes_an_empty_session_for_the_night() -> None:
-    """``plan:create`` wraps ``create_plan(kind="empty_session")``."""
+    """``plan:create`` wraps ``create_session``."""
     wayfinder = _wayfinder()
     PlanService(wayfinder).create_plan(night_id="2026-10-24")
-    wayfinder.planning.create_plan.assert_called_once_with(kind="empty_session", night_id="2026-10-24")
+    wayfinder.planning.create_session.assert_called_once_with(observing_night_id="2026-10-24")
 
 
 def test_mosaic_preview_passes_the_rotation() -> None:
@@ -137,6 +150,7 @@ def test_mosaic_preview_passes_the_rotation() -> None:
     arguments = wayfinder.planning.calculate_panels.call_args.kwargs
     assert arguments["rotation_deg"] == pytest.approx(35.0)
     assert arguments["rows"] == 2
+    assert (arguments["ra_deg"], arguments["dec_deg"]) == (10.0, 20.0)
     service.preview_mosaic(10.0, 20.0, {})
     assert wayfinder.planning.calculate_panels.call_args.kwargs["rotation_deg"] == pytest.approx(0.0)
 

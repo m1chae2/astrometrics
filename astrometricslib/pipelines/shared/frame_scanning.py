@@ -11,10 +11,13 @@ import re
 from datetime import datetime
 from typing import Any
 
-from astrometricslib.drivers.camera_profile_store import record_name_for_camera, resolve_camera_profile
-from astrometricslib.drivers.filter_detection import get_filter_type
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_header
-from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.camera_profile_store import (
+    record_name_for_camera,
+    resolve_camera_profile,
+)
+from astrometricslib._internal.drivers.filter_detection import get_filter_type
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
+from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.errors import AstrometricsError
@@ -562,7 +565,8 @@ def classify_and_sort_fits_files(
     Parameters
     ----------
     scan_list : `list` of `str`
-        A list of folders to check for new images.
+        A list of folders to check for new images. A path that names a
+        single FITS file sorts that file.
     target_id : `str`
         The name of the target for regular light frames.
     config : `AppConfiguration`
@@ -585,6 +589,11 @@ def classify_and_sort_fits_files(
     fits_files = []
 
     for src in scan_list:
+        if os.path.isfile(src):
+            # A file named on its own is sorted like a file found in a folder.
+            if src.lower().endswith((".fits", ".fit")):
+                fits_files.append((src, os.path.basename(src)))
+            continue
         for root, directories, files in os.walk(src):
             # Frames set aside by the stacking pipeline stay where they are.
             directories[:] = [d for d in directories if d not in _SKIPPED_FOLDER_NAMES]

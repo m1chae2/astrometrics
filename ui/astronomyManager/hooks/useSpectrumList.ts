@@ -149,6 +149,8 @@ export const useSpectrumList = (
             const tooltip = fullName === value ? fullName : `${fullName} (${value})`;
             const ra = typeof s === 'string' ? undefined : Number(s.ra);
             const dec = typeof s === 'string' ? undefined : Number(s.dec);
+            const magnitude = typeof s === 'string' ? undefined : Number(s.magnitude);
+            const spectralType = typeof s === 'string' || typeof s.spectralType !== 'string' ? '' : s.spectralType.trim();
 
             return {
                 id: value,
@@ -160,6 +162,9 @@ export const useSpectrumList = (
                 hasPhotometry,
                 ra: Number.isFinite(ra) ? ra : undefined,
                 dec: Number.isFinite(dec) ? dec : undefined,
+                magnitude: typeof s !== 'string' && s.magnitude != null && Number.isFinite(magnitude) ? magnitude : undefined,
+                hasCatalogMagnitude: typeof s === 'string' ? undefined : (s.hasCatalogMagnitude ?? undefined),
+                spectralType: spectralType !== '' && spectralType !== 'Unknown' ? spectralType : undefined,
             };
         });
 

@@ -24,7 +24,10 @@ holds both the old values and a ``sensor_noise`` entry.
 import argparse
 import sys
 
-from astrometricslib.drivers.camera_profile_migration import MigrationSetting, migrate_camera_profiles
+from astrometricslib._internal.drivers.camera_profile_migration import (
+    MigrationSetting,
+    migrate_camera_profiles,
+)
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import ConfigurationError
 

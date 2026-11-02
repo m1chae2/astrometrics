@@ -45,11 +45,11 @@ def test_control_and_planning_work_without_loading_execution() -> None:
 
         butler = DiskButler(app_config=config)
         control = ObservatoryControl(config=config, butler=butler)
-        assessment = control.safety.assess({}, datetime.now(UTC))
+        assessment = control.safety._assess({}, datetime.now(UTC))
         assert not assessment.permits_observing()
 
         planning = ObservationPlanning(config, butler)
-        session = planning.create_plan("empty_session", night_id="2026-08-10")
+        session = planning.create_session(observing_night_id="2026-08-10")
         assert session.queue == []
         """
     )

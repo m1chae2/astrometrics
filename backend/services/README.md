@@ -1,6 +1,6 @@
 # Backend services
 
-This folder holds the backend's services. A service is a Python class that keeps some state or does some work for the app. The RPC route (`/api/rpc`) calls a service method for each request. A service never imports the container (`backend/container.py`) or the routers. The container builds the services and passes each one what it needs.
+This folder holds the backend's services. A service is a Python class that keeps some state or does some work for the app. The RPC route (`/api/rpc`) calls a service method for each request. A service never imports the container (`backend/container.py`) or the routers. The container builds the services and passes each one what it needs. `Container.shutdown_resources()` stops them when the backend stops: the maintenance thread, the observatory control, and every Siril process (through the library's `processing.stop_stacking_programs()`; the backend's exit runs no `atexit` handlers).
 
 Terms are defined in the [glossary](../../documentation/Glossary.md). This file also explains each term when it first appears.
 
@@ -10,7 +10,7 @@ Terms are defined in the [glossary](../../documentation/Glossary.md). This file 
 - `data/` serves targets, stars, images and the deletion archive.
 - `infrastructure/` holds shared plumbing: settings, sockets, the scripting terminal, the handoff state and the safety guards.
 - `observatory/` serves the telescope, equipment, guiding, imaging, planning and the sequencer.
-- `processing/` serves ingestion, stacking and image processing, jobs and the frame quality measurement run.
+- `processing/` serves ingestion, stacking and image processing, jobs, the frame quality measurement run and the slow stack reviews (`stack_review_service.py`, which starts a preview remake or a stack comparison as a background job and answers with the result or the job to follow).
 
 ## Planning services (`observatory/`)
 

@@ -50,13 +50,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from astrometricslib import (
-    PIXEL_BLUR_FWHM_SQUARED_FACTOR,
-    UNKNOWN_CAPTURE_SETTING_CAMERA,
-    CaptureSetting,
-    MeasurementStatus,
-    QualityMeasurement,
-)
+from astrometricslib.reports import CaptureSetting, MeasurementStatus, QualityMeasurement
 from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.quality.efficiency import (
@@ -72,17 +66,32 @@ from wayfindinglib.models.quality.efficiency import (
 # Names of the registered metrics this module reads. Each is pinned to the
 # definition version this code was written for. A row of another version is
 # not used (decision S13): the frame is reported as "remeasure" instead.
+PIXEL_BLUR_FWHM_SQUARED_FACTOR = 2.0 * math.log(2.0) / 3.0
+"""The squared width, in pixel sides, that a square pixel adds to a star.
+
+A pixel is a square of width 1 in these units. The blur of a square pixel,
+matched to a Gaussian of the same variance, widens a star's full width at half
+maximum by ``2 ln 2 / 3`` in squared pixels. This is a mathematical value, not
+a tuned one. It is a copy of the science library's constant of the same name;
+a test checks that the two agree.
+"""
+
 STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC = "frame.star_width_effective_arcsec"
 SKY_RATE_METRIC = "frame.sky_rate_e_per_s_per_px"
 SKY_NOISE_METRIC = "frame.sky_noise_e"
 READ_NOISE_METRIC = "frame.read_noise_e"
 PINNED_METRIC_VERSIONS: dict[str, int] = {
     STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC: 1,
-    SKY_RATE_METRIC: 2,
-    SKY_NOISE_METRIC: 2,
-    READ_NOISE_METRIC: 1,
+    SKY_RATE_METRIC: 3,
+    SKY_NOISE_METRIC: 3,
+    READ_NOISE_METRIC: 2,
 }
-"""The definition version of each metric that this module's formulas assume."""
+"""The definition version of each metric that this module's formulas assume.
+
+The sky rate went from 2 to 3, the sky noise from 2 to 3 and the read noise
+from 1 to 2 without a change of formula: the raise only makes frames be
+measured again that had no gain entry before the offset fallback (decision
+D7). The formulas here are unchanged."""
 
 # --- Reference names and versions. Bump the version when the way a reference
 # is built changes.
@@ -1337,7 +1346,7 @@ def frame_observations_from_measurements(
         observations.append(
             FrameObservation(
                 frame_id=frame_id,
-                capture_setting=setting or CaptureSetting(camera=UNKNOWN_CAPTURE_SETTING_CAMERA),
+                capture_setting=setting or CaptureSetting.unknown(),
                 night_id=row.subject.observing_night_id,
                 target_id=row.subject.target_id,
                 start_epoch_seconds=(start_epoch_by_frame or {}).get(frame_id),

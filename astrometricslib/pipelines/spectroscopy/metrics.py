@@ -34,7 +34,7 @@ read, the numbers that describe that stack alone (for example the trail
 width) could move to the stack level.
 
 Yes/no verdicts are not measurements and are not declared here (for example
-``poor_match``, ``trustworthy`` and ``zero_order_saturation_flagged``). The
+``zero_order_saturation_flagged``). The
 per-star results stay in the star records.
 
 Names follow ``<checkpoint>.<snake_case>`` with exactly one dot, so the stage
@@ -51,6 +51,7 @@ from astrometricslib.models.quality.metric_spec import (
     MetricSpec,
     UncertaintyKind,
 )
+from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_spec, notice_spec
 
 # ---- Run totals from the summary -----------------------------------------
 
@@ -60,6 +61,11 @@ SPECTROSCOPY_TRAIL_WIDTH_MEDIAN = "spectroscopy.trail_width_median_px"
 SPECTROSCOPY_CATALOG_MATCHED_STAR_COUNT = "spectroscopy.catalog_matched_star_count"
 SPECTROSCOPY_POSITION_ONLY_STAR_COUNT = "spectroscopy.position_only_star_count"
 SPECTROSCOPY_UNRESOLVED_STAR_COUNT = "spectroscopy.unresolved_star_count"
+SPECTROSCOPY_SKIPPED_NO_TRAIL_STAR_COUNT = "spectroscopy.skipped_no_trail_star_count"
+SPECTROSCOPY_SKIPPED_UNIDENTIFIED_STAR_COUNT = "spectroscopy.skipped_unidentified_star_count"
+SPECTROSCOPY_NOTICE_BELOW_FEATURE_LIMIT = "spectroscopy.notice_stars_below_feature_limit"
+SPECTROSCOPY_NOTICE_GAIA_XP_DOWNLOAD_FAILED = "spectroscopy.notice_gaia_xp_download_failed"
+SPECTROSCOPY_NOTICE_REDDENING_LOOKUP_FAILED = "spectroscopy.notice_reddening_lookup_failed"
 SPECTROSCOPY_POOR_MATCH_CLASSIFICATION_COUNT = "spectroscopy.poor_match_classification_count"
 SPECTROSCOPY_AMBIGUOUS_CLASSIFICATION_COUNT = "spectroscopy.ambiguous_classification_count"
 
@@ -498,7 +504,8 @@ _STAGE_ROWS: tuple[_StageRow, ...] = (
         "count",
         Direction.NONE,
         "How many absorption features the feature test judged significant.",
-        "Features with a detected or possible verdict, among the features that were tested.",
+        "Features with a detected or possible verdict, among those tested. "
+        "Two names that share one dip count once.",
         "SPE-24",
     ),
     (
@@ -658,6 +665,27 @@ _STAGE_ROWS: tuple[_StageRow, ...] = (
         "How far the measured spectral type is from the catalog type, in subtype steps.",
         "Absolute steps between the two types; ten steps make one letter class.",
         "SPE-19",
+    ),
+    (
+        "post_processing",
+        "rms_gap_to_second_best",
+        "",
+        Direction.HIGHER,
+        "How much closer the best reference is than the second best, in relative RMS, checked against the "
+        "ambiguity gap.",
+        "The second-best reference's relative RMS minus the best one's; below the limit the subtype is "
+        "uncertain.",
+        "SPE-18",
+    ),
+    (
+        "post_processing",
+        "colour_difference_mag",
+        "mag",
+        Direction.LOWER,
+        "How far the spectrum's own B-V color is from the catalog B-V color.",
+        "The absolute size of the spectrum's B-V minus the catalog B-V; empty when the catalog color is "
+        "missing or redder than the color map covers.",
+        "SPE-27",
     ),
     (
         "post_processing",
@@ -921,6 +949,89 @@ def _gaia_xp_metrics() -> tuple[MetricSpec, ...]:
     return tuple(specs)
 
 
+def gaia_xp_download_failed_notice_spec() -> MetricSpec:
+    """Declare the notice for Gaia XP spectra that could not be downloaded.
+
+    Returns
+    -------
+    spec : `MetricSpec`
+        A run-level notice. Its value is the number of stars whose Gaia XP
+        spectrum could not be downloaded, so they were not compared with
+        Gaia; the row is stored only when there was at least one.
+    """
+    return notice_spec(
+        SPECTROSCOPY_NOTICE_GAIA_XP_DOWNLOAD_FAILED,
+        Checkpoint.SPECTROSCOPY,
+        SubjectLevel.RUN,
+        "count",
+        "Whether some stars could not be compared with Gaia because the download failed.",
+        "The number of stars whose Gaia XP spectrum could not be downloaded (no network, a server error or "
+        "no answer in time). A star with no XP spectrum is not counted. These stars are not compared with "
+        "Gaia; their own spectra are unaffected.",
+        "pipelines.spectroscopy.post_processing.record_quality.gaia_xp_download_failed_notice_measurement",
+        (
+            "A run in which every download failed would otherwise look like one in which no star has a Gaia "
+            "spectrum, and the Gaia check of the instrument response would be missing without a sign."
+        ),
+    )
+
+
+def reddening_lookup_failed_notice_spec() -> MetricSpec:
+    """Declare the notice for stars whose Gaia reddening lookup failed.
+
+    Returns
+    -------
+    spec : `MetricSpec`
+        A run-level notice. Its value is the number of stars whose catalog
+        reddening could not be looked up, so their spectra were classified as
+        observed; the row is stored only when there was at least one.
+    """
+    return notice_spec(
+        SPECTROSCOPY_NOTICE_REDDENING_LOOKUP_FAILED,
+        Checkpoint.SPECTROSCOPY,
+        SubjectLevel.RUN,
+        "count",
+        "Whether some stars were classified without the catalog reddening because the lookup failed.",
+        "The number of stars whose Gaia reddening could not be looked up (no network, a server error or "
+        "no answer in time). A star Gaia holds no reddening for is not counted. These stars are classified "
+        "on the observed spectrum, without the dust correction; their extracted spectra are unaffected.",
+        "pipelines.spectroscopy.post_processing.record_quality.reddening_lookup_failed_notice_measurement",
+        (
+            "A run in which the lookup failed would otherwise look like one in which no star has a catalog "
+            "reddening, and a classification of a dusty star could be off without a sign."
+        ),
+    )
+
+
+def below_feature_limit_notice_spec() -> MetricSpec:
+    """Declare the notice for spectra below the feature-analysis limit.
+
+    Returns
+    -------
+    spec : `MetricSpec`
+        A run-level notice. Its value is the number of extracted spectra whose
+        signal-to-noise is below the limit; the row is stored only when there
+        was at least one.
+    """
+    return notice_spec(
+        SPECTROSCOPY_NOTICE_BELOW_FEATURE_LIMIT,
+        Checkpoint.SPECTROSCOPY,
+        SubjectLevel.RUN,
+        "count",
+        "Whether some spectra were too faint for absorption-feature detection and classification.",
+        "The number of extracted spectra whose signal-to-noise per resolution element is below the limit for "
+        "finding an absorption line (validation register SPE-31). Those stars keep their spectrum and get no "
+        "absorption-feature detection or classification; their emission lines are still tested (validation "
+        "register SPE-32). An extended target is not counted.",
+        "pipelines.spectroscopy.post_processing.record_quality.below_feature_limit_notice_measurement",
+        (
+            "An absorption line cannot be found in a spectrum this faint, so the spectrum is kept but its "
+            "absorption features and type are not reported; a person should know that stars were left "
+            "partly unanalyzed."
+        ),
+    )
+
+
 SPECTROSCOPY_METRICS: tuple[MetricSpec, ...] = (
     _context_metric(
         SPECTROSCOPY_ZERO_ORDER_SATURATED_FRACTION_MAX,
@@ -983,6 +1094,32 @@ SPECTROSCOPY_METRICS: tuple[MetricSpec, ...] = (
         "It shows how much of the run could not be identified.",
         better=Direction.LOWER,
         uncertainty_method=_EXACT_COUNT,
+    ),
+    _context_metric(
+        SPECTROSCOPY_SKIPPED_NO_TRAIL_STAR_COUNT,
+        "count",
+        "How many detected stars were left out because no part of their trail is on the image.",
+        "Count of the detected stars whose trail, laid out from the star along the dispersion direction, "
+        "has no sample on the image. Such a star cannot give a spectrum, so it is left out before "
+        "extraction.",
+        "Every detected star of the single-image run. The session batch does not leave stars out this way "
+        "and gives no value.",
+        "It shows how many detections were set aside for a trail that is off the frame.",
+        uncertainty_method=_EXACT_COUNT,
+        register_entry="SPE-31",
+    ),
+    _context_metric(
+        SPECTROSCOPY_SKIPPED_UNIDENTIFIED_STAR_COUNT,
+        "count",
+        "How many detected stars were left out because they have no catalog identity.",
+        "Count of the detected stars that still carry a placeholder name. They would be dropped when the "
+        "run is saved, so they are left out before analysis. Those brighter than the last analyzed star are "
+        "still read, as neighbors only.",
+        "Every detected star of the single-image run whose trail is on the image. The session batch does not "
+        "leave stars out this way and gives no value.",
+        "It shows how much of the field could not be named, and that no spectrum was made for it.",
+        uncertainty_method=_EXACT_COUNT,
+        register_entry="SPE-31",
     ),
     _context_metric(
         SPECTROSCOPY_POOR_MATCH_CLASSIFICATION_COUNT,
@@ -1163,4 +1300,8 @@ SPECTROSCOPY_METRICS: tuple[MetricSpec, ...] = (
         "The stars compared with a Gaia XP spectrum.",
         computed_by=f"{_GAIA_XP_MODULE}.gaia_xp_gate",
     ),
+    camera_without_profile_spec("spectroscopy"),
+    below_feature_limit_notice_spec(),
+    gaia_xp_download_failed_notice_spec(),
+    reddening_lookup_failed_notice_spec(),
 )

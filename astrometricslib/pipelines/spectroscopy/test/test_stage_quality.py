@@ -5,7 +5,7 @@ spectrum, the processing result and the final result. These tests check that
 the `metric` helper sets ``passed`` from the limit and the direction, that
 each stage's builder reports the numbers it should, that a result built by the
 real pipeline from a synthetic frame carries all four in stage order, that the
-older `InputQualityAssessment` and `OutputQualityAssessment` keep their fields,
+older `InputQualityAssessment` keeps its fields,
 and that the run-level roll-up counts failures and takes medians.
 """
 
@@ -19,7 +19,6 @@ import pytest
 from astrometricslib.models.quality.spectroscopy_quality import (
     STAGE_ORDER,
     InputQualityAssessment,
-    OutputQualityAssessment,
     StageQualityCheckpoint,
     StageQualityMetric,
     metric,
@@ -31,7 +30,6 @@ from astrometricslib.models.stellar_source import (
 )
 from astrometricslib.pipelines.shared.quality.saturation import DEFAULT_SATURATION_FLAG_THRESHOLD
 from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import (
-    assess_output_quality,
     output_quality_checkpoint,
 )
 from astrometricslib.pipelines.spectroscopy.post_processing.record_quality import (
@@ -409,8 +407,8 @@ def test_processing_checkpoint_for_an_unclassified_spectrum_judges_nothing() -> 
 
 def final_checkpoint(
     classification: dict[str, object], catalog_type: str | None, own_type: str
-) -> tuple[OutputQualityAssessment, StageQualityCheckpoint]:
-    """Assess a classification and build its final checkpoint.
+) -> StageQualityCheckpoint:
+    """Build the final checkpoint for a classification.
 
     Parameters
     ----------
@@ -423,26 +421,24 @@ def final_checkpoint(
 
     Returns
     -------
-    assessment : `OutputQualityAssessment`
-        The older assessment.
     checkpoint : `StageQualityCheckpoint`
-        The final checkpoint built from it.
+        The final checkpoint.
     """
-    assessment = assess_output_quality(classification, None, 40.0)
-    checkpoint = output_quality_checkpoint(
-        assessment, own_spectral_type=own_type, catalog_spectral_type=catalog_type, catalog_comparison=None
+    return output_quality_checkpoint(
+        classification,
+        own_spectral_type=own_type,
+        catalog_spectral_type=catalog_type,
+        catalog_comparison=None,
     )
-    return assessment, checkpoint
 
 
-def test_final_checkpoint_agrees_with_the_output_assessment() -> None:
-    """A trustworthy result passes every verdict and the catalog distance."""
-    assessment, checkpoint = final_checkpoint(good_classification(), "G5V", "G2V")
+def test_final_checkpoint_passes_a_clean_result() -> None:
+    """A clean result passes every check and the catalog distance."""
+    checkpoint = final_checkpoint(good_classification(), "G5V", "G2V")
     metrics = by_name(checkpoint)
 
     assert checkpoint.stage == "post_processing"
-    assert assessment.is_trustworthy is True
-    assert metrics["trustworthy"].value == pytest.approx(1.0)
+    assert metrics["rms_gap_to_second_best"].passed is not False
     assert metrics["catalog_type_steps_apart"].value == pytest.approx(3.0)
     assert metrics["catalog_type_steps_apart"].passed is True
     assert checkpoint.has_failed_metric is False
@@ -453,22 +449,20 @@ def test_final_checkpoint_flags_a_poor_ambiguous_distant_result() -> None:
     """A poor match, a tie and a far catalog type each fail their metric."""
     classification = good_classification(
         classification_rms=0.3,
+        rms_gap_to_second_best=0.0,
         ranked_types=[{"spectral_type": "G2V", "rms": 0.3}, {"spectral_type": "G5V", "rms": 0.3}],
     )
-    assessment, checkpoint = final_checkpoint(classification, "B0V", "G2V")
+    checkpoint = final_checkpoint(classification, "B0V", "G2V")
     metrics = by_name(checkpoint)
 
-    assert assessment.is_trustworthy is False
-    assert metrics["poor_match"].passed is False
-    assert metrics["subtype_ambiguous"].passed is False
-    assert metrics["trustworthy"].passed is False
+    assert metrics["rms_gap_to_second_best"].passed is False
     assert metrics["catalog_type_steps_apart"].passed is False
-    assert {"poor_match", "subtype_ambiguous", "not_trustworthy"} <= set(checkpoint.flags)
+    assert {"poor_match", "subtype_ambiguous", "catalog_disagrees"} <= set(checkpoint.flags)
 
 
 def test_final_checkpoint_for_an_unclassified_spectrum_judges_nothing() -> None:
     """An unclassified spectrum has `None` values and a flag."""
-    _, checkpoint = final_checkpoint({"spectral_type": "Unknown", "ranked_types": []}, "G2V", "Unknown")
+    checkpoint = final_checkpoint({"spectral_type": "Unknown", "ranked_types": []}, "G2V", "Unknown")
 
     assert checkpoint.flags == ["unclassified"]
     assert all(entry.value is None for entry in checkpoint.metrics)
@@ -521,9 +515,7 @@ def test_the_checkpoints_of_a_pipeline_built_result_repeat_the_stored_numbers(
     """Checkpoints 0, 1 and 3 hold the same numbers as the older records."""
     raw, pre, _, post = (by_name(checkpoint) for checkpoint in pipeline_result.stage_quality)
     input_quality = pipeline_result.input_quality
-    output_quality = pipeline_result.output_quality
     assert input_quality is not None
-    assert output_quality is not None
 
     assert raw["valid_fraction"].value == pytest.approx(pipeline_result.valid_fraction)
     assert raw["zero_order_saturated_fraction"].value == input_quality.zero_order_saturated_pixel_fraction
@@ -531,7 +523,9 @@ def test_the_checkpoints_of_a_pipeline_built_result_repeat_the_stored_numbers(
     assert pre["signal_to_noise"].value == input_quality.signal_to_noise
     assert pre["valid_fraction"].value == pytest.approx(pipeline_result.valid_fraction)
     unclassified = pipeline_result.self_determined_spectral_type in ("", "Unknown")
-    assert post["trustworthy"].value == (None if unclassified else float(output_quality.is_trustworthy))
+    assert post["rms_gap_to_second_best"].value == (
+        None if unclassified else pipeline_result.rms_gap_to_second_best
+    )
 
 
 def test_the_processing_checkpoint_of_a_pipeline_built_result_matches_the_classification(
@@ -565,11 +559,11 @@ def test_a_result_saved_before_the_checkpoints_loads_with_an_empty_list() -> Non
     assert SpectroscopyResult.model_validate({}).stage_quality == []
 
 
-# ------------------------------------- the older assessments are unchanged
+# ------------------------------------- the older assessment is unchanged
 
 
-def test_the_input_and_output_assessments_keep_their_fields() -> None:
-    """The UI reads these two models; the checkpoints add no field to them."""
+def test_the_input_assessment_keeps_its_fields() -> None:
+    """The UI reads this model; the checkpoints add no field to it."""
     assert list(InputQualityAssessment.model_fields) == [
         "resolution_element_angstrom",
         "is_resolution_measured",
@@ -577,18 +571,10 @@ def test_the_input_and_output_assessments_keep_their_fields() -> None:
         "valid_fraction",
         "signal_to_noise",
     ]
-    assert list(OutputQualityAssessment.model_fields) == [
-        "is_poor_match",
-        "is_ambiguous",
-        "is_class_ambiguous",
-        "is_subtype_finer_than_resolution",
-        "catalog_agrees",
-        "is_trustworthy",
-    ]
 
 
-def test_the_assessment_functions_still_return_the_older_models() -> None:
-    """Both assessment functions return the same models as before."""
+def test_the_input_assessment_function_still_returns_the_older_model() -> None:
+    """The input assessment function returns the same model as before."""
     input_quality = assess_input_quality(
         resolution_element_angstrom=40.0,
         is_resolution_measured=True,
@@ -596,12 +582,8 @@ def test_the_assessment_functions_still_return_the_older_models() -> None:
         valid_fraction=1.0,
         signal_to_noise=5.0,
     )
-    output_quality = assess_output_quality(good_classification(), None, 40.0)
 
     assert type(input_quality) is InputQualityAssessment
-    assert type(output_quality) is OutputQualityAssessment
-    assert output_quality.is_trustworthy is True
-    assert output_quality.is_subtype_finer_than_resolution is None
 
 
 # ------------------------------------------------------ the run-level roll-up
@@ -630,7 +612,10 @@ def checkpoints_for(processing_rms: float | None, colour: float | None) -> list[
                 metric("synthetic_b_minus_v", colour, "magnitude"),
             ],
         ),
-        StageQualityCheckpoint(stage="post_processing", metrics=[metric("trustworthy", 1.0, "flag", 1.0)]),
+        StageQualityCheckpoint(
+            stage="post_processing",
+            metrics=[metric("catalog_type_steps_apart", 3.0, "subtype steps", 20.0, False)],
+        ),
     ]
 
 
@@ -653,7 +638,7 @@ def test_the_rollup_counts_failed_spectra_and_takes_medians() -> None:
     assert processing.metric_medians["synthetic_b_minus_v"] == pytest.approx(0.6)
     assert post.spectrum_count == 4
     assert post.failed_spectrum_count == 0
-    assert post.metric_medians == {"trustworthy": 1.0}
+    assert post.metric_medians == {"catalog_type_steps_apart": 3.0}
 
 
 def test_the_rollup_leaves_out_a_metric_no_spectrum_measured() -> None:

@@ -196,8 +196,9 @@ def compute_stack_saturated_pixel_fraction(data: np.ndarray, region: np.ndarray 
 def resolve_saturation_threshold(camera_name: str | None) -> tuple[float, str]:
     """Find the level at which this camera's pixels count as saturated.
 
-    The level is the camera profile's saturation threshold. A profile can
-    list a threshold above the value a clipped pixel actually reaches (its
+    The level is the camera profile's `pixel_saturation_level_adu`: its
+    saturation threshold, capped at the clip ceiling. A profile can list a
+    threshold above the value a clipped pixel actually reaches (its
     clip ceiling), which would make saturation impossible to detect. In that
     case the clip ceiling is used instead, and the source text says so. The
     default `SATURATION_ADU` is used only when no profile can be read.
@@ -214,7 +215,7 @@ def resolve_saturation_threshold(camera_name: str | None) -> tuple[float, str]:
     source : `str`
         A sentence saying where the level came from.
     """
-    from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
+    from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 
     try:
         profile = resolve_camera_profile(camera_name)
@@ -222,17 +223,16 @@ def resolve_saturation_threshold(camera_name: str | None) -> tuple[float, str]:
         return float(
             SATURATION_ADU
         ), f"default {SATURATION_ADU:g} ADU (no camera profile could be read: {error})"
-    threshold = float(profile.saturation_threshold_adu.value)
+    threshold = float(profile.pixel_saturation_level_adu.value)
     if profile.is_generic_fallback:
         return (
             threshold,
             f"generic fallback camera profile, {threshold:g} ADU (camera {camera_name!r} is not listed)",
         )
-    ceiling = float(profile.clip_ceiling_adu.value)
     if not profile.saturation_threshold_can_be_reached:
-        return ceiling, (
-            f"{profile.camera_name} profile clip ceiling, {ceiling:g} ADU "
-            f"(its saturation threshold of {threshold:g} ADU is above the ceiling and no pixel can reach it)"
+        return threshold, (
+            f"{profile.camera_name} profile clip ceiling, {threshold:g} ADU "
+            "(its saturation threshold is above the ceiling and no pixel can reach it)"
         )
     return threshold, f"{profile.camera_name} profile saturation threshold, {threshold:g} ADU"
 
@@ -241,6 +241,19 @@ def resolve_saturation_threshold(camera_name: str | None) -> tuple[float, str]:
 # that saturate pile up at exactly one value, so a small tolerance only allows
 # for the last count or two.
 CLIP_CEILING_TOLERANCE_FRACTION = 0.02
+
+# A star counts as saturated when at least this many connected pixels sit at
+# the frame's ceiling. Single pixels at the ceiling are common and are not
+# stars: a Nikon D5300 frame had 188 to 481 isolated ones, hot pixels. The
+# saturated stars in the same frames had cores of 9 to over 1700 pixels
+# (ASI533 frames of Vega, NGC 2403 and Arcturus; D5300 frames of NGC 2244 and
+# M 42). Four pixels (2 x 2) is the smallest blob that is not one hot pixel.
+SATURATED_BLOB_MINIMUM_PIXELS = 4
+
+# A frame is described as saturated when a star clips in at least this share of
+# the frames sampled from an exposure group. One clipped frame in three can be
+# a cosmic ray or a satellite trail; it is not a property of the exposure.
+SATURATED_FRAME_FRACTION = 0.5
 
 
 @dataclass(frozen=True)

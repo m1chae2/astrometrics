@@ -22,7 +22,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from astrometricslib import Astrometrics, AstrometricsError, CaptureSetting, SubjectLevel
+from astrometricslib import Astrometrics
+from astrometricslib.exceptions import AstrometricsError
+from astrometricslib.reports import CaptureSetting, SubjectLevel
 from wayfindinglib.analytics.result_quality.forecast import NORMALIZED_NOISE_METRIC, PINNED_STACK_METRICS
 from wayfindinglib.models.quality.rule import QualityRule
 from wayfindinglib.models.quality.statements import ProposedAction
@@ -109,7 +111,7 @@ def read_target_noise(astrometrics: Astrometrics, target_id: str) -> TargetNoise
             target_id=target_id,
             library_only=True,
             latest_only=True,
-        )
+        ).rows
     except AstrometricsError, OSError:
         return None
     pinned = PINNED_STACK_METRICS[NORMALIZED_NOISE_METRIC]

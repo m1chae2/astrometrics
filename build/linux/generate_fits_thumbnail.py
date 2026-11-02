@@ -15,6 +15,11 @@ _MINIMUM_SIZE = 100
 _MAXIMUM_SIZE = 2000
 _DEFAULT_SIZE = 256
 
+# The built-in errors a bad or odd FITS file can cause: a missing header
+# key, an empty or wrongly shaped array, or a bad value. Catching these (not
+# every exception) lets a real bug in the script still show its traceback.
+_DATA_ERRORS = (ValueError, TypeError, IndexError, KeyError, ArithmeticError)
+
 
 def main() -> None:
     """Convert the FITS file named on the command line to a PNG thumbnail.
@@ -38,7 +43,8 @@ def main() -> None:
         size = _DEFAULT_SIZE
     size = max(_MINIMUM_SIZE, min(_MAXIMUM_SIZE, size))
 
-    from astrometricslib import DATA_ERRORS, Astrometrics, AstrometricsError
+    from astrometricslib import Astrometrics
+    from astrometricslib.exceptions import AstrometricsError
 
     try:
         picture = Astrometrics().visualization.render_fits(
@@ -46,7 +52,7 @@ def main() -> None:
         )
         with open(output_file, "wb") as output_stream:
             output_stream.write(picture.png_bytes)
-    except (AstrometricsError, OSError, *DATA_ERRORS):
+    except (AstrometricsError, OSError, *_DATA_ERRORS):
         traceback.print_exc()
         sys.exit(1)
 

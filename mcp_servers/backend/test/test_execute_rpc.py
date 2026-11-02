@@ -13,7 +13,7 @@ import json
 
 import pytest
 
-from astrometricslib import ConflictError, NotFoundError, PermissionDeniedError
+from astrometricslib.exceptions import ConflictError, NotFoundError, PermissionDeniedError
 from mcp_servers.backend import definition
 
 

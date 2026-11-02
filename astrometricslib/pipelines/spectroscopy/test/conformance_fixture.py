@@ -126,7 +126,7 @@ def run_context(job_id: str | None = "job-1") -> PipelineRunContext:
     context : `PipelineRunContext`
         A context for target ``M 99``.
     """
-    return PipelineRunContext("M 99", "spectroscopy", "1.6.0", job_id or "run-fixed", job_id, MEASURED_AT)
+    return PipelineRunContext("M 99", "spectroscopy", "1.7.0", job_id or "run-fixed", job_id, MEASURED_AT)
 
 
 def spectroscopy_emitted_measurements() -> list[QualityMeasurement]:

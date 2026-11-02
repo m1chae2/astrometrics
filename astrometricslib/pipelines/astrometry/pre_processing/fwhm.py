@@ -27,11 +27,10 @@ import logging
 from typing import Any
 
 import numpy as np
-from astropy.io import fits
 from astropy.stats import gaussian_sigma_to_fwhm, sigma_clipped_stats
 from scipy import optimize
 
-from astrometricslib.drivers.fits_access import collapse_to_2d
+from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
@@ -147,8 +146,7 @@ def measure_image_fwhm(
         The median FWHM in pixels. None if no stars are found or
         there's an error.
     """
-    with fits.open(path, memmap=False) as hdul:
-        data = hdul[0].data
+    data = read_data(path, first_hdu_only=True)
     if data is None:
         return None
     data = np.asarray(data, dtype=float)

@@ -58,16 +58,6 @@ class _Stars:
             return SimpleNamespace(objects=self.by_target.get(target_id, []))
         raise AssertionError("the whole star catalog was read")
 
-    def save_all(self, objects: list[StellarObject], allow_empty: bool = False) -> str:
-        """Fail, because replacing the whole catalog must not happen.
-
-        Raises
-        ------
-        AssertionError
-            Always.
-        """
-        raise AssertionError("the whole star catalog was rewritten")
-
     def find_or_create_by_position(self, ra: float, dec: float, **details: object) -> StellarObject:
         """Record the request and return the prepared star.
 
@@ -90,7 +80,7 @@ def _make_service(stars: _Stars, planning_sources: list | None = None) -> Stella
     """
     astrometrics = SimpleNamespace(stars=stars, targets=SimpleNamespace(list=lambda: []))
     wayfinder = MagicMock()
-    wayfinder.planning.get_sources.return_value = planning_sources or []
+    wayfinder.planning.query_sources.return_value = SimpleNamespace(sources=planning_sources or [])
     return StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=wayfinder)
 
 

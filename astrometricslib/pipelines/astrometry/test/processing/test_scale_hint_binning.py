@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 from astropy.io import fits
 
-from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 

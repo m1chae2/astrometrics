@@ -124,19 +124,29 @@ RPC_METHODS: tuple[str, ...] = (
     "processing:delete_job",
     "processing:jobs_for_target",
     "processing:job_log_tail",
+    # A target's current stack in one short answer (a read).
+    "processing:stack_summary",
+    # Makes a stack's preview picture again without restacking (a background
+    # job; writes the pictures and the target's processed-image pointer).
+    "processing:remake_preview",
+    # The frames the stacker set aside for a target, with the reason (a read).
+    "quality:set_aside_frames",
+    # Measures a stack and the one before it the same way and compares them
+    # (a background job; it records a job and writes no quality rows).
+    "quality:measure_stack",
     # Measures a target's light frames and stores the numbers (a write).
-    "processing:record_frame_measurements",
+    "quality:record_frame_measurements",
     # Stacks some of a target's frames apart from its library stack and
     # measures the noise of each result (writes).
-    "processing:measure_half_difference_noise",
-    "processing:measure_noise_growth",
-    "processing:measure_night_contributions",
+    "processing:measure_noise",
     # Quality measurements: the stored ones, and what each metric means.
     # Parameter names are the library's snake_case names (target_id, not
     # targetId); the router drops names it does not know.
     "quality:query",
     "quality:metrics",
     "quality:resolve_rows",
+    # The job history. `detail="warnings"` lists the warnings one job detected.
+    "jobs:query",
     # Photometry and spectroscopy analysis
     "analysis:analyze_image",
     "analysis:get_results",
@@ -192,6 +202,7 @@ RPC_METHODS: tuple[str, ...] = (
     # Calibration frames
     "calibration:get_stats",
     "calibration:measure_sensor_noise",
+    "calibration:measure_frames",
     # Mosaics
     "mosaic:preview",
     "mosaic:create",
@@ -200,7 +211,7 @@ RPC_METHODS: tuple[str, ...] = (
     "execution:get_session",
     "execution:abort_session",
     "execution:reconcile_session",
-    "execution:record_divergence",
+    "execution:build_divergence_record",
     # Night plan and observation packages: read them, edit them, tick a
     # checklist item. A session write sends the `plan:changed` event; a package
     # write sends the `packages:changed` event.
@@ -218,12 +229,15 @@ RPC_METHODS: tuple[str, ...] = (
     "advisory:target_report",
     "advisory:tonight",
     "advisory:result",
+    "advisory:depth_goal",
+    "advisory:set_depth_goal",
     "history:nights",
     "history:night_quality",
     "history:target_changes",
     "history:live_session_status",
     "observatory:safety_status",
     "calibration:query",
+    "calibration:assess",
     # Sequencer queue
     "sequencer:get_queue",
     "sequencer:create_plan",
@@ -231,6 +245,8 @@ RPC_METHODS: tuple[str, ...] = (
     "sequencer:remove",
     "sequencer:reorder",
     "sequencer:begin",
+    "sequencer:pause",
+    "sequencer:abort",
     "sequencer:modify",
 )
 

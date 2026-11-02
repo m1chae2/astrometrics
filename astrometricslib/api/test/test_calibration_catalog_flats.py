@@ -1,4 +1,4 @@
-"""Tests for `CalibrationCatalog.refresh` reports and `assess_flats`.
+"""Tests for `CalibrationCatalog` reindex reports and flat `assess`.
 
 They build a small flat library on disk with a stub configuration, the way
 a download from the telescope computer would leave it.
@@ -57,6 +57,7 @@ def catalog(tmp_path: Path) -> CalibrationCatalog:
     configuration = SimpleNamespace(
         get_frames_path=lambda: tmp_path / "frames",
         get_library_file_path=lambda name: str(tmp_path / "library" / name),
+        get_minimum_calibration_frames=lambda: 3,
     )
     return CalibrationCatalog(configuration, None)
 
@@ -77,18 +78,19 @@ def test_refresh_reports_new_flats_and_assesses_them(catalog: CalibrationCatalog
     for index in range(6):
         write_flat(flat_folder(tmp_path, "L") / f"flat_{index}.fits", index, "Luminance")
 
-    report = catalog.refresh("flat")
+    report = catalog.reindex_frames("flat")
 
     assert report.kind == "flat"
     assert report.added_count == 6
     assert report.removed_count == 0
     assert len(report.changes) == 1
     assert report.changes[0].added == 6
-    assert len(report.flat_assessments) == 1
-    assessment = report.flat_assessments[0]
+    assert len(report.assessments) == 1
+    assessment = report.assessments[0]
+    assert assessment.kind == "flat"
     assert assessment.frame_count == 6
     assert assessment.offset == pytest.approx(10.0)
-    assert assessment.passes
+    assert assessment.status == "good"
 
 
 def test_second_refresh_with_no_new_frames_reports_nothing_added(
@@ -97,13 +99,13 @@ def test_second_refresh_with_no_new_frames_reports_nothing_added(
     """Rescanning an unchanged folder adds nothing and measures nothing."""
     for index in range(3):
         write_flat(flat_folder(tmp_path, "L") / f"flat_{index}.fits", index, "Luminance")
-    catalog.refresh("flat")
+    catalog.reindex_frames("flat")
 
-    report = catalog.refresh("flat")
+    report = catalog.reindex_frames("flat")
 
     assert report.added_count == 0
     assert report.changes == []
-    assert report.flat_assessments == []
+    assert report.assessments == []
     assert report.total_count == 3
 
 
@@ -116,36 +118,37 @@ def test_refresh_assesses_each_filter_and_offset_separately(
         write_flat(flat_folder(tmp_path, "L") / f"old_{index}.fits", 20 + index, "Luminance", offset=0)
         write_flat(flat_folder(tmp_path, "SPEC") / f"flat_{index}.fits", 40 + index, "Spectroscopy")
 
-    report = catalog.refresh("flat")
+    report = catalog.reindex_frames("flat")
 
-    keys = sorted((a.filter, a.offset) for a in report.flat_assessments)
+    keys = sorted((a.filter, a.offset) for a in report.assessments)
     assert keys == [("Luminance", 0.0), ("Luminance", 10.0), ("Star Analyzer 200", 10.0)]
     assert report.added_count == 9
 
 
-def test_assess_flats_narrows_by_filter_and_settings(catalog: CalibrationCatalog, tmp_path: Path) -> None:
+def test_assess_flat_narrows_by_filter_and_settings(catalog: CalibrationCatalog, tmp_path: Path) -> None:
     """Giving a filter alias and a gain/offset picks only that set."""
     for index in range(3):
         write_flat(flat_folder(tmp_path, "L") / f"flat_{index}.fits", index, "Luminance")
         write_flat(flat_folder(tmp_path, "L") / f"old_{index}.fits", 20 + index, "Luminance", offset=0)
         write_flat(flat_folder(tmp_path, "SPEC") / f"flat_{index}.fits", 40 + index, "Spectroscopy")
-    catalog.refresh("flat")
+    catalog.reindex_frames("flat")
 
-    luminance = catalog.assess_flats(filter_type="L", gain=0, offset=10)
-    spectroscopy = catalog.assess_flats(filter_type="SPEC")
-    everything = catalog.assess_flats()
+    luminance = catalog.assess("flat", filter_name="L", gain=0, offset=10)
+    spectroscopy = catalog.assess("flat", filter_name="SPEC")
+    everything = catalog.assess("flat")
 
     assert [(a.filter, a.frame_count) for a in luminance] == [("Luminance", 3)]
     assert [a.frame_count for a in spectroscopy] == [3]
     assert len(everything) == 3
+    assert all(a.kind == "flat" for a in everything)
 
 
-def test_assess_flats_with_nothing_matching_is_empty(catalog: CalibrationCatalog) -> None:
+def test_assess_flat_with_nothing_matching_is_empty(catalog: CalibrationCatalog) -> None:
     """An empty library gives an empty list, not an error."""
-    assert catalog.assess_flats(filter_type="L") == []
+    assert catalog.assess("flat", filter_name="L") == []
 
 
 def test_refresh_rejects_an_unknown_kind(catalog: CalibrationCatalog) -> None:
     """A kind other than dark, bias or flat is refused."""
     with pytest.raises(InvalidArgumentError, match="kind must be one of"):
-        catalog.refresh("lamp")  # ty: ignore[invalid-argument-type]
+        catalog.reindex_frames("lamp")  # ty: ignore[invalid-argument-type]

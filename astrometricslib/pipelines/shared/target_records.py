@@ -227,7 +227,7 @@ def list_targets(api: Any) -> list[Any]:
     targets : `list`
         A list of all targets in the database.
     """
-    stored_targets = api.catalog_access.get("target_catalog", {}) or []
+    stored_targets = api._catalog_access.get("target_catalog", {}) or []
     held = {target.id: target for target in api._targets}
     fingerprints = _saved_fingerprints(api)
     merged = []
@@ -273,7 +273,7 @@ def get_target(api: Any, target_id: str) -> Any | None:
 
     if target is None:
         known_ids = {existing.id for existing in api._targets}
-        for fresh_target in api.catalog_access.get("target_catalog", {}) or []:
+        for fresh_target in api._catalog_access.get("target_catalog", {}) or []:
             if fresh_target.id not in known_ids:
                 api._targets.append(fresh_target)
                 remember_stored_state(api, [fresh_target])
@@ -299,7 +299,7 @@ def reindex_frames(
     from astrometricslib.pipelines.shared import frame_scanning
 
     if catalog_access is None:
-        from astrometricslib.drivers.catalog_access import CatalogAccess
+        from astrometricslib._internal.drivers.catalog_access import CatalogAccess
 
         catalog_access = CatalogAccess()
 
@@ -399,7 +399,12 @@ def create_target_from_catalog(api: Any, target_id: str, simbad: Any) -> Any:
     if position is None:
         raise NotFoundError(f"The catalog does not know {target_id!r}.", details={"target_id": target_id})
     ra_text, dec_text = format_position(position.coordinate)
-    return create_target(api, normalized_id, ra=ra_text, dec=dec_text)
+    new_target = create_target(api, normalized_id, ra=ra_text, dec=dec_text)
+    if position.object_type:
+        new_target.simbad_object_type = position.object_type
+        _mark_touched(api, new_target.id)
+        save_targets(api)
+    return new_target
 
 
 def update_target(api: Any, target_id: str, updates: dict) -> Any | None:
@@ -456,40 +461,15 @@ def delete_target(api: Any, target_id: str) -> bool:
     """
     target = get_target(api, target_id)
     if target:
-        targets = api.catalog_access.get("target_catalog", {})
+        targets = api._catalog_access.get("target_catalog", {})
         filtered_targets = [t for t in targets if t.id != target.id]
-        api.catalog_access.put(filtered_targets, "target_catalog", {})
-        api._targets = api.catalog_access.get("target_catalog", {}) or []
+        api._catalog_access.put(filtered_targets, "target_catalog", {})
+        api._targets = api._catalog_access.get("target_catalog", {}) or []
         getattr(api, "_touched_target_ids", set()).discard(target.id)
         _saved_fingerprints(api).pop(target.id, None)
         remember_stored_state(api, api._targets)
         return True
     return False
-
-
-def refresh_target(api: Any, target_id: str, prune_missing: bool = False) -> None:
-    """Check the hard drive again for new images for this target.
-
-    Parameters
-    ----------
-    api : `Any`
-        The system that manages the targets.
-    target_id : `str`
-        The name of the target to check.
-    prune_missing : `bool`, optional
-        If True, it will also remove records for files that have been deleted
-        from the hard drive. Defaults to False.
-    """
-    target = get_target(api, target_id)
-    if not target:
-        create_target(api, target_id)
-        return
-
-    if prune_missing:
-        target.frames = []
-
-    reindex_frames(target)
-    save_targets(api)
 
 
 def save_targets(api: Any) -> None:
@@ -509,8 +489,8 @@ def save_targets(api: Any) -> None:
     if not touched_ids:
         return
 
-    if not hasattr(api.catalog_access, "merge_and_record"):
-        api.catalog_access.put(api._targets, "target_catalog", {})
+    if not hasattr(api._catalog_access, "merge_and_record"):
+        api._catalog_access.put(api._targets, "target_catalog", {})
         remember_stored_state(api, api._targets)
         return
 
@@ -520,7 +500,7 @@ def save_targets(api: Any) -> None:
     if not changed_targets:
         return
 
-    api.catalog_access.merge_and_record(
+    api._catalog_access.merge_and_record(
         "target_catalog", changed_targets, lambda existing_target, updated_target: updated_target
     )
     remember_stored_state(api, changed_targets)
@@ -584,10 +564,10 @@ def save_quality_stamps(api: Any, target: Target) -> None:
     target : `Target`
         The target whose frames were stamped.
     """
-    if not hasattr(api.catalog_access, "merge_and_record"):
+    if not hasattr(api._catalog_access, "merge_and_record"):
         save_targets(api)
         return
-    api.catalog_access.merge_and_record("target_catalog", [target], merge_quality_stamps)
+    api._catalog_access.merge_and_record("target_catalog", [target], merge_quality_stamps)
 
 
 def read_saved_target(api: Any, target_id: str) -> Any | None:
@@ -608,5 +588,5 @@ def read_saved_target(api: Any, target_id: str) -> Any | None:
     target : `Any` or `None`
         The stored target, or `None` if nothing is stored under that id.
     """
-    stored = api.catalog_access.get_by_ids("target_catalog", [target_id])
+    stored = api._catalog_access.get_by_ids("target_catalog", [target_id])
     return stored[0] if stored else None

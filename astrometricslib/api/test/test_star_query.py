@@ -10,8 +10,8 @@ from typing import Any
 
 import pytest
 
+from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.api.stars import StellarCatalog
-from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.stellar_source import StellarObject
 
@@ -141,7 +141,7 @@ def test_has_spectra_filters(catalog: StellarCatalog) -> None:
 def test_limits_are_capped(catalog: StellarCatalog) -> None:
     """A huge limit is cut to the cap, and full records to 10."""
     assert len(catalog.query(limit=10_000).stars) == 30
-    catalog.catalog_access.get_by_ids = lambda dataset, ids: [StellarObject(id=i) for i in ids]
+    catalog._catalog_access.get_by_ids = lambda dataset, ids: [StellarObject(id=i) for i in ids]
     assert len(catalog.query(detail="objects", limit=500).objects) == 10
 
 
@@ -188,5 +188,5 @@ def test_analysis_detail_returns_short_records_not_raw_arrays() -> None:
     summary = summarize_star(star)
     assert summary["spectrum"]["points"] == 3
     assert summary["spectrum"]["own_type_percent_off"] == pytest.approx(6.0)
-    assert summary["spectrum"]["no_good_match"] is False
+    assert "no_good_match" not in summary["spectrum"]
     assert "wavelengths_angstrom" not in str(summary)

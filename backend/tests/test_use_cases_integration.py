@@ -117,7 +117,7 @@ class TestUseCasesIntegration:
         """Verify target field spectroscopy extraction (Use Case 3.3)."""
         resp = client.post(
             "/api/rpc",
-            json={"jsonrpc": "2.0", "method": "astronomy:get", "params": {"object_id": "Vega"}, "id": "3.3"},
+            json={"jsonrpc": "2.0", "method": "astronomy:get", "params": {"star_id": "Vega"}, "id": "3.3"},
         )
         assert resp.status_code in [200, 404]
 
@@ -181,7 +181,7 @@ class TestUseCasesIntegration:
             json={
                 "jsonrpc": "2.0",
                 "method": "mosaic:preview",
-                "params": {"center_ra": 5.58, "center_dec": -5.39, "grid": {"panels_x": 2, "panels_y": 2}},
+                "params": {"center_ra": 83.7, "center_dec": -5.39, "grid": {"panels_x": 2, "panels_y": 2}},
                 "id": "6.2",
             },
         )

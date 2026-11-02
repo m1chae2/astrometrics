@@ -34,19 +34,10 @@ warnings.filterwarnings("ignore", category=AstropyWarning, message=".*extra padd
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from astrometricslib import (
-    AstrometricsError,
-    DbLogHandler,
-    ErrorInfo,
-    StorageNotMountedError,
-    close_interrupted_jobs,
-    configure_logging,
-    configure_offline_iers,
-    get_configuration,
-    new_request_id,
-    require_mounted_storage,
-    to_error_info,
-)
+from astrometricslib import configure_logging, configure_offline_iers, get_configuration
+from astrometricslib.drivers import require_mounted_storage
+from astrometricslib.exceptions import AstrometricsError, ErrorInfo, StorageNotMountedError, to_error_info
+from astrometricslib.jobs import DbLogHandler, close_interrupted_jobs, new_request_id
 from backend import startup
 from backend.container import container
 from backend.routers import figures, rpc_router, startup_routes, static_files, websockets

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from astrometricslib import ProcessingError
+from astrometricslib.exceptions import ProcessingError
 from backend.services.infrastructure.base_service import BaseBackgroundService
 
 

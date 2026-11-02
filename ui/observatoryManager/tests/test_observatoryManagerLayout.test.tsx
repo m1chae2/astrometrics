@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
 
 const callBackendMock = vi.fn();
 
@@ -106,6 +107,16 @@ describe('ObservatoryManager layout', () => {
         expect(screen.getByText('Calibration Library')).toBeTruthy();
         expect(screen.queryByTestId('camera-noise-example')).toBeNull();
         expect(await screen.findByText('Darks:')).toBeTruthy();
+    });
+
+    /**
+     * The Calibration Library table keeps room for its header and four full rows. jsdom has no layout,
+     * so this reads the style rule: a 26px header and four 25px rows with a 2px border need 128px.
+     */
+    it('keeps room in the Calibration Library table for four full rows', () => {
+        const css = readFileSync('ui/observatoryManager/observatoryManager.css', 'utf8');
+        const minimumHeight = Number(/\.calibration-panel \.calibration-table-container \{[^}]*min-height: (\d+)px/.exec(css)?.[1]);
+        expect(minimumHeight).toBeGreaterThanOrEqual(26 + 4 * 25 + 2);
     });
 
     /** Command controls are disabled; hover reason and aria-describedby carry the reason. */

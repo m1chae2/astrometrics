@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from pytest_mock import MockerFixture
 
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.foundation.errors import StorageError
 from astrometricslib.models.quality.gate_result import GateStatus, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.models.quality.limit import LimitTier

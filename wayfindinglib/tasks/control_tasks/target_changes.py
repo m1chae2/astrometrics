@@ -4,7 +4,7 @@ Description: The Ekos analyze log records the mount's state changes
 (``Slewing``, ``Tracking`` and so on) and, now and then, where the mount
 pointed (altitude, azimuth and declination). The stored
 `EkosSessionContext` keeps both. This module reads them and answers one
-question for `control.history.query(kind="target_changes")`: when did the
+question for `review.query(kind="target_changes")`: when did the
 mount finish a slew and start tracking at a new place in the sky, and
 which library target is that?
 
@@ -34,7 +34,7 @@ import astropy.units as u
 from astropy.coordinates import AltAz, SkyCoord
 from astropy.time import Time
 
-from astrometricslib import InvalidArgumentError, parse_coordinate_string
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.astronomy.coordinate_transforms import angular_separation_arcsec, earth_location
 from wayfindinglib.models.session.night_list import TargetChange
 
@@ -101,8 +101,8 @@ def library_target_positions(context: ControlContext) -> list[tuple[str, float, 
     positions = []
     for target in context.astrometrics.targets.list():
         try:
-            ra_deg = parse_coordinate_string(target.ra, is_ra=True)
-            dec_deg = parse_coordinate_string(target.dec, is_ra=False)
+            ra_deg = target.ra_deg
+            dec_deg = target.dec_deg
         except InvalidArgumentError:
             logger.info("Target %s has unreadable coordinates; not used to match pointings.", target.id)
             continue

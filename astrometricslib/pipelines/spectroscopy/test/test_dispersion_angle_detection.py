@@ -31,7 +31,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.pipelines.spectroscopy.pipeline import (
     DISPERSION_ANGLE_ROI_HALF_WIDTH_PX,

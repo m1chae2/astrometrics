@@ -1,7 +1,7 @@
 """SA200 spectral registration quality validity check.
 
 Runs Siril's registration step (shift-only transform, matching the
-production spectral stacking path in siril_interface.py) against a
+production spectral stacking path in the siril_interface package) against a
 target's Star Analyzer 200 ("SPEC") frames, then parses the resulting
 .seq registration summary and per-frame .lst star lists to flag
 frames where registration looks untrustworthy: too few matched star
@@ -16,7 +16,7 @@ sweep across filter_wfwhm settings: field-star population is
 typically rich enough in spectral frames too (a diffraction grating
 disperses every star's light, not just the target's, so most stars
 still look like normal point sources), so filter_wfwhm/stack_weight
-are no longer gated to standard-imaging-only in siril_interface.py.
+are no longer gated to standard-imaging-only in the siril_interface package.
 The sweep measures the stacked zero-order star's own FWHM
 specifically -- not a whole-field median FWHM across many stars,
 which is what rejection_threshold_analysis.py uses and which doesn't
@@ -37,13 +37,21 @@ import time
 from typing import Any
 
 import numpy as np
-from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
-from astrometricslib import DATA_ERRORS, Astrometrics, AstrometricsError, configure_logging
-from astrometricslib.drivers.fits_access import collapse_to_2d
-from astrometricslib.drivers.siril_output_parsing import parse_seq_file, parse_zero_order_star
+from astrometricslib import Astrometrics, configure_logging
+from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data
+from astrometricslib._internal.drivers.siril_output_parsing import parse_seq_file, parse_zero_order_star
+from astrometricslib._internal.errors import DATA_ERRORS
+from astrometricslib._internal.processing_scripts import detect_point_sources
+from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.foundation.paths import siril_work_directory
+from astrometricslib.pipelines.spectroscopy.utilities.registration_quality import (
+    MIN_MATCHED_STAR_PAIRS,
+    ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA,
+    ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA,
+    flag_outliers,
+)
 
 SWEEP_SIGMA = (3.0, 3.0)
 SWEEP_FILTER_WFWHM_GRID: list[str | None] = [None, "90%", "80%"]
@@ -151,20 +159,17 @@ def measure_zero_order_stacked_fwhm(astrometrics: Astrometrics, path: str) -> fl
     """
     from photutils.morphology import data_properties
 
-    with fits.open(path, memmap=False) as hdul:
-        data = hdul[0].data
+    data = read_data(path, first_hdu_only=True)
     if data is None:
         return None
     data = collapse_to_2d(np.asarray(data, dtype=float))
 
-    sources = astrometrics.stars.detect_point_sources(data)
+    sources = detect_point_sources(astrometrics.processing, data).sources
     if not sources:
         return None
     brightest = sources[0]
-    x = brightest.get("x_centroid", brightest.get("xcentroid"))
-    y = brightest.get("y_centroid", brightest.get("ycentroid"))
-    if x is None or y is None:
-        return None
+    x = brightest.x_centroid
+    y = brightest.y_centroid
 
     box = ZERO_ORDER_FWHM_BOX_RADIUS_PX
     x, y = round(x), round(y)
@@ -382,14 +387,11 @@ def run_analysis() -> None:
         else:
             position_jumps.append(float(np.hypot(curr["x"] - prev["x"], curr["y"] - prev["y"])))
 
-    thresholds = astrometrics.quality.spectral_registration_thresholds
-    low_star_count_flags = [n < thresholds["min_matched_star_pairs"] for n in nb_stars]
-    dim_zero_order_flags = astrometrics.quality.flag_value_outliers(
-        peak_to_background_ratios, thresholds["zero_order_amplitude_outlier_sigma"], low_is_bad=True
+    low_star_count_flags = [n < MIN_MATCHED_STAR_PAIRS for n in nb_stars]
+    dim_zero_order_flags = flag_outliers(
+        peak_to_background_ratios, ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA, low_is_bad=True
     )
-    position_jump_flags = astrometrics.quality.flag_value_outliers(
-        position_jumps, thresholds["zero_order_position_jump_outlier_sigma"]
-    )
+    position_jump_flags = flag_outliers(position_jumps, ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA)
 
     results = []
     print("\n==========================================")

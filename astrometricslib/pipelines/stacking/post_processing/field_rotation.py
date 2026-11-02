@@ -56,7 +56,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS, FITSFixedWarning
 
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_header
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
 from astrometricslib.models.quality.measurement import MeasurementStatus, QualityMeasurement
 from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (

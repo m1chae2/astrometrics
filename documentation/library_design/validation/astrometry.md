@@ -21,7 +21,7 @@ Two quantities appear in many entries. A *residual* is the distance left between
 - **Procedure:**
   1. Solve the stack through the public API and read the solver's fit residual from the quality summary.
   2. Detect the stars and refine each center with a 2-D Gaussian fit, which is independent of the pipeline's own centroids. The detector call is public; `centroid_2dg` comes from photutils.
-  3. Download the Gaia DR3 stars of the field brighter than G = 16 and move them to the image date (internal functions, not part of the public API; may change). <!-- impl: astrometricslib.drivers.gaia_cone_driver.query_gaia_cone_vizier --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.propagate_gaia_positions --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.read_observation_time -->
+  3. Download the Gaia DR3 stars of the field brighter than G = 16 and move them to the image date (internal functions, not part of the public API; may change). <!-- impl: astrometricslib._internal.drivers.gaia_cone_driver.query_gaia_cone_vizier --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.propagate_gaia_positions --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.read_observation_time -->
   4. Match each refined center to the nearest Gaia star within 2 arcsec and compute the median offset in RA and in Dec (the constant shift) and the scatter about it.
 
 ```python
@@ -32,7 +32,7 @@ from astropy.io import fits
 from photutils.centroids import centroid_2dg
 
 from astrometricslib import Astrometrics
-from astrometricslib.drivers.gaia_cone_driver import query_gaia_cone_vizier
+from astrometricslib._internal.drivers.gaia_cone_driver import query_gaia_cone_vizier
 from astrometricslib.pipelines.astrometry.processing.star_identifier import (
     propagate_gaia_positions,
     read_observation_time,
@@ -56,11 +56,11 @@ with fits.open(path, memmap=False) as hdul:
     data = np.asarray(hdul[0].data, dtype=float)
     header = hdul[0].header
 
-sources = astrometrics.stars.detect_point_sources(data)
+sources = detect_point_sources(astrometrics.processing, data).sources
 centres = []
 for source in sources[:3000]:
-    x = int(round(float(source.get("x_centroid", source.get("xcentroid")))))
-    y = int(round(float(source.get("y_centroid", source.get("ycentroid")))))
+    x = int(round(source.x_centroid))
+    y = int(round(source.y_centroid))
     box = data[y - 7 : y + 8, x - 7 : x + 8]
     if box.shape != (15, 15):
         continue
@@ -118,7 +118,7 @@ print("scatter:", np.median(np.hypot(d_ra - np.median(d_ra), d_dec - np.median(d
 - **Data you need:** Solved stacks with `DATE-OBS`, a few hundred or more detected stars that Gaia lists, and if possible one stack with few frames (a short stack is where the solver tends to be furthest off).
 - **Procedure:**
   1. Run astrometry on each stack through the public API. The refit runs inside it.
-  2. Read the refit's results from the quality summary: `gaia_fit_rms_before_arcsec`, `gaia_fit_rms_arcsec`, `gaia_fit_star_count` and `wcs_refinement_shift_arcsec`, and the flags. <!-- impl: astrometricslib.AstrometryPipelineQualityMetrics -->
+  2. Read the refit's results from the quality summary: `gaia_fit_rms_before_arcsec`, `gaia_fit_rms_arcsec`, `gaia_fit_star_count` and `wcs_refinement_shift_arcsec`, and the flags. <!-- impl: astrometricslib.reports.AstrometryPipelineQualityMetrics -->
   3. For an independent view, repeat the Gaia check of [AST-01](#ast-01) (2-D Gaussian centers, Gaia stars brighter than G = 16 moved to the image date) with the solver's solution and with the refined one, and compare the constant shift and the scatter.
   4. To look at the refit alone, call it directly on your own centroids and Gaia stars (internal function, not part of the public API; may change). <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.refine_wcs_with_gaia -->
 
@@ -213,8 +213,8 @@ print(refinement.applied, refinement.star_count, np.median(errors), errors.max()
 - **Data you need:** A library of solved stacks with quality summaries that carry a plate scale and a star width. Include at least one known bad solve if you have one.
 - **Procedure:**
   1. Run astrometry on each stack (public API).
-  2. For each, divide the residual by the star width in arcseconds: residual / (`plate_scale_arcsec_per_pixel` × `star_fwhm_px`). Do this for each of the three residuals the gate can use. <!-- impl: astrometricslib.AstrometryPipelineQualityMetrics -->
-  3. Read the gate itself with `gate("astrometric_residual")` on the quality summary. <!-- impl: astrometricslib.AstrometryQualitySummary.gate -->
+  2. For each, divide the residual by the star width in arcseconds: residual / (`plate_scale_arcsec_per_pixel` × `star_fwhm_px`). Do this for each of the three residuals the gate can use. <!-- impl: astrometricslib.reports.AstrometryPipelineQualityMetrics -->
+  3. Read the gate itself with `gate("astrometric_residual")` on the quality summary. <!-- impl: astrometricslib.reports.AstrometryQualitySummary.gate -->
 
 ```python
 from astrometricslib import Astrometrics
@@ -392,13 +392,13 @@ print(measure_image_fwhm("/path/to/your_stack.fits"), "px")
 - **Status:** Partly measured. One day and one field; the limits are not validated over many nights.
 - **Data you need:** A dense field (a globular cluster or the Milky Way) and network access.
 - **Procedure:**
-  1. Time each service on the same cone (internal driver functions, not part of the public API; may change). <!-- impl: astrometricslib.drivers.gaia_cone_driver.query_gaia_cone_vizier --> <!-- impl: astrometricslib.drivers.gaia_cone_driver.query_gaia_cone_esa -->
+  1. Time each service on the same cone (internal driver functions, not part of the public API; may change). <!-- impl: astrometricslib._internal.drivers.gaia_cone_driver.query_gaia_cone_vizier --> <!-- impl: astrometricslib._internal.drivers.gaia_cone_driver.query_gaia_cone_esa -->
   2. Repeat at G < 18 and G < 17, and on several days.
 
 ```python
 import time
 
-from astrometricslib.drivers.gaia_cone_driver import query_gaia_cone_esa, query_gaia_cone_vizier
+from astrometricslib._internal.drivers.gaia_cone_driver import query_gaia_cone_esa, query_gaia_cone_vizier
 
 ra, dec, radius = 250.42, 36.46, 1.13  # M 13
 for query in (query_gaia_cone_vizier, query_gaia_cone_esa):
@@ -605,7 +605,7 @@ print(wider["id", "angDist", "Gmag"])
 
 - **Claim:** With fewer than 10 detected stars, the local solver does not solve and spends its whole time limit trying.
 - **Settings it supports:**
-  - code constant `MINIMUM_SOURCES_FOR_LOCAL_SOLVE` = 10 in `astrometricslib/drivers/astrometry_net_driver.py` (changing it means editing the code). Relation: confirmed by this entry. <!-- impl: astrometricslib.drivers.astrometry_net_driver.MINIMUM_SOURCES_FOR_LOCAL_SOLVE -->
+  - code constant `MINIMUM_SOURCES_FOR_LOCAL_SOLVE` = 10 in `astrometricslib/_internal/drivers/astrometry_net_driver.py` (changing it means editing the code). Relation: confirmed by this entry. <!-- impl: astrometricslib._internal.drivers.astrometry_net_driver.MINIMUM_SOURCES_FOR_LOCAL_SOLVE -->
 - **Status:** Partly measured. One underexposed frame.
 - **Data you need:** A few frames with few detectable stars (short or cloudy exposures), and a local solver with index files.
 - **Procedure:**
@@ -618,16 +618,18 @@ import time
 import numpy as np
 from astropy.io import fits
 
-from astrometricslib import Astrometrics, PlateSolveFailedError
+from astrometricslib import Astrometrics
+from astrometricslib._internal.processing_scripts import detect_point_sources  # internal
+from astrometricslib.exceptions import PlateSolveFailedError
 
 astrometrics = Astrometrics()
 for path in ["/path/to/frame1.fits", "/path/to/frame2.fits"]:
     with fits.open(path, memmap=False) as hdul:
         data = np.asarray(hdul[0].data, dtype=float)
-    count = len(astrometrics.stars.detect_point_sources(data))
+    count = len(detect_point_sources(astrometrics.processing, data).sources)
     start = time.monotonic()
     try:
-        solved = astrometrics.stars.plate_solve(path) is not None
+        solved = astrometrics.processing.plate_solve(path) is not None
     except PlateSolveFailedError:
         solved = False
     print(path, count, "stars,", "solved" if solved else "not solved", round(time.monotonic() - start), "s")
@@ -760,11 +762,11 @@ print([abs(a - b) / abs(a) for a, b in zip(full, sample)])
 
 - **Claim:** The frame measurement recovers the width of known synthetic stars to within 0.5 percent, and their elongation to within 4 percent (low for strongly stretched stars), using a Moffat fit to up to about 196 isolated stars spread over the frame. A frame of trailed stars reads wide and elongated, not sharp.
 - **Settings it supports:**
-  - code constant `FRAME_MEASUREMENT_TIME_BUDGET_SECONDS` = 60 in `pipelines/shared/quality/frame_measurement.py` (changing it means editing the code). Relation: derived from this entry and from [STK-D22](stacking.md). The budget counts the CPU time of the measuring thread. One golden M 13 frame used 13.1 to 15.1 s of CPU time alone and 20 to 27.5 s with four running at once; 60 s is 4 times the first and 2.2 times the worst of the second. (A wall-clock budget of 60 s cut 46 of 61 real frames short on a busy machine.) <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.FRAME_MEASUREMENT_TIME_BUDGET_SECONDS -->
-  - code constants `MOFFAT_GRID_CELL_COUNT` = 196, `MOFFAT_CANDIDATES_PER_CELL` = 3 and `MOFFAT_MINIMUM_STAR_COUNT` = 5 in the same file. Relation: sanity check only. The synthetic runs kept about 150 stars of 300. <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_GRID_CELL_COUNT --> <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_CANDIDATES_PER_CELL --> <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_MINIMUM_STAR_COUNT -->
-  - code constants `MOFFAT_FIT_BOX_HALF_WIDTH_PX` = 10 and `MOFFAT_SUBPIXEL_FACTOR` = 3 in the same file. Relation: sanity check only. Widths from 2 to 6 px came back within 0.5 percent. <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_FIT_BOX_HALF_WIDTH_PX --> <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_SUBPIXEL_FACTOR -->
-  - code constants `MOFFAT_ISOLATION_RADIUS_PX` = 14, `MOFFAT_SATURATION_MARGIN_FRACTION` = 0.9, `MOFFAT_MINIMUM_R_SQUARED` = 0.8 and `MOFFAT_MAXIMUM_CENTER_SHIFT_PX` = 2.5 in the same file. Relation: sanity check only. They are not tested apart from the synthetic runs. <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_ISOLATION_RADIUS_PX --> <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_SATURATION_MARGIN_FRACTION --> <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_MINIMUM_R_SQUARED --> <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_MAXIMUM_CENTER_SHIFT_PX -->
-  - code constants `MOMENT_APERTURE_FWHM_MULTIPLE` = 1.5 and `MOMENT_APERTURE_MINIMUM_RADIUS_PX` = 3 in the same file. Relation: sanity check only. The window biases strongly stretched stars low (4 percent at an elongation of 2.5). <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOMENT_APERTURE_FWHM_MULTIPLE --> <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOMENT_APERTURE_MINIMUM_RADIUS_PX -->
+  - code constant `FRAME_MEASUREMENT_TIME_BUDGET_SECONDS` = 60 in `pipelines/shared/quality/frame_measurement.py` (changing it means editing the code). Relation: derived from this entry and from [STK-D22](stacking.md). The budget counts the CPU time of the measuring thread. One golden M 13 frame used 13.1 to 15.1 s of CPU time alone and 20 to 27.5 s with four running at once; 60 s is 4 times the first and 2.2 times the worst of the second. (A wall-clock budget of 60 s cut 46 of 61 real frames short on a busy machine.) <!-- impl: astrometricslib.pipelines.shared.quality.time_budget.FRAME_MEASUREMENT_TIME_BUDGET_SECONDS -->
+  - code constants `MOFFAT_GRID_CELL_COUNT` = 196, `MOFFAT_CANDIDATES_PER_CELL` = 3 and `MOFFAT_MINIMUM_STAR_COUNT` = 5 in the same file. Relation: sanity check only. The synthetic runs kept about 150 stars of 300. <!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_GRID_CELL_COUNT --> <!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_CANDIDATES_PER_CELL --> <!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_MINIMUM_STAR_COUNT -->
+  - code constants `MOFFAT_FIT_BOX_HALF_WIDTH_PX` = 10 and `MOFFAT_SUBPIXEL_FACTOR` = 3 in the same file. Relation: sanity check only. Widths from 2 to 6 px came back within 0.5 percent. <!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_FIT_BOX_HALF_WIDTH_PX --> <!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_SUBPIXEL_FACTOR -->
+  - code constants `MOFFAT_ISOLATION_RADIUS_PX` = 14, `MOFFAT_SATURATION_MARGIN_FRACTION` = 0.9, `MOFFAT_MINIMUM_R_SQUARED` = 0.8 and `MOFFAT_MAXIMUM_CENTER_SHIFT_PX` = 2.5 in the same file. Relation: sanity check only. They are not tested apart from the synthetic runs. <!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_ISOLATION_RADIUS_PX --> <!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_SATURATION_MARGIN_FRACTION --> <!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_MINIMUM_R_SQUARED --> <!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_MAXIMUM_CENTER_SHIFT_PX -->
+  - code constants `MOMENT_APERTURE_FWHM_MULTIPLE` = 1.5 and `MOMENT_APERTURE_MINIMUM_RADIUS_PX` = 3 in the same file. Relation: sanity check only. The window biases strongly stretched stars low (4 percent at an elongation of 2.5). <!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOMENT_APERTURE_FWHM_MULTIPLE --> <!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOMENT_APERTURE_MINIMUM_RADIUS_PX -->
 - **Status:** Design estimate. The fit recovers known widths on synthetic frames. It has not yet been compared with real data.
 - **Data you need:** Light frames of one camera setting with a known gain and read noise in the camera profile, ideally a session with round stars and a session with trailed stars, and bias frames at the same setting in the calibration library (for the sky metrics).
 - **Procedure:**
@@ -775,18 +777,18 @@ print([abs(a - b) / abs(a) for a, b in zip(full, sample)])
   from astrometricslib import Astrometrics
 
   astro = Astrometrics()
-  summary = astro.processing.record_frame_measurements("M 13", limit=20)
+  summary = astro.quality.record_frame_measurements("M 13", limit=20)
   print(summary.frames_measured, summary.rows_written, summary.frames_failed)
   for metric in (
       "frame.star_width_moffat_px",
       "frame.star_width_gaussian_brightest_px",
       "frame.star_elongation",
   ):
-      for row in astro.quality.query(metric=metric, target_id="M 13"):
+      for row in astro.quality.query(metric=metric, target_id="M 13").rows:
           print(metric, row.subject.subject_id, row.value, row.status.value, row.reason)
   ```
 
-  `ProcessingPipelines.record_frame_measurements` <!-- impl: astrometricslib.api.processing.ProcessingPipelines.record_frame_measurements --> calls `measure_frame` <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.measure_frame --> for each light frame.
+  `QualityRecords.record_frame_measurements` <!-- impl: astrometricslib.api.quality.QualityRecords.record_frame_measurements --> calls `measure_frame` <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.measure_frame --> for each light frame.
 - **Acceptance criterion:** Not recorded (set after the real-data check).
 - **What to look at:** The Moffat width and the Gaussian width of the brightest stars on round frames (the Moffat width is expected to be 0.83 to 0.91 of the Gaussian width: see the synthetic ratios below), and on trailed frames the Gaussian width reading sharp (it keeps the narrow axis of a star stretched by more than 1.5) while the Moffat width and the elongation rise.
 - **Our result:** Synthetic runs on 2026-10-22: Moffat stars of known width, stretch and angle, drawn with 5 by 5 sub-sampling on a 1500 by 1500 px frame (300 stars, sky 500 ADU, gain 0.5 e-/ADU, read noise 2 e-, fixed seeds), through `measure_star_profiles`. About 150 stars survived the isolation and fit cuts in each case.
@@ -808,12 +810,12 @@ print([abs(a - b) / abs(a) for a, b in zip(full, sample)])
   | 3.0 | 3 | 2.5, 57.3 | 3.005 | 2.40 | 57.2 |
   | 4.0 | 3 | 1.2, 114.6 | 4.00 | 1.196 | 114.6 |
 
-  The shared beta came back within 2 percent of the true value (2.0, 3.05, 5.03). The width is within 0.5 percent of the truth in every case. The elongation of round stars reads 1.02 to 1.05 (noise pushes it above 1), and that of stretched stars reads 1 to 4 percent low because the window cuts the faint ends. The detector of the frame quarantine and the source detector cut stars by roundness, so they lose stretched stars (at an elongation of 1.6 the source detector returned 4 sources where 294 exist); `detect_stars_without_shape_cut` <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.detect_stars_without_shape_cut --> keeps the sharpness window and drops the roundness window, and finds 150 or more stars at every elongation up to 2.5.
+  The shared beta came back within 2 percent of the true value (2.0, 3.05, 5.03). The width is within 0.5 percent of the truth in every case. The elongation of round stars reads 1.02 to 1.05 (noise pushes it above 1), and that of stretched stars reads 1 to 4 percent low because the window cuts the faint ends. The detector of the frame quarantine and the source detector cut stars by roundness, so they lose stretched stars (at an elongation of 1.6 the source detector returned 4 sources where 294 exist); `detect_stars_without_shape_cut` <!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.detect_stars_without_shape_cut --> keeps the sharpness window and drops the roundness window, and finds 150 or more stars at every elongation up to 2.5.
 
   Run time: the full `measure_frame` took 11.6 s (`M_13_Light_Luminance_019`) and 13.5 s (`M_13_Light_Luminance_020`) on 3008 by 3008 px ASI533MM frames, serial, on a 12-core machine, with 179 and 175 stars. The Moffat width read 1.92 and 2.14 px, the Gaussian width of the brightest stars 2.33 and 2.48 px, and the elongation 1.05 and 1.19 (angle 149 and 0.1 degrees, coherence 0.59 and 0.97). These are run-through numbers, not a validation: the gain and read noise used were test values.
   Ratio of the two widths on the same synthetic frames (`measure_star_profiles` against `measure_fwhm_from_data`, 700 by 700 px, 90 stars, run 2026-10-22): the Moffat width over the Gaussian width is 0.874 for 3 px stars of beta 3, 0.838 for 2 px, 0.907 for 5 px, 0.825 for beta 2 and 0.914 for beta 5. The Gaussian fit reads wider because it has no wings to absorb, so a ratio near 0.85 to 0.9 is expected, not 1. On a frame stretched to 2 the Gaussian function returns no width.
 
-  Real data (ZWO ASI 533MM Pro, gain 0, offset 10, 60 s, M 57, night of 2026-10-03, 61 frames, run 2026-10-22 on copies of the databases): 61 of 61 frames were measured (793 rows) and a second run measured nothing. The median Moffat width over the 47 round frames (elongation below 1.15) was 1.90 px against a Gaussian 2.26 px (ratio 0.834, inside the synthetic range). For the 8 frames at elongation 1.15 to 1.30 it was 2.37 against 2.62 px (0.902), and for the one frame at 1.30 or more 2.54 against 2.79 (0.911). The median was 196 stars per frame and the elongation ranged from 1.03 to 1.30. The ratio rises with the elongation because the Gaussian estimator falls back to the narrow axis of a stretched star. The quarantine step had already set the worst frames aside, so badly trailed frames are not in this sample. A width of 1.92 px is just under Nyquist sampling (2 px per FWHM), so the fits there rest on pixel-integrated models and are less certain than on wider stars. To repeat: `astro.processing.record_frame_measurements("M 57")`, then query `frame.star_width_moffat_px` and `frame.star_width_gaussian_brightest_px` and the ratio per frame.
+  Real data (ZWO ASI 533MM Pro, gain 0, offset 10, 60 s, M 57, night of 2026-10-03, 61 frames, run 2026-10-22 on copies of the databases): 61 of 61 frames were measured (793 rows) and a second run measured nothing. The median Moffat width over the 47 round frames (elongation below 1.15) was 1.90 px against a Gaussian 2.26 px (ratio 0.834, inside the synthetic range). For the 8 frames at elongation 1.15 to 1.30 it was 2.37 against 2.62 px (0.902), and for the one frame at 1.30 or more 2.54 against 2.79 (0.911). The median was 196 stars per frame and the elongation ranged from 1.03 to 1.30. The ratio rises with the elongation because the Gaussian estimator falls back to the narrow axis of a stretched star. The quarantine step had already set the worst frames aside, so badly trailed frames are not in this sample. A width of 1.92 px is just under Nyquist sampling (2 px per FWHM), so the fits there rest on pixel-integrated models and are less certain than on wider stars. To repeat: `astro.quality.record_frame_measurements("M 57")`, then query `frame.star_width_moffat_px` and `frame.star_width_gaussian_brightest_px` and the ratio per frame.
 - **Verdict:** Not judged.
 - **Limits:** Synthetic stars only, plus two real frames that were run but not compared. The fit box (21 by 21 px) is validated for widths up to about 7 px; wider stars read a little narrow because the box cuts their wings. The moment window biases elongation low for strongly stretched stars. The pixel scale comes from the frame record and is treated as exact.
 - **To tune for your setup:** If your stars are wider than 7 px, raise `MOFFAT_FIT_BOX_HALF_WIDTH_PX`. If few frames reach 5 stars, lower `MOFFAT_MINIMUM_STAR_COUNT` or raise `MOFFAT_CANDIDATES_PER_CELL`. Re-run the procedure on a round session and a trailed one after any change.
@@ -827,8 +829,8 @@ print([abs(a - b) / abs(a) for a, b in zip(full, sample)])
 
 - **Claim:** The effective star width adds the blur of one square pixel to the fitted Moffat width, with a fixed theoretical term (`FWHM_eff^2 = FWHM^2 + c p^2`, `c` = 2 ln 2 / 3 = 0.4621). The width of the stars in the center and in each corner of the field comes from the same fits as the frame's width, with no second fit. Neither has been checked against a known tilt or against a known seeing. The 61 frames of the night are not 61 independent results: they are undithered, so each region holds the same 16 stars in every frame.
 - **Settings it supports:**
-  - code constant `PIXEL_BLUR_FWHM_SQUARED_FACTOR` (the exact value 2 ln 2 / 3, about 0.462) in `pipelines/shared/quality/frame_measurement.py`. Relation: sanity check only. It is theory (the user's decision of 2026-10-23: no fitted value), not a tuned number. The check below shows what the Gaussian-core assumption leaves out. <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.PIXEL_BLUR_FWHM_SQUARED_FACTOR -->
-  - code constants `FIELD_GRID_CELLS_PER_SIDE` = 14 and `FIELD_REGION_CELLS_PER_SIDE` = 4 in the same file. Relation: sanity check only. A block of 4 by 4 of the 14 by 14 cells is 8 percent of the frame and holds 16 stars when every cell has one, which is more than the 5 a median needs. <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.FIELD_GRID_CELLS_PER_SIDE --> <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.FIELD_REGION_CELLS_PER_SIDE -->
+  - code constant `PIXEL_BLUR_FWHM_SQUARED_FACTOR` (the exact value 2 ln 2 / 3, about 0.462) in `pipelines/shared/quality/frame_measurement.py`. Relation: sanity check only. It is theory (the user's decision of 2026-10-23: no fitted value), not a tuned number. The check below shows what the Gaussian-core assumption leaves out. <!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.PIXEL_BLUR_FWHM_SQUARED_FACTOR -->
+  - code constants `FIELD_GRID_CELLS_PER_SIDE` = 14 and `FIELD_REGION_CELLS_PER_SIDE` = 4 in the same file. Relation: sanity check only. A block of 4 by 4 of the 14 by 14 cells is 8 percent of the frame and holds 16 stars when every cell has one, which is more than the 5 a median needs. <!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.FIELD_GRID_CELLS_PER_SIDE --> <!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.FIELD_REGION_CELLS_PER_SIDE -->
 - **Status:** Design estimate. The blur term is theory, checked on a computed star only. The region widths are measured on one night and have no known tilt to compare with.
 - **Data you need:** Light frames of one camera setting, and for the tilt question a session where the camera plane is known to be tilted or square (no such session is held).
 - **Procedure:**
@@ -845,11 +847,11 @@ print([abs(a - b) / abs(a) for a, b in zip(full, sample)])
       "frame.star_width_center_px",
       "frame.star_width_corner_xhigh_ylow_px",
   ):
-      for row in astro.quality.query(metric=metric, target_id="M 57"):
+      for row in astro.quality.query(metric=metric, target_id="M 57").rows:
           print(metric, row.subject.subject_id, row.value, row.uncertainty, row.sample_count)
   ```
 
-  `measure_frame` <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.measure_frame --> stores the rows. A frame measured before the rows existed is measured again by the job, because the job stores a fingerprint of the frame metrics (`frame_metric_set_fingerprint`) on every frame it measures and compares it with the current one; `measure_star_profiles` <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.measure_star_profiles --> and `measure_field_region_widths` <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.measure_field_region_widths --> give the same numbers on one plane.
+  `measure_frame` <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.measure_frame --> stores the rows. A frame measured before the rows existed is measured again by the job, because the job stores a fingerprint of the frame metrics (`frame_metric_set_fingerprint`) on every frame it measures and compares it with the current one; `measure_star_profiles` <!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.measure_star_profiles --> and `measure_field_region_widths` <!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.measure_field_region_widths --> give the same numbers on one plane.
 - **Acceptance criterion:** Not recorded. A tilt claim needs a session with a known tilt, or a session before and after the camera plane was changed, which the observatory does not hold.
 - **What to look at:** The size of each corner minus the center against the bootstrap errors, the same sign in the same corner in most frames of a night, and the same pattern on another night. A pattern that follows the seeing and not the corner is not a tilt.
 - **Our result:** 2026-10-23, M 57, night of 2026-10-03, 61 frames of 60 s (ASI533MM Pro, 1.915 arcsec/px), read only.
@@ -914,7 +916,7 @@ print([abs(a - b) / abs(a) for a, b in zip(full, sample)])
       "astrometry.frame_target_clipped_fraction",
       "astrometry.frame_target_nonlinear_fraction",
   ):
-      for row in astro.quality.query(metric=metric, target_id="M 57"):
+      for row in astro.quality.query(metric=metric, target_id="M 57").rows:
           print(metric, row.subject.subject_id, row.value, row.sample_count, row.status.value, row.reason[:80])
   ```
 
@@ -995,7 +997,7 @@ for metric in (
     "astrometry.expected_pixel_phase_rms_arcsec",
     "astrometry.expected_gaia_epoch_error_rms_arcsec",
 ):
-    for row in astrometrics.quality.query(metric=metric, target_id="M 57"):
+    for row in astrometrics.quality.query(metric=metric, target_id="M 57").rows:
         print(metric, row.status, row.value, row.reason)
 ```
 
@@ -1015,12 +1017,12 @@ These values have not been measured. Each is a code constant unless the table sa
 
 | ID | Setting | Value | Where | Risk if wrong | How you could measure it on your data |
 | --- | --- | --- | --- | --- | --- |
-| AST-D01 | Detection threshold; sharpness range; roundness range | 5σ; 0.2 to 1.0; −0.6 to 0.6 | `SourceDetector` defaults and `DAOStarFinder` arguments in `pipelines/astrometry/pre_processing/source_detection.py` <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector.detect --> | Missed stars or false detections. | Run `astrometrics.stars.detect_point_sources(data, threshold_sigma=k)` for several `k` on solved frames and count the detections with and without a catalog match. |
+| AST-D01 | Detection threshold; sharpness range; roundness range | 5σ; 0.2 to 1.0; −0.6 to 0.6 | `SourceDetector` defaults and `DAOStarFinder` arguments in `pipelines/astrometry/pre_processing/source_detection.py` <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector.detect --> | Missed stars or false detections. | Run `astrometrics.processing.detect_point_sources(data, threshold_sigma=k)` for several `k` on solved frames and count the detections with and without a catalog match. |
 | AST-D02 | Merge distance for duplicate detections | 15 px | `SourceDetector.deduplicate` default <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector.deduplicate --> | One star counted twice, or two stars merged. | Count close pairs among detections of a solved frame and check against Gaia whether they are one star or two. |
 | AST-D03 | Color-frame block averaging before detection | 2 by 2 | `_COLOR_DETECTION_BIN_FACTOR` in `pipelines/astrometry/processing/star_identifier.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier._COLOR_DETECTION_BIN_FACTOR --> | Fewer catalog matches on color frames. | Checked on a synthetic demosaiced background only (`test_color_frame_detection.py`); on a real color stack, compare catalog matches with factors 1, 2 and 3. |
-| AST-D04 | Fewest detections to try a solve | 4 | inline in `StarIdentifier.process_image` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier.process_image --> | Solves tried that cannot work, or solvable frames skipped. | Solve frames with 4 to 10 detections with `astrometrics.stars.plate_solve` and record which solve. |
+| AST-D04 | Fewest detections to try a solve | 4 | inline in `StarIdentifier.process_image` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier.process_image --> | Solves tried that cannot work, or solvable frames skipped. | Solve frames with 4 to 10 detections with `astrometrics.processing.plate_solve` and record which solve. |
 | AST-D05 | Brightest stars sent to the online solver | 100 | `MAXIMUM_PLATE_SOLVE_SOURCES` in `pipelines/astrometry/processing/star_identifier.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.MAXIMUM_PLATE_SOLVE_SOURCES --> | Slow or failed online solves. | Time online solves of a few frames with 50, 100 and 200 stars sent. |
-| AST-D06 | Pixel-scale window; driver widening; blind-retry cut-off | ±5%; 0.8 and 1.2; 90% of the time limit | `StarIdentifier._calculate_scale_hints`; `AstrometryNetPlateSolveDriver` and `HINTED_SOLVE_NEAR_TIMEOUT_FRACTION` in `drivers/astrometry_net_driver.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._calculate_scale_hints --> <!-- impl: astrometricslib.drivers.astrometry_net_driver.HINTED_SOLVE_NEAR_TIMEOUT_FRACTION --> | Solver search too wide (slow) or too narrow (no solve). | Compare the solved plate scale with the hint across your library (`report_gate_limits.py` lists stored values) to see how much window you need. |
+| AST-D06 | Pixel-scale window; driver widening; blind-retry cut-off | ±5%; 0.8 and 1.2; 90% of the time limit | `StarIdentifier._calculate_scale_hints`; `AstrometryNetPlateSolveDriver` and `HINTED_SOLVE_NEAR_TIMEOUT_FRACTION` in `drivers/astrometry_net_driver.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._calculate_scale_hints --> <!-- impl: astrometricslib._internal.drivers.astrometry_net_driver.HINTED_SOLVE_NEAR_TIMEOUT_FRACTION --> | Solver search too wide (slow) or too narrow (no solve). | Compare the solved plate scale with the hint across your library (`report_gate_limits.py` lists stored values) to see how much window you need. |
 | AST-D07 | Catalog match radius | 10 arcsec | `CATALOG_MATCH_RADIUS_ARCSEC` in `pipelines/shared/catalog_star_identity.py` <!-- impl: astrometricslib.pipelines.shared.catalog_star_identity.CATALOG_MATCH_RADIUS_ARCSEC --> | True matches missed or wrong stars matched. | After a Gaia refit, histogram the detected-to-catalog distances from `StarIdentifier.catalog_match_separations_arcsec` and set the radius where true matches end. |
 | AST-D08 | Most stars identified per image | 500 | config key `[Processing.Astrometry] maximum_identified_stars` (default 500; 0 means no limit) <!-- impl: astrometricslib.AppConfiguration.get_maximum_identified_stars --> | Long run time and high memory use. | Time a run and watch memory with 500, 1000 and 0 on your densest field. |
 | AST-D09 | Failed catalog lookups allowed | under 50% | `MAXIMUM_FAILED_LOOKUP_FRACTION` in `pipelines/astrometry/post_processing/record_quality.py` <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.MAXIMUM_FAILED_LOOKUP_FRACTION --> | Network outages pass the gate, or normal runs fail it. | `report_gate_limits.py` prints the failed / attempted share of every stored run; compare it with runs you know had a network outage. |

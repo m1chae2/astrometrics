@@ -7,17 +7,21 @@ numbers in `frame_quarantine.py`).
 
 import json
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from astrometricslib.models.quality.quality_summary import StackingPipelineQualityMetrics, StackQualitySummary
+from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME, is_quarantined_path
+from astrometricslib.pipelines.stacking.post_processing.record_quality import stacking_notice_measurements
 from astrometricslib.pipelines.stacking.pre_processing import frame_quarantine
 from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
     QUARANTINE_EXCLUSION_REASON_PREFIX,
-    assess_input_quality,
+    record_input_counts,
 )
 from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
     MANIFEST_FILE_NAME,
@@ -395,20 +399,32 @@ def test_is_quarantined_path_checks_whole_folder_names() -> None:
     assert not is_quarantined_path(os.path.join("lights", "M 1", "not_excluded_frames", "f.fits"))
 
 
-def test_input_quality_counts_quarantined_frames_and_says_so() -> None:
-    """The input judgement counts moved frames and flags the stack."""
+def test_input_counts_include_quarantined_frames_and_a_notice_says_so() -> None:
+    """The metrics count moved frames and the stack gets a notice row."""
     excluded = [
         SimpleNamespace(path="a.fits", reason=f"{QUARANTINE_EXCLUSION_REASON_PREFIX}: clouded (203 stars)"),
         SimpleNamespace(path="b.fits", reason=f"{QUARANTINE_EXCLUSION_REASON_PREFIX}: trailed (round 0.44)"),
         SimpleNamespace(path="c.fits", reason="minority gain setting"),
     ]
 
-    quality = assess_input_quality(56, 53, excluded, None, {})
+    summary = StackQualitySummary(
+        target_id="M 1",
+        stacking_metrics=StackingPipelineQualityMetrics(
+            is_spectral=False, frames_submitted=56, frames_stacked=53
+        ),
+    )
+    record_input_counts(summary.stacking_metrics, 53, excluded, {})
+    context = PipelineRunContext(
+        "M 1", "stacking", "1.3.0", "job-1", "job-1", datetime(2026, 11, 1, tzinfo=UTC)
+    )
 
-    assert quality.frames_quarantined == 2
-    assert quality.frames_excluded_for_gain == 1
-    assert quality.is_flagged
-    assert any("2 frame(s) with clouds or trailed stars" in reason for reason in quality.flag_reasons)
+    rows = stacking_notice_measurements(summary, context, "M1_Stacked.fits")
+
+    assert summary.stacking_metrics.frames_quarantined == 2
+    assert summary.stacking_metrics.frames_excluded_for_gain == 1
+    assert [row.reason for row in rows] == [
+        "2 frame(s) with clouds or trailed stars moved to the _excluded folder"
+    ]
 
 
 def test_the_report_keeps_the_measurements_of_kept_frames_as_well_as_moved_ones(tmp_path: Path) -> None:

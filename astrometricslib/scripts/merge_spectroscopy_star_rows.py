@@ -37,7 +37,7 @@ import logging
 import sys
 
 from astrometricslib import Astrometrics, configure_logging
-from astrometricslib.drivers.local_database import backup_catalog_database
+from astrometricslib._internal.drivers.local_database import backup_catalog_database
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.shared.star_recording import merge_spectroscopy_stellar_object
 
@@ -86,7 +86,7 @@ def find_spectroscopy_row_ids(astrometrics: Astrometrics) -> list[str]:
     """
     return sorted(
         summary.id
-        for summary in astrometrics.catalog_access.list_star_summaries()
+        for summary in astrometrics._catalog_access.list_star_summaries()
         if summary.id.endswith(SPECTROSCOPY_ROW_ID_SUFFIX)
     )
 
@@ -134,7 +134,7 @@ def merge_spectroscopy_rows(astrometrics: Astrometrics, spectroscopy_row_ids: li
         base_id = spectroscopy_row_id.removesuffix(SPECTROSCOPY_ROW_ID_SUFFIX)
         hydrated_rows = {
             star.id: star
-            for star in astrometrics.catalog_access.get_by_ids(
+            for star in astrometrics._catalog_access.get_by_ids(
                 "stellar_catalog", [spectroscopy_row_id, base_id]
             )
         }
@@ -158,10 +158,10 @@ def merge_spectroscopy_rows(astrometrics: Astrometrics, spectroscopy_row_ids: li
             surviving_star = spectral_star
             renamed_count += 1
 
-        astrometrics.catalog_access.merge_and_record(
+        astrometrics._catalog_access.merge_and_record(
             "stellar_catalog", [surviving_star], lambda _existing, updated: updated
         )
-        astrometrics.catalog_access.delete_by_ids("stellar_catalog", [spectroscopy_row_id])
+        astrometrics._catalog_access.delete_by_ids("stellar_catalog", [spectroscopy_row_id])
     return merged_count, renamed_count
 
 
@@ -192,7 +192,7 @@ def run_merge(argv: list[str] | None = None) -> int:
 
     existing_base_ids = {
         star.id
-        for star in astrometrics.catalog_access.get_by_ids(
+        for star in astrometrics._catalog_access.get_by_ids(
             "stellar_catalog",
             [row_id.removesuffix(SPECTROSCOPY_ROW_ID_SUFFIX) for row_id in spectroscopy_row_ids],
         )

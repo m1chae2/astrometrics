@@ -6,7 +6,8 @@ import sqlite3
 import time
 from typing import Any
 
-from astrometricslib import AstrometricsError, NotFoundError
+from astrometricslib.exceptions import AstrometricsError, NotFoundError
+from astrometricslib.jobs import run_as_background_job
 from backend.services.infrastructure.base_service import BaseBackgroundService
 
 logger = logging.getLogger(__name__)
@@ -14,15 +15,22 @@ logger = logging.getLogger(__name__)
 # Define stable log directory relative to this file
 LOG_DIR = None  # Will be initialized from config
 
+# How long a request to start the calibration measuring job waits for it to
+# finish, in seconds. A library that is already measured finishes at once, so
+# the answer carries the counts. A first pass takes tens of minutes, so the
+# request then returns the job's id and the work goes on in the background.
+CALIBRATION_MEASUREMENT_GRACE_SECONDS = 3.0
+
 
 class ImageProcessingService(BaseBackgroundService):
     """Service for managing background image processing tasks."""
 
     def __init__(
         self,
-        siril_driver: Any = None,
+        processing_api: Any = None,
+        job_repository: Any = None,
         target_service: Any = None,
-        calibration_library: Any = None,
+        calibration: Any = None,
         config_service: Any = None,
         notification_service: Any = None,
         job_service: Any = None,
@@ -32,12 +40,15 @@ class ImageProcessingService(BaseBackgroundService):
 
         Parameters
         ----------
-        siril_driver : `Any`, optional
-            The CLI driver for communicating with Siril.
+        processing_api : `Any`, optional
+            The library's processing API (`astrometrics.processing`). It
+            opens a stack in the Siril window.
+        job_repository : `Any`, optional
+            The database that keeps the job log lines.
         target_service : `Any`, optional
             Service for fetching target metadata and frame sets.
-        calibration_library : `Any`, optional
-            Service for finding matching calibration masters.
+        calibration : `Any`, optional
+            The library's calibration catalog.
         config_service : `Any`, optional
             Provides filesystem paths and application settings.
         notification_service : `Any`, optional
@@ -48,10 +59,11 @@ class ImageProcessingService(BaseBackgroundService):
             Maintains the global event bus.
         """
         super().__init__(job_service=job_service, astrometrics_service=astrometrics_service)
-        self.siril = siril_driver
+        self._processing_api = processing_api
+        self._job_repository = job_repository
 
         self._target_service = target_service
-        self._calibration_library = calibration_library
+        self._calibration = calibration
         self._config_service = config_service
         global LOG_DIR
         LOG_DIR = str(self._config_service.get_logs_path())
@@ -66,7 +78,42 @@ class ImageProcessingService(BaseBackgroundService):
             ``"darks"``, ``"biases"`` and ``"flats"``, each a list of
             per-group counts.
         """
-        return self._calibration_library.get_stats()
+        answer = self._calibration.query(detail="counts")
+        return {
+            key: [
+                {name: value for name, value in row.items() if name != "row_key"}
+                for row in (getattr(answer, key) or [])
+            ]
+            for key in ("darks", "biases", "flats")
+        }
+
+    def start_calibration_measurement(
+        self, kind: str | None = None, camera_id: str | None = None, force: bool = False
+    ) -> dict[str, Any]:
+        """Start the job that measures the dark and bias frames.
+
+        Parameters
+        ----------
+        kind : `str`, optional
+            ``"dark"`` or ``"bias"``. Leave it out for both.
+        camera_id : `str`, optional
+            Only this camera's frames.
+        force : `bool`, optional
+            Measure every frame again, even if its file has not changed.
+
+        Returns
+        -------
+        outcome : `dict` [`str`, `Any`]
+            ``{"jobId", "result"}`` when the job finished at once, else
+            ``{"status": "running", "jobId", ...}``. The job goes on in the
+            background and records its progress in the job list.
+        """
+        return run_as_background_job(
+            lambda: self._calibration.measure_frames(
+                kind=kind, camera_id=camera_id, force=force, register_job=True
+            ),
+            grace_period_seconds=CALIBRATION_MEASUREMENT_GRACE_SECONDS,
+        )
 
     def get_processing_status(self, target_id: str) -> dict:
         """Verify if a target has any running stacking jobs.
@@ -133,7 +180,7 @@ class ImageProcessingService(BaseBackgroundService):
             `True` if the Siril GUI was launched successfully,
             `False` otherwise.
         """
-        if not self.siril or not self._target_service:
+        if not self._processing_api or not self._target_service:
             return False
 
         target = self._target_service.get_targets(target_id)
@@ -155,7 +202,7 @@ class ImageProcessingService(BaseBackgroundService):
                 path = ""
 
         try:
-            self.siril.launch_siril_gui(path)
+            self._processing_api.open_in_siril(path)
             return True
         except AstrometricsError, OSError, ValueError:
             logger.exception("Failed to launch Siril for %s", target_id)
@@ -218,7 +265,7 @@ class ImageProcessingService(BaseBackgroundService):
             image_files,
             log_file_path=log_file,
             target_service=self._target_service,
-            siril=self.siril,
+            job_repository=self._job_repository,
             notification_service=self._notification_service,
         )
 
@@ -276,7 +323,7 @@ def start_siril_processing_task(
     image_files: list[Any],
     log_file_path: str | None = None,
     target_service: Any = None,
-    siril: Any = None,
+    job_repository: Any = None,
     notification_service: Any = None,
     **kwargs: Any,
 ) -> str | None:
@@ -284,8 +331,8 @@ def start_siril_processing_task(
 
     This is the same stage the batch script runs, so a stack made from the
     viewer gets the same quality summary, provenance record and processed
-    picture as one made in a batch. The ``siril`` driver is used only to
-    reach the job log database; the stage makes its own Siril driver.
+    picture as one made in a batch. The ``job_repository`` is the database
+    that keeps the job log lines.
 
     Returns
     -------
@@ -298,7 +345,7 @@ def start_siril_processing_task(
     NotFoundError
         If the target is not in the library.
     """
-    from astrometricslib import capture_job_logs
+    from astrometricslib.jobs import capture_job_logs
 
     if log_file_path:
         # Clear old logs for this target at the start of a new job. The
@@ -310,7 +357,6 @@ def start_siril_processing_task(
     # which preview steps ran) through its own module loggers.
     # `capture_job_logs` sends them, and the lines written here, to the job's
     # log file and its database rows, so the job log shows them.
-    job_repository = getattr(siril, "job_repository", None)
     with capture_job_logs(job_id=job_id, log_file_path=log_file_path, job_store=job_repository):
         logger.info("Starting new processing task for %s (Job: %s)", target_id, job_id)
 
@@ -331,9 +377,14 @@ def start_siril_processing_task(
         # summary and provenance, makes the preview picture the viewer shows,
         # and saves the target. This job is already in the job list, so the
         # stack records its provenance against it instead of a new job.
-        from astrometricslib import ProcessingError, frame_is_spectral, log_context
+        from astrometricslib.exceptions import ProcessingError
+        from astrometricslib.jobs import log_context
 
-        kind = "spectral" if frames_to_stack and all(map(frame_is_spectral, frames_to_stack)) else "imaging"
+        kind = (
+            "spectral"
+            if frames_to_stack and all(frame.is_spectral for frame in frames_to_stack)
+            else "imaging"
+        )
         try:
             with log_context(job_id=job_id):
                 stack_result = target_service.astrometrics.processing.stack(

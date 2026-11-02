@@ -445,8 +445,7 @@ def test_the_real_validate_output_records_the_gates_for_a_run_with_no_work() -> 
 
     summary = runner.PhotometryPipelineAdapter().validate_output(request, result)
 
-    assert summary.flagged is True
-    assert "no frames for the requested filter" in summary.flag_reasons
+    assert summary.gate(rg.PHOTOMETRY_WORK_GATE_NAME).detail == "no frames for the requested filter"
     assert summary.gate(rg.PHOTOMETRY_WORK_GATE_NAME).status is GateStatus.FAILED
     for name in (
         rg.COMPARISON_ENSEMBLE_GATE_NAME,

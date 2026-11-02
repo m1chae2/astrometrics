@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.quality.limit import LimitTier, QualityLimit
 from astrometricslib.models.quality.measurement import (

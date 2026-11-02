@@ -42,7 +42,7 @@ from scipy.sparse.csgraph import connected_components
 from scipy.spatial import cKDTree
 
 from astrometricslib import Astrometrics, configure_logging
-from astrometricslib.drivers.local_database import backup_catalog_database
+from astrometricslib._internal.drivers.local_database import backup_catalog_database
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.pipelines.shared.catalog_star_identity import (
     SAME_STAR_POSITION_TOLERANCE_ARCSEC,
@@ -263,7 +263,7 @@ def run_merge(argv: list[str] | None = None) -> int:
     configure_logging("merge_duplicate_catalog_stars", level=logging.INFO, log_dir="")
 
     astrometrics = Astrometrics()
-    clusters = find_duplicate_clusters(astrometrics.catalog_access.list_star_summaries())
+    clusters = find_duplicate_clusters(astrometrics._catalog_access.list_star_summaries())
     if not clusters:
         print("No duplicate catalog rows found.")
         return 0
@@ -274,7 +274,7 @@ def run_merge(argv: list[str] | None = None) -> int:
         if len(ids) > MAXIMUM_CLUSTER_SIZE:
             skipped.append((ids, f"{len(ids)} rows in one cluster"))
             continue
-        stars = {star.id: star for star in astrometrics.catalog_access.get_by_ids("stellar_catalog", ids)}
+        stars = {star.id: star for star in astrometrics._catalog_access.get_by_ids("stellar_catalog", ids)}
         result = merge_cluster(stars, choose_survivor_id(list(stars)))
         if isinstance(result, str):
             skipped.append((ids, result))
@@ -301,10 +301,10 @@ def run_merge(argv: list[str] | None = None) -> int:
         return 1
     print(f"\nBacked up the catalog database to {backup_path}.")
     for survivor, removed in planned:
-        astrometrics.catalog_access.merge_and_record(
+        astrometrics._catalog_access.merge_and_record(
             "stellar_catalog", [survivor], lambda _existing, updated: updated
         )
-        astrometrics.catalog_access.delete_by_ids("stellar_catalog", removed)
+        astrometrics._catalog_access.delete_by_ids("stellar_catalog", removed)
     print(f"Merged {len(planned)} cluster(s), removing {sum(len(removed) for _, removed in planned)} row(s).")
     return 0
 

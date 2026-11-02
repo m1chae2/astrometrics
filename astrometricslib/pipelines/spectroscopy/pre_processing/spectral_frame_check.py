@@ -27,6 +27,7 @@ from typing import Any
 import numpy as np
 from scipy import ndimage
 
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import AstrometricsError, ProcessingError
 from astrometricslib.pipelines.shared.quality.saturation import (
     SATURATION_ADU,
@@ -235,13 +236,16 @@ def analyze_spectral_frame(
     return result
 
 
-def load_dispersion_geometry(camera_name: str) -> dict[str, Any]:
+def load_dispersion_geometry(camera_name: str, drivers: Drivers | None = None) -> dict[str, Any]:
     """Read where a camera's spectrum runs from the spectroscopy settings.
 
     Parameters
     ----------
     camera_name : `str`
         The camera the frames were taken with.
+    drivers : `Drivers`, optional
+        The outside services the caller chose. Reading the geometry calls
+        none of them.
 
     Returns
     -------
@@ -252,7 +256,7 @@ def load_dispersion_geometry(camera_name: str) -> dict[str, Any]:
     from astrometricslib.utilities import ConfigLoader
 
     config = ConfigLoader.load_spectroscopy_config(camera_name=camera_name)
-    pipeline = SpectroscopyPipeline(config)
+    pipeline = SpectroscopyPipeline(config, drivers=drivers)
     return {
         "vertical": config.dispersion_orientation == "vertical",
         "positive": config.dispersion_direction == "positive",
@@ -268,6 +272,7 @@ def measure_spectral_frame_file(
     geometry: dict[str, Any],
     predict_exposure_seconds: float | None = None,
     zero_order_row_column: tuple[float, float] | None = None,
+    drivers: Drivers | None = None,
 ) -> dict[str, Any]:
     """Read one raw spectrum frame and measure it.
 
@@ -295,6 +300,9 @@ def measure_spectral_frame_file(
         The zero order's (row, column), when the caller already knows it.
         The search is then skipped, which is the way to measure a frame whose
         target the search cannot find.
+    drivers : `Drivers`, optional
+        The outside services the caller chose, passed to the trail
+        measurement.
 
     Returns
     -------
@@ -309,7 +317,7 @@ def measure_spectral_frame_file(
         No clear zero-order target is near the centre of the frame, and no
         position was given.
     """
-    from astrometricslib.drivers.fits_access import collapse_to_2d, read_data
+    from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data
     from astrometricslib.pipelines.stacking.processing.group_alignment import locate_zero_order
     from astrometricslib.pipelines.stacking.processing.group_derotation import measure_trail_angle_degrees
 
@@ -335,7 +343,7 @@ def measure_spectral_frame_file(
         saturation_source=threshold_source,
         **geometry,
     )
-    tilt, contrast = measure_trail_angle_degrees(path, (position[1], position[0]), camera_name)
+    tilt, contrast = measure_trail_angle_degrees(path, (position[1], position[0]), camera_name, drivers)
     return {
         "zero_order_xy": [round(position[1], 1), round(position[0], 1)],
         "zero_order_source": zero_order_source,
@@ -428,6 +436,7 @@ def check_spectral_frames(
     predict_exposure_seconds: float | None,
     limit: int,
     zero_order_row_column: tuple[float, float] | None = None,
+    drivers: Drivers | None = None,
 ) -> Any:
     """Measure a target's raw spectrum frames and summarize where they clip.
 
@@ -451,6 +460,9 @@ def check_spectral_frames(
         The zero order's (row, column), when the caller knows it. It is used
         for every frame, so it suits frames of one target taken without
         moving the mount, and it skips the search.
+    drivers : `Drivers`, optional
+        The outside services the caller chose, passed to the trail
+        measurements.
 
     Returns
     -------
@@ -494,7 +506,7 @@ def check_spectral_frames(
         }
         try:
             if frame.camera not in geometry_by_camera:
-                geometry_by_camera[frame.camera] = load_dispersion_geometry(frame.camera)
+                geometry_by_camera[frame.camera] = load_dispersion_geometry(frame.camera, drivers)
             row.update(
                 measure_spectral_frame_file(
                     frame.path,
@@ -503,6 +515,7 @@ def check_spectral_frames(
                     geometry_by_camera[frame.camera],
                     predict_exposure_seconds,
                     zero_order_row_column,
+                    drivers,
                 )
             )
         except (OSError, ValueError, AstrometricsError) as error:

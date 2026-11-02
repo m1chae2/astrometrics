@@ -10,7 +10,7 @@ import astropy.units as u
 from astropy.coordinates import EarthLocation
 from astropy.time import Time
 
-from astrometricslib import ConflictError
+from astrometricslib.exceptions import ConflictError
 
 from .property_wait import wait_for_switch_state
 from .pyindi_compatibility import INDI_ERRORS, PyIndi

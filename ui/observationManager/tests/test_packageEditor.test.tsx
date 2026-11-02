@@ -12,6 +12,11 @@ import { captureTestFrame } from '../../common/services/imaging/captureService';
 import { FilterType, FrameType, ObservationPackage } from '../../common/types/backendTypes';
 
 vi.mock('../LastImageViewer', () => ({ LastImageViewer: () => <div>Last Image stub</div> }));
+/** The configured filters `system:filters` returns, as the library names them. */
+const configuredFilters = vi.hoisted(() => ({ list: ['Luminance', 'Star Analyzer 200'] as string[] }));
+vi.mock('../hooks/useAvailableFilters', () => ({
+    useAvailableFilters: () => ({ filters: configuredFilters.list, loading: false, error: null }),
+}));
 vi.mock('../../common/services/imaging/captureService', () => ({ captureTestFrame: vi.fn() }));
 
 /** What the mocked policy answers; tests change it. */
@@ -91,6 +96,22 @@ describe('PackageEditor', () => {
         renderEditor({ ...samplePackage, exposure_requests: [] });
         expect(screen.getByText('No exposure rows yet. Add one with the Image Planner above.')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Add to Sequence' })).toBeDisabled();
+    });
+
+    it('offers the configured filters by short name, SPEC included', async () => {
+        const props = renderEditor(samplePackage);
+        const select = screen.getByRole('combobox', { name: 'Filter' }) as HTMLSelectElement;
+        expect([...select.options].map((option) => option.textContent)).toEqual(['L', 'SPEC']);
+        await userEvent.selectOptions(select, 'Star Analyzer 200');
+        await userEvent.click(screen.getByRole('button', { name: 'Add to List' }));
+        expect(props.onAddExposure).toHaveBeenCalledWith(expect.objectContaining({ filter: 'Star Analyzer 200' }));
+    });
+
+    it('says where to set filters when none are configured', () => {
+        configuredFilters.list = [];
+        renderEditor(samplePackage);
+        expect(screen.getByText('No filters set. Add them in Settings, Observatory, Filters.')).toBeInTheDocument();
+        configuredFilters.list = ['Luminance', 'Star Analyzer 200'];
     });
 
     it('shows a refused save as an alert', () => {

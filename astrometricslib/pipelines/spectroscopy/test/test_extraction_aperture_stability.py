@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 from scipy.ndimage import median_filter
 
-from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor import (
     SpectrumExtractor,
 )

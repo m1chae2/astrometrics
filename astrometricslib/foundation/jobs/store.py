@@ -642,6 +642,7 @@ class JobStore:
         status: str | None = None,
         active_only: bool = False,
         limit: int = 50,
+        offset: int = 0,
     ) -> list[ProcessingJob]:
         """Find jobs by target, type and status, newest first.
 
@@ -658,6 +659,8 @@ class JobStore:
             ``running``). Defaults to `False`.
         limit : `int`, optional
             Most jobs to return. Defaults to 50.
+        offset : `int`, optional
+            How many of the newest matching jobs to skip. Defaults to 0.
 
         Returns
         -------
@@ -670,8 +673,8 @@ class JobStore:
             rows = conn.execute(
                 "SELECT * FROM processing_jobs WHERE (? IS NULL OR target_id = ?) "
                 "AND (? IS NULL OR job_type = ?) AND (? IS NULL OR status = ?) "
-                "AND (? = 0 OR status IN ('started', 'running')) ORDER BY created_at DESC LIMIT ?",
-                (target_id, target_id, job_type, job_type, status, status, int(active_only), limit),
+                "AND (? = 0 OR status IN ('started', 'running')) ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (target_id, target_id, job_type, job_type, status, status, int(active_only), limit, offset),
             ).fetchall()
             conn.close()
             return [self._row_to_job(row) for row in rows]

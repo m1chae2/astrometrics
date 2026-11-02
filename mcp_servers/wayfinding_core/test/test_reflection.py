@@ -22,8 +22,8 @@ def test_the_wayfinder_sub_apis_are_reflected(registry: ToolRegistry) -> None:
 
 
 def test_history_query_has_the_documented_arguments(registry: ToolRegistry) -> None:
-    """`observatory_history_query` needs a kind; the rest are optional."""
-    schema = registry.tools["observatory_history_query"]["tool_def"].input_schema
+    """`review_query` needs a kind; the rest are optional."""
+    schema = registry.tools["review_query"]["tool_def"].input_schema
     assert schema["required"] == ["kind"]
     assert set(schema["properties"]) == {"kind", "session_id", "ekos_file_id", "include", "limit"}
 
@@ -33,8 +33,8 @@ async def test_a_reflected_tool_runs(registry: ToolRegistry) -> None:
     reply = await registry.execute(
         "planning_calculate_panels",
         {
-            "center_ra": "16:41:41.24",
-            "center_dec": "+36:27:35.5",
+            "ra_deg": 250.172,
+            "dec_deg": 36.4599,
             "rows": 2,
             "cols": 2,
             "overlap_percent": 10.0,

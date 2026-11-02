@@ -598,7 +598,7 @@ from astrometricslib import Astrometrics
 
 astrometrics = Astrometrics()
 result = astrometrics.processing.process_target(
-    "NGC 2244", stages=["photometry"], photometry={"filter_type": "Luminance"}
+    "NGC 2244", stages=["photometry"], photometry={"filter_name": "Luminance"}
 )
 print(result.quality.photometry.gate("comparison_ensemble").detail)
 ```
@@ -673,7 +673,7 @@ print(counts, result.results["photometry"]["crossSessionMatchCount"])
 from datetime import datetime
 
 from astrometricslib import Astrometrics
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.quality_store import QualityStore
 
 astrometrics = Astrometrics()
 target = astrometrics.targets.get("M 57")
@@ -693,7 +693,7 @@ rows = QualityStore.from_configuration(astrometrics.config).query(
 )
 print([(row.value, row.uncertainty, row.sample_count) for row in rows])
 ```
-<!-- impl: astrometricslib.Astrometrics --> <!-- impl: astrometricslib.drivers.quality_store.QualityStore -->
+<!-- impl: astrometricslib.Astrometrics --> <!-- impl: astrometricslib._internal.drivers.quality_store.QualityStore -->
 
   1. For repeatability, split the fixed star set into two random halves, find each half's zero point in every frame with `differential_frame_estimates` <!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.differential_frame_estimates -->, and take the robust spread of the differences. Repeat for 50 random splits. For the error, compare `standard_error_of_median` <!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.standard_error_of_median --> with `bootstrap_median_error` <!-- impl: astrometricslib.pipelines.shared.quality.frame_statistics.bootstrap_median_error --> on the same differences. For the dependence on seeing, regress the steady frames' zero points on `frame.star_width_moffat_px`. The scripts are in the session's scratch folder (`science/s2/`): `run_s2.py` and `evidence_s2b.py`.
 
@@ -727,7 +727,7 @@ print([(row.value, row.uncertainty, row.sample_count) for row in rows])
   1. Read the stored zero points of a run and pass them to the helper.
 
 ```python
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.pipelines.photometry.processing.catalog_zero_point import zero_point_scatter
 
 rows = QualityStore.from_configuration(astrometrics.config).query(
@@ -735,7 +735,7 @@ rows = QualityStore.from_configuration(astrometrics.config).query(
 )
 print(zero_point_scatter([row.value for row in rows if row.value is not None]))
 ```
-<!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.zero_point_scatter --> <!-- impl: astrometricslib.drivers.quality_store.QualityStore -->
+<!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.zero_point_scatter --> <!-- impl: astrometricslib._internal.drivers.quality_store.QualityStore -->
 
 - **Acceptance criterion:** Not recorded (set after the result).
 - **What to look at:** The spread in magnitudes, with its frame count and bootstrap error. Compare it with the frame-to-frame precision of [PHO-15](#pho-15) (0.0013 mag): the difference is real wander.
@@ -781,7 +781,7 @@ astrometrics.processing.process_target(
 for part in ("photon", "sky", "read"):
     for row in astrometrics.quality.query(
         metric=f"photometry.model_noise_{part}_at_mag12_mag", target_id="M 57"
-    ):
+    ).rows:
         print(part, row.status, row.value)
 ```
 
@@ -816,7 +816,7 @@ for rank in (1, 2, 3):
     for quantity in ("frequency_per_day", "power_fraction"):
         for row in astrometrics.quality.query(
             metric=f"photometry.window_alias_{rank}_{quantity}", target_id="Vega"
-        ):
+        ).rows:
             print(rank, quantity, row.value, row.reason)
 ```
 
@@ -853,7 +853,7 @@ for metric in (
     "photometry.target_phase_coverage_fraction",
     "photometry.target_catalog_amplitude_mag",
 ):
-    for row in astrometrics.quality.query(metric=metric, target_id="Mirach"):
+    for row in astrometrics.quality.query(metric=metric, target_id="Mirach").rows:
         print(metric, row.status, row.value, row.reason)
 ```
 
@@ -889,7 +889,7 @@ These tuned values have not been measured. They are reasoned choices.
 | PHO-D14 | Discrimination AUC floor | 0.7 | `MINIMUM_DISCRIMINATION_AUC` in `variability_skill.py` | Poor fields pass the gate, or good fields fail it. | Collect the gate's AUC over many fields ([PHO-08](#pho-08)) and compare runs you trust with runs you do not. |
 | PHO-D15 | Largest acceptable detectable amplitude | 0.3 mag peak to peak | `MAXIMUM_DETECTABLE_AMPLITUDE_MAG` in `record_quality.py` | Fields that cannot see small variables pass. | Compare the gate's estimate with the 50% depth of `validate_photometry_injection.py` ([PHO-09](#pho-09)) on the same field. |
 | PHO-D16 | Corner displacement; centroid fallback share; tracking drift | 1 px; 20%; 20 px | `MAXIMUM_CORNER_DISPLACEMENT_PX`, `MAXIMUM_CENTROID_FALLBACK_FRACTION` in `record_quality.py`; `UNSTABLE_TRACKING_DRIFT_PX` in `pre_processing/assess_input_quality.py` | Bad alignment passes, or good nights are flagged. | Collect the `registration_drift` values over many nights ([PHO-04](#pho-04)) and set each limit above the nights you trust. |
-| PHO-D17 | Low coverage; low confidence margin | 0.5; 1 MAD | `LOW_COVERAGE_THRESHOLD` in `assess_input_quality.py`; `LOW_CONFIDENCE_MARGIN` in `post_processing/assess_output_quality.py` | Verdicts that flip between nights. | Re-measure stars near the limit on a second night and count how often their verdict flips. |
+| PHO-D17 | Retired: the low-coverage and low-confidence-margin flags (0.5; 1 MAD) were removed, and the numbers they read (`coverage_fraction`, `margin_in_mad_units`) stay as measurements | None | `coverage_fraction`, `margin_in_mad_units` | None: no flag or rule reads a limit. | A wayfindinglib rule that reads these numbers would need its own entry. |
 | PHO-D18 | Between-session flag | significance above 3; amplitude at least 0.02 mag | `DEFAULT_LONG_TERM_SIGNIFICANCE_THRESHOLD`, `MINIMUM_LONG_TERM_AMPLITUDE_MAG` in `processing/variability_analyzer.py` | False between-session flags, or missed ones. | Count flags on stars a catalog calls constant over a multi-session target ([PHO-14](#pho-14)). |
 | PHO-D19 | Period checks: alias rival share; agreeing nights | 90% of the best peak; more than half | `_RIVAL_ALIAS_POWER_SHARE`, `_AGREEING_SHARE` in `processing/period_checks.py` | Alias periods reported as real. | Run `holdout_cycle` and `alias_check` on a star of known period observed on several nights. |
 | PHO-D20 | Stars searched for a period | target plus 10 brightest | `MAXIMUM_BRIGHTEST_STARS_FOR_PERIOD_SEARCH` in `batch.py` | Run time grows with the number of stars searched. | A cost choice; time `search_periods_and_save` on your largest field. |

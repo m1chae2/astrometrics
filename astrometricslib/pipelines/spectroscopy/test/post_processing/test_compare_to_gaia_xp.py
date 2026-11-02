@@ -15,7 +15,7 @@ import pytest
 
 from astrometricslib.models.quality.gaia_xp_comparison import GaiaXpComparison
 from astrometricslib.models.quality.gate_result import GateStatus
-from astrometricslib.models.quality.spectroscopy_quality import CatalogComparison, OutputQualityAssessment
+from astrometricslib.models.quality.spectroscopy_quality import CatalogComparison
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.shared.catalog_star_identity import gaia_dr3_source_id_of
 from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import (
@@ -30,6 +30,7 @@ from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp i
     REASON_NO_SOURCE_ID,
     REASON_NO_SPECTRUM,
     REASON_NO_XP,
+    REASON_XP_DOWNLOAD_FAILED,
     compare_spectrum_to_xp,
     compare_to_gaia_xp,
     gaia_xp_gate,
@@ -194,6 +195,19 @@ def test_a_source_with_no_xp_spectrum_is_not_checked() -> None:
     assert driver.requested_ids == [SOURCE_ID]
 
 
+def test_a_failed_download_is_not_checked_with_its_own_reason() -> None:
+    """A failed download is told apart from a source with no XP spectrum."""
+    wavelength, intensity = make_calibrated_spectrum("G2V")
+    driver = FakeGaiaXpDriver({SOURCE_ID: make_xp_spectrum("G2V")}, download_fails=True)
+
+    comparison = compare_to_gaia_xp(driver, SOURCE_ID, wavelength, intensity)
+
+    assert comparison.status == "not_checked"
+    assert comparison.not_checked_reason == REASON_XP_DOWNLOAD_FAILED
+    assert comparison.not_checked_reason != REASON_NO_XP
+    assert comparison.gaia_source_id == SOURCE_ID
+
+
 def test_a_star_with_no_response_corrected_spectrum_is_not_checked() -> None:
     """A camera with no stored instrument response gives nothing to compare."""
     wavelength, _intensity = make_calibrated_spectrum("G2V")
@@ -276,31 +290,29 @@ def test_metrics_of_a_spectrum_that_was_not_compared_have_no_value_and_say_why()
 
 def test_checkpoint_three_carries_the_gaia_metrics_and_a_flag() -> None:
     """Checkpoint 3 gets the Gaia metrics, classified or not."""
-    assessment = OutputQualityAssessment(
-        is_poor_match=False,
-        is_ambiguous=False,
-        is_class_ambiguous=False,
-        catalog_agrees=True,
-        is_trustworthy=True,
-    )
+    classification = {
+        "classification_rms": 0.05,
+        "rms_gap_to_second_best": 0.1,
+        "rms_gap_to_next_class": 0.1,
+    }
     bad = compare(tilt_percent_per_1000_angstrom=6.0)
 
     classified = output_quality_checkpoint(
-        assessment,
+        classification,
         own_spectral_type="G2V",
         catalog_spectral_type="G2V",
         catalog_comparison=CatalogComparison(),
         gaia_xp_comparison=bad,
     )
     unclassified = output_quality_checkpoint(
-        assessment,
+        classification,
         own_spectral_type="Unknown",
         catalog_spectral_type=None,
         catalog_comparison=None,
         gaia_xp_comparison=bad,
     )
     without = output_quality_checkpoint(
-        assessment, own_spectral_type="G2V", catalog_spectral_type="G2V", catalog_comparison=None
+        classification, own_spectral_type="G2V", catalog_spectral_type="G2V", catalog_comparison=None
     )
 
     for checkpoint in (classified, unclassified):

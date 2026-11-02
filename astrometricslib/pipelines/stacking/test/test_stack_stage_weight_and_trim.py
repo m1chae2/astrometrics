@@ -17,7 +17,7 @@ from astrometricslib.models.quality.quality_summary import StackingPipelineQuali
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.stacking import stage as stacking_tasks
 
-SIRIL_DRIVER = "astrometricslib.drivers.siril_interface.ImageProcessing"
+SIRIL_DRIVER = "astrometricslib._internal.drivers.siril_interface.ImageProcessing"
 SUMMARY_BUILDER = "astrometricslib.pipelines.stacking.stage._build_stack_quality_summary"
 RUN_STACK = "astrometricslib.pipelines.stacking.stack_runner.run_stack"
 PREVIEW = "astrometricslib.pipelines.stacking.post_processing.stack_preview.write_stack_preview"
@@ -87,7 +87,7 @@ def run_stage(target: Target, fake_run_stack: object) -> str | None:
         patch(RUN_STACK, side_effect=fake_run_stack),
         patch(PREVIEW, MagicMock(return_value=None)),
     ):
-        return stacking_tasks.stack_frames(target, filter_type=FilterType.L)
+        return stacking_tasks.stack_frames(target)
 
 
 def test_mixed_exposures_are_stacked_with_noise_weighting(stacks_folder: Path) -> None:

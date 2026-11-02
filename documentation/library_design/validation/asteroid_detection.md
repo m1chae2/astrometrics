@@ -23,7 +23,7 @@ The pipeline finds sources in worker processes. Run the examples below as a save
 - **Status:** Partly measured. Synthetic fields only; the grid stops at 150 arcsec per hour and uses round sources.
 - **Data you need:** None for the synthetic grid. To repeat it on your own sky, you need 8 or more light frames of one field taken within one night at a steady cadence, a plate-solved stack of the same field, and `RA`, `DEC` and `DATE-OBS` in every frame header.
 - **Procedure:**
-  1. Build a synthetic field with one injected mover and run the full pipeline on it. The harness writes 8 frames, 256 by 256 pixels, 300 s apart, at 1.8 arcsec/pixel, with 25 fixed stars and Gaussian sky noise. It then calls the same pipeline class a normal run uses. Both the harness and the pipeline class are internal (internal functions, not part of the public API; may change). <!-- impl: astrometricslib.scripts.validate_asteroid_detection.make_mover --> <!-- impl: astrometricslib.scripts.validate_asteroid_detection.write_synthetic_field --> <!-- impl: astrometricslib.scripts.validate_asteroid_detection.run_trial --> <!-- impl: astrometricslib.pipelines.asteroid_detection.pipeline.AsteroidDetectionPipeline -->
+  1. Build a synthetic field with one injected mover and run the full pipeline on it. The harness writes 8 frames, 256 by 256 pixels, 300 s apart, at 1.8 arcsec/pixel, with 25 fixed stars and Gaussian sky noise. It then calls the same pipeline class a normal run uses. Both the harness and the pipeline class are internal (internal functions, not part of the public API; may change). The settings are a plain dictionary of the `[Processing.MovingObject]` keys, the same dictionary `Astrometrics().processing.process_target(..., asteroids={"moving_object_config": {...}})` takes; the internal helper `moving_object_config_from_options` checks it and refuses a key that names no setting. <!-- impl: astrometricslib.pipelines.asteroid_detection.runner.moving_object_config_from_options --> <!-- impl: astrometricslib.scripts.validate_asteroid_detection.make_mover --> <!-- impl: astrometricslib.scripts.validate_asteroid_detection.write_synthetic_field --> <!-- impl: astrometricslib.scripts.validate_asteroid_detection.run_trial --> <!-- impl: astrometricslib.pipelines.asteroid_detection.pipeline.AsteroidDetectionPipeline -->
   2. Count the mover as recovered when a confirmed track lies within 3 pixels of the injected position in at least 3 frames. <!-- impl: astrometricslib.scripts.validate_asteroid_detection.candidate_follows_mover --> <!-- impl: astrometricslib.scripts.validate_asteroid_detection.MATCH_TOLERANCE_PX -->
   3. Repeat for 12 fields per cell of a grid of peak brightness (3, 5, 8, 12, 20σ) against rate (5, 20, 60, 150 arcsec per hour). <!-- impl: astrometricslib.scripts.validate_asteroid_detection.recovery_grid --> <!-- impl: astrometricslib.scripts.validate_asteroid_detection.format_recovery -->
   4. The confirmed tracks are sent to SkyBoT (the online list of known solar-system bodies). The script does not stub that query. Offline, the queries fail and the track stays at `rate_linearity_confirmed`, which still counts as confirmed. To run offline on purpose, give the cross-matcher a client that knows no bodies, as below. Save the example as a script and run it: the pipeline finds sources in worker processes, so the calls must sit under `if __name__ == "__main__":`. <!-- impl: astrometricslib.pipelines.asteroid_detection.ephemeris.EphemerisCrossMatcher -->
@@ -33,8 +33,8 @@ from unittest import mock
 
 import numpy as np
 
-from astrometricslib import MovingObjectConfig
 from astrometricslib.pipelines.asteroid_detection import pipeline as pipeline_module  # internal
+from astrometricslib.pipelines.asteroid_detection.runner import moving_object_config_from_options  # internal
 from astrometricslib.scripts import validate_asteroid_detection as harness  # internal
 
 
@@ -62,7 +62,7 @@ if __name__ == "__main__":
         print(harness.format_recovery(grid, snrs, rates))
 
         # One cell with a setting changed: 12 fields, 8σ, 60 arcsec/h.
-        config = MovingObjectConfig(detection_threshold_sigma=4.0)
+        config = moving_object_config_from_options({"detection_threshold_sigma": 4.0})
         generator = np.random.default_rng(0)
         hits = sum(
             harness.run_trial(
@@ -74,7 +74,7 @@ if __name__ == "__main__":
 ```
 
   1. To match your own optics, set the harness's `PIXEL_SCALE_ARCSEC` and `SECONDS_BETWEEN_FRAMES` before the calls (for example `harness.PIXEL_SCALE_ARCSEC = 1.1`). Leave the frame count at 8: `write_synthetic_field` fixes it when the module loads. <!-- impl: astrometricslib.scripts.validate_asteroid_detection.PIXEL_SCALE_ARCSEC --> <!-- impl: astrometricslib.scripts.validate_asteroid_detection.SECONDS_BETWEEN_FRAMES -->
-  2. To test on your own sky, add a Gaussian dot of known peak along a straight line to copies of your frames (open them with `memmap=False`). Then run `AsteroidDetectionPipeline(config).process(target_id, stack_path, frames)`, where `frames` is a list of `(path, unix_timestamp)` pairs, and check whether a confirmed candidate's `frame_detections` follow the line. <!-- impl: astrometricslib.pipelines.asteroid_detection.pipeline.AsteroidDetectionPipeline.process --> <!-- impl: astrometricslib.AsteroidDetectionCandidate -->
+  2. To test on your own sky, add a Gaussian dot of known peak along a straight line to copies of your frames (open them with `memmap=False`). Then run `AsteroidDetectionPipeline(config).process(target_id, stack_path, frames)`, where `frames` is a list of `(path, unix_timestamp)` pairs, and check whether a confirmed candidate's `frame_detections` follow the line. <!-- impl: astrometricslib.pipelines.asteroid_detection.pipeline.AsteroidDetectionPipeline.process --> <!-- impl: astrometricslib._internal.results.AsteroidDetectionCandidate -->
 
 - **Acceptance criterion:** Not recorded (set after the result).
 - **What to look at:** The completeness (recall) in each cell, from 0% to 100%. A good detector reaches high completeness at the brightness and rates you care about. The brightness where the completeness rises from near 0 to most fields is the practical detection limit; compare it with `detection_threshold_sigma`.
@@ -250,11 +250,13 @@ for gate in summary.gates:
   2. Collect `astrometric_error_arcsec` from every detection of every returned candidate, one value per frame.
 
 ```python
-from astrometricslib import MovingObjectConfig
 from astrometricslib.pipelines.asteroid_detection.pipeline import AsteroidDetectionPipeline  # internal
+from astrometricslib.pipelines.asteroid_detection.runner import moving_object_config_from_options  # internal
 
 frames = [("/data/frame_001.fits", 1700000000.0), ("/data/frame_002.fits", 1700000300.0)]
-candidates = AsteroidDetectionPipeline(MovingObjectConfig()).process("my-target", "/data/stack.fits", frames)
+candidates = AsteroidDetectionPipeline(moving_object_config_from_options({})).process(
+    "my-target", "/data/stack.fits", frames
+)
 per_frame = {}
 for candidate in candidates:
     for detection in candidate.frame_detections:
@@ -275,10 +277,10 @@ print(min(per_frame.values()), max(per_frame.values()))
 
 ### MOV-07
 
-**Bounding-box pre-filter speeds up chaining**
+**Nearby-pair search speeds up chaining**
 
-- **Claim:** Before the detector computes exact angular separations, it drops every pair outside an RA/Dec box around the match radius. On a dense field this removes almost all pairs and makes chaining take seconds, with the same tracks as an exhaustive search.
-- **Settings it supports:** No tuned value. The box is the match radius times 1.2, widened in RA by 1/cos(Dec), inside the chaining step (internal function, not part of the public API; may change). <!-- impl: astrometricslib.pipelines.asteroid_detection.detection.MovingObjectDetector._chain_detections_by_persistence -->
+- **Claim:** Before the detector computes exact separations, it finds the nearby (chain, dot) pairs with a tree search on the dots of the new frame, then applies the same RA/Dec box and distance tests as an all-pairs search. On a dense field this removes almost all pairs and makes chaining take seconds, with the same tracks, in the same order, as an all-pairs search.
+- **Settings it supports:** No tuned value. The box is the match radius times 1.2, widened in RA by 1/cos(Dec). The tree search keeps a 10% margin on the radius and is skipped for chains within about 12 degrees of a pole, which try every dot. Both sit inside the chaining step (internal function, not part of the public API; may change). <!-- impl: astrometricslib.pipelines.asteroid_detection.detection.MovingObjectDetector._chain_detections_by_persistence -->
 - **Status:** Partly measured. One field, timed once.
 - **Data you need:** A dense field with tens of thousands of detections across tens of frames.
 - **Procedure:**
@@ -288,23 +290,23 @@ print(min(per_frame.values()), max(per_frame.values()))
 ```python
 import time
 
-from astrometricslib import MovingObjectConfig
 from astrometricslib.pipelines.asteroid_detection.detection import MovingObjectDetector  # internal
+from astrometricslib.pipelines.asteroid_detection.runner import moving_object_config_from_options  # internal
 
 detections = [d for candidate in candidates for d in candidate.frame_detections]
 start = time.perf_counter()
-MovingObjectDetector(MovingObjectConfig()).detect_candidates("my-target", detections)
+MovingObjectDetector(moving_object_config_from_options({})).detect_candidates("my-target", detections)
 print(f"{len(detections)} detections chained in {time.perf_counter() - start:.1f} s")
 ```
 
 - **Acceptance criterion:** Not recorded (set after the result).
 - **What to look at:** Wall-clock time of the chaining step, in seconds, and whether the tracks match an exhaustive search.
-- **Our result:** M 81 (DS-M81), about 150,000 detected sources across 46 frames: the box removed 99.9% of pairs, and the step went from over 20 minutes to seconds, with the same tracks. Date not recorded.
+- **Our result:** M 81 (DS-M81), about 150,000 detected sources across 46 frames: the box removed 99.9% of pairs, and the step went from over 20 minutes to seconds, with the same tracks. Date not recorded. Synthetic check, 2026-11-01: 12 frames, each with N fixed stars and 5% noise dots, seed 0-3; the chaining step alone took 0.65, 1.5, 3.8 and 9.6 s with the per-chain loop and 0.05, 0.12, 0.34 and 0.55 s with the tree search for N = 500, 1000, 2000 and 4000. The chains were identical (same dots, same order) in these cases and in five more, near RA = 0 and near both poles.
 - **Verdict:** Not judged.
-- **Limits:** One field, one machine. The search still looks at every pair; it only does so in one vectorized NumPy comparison.
+- **Limits:** One real field timed once, plus synthetic timings (below). A chain is never closed early: its radius only grows with the gap, up to the cap, so no chain becomes unreachable within a night. The cost still grows with chains times the dots near each one.
 - **To tune for your setup:** Nothing to tune. If chaining is slow, lower `chain_match_radius_max_arcsec` to shrink the box.
 - **Regenerate with:** No script; measured by hand, date not recorded.
-- **Guarded by tests:** None.
+- **Guarded by tests:** `astrometricslib/pipelines/asteroid_detection/test/test_chaining_equivalence.py` (`test_fixed_small_input_gives_expected_chains`, `test_random_input_matches_plain_all_pairs_search`).
 - **Raw record:** None kept.
 
 ### MOV-08
@@ -348,3 +350,4 @@ These values have not been measured. Each is a reasoned choice.
 | MOV-D08 | Fewest votes for the pointing shift | 5 | code constant `_POINTING_CORRECTION_MIN_VOTES` in `pipeline.py` | A wrong pointing correction. | Count frames whose detections carry no measured position error after `AsteroidDetectionPipeline.process`, and check them by eye. |
 | MOV-D09 | Match radius for the position-error estimate | 15 arcsec (three vote bins) | code constant `_POSITION_ERROR_MATCH_RADIUS_ARCSEC` in `pipeline.py` | Position error read too low. | Compare the estimate with the scatter of hand-matched stars on frames with known large errors. |
 | MOV-D10 | Source shape limits | roundness -0.6 to 0.6; sharpness 0.2 to 1.0 | `SourceDetector` in `astrometricslib/pipelines/astrometry/pre_processing/source_detection.py` | Trailed movers dropped. | Inject trailed movers and count how many the shape limits drop. |
+| MOV-D11 | Most SkyBoT questions per run | 200 questions (100 movers at two each) | code constant `_DEFAULT_MAX_QUERIES_PER_RUN` in `astrometricslib/pipelines/asteroid_detection/ephemeris.py`, the `max_queries` argument of `EphemerisCrossMatcher` | Too low: real movers are left unchecked on a busy ecliptic field. Too high: a run that mistakes artifacts for movers sends hundreds of questions to a public service, at least 0.5 s apart. Basis: [MOV-04](#mov-04) found at most 1 confirmed mover on two far-from-ecliptic fields; [MOV-05](#mov-05) found 97 to 187 on older runs without the pointing correction, which would have needed 194 to 374 questions. The limit sits above the first and below the second. Not measured on a field near the ecliptic. | Run fields near the ecliptic with `AsteroidDetectionPipeline.process` and read `ephemeris_queries_attempted` and `ephemeris_candidates_unchecked` in `last_run_metrics`; set the limit above the largest healthy `attempted` count. |

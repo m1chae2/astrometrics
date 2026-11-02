@@ -198,9 +198,9 @@ def validate_standards(astrometrics: Astrometrics) -> None:
             )
 
     print("Stored spectra of stars with a catalog type (match vs catalog):")
-    summaries = [s for s in astrometrics.catalog_access.list_star_summaries() if s.has_spectra]
+    summaries = [s for s in astrometrics._catalog_access.list_star_summaries() if s.has_spectra]
     good = agree = total = 0
-    for star in astrometrics.catalog_access.get_by_ids("stellar_catalog", [s.id for s in summaries]):
+    for star in astrometrics._catalog_access.get_by_ids("stellar_catalog", [s.id for s in summaries]):
         reference = nearest_reference_type(star.spectral_type)
         spectroscopy = star.spectroscopy
         if reference is None or spectroscopy.self_determined_spectral_type in ("", "Unknown"):

@@ -9,7 +9,7 @@ import json
 
 from starlette.requests import Request
 
-from astrometricslib import ConflictError
+from astrometricslib.exceptions import ConflictError
 from backend.main_backend import expected_error_handler, global_exception_handler
 
 

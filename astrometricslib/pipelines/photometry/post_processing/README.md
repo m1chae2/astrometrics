@@ -37,7 +37,6 @@ The `detectable_amplitude` gate fails when this estimate is above 0.3 mag (desig
 ## Settings
 
 - **CV cutoff multiplier.** `DEFAULT_VARIABILITY_SIGMA_THRESHOLD` is 7.4 (measured; see [PHO-10](../../../../documentation/library_design/validation/photometry.md#pho-10)). The cutoff never falls below 0.02.
-- **Low-confidence margin.** `LOW_CONFIDENCE_MARGIN` is 1 MAD (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)). The cutoff sits at least 7.4 MAD above the field median, so 1 MAD is a small step next to it. A star that close is one noisy measurement away from the other side.
 - **Discrimination floor.** `MINIMUM_DISCRIMINATION_AUC` is 0.7 (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)).
 - **Largest detectable amplitude.** `MAXIMUM_DETECTABLE_AMPLITUDE_MAG` is 0.3 mag (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)).
 
@@ -49,9 +48,7 @@ The stage records these values for each star. A large margin means the CV-cutoff
 | --- | --- | --- | --- | --- |
 | `coefficient_of_variation` | none | CV cutoff of the field: median CV plus 7.4 MAD, at least 0.02 (measured; see [PHO-10](../../../../documentation/library_design/validation/photometry.md#pho-10)) | High: more scatter relative to the mean | Margin calculation |
 | `adaptive_cutoff` | none | Same as above | High: the field's stars scatter more, so a star needs more scatter to be flagged | Margin calculation |
-| `margin_in_mad_units` | MAD | Magnitude below 1 (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)) | Large positive: the CV is far above the cutoff. Near zero: the CV sits close to it. | Low-confidence flag; reviewers |
-| `is_low_confidence` | flag | Set when the margin is within 1 MAD of the cutoff on either side (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)) | Set: a borderline call | `is_trustworthy`; reviewers |
-| `is_trustworthy` | flag | Set when `is_low_confidence` is not set | Set: the verdict is stable | Reviewers |
+| `margin_in_mad_units` | MAD | None | Large positive: the CV is far above the cutoff. Near zero: the CV sits close to it. | Reviewers |
 
 The margin is `(CV - cutoff) / MAD`, where the MAD is the field's median absolute deviation of the CV, never taken below 0.0001.
 
@@ -69,7 +66,7 @@ Scintillation is stored for a site at sea level unless the configuration holds t
 
 ## Files
 
-- `assess_output_quality.py` builds the per-star confidence record described above (`assess_output_quality`).
+- `assess_output_quality.py` builds the per-star margin record described above (`assess_output_quality`).
 - `known_variability_labels.py` labels each variable candidate with whether SIMBAD, Gaia DR3 or VSX already list it as variable (`label_known_variability`). SIMBAD is a general star database, Gaia DR3 is the third data release of the Gaia satellite survey, and VSX is the International Variable Star Index. The file also splits stars into listed and unlisted groups for the AUC check (`is_listed_as_variable`, `split_scores_by_catalog_status`). A candidate whose catalogs were never asked is labeled `unknown`, not "not listed".
 - `variability_skill.py` measures whether the variability score can see cataloged variables, and the smallest amplitude the candidate rule can flag.
 - `record_quality.py` builds the run's gate record (`photometry_run_gates`): one `passed`, `failed` or `not_checked` result per gate. It also turns the run's counts, measurements and gates into quality measurements (`photometry_run_measurements`) and stores them (`record_photometry_quality`). A gate's stored number always means one thing: the comparison-ensemble gate stores the size of the smallest set and the registration gate stores the largest global drift, and the scatter ratio, the corner displacement and the fallback share have metrics of their own. `GATE_LIMIT_SOURCES` says, for each gate, which metric stands for it and how its limit was obtained: the gates that need a time, a plate solve or a session are geometry, and every other limit is a design estimate stored with its register row (PHO-D06, PHO-D09, PHO-D13 to PHO-D16). The history fill reads that table and `gate_for_measurement`. A failure while building or storing the rows is logged and never fails the run, and a NaN is stored as not measured.

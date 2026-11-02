@@ -106,7 +106,7 @@ sys.modules.setdefault("astroquery.simbad", mock_astroquery.simbad)
 sys.modules.setdefault("astroquery.astrometry_net", mock_astroquery.astrometry_net)
 
 from astrometricslib import AppConfiguration
-from astrometricslib.foundation import config as config_loader  # ruff: ignore[banned-api]
+from astrometricslib.foundation import config as config_loader
 
 
 @pytest.fixture(scope="session")

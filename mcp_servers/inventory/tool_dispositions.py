@@ -66,18 +66,6 @@ INTERIM_BLOCKS = {
         "INDI device that is off, and enclosure_state returns unknown in the MCP process. Blocked until "
         "those sections use the connect-only path."
     ),
-    "planning_get_sources": (
-        "Returns whole target records and every star, which overflows the 40,000 character reply. Use "
-        "planning_find_sources, which caps the list, brightest first."
-    ),
-    "planning_get_library_star_summaries": (
-        "Returns every star in the circle, which can overflow the 40,000 character reply. Use "
-        "planning_find_sources, which caps the list, brightest first."
-    ),
-    "planning_resolve_target_coordinates": (
-        "Returns the whole target record, frames and all, which overflows the reply. Use "
-        "planning_lookup_coordinates, which returns the position."
-    ),
     "observatory_imaging_status": (
         "The filters and focuser sections return [] and 0 because the MCP process has no hardware "
         "connection. Use app_status with the telescope section (focuser position, filter, pier side, "
@@ -142,35 +130,21 @@ DECISIONS = {
     "observatory_equipment_set_active_telescope": ToolDecision(
         "withhold", "Writes the active telescope into the configuration file."
     ),
-    "observatory_safety_save_rule_set": ToolDecision(
-        "withhold", "Changes the rules that decide when the observatory is safe."
-    ),
-    "observatory_imaging_save_focus_model": ToolDecision("withhold", "Replaces the stored focus model."),
-    "observatory_guiding_save_calibration": ToolDecision(
-        "withhold", "Replaces the stored guider calibration."
-    ),
-    "observatory_guiding_save_spectrum_analysis": ToolDecision(
-        "withhold", "Replaces the standing guiding analysis."
-    ),
     "observatory_safety_apply_promotion_decision": ToolDecision(
         "withhold", "Applies an operator's decision. Needs the operator."
     ),
-    "star_tune_spectroscopy_calibration": ToolDecision(
-        "withhold",
-        "Rewrites the live configuration file through update_config. Needs an apply=false mode that only "
-        "returns the fitted values.",
-        "change-data",
-    ),
-    "star_save_all": ToolDecision("withhold", "Replaces the whole star catalog."),
     # ---- Fix first ----
     "target_save": ToolDecision("withhold", "Writes the database. The AI is read-only."),
+    "star_get_spectrum": ToolDecision(
+        "withhold", "A script convenience. The AI reads a star's spectrum through star_get and star_query."
+    ),
+    "target_get_stars": ToolDecision(
+        "withhold", "A script convenience, uncapped. The AI reads a target's stars through star_query."
+    ),
     "star_analyze_periodicity": ToolDecision(
         "fix", "Writes the result into the live star catalog. Needs a save=false option.", "change-data"
     ),
-    "star_detect_point_sources": ToolDecision(
-        "fix", "Needs a NumPy array, which MCP cannot send. Take a frame path."
-    ),
-    "star_plate_solve": ToolDecision(
+    "processing_plate_solve": ToolDecision(
         "fix",
         "Returns an astropy WCS, which MCP cannot send. Return the solved center and pixel scale.",
     ),
@@ -180,33 +154,29 @@ DECISIONS = {
         "of pipeline_run.",
     ),
     # ---- Drop ----
-    "processing_acquire_analysis_slot": ToolDecision(
-        "drop", "Internal concurrency lock exposed by reflection."
+    "processing_acquire_job_slot": ToolDecision("drop", "Internal concurrency lock exposed by reflection."),
+    "star_dataset_version": ToolDecision(
+        "drop",
+        "A change counter for the backend's answer cache. It tells an AI client nothing about the sky.",
     ),
-    "processing_acquire_stacking_slot": ToolDecision(
-        "drop", "Internal concurrency lock exposed by reflection."
+    "processing_stop_stacking_programs": ToolDecision(
+        "drop", "Stops every Siril the library started. The backend calls it when it stops."
+    ),
+    "processing_open_in_siril": ToolDecision(
+        "drop", "Opens a window on the person's screen. An AI client cannot see it. The app's button uses it."
     ),
     "planning_get_constellation_lines": ToolDecision(
         "drop",
         "Draws the Planetarium. Returns an empty list because of a wrong file path, and is 89 KB when fixed.",
     ),
-    "execution_record_divergence": ToolDecision(
+    "execution_build_divergence_record": ToolDecision(
         "drop", "Builds a record and writes nothing. The only arguments MCP can send are useless.", "compute"
     ),
     "execution_advance_session": ToolDecision(
         "drop", "Needs callables that MCP cannot send. No MCP use today."
     ),
-    "execution_execute_meridian_flip": ToolDecision("drop", "Needs callables that MCP cannot send."),
-    "execution_recover_fault": ToolDecision("drop", "Needs callables that MCP cannot send."),
-    "execution_recover_guide_star_loss": ToolDecision("drop", "Needs callables that MCP cannot send."),
     "execution_create_recorder": ToolDecision(
         "drop", "Builds an object. The result is only a text label over MCP."
-    ),
-    "observatory_safety_assess": ToolDecision(
-        "drop", "Works on readings MCP cannot express. Keeps state between calls."
-    ),
-    "observatory_equipment_summarize_device": ToolDecision(
-        "drop", "Classifies values the caller passes in. Reads nothing."
     ),
     # ---- Not offered yet: parts of the old sync set not built ----
     "observatory_remote_sync_frames": ToolDecision(
@@ -222,9 +192,13 @@ DECISIONS = {
         "ingest",
     ),
     "quality_measure_frames": ToolDecision(
-        "keep", "Built 2026-10-03. Statistics on raw frames. Nothing is saved."
+        "keep",
+        "Built 2026-10-03. Statistics on raw frames. Nothing is saved. Since 2026-10-31 kind=spectral "
+        "measures raw spectrum frames (zero-order position, tilt, width, peaks, saturated patches along "
+        "the spectrum, a predicted peak at another exposure, a summary by exposure and pier side); it "
+        "replaces quality_check_spectral_frames.",
     ),
-    "observatory_history_get_live_session_status": ToolDecision(
+    "review_get_live_session_status": ToolDecision(
         "keep",
         "Served 2026-10-03. refresh=true copies the newest Ekos and KStars logs into a local folder, "
         "which is reading from the telescope computer and adds files only. A folder argument is now "
@@ -245,7 +219,33 @@ DECISIONS = {
     "target_get_frame": ToolDecision(
         "keep", "Returns the path of one frame, found by ISO, exposure and index."
     ),
-    "observatory_history_frame_guiding": ToolDecision(
+    "observatory_mount_poll_external_alignment": ToolDecision(
+        "drop",
+        "The backend calls it to store the syncs other programs queued. It writes records, and the AI "
+        "is read-only.",
+        "ingest",
+    ),
+    "observatory_mount_get_polar_alignment": ToolDecision(
+        "drop",
+        'The backend shows it. An AI reads the stored runs through review_query(kind="alignment").',
+    ),
+    "observatory_equipment_apply_configuration": ToolDecision(
+        "drop",
+        "The backend calls it after the settings page saves. It points the INDI session at a host, so "
+        "it is not offered to the AI.",
+        "change-data",
+    ),
+    "review_query_alignment_sessions": ToolDecision(
+        "drop",
+        "The backend calls it with plate-solve attempts it has already read. The AI reads nights through "
+        'review_query(kind="alignment"), which groups them already.',
+    ),
+    "review_query_alignment_records": ToolDecision(
+        "drop",
+        "The backend reads the stored attempts for its alignment views and passes in library targets. "
+        'The AI reads nights through review_query(kind="alignment").',
+    ),
+    "review_frame_guiding": ToolDecision(
         "keep",
         "Built 2026-10-03. Cuts the stored guide-log samples to each light frame's exposure window. "
         "Reads only.",
@@ -277,15 +277,6 @@ DECISIONS = {
         "2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to stack.",
         "process",
     ),
-    "quality_check_spectral_frames": ToolDecision(
-        "keep",
-        "Built 2026-10-04. Measures raw spectrum frames: zero-order position, tilt, width, peaks, saturated "
-        "patches along the spectrum, a predicted peak at another exposure, and a summary by exposure and by "
-        "pier side. Nothing is saved.",
-    ),
-    "planning_get_imaged_field_centers": ToolDecision(
-        "withhold", "Replaced by target_imaged_field_centers, which runs as a background job."
-    ),
     "target_imaged_field_centers": ToolDecision(
         "keep",
         "Built 2026-10-04. The distinct sky positions imaged, read from FITS headers (about 35 s on this "
@@ -296,10 +287,11 @@ DECISIONS = {
         "Built 2026-10-04. Targets as short rows or one grouped record, the cameras used, or each "
         "target's frames per camera; replaces target_get and target_list.",
     ),
-    "planning_find_sources": ToolDecision(
+    "planning_query_sources": ToolDecision(
         "keep",
-        "Built 2026-10-04. Library targets and stars near a point, brightest stars first, cut at a limit "
-        "with the total reported.",
+        "Targets and stars near a point from the library, SIMBAD or the online catalogs, brightest stars "
+        "first, cut at a limit with the total reported. Replaces planning_find_sources, "
+        "planning_get_sources, planning_get_library_star_summaries and planning_get_online_catalog_sources.",
     ),
     "planning_lookup_coordinates": ToolDecision(
         "keep", "Built 2026-10-04. The position of a named object, from the library or SIMBAD. Reads only."
@@ -307,7 +299,7 @@ DECISIONS = {
     "processing_stack_summary": ToolDecision(
         "keep",
         "Built 2026-10-04. One short answer for a target's stack: frames stacked and skipped, rejected "
-        "fraction, star width against the inputs, flags and each exposure group. Reads the saved summary.",
+        "fraction, star width against the inputs and each exposure group. Reads the saved summary.",
     ),
     "star_query": ToolDecision(
         "keep", "Built 2026-10-03. Library star lookup with hard caps on rows, region size and full records."
@@ -328,32 +320,45 @@ DECISIONS = {
         "Built 2026-10-05. Draws one chart of a target or a star; the registry sends it as a PNG image. "
         "Saves nothing.",
     ),
-    "planning_get_library_star_summaries": ToolDecision("keep", "Reads star summaries for planning."),
-    "planning_get_sources": ToolDecision(
-        "keep", "Lists sources near a position. It also returns targets; target_query will cover those."
-    ),
-    "planning_get_online_catalog_sources": ToolDecision(
-        "keep", "Queries online catalogs over the network. Reads only."
-    ),
-    "planning_list_catalog_driver_metadata": ToolDecision("keep", "Lists the catalog drivers. Reads only."),
-    "planning_resolve_target_coordinates": ToolDecision(
-        "keep", "Looks up an object's position by name. Unknown names go to SIMBAD over the network."
-    ),
+    "planning_query_catalogs": ToolDecision("keep", "Lists the catalog drivers. Reads only."),
     "planning_get_visibility": ToolDecision(
         "keep",
         "Built 2026-10-03. Where objects are now or over a night: altitude, horizon clearance with "
         "caller-given blocked ranges, meridian crossing, Sun and Moon. Reads nothing stored.",
     ),
-    "planning_get_advisory": ToolDecision(
+    "review_get_advisory": ToolDecision(
         "keep",
-        "Built 2026-10-06; widened 2026-10-24. The target dataset report (quality), tonight's ranking, "
-        "the trust "
-        "in one star result, or the calibration inventory, worked out on demand. Saves nothing.",
+        "Built 2026-10-06; split 2026-10-31. The target dataset report (quality) or the trust in one star "
+        "result, worked out on demand. Saves nothing.",
+    ),
+    "planning_get_tonight_advice": ToolDecision(
+        "keep", "Tonight's ranking of targets, worked out on demand. Saves nothing."
+    ),
+    "planning_get_calibration_advice": ToolDecision(
+        "keep",
+        "How many calibration frames of one kind the library holds, worked out on demand. Saves nothing.",
     ),
     "planning_get_plan": ToolDecision(
-        "keep", "Built 2026-10-06. Reads a recorded session or the session list."
+        "keep", "Built 2026-10-06. Reads one recorded session, by id or by night."
     ),
-    "planning_deep_catalog_status": ToolDecision(
+    "planning_query_plans": ToolDecision(
+        "keep", "Lists the recorded sessions, the observation packages or the suggestion log. Reads only."
+    ),
+    "planning_get_package_for_target": ToolDecision(
+        "keep", "Reads the one package that stands for a target. Reads only."
+    ),
+    "planning_get_depth_goal": ToolDecision(
+        "keep",
+        "Built 2026-10-27 (#134). Reads a target's depth goal: the chosen level, the depth reached and the "
+        "time to reach the level. Saves nothing.",
+    ),
+    "planning_set_depth_goal": ToolDecision(
+        "withhold",
+        "Writes the user's chosen depth level for a target to the database. Not a hardware command, but the "
+        "user decided an AI may not change configuration.",
+        "change-data",
+    ),
+    "planning_get_deep_catalog_status": ToolDecision(
         "keep",
         "Built 2026-10-06. Reads the catalog file; the optional estimate queries the Gaia archive and "
         "saves nothing.",
@@ -369,7 +374,7 @@ DECISIONS = {
         "withhold", "Writes the calibration counts and the session after a night."
     ),
     # ---- Keep ----
-    "observatory_history_query": ToolDecision(
+    "review_query": ToolDecision(
         "keep",
         "Built 2026-10-03. Reads the recorded nights and calculates the analyses, in replies under 40,000 "
         "characters. The recorded-data tables are read through the butler, which creates a missing table. "
@@ -377,8 +382,9 @@ DECISIONS = {
     ),
     "jobs_query": ToolDecision(
         "keep",
-        "Built 2026-10-03. Reads jobs, log tails, stored results and data lineage from the logs database, "
-        "opened read-only. A job stuck at 'started' after the app stopped still shows as active.",
+        "Built 2026-10-03. Reads jobs, log tails, stored results, data lineage and (detail=warnings) the "
+        "warnings one job detected, from the logs and quality databases, opened read-only. A job stuck at "
+        "'started' after the app stopped still shows as active.",
     ),
     "quality_query": ToolDecision(
         "keep",
@@ -390,6 +396,13 @@ DECISIONS = {
         "Built 2026-10-24. Reads the camera, telescope, filter, exposure, gain setting, offset and binning "
         "that stored quality measurements point at, by capture setting id. Writes nothing and creates "
         "no table.",
+        tool_class="observe",
+    ),
+    "quality_calibration_identities": ToolDecision(
+        "keep",
+        "Built 2026-10-25. Reads which flat, bias and dark masters, optic, camera, Siril version and "
+        "stacking algorithm version each library stacking run used, by run id or target, so two runs "
+        "confounded by a calibration change can be told apart. Writes nothing and creates no table.",
         tool_class="observe",
     ),
     "quality_resolve_rows": ToolDecision(
@@ -425,10 +438,7 @@ DECISIONS = {
         "Ends the guide loop through a stop event MCP cannot send. Dropped with the other hardware tools.",
         "safe-stop",
     ),
-    "observatory_safety_execute_safe_state": ToolDecision(
-        "drop", "Commands the mount and enclosure, so it is dropped with the other hardware tools."
-    ),
-    "observatory_history_get_performance_envelope": ToolDecision(
+    "review_get_performance_envelope": ToolDecision(
         "keep", "Slow: reads every session and target twice.", "observe"
     ),
     "observatory_remote_check_connection": ToolDecision("keep", "A small network probe.", "observe"),
@@ -469,14 +479,59 @@ DECISIONS = {
         "actuate",
     ),
     "calibration_save": ToolDecision("withhold", "Writes the calibration index. The AI is read-only."),
-    "calibration_assess_flats": ToolDecision("keep", "Checks flats. Writes nothing."),
+    "calibration_assess": ToolDecision(
+        "keep",
+        "Judges the dark, bias or flat sets of the library from the stored numbers. "
+        "Flats are measured when asked. Writes nothing.",
+    ),
+    "calibration_measure_frames": ToolDecision(
+        "withhold",
+        "Writes the measured numbers of dark and bias frames to the quality store and their "
+        "stamps to the calibration index. The AI is read-only.",
+    ),
     "calibration_measure_sensor_noise": ToolDecision(
         "withhold",
         "With save on, it writes a measured gain and read noise into the camera profile in the "
         "configuration file. The AI is read-only.",
     ),
     "target_get_header": ToolDecision("keep", "Reads one FITS header."),
+    "target_read_frame_header": ToolDecision(
+        "drop",
+        "Reads a header from any path with typed values. target_get_header already serves an AI client.",
+    ),
     "target_read_saved": ToolDecision(
+        "drop",
+        "Returns the whole target record, frames and all, which overflows the reply. Use target_query.",
+    ),
+    "target_select_frames": ToolDecision(
+        "drop",
+        "Returns whole frame records, which can overflow the reply. Scripts and wayfindinglib use it. "
+        "review_frame_guiding already serves an AI client.",
+    ),
+    "calibration_camera_profile": ToolDecision(
+        "keep",
+        "Built 2026-11-01. Reads the stored facts about one camera model: aliases, limits and gains.",
+        tool_class="observe",
+    ),
+    "target_add_frames": ToolDecision(
+        "withhold", "Moves files into the library from any path. The AI is read-only; wayfindinglib calls it."
+    ),
+    "calibration_add_frames": ToolDecision(
+        "withhold", "Moves files into the calibration library from any path. The AI is read-only."
+    ),
+    "target_sessions": ToolDecision(
+        "keep", "Built 2026-11-01. Groups one target's frames into nights. Reads only.", tool_class="observe"
+    ),
+    "quality_get_aperture_record": ToolDecision(
+        "drop",
+        "Reads a file from any path and returns every aperture, which can overflow the reply. "
+        "Scripts and wayfindinglib use it.",
+    ),
+    "processing_predict_stack_weights": ToolDecision(
+        "drop",
+        "Takes per-frame lists that only forecast code holds. An AI client has no way to supply them.",
+    ),
+    "target_resolve": ToolDecision(
         "drop",
         "Returns the whole target record, frames and all, which overflows the reply. Use target_query.",
     ),
@@ -487,11 +542,6 @@ DECISIONS = {
     "ui_build_check": ToolDecision("keep", "Developer check."),
     "typegen_contract_validator": ToolDecision("keep", "Developer check."),
     # ---- Class corrections found by reading the code ----
-    "observatory_mount_run_polar_alignment_assist": ToolDecision(
-        "drop",
-        "Only fits a pointing model from plate-solve records passed in. The user does not want it.",
-        "compute",
-    ),
     "observatory_safety_enter_controller_mode": ToolDecision(
         "withhold",
         "Writes the delegation state (the Safe Mode toggle) to the database. Not a hardware command, but "
@@ -505,24 +555,7 @@ DECISIONS = {
         "change-data",
     ),
     # ---- Records: dropped ----
-    "observatory_equipment_save_commissioning_run": ToolDecision(
-        "drop", "Takes a whole run object that MCP cannot send. The ingest tools create the same records."
-    ),
-    "observatory_history_save_ekos_session_context": ToolDecision(
-        "drop", "Takes a whole context object that MCP cannot send. The ingest tools create the same records."
-    ),
-    "observatory_guiding_save_run": ToolDecision(
-        "drop", "Takes a whole run object that MCP cannot send. The ingest tools create the same records."
-    ),
     # ---- No use, empty, or cannot be called through MCP ----
-    "observatory_guiding_get_image": ToolDecision(
-        "drop",
-        "Returns the text form of raw bytes, and None in practice because the app never enables BLOBs.",
-        "observe",
-    ),
-    "observatory_equipment_cooling_ramp_rate": ToolDecision(
-        "drop", "Needs a cooling-policy object that MCP cannot send. Arithmetic on the caller's input."
-    ),
     # ---- Not wanted by the user ----
     "observatory_guiding_run_loop": ToolDecision(
         "drop",
@@ -530,75 +563,53 @@ DECISIONS = {
         "Sends guide pulses, which belongs to the dropped control side.",
         "actuate",
     ),
-    "observatory_guiding_drain_external_pulses": ToolDecision(
-        "drop",
-        "Clears guide pulses when read. Belongs to the dropped control side. The user does not want it.",
-    ),
     "observatory_guiding_refit_spectrum": ToolDecision(
         "drop", "Recomputes and stores a result. The user does not want an AI to trigger it."
-    ),
-    "observatory_imaging_compute_focus_correction": ToolDecision(
-        "drop", "Advice for a device command the app will not send. The user does not want it."
-    ),
-    "observatory_guiding_compute_correction": ToolDecision(
-        "drop", "Advice for a device command the app will not send. The user does not want it."
-    ),
-    "observatory_mount_compute_pointing_correction": ToolDecision(
-        "drop", "Advice for a device command the app will not send. The user does not want it."
-    ),
-    "quality_flag_value_outliers": ToolDecision(
-        "drop", "Arithmetic on numbers the caller passes in. The user does not want it."
     ),
     # ---- Writers with no read-only form ----
     **dict.fromkeys(
         (
-            "calibration_add",
-            "calibration_refresh",
-            "processing_discard_previous_stack",
+            "calibration_reindex_frames",
             "processing_process_target",
-            "processing_restore_excluded_frames",
-            "processing_swap_with_previous_stack",
             "star_create",
             "star_find_or_create_by_position",
             "star_update",
             "target_add",
             "target_create",
             "planning_create_mosaic",
-            "planning_create_plan",
-            "planning_edit_queue",
-            "planning_edit_package",
+            "planning_create_sequence",
+            "planning_create_package",
+            "planning_create_session",
+            "planning_add_to_queue",
+            "planning_reorder_queue",
+            "planning_remove_from_queue",
+            "planning_set_entry_exposures",
+            "planning_add_checklist_items",
+            "planning_set_framing",
+            "planning_update_package",
+            "planning_reopen_package",
+            "planning_dismiss_package",
+            "planning_undismiss_package",
             "planning_refresh_suggestions",
             "planning_tick_checklist_item",
         ),
         ToolDecision("withhold", READ_ONLY_NOTE),
     ),
-    "processing_record_frame_measurements": ToolDecision(
+    "quality_record_frame_measurements": ToolDecision(
         "withhold",
         "Measures a target's light frames and writes the numbers into the quality database, and stamps "
         "each measured frame on the target record. It never changes a frame file. The AI is read-only, "
         "so it reads the stored numbers with quality_query instead.",
         "change-data",
     ),
-    "processing_measure_half_difference_noise": ToolDecision(
-        "withhold",
-        "Stacks two halves of a target's frames into the target's _subsets folder (about one library "
-        "stack's time in all), subtracts them, and writes the noise of the difference into the quality "
-        "database. The halves are deleted afterwards, and the library stack, its previews and its "
-        "records are never changed. The AI is read-only, so it reads the stored numbers with "
-        "quality_query instead.",
-        "change-data",
-    ),
     **dict.fromkeys(
-        (
-            "processing_stack_subset",
-            "processing_measure_noise_growth",
-            "processing_measure_night_contributions",
-        ),
+        ("processing_measure_noise",),
         ToolDecision(
             "withhold",
             "Stacks some of a target's frames into the target's _subsets folder (never over the library "
             "stack, its previews or its records) and writes the noise of each result into the quality "
-            "database. It costs one stack for each subset, so it takes minutes. The AI is read-only, so "
+            "database. It costs one stack for each subset, so it takes minutes (kind=odd_even_difference "
+            "stacks two halves, about one library stack's time in all). The AI is read-only, so "
             "it reads the stored numbers with quality_query instead.",
             "change-data",
         ),
@@ -612,10 +623,6 @@ DECISIONS = {
     **dict.fromkeys(
         (
             "observatory_guiding_expose",
-            "observatory_guiding_pulse",
-            "observatory_guiding_run_backlash_calibration",
-            "observatory_guiding_run_calibration",
-            "observatory_guiding_run_exposure_test",
             "observatory_imaging_capture_image",
             "observatory_imaging_focus_move",
             "observatory_imaging_set_filter",
@@ -624,15 +631,11 @@ DECISIONS = {
             "observatory_mount_set_slew_rate",
             "observatory_mount_set_tracking",
             "observatory_mount_slew",
-            "observatory_mount_sync",
             "observatory_mount_unpark",
-            "observatory_safety_close_enclosure",
-            "observatory_safety_open_enclosure",
         ),
         ToolDecision("drop", DEVICE_COMMAND_NOTE),
     ),
     # ---- Replaced by a broader tool ----
-    "calibration_get": ToolDecision("drop", "Replaced by calibration_query."),
     "target_get": ToolDecision("drop", "Replaced by target_query."),
     "target_list": ToolDecision("drop", "Replaced by target_query."),
     "backend_health_check": ToolDecision("drop", "Replaced by app_status."),
@@ -662,6 +665,8 @@ CATEGORY_RULES = (
     (re.compile(r"^(processing_|diagnostics_|quality_|visualization_)"), "image-processing"),
     (re.compile(r"^jobs_"), "jobs-history"),
     (re.compile(r"^(planning_|execution_)"), "planning-sessions"),
+    (re.compile(r"^review_save_"), "observatory-config"),
+    (re.compile(r"^review_"), "observatory-status"),
     (
         re.compile(
             r"^observatory_[a-z]+_(save_|set_active_|apply_promotion_decision"

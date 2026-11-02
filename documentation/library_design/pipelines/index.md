@@ -26,7 +26,7 @@ Stage 1 returns a `Result` object. `run` is skipped only when that object says `
 | Spectroscopy | No-op: returns an empty `Result`. |
 | Asteroid detection | No-op: returns an empty `Result`. |
 
-The fifth pipeline, stacking, does not use this interface and has no adapter. It runs from `stage.stack_frames` through `stack_runner.run_stack` to a `StackingDriver`: the interface for a program that calibrates, aligns and combines frames. The one implementation uses Siril, an open-source astronomy image processor, through the `ImageProcessing` class in `siril_interface.py`.
+The fifth pipeline, stacking, does not use this interface and has no adapter. It runs from `stage.stack_frames` through `stack_runner.run_stack` to a `StackingDriver`: the interface for a program that calibrates, aligns and combines frames. The one implementation uses Siril, an open-source astronomy image processor, through the `ImageProcessing` class in the `siril_interface` package.
 
 ```mermaid
 flowchart LR
@@ -54,7 +54,7 @@ Code outside the library calls the pipelines through the package root (see `Astr
 | Photometry | [Photometry](photometry.md) | `PhotometryPipelineAdapter` | `PhotometryQualitySummary` | 11 run gates + 2 period checks |
 | Spectroscopy | [Spectroscopy](spectroscopy.md) | `SpectroscopyPipelineAdapter` | `SpectroscopyQualitySummary` | 9 run gates |
 | Asteroid detection | [Asteroid detection](asteroid_detection.md) | `AsteroidDetectionPipelineAdapter` | `AsteroidDetectionQualitySummary` | 5 run gates |
-| Image stacking | [Image stacking](stacking.md) | None (runs from `stage.stack_frames`) | `StackQualitySummary` | 16 run gates |
+| Image stacking | [Image stacking](stacking.md) | None (runs from `stage.stack_frames`) | `StackQualitySummary` | 25 run gates |
 
 A run gate is recorded on the run's quality summary. A period check is recorded on each period-search result and can lower its verdict. The counts cover only these recorded gates. The Architecture paper also describes quality tests that are not gates: the spectroscopy extinction record and sky-contamination share, kept with each spectrum, and the rejection of a poor wavelength fit when the instrument is calibrated.
 

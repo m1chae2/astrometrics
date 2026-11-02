@@ -21,8 +21,8 @@ differ from the others.
 from collections.abc import Sequence
 from typing import Any
 
-from astrometricslib.drivers.camera_profile_store import camera_identity
-from astrometricslib.foundation.errors import ConflictError
+from astrometricslib._internal.drivers.camera_profile_store import camera_identity
+from astrometricslib.foundation.errors import ConflictError, InvalidArgumentError
 
 __all__ = ["choose_camera_frames", "ensure_single_camera", "split_frames_by_camera"]
 
@@ -80,27 +80,51 @@ def describe_cameras(frames_by_camera: dict[str, list[Any]]) -> str:
     return ", ".join(f"'{name}' ({len(group)} frames)" for name, group in frames_by_camera.items())
 
 
-def ensure_single_camera(frames: Sequence[Any]) -> None:
+def ensure_single_camera(frames: Sequence[Any], *, target_id: str | None = None) -> None:
     """Refuse to go on if the frames come from more than one camera.
+
+    This is the one single-camera check. Two kinds of caller use it. The
+    stacking stage and the subset stack are internal steps and give no target
+    name, so a mixed set is a `ConflictError`. The public ``stack`` call
+    gives the target's name, and its caller chose the frames, so a mixed set is
+    an `InvalidArgumentError` that tells the caller how to choose one camera.
 
     Parameters
     ----------
     frames : `Sequence`
         The frames about to be stacked.
+    target_id : `str`, optional
+        The target the frames belong to. Given by the public ``stack`` call;
+        it selects the `InvalidArgumentError` and names the target in the
+        message.
 
     Raises
     ------
     ConflictError
-        If the frames come from more than one camera. The message names the
-        cameras and how many frames each took.
+        If the frames come from more than one camera and no ``target_id`` is
+        given. The message names the cameras and how many frames each took.
+    InvalidArgumentError
+        If the frames come from more than one camera and ``target_id`` is
+        given. The message names each camera and how many frames it took.
     """
     frames_by_camera = split_frames_by_camera(frames)
-    if len(frames_by_camera) > 1:
+    if len(frames_by_camera) <= 1:
+        return
+    if target_id is None:
         raise ConflictError(
             "These frames come from more than one camera, and frames from different cameras "
             f"cannot be stacked together: {describe_cameras(frames_by_camera)}. "
             "Choose the frames of one camera."
         )
+    raise InvalidArgumentError(
+        f"The selected frames of {target_id!r} come from more than one camera: "
+        f"{describe_cameras(frames_by_camera)}. Frames from different cameras are never stacked together. "
+        "Pass camera_id to choose one.",
+        details={
+            "target": target_id,
+            "cameras": {name: len(group) for name, group in frames_by_camera.items()},
+        },
+    )
 
 
 def choose_camera_frames(frames: Sequence[Any], camera: str) -> tuple[list[Any], str | None]:

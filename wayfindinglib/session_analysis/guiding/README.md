@@ -2,7 +2,7 @@
 
 This folder judges one observing night of guiding. The autoguider measures how far the guide star has drifted from its target position and commands small mount corrections to put it back. The analysis asks whether that record is trustworthy, how well the mount tracked, and whether anything should change.
 
-`pipeline.py` runs the three stages in order and builds the night's summary (`GuidingSessionAnalysis` in `wayfindinglib/models/session/session_quality.py`). The summary lists which limits it used (`resolvedParameters`) so any result can be traced to the numbers behind it. A night is flagged when any recommendation is a warning.
+`pipeline.py` runs the three stages in order and builds the night's summary (`GuidingSessionAnalysis` in `wayfindinglib/models/session/session_quality.py`). The summary lists which limits it used (`resolvedParameters`) so any result can be traced to the numbers behind it. A warning is a recommendation whose kind is `warning`; the summary has no separate flag.
 
 ## Stages
 

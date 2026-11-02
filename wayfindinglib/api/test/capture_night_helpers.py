@@ -9,7 +9,7 @@ different.
 
 from typing import Any
 
-from astrometricslib import observing_night_id
+from astrometricslib.reports import observing_night_id
 from wayfindinglib import ObservatoryControl
 from wayfindinglib.api.test.guiding_night_helpers import FIRST_NIGHT, record_guiding_night
 from wayfindinglib.models.session.capture_frame import CaptureFrame

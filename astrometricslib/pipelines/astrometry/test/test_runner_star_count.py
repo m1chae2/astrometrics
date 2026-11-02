@@ -8,7 +8,6 @@ from typing import Any
 
 import pytest
 
-from astrometricslib.drivers import astrometry_net_driver
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.astrometry import pipeline as astrometry_pipeline
 from astrometricslib.pipelines.astrometry import runner
@@ -43,9 +42,7 @@ def test_run_sets_number_of_stars_from_stacked_image_stars(monkeypatch: pytest.M
     monkeypatch.setattr(runner, "_write_solved_wcs_to_fits_header", lambda *_: None)
     monkeypatch.setattr(runner, "record_pipeline_stars", lambda stars, **_: (stars, None))
     monkeypatch.setattr(star_identifier, "get_gaia_query_statistics", lambda: {})
-    monkeypatch.setattr(astrometry_net_driver, "get_plate_solve_attempt_count", lambda: 1)
     monkeypatch.setattr(star_identifier, "reset_gaia_query_statistics", lambda: None)
-    monkeypatch.setattr(astrometry_net_driver, "reset_plate_solve_statistics", lambda: None)
 
     target = Target(id="Test Target")
     assert target.number_of_stars == 0

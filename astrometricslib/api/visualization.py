@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Literal
 
 from matplotlib.figure import Figure
 
-from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
+from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.models.stellar_source import StellarObject
@@ -56,6 +56,8 @@ _DEFAULT_FIGURE_SIZES = {
 class Visualization:
     """Draw FITS frames as pictures, and plot the results of the pipelines.
 
+    To draw the stars of a target on its stacked image, read their pixel
+    positions with `StellarCatalog.query` and ``detail="overlay"``.
     A target or star id that names nothing in the library raises
     `NotFoundError`. A file that cannot be drawn raises `ProcessingError`.
 

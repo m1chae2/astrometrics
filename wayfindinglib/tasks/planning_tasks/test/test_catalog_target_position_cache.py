@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 from astropy.coordinates import SkyCoord
 
+from astrometricslib import Target
 from wayfindinglib.tasks.planning_tasks import catalog_operations
 from wayfindinglib.tasks.planning_tasks.catalog_operations import _targets_within_radius
 
@@ -58,9 +59,9 @@ def _targets() -> list[SimpleNamespace]:
         Fake targets with `id`, `ra` and `dec` strings.
     """
     return [
-        SimpleNamespace(id="Near A", ra="10h 00m 00s", dec="20° 00′ 00″"),
-        SimpleNamespace(id="Near B", ra="10h 04m 00s", dec="20° 30′ 00″"),
-        SimpleNamespace(id="Far", ra="20h 00m 00s", dec="-40° 00′ 00″"),
+        Target(id="Near A", ra="10h 00m 00s", dec="20° 00′ 00″"),
+        Target(id="Near B", ra="10h 04m 00s", dec="20° 30′ 00″"),
+        Target(id="Far", ra="20h 00m 00s", dec="-40° 00′ 00″"),
     ]
 
 
@@ -113,8 +114,8 @@ def test_targets_without_a_position_are_left_out(tmp_path: Path) -> None:
     """Blank and placeholder positions never match."""
     (tmp_path / "astrometrics.db").write_text("x")
     targets = [
-        SimpleNamespace(id="Blank", ra="", dec=""),
-        SimpleNamespace(id="Placeholder", ra="0h 0m 0s", dec="0° 0′ 0′′"),
+        Target(id="Blank", ra="", dec=""),
+        Target(id="Placeholder", ra="0h 0m 0s", dec="0° 0′ 0′′"),
         *_targets(),
     ]
     handle, _ = _astrometrics(tmp_path, targets)

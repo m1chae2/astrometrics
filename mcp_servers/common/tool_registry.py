@@ -29,18 +29,13 @@ from typing import Any
 
 from mcp.types import ImageContent, TextContent, Tool
 
-from astrometricslib import (
-    ErrorInfo,
-    get_configuration,
-    is_path_inside,
-    log_context,
-    new_request_id,
-    resolve_mounted_path,
-    to_error_info,
-)
+from astrometricslib import get_configuration
+from astrometricslib.drivers import is_path_inside, resolve_mounted_path
+from astrometricslib.exceptions import ErrorInfo, to_error_info
+from astrometricslib.jobs import log_context, new_request_id
 from mcp_servers.common.profile import current_profile, find_withheld_tools, load_manifest, refusal_message
+from mcp_servers.common.reply_budget import fit_reply_to_budget
 from mcp_servers.common.tool_errors import ToolErrorContent, error_content
-from wayfindinglib import fit_reply_to_budget
 
 logger = logging.getLogger(__name__)
 
@@ -372,7 +367,7 @@ def result_content(result: Any) -> list[Any]:
         image and a short text. Anything else becomes indented JSON text;
         a reply too long for `MAXIMUM_REPLY_BYTES` is sent without the
         indentation. A target report, a ranking or a night review is first
-        shortened by `wayfindinglib.fit_reply_to_budget` (whole references or
+        shortened by `fit_reply_to_budget` (whole references or
         candidates, never part of a statement). A list still too long keeps as
         many whole items as fit (see `_whole_items_that_fit`); anything else is
         cut.

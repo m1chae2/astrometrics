@@ -74,7 +74,7 @@ class Result:
     `Result` still goes through `validate_output`/`to_result_dict`
     exactly like a real run's would, so the target still gets a real
     (if empty) quality summary and the caller still gets the normal
-    result structure, with the reason recorded as a flag rather than a
+    result structure, with the reason recorded as a failed gate rather than a
     one-off status/message pair.
 
     Beyond that, this is a grab-bag by design, not a forced common
@@ -193,7 +193,7 @@ class AnalysisPipeline(ABC):
         Returns
         -------
         summary : `PipelineQualitySummaryBase`
-            This run's quality record, including any flags it raised.
+            This run's quality record, including the gates it recorded.
         """
         pass
 

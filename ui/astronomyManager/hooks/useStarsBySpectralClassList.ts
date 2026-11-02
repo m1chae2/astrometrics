@@ -40,6 +40,9 @@ export const useStarsBySpectralClassList = (spectralClass: string | undefined) =
                 hasPhotometry: star.hasPhotometry,
                 ra: star.ra ?? undefined,
                 dec: star.dec ?? undefined,
+                magnitude: star.magnitude ?? undefined,
+                hasCatalogMagnitude: star.hasCatalogMagnitude,
+                spectralType: star.spectralType || undefined,
             };
         });
     }, [stars, filterText]);

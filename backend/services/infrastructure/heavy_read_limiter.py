@@ -16,7 +16,7 @@ import time
 from collections.abc import Callable, Hashable
 from typing import Any, TypeVar
 
-from astrometricslib import ConflictError
+from astrometricslib.exceptions import ConflictError
 
 logger = logging.getLogger(__name__)
 

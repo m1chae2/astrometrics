@@ -20,7 +20,7 @@ from typing import Any
 
 from astropy.wcs import WCS, FITSFixedWarning
 
-from astrometricslib.drivers.fits_access import read_header
+from astrometricslib._internal.drivers.fits_access import read_header
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 

@@ -14,14 +14,14 @@ different images and exposures can be compared for brightness. The
 intensities themselves are not changed.
 
 The full-scale value is the one the stacker already uses
-(`exposure_groups.FULL_SCALE_COUNTS`), checked on the ASI533MM Pro's stacks:
+(`constants.FULL_SCALE_COUNTS`), checked on the ASI533MM Pro's stacks:
 Deneb's stack tops out at exactly 1.0 where the star saturates.
 """
 
 import logging
 from typing import Any
 
-from astrometricslib.pipelines.stacking.processing.exposure_groups import FULL_SCALE_COUNTS
+from astrometricslib.foundation.constants import FULL_SCALE_COUNTS
 
 logger = logging.getLogger(__name__)
 

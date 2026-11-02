@@ -18,14 +18,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeVar
 
-from astrometricslib import (
-    Astrometrics,
-    AstrometricsError,
-    ConflictError,
-    InvalidArgumentError,
-    StarQueryResult,
-    StellarObject,
-)
+from astrometricslib import Astrometrics, StellarObject
+from astrometricslib.exceptions import AstrometricsError, ConflictError, InvalidArgumentError
 from backend.services.data.deletion_archive import archive_record_before_delete
 from backend.services.infrastructure.heavy_read_limiter import DEFAULT_SHARED_WAIT_SECONDS, HeavyReadLimiter
 
@@ -47,7 +41,7 @@ _MAXIMUM_CONCURRENT_PERIOD_SEARCHES = 2
 
 # The whole-catalog answers (per-target counts, class counts, a class's
 # stars) each read every star's summary, which takes seconds on a large
-# library. They are kept until `CatalogAccess.get_dataset_version`
+# library. They are kept until `StellarCatalog.dataset_version`
 # says a write has happened, not on a timer. This is only the fallback: how
 # long an answer may be served for a version already confirmed current, in
 # case a program outside this process (such as a maintenance script) wrote
@@ -153,7 +147,7 @@ class StellarService:
     def _cached_catalog_answer(self, key: str, compute: Callable[[], _Answer]) -> _Answer:
         """Answer a whole-catalog question, reusing the last answer if current.
 
-        Freshness is checked against `CatalogAccess.get_dataset_version`
+        Freshness is checked against `StellarCatalog.dataset_version`
         rather than a timer, so nothing is recomputed while the catalog is
         unchanged. `_CATALOG_ANSWER_CACHE_FALLBACK_MAX_AGE_SECONDS` is only a
         backstop for a write that counter missed.
@@ -197,7 +191,7 @@ class StellarService:
                 retryable=True,
             )
         try:
-            current_version = self.astrometrics.catalog_access.get_dataset_version("stellar_catalog")
+            current_version = self.astrometrics.stars.dataset_version()
             now = time.monotonic()
             with self._catalog_answers_lock:
                 cached = self._catalog_answers.get(key)
@@ -333,7 +327,7 @@ class StellarService:
         detail: str,
         limit: int | None,
         offset: int,
-    ) -> StarQueryResult:
+    ) -> Any:
         """Run a star listing query with the app's scope arguments.
 
         Parameters
@@ -371,7 +365,7 @@ class StellarService:
         detail: str,
         limit: int | None,
         offset: int,
-    ) -> StarQueryResult:
+    ) -> Any:
         """Ask the library for a star listing, without any limiting.
 
         Parameters are those of `_query_listing`.
@@ -572,7 +566,7 @@ class StellarService:
         """
         return "stellar catalog saved"
 
-    def get_object(self, object_id: str) -> StellarObject | None:
+    def get_object(self, star_id: str) -> StellarObject | None:
         """Retrieve a stellar object by ID.
 
         Returns
@@ -580,7 +574,7 @@ class StellarService:
         result : `StellarObject` or `None`
             The matching stellar object, or `None` if not found.
         """
-        return self.astrometrics.stars.get(object_id)
+        return self.astrometrics.stars.get(star_id)
 
     def get_object_fuzzy(self, search_term: str) -> StellarObject | None:
         """Retrieve a stellar object by ID or name.
@@ -597,11 +591,11 @@ class StellarService:
         return self.astrometrics.stars.get(search_term)
 
     def get_object_fuzzy_by_id(
-        self, object_id: str | None = None, search_term: str | None = None
+        self, star_id: str | None = None, search_term: str | None = None
     ) -> StellarObject | None:
         """RPC wrapper to resolve an astronomy object using fuzzy matching.
 
-        Accepts either param name (object_id or search_term).
+        Accepts either param name (star_id or search_term).
 
         Returns
         -------
@@ -611,19 +605,19 @@ class StellarService:
         Raises
         ------
         InvalidArgumentError
-            If neither ``object_id`` nor ``search_term`` is provided.
+            If neither ``star_id`` nor ``search_term`` is provided.
         """
-        term = search_term or object_id
+        term = search_term or star_id
         if not term:
-            raise InvalidArgumentError("Missing search term or object_id")
+            raise InvalidArgumentError("Missing search term or star_id")
         return self.get_object_fuzzy(term)
 
-    def analyze_periodicity(self, object_id: str) -> StellarObject | None:
+    def analyze_periodicity(self, star_id: str) -> StellarObject | None:
         """Search a star's light curve for a repeating pattern, and save it.
 
         Parameters
         ----------
-        object_id : `str`
+        star_id : `str`
             The id of the star to analyze.
 
         Returns
@@ -633,7 +627,7 @@ class StellarService:
             star exists.
         """
         with self._period_search_slots:
-            return self.astrometrics.stars.analyze_periodicity(object_id)
+            return self.astrometrics.stars.analyze_periodicity(star_id)
 
     def add_object(self, new_object: StellarObject) -> None:
         """Add or update a stellar object."""
@@ -645,7 +639,7 @@ class StellarService:
         updates = new_object.serialize()
         self.astrometrics.stars.update(new_object.id, updates)
 
-    def delete_object(self, object_id: str) -> bool:
+    def delete_object(self, star_id: str) -> bool:
         """Remove a stellar object from the database.
 
         Returns
@@ -653,14 +647,14 @@ class StellarService:
         result : `bool`
             `True` if the object was deleted, `False` otherwise.
         """
-        existing = self.astrometrics.stars.get(object_id)
+        existing = self.astrometrics.stars.get(star_id)
         if existing is not None:
             archive_record_before_delete(
                 self.config.get_library_path(), "stellar_object", existing.id, existing.serialize()
             )
-        return self.astrometrics.stars.delete(object_id)
+        return self.astrometrics.stars.delete(star_id)
 
-    def update_object(self, object_id: str, updates: dict) -> StellarObject | None:
+    def update_object(self, star_id: str, updates: dict) -> StellarObject | None:
         """Update stellar object properties.
 
         Returns
@@ -668,7 +662,7 @@ class StellarService:
         result : `StellarObject` or `None`
             The updated stellar object, or `None` if not found.
         """
-        return self.astrometrics.stars.update(object_id, updates)
+        return self.astrometrics.stars.update(star_id, updates)
 
     def get_spectroscopy_list(self) -> list[str]:
         """Get list of objects with processed spectrum data.
@@ -755,15 +749,16 @@ class StellarService:
             One `SkySource` per object, with the Planetarium's camelCase
             keys.
         """
-        sources = self.wayfinder.planning.get_sources(
+        result = self.wayfinder.planning.query_sources(
             ra,
             dec,
             radius,
-            include=["stars", "online"] if include_catalog else ["stars"],
-            limiting_magnitude=limiting_magnitude,
+            source=["targets", "stars", "simbad"] if include_catalog else ["targets", "stars"],
+            magnitude_max=limiting_magnitude,
             include_stars_without_catalog_magnitude=include_stars_without_catalog_magnitude,
+            limit=None,
         )
-        return [source.model_dump(by_alias=True) for source in sources]
+        return [source.model_dump(by_alias=True) for source in result.sources]
 
     def get_planetarium_targets(self) -> list[dict]:
         """List every library target that has coordinates, for the sky map.
@@ -779,8 +774,10 @@ class StellarService:
         REQ: PLN-2.2
         """
         whole_sky_radius_deg = 180.0
-        sources = self.wayfinder.planning.get_sources(0.0, 0.0, whole_sky_radius_deg, include=[])
-        return [source.model_dump(by_alias=True) for source in sources]
+        result = self.wayfinder.planning.query_sources(
+            0.0, 0.0, whole_sky_radius_deg, source=["targets"], limit=None
+        )
+        return [source.model_dump(by_alias=True) for source in result.sources]
 
     def get_online_catalog_sources(
         self,
@@ -817,14 +814,16 @@ class StellarService:
 
         REQ: PLN-3.1, PLN-3.2
         """
-        sources = self.wayfinder.planning.get_online_catalog_sources(
+        result = self.wayfinder.planning.query_sources(
             ra_deg=ra,
             dec_deg=dec,
             radius_deg=radius,
-            enabled_driver_names=enabled_drivers,
-            magnitude_limit=limiting_magnitude,
+            source=["catalogs"],
+            catalog_drivers=enabled_drivers,
+            magnitude_max=limiting_magnitude,
+            limit=None,
         )
-        return [source.model_dump(by_alias=True) for source in sources]
+        return [source.model_dump(by_alias=True) for source in result.sources]
 
     def deep_catalog_status(self) -> dict:
         """Say how much of the downloaded deep-star catalog is installed.
@@ -838,10 +837,10 @@ class StellarService:
         dict
             ``installed``, ``complete``, ``star_count``, ``pixels_downloaded``,
             ``pixels_total``, ``healpix_level``, ``magnitude_limit`` and
-            ``size_megabytes`` (from ``planning.deep_catalog_status``),
+            ``size_megabytes`` (from ``planning.get_deep_catalog_status``),
             plus ``installCommand``: the command that downloads it.
         """
-        status = self.wayfinder.planning.deep_catalog_status(register_job=False).model_dump(
+        status = self.wayfinder.planning.get_deep_catalog_status(register_job=False).model_dump(
             mode="json", exclude={"estimate"}
         )
         status["installCommand"] = DEEP_CATALOG_INSTALL_COMMAND
@@ -858,12 +857,12 @@ class StellarService:
 
         REQ: PLN-3.1
         """
-        return self.wayfinder.planning.list_catalog_driver_metadata()
+        return [driver.model_dump() for driver in self.wayfinder.planning.query_catalogs()]
 
     def get_constellation_lines(self) -> list[dict]:
         """Return all bundled constellation stick-figure line segments.
 
-        Unlike get_sources()/get_online_catalog_sources(), this takes no
+        Unlike get_sources() and get_online_catalog_sources(), this takes no
         ra/dec/radius — the full bundled dataset (a few hundred segments) is
         small enough to return in one shot and let the frontend project/cull
         it client-side, decoupled from whatever stars the user currently has
@@ -876,7 +875,7 @@ class StellarService:
 
         REQ: PLN-3.3
         """
-        return self.wayfinder.planning.get_constellation_lines()
+        return [segment.model_dump() for segment in self.wayfinder.planning.get_constellation_lines()]
 
     def get_visibility(
         self,

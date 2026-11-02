@@ -7,7 +7,7 @@
  * Last Image takes the column on the right. With no package picked, each panel says "Choose a
  * package or New package".
  */
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ImagePlanner } from './ImagePlanner';
 import { ImageList } from './ImageList';
 import { DitherSettings } from './DitherSettings';
@@ -21,7 +21,8 @@ import { useCommandAvailability } from '../common/hooks/useCommandAvailability';
 import { captureTestFrame } from '../common/services/imaging/captureService';
 import { emitToast } from '../common/utils/emitToast';
 import { DitherConfig, ExposureRequest, FilterType, ObservationPackage } from '../common/types/backendTypes';
-import { ditherValuesOf, filterLabel, frameTypeFromLabel, labelFromFrameType } from './packageModel';
+import { ditherValuesOf, frameTypeFromLabel, labelFromFrameType } from './packageModel';
+import { useAvailableFilters } from './hooks/useAvailableFilters';
 import '../common/styles/panels.css';
 import './packageLibrary.css';
 
@@ -79,7 +80,13 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
     const [imgType, setImgType] = useState('Light');
     const [imgCount, setImgCount] = useState(1);
     const [imgExposure, setImgExposure] = useState(60);
-    const [imgFilter, setImgFilter] = useState('L');
+    const [imgFilter, setImgFilter] = useState<string>(FilterType.NONE);
+    /** The observatory's configured filters, as the library names them. */
+    const { filters: availableFilters } = useAvailableFilters();
+    // Start the planner on the first configured filter once the list arrives.
+    useEffect(() => {
+        if (availableFilters.length > 0 && !availableFilters.includes(imgFilter)) setImgFilter(availableFilters[0]);
+    }, [availableFilters, imgFilter]);
     const [imgDelay, setImgDelay] = useState(0);
 
     /** True while the Delete confirmation is open. */
@@ -93,7 +100,7 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
         type: labelFromFrameType(request.frameType),
         count: request.count,
         exposure: request.exposureSec,
-        filter: filterLabel(request.filter ?? FilterType.NONE),
+        filter: request.filter ?? FilterType.NONE,
         delay: request.delaySec ?? 0,
         name: undefined,
     }));
@@ -194,6 +201,7 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
                                         onCancel={() => setEditingIndex(null)}
                                         onTestImage={handleTestImage}
                                         testImageUnavailableReason={availability.canCommand ? null : availability.reason}
+                                        filterOptions={availableFilters}
                                         values={{ type: imgType, count: imgCount, exposure: imgExposure, filter: imgFilter, delay: imgDelay }}
                                         onChange={(values) => {
                                             setImgType(values.type);

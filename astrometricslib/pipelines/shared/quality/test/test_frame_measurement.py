@@ -6,6 +6,7 @@ One test also runs the measurement on a real M 13 golden frame (Git LFS) and
 only checks that it runs and returns finite numbers.
 """
 
+import importlib
 import math
 import time
 from datetime import UTC, datetime
@@ -27,21 +28,9 @@ from astrometricslib.models.quality.measurement import MeasurementStatus, Qualit
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
 from astrometricslib.pipelines.shared.quality.frame_measurement import (
-    FRAME_MEASUREMENT_TIME_BUDGET_SECONDS,
-    PIXEL_BLUR_FWHM_SQUARED_FACTOR,
-    RegionWidth,
-    StarProfileResult,
-    StarWidthSample,
-    _mean_ellipticity_angle,
-    _Stopwatch,
-    effective_star_width_px,
     frame_subject_id,
-    look_up_frame_sensor_noise,
     measure_clipped_mean_adu,
-    measure_field_region_widths,
     measure_frame,
-    measure_sky_electrons,
-    measure_star_profiles,
 )
 from astrometricslib.pipelines.shared.quality.metric_registry import get_metric_registry
 from astrometricslib.pipelines.shared.quality.metrics import (
@@ -66,6 +55,25 @@ from astrometricslib.pipelines.shared.quality.metrics import (
 from astrometricslib.pipelines.shared.quality.record_measurements import (
     check_measurement_against_registry,
 )
+from astrometricslib.pipelines.shared.quality.sky_electrons import (
+    look_up_frame_sensor_noise,
+    measure_sky_electrons,
+)
+from astrometricslib.pipelines.shared.quality.star_profile_fitting import (
+    PIXEL_BLUR_FWHM_SQUARED_FACTOR,
+    RegionWidth,
+    StarProfileResult,
+    StarWidthSample,
+    _mean_ellipticity_angle,
+    effective_star_width_px,
+    measure_field_region_widths,
+    measure_star_profiles,
+)
+from astrometricslib.pipelines.shared.quality.time_budget import (
+    FRAME_MEASUREMENT_TIME_BUDGET_SECONDS,
+    Stopwatch,
+)
+from astrometricslib.pipelines.stacking.processing.group_gains import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.test.golden import measurements as golden_measurements
 
 # The camera setting of the synthetic frames, and the numbers the profile holds
@@ -584,7 +592,7 @@ def test_without_the_gaussian_function_that_metric_is_not_measured(round_frame_p
 
 def test_the_time_budget_counts_cpu_time_so_a_waiting_thread_does_not_use_it_up() -> None:
     """Sleeping adds nothing to the stopwatch; computing does."""
-    stopwatch = _Stopwatch(0.05)
+    stopwatch = Stopwatch(0.05)
     time.sleep(0.3)
     assert not stopwatch.expired()
     assert stopwatch.elapsed() < 0.05
@@ -858,7 +866,7 @@ def test_lookup_reports_a_profile_entry_that_holds_only_a_gain() -> None:
 
 
 def test_every_new_metric_names_a_function_that_exists() -> None:
-    """The seven new declarations each name a function in this module."""
+    """The seven new declarations each name a function that exists."""
     registry = get_metric_registry()
     for name in (
         FRAME_STAR_WIDTH_MOFFAT_PX,
@@ -869,7 +877,10 @@ def test_every_new_metric_names_a_function_that_exists() -> None:
         FRAME_SKY_NOISE_E,
         FRAME_READ_NOISE_E,
     ):
-        assert registry.get(name).computed_by.startswith("pipelines.shared.quality.frame_measurement.")
+        module_path, function_name = registry.get(name).computed_by.rsplit(".", 1)
+        assert module_path.startswith("pipelines.shared.quality.")
+        module = importlib.import_module(f"astrometricslib.{module_path}")
+        assert callable(getattr(module, function_name))
 
 
 GOLDEN_FRAME = golden_measurements.SAMPLE_FOLDER / f"{golden_measurements.DETECTION_FRAME}.fits"
@@ -1112,3 +1123,63 @@ def test_the_samples_hold_the_stars_behind_the_median() -> None:
     result = measure_star_profiles(_make_frame_pixels(), SATURATION_ADU)
     assert len(result.samples) == result.star_count
     assert float(np.median([sample.width_px for sample in result.samples])) == pytest.approx(result.width_px)
+
+
+def _profile_at_offset_ten() -> CameraProfile:
+    """Build a profile whose only entry is at offset 10, measured.
+
+    Returns
+    -------
+    profile : `CameraProfile`
+        The profile; the test frames are at offset 0.
+    """
+    profile = _profile()
+    entry = profile.sensor_noise[0].model_copy(update={"offset": "10"})
+    return profile.model_copy(update={"sensor_noise": (entry,)})
+
+
+def test_lookup_uses_another_offset_only_for_a_frame_known_to_be_unclipped() -> None:
+    """The offset fallback needs clipped_at_zero=False; its source says so."""
+    profile = _profile_at_offset_ten()
+    record = _frame_record("x.fits")
+    assert look_up_frame_sensor_noise(profile, record)[1] is None
+    assert look_up_frame_sensor_noise(profile, record, clipped_at_zero=True)[1] is None
+    gain, read_noise, reason = look_up_frame_sensor_noise(profile, record, clipped_at_zero=False)
+    assert reason == ""
+    assert gain.value == GAIN_E_PER_ADU
+    assert read_noise.provenance.kind == ProvenanceKind.MEASURED
+    assert "offset fallback" in read_noise.provenance.source
+
+
+def test_measure_frame_uses_the_offset_fallback_for_an_unclipped_frame(round_frame_path: str) -> None:
+    """A frame with no zero pixels borrows offset 10 gain and read noise."""
+    rows = _by_metric(
+        _run(
+            round_frame_path,
+            camera_profile=_profile_at_offset_ten(),
+            clipped_zero_fraction_limit=CLIPPED_FRAME_ZERO_FRACTION,
+        )
+    )
+    assert rows[FRAME_READ_NOISE_E][0].status == MeasurementStatus.MEASURED
+    assert "offset fallback" in rows[FRAME_READ_NOISE_E][0].reason
+    assert rows[FRAME_SKY_RATE_E_PER_S_PER_PX][0].status == MeasurementStatus.MEASURED
+
+
+def test_measure_frame_refuses_the_offset_fallback_without_a_limit_or_for_a_clipped_frame(
+    round_frame_path: str, tmp_path: Path
+) -> None:
+    """With no limit, or 30% zero pixels, there is no gain or read noise."""
+    rows = _by_metric(_run(round_frame_path, camera_profile=_profile_at_offset_ten()))
+    assert rows[FRAME_READ_NOISE_E][0].status == MeasurementStatus.NOT_MEASURED
+    pixels = _make_frame_pixels()
+    pixels[:, : int(0.3 * pixels.shape[1])] = 0.0
+    clipped_path = _write_frame(tmp_path, pixels)
+    rows = _by_metric(
+        _run(
+            clipped_path,
+            camera_profile=_profile_at_offset_ten(),
+            clipped_zero_fraction_limit=CLIPPED_FRAME_ZERO_FRACTION,
+        )
+    )
+    assert rows[FRAME_READ_NOISE_E][0].status == MeasurementStatus.NOT_MEASURED
+    assert "clipped at zero" in rows[FRAME_READ_NOISE_E][0].reason

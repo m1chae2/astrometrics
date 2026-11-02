@@ -15,6 +15,8 @@ recorded, and nothing is re-measured here.
 
 from typing import Any
 
+from astrometricslib.models.stellar_source import ladder_steps_between
+
 SPECTRAL_CLASS_LABELS: dict[str, str] = {
     "O": "Blue supergiants",
     "B": "Blue giants",
@@ -112,9 +114,10 @@ def _spectrum_summary(star: Any) -> dict[str, Any]:
     Returns
     -------
     summary : `dict` [`str`, `Any`]
-        The star's own type with its match quality, features, lines and
-        quality notes. The poor-match, separation and catalog-disagreement
-        verdicts are the models' own fields.
+        The star's own type with its match numbers (the RMS and the two
+        gaps), the steps between that type and the catalog type, features,
+        lines and quality notes. It states no verdict: whether a match is
+        poor or a gap too small is the quality advisory's statement.
     """
     spectroscopy = star.spectroscopy
     wavelengths = list(spectroscopy.wavelengths_angstrom or [])
@@ -122,7 +125,7 @@ def _spectrum_summary(star: Any) -> dict[str, Any]:
     rms = spectroscopy.self_determined_spectral_type_rms
     candidates = [_plain(item) for item in (spectroscopy.self_determined_spectral_type_candidates or [])]
     ranked = sorted(candidates, key=lambda item: item.get("rms", 9.0))
-    differs = star.differs_from_catalog
+    steps_between = ladder_steps_between(own_type, star.spectral_type)
     features = [
         {
             "feature": _field(item, "feature"),
@@ -153,27 +156,25 @@ def _spectrum_summary(star: Any) -> dict[str, Any]:
         "valid_fraction": _round(spectroscopy.valid_fraction),
         "own_spectral_type": own_type,
         "own_type_percent_off": _round(None if rms is None else rms * 100.0, 1),
-        "no_good_match": None if rms is None else spectroscopy.is_poor_match,
         "note": spectroscopy.self_determined_spectral_type_note or None,
         "closest_reference_types": [
             {"type": item.get("spectral_type"), "percent_off": _round(item.get("rms", 0.0) * 100.0, 1)}
             for item in ranked[:TOP_CANDIDATES]
         ],
         "rms_gap_to_second_best": _round(spectroscopy.rms_gap_to_second_best, 3),
-        "is_ambiguous": spectroscopy.is_ambiguous,
         "rms_gap_to_next_class": _round(spectroscopy.rms_gap_to_next_class, 3),
-        "is_class_ambiguous": spectroscopy.is_class_ambiguous,
-        "differs_from_catalog": differs,
+        "catalog_type_steps_apart": None if steps_between is None else abs(steps_between),
         "emission_line_source": spectroscopy.is_emission_line_source,
         "emission_lines": lines[:MAXIMUM_ROWS_PER_LIST],
         "absorption_features": features[:MAXIMUM_ROWS_PER_LIST],
         "dispersion_angle_degrees": _round(spectroscopy.dispersion_angle, 2),
         "median_trail_width_px": _round(sorted(widths)[len(widths) // 2], 2) if widths else None,
         "neighbor_wing_status": spectroscopy.neighbor_wing_status,
+        "neighbor_share_estimate": _round(spectroscopy.neighbor_share_estimate, 3),
+        "neighbor_overlap_count": spectroscopy.neighbor_overlap_count,
         "possible_neighbor_contamination": spectroscopy.possible_neighbor_contamination,
         "catalog_comparison": _plain(spectroscopy.catalog_comparison),
         "input_quality": _plain(spectroscopy.input_quality),
-        "output_quality": _plain(spectroscopy.output_quality),
     }
 
 

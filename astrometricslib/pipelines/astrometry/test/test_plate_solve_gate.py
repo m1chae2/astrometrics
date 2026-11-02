@@ -9,7 +9,6 @@ from typing import Any
 
 import pytest
 
-from astrometricslib.drivers import astrometry_net_driver
 from astrometricslib.models.quality.gate_result import GateStatus
 from astrometricslib.models.quality.quality_summary import AstrometryQualitySummary
 from astrometricslib.models.target import Target
@@ -43,7 +42,6 @@ def validate_with_options(
         The summary `validate_output` built.
     """
     monkeypatch.setattr(star_identifier, "get_gaia_query_statistics", lambda: {})
-    monkeypatch.setattr(astrometry_net_driver, "get_plate_solve_attempt_count", lambda: 1)
     context = SimpleNamespace(
         stellar_objects=[],
         sources_detected=5,
@@ -98,21 +96,20 @@ def _validate(monkeypatch: pytest.MonkeyPatch, wcs: Any, **context_fields: Any) 
     return validate_with_options(monkeypatch, {}, wcs, **context_fields)
 
 
-def test_an_unsolved_image_fails_the_gate_and_flags_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No solution gives a failed gate, a flagged run, and the old reason."""
+def test_an_unsolved_image_fails_the_gate_with_the_old_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No solution gives a failed gate that carries the old reason."""
     summary = _validate(monkeypatch, wcs=None)
 
     assert summary.gate(runner.PLATE_SOLVE_GATE_NAME).status is GateStatus.FAILED
-    assert summary.flagged is True
-    assert "plate solve failed" in summary.flag_reasons
+    assert summary.gate(runner.PLATE_SOLVE_GATE_NAME).detail == "plate solve failed"
 
 
-def test_a_solved_image_passes_the_gate_and_is_not_flagged(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A solution gives a passed gate that is on record, and no flag."""
+def test_a_solved_image_passes_the_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A solution gives a passed gate that is on record."""
     summary = _validate(monkeypatch, wcs=object())
 
     assert summary.gate(runner.PLATE_SOLVE_GATE_NAME).status is GateStatus.PASSED
-    assert "plate solve failed" not in summary.flag_reasons
+    assert summary.gate(runner.PLATE_SOLVE_GATE_NAME).detail != "plate solve failed"
 
 
 def _validate_with_measured_scale(

@@ -24,7 +24,7 @@ import re
 import time
 from typing import Any
 
-from astrometricslib import NotFoundError
+from astrometricslib.exceptions import NotFoundError
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.drivers.phd2.phd2_guiding_service import PHD2GuidingService
 from wayfindinglib.models.session.observation_session import ObservationSession, WeatherSample

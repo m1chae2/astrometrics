@@ -297,7 +297,7 @@ def _make_executor(target_callable: Callable[..., Any]) -> Callable[..., Any]:
             # (``register_job=True``) and runs in a background thread; the
             # client gets its real result if it finishes quickly, or the
             # job id to poll.
-            from astrometricslib import run_as_background_job
+            from astrometricslib.jobs import run_as_background_job
 
             arguments = _call_arguments(kwargs, parameter_names)
             return await asyncio.to_thread(

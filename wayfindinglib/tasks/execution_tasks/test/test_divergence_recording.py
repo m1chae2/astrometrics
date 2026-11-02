@@ -9,7 +9,7 @@ capabilities are rejected -- the behavior
 
 import pytest
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.models.policy.delegation import ObservatoryCapability
 from wayfindinglib.tasks.execution_tasks.divergence_recording import record_divergence
 

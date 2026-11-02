@@ -53,6 +53,7 @@ from typing import Any
 
 import numpy as np
 
+from astrometricslib.foundation.constants import FULL_SCALE_COUNTS
 from astrometricslib.models.camera_profile import CameraProfile
 from astrometricslib.pipelines.photometry.pre_processing.detector_noise import resolve_detector_noise
 from astrometricslib.pipelines.shared.quality.saturation import is_normalised_stack_scale
@@ -69,7 +70,6 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.quantum_efficiency_co
     quantum_efficiency_correction_factor,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import ResolutionProfile
-from astrometricslib.pipelines.stacking.processing.exposure_groups import FULL_SCALE_COUNTS
 
 # The variance of the median of `n` normal numbers is `pi / 2` times the
 # variance of one number divided by `n`, for large `n`. For the few pixels in

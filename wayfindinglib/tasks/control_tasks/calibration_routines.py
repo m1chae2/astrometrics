@@ -38,7 +38,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from astrometricslib import HardwareError
+from astrometricslib.exceptions import HardwareError
 from wayfindinglib.analytics.pointing_model import fit_pointing_model
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
 from wayfindinglib.models.session.telemetry import MountPointingModel
@@ -108,7 +108,7 @@ def run_guider_calibration(
     -------
     calibration : `GuiderCalibration`
         The derived camera angle and per-axis rates -- not persisted;
-        the caller (`control.guiding.run_calibration`)
+        the caller (`control.guiding._run_calibration`)
         decides whether and how to record it. May raise
         `compute_guider_calibration`'s `ValueError` if either pulse
         produced no measurable star displacement.

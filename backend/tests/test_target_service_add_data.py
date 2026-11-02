@@ -8,7 +8,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from astrometricslib import InvalidArgumentError, ReindexReport
+from astrometricslib._internal.catalog import ReindexReport
+from astrometricslib.exceptions import InvalidArgumentError
 from backend.services.data.target_service import TargetService
 
 

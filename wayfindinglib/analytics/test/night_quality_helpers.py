@@ -10,18 +10,12 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
-from astrometricslib import (
-    CaptureSetting,
-    FrameRecord,
-    MeasurementOrigin,
-    MeasurementStatus,
-    QualityMeasurement,
-    QualitySubject,
-    SubjectLevel,
-    Target,
-    frame_subject_id,
-)
+from astrometricslib import FrameRecord, Target
+from astrometricslib._internal.frames import frame_subject_id
+from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
+from astrometricslib.reports import CaptureSetting, MeasurementStatus, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.result_quality.efficiency import (
+    PINNED_METRIC_VERSIONS,
     READ_NOISE_METRIC,
     SKY_NOISE_METRIC,
     SKY_RATE_METRIC,
@@ -130,9 +124,9 @@ def make_rows(
         sky = 1.0 if bad else 0.5
         for metric, version, value in (
             (STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC, 1, width if bad else 2.0),
-            (SKY_RATE_METRIC, 2, sky),
-            (SKY_NOISE_METRIC, 2, (sky * 60.0) ** 0.5),
-            (READ_NOISE_METRIC, 1, 3.0),
+            (SKY_RATE_METRIC, PINNED_METRIC_VERSIONS[SKY_RATE_METRIC], sky),
+            (SKY_NOISE_METRIC, PINNED_METRIC_VERSIONS[SKY_NOISE_METRIC], (sky * 60.0) ** 0.5),
+            (READ_NOISE_METRIC, PINNED_METRIC_VERSIONS[READ_NOISE_METRIC], 3.0),
         ):
             rows.append(make_row(metric, version, value, target, frame))
         if bad:
@@ -168,19 +162,21 @@ class FakeLibrary:
         target_id: str | None = None,
         observing_night_id: str | None = None,
         **_: Any,
-    ) -> list[QualityMeasurement]:
+    ) -> QualityQueryResult:
         """Answer ``quality.query`` from the stored rows.
 
         Returns
         -------
-        rows : `list` [`QualityMeasurement`]
+        answer : `QualityQueryResult`
             The rows that match.
         """
-        return [
-            row
-            for row in self.rows
-            if (metric is None or row.metric == metric)
-            and (level is None or row.subject.level.value == level)
-            and (target_id is None or row.subject.target_id == target_id)
-            and (observing_night_id is None or row.subject.observing_night_id == observing_night_id)
-        ]
+        return QualityQueryResult(
+            rows=[
+                row
+                for row in self.rows
+                if (metric is None or row.metric == metric)
+                and (level is None or row.subject.level.value == level)
+                and (target_id is None or row.subject.target_id == target_id)
+                and (observing_night_id is None or row.subject.observing_night_id == observing_night_id)
+            ]
+        )

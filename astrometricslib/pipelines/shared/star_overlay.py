@@ -27,7 +27,7 @@ Star clusters and ``Star_<n>`` field detections are never labeled.
 import logging
 from typing import Any
 
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_header
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
 from astrometricslib.models.catalog_queries import OverlayStar
 from astrometricslib.models.stellar_source import StellarObject, has_catalog_magnitude
 from astrometricslib.pipelines.shared.star_catalog_queries import (

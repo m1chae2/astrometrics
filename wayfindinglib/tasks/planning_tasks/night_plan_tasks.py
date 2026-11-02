@@ -1,8 +1,8 @@
 """Purpose: The steps that change a stored night plan.
 
 Description: The night plan is an `ObservationSession` (register entry
-WAY-50). `ObservationPlanning.edit_queue` and `tick_checklist_item` hand
-their work to the functions here. They do four jobs:
+WAY-50). The queue verbs of `ObservationPlanning` and `tick_checklist_item`
+hand their work to the functions here. They do four jobs:
 
 * Merge or refuse repeated exposure requests, so the app never has to.
 * Check each request against what the camera allows (`allowed_capture_values`).
@@ -18,7 +18,7 @@ nothing and keeps the revision. A write that names an old revision raises
 from collections.abc import Iterable
 from datetime import UTC, datetime
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.analytics.result_quality.allowed_capture_values import AllowedCaptureValues
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.planning.observation_package import ExposureRequest

@@ -7,6 +7,12 @@
  * backend serves the run, and it starts only if a test file that is going to
  * run contains the marker `@requires-test-backend`. The backend uses a
  * throwaway library, a random port and the INDI simulator.
+ *
+ * Everything the backend stores stays in the throwaway folder: the settings file
+ * names the image library and the wayfinding library, and the data, cache and
+ * state folders point inside it. Without the wayfinding entry and those folders
+ * the backend falls back to the user's real ones, and the suite's setup call
+ * rewrites the real `wayfinding.db`.
  */
 
 import { spawn, ChildProcess } from 'child_process';
@@ -70,6 +76,53 @@ function reserveFreePort(): Promise<number> {
 }
 
 /**
+ * Writes the settings file for the test backend and creates the folders it names.
+ *
+ * @param {string} sandboxDirectory - The throwaway folder for this run.
+ * @return {string} The path of the settings file.
+ */
+export function writeSandboxConfig(sandboxDirectory: string): string {
+    const libraryDirectory = path.join(sandboxDirectory, 'library');
+    const framesDirectory = path.join(libraryDirectory, 'frames');
+    const wayfindingDirectory = path.join(sandboxDirectory, 'wayfinding');
+    fs.mkdirSync(framesDirectory, { recursive: true });
+    fs.mkdirSync(wayfindingDirectory, { recursive: true });
+    const configPath = path.join(sandboxDirectory, 'astrometrics.config.toml');
+    fs.writeFileSync(
+        configPath,
+        `["Image Library"]\npath = "${libraryDirectory}"\nframes_path = "${framesDirectory}"\n\n` +
+            `["Wayfinding Library"]\npath = "${wayfindingDirectory}"\n`,
+    );
+    return configPath;
+}
+
+/**
+ * Builds the environment variables that keep the test backend inside its throwaway folder.
+ *
+ * @param {NodeJS.ProcessEnv} parentEnvironment - The environment of this test run.
+ * @param {string} configPath - The settings file from `writeSandboxConfig`.
+ * @param {number} port - The port the backend listens on.
+ * @return {NodeJS.ProcessEnv} The backend's environment.
+ */
+export function testBackendEnvironment(
+    parentEnvironment: NodeJS.ProcessEnv,
+    configPath: string,
+    port: number,
+): NodeJS.ProcessEnv {
+    const sandboxDirectory = path.dirname(configPath);
+    return {
+        ...parentEnvironment,
+        ASTROMETRICS_CONFIG: configPath,
+        ASTROMETRICS_CONFIG_PATH: configPath,
+        ASTROMETRICS_TESTING: '1',
+        ASTROMETRICS_PORT: String(port),
+        XDG_DATA_HOME: path.join(sandboxDirectory, 'xdg_data'),
+        XDG_CACHE_HOME: path.join(sandboxDirectory, 'xdg_cache'),
+        XDG_STATE_HOME: path.join(sandboxDirectory, 'xdg_state'),
+    };
+}
+
+/**
  * Starts the backend on a fresh port and waits for it to answer an RPC probe.
  *
  * @param {string} configPath - Sandbox config file to pass via ASTROMETRICS_CONFIG_PATH.
@@ -85,12 +138,7 @@ async function trySpawnBackend(
 
     const backend = spawn(pythonPath, ['-m', 'backend.main_backend'], {
         cwd: repoRoot,
-        env: {
-            ...process.env,
-            ASTROMETRICS_CONFIG_PATH: configPath,
-            ASTROMETRICS_TESTING: '1',
-            ASTROMETRICS_PORT: String(port),
-        },
+        env: testBackendEnvironment(process.env, configPath, port),
         stdio: 'pipe',
     });
 
@@ -153,11 +201,7 @@ export default async function setup(project: TestProject): Promise<() => void> {
     }
 
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'astrometrics-test-ui-'));
-    const libraryDirectory = path.join(tempDir, 'library');
-    const framesDirectory = path.join(libraryDirectory, 'frames');
-    fs.mkdirSync(framesDirectory, { recursive: true });
-    const configPath = path.join(tempDir, 'astrometrics.config.toml');
-    fs.writeFileSync(configPath, `["Image Library"]\npath = "${libraryDirectory}"\nframes_path = "${framesDirectory}"\n`);
+    const configPath = writeSandboxConfig(tempDir);
 
     let backend: ChildProcess | null = null;
     let port = -1;

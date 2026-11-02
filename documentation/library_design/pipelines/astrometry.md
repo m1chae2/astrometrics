@@ -50,9 +50,9 @@ No card is strictly required: a missing card weakens a hint or a correction, and
 
 | FITS keyword | Requirement | Data type | Used for | When missing |
 | --- | --- | --- | --- | --- |
-| `DATE-OBS` | Recommended | `str` (ISO-8601, UTC) | Time the shutter opened. Used to move Gaia DR3 star positions from the catalog date to the image date (Eq. 3). | Gaia positions stay at the catalog date (epoch 2016.0) and the run is flagged. |
+| `DATE-OBS` | Recommended | `str` (ISO-8601, UTC) | Time the shutter opened. Used to move Gaia DR3 star positions from the catalog date to the image date (Eq. 3). | Gaia positions stay at the catalog date (epoch 2016.0) and the run records the `gaia_epoch_unknown` flag. |
 | `FOCALLEN` | Recommended | `float` (mm) | Telescope focal length, used for the pixel-scale hint (Eq. 2). | The focal length set in the configuration. |
-| `XPIXSZ` / `YPIXSZ` | Recommended | `float` (μm) | Pixel size after binning (binning joins neighboring sensor pixels into one), used as written. If the two values differ, they are averaged and the run is flagged. | `PIXSIZE1` / `PIXSIZE2` times `XBINNING` / `YBINNING`. |
+| `XPIXSZ` / `YPIXSZ` | Recommended | `float` (μm) | Pixel size after binning (binning joins neighboring sensor pixels into one), used as written. If the two values differ, they are averaged and the run records the `scale_hint_binning_mismatch` flag. | `PIXSIZE1` / `PIXSIZE2` times `XBINNING` / `YBINNING`. |
 | `PIXSIZE1` / `PIXSIZE2` | Optional | `float` (μm) | Pixel size before binning; multiplied by the binning factor. | `PIXSCAL`. |
 | `XBINNING` / `YBINNING` | Optional | `int` | Binning factor: how many sensor pixels are joined along each axis. Applied to `PIXSIZE1` / `PIXSIZE2`. | 1. |
 | `PIXSCAL` | Optional | `float` (arcsec/px) | Pixel scale (the sky angle one pixel covers), read only when no pixel size is given. | No scale hint: the solver searches all scales. |
@@ -69,9 +69,9 @@ This section covers, in order: finding stars, estimating how much sky a pixel co
 
 A point source is anything in the image that looks like a single star. To find them, the pipeline first estimates the sky background: the faint glow behind the stars. The background is a 2-D map (photutils `Background2D`, median estimator, 3σ clipping). Sigma clipping repeatedly drops pixels more than 3 standard deviations from the median, so stars do not inflate the sky estimate. A small image falls back to one sigma-clipped median.
 
-The test below asks how many noise units a pixel stands above the local sky. A large value means a real source; a value near zero means only sky. A source is kept when its peak stands above the background $B_\text{sky}$ by the threshold $k$, where $\sigma_\text{sky}$ is the noise of the background:
+The test below asks how many noise units a pixel stands above the local sky. A large value means a real source; a value near zero means only sky. A source is kept when its peak stands above the background $B_\text{sky}$ by the threshold $k$, where $\sigma_\text{bkg}$ is the noise of the background:
 
-$$\frac{I(x, y) - B_\text{sky}(x, y)}{\sigma_\text{sky}} \ge k = 5 \tag{1}$$
+$$\frac{I(x, y) - B_\text{sky}(x, y)}{\sigma_\text{bkg}} \ge k = 5 \tag{1}$$
 
 `DAOStarFinder` (a standard star finder from photutils) also checks shape. Sharpness compares a peak's height with its spread; roundness compares its width along the two axes, with 0 meaning round. It keeps sharpness in $[0.2, 1.0]$ and roundness in $[-0.6, +0.6]$, which rejects hot pixels (single pixels that always read high) and filament structure.
 
@@ -146,7 +146,7 @@ Symbols follow the architecture paper's [list of symbols](../Astrometrics_Librar
 | Symbol | Meaning | Unit |
 | --- | --- | --- |
 | $B_\text{sky}(x, y)$ | Background (sky) level at a pixel | ADU |
-| $\sigma_\text{sky}$ | Noise of the background | ADU |
+| $\sigma_\text{bkg}$ | Noise of the background | ADU |
 | $k$ | Detection threshold, in units of the background noise | none |
 | $s$ | Pixel scale | arcsec/px |
 | $p_\text{px}$ | Pixel pitch (binned pixel size) | μm |
@@ -169,7 +169,7 @@ Symbols follow the architecture paper's [list of symbols](../Astrometrics_Librar
 
 ### 4.1 Quality gates
 
-A quality gate is an automatic test on a run. It passes, fails, or is "not checked" when the data it needs are missing. A failed gate marks the run as flagged (the `flagged` field in Section 7) so a person can look at it. The list below is read from the code when this guide is generated.
+A quality gate is an automatic test on a run. It passes, fails, or is "not checked" when the data it needs are missing. A failed gate is stored as a warning row, and the job's warnings list it so a person can look at it. The list below is read from the code when this guide is generated.
 
 | Gate | Role | Defined in | What it checks |
 | --- | --- | --- | --- |
@@ -227,8 +227,6 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `resolved_parameters` | `dict[str, Any]` | The settings the run actually used, after defaults were filled in. |
 | `camera_profile` | `astrometricslib.models.applied_camera_profile.AppliedCameraProfile \| None` | The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip. |
 | `quality_processing_applied` | `bool` | Whether the quality gates were run. |
-| `flagged` | `bool` | True if one or more quality gates failed, so a person should look at the run. |
-| `flag_reasons` | `list[str]` | One plain sentence for each reason the run was flagged. |
 | `gates` | `list[astrometricslib.models.quality.gate_result.GateResult]` | Every quality gate result: passed, failed or not checked. |
 | `created_at` | `datetime.datetime` | Time the quality summary was made, in UTC. |
 | `provenance_activity_id` | `str \| None` | Identifier of this run in the provenance record (the IVOA-standard log of which run made which data). |

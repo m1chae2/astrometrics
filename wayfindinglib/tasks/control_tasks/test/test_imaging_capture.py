@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import ConfigurationError, HardwareError, InvalidArgumentError
+from astrometricslib.exceptions import ConfigurationError, HardwareError, InvalidArgumentError
 from wayfindinglib.analytics.guide_pulses import GUIDE_RATE_ARCSEC_PER_S
 from wayfindinglib.models.planning.observation_package import DitherConfig
 from wayfindinglib.tasks.control_tasks import hardware_operations, imaging_capture

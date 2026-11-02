@@ -16,13 +16,13 @@ Comprehensive Python API reference for ``astrometricslib`` and ``wayfindinglib``
         :link: astrometricslib
         :link-type: doc
 
-        Image calibration, plate solving, star field visualization, catalog and file storage access, and spectroscopy pipelines.
+        Process, measure and catalog astronomical images.
 
     .. grid-item-card:: Wayfinding Library
         :link: wayfindinglib
         :link-type: doc
 
-        INDI mount control, target visibility calculations, mosaic planning, and observation execution.
+        Plan and run observing sessions and control the observatory.
 
 .. toctree::
    :maxdepth: 2

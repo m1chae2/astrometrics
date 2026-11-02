@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from astrometricslib import ConflictError, InvalidArgumentError
+from astrometricslib.exceptions import ConflictError, InvalidArgumentError
 from wayfindinglib.drivers.catalog.deep_star_store import (
     BRIGHT_TIER_MAX_MAGNITUDE,
     COARSE_TILE_HEIGHT_DEGREES,

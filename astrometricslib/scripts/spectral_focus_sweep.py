@@ -59,7 +59,7 @@ from pathlib import Path
 
 import numpy as np
 
-from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.models.measured_line_spread import MeasuredLineSpread
 from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline

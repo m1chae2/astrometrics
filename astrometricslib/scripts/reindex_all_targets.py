@@ -8,7 +8,8 @@ import logging
 import sqlite3
 import sys
 
-from astrometricslib import FITS_READ_ERRORS, Astrometrics, AstrometricsError, configure_logging
+from astrometricslib import Astrometrics, configure_logging
+from astrometricslib.exceptions import FITS_READ_ERRORS, AstrometricsError
 
 
 def run_batch_processing() -> None:

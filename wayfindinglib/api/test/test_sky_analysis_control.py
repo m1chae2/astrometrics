@@ -1,7 +1,7 @@
 """Purpose: End-to-end tests for the sky and recurring-issue analyses.
 
 Description: Runs the sky-coverage and recurring-issue analyses behind
-`control.history.query` (`night_analysis.sky_coverage_analysis` and
+`review.query` (`night_analysis.sky_coverage_analysis` and
 `recurring_issues`) against a real isolated configuration, Butler and
 log database, with the science library's frames replaced by synthetic ones.
 Checks that a planted low-altitude effect is found across nights, that nights
@@ -12,7 +12,7 @@ is reported as recurring.
 import numpy as np
 import pytest
 
-from astrometricslib import observing_night_id
+from astrometricslib.reports import observing_night_id
 from wayfindinglib import ObservatoryControl
 from wayfindinglib.api.test.capture_night_helpers import Library
 from wayfindinglib.api.test.guiding_night_helpers import FIRST_NIGHT, record_guiding_night

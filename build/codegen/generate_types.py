@@ -18,11 +18,14 @@ from pydantic import BaseModel
 # Ensure we can import from backend
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from astrometricslib import ErrorInfo, FilterType
+from astrometricslib import FilterType
+from astrometricslib.exceptions import ErrorInfo
 from astrometricslib.foundation.jobs.models import ProcessingJob, ProcessStatus
 from astrometricslib.models.applied_camera_profile import AppliedCameraProfile
+from astrometricslib.models.calibration_ingest import CalibrationMeasurementReport, CalibrationSetHealth
 from astrometricslib.models.calibration_inventory import CalibrationEntry, CalibrationStats
 from astrometricslib.models.catalog_queries import CalibrationQueryResult, OverlayStar, TargetStarCount
+from astrometricslib.models.job_queries import JobLogLine, JobQueryResult, JobSummary, JobWarning, LineageRun
 from astrometricslib.models.measured_line_spread import MeasuredLineSpread
 from astrometricslib.models.moving_object import (
     AsteroidDetectionCandidate,
@@ -31,8 +34,10 @@ from astrometricslib.models.moving_object import (
     FrameDetection,
     MovingObjectTrack,
 )
+from astrometricslib.models.processing_results import PreviewRemakeResult
 from astrometricslib.models.quality.astrometry_quality import CatalogMatchQuality
 from astrometricslib.models.quality.capture_setting import CaptureSetting
+from astrometricslib.models.quality.excluded_frames import SetAsideFrameRecord
 from astrometricslib.models.quality.gaia_xp_comparison import (
     GaiaXpBandResidual,
     GaiaXpBandSummary,
@@ -58,6 +63,8 @@ from astrometricslib.models.quality.metric_spec import (
     MetricSummary,
     UncertaintyKind,
 )
+from astrometricslib.models.quality.photometry_quality import OutputQualityAssessment
+from astrometricslib.models.quality.quality_reports import StackQualityReport, StackSummary
 from astrometricslib.models.quality.quality_summary import (
     AsteroidDetectionPipelineQualityMetrics,
     AsteroidDetectionQualitySummary,
@@ -69,7 +76,6 @@ from astrometricslib.models.quality.quality_summary import (
     NoiseModelPoint,
     PhotometryPipelineQualityMetrics,
     PhotometryQualitySummary,
-    SpectralClassificationConcern,
     SpectroscopyPipelineQualityMetrics,
     SpectroscopyQualitySummary,
     StackingPipelineQualityMetrics,
@@ -78,14 +84,15 @@ from astrometricslib.models.quality.quality_summary import (
 )
 from astrometricslib.models.quality.row_frames import QualityRowFile, QualityRowResolution
 from astrometricslib.models.quality.spectroscopy_quality import (
+    AbsorptionFeatureLimits,
     CatalogComparison,
+    DetectionLabelLimits,
+    EmissionLineLimits,
     InputQualityAssessment,
-    OutputQualityAssessment,
     StageQualityCheckpoint,
     StageQualityMetric,
     StageQualityRollup,
 )
-from astrometricslib.models.quality.stacking_quality import StackingInputQuality, StackingOutputQuality
 from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasurement
 from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
 from astrometricslib.models.stellar_source import (
@@ -136,6 +143,7 @@ from backend.services.infrastructure.system_status_service import (
     SystemPulse,
     TelescopePulse,
 )
+from backend.services.processing.stack_review_service import StackReviewStart
 from wayfindinglib.drivers.indi_interface import TelescopeStatus
 from wayfindinglib.models.control_status import SafetyStatus
 from wayfindinglib.models.equipment_and_site.camera_noise import CameraNoiseSetting
@@ -144,6 +152,7 @@ from wayfindinglib.models.equipment_and_site.performance_envelope import (
     PerformanceEnvelope,
     TrackingRiskMap,
 )
+from wayfindinglib.models.planning.depth_goal import DepthGoalStatus, DepthLevelOption
 from wayfindinglib.models.planning.framing import SkyCorner
 from wayfindinglib.models.planning.mosaic import MosaicPanel
 from wayfindinglib.models.planning.observation_package import ExposureRequest, ObservationPackage
@@ -297,6 +306,17 @@ def generate_enum(enum_cls: type[Enum], name: str) -> str:
     return "\n".join(lines)
 
 
+FIELD_TYPE_OVERRIDES: dict[str, dict[str, Any]] = {
+    "TelescopePulse": {"alignment_targets": list[AlignmentTargetSession]},
+}
+"""Fields whose TypeScript type is richer than the backend model's annotation.
+
+The backend may only use the libraries' public names, so `TelescopePulse` holds
+the grouped alignment sessions as plain dictionaries. The reply carries
+`AlignmentTargetSession` records, and the UI wants that type.
+"""
+
+
 def generate_interface(model: type[BaseModel], name: str) -> str:
     """Generate a TypeScript interface definition from a Pydantic model.
 
@@ -323,6 +343,7 @@ def generate_interface(model: type[BaseModel], name: str) -> str:
     lines.append(f"export interface {name} {{")
 
     hints = get_type_hints(model, include_extras=True)
+    hints.update(FIELD_TYPE_OVERRIDES.get(name, {}))
     for field_name, field_info in model.model_fields.items():
         ts_name = field_info.alias or field_name
         optional = not field_info.is_required()
@@ -510,8 +531,12 @@ def render_types() -> str:
         generate_interface(GaiaXpBandSummary, "GaiaXpBandSummary"),
         generate_interface(GaiaXpRunSummary, "GaiaXpRunSummary"),
         generate_interface(ExtinctionCorrectionRecord, "ExtinctionCorrectionRecord"),
+        generate_interface(AbsorptionFeatureLimits, "AbsorptionFeatureLimits"),
+        generate_interface(EmissionLineLimits, "EmissionLineLimits"),
+        generate_interface(DetectionLabelLimits, "DetectionLabelLimits"),
         generate_interface(CatalogComparison, "CatalogComparison"),
         generate_interface(InputQualityAssessment, "InputQualityAssessment"),
+        # The photometry class of this name.
         generate_interface(OutputQualityAssessment, "OutputQualityAssessment"),
         generate_interface(StageQualityMetric, "StageQualityMetric"),
         generate_interface(StageQualityCheckpoint, "StageQualityCheckpoint"),
@@ -570,8 +595,6 @@ def render_types() -> str:
         generate_interface(TargetSessionContribution, "TargetSessionContribution"),
         generate_interface(ExposureGroupSummary, "ExposureGroupSummary"),
         generate_interface(AppliedCameraProfile, "AppliedCameraProfile"),
-        generate_interface(StackingInputQuality, "StackingInputQuality"),
-        generate_interface(StackingOutputQuality, "StackingOutputQuality"),
         generate_interface(StackingPipelineQualityMetrics, "StackingPipelineQualityMetrics"),
         generate_interface(StackQualitySummary, "StackQualitySummary"),
         generate_interface(AstrometryPipelineQualityMetrics, "AstrometryPipelineQualityMetrics"),
@@ -580,7 +603,6 @@ def render_types() -> str:
         generate_interface(NoiseModelPoint, "NoiseModelPoint"),
         generate_interface(PhotometryPipelineQualityMetrics, "PhotometryPipelineQualityMetrics"),
         generate_interface(PhotometryQualitySummary, "PhotometryQualitySummary"),
-        generate_interface(SpectralClassificationConcern, "SpectralClassificationConcern"),
         generate_interface(SpectroscopyPipelineQualityMetrics, "SpectroscopyPipelineQualityMetrics"),
         generate_interface(SpectroscopyQualitySummary, "SpectroscopyQualitySummary"),
         generate_interface(FrameDetection, "FrameDetection"),
@@ -638,6 +660,8 @@ def render_types() -> str:
                 NeedsAttention,
                 TargetDatasetReport,
                 TonightRanking,
+                DepthGoalStatus,
+                DepthLevelOption,
                 NightQuality,
                 NightListEntry,
                 TargetChange,
@@ -645,6 +669,18 @@ def render_types() -> str:
                 SafetyStatus,
                 CameraNoiseSetting,
                 CalibrationQueryResult,
+                CalibrationSetHealth,
+                CalibrationMeasurementReport,
+                JobQueryResult,
+                JobSummary,
+                JobLogLine,
+                LineageRun,
+                JobWarning,
+                StackSummary,
+                PreviewRemakeResult,
+                SetAsideFrameRecord,
+                StackReviewStart,
+                StackQualityReport,
             ],
             written,
         )

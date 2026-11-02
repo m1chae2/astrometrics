@@ -1,15 +1,48 @@
-"""Purpose: The Wayfinder, the entry point to the wayfinding library.
+"""Plan and run observing sessions and control the observatory.
 
-Description: `Wayfinder` composes the library's three sub-APIs:
-`control` (operate the observatory), `planning` (decide what to
-observe) and `execution` (run and recover an observing session).
-`control` has seven children named by topic, such as `control.mount`
-and `control.history`. The package root also offers the models those
-sub-APIs take and return, the pure functions callers need
-(`group_alignment_attempts`, and `fit_reply_to_budget`, which the MCP tools
-use to shorten a long quality reply), and the library's own error class.
-The error categories themselves (`NotFoundError`,
-`InvalidArgumentError` and the rest) come from `astrometricslib`.
+`wayfindinglib` helps you set up each night's session and suggests what to
+image, based on the quality metrics in `astrometricslib`'s databases. It
+records alignment and guiding metrics to help you judge how well the
+observatory itself is performing. Its judgments are suggestions of what to
+image or do next, not verdicts on data.
+
+To use the library, build the entry point with no arguments. It loads the
+settings by itself::
+
+    from wayfindinglib import Wayfinder
+
+    wayfinder = Wayfinder()
+
+`Wayfinder` has one attribute for each sub-API:
+
+- `control` (`ObservatoryControl`): operate the observatory through six
+  children named by topic: `mount`, `imaging`, `guiding`, `safety`,
+  `equipment` and `remote`.
+- `planning` (`ObservationPlanning`): decide what to observe, from target
+  visibility to observation packages, sequences and mosaic grids.
+- `execution` (`ObservationExecution`): run and recover an observing
+  session, and record its telemetry.
+- `review` (`ObservationReview`): how past and current nights went, and
+  the limits the equipment has shown.
+
+What to import from where
+-------------------------
+The package root holds 7 names: `Wayfinder`, the four sub-API classes
+(`ObservatoryControl`, `ObservationPlanning`, `ObservationExecution` and
+`ObservationReview`), and the two records a script builds or reads most
+(`ObservationSession` and `ObservationPackage`).
+Two public modules hold the rest:
+
+- `wayfindinglib.exceptions`: the errors that belong to this library. The
+  shared categories (`NotFoundError`, `InvalidArgumentError` and the rest)
+  come from `astrometricslib.exceptions`.
+- `wayfindinglib.reports`: the states and levels that results report
+  (`RunState`, `PackageStatus`, `DepthGoalState` and `DepthLevel`).
+
+Everything else is private. The result models that the calls return are
+private too: use their fields, as listed on the API reference page, and do
+not import the classes. This library uses only the public names of
+`astrometricslib`.
 
 Every name below except `Wayfinder` is loaded on first use (module
 `__getattr__`, PEP 562) from one lookup table. Importing a submodule
@@ -18,8 +51,6 @@ import of the INDI drivers here would make every import of the library
 load hardware code. The `TYPE_CHECKING` imports never run; they only let
 type checkers see each name in `__all__`.
 """
-
-from __future__ import annotations
 
 import importlib
 import logging
@@ -40,79 +71,12 @@ configure_offline_iers()
 
 if TYPE_CHECKING:
     from astrometricslib import AppConfiguration, Astrometrics
-    from wayfindinglib.analytics.alignment_sessions import group_alignment_attempts
-    from wayfindinglib.analytics.result_quality.reply_budget import fit_reply_to_budget
     from wayfindinglib.api.control import ObservatoryControl
     from wayfindinglib.api.execution import ObservationExecution
     from wayfindinglib.api.planning import ObservationPlanning
-    from wayfindinglib.data_access.delegation_policy_reader import DelegationPolicyValidationError
-    from wayfindinglib.drivers.control_record_store import ControlRecordStore
-    from wayfindinglib.drivers.indi_interface import IndiInterface
-    from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
-    from wayfindinglib.models.control_status import (
-        EquipmentStatus,
-        GuidingStatus,
-        ImagingStatus,
-        SafetyStatus,
-    )
-    from wayfindinglib.models.equipment_and_site.calibration import CalibrationAdvisory
-    from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration, Telescope
-    from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
-    from wayfindinglib.models.planning.deep_catalog import DeepCatalogEstimate, DeepCatalogStatus
-    from wayfindinglib.models.planning.mosaic import MosaicPanel, MosaicPlan
-    from wayfindinglib.models.planning.observation_package import (
-        DitherConfig,
-        ExposureRequest,
-        FrameType,
-        ObservationPackage,
-        PackageStatus,
-        PackageSuggestion,
-    )
-    from wayfindinglib.models.planning.sequence_plan import SequenceItem, SequencePlan
-    from wayfindinglib.models.planning.sequence_summary import SequenceSummary
-    from wayfindinglib.models.planning.sky_source import SkySource
-    from wayfindinglib.models.planning.suggestion_log import PackageChange, SuggestionLogEntry
-    from wayfindinglib.models.planning.target_report import TargetDatasetReport
-    from wayfindinglib.models.planning.tonight_ranking import TonightRanking
-    from wayfindinglib.models.planning.visibility import (
-        HorizonZone,
-        MeridianStatus,
-        NightConditions,
-        ObjectVisibility,
-        VisibilityReport,
-        VisibilitySpan,
-    )
-    from wayfindinglib.models.policy.delegation import ObservatoryCapability
-    from wayfindinglib.models.quality.statements import TargetStatement
-    from wayfindinglib.models.session.capture_result import CaptureResult
-    from wayfindinglib.models.session.live_session_status import LiveSessionStatus
-    from wayfindinglib.models.session.night_list import NightListEntry, TargetChange
-    from wayfindinglib.models.session.night_quality import NightQuality
-    from wayfindinglib.models.session.observation_session import (
-        ChecklistItem,
-        Framing,
-        ObservationSession,
-        ObservationSessionSummary,
-        PlanChange,
-        PlanChangeItem,
-        PlanRevisionConflictError,
-        QueueRequest,
-        RunState,
-        StartTimeMode,
-    )
-    from wayfindinglib.models.session.session_progress import (
-        EntryProgress,
-        ObservationSessionWithProgress,
-        SessionProgress,
-    )
-    from wayfindinglib.models.session.telemetry import (
-        AlignmentAttempt,
-        AlignmentTargetSession,
-        LiveGuidingStatus,
-        MountPointingModel,
-        PolarAlignmentStatus,
-    )
-    from wayfindinglib.models.sky_position import SkyPosition
+    from wayfindinglib.api.review import ObservationReview
+    from wayfindinglib.models.planning.observation_package import ObservationPackage
+    from wayfindinglib.models.session.observation_session import ObservationSession
 
 try:
     # Single source of truth is pyproject.toml; both libraries ship from the
@@ -122,84 +86,12 @@ except PackageNotFoundError:  # running from a source tree without an install
     __version__ = "0.0.0+unknown"
 
 _LAZY_EXPORTS = {
-    # The sub-APIs and the drivers that tests and the backend put in.
     "ObservatoryControl": "wayfindinglib.api.control",
     "ObservationPlanning": "wayfindinglib.api.planning",
     "ObservationExecution": "wayfindinglib.api.execution",
-    "IndiInterface": "wayfindinglib.drivers.indi_interface",
-    "SimulatorIndiInterface": "wayfindinglib.drivers.simulators.indi_simulator",
-    # The store of each night's alignment, guiding and polar alignment records.
-    "ControlRecordStore": "wayfindinglib.drivers.control_record_store",
-    # Models that `control` takes and returns.
-    "SkyPosition": "wayfindinglib.models.sky_position",
-    "MountPointingModel": "wayfindinglib.models.session.telemetry",
-    "LiveGuidingStatus": "wayfindinglib.models.session.telemetry",
-    "AlignmentAttempt": "wayfindinglib.models.session.telemetry",
-    "AlignmentTargetSession": "wayfindinglib.models.session.telemetry",
-    # The shape of `IndiInterface.get_polar_alignment_status()` and of a
-    # stored polar alignment run.
-    "PolarAlignmentStatus": "wayfindinglib.models.session.telemetry",
-    # The capability `control.safety` and `execution.record_divergence` take.
-    "ObservatoryCapability": "wayfindinglib.models.policy.delegation",
-    "ImagingStatus": "wayfindinglib.models.control_status",
-    "GuidingStatus": "wayfindinglib.models.control_status",
-    "SafetyStatus": "wayfindinglib.models.control_status",
-    "EquipmentStatus": "wayfindinglib.models.control_status",
-    "CaptureResult": "wayfindinglib.models.session.capture_result",
-    # Models that `planning` and `execution` take and return.
-    "VisibilityReport": "wayfindinglib.models.planning.visibility",
-    "ObjectVisibility": "wayfindinglib.models.planning.visibility",
-    "VisibilitySpan": "wayfindinglib.models.planning.visibility",
-    "MeridianStatus": "wayfindinglib.models.planning.visibility",
-    "NightConditions": "wayfindinglib.models.planning.visibility",
-    "HorizonZone": "wayfindinglib.models.planning.visibility",
-    "TargetDatasetReport": "wayfindinglib.models.planning.target_report",
-    "TonightRanking": "wayfindinglib.models.planning.tonight_ranking",
-    "TargetStatement": "wayfindinglib.models.quality.statements",
-    "CalibrationAdvisory": "wayfindinglib.models.equipment_and_site.calibration",
-    "MosaicPanel": "wayfindinglib.models.planning.mosaic",
-    "MosaicPlan": "wayfindinglib.models.planning.mosaic",
-    "SequenceItem": "wayfindinglib.models.planning.sequence_plan",
-    "SequencePlan": "wayfindinglib.models.planning.sequence_plan",
+    "ObservationReview": "wayfindinglib.api.review",
     "ObservationPackage": "wayfindinglib.models.planning.observation_package",
-    "PackageStatus": "wayfindinglib.models.planning.observation_package",
-    "PackageSuggestion": "wayfindinglib.models.planning.observation_package",
-    "PackageChange": "wayfindinglib.models.planning.suggestion_log",
-    "SuggestionLogEntry": "wayfindinglib.models.planning.suggestion_log",
-    "ExposureRequest": "wayfindinglib.models.planning.observation_package",
-    "DitherConfig": "wayfindinglib.models.planning.observation_package",
-    "FrameType": "wayfindinglib.models.planning.observation_package",
     "ObservationSession": "wayfindinglib.models.session.observation_session",
-    "ObservationSessionSummary": "wayfindinglib.models.session.observation_session",
-    "QueueRequest": "wayfindinglib.models.session.observation_session",
-    "RunState": "wayfindinglib.models.session.observation_session",
-    "SessionProgress": "wayfindinglib.models.session.session_progress",
-    "EntryProgress": "wayfindinglib.models.session.session_progress",
-    "ObservationSessionWithProgress": "wayfindinglib.models.session.session_progress",
-    "StartTimeMode": "wayfindinglib.models.session.observation_session",
-    "ChecklistItem": "wayfindinglib.models.session.observation_session",
-    "Framing": "wayfindinglib.models.session.observation_session",
-    "PlanChange": "wayfindinglib.models.session.observation_session",
-    "PlanChangeItem": "wayfindinglib.models.session.observation_session",
-    "PlanRevisionConflictError": "wayfindinglib.models.session.observation_session",
-    "SequenceSummary": "wayfindinglib.models.planning.sequence_summary",
-    # Models that `control.history` returns.
-    "NightListEntry": "wayfindinglib.models.session.night_list",
-    "TargetChange": "wayfindinglib.models.session.night_list",
-    "NightQuality": "wayfindinglib.models.session.night_quality",
-    "LiveSessionStatus": "wayfindinglib.models.session.live_session_status",
-    "DeepCatalogStatus": "wayfindinglib.models.planning.deep_catalog",
-    "SkySource": "wayfindinglib.models.planning.sky_source",
-    "DeepCatalogEstimate": "wayfindinglib.models.planning.deep_catalog",
-    "SiteProfile": "wayfindinglib.models.equipment_and_site.site_profile",
-    "Telescope": "wayfindinglib.models.equipment_and_site.equipment",
-    "EquipmentConfiguration": "wayfindinglib.models.equipment_and_site.equipment",
-    # Groups plate solves into one `AlignmentTargetSession` per target.
-    "group_alignment_attempts": "wayfindinglib.analytics.alignment_sessions",
-    # Shortens a quality reply for the MCP tools; the library replies in full.
-    "fit_reply_to_budget": "wayfindinglib.analytics.result_quality.reply_budget",
-    # The library's own error class. The categories come from astrometricslib.
-    "DelegationPolicyValidationError": "wayfindinglib.data_access.delegation_policy_reader",
 }
 """Export name -> the module that defines it."""
 
@@ -232,9 +124,9 @@ def __getattr__(name: str) -> object:
 class Wayfinder:
     """The entry point to the wayfinding library.
 
-    Builds and holds the three sub-APIs, `control`, `planning` and
-    `execution`, over one configuration, one `DiskButler` and one
-    `Astrometrics` handle, so all three see the same records. It has no
+    Builds and holds the four sub-APIs, `control`, `planning`,
+    `execution` and `review`, over one configuration, one `DiskButler` and
+    one `Astrometrics` handle, so all four see the same records. It has no
     methods of its own.
 
     The watchdog (`wayfindinglib/watchdog/`) is not built here on
@@ -245,8 +137,11 @@ class Wayfinder:
         self,
         config: AppConfiguration | None = None,
         astrometrics: Astrometrics | None = None,
+        *,
+        simulated: bool | None = None,
+        separate_process: bool = False,
     ) -> None:
-        """Build the three sub-APIs over a shared configuration and storage.
+        """Build the four sub-APIs over a shared configuration and storage.
 
         Parameters
         ----------
@@ -256,23 +151,38 @@ class Wayfinder:
             The science library handle every part of the Wayfinder uses, so
             all of them see the same target catalog. A new one is built over
             the configuration when omitted.
+        simulated : `bool`, optional
+            Use the simulated INDI session instead of the real hardware.
+            When omitted, the simulator is used if ``ASTROMETRICS_TESTING``
+            is set in the environment.
+        separate_process : `bool`, optional
+            Run the INDI session in a process of its own. The library
+            starts it on the first call that needs INDI, and
+            ``control.close()`` stops it. A program with a busy event loop,
+            such as the backend, should ask for it: the INDI client
+            library holds Python's global lock during its blocking calls
+            and would freeze everything else. `False` by default.
 
         Attributes
         ----------
         control : `ObservatoryControl`
             Direct hardware commanding across mount, imaging, guiding,
-            remote, history, safety, and equipment.
+            remote, safety, and equipment.
         planning : `ObservationPlanning`
             Target visibility, sky catalogs, mosaic calculation, and queue
             sequence planning.
         execution : `ObservationExecution`
             Session queue advancement, meridian flip automation, and fault
             recovery.
+        review : `ObservationReview`
+            Past and current observing nights, alignment sessions and the
+            equipment's performance limits.
         """
         from astrometricslib import Astrometrics, get_configuration
         from wayfindinglib.api.control import ObservatoryControl
         from wayfindinglib.api.execution import ObservationExecution
         from wayfindinglib.api.planning import ObservationPlanning
+        from wayfindinglib.api.review import ObservationReview
         from wayfindinglib.drivers.butler import DiskButler
 
         self.config = config or get_configuration()
@@ -280,8 +190,15 @@ class Wayfinder:
         self.astrometrics = astrometrics or Astrometrics(self.config)
 
         butler = DiskButler(app_config=self.config)
-        self.control = ObservatoryControl(config=self.config, butler=butler, astrometrics=self.astrometrics)
+        self.control = ObservatoryControl(
+            config=self.config,
+            butler=butler,
+            astrometrics=self.astrometrics,
+            simulated=simulated,
+            separate_process=separate_process,
+        )
         self.planning = ObservationPlanning(self.config, butler, astrometrics=self.astrometrics)
+        self.review = ObservationReview(self.control)
         self.execution = ObservationExecution(
             self.config, butler, astrometrics=self.astrometrics, control=self.control
         )

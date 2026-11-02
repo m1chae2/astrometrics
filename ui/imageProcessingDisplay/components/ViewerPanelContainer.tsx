@@ -54,9 +54,6 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
   checkedFiles, handleRequestDeleteFiles, onOpenHeaderModal, onFileClick, selectedFile,
   toggleFile, toggleAllFiles, analysisResults
 }) => {
-  const stackedFwhm = (analysisResults as any)?.stackedFwhmPx ?? (analysisResults as any)?.stacked_fwhm_px;
-  const rejectedCount = analysisResults?.rejectedCount ?? 0;
-
   return (
     <div className="image-processing-display__center">
       <SectionPanel
@@ -64,23 +61,6 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
         className="image-processing-display__viewer-section"
         headerContent={
           <div className="fits-header-controls" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            {stackedFwhm !== undefined && stackedFwhm !== null && (
-              <span
-                style={{
-                  fontSize: '0.75rem',
-                  padding: '2px 8px',
-                  borderRadius: '10px',
-                  background: 'rgba(0, 229, 255, 0.12)',
-                  border: '1px solid rgba(0, 229, 255, 0.4)',
-                  color: '#00e5ff',
-                  fontWeight: 600,
-                  marginRight: '6px'
-                }}
-                title="Stack Quality: FWHM & Rejected frames count"
-              >
-                FWHM {Number(stackedFwhm).toFixed(2)}px • {rejectedCount} Rejected
-              </span>
-            )}
             <button
               className={`btn btn--tiny ${stretch ? 'btn--active' : ''}`}
               onClick={toggleStretch}

@@ -33,7 +33,9 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrometricslib import CaptureSetting, ConfigurationError, FilterType, resolve_camera_profile
+from astrometricslib import FilterType
+from astrometricslib.exceptions import ConfigurationError
+from astrometricslib.reports import CaptureSetting
 from wayfindinglib.analytics.capture_history import normalize_name
 
 NOT_MEASURED_NOTE = "setting not measured"
@@ -43,9 +45,10 @@ NOT_MEASURED_NOTE = "setting not measured"
 class CameraProfileLike(Protocol):
     """The parts of a camera profile this module reads.
 
-    `astrometricslib` returns the profile from `resolve_camera_profile`
-    but does not export its class from the package root, and this library
-    imports only from the root. A `Protocol` names what is needed.
+    `astrometricslib` returns the profile from
+    `processing.calibration.camera_profile` but does not export its class
+    from the package root, and this library imports only from the public
+    modules. A `Protocol` names what is needed.
     """
 
     camera_name: str
@@ -310,9 +313,9 @@ def allowed_capture_values(
     Parameters
     ----------
     camera_profile : `CameraProfileLike`
-        The camera's profile, from `resolve_camera_profile`. Its measured
-        settings are the allowed ones. The generic fallback profile counts
-        as having none.
+        The camera's profile, from `processing.calibration.camera_profile`.
+        Its measured settings are the allowed ones. The generic fallback
+        profile counts as having none.
     configured_filter_names : `Iterable` [`str`], optional
         The filters the equipment configuration lists.
     library_filter_names : `Iterable` [`str`], optional
@@ -352,7 +355,7 @@ def allowed_capture_values(
     )
 
 
-def camera_names_match(first: str, second: str, config: Any = None) -> bool:
+def camera_names_match(astrometrics: Any, first: str, second: str) -> bool:
     """Say whether two camera names are the same camera.
 
     This is the one camera-name matcher of the quality code. The catalog name,
@@ -362,11 +365,12 @@ def camera_names_match(first: str, second: str, config: Any = None) -> bool:
 
     Parameters
     ----------
+    astrometrics : `Any`
+        The science library's high-level interface (``Astrometrics``); it
+        holds the camera profiles. For a camera with no profile, the names
+        are compared as written.
     first, second : `str`
         The two camera names.
-    config : `AppConfiguration`, optional
-        The configuration that holds the camera profiles. Without it, or for
-        a camera with no profile, the names are compared as written.
 
     Returns
     -------
@@ -377,7 +381,7 @@ def camera_names_match(first: str, second: str, config: Any = None) -> bool:
     for name in (first, second):
         spellings_of_name = {normalize_name(name)}
         try:
-            profile = resolve_camera_profile(name, config)
+            profile = astrometrics.processing.calibration.camera_profile(name)
             spellings_of_name.update(
                 normalize_name(alias)
                 for alias in (profile.camera_name, profile.record_name, *profile.name_aliases)
@@ -392,7 +396,7 @@ def camera_names_match(first: str, second: str, config: Any = None) -> bool:
 
 
 def allowed_capture_values_for_camera(
-    camera_name: str, config: Any, library_settings: Iterable[CaptureSetting]
+    astrometrics: Any, camera_name: str, library_settings: Iterable[CaptureSetting]
 ) -> AllowedCaptureValues:
     """Collect what the camera of a night plan may be asked to do.
 
@@ -403,10 +407,11 @@ def allowed_capture_values_for_camera(
 
     Parameters
     ----------
+    astrometrics : `Any`
+        The science library's high-level interface (``Astrometrics``); it
+        holds the camera profiles.
     camera_name : `str`
         The camera named in the plan.
-    config : `AppConfiguration`
-        The configuration that holds the camera profiles.
     library_settings : `Iterable` [`CaptureSetting`]
         Every capture setting in the measurement store. Those of this camera
         give the filters.
@@ -417,7 +422,7 @@ def allowed_capture_values_for_camera(
         The allowed values, with a `check` method for a request.
     """
     try:
-        profile = resolve_camera_profile(camera_name, config)
+        profile = astrometrics.processing.calibration.camera_profile(camera_name)
     except ConfigurationError:
         # A configuration with no camera profiles cannot say what was
         # measured. Treat the camera as unprofiled: requests are accepted and
@@ -426,6 +431,6 @@ def allowed_capture_values_for_camera(
     library_filters = [
         setting.filter_name
         for setting in library_settings
-        if setting.filter_name and camera_names_match(setting.camera, camera_name, config)
+        if setting.filter_name and camera_names_match(astrometrics, setting.camera, camera_name)
     ]
     return allowed_capture_values(profile, (), library_filters)

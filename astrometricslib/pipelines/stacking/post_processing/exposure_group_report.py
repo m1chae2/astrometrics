@@ -20,8 +20,8 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-from astrometricslib.drivers.fits_access import read_data
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.fits_access import read_data
 from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
     DEFAULT_STAR_FWHM_PIXELS,
@@ -29,11 +29,10 @@ from astrometricslib.pipelines.stacking.post_processing.exposure_saturation impo
     checked_estimate_range,
     group_is_saturated,
     measure_frame_saturation,
-    recommend_stack_exposure_seconds,
 )
-from astrometricslib.pipelines.stacking.processing.exposure_groups import (
+from astrometricslib.pipelines.stacking.processing.group_combination import FRAMES_SAMPLED_PER_GROUP
+from astrometricslib.pipelines.stacking.processing.group_gains import (
     CLIPPED_FRAME_ZERO_FRACTION,
-    FRAMES_SAMPLED_PER_GROUP,
     GroupGainMeasurement,
 )
 
@@ -303,6 +302,7 @@ def build_group_summary(
     alignment_shift_pixels: list[float] | None = None,
     left_out_reason: str | None = None,
     gain_measurement: GroupGainMeasurement | None = None,
+    gain_applied: float | None = None,
 ) -> dict[str, Any]:
     """Build the entry describing one exposure group.
 
@@ -330,6 +330,10 @@ def build_group_summary(
         ratio (brightest quarter of the stars, or brightest pixels on the pixel
         fallback) and their disagreement. Leave it out for a group that was
         never compared with the reference.
+    gain_applied : `float`, optional
+        The gain the final combination applied to the group, when it measured
+        one (see `ExposureGroupCombination`). Leave it out for a group that was
+        left out, or whose gain the combination could not measure.
 
     Returns
     -------
@@ -366,6 +370,7 @@ def build_group_summary(
         "stack_path": stack_path,
         "alignment_shift_pixels": alignment_shift_pixels,
         **gain_fields,
+        "gain_applied": None if gain_applied is None else float(gain_applied),
         "left_out_reason": left_out_reason,
         **group_peak_fields(frames, saturation),
     }
@@ -386,8 +391,8 @@ def exposure_group_linearity_gate(groups: list[dict[str, Any]], tolerance: float
     bright end of a group is compressed near full well or clipped they do not.
     A group whose check ratio sits more than `tolerance` from the gain is left
     out of the combined image (see `_stack_exposure_groups`), and this gate
-    fails with a sentence that names the ratios. The sentence is the same text
-    the stage lists as the group's flag reason, so the two never disagree.
+    fails with a sentence that names the ratios. The sentence is the
+    reason of the gate's warning row.
 
     Parameters
     ----------
@@ -552,21 +557,6 @@ def raw_frame_clipping_gate(diagnostics: dict[str, Any]) -> GateResult:
         limit=CLIPPED_FRAME_ZERO_FRACTION,
         limit_source=limit_source,
     )
-
-
-def recommended_exposure_for_groups(
-    exposure_seconds: list[float], saturation_by_group: list[list[FrameSaturation]]
-) -> float | None:
-    """Recommend one exposure for a stack.
-
-    Returns
-    -------
-    recommended : `float` or `None`
-        The recommended exposure in seconds, rounded to two decimals, or
-        `None` when it cannot be worked out.
-    """
-    recommendation = recommend_stack_exposure_seconds(exposure_seconds, saturation_by_group)
-    return None if recommendation is None else round(float(recommendation), 2)
 
 
 def write_group_manifest(

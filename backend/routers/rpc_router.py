@@ -15,14 +15,8 @@ from typing import Any
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from astrometricslib import (
-    ConfigurationError,
-    ErrorInfo,
-    InvalidArgumentError,
-    log_context,
-    new_request_id,
-    to_error_info,
-)
+from astrometricslib.exceptions import ConfigurationError, ErrorInfo, InvalidArgumentError, to_error_info
+from astrometricslib.jobs import log_context, new_request_id
 from backend.container import container
 from backend.public_interface import RPC_METHODS
 from backend.services.infrastructure.frontend_log import log_frontend_message
@@ -98,7 +92,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "telescope:set_filter": ("wayfinder.control.imaging", "set_filter"),
     "telescope:set_slew_rate": ("wayfinder.control.mount", "set_slew_rate"),
     "telescope:set_tracking": ("wayfinder.control.mount", "set_tracking"),
-    # The UI sends RA in hours; the service makes a SkyPosition.
+    # The UI sends RA in hours; the service sends degrees.
     "telescope:slew_coordinates": ("telescope_service", "slew_coordinates"),
     "telescope:slew_target": ("telescope_service", "slew_target"),
     # The service adds the guiding history and alignment state to
@@ -122,7 +116,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "telescope:get_pointing_model": ("alignment_service", "compute_pointing_model"),
     # The equipment's limits, with the sky's tracking-risk grid that the
     # planetarium colors.
-    "telescope:get_performance_envelope": ("wayfinder.control.history", "get_performance_envelope"),
+    "telescope:get_performance_envelope": ("wayfinder.review", "get_performance_envelope"),
     "telescope:get_guiding_spectrum": ("guiding_service", "analyze_guiding_spectrum"),
     # Equipment set-up and control mode
     "observatory:list_cameras": ("equipment_service", "list_camera_profiles"),
@@ -150,27 +144,41 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "processing:delete_job": ("job_service", "delete_job"),
     "processing:jobs_for_target": ("job_service", "get_jobs_for_target"),
     "processing:job_log_tail": ("image_processing_service", "fetch_job_log_tail"),
+    # A short answer about a target's current stack, read from the numbers the
+    # stacking stage saved with it. Nothing is measured and nothing is written.
+    # A target with no saved stack summary raises `NotFoundError`.
+    "processing:stack_summary": ("astrometrics.processing", "stack_summary"),
+    # Makes a stack's preview picture again from the stack that is there. It
+    # takes about a minute, so the service starts it as a background job and
+    # answers at once with the result or the job to follow. A write (pictures
+    # and the target's processed-image pointer), so the AI's read-only
+    # profile withholds it.
+    "processing:remake_preview": ("stack_review_service", "start_preview_remake"),
+    # The frames the stacker set aside for a target, each with the reason.
+    # Nothing is moved, measured or written.
+    "quality:set_aside_frames": ("astrometrics.quality", "set_aside_frames"),
+    # Compares a target's stack with the previous one. A failed plate solve can
+    # take about ten minutes, so the service starts it as a background job.
+    "quality:measure_stack": ("stack_review_service", "start_stack_comparison"),
     # Measures a target's light frames and stores the numbers. Starts a
     # background run and answers at once; the result arrives as the
     # `quality:measured` event. A write, so the AI's read-only profile
     # withholds it.
-    "processing:record_frame_measurements": ("quality_measurement_service", "start_frame_measurements"),
+    "quality:record_frame_measurements": ("quality_measurement_service", "start_frame_measurements"),
     # Stack some of a target's frames apart from its library stack, into the
     # target's `_subsets` folder, and measure the noise of each result. Each
     # starts a background run and answers at once. Writes (they stack and store
     # rows), so the AI's read-only profile withholds them.
-    "processing:measure_half_difference_noise": (
-        "quality_measurement_service",
-        "start_half_difference_noise",
-    ),
-    "processing:measure_noise_growth": ("quality_measurement_service", "start_noise_growth"),
-    "processing:measure_night_contributions": ("quality_measurement_service", "start_night_contributions"),
-    # Quality measurements. These read the library's quality root directly:
-    # `query` reads the stored measurements and `metrics` lists the declared
-    # metrics. Neither writes anything.
-    "quality:query": ("astrometrics.quality", "query"),
+    "processing:measure_noise": ("quality_measurement_service", "start_noise_measurement"),
+    # Quality measurements. `query` reads the stored measurements (the
+    # service gives the screens the plain list of rows) and `metrics` lists
+    # the declared metrics. Neither writes anything.
+    "quality:query": ("quality_measurement_service", "query_measurements"),
     "quality:metrics": ("astrometrics.quality", "metrics"),
     "quality:resolve_rows": ("astrometrics.quality", "resolve_rows"),
+    # The job history, read-only. `detail="warnings"` lists the warnings one
+    # job detected, from the stored quality rows that carry its id.
+    "jobs:query": ("astrometrics.jobs", "query"),
     # Photometry and spectroscopy analysis
     "analysis:analyze_image": ("analysis_orchestrator", "analyze_image"),
     "analysis:get_results": ("analysis_orchestrator", "get_analysis_results"),
@@ -229,6 +237,9 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # flat and bias frames. With `save` true it writes the camera profile in
     # the config (after a backup), so the AI's read-only profile withholds it.
     "calibration:measure_sensor_noise": ("astrometrics.processing.calibration", "measure_sensor_noise"),
+    # Starts the job that measures the dark and bias frames and returns at
+    # once with the job's id. It stores numbers; it never changes a frame.
+    "calibration:measure_frames": ("image_processing_service", "start_calibration_measurement"),
     # Mosaics
     "mosaic:preview": ("mosaic_service", "preview_mosaic"),
     "mosaic:create": ("mosaic_service", "create_mosaic"),
@@ -239,7 +250,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "execution:get_session": ("execution_service", "get_session"),
     "execution:abort_session": ("execution_service", "abort_session"),
     "execution:reconcile_session": ("execution_service", "reconcile_session"),
-    "execution:record_divergence": ("execution_service", "record_divergence"),
+    "execution:build_divergence_record": ("execution_service", "build_divergence_record"),
     # Night plan and observation packages. `plan:get` reads (no `session_id`
     # lists all), `plan:list_packages` lists the package library and
     # `plan:current_session` reads tonight's session. `plan:edit` and
@@ -263,12 +274,16 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "advisory:target_report": ("advisory_service", "get_target_report"),
     "advisory:tonight": ("advisory_service", "get_tonight_ranking"),
     "advisory:result": ("advisory_service", "get_result_statements"),
+    "advisory:depth_goal": ("advisory_service", "get_depth_goal"),
+    "advisory:set_depth_goal": ("advisory_service", "set_depth_goal"),
     "history:nights": ("advisory_service", "list_nights"),
     "history:night_quality": ("advisory_service", "get_night_quality"),
     "history:target_changes": ("advisory_service", "list_target_changes"),
     "history:live_session_status": ("advisory_service", "get_live_session_status"),
     "observatory:safety_status": ("advisory_service", "get_safety_status"),
     "calibration:query": ("astrometrics.processing.calibration", "query"),
+    # Judges the sets of one kind from the stored numbers. A read.
+    "calibration:assess": ("astrometrics.processing.calibration", "assess"),
     # Sequencer queue
     "sequencer:get_queue": ("target_imaging_executor", "get_queue"),
     "sequencer:create_plan": ("target_imaging_executor", "create_plan"),
@@ -276,6 +291,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "sequencer:remove": ("target_imaging_executor", "remove_from_queue"),
     "sequencer:reorder": ("target_imaging_executor", "reorder"),
     "sequencer:begin": ("target_imaging_executor", "begin_imaging"),
+    "sequencer:pause": ("target_imaging_executor", "pause_imaging"),
+    "sequencer:abort": ("target_imaging_executor", "abort_imaging"),
     "sequencer:modify": ("target_imaging_executor", "modify_queue_item"),
 }
 

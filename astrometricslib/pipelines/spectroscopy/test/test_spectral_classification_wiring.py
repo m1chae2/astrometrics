@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
 from astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response import load_instrument_response

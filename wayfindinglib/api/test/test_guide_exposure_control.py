@@ -1,6 +1,6 @@
 """Purpose: Tests for the guide exposure test on the facade.
 
-Description: Runs `control.guiding.run_exposure_test` with a simulated
+Description: Runs `control.guiding._run_exposure_test` with a simulated
 guide camera in place of the real one. It checks that the plate scale and
 limits come from the configured equipment, that a good star gives a short
 recommended exposure, and that an unreachable telescope is refused before any
@@ -10,7 +10,7 @@ exposure is sent. The real guide camera is not used.
 import numpy as np
 import pytest
 
-from astrometricslib import ExternalServiceError
+from astrometricslib.exceptions import ExternalServiceError
 from wayfindinglib import ObservatoryControl
 from wayfindinglib.analytics.performance_envelope import SensorLimits
 from wayfindinglib.api.test.capture_night_helpers import Library, add_frames
@@ -98,7 +98,7 @@ def test_a_bright_star_recommends_the_shortest_exposure(
         record_guiding_night(control, day)
         add_frames(library, day)
 
-    test = control.guiding.run_exposure_test((0.5, 1.0), frames_per_exposure=6)
+    test = control.guiding._run_exposure_test((0.5, 1.0), frames_per_exposure=6)
 
     assert test.plate_scale_arcsec_per_px == pytest.approx(206.265 * 3.75 / 120.0)
     assert test.guiding_rms_limit_arcsec is not None
@@ -113,6 +113,6 @@ def test_an_unreachable_telescope_is_refused_before_any_exposure(
     monkeypatch.setattr(remote_transfer_tasks, "check_remote_connection", lambda context: False)
 
     with pytest.raises(ExternalServiceError, match="not reachable"):
-        control.guiding.run_exposure_test()
+        control.guiding._run_exposure_test()
 
     assert camera.exposures == []

@@ -1,10 +1,7 @@
 """Purpose: Unit tests for the StellarCatalog high-level interface.
 
-Description: Verifies `save_all` passes the catalog_access's required
-`coordinate` argument (omitting it previously made every call raise
-TypeError, including the backend's own save path), and that its
-replace-all semantics cannot silently wipe the catalog when handed an
-empty list.
+Description: Verifies the catalog's dataset version, ids, queries and
+photometry updates against a mock storage.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -16,7 +13,6 @@ import pytest
 from pytest_mock import MockerFixture
 
 from astrometricslib.api.stars import StellarCatalog
-from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 
 
@@ -44,46 +40,16 @@ def _ids(catalog: StellarCatalog) -> list[str]:
     return catalog.query(detail="ids", limit=None).ids
 
 
-class TestSaveAll:
-    """Unit test suite for StellarCatalog.save_all."""
+class TestDatasetVersion:
+    """Unit test suite for StellarCatalog.dataset_version."""
 
-    def test_passes_required_coordinate_argument_to_catalog_access(self) -> None:
-        """Verify the catalog_access receives all three required arguments.
-
-        `AbstractCatalogAccess.put(obj, dataset_type, coordinate)` requires
-        `coordinate`; the previous two-argument call raised TypeError on
-        every invocation.
-        """
+    def test_reports_the_star_catalog_write_count(self) -> None:
+        """The call asks the database for the stellar catalog's counter."""
         catalog = _make_catalog()
-        objects = [StellarObject(id="* alf Lyr", name="Vega")]
+        catalog._catalog_access.get_dataset_version.return_value = 7
 
-        result = catalog.save_all(objects)
-
-        catalog.catalog_access.put.assert_called_once_with(objects, "stellar_catalog", {})
-        assert result == "stellar catalog saved"
-
-    def test_empty_list_is_refused_by_default(self) -> None:
-        """An empty list must not silently delete the whole catalog.
-
-        `put_all` runs an unconditional DELETE when given an empty
-        list, so a caller that simply had not loaded the catalog yet
-        would otherwise destroy every row.
-        """
-        catalog = _make_catalog()
-
-        with pytest.raises(InvalidArgumentError, match="empty list"):
-            catalog.save_all([])
-
-        catalog.catalog_access.put.assert_not_called()
-
-    def test_empty_list_allowed_when_explicitly_requested(self) -> None:
-        """Deliberately clearing the catalog remains possible."""
-        catalog = _make_catalog()
-
-        result = catalog.save_all([], allow_empty=True)
-
-        catalog.catalog_access.put.assert_called_once_with([], "stellar_catalog", {})
-        assert result == "stellar catalog saved"
+        assert catalog.dataset_version() == 7
+        catalog._catalog_access.get_dataset_version.assert_called_once_with("stellar_catalog")
 
 
 class TestAnalyzePeriodicity:
@@ -106,8 +72,8 @@ class TestAnalyzePeriodicity:
         result = catalog.analyze_periodicity("Gaia DR3 1")
 
         assert result.photometry.periodogram is not None
-        object_id, updates = catalog.update.call_args.args
-        assert object_id == "Gaia DR3 1"
+        star_id, updates = catalog.update.call_args.args
+        assert star_id == "Gaia DR3 1"
         assert updates["photometry"].periodogram is not None
 
     def test_returns_a_star_with_too_few_points_without_saving(self) -> None:
@@ -141,7 +107,7 @@ def _make_real_catalog(tmp_path: Path, stars: list[StellarObject]) -> StellarCat
     catalog : `StellarCatalog`
         A catalog whose stellar_catalog table holds exactly `stars`.
     """
-    from astrometricslib.drivers.catalog_access import CatalogAccess
+    from astrometricslib._internal.drivers.catalog_access import CatalogAccess
     from astrometricslib.foundation.config import AppConfiguration
 
     library_path = tmp_path / "library"
@@ -197,7 +163,7 @@ class TestQueriesNeverLoadTheWholeCatalog:
             ],
         )
         mocker.patch.object(
-            catalog.catalog_access._generic, "get_all", side_effect=AssertionError("read the whole catalog")
+            catalog._catalog_access._generic, "get_all", side_effect=AssertionError("read the whole catalog")
         )
         return catalog
 
@@ -355,33 +321,3 @@ class TestFindOrCreateByPosition:
 
         assert created.id == "Star_2"
         assert created.name == "Star_2"
-
-
-def test_plate_solve_returns_the_solved_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`plate_solve` asks the star identifier to solve and returns its WCS."""
-    from astrometricslib.pipelines.astrometry.processing import star_identifier
-
-    calls: list[tuple[str, bool]] = []
-    solved = object()
-
-    class FakeIdentifier:
-        """Stands in for `StarIdentifier` and records each request."""
-
-        def __init__(self, config: object, drivers: object = None) -> None:
-            """Accept the configuration and drivers the catalog passes."""
-
-        def process_image(self, path: str, attempt_plate_solving: bool) -> tuple[list, object]:
-            """Record the call and return a made-up solution.
-
-            Returns
-            -------
-            result : `tuple`
-                No stars, and the made-up solution.
-            """
-            calls.append((path, attempt_plate_solving))
-            return [], solved
-
-    monkeypatch.setattr(star_identifier, "StarIdentifier", FakeIdentifier)
-
-    assert _make_catalog().plate_solve("/frames/one.fits") is solved
-    assert calls == [("/frames/one.fits", True)]

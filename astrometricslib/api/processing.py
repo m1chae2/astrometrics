@@ -17,30 +17,39 @@ cannot be met, and return a typed result otherwise.
 import logging
 import math
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
-from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
-from astrometricslib.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
-from astrometricslib.foundation.jobs.runner import background_job, registered_job
-from astrometricslib.models.calibration_ingest import CalibrationIngestReport, FlatSetAssessment
+from astrometricslib.foundation.jobs.runner import background_job, current_job_id, registered_job
+from astrometricslib.models.calibration_ingest import (
+    CalibrationIngestReport,
+    CalibrationMeasurementReport,
+    CalibrationSetHealth,
+)
+from astrometricslib.models.camera_profile import CameraProfile
 from astrometricslib.models.catalog_queries import CalibrationQueryResult
-from astrometricslib.models.processing_results import PreviewRemakeResult, ProcessTargetResult, StackResult
-from astrometricslib.models.quality.excluded_frames import RestoreReport
-from astrometricslib.models.quality.frame_measurement_summary import FrameMeasurementSummary
+from astrometricslib.models.processing_results import (
+    PreviewRemakeResult,
+    ProcessTargetResult,
+    StackResult,
+    StackWeightPrediction,
+)
+from astrometricslib.models.quality.measurement import SubjectLevel
 from astrometricslib.models.quality.quality_reports import (
     StackSummary,
 )
 from astrometricslib.models.quality.quality_summary import STACKING_PIPELINE_VERSION
 from astrometricslib.models.quality.subset_stacks import (
-    HalfDifferenceNoiseResult,
     NightContributionResult,
     NoiseGrowthResult,
-    SubsetStackResult,
+    OddEvenDifferenceNoiseResult,
 )
 from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasurement
 from astrometricslib.models.target import FrameRecord, Target
@@ -50,16 +59,24 @@ from astrometricslib.pipelines.shared.api_arguments import (
     TargetLookup,
     TimeInput,
     check_choice,
+    check_include,
     make_frame_selection,
     reject_unused_arguments,
     resolve_target,
 )
 from astrometricslib.pipelines.shared.camera_passes import resolve_processing_frames
+from astrometricslib.pipelines.shared.quality.metrics import CALIBRATION_FRAME_METRICS, FRAME_METRICS
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.stacking.calibration_ingest import (
     assess_flat_group,
     build_ingest_report,
     flatten_frame_index,
+)
+from astrometricslib.pipelines.stacking.calibration_measurement_run import measure_calibration_frames
+from astrometricslib.pipelines.stacking.pre_processing.calibration_assessment import (
+    combine_status,
+    flat_set_checks,
+    summarize_checks,
 )
 from astrometricslib.pipelines.stacking.sensor_noise_run import measure_sensor_noise_from_library
 from astrometricslib.utilities.parallel_batch import BatchRunSummary
@@ -71,6 +88,13 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["CalibrationCatalog", "ProcessingPipelines"]
 
+NOISE_KINDS = ("growth", "night_contributions", "odd_even_difference")
+NOISE_SECTIONS = ("night_contributions", "odd_even_difference")
+_NOISE_ARGUMENTS = {
+    "growth": ("maximum_steps", "include"),
+    "night_contributions": (),
+    "odd_even_difference": ("keep_halves",),
+}
 _CalibrationKind = Literal["dark", "bias", "flat"]
 _CALIBRATION_KINDS: tuple[str, ...] = ("dark", "bias", "flat")
 
@@ -81,6 +105,72 @@ _CALIBRATION_ARGUMENTS = {
     "target_frames": ("target",),
     "match": ("kind", "camera_id", "gain", "offset", "binning", "temperature_c"),
 }
+
+
+_ASSESS_ARGUMENTS = {
+    "dark": ("camera_id", "gain", "offset", "binning", "temperature_c", "exposure_seconds"),
+    "bias": ("camera_id", "gain", "offset", "binning"),
+    "flat": ("camera_id", "gain", "offset", "binning", "telescope", "filter_name"),
+}
+
+# The definition version of each metric a calibration judgement reads. A stored
+# row of another version is not used, so a redefined metric is never mixed
+# with the old numbers.
+_CURRENT_VERSIONS = {
+    spec.name: spec.definition_version for spec in (*FRAME_METRICS, *CALIBRATION_FRAME_METRICS)
+}
+
+# Two dark exposures are the same set when they differ by less than this many
+# seconds. It is the tolerance the library uses to pick a dark for a light
+# (`select_dark_frames`).
+_EXPOSURE_MATCH_TOLERANCE_SECONDS = 0.05
+
+
+def _calibration_set_matches(
+    calibration_set: Any,
+    gain: Any,
+    offset: float | None,
+    binning: Any,
+    temperature_c: float | None,
+    exposure_seconds: float | None,
+) -> bool:
+    """Tell whether a dark or bias set has the asked settings.
+
+    Parameters
+    ----------
+    calibration_set : `CalibrationSet`
+        The set.
+    gain, offset, binning, temperature_c, exposure_seconds : optional
+        The settings to match. A setting left as `None` is not compared.
+        Gains match as numbers when both are numbers. Binning is written in
+        the library's standard form first. The temperature is turned into
+        the library's temperature slot.
+
+    Returns
+    -------
+    matches : `bool`
+        `True` when every given setting matches.
+    """
+    from astrometricslib._internal.drivers.calibration_library import (
+        DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+        temperature_slot_c,
+    )
+
+    row = {"camera": calibration_set.camera, "iso": calibration_set.gain, "offset": calibration_set.offset}
+    row["binning"] = calibration_set.binning
+    row["temperature_c"] = calibration_set.temperature_c
+    if not _calibration_row_matches(
+        calibration_set.kind, row, calibration_set.camera, gain, offset, binning, temperature_c
+    ):
+        return False
+    if temperature_c is not None and calibration_set.temperature_c != temperature_slot_c(
+        temperature_c, DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
+    ):
+        return False
+    return exposure_seconds is None or (
+        calibration_set.exposure_seconds is not None
+        and abs(calibration_set.exposure_seconds - exposure_seconds) < _EXPOSURE_MATCH_TOLERANCE_SECONDS
+    )
 
 
 def _calibration_row_key(kind: str, row: dict[str, Any]) -> str:
@@ -143,7 +233,7 @@ def _calibration_row_matches(
     matches : `bool`
         `True` when every given setting matches.
     """
-    from astrometricslib.drivers.calibration_library import (
+    from astrometricslib._internal.drivers.calibration_library import (
         DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
         normalize_binning,
         temperature_slot_c,
@@ -198,7 +288,7 @@ class CalibrationCatalog:
         self._library: Any = None
 
     @property
-    def library(self) -> Any:
+    def _calibration_library(self) -> Any:
         """The calibration-data model, built the first time it is used.
 
         Returns
@@ -207,7 +297,7 @@ class CalibrationCatalog:
             The underlying calibration library model.
         """
         if self._library is None:
-            from astrometricslib.drivers.calibration_library import CalibrationLibrary
+            from astrometricslib._internal.drivers.calibration_library import CalibrationLibrary
 
             self._library = CalibrationLibrary(app_config=self._config)
         return self._library
@@ -275,6 +365,7 @@ class CalibrationCatalog:
             If the detail or kind is unknown, an argument the detail does
             not use is given, or a needed target is missing.
         """
+        from astrometricslib._internal.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
         from astrometricslib.pipelines.shared.quality import frame_statistics
 
         check_choice("detail", detail, CALIBRATION_DETAILS)
@@ -294,9 +385,9 @@ class CalibrationCatalog:
             },
         )
         if refresh:
-            self.library.load_library()
+            self._calibration_library.load_library()
         if detail in ("counts", "match"):
-            stats = self.library.get_stats()
+            stats = self._calibration_library.get_stats()
             wanted = {"dark": "darks", "bias": "biases", "flat": "flats"}
             keyed = {
                 key: [{**row, "row_key": _calibration_row_key(label, row)} for row in stats.get(key, [])]
@@ -322,68 +413,107 @@ class CalibrationCatalog:
                     if _calibration_row_matches(label, row, camera_id, gain, offset, binning, temperature_c)
                 ]
                 return CalibrationQueryResult(
-                    detail=detail, kind=kind, camera_totals=camera_totals, matched_row_keys=matched
+                    detail=detail,
+                    kind=kind,
+                    camera_totals=camera_totals,
+                    matched_row_keys=matched,
+                    dark_temperature_tolerance_c=DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
                 )
             rows = keyed
             if kind is not None:
                 rows = {wanted[kind]: rows[wanted[kind]]}
-            return CalibrationQueryResult(detail=detail, kind=kind, camera_totals=camera_totals, **rows)
+            return CalibrationQueryResult(
+                detail=detail,
+                kind=kind,
+                camera_totals=camera_totals,
+                dark_temperature_tolerance_c=DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+                **rows,
+            )
         if target is None:
             raise InvalidArgumentError(f"detail={detail!r} needs a target.")
         resolved = resolve_target(self._targets, target)
         if detail == "target_frames":
             lights = frame_statistics.get_frame_stats(resolved)["lights"]
-            return CalibrationQueryResult(detail=detail, target_id=resolved.id, lights=lights)
-        groups = frame_statistics.get_frame_stats_grouped(resolved, self, camera_id)
-        return CalibrationQueryResult(detail=detail, target_id=resolved.id, groups=groups)
+            return CalibrationQueryResult(
+                detail=detail,
+                target_id=resolved.id,
+                lights=lights,
+                dark_temperature_tolerance_c=DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+            )
+        groups = frame_statistics.get_frame_stats_grouped(resolved, self._calibration_library, camera_id)
+        return CalibrationQueryResult(
+            detail=detail,
+            target_id=resolved.id,
+            groups=groups,
+            dark_temperature_tolerance_c=DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+        )
 
-    def save(self) -> None:
-        """Write the calibration library to its JSON file on disk."""
-        self.library.save_library()
+    def add_frames(self, paths: Sequence[str], *, telescope: str) -> list[str]:
+        """Move new dark, bias and flat files into the calibration library.
 
-    def add(self, image_file: str, kind: _CalibrationKind, **kwargs: Any) -> None:
-        """Add a calibration frame of the given kind (dark, bias or flat).
-
-        Parameters
-        ----------
-        image_file : `str`
-            Path to the calibration frame FITS file.
-        kind : {"dark", "bias", "flat"}
-            The calibration frame kind.
-        **kwargs
-            Passed to the kind's own adder; ``flat`` accepts ``telescope``.
-        """
-        check_choice("kind", kind, _CALIBRATION_KINDS)
-        method = getattr(self.library, f"add_{kind}_frame")
-        method(image_file, **kwargs)
-
-    def get(self, kind: _CalibrationKind, **kwargs: Any) -> list[str]:
-        """Find the calibration frame files of the given kind.
+        Each path is a folder to search or a single FITS file. A file is
+        sorted by its header into the calibration folders. A light frame is
+        left where it is: `TargetCatalog.add_frames` moves those. Files are
+        moved, not copied, and a file that cannot be read stays where it is.
+        The call does not update the index: call `reindex_frames` and `save`
+        for that.
 
         Parameters
         ----------
-        kind : {"dark", "bias", "flat"}
-            The calibration frame kind.
-        **kwargs
-            Passed to the kind's own lookup. Common keys are ``camera``,
-            ``exposure`` (darks only), ``telescope`` and ``filter_type``
-            (flats only), and ``validate_paths``.
+        paths : `Sequence` [`str`]
+            Folders to search, or FITS files.
+        telescope : `str`
+            The name of the telescope the frames were taken with. It is part
+            of the library folder of a flat frame.
 
         Returns
         -------
-        frames : `list` [`str`]
-            Matching frame file paths.
+        added_paths : `list` [`str`]
+            The new path of each file that was moved to a place where no file
+            of that name yet existed.
         """
-        check_choice("kind", kind, _CALIBRATION_KINDS)
-        method = getattr(self.library, f"get_{kind}_frames")
-        return method(**kwargs)
+        from astrometricslib.pipelines.shared.frame_scanning import classify_and_sort_fits_files
 
-    def refresh(self, kind: _CalibrationKind, prune_missing: bool = False) -> CalibrationIngestReport:
+        added_paths: list[str] = []
+        classify_and_sort_fits_files(list(paths), "", self._config, telescope, added_paths)
+        return added_paths
+
+    def camera_profile(self, camera_name: str | None) -> CameraProfile:
+        """Give the stored facts about a camera model.
+
+        The profile holds the camera's other spellings, its saturation
+        limits with where each came from, and its gain and read noise for
+        each sensor setting. The match ignores case, spaces and punctuation.
+
+        Parameters
+        ----------
+        camera_name : `str` or `None`
+            The camera name, written in any spelling that the profile lists.
+
+        Returns
+        -------
+        profile : `CameraProfile`
+            The matching profile. When nothing matches, or no name is given,
+            this is the generic fallback profile, whose
+            ``is_generic_fallback`` is `True`. A name that matches nothing
+            also logs a warning, once per distinct name.
+        """
+        return resolve_camera_profile(camera_name, self._config)
+
+    def save(self) -> None:
+        """Write the calibration library to its JSON file on disk."""
+        self._calibration_library.save_library()
+
+    def reindex_frames(self, kind: _CalibrationKind, prune_missing: bool = False) -> CalibrationIngestReport:
         """Rescan one kind of calibration frame and report what was found.
 
         Use this after new calibration frames have been downloaded. The
         report says how many frames were found, which groups they were
-        filed under and, for flats, whether each new set is good enough.
+        filed under and whether each set that gained frames is good enough.
+        Darks and biases are judged from the numbers `measure_frames`
+        stored, and nothing is measured during the rescan, so a new frame
+        with no numbers yet gives checks that are ``not_checked`` with the
+        reason. New flats are measured, as before.
 
         Parameters
         ----------
@@ -396,59 +526,384 @@ class CalibrationCatalog:
         Returns
         -------
         report : `CalibrationIngestReport`
-            The frames added and removed, per group, and the assessment of
-            each flat set that gained frames.
+            The frames added and removed, per group, and the health of each
+            set that gained frames.
         """
         check_choice("kind", kind, _CALIBRATION_KINDS)
-        before = flatten_frame_index(getattr(self.library, f"{kind}_frames"))
-        method = getattr(self.library, f"refresh_{kind}_frames")
+        before = flatten_frame_index(getattr(self._calibration_library, f"{kind}_frames"))
+        method = getattr(self._calibration_library, f"refresh_{kind}_frames")
         method(prune_missing=prune_missing)
-        after = flatten_frame_index(getattr(self.library, f"{kind}_frames"))
-        flat_groups = self.library.list_flat_groups() if kind == "flat" else ()
-        return build_ingest_report(kind, before, after, flat_groups)
+        after = flatten_frame_index(getattr(self._calibration_library, f"{kind}_frames"))
+        added_paths = set().union(*after.values()) - set().union(*before.values())
+        assessments: list[CalibrationSetHealth] = []
+        if added_paths:
+            if kind == "flat":
+                minimum_frames = self._config.get_minimum_calibration_frames()
+                assessments = [
+                    self._flat_set_health(group, minimum_frames)
+                    for group in self._calibration_library.list_flat_groups()
+                    if added_paths.intersection(group.paths)
+                ]
+            else:
+                gained = [
+                    calibration_set
+                    for calibration_set in self._calibration_library.list_calibration_sets(
+                        kind, validate_paths=False
+                    )
+                    if added_paths.intersection(calibration_set.paths)
+                ]
+                assessments = self._judge_dark_or_bias_sets(kind, gained, None)
+        return build_ingest_report(kind, before, after, assessments)
 
     @background_job("diagnostics", grace_period_seconds=20.0)
-    def assess_flats(
+    def assess(
         self,
-        telescope: str | None = None,
+        kind: _CalibrationKind,
         camera_id: str | None = None,
-        filter_type: str | None = None,
-        gain: float | None = None,
+        gain: str | int | float | None = None,
         offset: float | None = None,
+        binning: str | int | None = None,
+        temperature_c: float | None = None,
+        exposure_seconds: float | None = None,
+        telescope: str | None = None,
+        filter_name: str | None = None,
         register_job: bool = True,
-    ) -> list[FlatSetAssessment]:
-        """Check whether the flats in the library are good enough to use.
+    ) -> list[CalibrationSetHealth]:
+        """Check whether the calibration sets in the library are good enough.
 
-        Each set (one telescope, camera, filter, gain and offset) is
-        measured on its own with the check the stacker runs: how many
-        frames, how bright, how noisy the master flat will be, and any
-        problems. Leave an argument out to include every value of it.
+        Each set (the frames of one camera at one setting) is judged on its
+        own, and the answer is one common record for darks, biases and flats.
+        A dark or bias set is judged from the numbers stored for each of its
+        frames by `measure_frames`, against limits taken from the equipment:
+        the camera profile's read noise and bias level, and the bias frames
+        of the same setting. Nothing is stored for the judgement; it is worked
+        out when asked, so a changed limit shows at once. A check that has no
+        reference, or whose numbers are not stored yet, is ``not_checked``
+        with the reason. It never uses a default. A flat set is measured when
+        asked, with the check the stacker runs. Nothing is written.
+
+        Arguments used by each kind (any other argument is refused):
+
+        - ``"dark"``: ``camera_id``, ``gain``, ``offset``, ``binning``,
+          ``temperature_c`` and ``exposure_seconds``.
+        - ``"bias"``: ``camera_id``, ``gain``, ``offset`` and ``binning``.
+        - ``"flat"``: ``camera_id``, ``gain``, ``offset``, ``binning``,
+          ``telescope`` and ``filter_name``.
 
         Parameters
         ----------
-        telescope : `str`, optional
-            Only this telescope's flats.
+        kind : {"dark", "bias", "flat"}
+            The kind of calibration frame.
         camera_id : `str`, optional
-            Only this camera's flats.
-        filter_type : `str`, optional
-            Only flats for this filter, such as ``"L"`` or ``"SPEC"``.
-        gain : `float`, optional
-            Only flats at this gain.
-        offset : `float`, optional
-            With `gain`, only flats at this camera offset.
+            Only this camera's sets.
+        gain, offset, binning : optional
+            Only sets with this gain (or ISO), camera offset and binning.
+            Binning ``"2"`` and ``"2x2"`` are the same.
+        temperature_c : `float`, optional
+            Darks only: the set whose temperature slot holds this sensor
+            temperature, in degrees Celsius.
+        exposure_seconds : `float`, optional
+            Darks only: the set with this exposure, within 0.05 s.
+        telescope : `str`, optional
+            Flats only: the telescope the flats were taken through.
+        filter_name : `str`, optional
+            Flats only: the filter, such as ``"L"`` or ``"SPEC"``.
         register_job : `bool`, optional
             Record the run in the job list. Defaults to `True`.
 
         Returns
         -------
-        assessments : `list` [`FlatSetAssessment`]
-            One assessment per matching set. Empty if no flats match.
+        health : `list` [`CalibrationSetHealth`]
+            One record per matching set. Empty if no set matches. An unknown
+            kind, or an argument the kind does not use, is refused with an
+            `InvalidArgumentError`.
         """
+        check_choice("kind", kind, _CALIBRATION_KINDS)
+        reject_unused_arguments(
+            kind,
+            _ASSESS_ARGUMENTS,
+            {
+                "camera_id": camera_id is not None,
+                "gain": gain is not None,
+                "offset": offset is not None,
+                "binning": binning is not None,
+                "temperature_c": temperature_c is not None,
+                "exposure_seconds": exposure_seconds is not None,
+                "telescope": telescope is not None,
+                "filter_name": filter_name is not None,
+            },
+        )
         with registered_job(enabled=register_job, job_type="diagnostics", target_id="calibration"):
-            groups = self.library.list_flat_groups(
-                telescope=telescope, camera=camera_id, filter_type=filter_type, gain=gain, offset=offset
+            if kind == "flat":
+                return self._assess_flat_sets(telescope, camera_id, filter_name, gain, offset, binning)
+            return self._assess_dark_or_bias_sets(
+                kind, camera_id, gain, offset, binning, temperature_c, exposure_seconds
             )
-            return [assess_flat_group(group) for group in groups]
+
+    def _assess_flat_sets(
+        self,
+        telescope: str | None,
+        camera_id: str | None,
+        filter_name: str | None,
+        gain: Any,
+        offset: float | None,
+        binning: Any,
+    ) -> list[CalibrationSetHealth]:
+        """Judge the flat sets that match, with the stacker's own flat check.
+
+        Returns
+        -------
+        health : `list` [`CalibrationSetHealth`]
+            One record per matching flat set.
+        """
+        from astrometricslib._internal.drivers.calibration_library import normalize_binning
+
+        minimum_frames = self._config.get_minimum_calibration_frames()
+        groups = self._calibration_library.list_flat_groups(
+            telescope=telescope, camera=camera_id, filter_type=filter_name, gain=gain, offset=offset
+        )
+        return [
+            self._flat_set_health(group, minimum_frames)
+            for group in groups
+            if binning is None or normalize_binning(group.binning) == normalize_binning(binning)
+        ]
+
+    @staticmethod
+    def _flat_set_health(group: Any, minimum_frames: int) -> CalibrationSetHealth:
+        """Measure one flat set with the stacker's flat check and judge it.
+
+        Parameters
+        ----------
+        group : `FlatGroup`
+            The set.
+        minimum_frames : `int`
+            The configured fewest frames a master may be built from.
+
+        Returns
+        -------
+        health : `CalibrationSetHealth`
+            The set's health.
+        """
+        assessment = assess_flat_group(group)
+        checks = flat_set_checks(assessment, minimum_frames)
+        row = {
+            "camera": group.camera,
+            "filter": group.filter,
+            "iso": group.gain,
+            "offset": group.offset,
+            "binning": group.binning,
+        }
+        return CalibrationSetHealth(
+            kind="flat",
+            rowKey=_calibration_row_key("flat", row),
+            camera=group.camera,
+            gain=group.gain,
+            offset=group.offset,
+            binning=group.binning,
+            telescope=group.telescope,
+            filter=group.filter,
+            frameCount=len(group.paths),
+            uniqueFrameCount=assessment.frame_count,
+            status=combine_status(checks),
+            summary=summarize_checks(checks),
+            checks=checks,
+            smoothingSigmaPixels=assessment.smoothing_sigma_pixels,
+        )
+
+    def _assess_dark_or_bias_sets(
+        self,
+        kind: str,
+        camera_id: str | None,
+        gain: Any,
+        offset: float | None,
+        binning: Any,
+        temperature_c: float | None,
+        exposure_seconds: float | None,
+    ) -> list[CalibrationSetHealth]:
+        """Judge the dark or bias sets that match, from the stored numbers.
+
+        Returns
+        -------
+        health : `list` [`CalibrationSetHealth`]
+            One record per matching set.
+        """
+        wanted = [
+            calibration_set
+            for calibration_set in self._calibration_library.list_calibration_sets(kind, camera=camera_id)
+            if _calibration_set_matches(
+                calibration_set, gain, offset, binning, temperature_c, exposure_seconds
+            )
+        ]
+        return self._judge_dark_or_bias_sets(kind, wanted, camera_id)
+
+    def _judge_dark_or_bias_sets(
+        self, kind: str, wanted: list[Any], camera_id: str | None
+    ) -> list[CalibrationSetHealth]:
+        """Judge the given dark or bias sets from the stored numbers.
+
+        Nothing is measured here: a frame with no stored numbers makes its
+        checks ``not_checked`` with the reason.
+
+        Parameters
+        ----------
+        kind : {"dark", "bias"}
+            The kind of the sets.
+        wanted : `list` [`CalibrationSet`]
+            The sets to judge.
+        camera_id : `str` or `None`
+            Limits the bias sets used as references to this camera.
+
+        Returns
+        -------
+        health : `list` [`CalibrationSetHealth`]
+            One record per set.
+        """
+        from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
+        from astrometricslib.pipelines.shared.quality.calibration_frame_measurement import (
+            calibration_subject_id,
+        )
+        from astrometricslib.pipelines.stacking.pre_processing.calibration_assessment import (
+            assess_dark_or_bias_frames,
+            build_bias_reference,
+            frame_facts_from_rows,
+            health_of_judgement,
+        )
+
+        library = self._calibration_library
+        if not wanted:
+            return []
+        store = QualityStore(quality_database_path(self._config))
+        bias_sets = library.list_calibration_sets("bias", camera=camera_id) if kind == "dark" else []
+        subject_paths = {
+            calibration_subject_id(path, "bias"): path for bias_set in bias_sets for path in bias_set.paths
+        }
+        subject_paths.update({
+            calibration_subject_id(path, kind): path
+            for calibration_set in wanted
+            for path in calibration_set.paths
+        })
+        prefixes = {"calibration/bias/", f"calibration/{kind}/"}
+        rows = [
+            row
+            for prefix in sorted(prefixes)
+            for row in store.query(level=SubjectLevel.FRAME, subject_id_prefix=prefix)
+            if row.definition_version == _CURRENT_VERSIONS.get(row.metric)
+        ]
+        facts = frame_facts_from_rows(rows, subject_paths)
+        minimum_frames = self._config.get_minimum_calibration_frames()
+        health = []
+        for calibration_set in wanted:
+            profile = resolve_camera_profile(calibration_set.camera, self._config)
+            setting = (calibration_set.gain, calibration_set.offset, calibration_set.binning)
+            reference = None
+            if kind == "dark":
+                same_setting = [
+                    bias_set for bias_set in bias_sets if bias_set.has_setting_of(calibration_set)
+                ]
+                reference = build_bias_reference([
+                    facts[path] for bias_set in same_setting for path in bias_set.paths if path in facts
+                ])
+            judgement = assess_dark_or_bias_frames(
+                kind,
+                calibration_set.paths,
+                facts,
+                minimum_frames=minimum_frames,
+                profile=profile,
+                setting=setting,
+                exposure_seconds=calibration_set.exposure_seconds,
+                reference=reference,
+            )
+            row = {
+                "camera": calibration_set.camera,
+                "iso": calibration_set.gain,
+                "offset": calibration_set.offset,
+                "binning": calibration_set.binning,
+                "temperature_c": calibration_set.temperature_c,
+                "exposure": calibration_set.exposure_seconds,
+            }
+            health.append(
+                health_of_judgement(
+                    judgement,
+                    kind=kind,
+                    row_key=_calibration_row_key(kind, row),
+                    camera=calibration_set.camera,
+                    gain=calibration_set.gain,
+                    offset=calibration_set.offset,
+                    binning=calibration_set.binning,
+                    temperature_slot_c=calibration_set.temperature_c,
+                    exposure_seconds=calibration_set.exposure_seconds,
+                )
+            )
+        return health
+
+    @background_job("diagnostics", grace_period_seconds=20.0)
+    def measure_frames(
+        self,
+        kind: Literal["dark", "bias"] | None = None,
+        camera_id: str | None = None,
+        force: bool = False,
+        register_job: bool = True,
+    ) -> CalibrationMeasurementReport:
+        """Measure the dark and bias frames that are new or changed.
+
+        Each frame is read once and its numbers (level, zero share, noise,
+        large-scale pattern and so on) are stored, so `assess` can judge the
+        sets. A frame whose file has not changed since it was measured is
+        skipped, so a second run costs almost nothing. The first run over a
+        large library takes a long time (about half a second per frame).
+        This writes rows to the quality store and the frame stamps to the
+        calibration index. It never changes, moves or deletes a frame.
+
+        Parameters
+        ----------
+        kind : {"dark", "bias"}, optional
+            Only this kind. Leave it out for both.
+        camera_id : `str`, optional
+            Only this camera's frames.
+        force : `bool`, optional
+            Measure every frame again, even if its file has not changed.
+        register_job : `bool`, optional
+            Record the run in the job list. Defaults to `True`.
+
+        Returns
+        -------
+        report : `CalibrationMeasurementReport`
+            How many frames were measured, skipped and unreadable. An unknown
+            kind is refused with an `InvalidArgumentError`.
+        """
+        from uuid import uuid4
+
+        from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
+
+        if kind is not None:
+            check_choice("kind", kind, ("dark", "bias"))
+        with registered_job(enabled=register_job, job_type="diagnostics", target_id="calibration") as job:
+
+            def report_progress(done: int, total: int) -> None:
+                """Tell the job how far the run is."""
+                job.stage(int(100 * done / max(total, 1)), f"Measured {done} of {total} calibration frames")
+
+            summary = measure_calibration_frames(
+                self._calibration_library,
+                QualityStore(quality_database_path(self._config)),
+                self._config,
+                run_id=job.job_id or f"calibration-measure-{uuid4().hex}",
+                job_id=job.job_id or current_job_id(),
+                measured_at=datetime.now(UTC),
+                kinds=("dark", "bias") if kind is None else (kind,),
+                camera=camera_id,
+                force=force,
+                progress=report_progress,
+            )
+        return CalibrationMeasurementReport(
+            frameCount=summary.frame_count,
+            measuredCount=summary.measured_count,
+            unchangedCount=summary.unchanged_count,
+            unreadableCount=summary.unreadable_count,
+            failedCount=summary.failed_count,
+            rowsStored=summary.rows_stored,
+            notes=summary.notes,
+        )
 
     @background_job("diagnostics", grace_period_seconds=20.0)
     def measure_sensor_noise(
@@ -457,10 +912,10 @@ class CalibrationCatalog:
         gain: str | float,
         offset: str | float,
         binning: str = "1x1",
-        temperature: float | None = None,
+        temperature_c: float | None = None,
         exposure_seconds: float | None = None,
         telescope: str | None = None,
-        filter_type: str | None = None,
+        filter_name: str | None = None,
         save: bool = False,
         register_job: bool = True,
     ) -> SensorNoiseMeasurement:
@@ -487,14 +942,15 @@ class CalibrationCatalog:
             The camera offset.
         binning : `str`, optional
             The binning, such as ``"1x1"``. Defaults to ``"1x1"``.
-        temperature : `float`, optional
-            Use only frames within 1 degree C of this sensor temperature.
+        temperature_c : `float`, optional
+            Use only frames within 1 degree C of this sensor temperature,
+            in degrees Celsius.
         exposure_seconds : `float`, optional
             Use only flats of this exposure. Needed when the setting's flats
             were taken at several exposures.
         telescope : `str`, optional
             Use only flats taken through this telescope.
-        filter_type : `str`, optional
+        filter_name : `str`, optional
             Use only flats taken through this filter.
         save : `bool`, optional
             Write a measured result into the camera profile, with a backup
@@ -510,16 +966,16 @@ class CalibrationCatalog:
         """
         with registered_job(enabled=register_job, job_type="diagnostics", target_id="calibration"):
             return measure_sensor_noise_from_library(
-                self.library,
+                self._calibration_library,
                 self._config,
                 camera_id,
                 gain,
                 offset,
                 binning,
-                temperature_c=temperature,
+                temperature_c=temperature_c,
                 exposure_seconds=exposure_seconds,
                 telescope=telescope,
-                filter_type=filter_type,
+                filter_type=filter_name,
                 save=save,
                 measured_on=datetime.now(UTC).date(),
             )
@@ -556,7 +1012,9 @@ class _TargetsOnDemand:
 
 
 class ProcessingPipelines:
-    """Stack targets, remake their previews, and run the analysis stages.
+    """Stack targets, run the analysis stages and measure noise.
+
+    It also remakes the preview pictures of stacks.
 
     Every method that takes a target accepts its id or the `Target`. An id
     that names no target, or a stack that does not exist, raises
@@ -577,8 +1035,9 @@ class ProcessingPipelines:
     drivers : `Drivers`, optional
         The plate solver, stacking program and SIMBAD driver to use. Any
         left out is the built-in one (Astrometry.net, Siril, astroquery).
-        They reach `stack`, the astrometry and spectroscopy stages of
-        `process_target` for one target, and `run_spectroscopy_by_session`.
+        They reach `stack`, the astrometry, photometry and spectroscopy
+        stages of `process_target` for one target, and
+        `run_spectroscopy_by_session`.
         `process_target` for several targets runs in worker processes, which
         cannot receive them, so it refuses to start when any were given.
 
@@ -731,8 +1190,8 @@ class ProcessingPipelines:
         Returns
         -------
         result : `StackResult`
-            The frames chosen and, unless ``plan_only``, the stack's path,
-            flags and quality summary (``quality_summary``). To compare
+            The frames chosen and, unless ``plan_only``, the stack's path
+            and quality summary (``quality_summary``). To compare
             it with the previous stack, use
             `Astrometrics.quality.measure_stack`.
 
@@ -745,9 +1204,9 @@ class ProcessingPipelines:
         """
         from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
         from astrometricslib.pipelines.stacking.post_processing.stack_preview import PreviewSettings
+        from astrometricslib.pipelines.stacking.pre_processing.camera_selection import ensure_single_camera
         from astrometricslib.pipelines.stacking.stack_request import (
             SirilOptions,
-            check_one_camera,
             choose_frames_to_stack,
             run_stack,
         )
@@ -765,7 +1224,7 @@ class ProcessingPipelines:
                 )
             if not frames:
                 raise InvalidArgumentError("frames is empty: there is nothing to stack.")
-            check_one_camera(resolved, frames)
+            ensure_single_camera(frames, target_id=resolved.id)
             chosen = list(frames)
         else:
             selection = make_frame_selection(
@@ -791,331 +1250,201 @@ class ProcessingPipelines:
                 log_file=log_file,
             ),
             register_job=register_job,
-            stacking_slot=self.acquire_stacking_slot,
+            stacking_slot=self.acquire_job_slot,
             save_targets=self._targets.save,
             drivers=self._drivers,
             measured_at=datetime.now(UTC),
-            quality_recording=FrameQualityRecording(self._config, self.calibration.library),
+            quality_recording=FrameQualityRecording(self._config, self.calibration._calibration_library),
         )
 
     @background_job("stacking", grace_period_seconds=8.0)
-    def stack_subset(
+    def measure_noise(
         self,
         target: str | Target,
-        frames: list[FrameRecord],
-        *,
-        label: str,
-        output_folder: str | None = None,
-        register_job: bool = True,
-    ) -> SubsetStackResult:
-        """Stack exactly the given frames into a scratch folder.
-
-        The stack uses the target's normal settings (rejection, weighting,
-        exposure groups and edge trim). It is written to
-        ``<target's stacks folder>/_subsets/<label>/<label>.fits``, or to
-        ``output_folder`` when that lies inside the ``_subsets`` folder,
-        never to the library stack's path. While it runs, no library stack
-        and no other subset job of the target can run; a second one is
-        refused with `ConflictError`, not queued. Nothing is
-        assigned on the target and the target is not saved. The frame
-        quarantine step is not run, so give frames the library stack already
-        kept. The stack's noise in the target's stored sky apertures, its
-        effective frame count and its effective time are stored in the quality
-        database at level ``stack``. Delete the ``_subsets`` folder whenever
-        you like; nothing reads it back. A label that is unsafe in a path,
-        fewer than four frames, or frames from more than one camera raise
-        `InvalidArgumentError`.
-
-        Parameters
-        ----------
-        target : `str` or `Target`
-            The target the frames belong to.
-        frames : `list` [`FrameRecord`]
-            The frames to stack, at least four, all from one camera.
-        label : `str`
-            Names the subset's folder and file. Letters, digits, dots,
-            underscores and hyphens; it may not start with a dot.
-        output_folder : `str`, optional
-            Write the stack here instead of the default subset folder. It
-            must be inside the target's ``_subsets`` folder.
-        register_job : `bool`, optional
-            Record the run in the job list. Defaults to `True`.
-
-        Returns
-        -------
-        result : `SubsetStackResult`
-            The subset stack's path, its frame counts and its noise (or why
-            there is none).
-        """
-        from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
-        from astrometricslib.pipelines.stacking.subset_noise_run import stack_chosen_subset
-
-        resolved = self._resolve(target)
-        with registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job:
-            context = self._subset_context(resolved, job.job_id)
-            return stack_chosen_subset(
-                resolved,
-                frames,
-                label,
-                self._library_stack_path(
-                    resolved,
-                    "spectral" if any(frame_is_spectral(frame) for frame in frames) else "imaging",
-                    must_exist=False,
-                ),
-                context=context,
-                configuration=self._config,
-                drivers=self._drivers,
-                stacking_slot=self.acquire_stacking_slot,
-                output_folder=output_folder,
-            )
-
-    @background_job("stacking", grace_period_seconds=8.0)
-    def measure_noise_growth(
-        self,
-        target: str | Target,
+        kind: Literal["growth", "night_contributions", "odd_even_difference"] = "growth",
         *,
         maximum_steps: int = 4,
-        include_night_contributions: bool = False,
-        include_half_difference: bool = True,
+        include: list[str] | None = None,
+        keep_halves: bool = False,
         register_job: bool = True,
-    ) -> NoiseGrowthResult:
-        """Stack growing subsets of a target and measure each one's noise.
+    ) -> NoiseGrowthResult | NightContributionResult | OddEvenDifferenceNoiseResult:
+        """Stack parts of a target's library stack and measure the noise.
 
-        The frames of the target's library stack (read from the stack's
-        ``_inputs.json``) are split by observing night. The subsets are the
-        first night, the first two nights, and so on, up to one night fewer
-        than the stack. A stack of one night uses the first quarter, half and
-        three quarters of its frames instead. At most ``maximum_steps``
-        subsets are made, spaced evenly through the possible ones, and a
-        subset with fewer than four frames is left out. The library stack is
-        the last point of the curve and is not stacked again.
+        Each kind stacks some of the library stack's frames (read from the
+        stack's ``_inputs.json``) into the target's ``_subsets`` folder with
+        the normal settings (without the frame quarantine step), and measures
+        the noise in the same sky apertures as the library stack, so the
+        numbers compare. Rows are stored at level ``stack``. The library
+        stack, its previews and its record are never changed. None of the
+        kinds starts by itself after a stack, and none runs inside the stack's
+        own process; a caller starts it. The target must already have the
+        noise apertures that its library stack stored, so stack it once first
+        if it was stacked before they were recorded. A target with no stack,
+        or a stack with no ``_inputs.json``, raises `NotFoundError`.
 
-        Each subset is stacked into the target's ``_subsets`` folder with the
-        normal settings (without the frame quarantine step). Its noise is
-        measured in the same sky apertures as the library stack, so the
-        numbers compare. The noise, the reference flux, the effective frame
-        count and the effective time are stored at level ``stack``, with the
-        subset's label in the subject. The library stack, its previews and its
-        record are never changed.
+        Arguments used by each kind (any other argument is refused):
 
-        Cost: one stack for each subset, four by default, each with fewer
-        frames than the library stack, plus the half-difference noise (two
-        stacks of half the frames each, about one library stack's time and
-        Siril's temporary disk). Expect the time of about two to four library
-        stacks (a design estimate, not a measurement). This job does not
-        start by itself after a stack; a caller starts it. The target must
-        already have the noise apertures that its library stack stored, so
-        stack it once first if it was stacked before they were recorded. A
-        target with no stack, or a stack with no ``_inputs.json``, raises
-        `NotFoundError`.
+        - ``"growth"``: ``maximum_steps`` and ``include``; ``include`` may
+          hold ``"night_contributions"`` and ``"odd_even_difference"``.
+        - ``"night_contributions"``: none.
+        - ``"odd_even_difference"``: ``keep_halves``.
 
         Parameters
         ----------
         target : `str` or `Target`
             The target.
+        kind : `str`, optional
+            ``"growth"`` (default): the noise against the number of frames.
+            The frames are split by observing night. The subsets are the first
+            night, the first two nights, and so on, up to one night fewer than
+            the stack. A stack of one night uses the first quarter, half and
+            three quarters of its frames instead. At most ``maximum_steps``
+            subsets are made, spaced evenly through the possible ones, and a
+            subset with fewer than four frames is left out. The library stack
+            is the last point of the curve and is not stacked again. The
+            noise, the reference flux, the effective frame count and the
+            effective time are stored with the subset's label in the subject.
+            The cost is one stack for each subset, four by default, each with
+            fewer frames than the library stack, plus the odd–even difference
+            noise (about one library stack's time and Siril's temporary disk).
+            Expect the time of about two to four library stacks (a design
+            estimate, not a measurement).
+
+            ``"night_contributions"``: what each observing night gave to the
+            library stack. For every night, the stack's frames without that
+            night are stacked, and four numbers are stored on that leave-out
+            stack, with the night in the subject's observing night: the
+            night's share of the library stack's total frame weight
+            (``stacking.night_weight_fraction``), the noise of the stack
+            without the night (``stacking.noise_without_night``), the paired
+            difference from the library stack's noise
+            (``stacking.noise_difference_without_night``) and the ratio the
+            two stacks' effective frame counts predict
+            (``stacking.subset_expected_noise_ratio``). The cost is one stack
+            for every night, each close to the library stack's own cost. A
+            stack of one night has nothing to leave out. A share is stored as
+            not measured when the stack's weights are unknown (Siril weighted
+            the frames itself).
+
+            ``"odd_even_difference"``: the library stack's random noise from
+            two halves. The frames are put in order of capture time and split
+            into the 1st, 3rd, ... and the 2nd, 4th, ... frame. The library
+            stack's registration reference frame goes into both, and it is
+            handed to the stacker as the frame to line up with, so a half
+            cannot choose its own and the two half stacks have the same pixel
+            grid. Each half is stacked (without the edge trim), the
+            difference is taken, and its noise is measured in the library
+            stack's stored empty apertures. The difference cancels what the
+            frames share (sky structure, faint stars, nebula) and keeps their
+            random noise, so it is the more honest noise of a deep or crowded
+            field. Nine rows are stored on the library stack, beside its
+            ``stacking.empty_aperture_noise_*`` rows and never replacing
+            them: the noise (``..._stack_unit`` and ``..._normalized``), the
+            reference flux the normalized value divides by, the two halves'
+            effective frame counts, the variance factor, the variance ratio
+            with each frame's modeled noise, and the shared frame's two
+            weight shares (all ``stacking.odd_even_difference_*``). Five more
+            rows say what the two halves share at the scale of a few pixels
+            (an upper limit of a fixed pattern on the sensor) and how that
+            differs along and across the pointing drift (the
+            ``stacking.half_shared_fine_scale_*`` and
+            ``stacking.walking_noise_*`` metrics). The halves are deleted
+            afterwards. The cost is two stacks of half the frames each, about
+            one library stack's time in all, plus the temporary disk space
+            Siril needs for each. While it runs, no library stack and no
+            other subset job of the target can run. When the measurement
+            cannot be made (a half with under 8 frames, no recorded
+            registration reference, other apertures than the library stack's,
+            a Siril failure), the rows are stored as not measured with the
+            reason, and the result says why.
         maximum_steps : `int`, optional
-            The most subsets to stack. Defaults to 4.
-        include_night_contributions : `bool`, optional
-            Also run `measure_night_contributions` in the same job. Defaults
-            to `False`, because it costs one more stack for every night.
-        include_half_difference : `bool`, optional
-            Also run `measure_half_difference_noise` in the same job, under
-            the same lock, after the series. Defaults to `True`: it costs
-            about one library stack's time, and it is the noise measure that
-            ignores structure the frames share. Its result is in
-            ``half_difference`` and its rows are counted there.
+            Applies to ``"growth"`` only. The most subsets to stack. Defaults
+            to 4.
+        include : `list` [`str`], optional
+            Applies to ``"growth"`` only. Sections to run in the same job,
+            under the same lock, after the series: ``"night_contributions"``
+            (one more stack for every night) and ``"odd_even_difference"``
+            (about one library stack's time, and the noise measure that
+            ignores structure the frames share; its result is in
+            ``odd_even_difference`` and its rows are counted there). `None`
+            means ``["odd_even_difference"]``; pass an empty list for neither.
+        keep_halves : `bool`, optional
+            Applies to ``"odd_even_difference"`` only. Keep the two half
+            stacks in the ``_subsets`` folder. Defaults to `False`.
         register_job : `bool`, optional
             Record the run in the job list. Defaults to `True`.
 
         Returns
         -------
-        result : `NoiseGrowthResult`
-            The subsets, smallest first, with notes about steps left out.
+        result : `NoiseGrowthResult`, `NightContributionResult`, ...
+            For ``"growth"`` a `NoiseGrowthResult` (the subsets, smallest
+            first, with notes about steps left out); for
+            ``"night_contributions"`` a `NightContributionResult` (one entry
+            for each night); for ``"odd_even_difference"`` an
+            `OddEvenDifferenceNoiseResult` (the difference noise, the halves'
+            effective frame counts and the library stack's own noise that the
+            difference implies, or the reason there are none).
 
         Raises
         ------
         InvalidArgumentError
-            If ``maximum_steps`` is below 1.
+            If the kind or an include section is unknown, an argument the
+            kind does not use is given, or ``maximum_steps`` is below 1.
         """
+        from astrometricslib.pipelines.stacking.odd_even_difference_run import run_odd_even_difference_noise
         from astrometricslib.pipelines.stacking.subset_noise_run import (
-            run_half_difference_noise,
             run_night_contributions,
             run_noise_growth,
         )
-
-        if maximum_steps < 1:
-            raise InvalidArgumentError("maximum_steps must be at least 1.")
         from astrometricslib.pipelines.stacking.target_stack_guard import subset_job_guard
 
+        check_choice("kind", kind, NOISE_KINDS)
+        sections = check_include(include, NOISE_SECTIONS)
+        reject_unused_arguments(
+            kind,
+            _NOISE_ARGUMENTS,
+            {
+                "maximum_steps": maximum_steps != 4,
+                "include": bool(sections),
+                "keep_halves": keep_halves,
+            },
+        )
+        if maximum_steps < 1:
+            raise InvalidArgumentError("maximum_steps must be at least 1.")
+        if kind == "growth" and include is None:
+            sections = frozenset(("odd_even_difference",))
         resolved = self._resolve(target)
         library_stack_path = self._library_stack_path(resolved, "imaging")
-        with (
-            registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job,
-            subset_job_guard(resolved.id),
-        ):
+        with registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job:
             context = self._subset_context(resolved, job.job_id)
-            result = run_noise_growth(
-                resolved,
-                library_stack_path,
-                context=context,
-                configuration=self._config,
-                drivers=self._drivers,
-                stacking_slot=self.acquire_stacking_slot,
-                maximum_steps=maximum_steps,
-            )
-            if include_night_contributions:
-                result.night_contributions = run_night_contributions(
-                    resolved,
-                    library_stack_path,
-                    context=context,
-                    configuration=self._config,
-                    drivers=self._drivers,
-                    stacking_slot=self.acquire_stacking_slot,
+            shared = {
+                "context": context,
+                "configuration": self._config,
+                "drivers": self._drivers,
+                "stacking_slot": self.acquire_job_slot,
+            }
+            if kind == "night_contributions":
+                return run_night_contributions(resolved, library_stack_path, **shared)
+            if kind == "odd_even_difference":
+                return run_odd_even_difference_noise(
+                    resolved, library_stack_path, keep_halves=keep_halves, **shared
                 )
-            if include_half_difference:
-                try:
-                    result.half_difference = run_half_difference_noise(
-                        resolved,
-                        library_stack_path,
-                        context=context,
-                        configuration=self._config,
-                        drivers=self._drivers,
-                        stacking_slot=self.acquire_stacking_slot,
+            with subset_job_guard(resolved.id):
+                result = run_noise_growth(resolved, library_stack_path, maximum_steps=maximum_steps, **shared)
+                if "night_contributions" in sections:
+                    result.night_contributions = run_night_contributions(
+                        resolved, library_stack_path, **shared
                     )
-                except Exception as error:  # the series is already stored; report, do not lose it
-                    logger.exception("The half-difference noise of %s failed", resolved.id)
-                    result.notes.append(
-                        f"The half-difference noise was not measured ({type(error).__name__}: {error})."
-                    )
-            return result
-
-    @background_job("stacking", grace_period_seconds=8.0)
-    def measure_night_contributions(
-        self, target: str | Target, *, register_job: bool = True
-    ) -> NightContributionResult:
-        """Measure what each observing night gave to a target's library stack.
-
-        For every night of the stack's frames, the stack's frames without that
-        night are stacked into the target's ``_subsets`` folder, and two
-        numbers are stored at level ``stack`` on that leave-out stack, with the
-        night in the subject's observing night: the night's share of the
-        library stack's total frame weight (``stacking.night_weight_fraction``)
-        and the noise of the stack without the night
-        (``stacking.noise_without_night``), with the paired difference from the
-        library stack's noise (``stacking.noise_difference_without_night``)
-        and the ratio the two stacks' effective frame counts predict
-        (``stacking.subset_expected_noise_ratio``).
-
-        Cost: one stack for every night, each close to the library stack's own
-        cost. It never runs by itself after a stack; call it when you want
-        it, or pass ``include_night_contributions`` to
-        `measure_noise_growth`. A stack of one night has nothing to leave out.
-        A target with no stack, or a stack with no ``_inputs.json``, raises
-        `NotFoundError`.
-        A share is stored as not measured when the stack's weights are unknown
-        (Siril weighted the frames itself).
-
-        Parameters
-        ----------
-        target : `str` or `Target`
-            The target.
-        register_job : `bool`, optional
-            Record the run in the job list. Defaults to `True`.
-
-        Returns
-        -------
-        result : `NightContributionResult`
-            One entry for each night.
-        """
-        from astrometricslib.pipelines.stacking.subset_noise_run import run_night_contributions
-
-        resolved = self._resolve(target)
-        library_stack_path = self._library_stack_path(resolved, "imaging")
-        with registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job:
-            context = self._subset_context(resolved, job.job_id)
-            return run_night_contributions(
-                resolved,
-                library_stack_path,
-                context=context,
-                configuration=self._config,
-                drivers=self._drivers,
-                stacking_slot=self.acquire_stacking_slot,
-            )
-
-    @background_job("stacking", grace_period_seconds=8.0)
-    def measure_half_difference_noise(
-        self, target: str | Target, *, keep_halves: bool = False, register_job: bool = True
-    ) -> HalfDifferenceNoiseResult:
-        """Measure a library stack's random noise from two halves.
-
-        The library stack's frames are put in order of capture time and split
-        into two disjoint halves, the 1st, 3rd, ... and the 2nd, 4th, ...
-        frame. The library stack's registration reference frame goes into
-        both, and it is handed to the stacker as the frame to line up with,
-        so a half cannot choose its own and the two half stacks have the same
-        pixel grid. Each half is stacked into the target's ``_subsets``
-        folder (normal settings, without the edge trim and the frame
-        quarantine), the difference is taken, and its noise is measured in
-        the library stack's stored empty apertures. The difference cancels
-        what the frames share (sky structure, faint stars, nebula) and keeps
-        their random noise, so it is the more honest noise of a deep or
-        crowded field. Nine rows are stored on the library stack at level
-        ``stack``, beside its ``stacking.empty_aperture_noise_*`` rows and
-        never replacing them: the noise (``..._stack_unit`` and
-        ``..._normalized``), the reference flux the normalized value divides
-        by, the two halves' effective frame counts, the variance factor, the
-        variance ratio with each frame's modeled noise, and the shared
-        frame's two weight shares (all ``stacking.half_difference_*``). Five
-        more rows say what the two halves share at the scale of a few pixels
-        (an upper limit of a fixed pattern on the sensor) and how that
-        differs along and across the pointing drift (the
-        ``stacking.half_shared_fine_scale_*`` and ``stacking.walking_noise_*``
-        metrics). The halves are deleted afterwards.
-
-        Cost: two stacks of half the frames each, about one library stack's
-        time in all, plus the temporary disk space Siril needs for each
-        (its converted and registered frames, deleted after each stack).
-        Neither this job nor `measure_noise_growth` starts by itself after a
-        stack, and neither runs inside the stack's own process. While it runs,
-        no library stack and no other subset job of the target can run.
-        When the measurement cannot be made (a half with under 8 frames, no
-        recorded registration reference, other apertures than the library
-        stack's, a Siril failure), the rows are stored as not measured with
-        the reason, and the result says why. A target with no stack, or a
-        stack with no recorded frames, raises `NotFoundError`.
-
-        Parameters
-        ----------
-        target : `str` or `Target`
-            The target.
-        keep_halves : `bool`, optional
-            Keep the two half stacks in the ``_subsets`` folder. Defaults to
-            `False`.
-        register_job : `bool`, optional
-            Record the run in the job list. Defaults to `True`.
-
-        Returns
-        -------
-        result : `HalfDifferenceNoiseResult`
-            The difference noise, the halves' effective frame counts and the
-            library stack's own noise that the difference implies, or the
-            reason there are none.
-        """
-        from astrometricslib.pipelines.stacking.subset_noise_run import run_half_difference_noise
-
-        resolved = self._resolve(target)
-        library_stack_path = self._library_stack_path(resolved, "imaging")
-        with registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job:
-            context = self._subset_context(resolved, job.job_id)
-            return run_half_difference_noise(
-                resolved,
-                library_stack_path,
-                context=context,
-                configuration=self._config,
-                drivers=self._drivers,
-                stacking_slot=self.acquire_stacking_slot,
-                keep_halves=keep_halves,
-            )
+                if "odd_even_difference" in sections:
+                    try:
+                        result.odd_even_difference = run_odd_even_difference_noise(
+                            resolved, library_stack_path, **shared
+                        )
+                    except Exception as error:  # the series is already stored; report, do not lose it
+                        logger.exception("The odd–even difference noise of %s failed", resolved.id)
+                        reason = f"{type(error).__name__}: {error}"
+                        result.notes.append(f"The odd–even difference noise was not measured ({reason}).")
+                return result
 
     def _library_stack_path(self, target: Target, kind: StackKind, *, must_exist: bool = True) -> str:
         """Find the path of a target's library stack for the subset jobs.
@@ -1167,7 +1496,7 @@ class ProcessingPipelines:
             target.id,
             "stacking",
             STACKING_PIPELINE_VERSION,
-            {"job_id": job_id, "measured_at": datetime.now(UTC)},
+            {"job_id": job_id or current_job_id(), "measured_at": datetime.now(UTC)},
         )
 
     @background_job("preview", grace_period_seconds=20.0)
@@ -1258,10 +1587,18 @@ class ProcessingPipelines:
             star_stretch=star_stretch,
         )
         with (
-            self.acquire_stacking_slot(),
+            self.acquire_job_slot(),
             registered_job(enabled=register_job, job_type="preview", target_id=resolved.id),
         ):
-            result = remake_stack_preview(resolved, kind == "spectral", settings, keep_previous)
+            result = remake_stack_preview(
+                resolved,
+                kind == "spectral",
+                settings,
+                keep_previous,
+                job_id=current_job_id(),
+                measured_at=datetime.now(UTC),
+                configuration=self._config,
+            )
         if result.shown_in_viewer:
             self._targets.save()
         return result
@@ -1325,14 +1662,19 @@ class ProcessingPipelines:
             Options for the astrometry stage: ``path`` (the image to plate
             solve; the stack by default).
         photometry : `dict`, optional
-            Options for the photometry stage: ``frames``, ``filter_type``,
+            Options for the photometry stage: ``frames``, ``filter_name``,
             ``use_astrometry_seed`` and ``max_workers``.
         spectroscopy : `dict`, optional
             Options for the spectroscopy stage: ``path`` and ``limit`` (a
-            cap on how many stars to process).
+            cap on how many stars to process, the brightest first; left out or
+            `None`, every usable identified star is processed. The user
+            removed the top-10 default on 2026-11-01).
         asteroids : `dict`, optional
             Options for the asteroid search: ``moving_object_config`` (a
-            `MovingObjectConfig`).
+            dictionary of settings, such as
+            ``{"detection_threshold_sigma": 4.0}``; a key left out keeps its
+            default value, and a key that names no setting raises
+            `InvalidArgumentError`).
         camera_id : `str`, optional
             Only frames from this camera are processed (the full name, or
             part of it). Needed for several targets. For one target, it
@@ -1422,6 +1764,9 @@ class ProcessingPipelines:
                     f"Unknown {stage} option(s): {', '.join(unknown)}. "
                     f"Choose from: {', '.join(sorted(tasks.STAGE_OPTIONS[stage]))}."
                 )
+        from astrometricslib.pipelines.asteroid_detection.runner import moving_object_config_from_options
+
+        moving_object_config_from_options((asteroids or {}).get("moving_object_config"))
         resolved = self._resolve(target)
         frame_selection = None
         if "photometry" in chosen_stages or "spectroscopy" in chosen_stages:
@@ -1439,7 +1784,6 @@ class ProcessingPipelines:
 
     def run_spectroscopy_by_session(
         self,
-        astrometrics: Any,
         target: str | Target,
         frame_records: list[Any],
         max_workers: int | None = None,
@@ -1449,8 +1793,6 @@ class ProcessingPipelines:
 
         Parameters
         ----------
-        astrometrics : `astrometricslib.Astrometrics`
-            The parent astrometrics, needed to resolve session boundaries.
         target : `str` or `Target`
             The target whose spectroscopy frames should be processed.
         frame_records : `list`
@@ -1480,7 +1822,7 @@ class ProcessingPipelines:
             failed_message=f"[{resolved.id}] Session-based spectroscopy failed.",
         ) as job:
             return spectroscopy_batch_operations.process_spectroscopy_frames_by_session(
-                astrometrics,
+                self._config,
                 resolved,
                 frame_records,
                 max_workers=max_workers,
@@ -1498,7 +1840,7 @@ class ProcessingPipelines:
         Reads the numbers the stacking stage saved with the stack, so nothing
         is measured again. The answer covers how many frames went in and how
         many were set aside, the share of pixels rejected, the star width
-        against what the input frames predict, the flags, and what happened
+        against what the input frames predict, and what happened
         to each exposure group (its frames, whether it clipped, how far it
         was moved to line up, and why it was left out if it was).
 
@@ -1519,233 +1861,134 @@ class ProcessingPipelines:
         check_choice("kind", kind, STACK_KINDS)
         return summarize_stack(self._resolve(target), kind)
 
-    def discard_previous_stack(self, target: str | Target, kind: StackKind = "imaging") -> list[str]:
-        """Delete the kept previous stack of a target.
+    @staticmethod
+    def predict_stack_weights(
+        exposure_seconds: Sequence[float | None],
+        configured_weight: str | None = None,
+        *,
+        is_spectral: bool = False,
+        star_width_px: Sequence[float | None] | None = None,
+        rate_variance: Sequence[float | None] | None = None,
+        group_frame_noise_adu: Mapping[float, float | None] | None = None,
+    ) -> StackWeightPrediction:
+        """Predict how the stacker would weight a set of frames.
 
-        Use this once the new stack looks good. It deletes the old stack and
-        its pictures, and it cannot be undone. The pipeline never does this by
-        itself; it only replaces the previous stack with a newer one at the
-        next restack.
-
-        Parameters
-        ----------
-        target : `str` or `Target`
-            The target whose previous stack to delete.
-        kind : `str`, optional
-            ``"imaging"`` (default) or ``"spectral"`` stack.
-
-        Returns
-        -------
-        removed : `list` [`str`]
-            The files deleted. Empty if no previous stack was kept.
-        """
-        from astrometricslib.pipelines.stacking.post_processing.previous_stack import discard_previous_stack
-        from astrometricslib.pipelines.stacking.post_processing.stack_quality_report import stack_path_of
-
-        check_choice("kind", kind, STACK_KINDS)
-        return discard_previous_stack(stack_path_of(self._resolve(target), kind))
-
-    def swap_with_previous_stack(self, target: str | Target, kind: StackKind = "imaging") -> list[str]:
-        """Put the previous stack back as the current one.
-
-        Use this when the new stack turned out worse. The current stack
-        moves into ``_previous`` in the same step, so calling this again undoes
-        it. Only the files change places. The stored quality summary describes
-        the stack that was current when it was written, so restack to refresh
-        it.
+        This runs the stacker's own rules on the frame facts you give, so a
+        forecast made before stacking agrees with the stack made later.
+        Nothing is read from disk or saved.
 
         Parameters
         ----------
-        target : `str` or `Target`
-            The target whose stacks to swap.
-        kind : `str`, optional
-            ``"imaging"`` (default) or ``"spectral"`` stacks.
+        exposure_seconds : `Sequence` [`float` or `None`]
+            The exposure length of each frame, in seconds. `None` marks a
+            frame whose length cannot be read.
+        configured_weight : `str`, optional
+            The ``Processing.Siril.stack_weight`` setting. A configured mode
+            wins over the stacker's own choice.
+        is_spectral : `bool`, optional
+            Whether the stack is spectral. Those keep their configured weight.
+        star_width_px : `Sequence` [`float` or `None`], optional
+            The weighted star width of each frame, in pixels. Needed for the
+            ``wfwhm`` weights and the weights inside each exposure group.
+        rate_variance : `Sequence` [`float` or `None`], optional
+            The variance of each frame in rate units. Needed for the
+            ``noise`` weights.
+        group_frame_noise_adu : `dict` [`float`, `float` or `None`], optional
+            The noise of one raw frame of each exposure group, in counts,
+            keyed by the group's length (``folded_exposure_lengths`` of the
+            result). Needed for the weights of an exposure-group stack.
 
         Returns
         -------
-        restored : `list` [`str`]
-            The files now current that came from the previous stack. Empty if
-            no previous stack was kept, in which case nothing moves.
+        prediction : `StackWeightPrediction`
+            The weighting mode, the exposure group of each frame, and the
+            weight of each frame (or the reasons they are unknown).
+
+        Notes
+        -----
+        The call reads no stored data, so it is a static method. Code that
+        holds no `Astrometrics` handle can call it on the class,
+        ``ProcessingPipelines.predict_stack_weights(...)``.
         """
-        from astrometricslib.pipelines.stacking.post_processing.previous_stack import (
-            swap_with_previous_stack,
+        from astrometricslib.pipelines.stacking.stack_weight_prediction import predict_stack_weights
+
+        return predict_stack_weights(
+            exposure_seconds,
+            configured_weight,
+            is_spectral=is_spectral,
+            star_width_px=star_width_px,
+            rate_variance=rate_variance,
+            group_frame_noise_adu=group_frame_noise_adu,
         )
-        from astrometricslib.pipelines.stacking.post_processing.stack_quality_report import stack_path_of
 
-        check_choice("kind", kind, STACK_KINDS)
-        return swap_with_previous_stack(stack_path_of(self._resolve(target), kind))
+    def open_in_siril(self, file_path: str) -> None:
+        """Open a stack in the Siril program's window, for a person to inspect.
 
-    @background_job("quality", grace_period_seconds=20.0)
-    def record_frame_measurements(
-        self,
-        target: str | Target,
-        frames: list[FrameRecord] | None = None,
-        limit: int | None = None,
-        register_job: bool = True,
-    ) -> FrameMeasurementSummary:
-        """Measure a target's light frames once and store the numbers.
-
-        Each light frame is read once and measured: the width, elongation
-        and direction of its stars, the sky brightness and noise in
-        electrons, the camera's read noise, the temperatures, and the
-        measurements the library already makes (background level, saturated
-        fraction, Gaussian star width, count of bright regions). The numbers
-        go into the quality database and can be read with
-        ``Astrometrics.quality.query``. A value that cannot be measured is
-        stored as ``not_measured`` with the reason. The sky brightness needs
-        the bias level of the frame's exact camera setting, taken from the
-        calibration library's bias frames; with none at that setting those
-        two metrics are ``not_measured``.
-
-        The frame files are never moved or changed. Each measured frame gets
-        a stamp (the file size and change time at the measurement), saved to
-        the stored target every 20 frames and at the end. Only the stamps are
-        written, so the save never overwrites other changes to the target. A
-        frame whose file still matches its stamp is skipped, so a second call
-        measures nothing again. A frame that fails, for any reason, is
-        counted and tried again next time; one failure does not stop the
-        others. Each frame takes about 12 s of one core, and four frames are
-        measured at once in four worker processes: real data (61 frames of
-        3008 by 3008 pixels) took about 345 s and about 2.7 GB of memory.
-
-        The worker processes are started with "spawn", which imports the
-        calling script again in each worker. A script that calls this method
-        must therefore keep its top-level code under
-        ``if __name__ == "__main__":``, or the workers stop and every frame
-        fails. The backend, the bundled scripts and notebooks run as modules
-        or cells and are not affected.
-
-        Only one run measures a target at a time, and only one run in the
-        process reads frames at a time. A second call for a target that is
-        already being measured returns at once with ``already_running`` set
-        and nothing measured. A call for another target waits for its turn.
+        This uses the stacking program chosen for this API (Siril unless a
+        caller chose another one that has a window; one without a window raises
+        `ProcessingError`). Siril starts as its
+        own process and keeps running after the call returns. If the program
+        cannot start, the failure is logged and nothing is raised. Nothing is
+        stacked, read or saved.
 
         Parameters
         ----------
-        target : `str` or `Target`
-            The target whose light frames to measure.
-        frames : `list` [`FrameRecord`], optional
-            Only these frames. All of the target's light frames when omitted.
-        limit : `int`, optional
-            Measure at most this many frames, newest first. The rest wait for
-            the next call.
-        register_job : `bool`, optional
-            Record the run in the job list. Defaults to `True`.
-
-        Returns
-        -------
-        summary : `FrameMeasurementSummary`
-            How many frames were measured, skipped because they had not
-            changed, or failed, and how many rows were written.
-
-        Raises
-        ------
-        InvalidArgumentError
-            If ``limit`` is below 1.
+        file_path : `str`
+            The FITS file to open. An empty string opens Siril alone.
         """
-        from astrometricslib.drivers.quality_store import QualityStore
-        from astrometricslib.pipelines.shared.target_records import save_quality_stamps
-        from astrometricslib.pipelines.stacking.frame_measurement_run import (
-            FrameMeasurementSession,
-            record_frame_measurements_for_target,
-        )
+        self._drivers.stacking_or_default().open_in_viewer(file_path)
 
-        if limit is not None and limit < 1:
-            raise InvalidArgumentError("limit must be at least 1.")
-        resolved = self._resolve(target)
-        with registered_job(enabled=register_job, job_type="quality", target_id=resolved.id) as job:
-            # The run gets its own run id and reports progress only when it
-            # registered (or joined) a job of its own. Called from inside
-            # another job (stacking, ingestion), it leaves that job's
-            # progress and id alone.
-            session = FrameMeasurementSession(
-                QualityStore.from_configuration(self._config),
-                self.calibration.library,
-                progress_job=job if job.job_id is not None and job.job_type == "quality" else None,
-                measured_at=datetime.now(UTC),
-            )
-            return record_frame_measurements_for_target(
-                resolved,
-                session,
-                frames=frames,
-                limit=limit,
-                save_target=lambda: save_quality_stamps(self._targets, resolved),
-            )
+    def stop_stacking_programs(self) -> None:
+        """Stop every stacking program this library started and still runs.
 
-    def restore_excluded_frames(self, target: str | Target, apply: bool = False) -> RestoreReport:
-        """List, or move back, the frames the stacker set aside for a target.
+        The backend calls this when it stops, so no Siril process outlives
+        it. A person's own Siril window, opened by hand, is not touched.
+        Safe to call more than once, and when nothing is running.
+        """
+        self._drivers.stacking_or_default().stop_running_programs()
 
-        By default nothing moves: the call only lists the frames. With
-        ``apply=True`` it moves them back and reindexes the target, which
-        saves it. The next stack may set the same frames aside again. To
-        keep them in the stack, turn off ``quarantine_bad_frames_enabled`` in
-        the configuration first. To only read the list, use
-        ``Astrometrics.quality.measure_frames(include=["excluded"])``.
+    def plate_solve(self, image_path: str) -> Any | None:
+        """Work out where on the sky an image points, from its stars.
+
+        Plate solving matches the pattern of stars in the image against a
+        star catalog. The result is a World Coordinate System (WCS): the
+        mapping from each pixel to a sky position.
 
         Parameters
         ----------
-        target : `str` or `Target`
-            The target whose frames to restore.
-        apply : `bool`, optional
-            Move the frames back. Defaults to `False`, which only lists them.
+        image_path : `str`
+            The FITS file to solve.
 
         Returns
         -------
-        report : `RestoreReport`
-            The frames that were set aside, and how many were moved back.
+        wcs : `astropy.wcs.WCS` or `None`
+            The pixel-to-sky mapping, or `None` when the image cannot be
+            read or too few stars are found to try a solve. When a solve is
+            tried and the star pattern cannot be matched, the star
+            identifier raises `PlateSolveFailedError` instead.
         """
-        from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
-            find_quarantine_folders,
-            list_set_aside_frames,
-            restore_quarantined_frames,
-        )
+        from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
-        resolved = self._resolve(target)
-        frames_path = str(self._config.get_frames_path())
-        frames = list_set_aside_frames(frames_path, resolved.id)
-        restored_count = 0
-        if apply:
-            for folder in find_quarantine_folders(frames_path, resolved.id):
-                restored_count += len(restore_quarantined_frames(folder))
-            if restored_count:
-                self._targets.reindex_frames(resolved)
-        return RestoreReport(
-            target_id=resolved.id, applied=apply, frames=frames, restored_count=restored_count
+        _, wcs = StarIdentifier(config=self._config, drivers=self._drivers).process_image(
+            image_path, attempt_plate_solving=True
         )
+        return wcs
 
     # -- Limits on how much heavy work runs at once -------------------------
 
-    def acquire_analysis_slot(self) -> AbstractContextManager:
+    def acquire_job_slot(self) -> AbstractContextManager:
         """Limit how many heavy jobs can run at the same time.
 
-        Processing images takes a lot of CPU power. This makes sure the
-        computer is not overwhelmed, by limiting how many jobs run at once.
-        Shares its slot pool with stacking (see `acquire_stacking_slot`);
+        Analyzing and stacking images use a lot of CPU power and memory.
+        This makes sure the computer is not overwhelmed, by limiting how
+        many jobs run at once. Analysis and stacking share one slot pool;
         both draw on ``max_concurrent_jobs``.
 
         Returns
         -------
         slot : `AbstractContextManager`
             Enter to block until a slot is free, then hold it for the
-            analysis run's duration.
-        """
-        from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
-
-        return acquire_resource_slot(self._config, "job", self._config.get_max_concurrent_jobs())
-
-    def acquire_stacking_slot(self) -> AbstractContextManager:
-        """Limit how many stacking programs can run at the same time.
-
-        Stacking images uses a lot of memory and CPU. This makes sure the
-        computer does not run out, by limiting how many stacks run at once.
-        Shares its slot pool with analysis (see `acquire_analysis_slot`);
-        both draw on ``max_concurrent_jobs``.
-
-        Returns
-        -------
-        slot : `AbstractContextManager`
-            Enter to block until a slot is free, then hold it for the
-            stacking run's duration.
+            job's duration.
         """
         from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
 

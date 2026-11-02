@@ -6,7 +6,8 @@ into a folder named `_excluded` next to them (see
 `excluded_frames.json`, which says where every frame came from and what was
 measured. This script lists those frames and, with ``--apply``, moves them
 back and re-scans the target so it lists them again. It calls
-`ProcessingPipelines.restore_excluded_frames`.
+`restore_excluded_frames` from
+`astrometricslib._internal.processing_scripts`.
 
 A restored frame joins the next stack, and the next stack may move it aside
 again. To keep frames in the stack for good, set
@@ -25,6 +26,7 @@ import logging
 import sys
 
 from astrometricslib import Astrometrics, configure_logging
+from astrometricslib._internal.processing_scripts import restore_excluded_frames
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         if target is None:
             logger.info("%s: no such target.", target_id)
             continue
-        report = astrometrics.processing.restore_excluded_frames(target, apply=arguments.apply)
+        report = restore_excluded_frames(astrometrics.processing, target, apply=arguments.apply)
         total += len(report.frames)
         if report.frames:
             logger.info("%s: %d frame(s) set aside", target_id, len(report.frames))

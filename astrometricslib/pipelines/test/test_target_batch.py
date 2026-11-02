@@ -11,8 +11,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from astrometricslib._internal.drivers import catalog_access as catalog_access_module
 from astrometricslib.api.processing import ProcessingPipelines
-from astrometricslib.drivers import catalog_access as catalog_access_module
 from astrometricslib.foundation import config as config_module
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines import target_batch, tasks

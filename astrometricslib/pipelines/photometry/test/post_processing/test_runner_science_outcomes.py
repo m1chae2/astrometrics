@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.foundation.observatory_setups import ObservatorySetups, OpticConfig
 from astrometricslib.models.quality.measurement import MeasurementStatus
 from astrometricslib.models.target import FrameRecord, Target

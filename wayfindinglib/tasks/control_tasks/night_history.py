@@ -3,7 +3,7 @@
 The app records each observing night in several places: the Ekos session
 logs, the guiding runs, the guide-log samples, the frame library and the
 plate solves. The analyses in `night_analysis` turn these into findings.
-This module is the front door behind `control.history.query`. It checks
+This module is the front door behind `review.query`. It checks
 the arguments for a ``kind`` of question, picks the right analysis,
 shrinks the answer to plain data, and guarantees that the reply fits under
 a size limit.
@@ -24,7 +24,7 @@ import json
 from datetime import date
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import ConfigurationError, ConflictError, InvalidArgumentError, NotFoundError
+from astrometricslib.exceptions import ConfigurationError, ConflictError, InvalidArgumentError, NotFoundError
 from wayfindinglib.analytics import capture_history
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
 from wayfindinglib.models.session.night_list import NightListEntry
@@ -63,7 +63,7 @@ TYPED_KIND_ARGUMENTS = {
     "night_quality": ("session_id",),
 }
 """The kinds that answer with a typed list instead of a dictionary, and the
-optional arguments each uses. `HistoryControl.query` answers these itself
+optional arguments each uses. `ObservationReview.query` answers these itself
 (see `refuse_unused_arguments`). They are kept apart from ``KINDS`` because
 their replies are lists of models, which `fit_to_budget` does not shrink."""
 

@@ -22,7 +22,7 @@ configuration and from measurements, never persisted.
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrometricslib import QualityLimit
+from astrometricslib.reports import QualityLimit
 
 
 class TrackingRiskMap(BaseModel):
@@ -96,7 +96,7 @@ class PerformanceEnvelope(BaseModel):
         anyone can redo it. `QualityLimit` has no place for them.
     tracking_risk : `TrackingRiskMap` or `None`
         How risky each part of the sky is for tracking with this
-        equipment. Filled in by `control.history.get_performance_envelope`;
+        equipment. Filled in by `review.get_performance_envelope`;
         `None` in the envelopes the night analyses use internally.
     """
 

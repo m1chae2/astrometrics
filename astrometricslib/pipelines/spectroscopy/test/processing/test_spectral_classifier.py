@@ -14,10 +14,10 @@ relative RMS units and neither a probability: the best reference's
 `classification_rms` and `rms_gap_to_second_best`, the RMS of the second-best
 reference minus the best one's. The gap must be zero only for identical
 templates, small for an adjacent pair of subtypes and large for a hot-versus-
-cool pair, and `is_ambiguous` must follow `AMBIGUOUS_RMS_GAP`.
+cool pair, measured against `AMBIGUOUS_RMS_GAP`.
 
 Tests of the post-processing trust/comparison functions
-(`is_classification_poor_match`, `is_classification_ambiguous`,
+(`is_classification_poor_match`, `is_classification_class_ambiguous`,
 `build_spectral_classification_concerns`, `catalog_disagreement_note`,
 `luminosity_class_note`) live in
 `test/post_processing/test_assess_output_quality.py` and
@@ -146,9 +146,7 @@ def test_too_few_points_returns_unknown_without_crashing() -> None:
     assert result["spectral_type"] == "Unknown"
     assert result["classification_rms"] is None
     assert result["rms_gap_to_second_best"] is None
-    assert result["is_ambiguous"] is None
     assert result["rms_gap_to_next_class"] is None
-    assert result["is_class_ambiguous"] is None
     assert result["correlation_by_type"] == {}
     assert result["ranked_types"] == []
 
@@ -163,9 +161,7 @@ def test_a_flat_spectrum_returns_unknown_without_crashing() -> None:
     assert result["spectral_type"] == "Unknown"
     assert result["classification_rms"] is None
     assert result["rms_gap_to_second_best"] is None
-    assert result["is_ambiguous"] is None
     assert result["rms_gap_to_next_class"] is None
-    assert result["is_class_ambiguous"] is None
     assert result["ranked_types"] == []
 
 
@@ -179,9 +175,7 @@ def test_a_spectrum_covering_too_little_of_the_range_is_not_classified() -> None
     assert result["spectral_type"] == "Unknown"
     assert result["classification_rms"] is None
     assert result["rms_gap_to_second_best"] is None
-    assert result["is_ambiguous"] is None
     assert result["rms_gap_to_next_class"] is None
-    assert result["is_class_ambiguous"] is None
     assert "covers only" in result["reason"]
 
 
@@ -194,7 +188,6 @@ def test_a_spectrum_unlike_every_reference_is_flagged_as_a_poor_match() -> None:
 
     result = classify_spectral_type(wavelength, tilted)
 
-    assert result["match_quality"] == "poor"
     assert result["classification_rms"] > NO_GOOD_MATCH_RMS
 
 
@@ -280,9 +273,7 @@ def test_a_spectrum_no_reference_matches_is_left_unclassified() -> None:
     assert result["spectral_type"] == "Unknown"
     assert result["classification_rms"] is None
     assert result["rms_gap_to_second_best"] is None
-    assert result["is_ambiguous"] is None
     assert result["rms_gap_to_next_class"] is None
-    assert result["is_class_ambiguous"] is None
     assert "no reference matches" in str(result["reason"])
 
 
@@ -364,11 +355,10 @@ def test_the_gap_is_zero_for_identical_templates_and_positive_for_every_distinct
     )
 
     assert tied["rms_gap_to_second_best"] == pytest.approx(0.0, abs=1e-12)
-    assert tied["is_ambiguous"] is True
 
 
 def test_an_adjacent_subtype_pair_has_a_gap_below_the_ambiguity_limit() -> None:
-    """Verify a spectrum halfway between A0V and A2V is ambiguous.
+    """Verify a spectrum halfway between A0V and A2V has a tiny gap.
 
     The two neighbouring rungs fit it almost equally well, so the RMS gap
     between the best and the second best is far under `AMBIGUOUS_RMS_GAP`.
@@ -381,14 +371,12 @@ def test_an_adjacent_subtype_pair_has_a_gap_below_the_ambiguity_limit() -> None:
 
     assert {entry["spectral_type"] for entry in result["ranked_types"][:2]} == {"A0V", "A2V"}
     assert result["rms_gap_to_second_best"] < AMBIGUOUS_RMS_GAP
-    assert result["is_ambiguous"] is True
     # Both candidates are A stars, so the nearest other class is further off.
     assert result["rms_gap_to_next_class"] > AMBIGUOUS_RMS_GAP
-    assert result["is_class_ambiguous"] is False
 
 
-def test_a_cross_class_pair_is_ambiguous_at_both_levels() -> None:
-    """Verify a spectrum halfway between F8V and G0V is ambiguous both ways.
+def test_a_cross_class_pair_has_a_gap_below_the_limit_at_both_levels() -> None:
+    """Verify a spectrum halfway between F8V and G0V has tiny gaps both ways.
 
     The two neighbouring rungs belong to different spectral classes, so the
     best reference of another class is almost as close as the best one.
@@ -402,15 +390,12 @@ def test_a_cross_class_pair_is_ambiguous_at_both_levels() -> None:
     assert {entry["spectral_type"] for entry in result["ranked_types"][:2]} == {"F8V", "G0V"}
     assert result["rms_gap_to_second_best"] < AMBIGUOUS_RMS_GAP
     assert result["rms_gap_to_next_class"] < AMBIGUOUS_RMS_GAP
-    assert result["is_ambiguous"] is True
-    assert result["is_class_ambiguous"] is True
 
 
-def test_a_hot_versus_cool_pair_has_a_large_gap_and_is_not_ambiguous() -> None:
+def test_a_hot_versus_cool_pair_has_a_large_gap() -> None:
     """Verify an O5V spectrum compared with O5V and M2V is clearly O5V.
 
-    The RMS gap is about 1.0, fifty times `AMBIGUOUS_RMS_GAP`, so the match is
-    not ambiguous.
+    The RMS gap is about 1.0, fifty times `AMBIGUOUS_RMS_GAP`.
     """
     wavelength, intensity = _observation_from_blurred_templates("O5V")
 
@@ -423,13 +408,11 @@ def test_a_hot_versus_cool_pair_has_a_large_gap_and_is_not_ambiguous() -> None:
 
     assert result["spectral_type"] == "O5V"
     assert result["rms_gap_to_second_best"] > 50 * AMBIGUOUS_RMS_GAP
-    assert result["is_ambiguous"] is False
     assert result["rms_gap_to_next_class"] > 50 * AMBIGUOUS_RMS_GAP
-    assert result["is_class_ambiguous"] is False
 
 
-def test_a_single_reference_gives_no_gap_and_no_ambiguity_verdict() -> None:
-    """Verify one compared reference leaves the gap and verdict as `None`."""
+def test_a_single_reference_gives_no_gap() -> None:
+    """Verify one compared reference leaves the gaps as `None`."""
     wavelength, intensity = _observation_from_blurred_templates("G2V")
 
     result = classify_spectral_type(
@@ -438,6 +421,4 @@ def test_a_single_reference_gives_no_gap_and_no_ambiguity_verdict() -> None:
 
     assert result["spectral_type"] == "G2V"
     assert result["rms_gap_to_second_best"] is None
-    assert result["is_ambiguous"] is None
     assert result["rms_gap_to_next_class"] is None
-    assert result["is_class_ambiguous"] is None

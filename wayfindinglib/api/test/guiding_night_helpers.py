@@ -8,7 +8,7 @@ a night different.
 
 import numpy as np
 
-from astrometricslib import observing_night_id
+from astrometricslib.reports import observing_night_id
 from wayfindinglib import ObservatoryControl
 from wayfindinglib.models.equipment_and_site.equipment_fingerprint import build_equipment_fingerprint
 from wayfindinglib.models.session.ekos_session import EkosSessionContext, SessionEquipmentAttribution
@@ -73,7 +73,7 @@ def record_guiding_night(
         "ekos_session_context",
         {"id": f"session-{night}"},
     )
-    control.guiding.save_run(
+    control.guiding._save_run(
         GuidingRunSummary(
             id=f"guide_log-{night}.txt#0",
             session_id=night,

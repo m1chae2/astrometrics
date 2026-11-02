@@ -14,7 +14,8 @@ import pytest
 
 from backend.services.observatory.equipment_service import EquipmentService
 from backend.services.observatory.mosaic_service import MosaicService
-from wayfindinglib import EquipmentStatus, MosaicPanel
+from wayfindinglib._internal.control import EquipmentStatus
+from wayfindinglib._internal.planning import MosaicPanel
 from wayfindinglib.api.control.equipment import EquipmentControl
 from wayfindinglib.api.planning import ObservationPlanning
 

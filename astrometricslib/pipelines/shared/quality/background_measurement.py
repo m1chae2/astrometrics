@@ -7,10 +7,9 @@ is kept separately, in `stacking/pre_processing/background_homogeneity.py`.
 """
 
 import numpy as np
-from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
-from astrometricslib.drivers.fits_access import collapse_to_2d
+from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data
 from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
 
 
@@ -31,8 +30,7 @@ def measure_frame_background_level(path: str) -> float | None:
         The average background brightness number. Returns None if the
         file is empty.
     """
-    with fits.open(path, memmap=False) as hdul:
-        data = hdul[0].data
+    data = read_data(path, first_hdu_only=True)
     if data is None:
         return None
     data = np.asarray(data, dtype=float)
@@ -62,8 +60,7 @@ def measure_frame_saturated_pixel_fraction(path: str, saturation_threshold_adu: 
         A number between 0.0 and 1.0 representing the percentage of blown out
         pixels. Returns None if the file is empty.
     """
-    with fits.open(path, memmap=False) as hdul:
-        data = hdul[0].data
+    data = read_data(path, first_hdu_only=True)
     if data is None:
         return None
     data = np.asarray(data, dtype=float)

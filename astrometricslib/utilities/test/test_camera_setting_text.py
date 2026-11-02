@@ -6,7 +6,7 @@ calibration library has no binning rule of its own: it uses this module's.
 
 import pytest
 
-from astrometricslib.drivers import calibration_library
+from astrometricslib._internal.drivers import calibration_library
 from astrometricslib.utilities.camera_setting_text import (
     canonical_binning_setting,
     canonical_gain_setting,

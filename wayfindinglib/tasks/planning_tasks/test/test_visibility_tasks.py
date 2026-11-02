@@ -40,7 +40,7 @@ def _site(**overrides: Any) -> SiteProfile:
     return SiteProfile(**defaults)
 
 
-def test_effective_altitude_floor_uses_stricter_of_telescope_and_package() -> None:
+def test_effective_altitude_fixed_pattern_noise_uses_stricter_of_telescope_and_package() -> None:
     """Verify the effective floor is the stricter (higher) of the two."""
     telescope = _telescope(min_altitude_deg=10.0)
     assert visibility_tasks.effective_altitude_floor(telescope, 30.0) == pytest.approx(30.0)
@@ -48,13 +48,13 @@ def test_effective_altitude_floor_uses_stricter_of_telescope_and_package() -> No
     assert visibility_tasks.effective_altitude_floor(telescope, None) == pytest.approx(10.0)
 
 
-def test_effective_altitude_floor_ignores_telescope_limit_when_disabled() -> None:
+def test_effective_altitude_fixed_pattern_noise_ignores_telescope_limit_when_disabled() -> None:
     """Verify a disabled telescope limit no longer constrains the floor."""
     telescope = _telescope(altitude_limits_enabled=False, min_altitude_deg=30.0)
     assert visibility_tasks.effective_altitude_floor(telescope, None) == pytest.approx(-90.0)
 
 
-def test_visibility_state_at_visible_above_floor() -> None:
+def test_visibility_state_at_visible_above_fixed_pattern_noise() -> None:
     """Verify a target above the floor and outside any zone is visible."""
     telescope = _telescope()
     site = _site()
@@ -68,7 +68,7 @@ def test_visibility_state_at_visible_above_floor() -> None:
     assert zone is None
 
 
-def test_visibility_state_at_blocked_below_floor() -> None:
+def test_visibility_state_at_blocked_below_fixed_pattern_noise() -> None:
     """Verify a target below the floor is not visible."""
     telescope = _telescope()
     site = _site()
@@ -156,7 +156,7 @@ def test_find_earliest_visible_window_none_when_never_long_enough() -> None:
     assert span is None
 
 
-def test_ever_clears_floor_true_when_any_sample_clears() -> None:
+def test_ever_clears_fixed_pattern_noise_true_when_any_sample_clears() -> None:
     """Verify ever_clears_floor detects a single clearing sample."""
     telescope = _telescope()
     site = _site()
@@ -173,7 +173,7 @@ def test_ever_clears_floor_true_when_any_sample_clears() -> None:
         )
 
 
-def test_ever_clears_floor_false_when_never_clears() -> None:
+def test_ever_clears_fixed_pattern_noise_false_when_never_clears() -> None:
     """Verify ever_clears_floor is False when the altitude never clears."""
     telescope = _telescope()
     site = _site()

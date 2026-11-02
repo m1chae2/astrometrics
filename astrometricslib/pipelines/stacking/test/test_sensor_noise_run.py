@@ -14,9 +14,9 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib._internal.drivers import camera_profile_store
+from astrometricslib._internal.drivers.camera_profile_store import load_camera_profiles
 from astrometricslib.api.processing import CalibrationCatalog
-from astrometricslib.drivers import camera_profile_store
-from astrometricslib.drivers.camera_profile_store import load_camera_profiles
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.camera_profile import ProvenancedValue, ValueProvenance
 from astrometricslib.models.quality.measurement import MeasurementStatus
@@ -110,7 +110,7 @@ def frames_folder(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def catalog(frames_folder: Path) -> CalibrationCatalog:
+def catalog(frames_folder: Path, monkeypatch: pytest.MonkeyPatch) -> CalibrationCatalog:
     """Make a catalog over the synthetic frames, with its library scanned.
 
     Returns
@@ -121,10 +121,17 @@ def catalog(frames_folder: Path) -> CalibrationCatalog:
     configuration = SimpleNamespace(
         get_frames_path=lambda: frames_folder / "frames",
         get_library_file_path=lambda name: str(frames_folder / "library" / name),
+        get_minimum_calibration_frames=lambda: 3,
+        get_library_path=lambda: str(frames_folder / "library"),
+    )
+    # A rescan judges new dark and bias sets, which needs a camera profile.
+    generic = next(p for p in load_camera_profiles() if p.is_generic_fallback)
+    monkeypatch.setattr(
+        "astrometricslib.api.processing.resolve_camera_profile", lambda name, config=None: generic
     )
     calibration_catalog = CalibrationCatalog(configuration, None)
-    calibration_catalog.refresh("flat")
-    calibration_catalog.refresh("bias")
+    calibration_catalog.reindex_frames("flat")
+    calibration_catalog.reindex_frames("bias")
     return calibration_catalog
 
 
@@ -157,7 +164,7 @@ def test_a_setting_with_flats_but_no_biases_is_not_measured(
     for index in range(12):
         flat_path = frames_folder / "frames" / "flats" / "Scope" / CAMERA / "L" / f"high_{index:02d}.fits"
         write_frame(flat_path, generator, True, gain=100, taken_after_seconds=10.0 * index)
-    catalog.refresh("flat")
+    catalog.reindex_frames("flat")
 
     result = catalog.measure_sensor_noise(CAMERA, gain=100, offset=10, register_job=False)
 
@@ -173,7 +180,7 @@ def test_mixed_flat_exposures_need_an_exposure_to_choose(
     for index in range(12):
         flat_path = frames_folder / "frames" / "flats" / "Scope" / CAMERA / "L" / f"long_{index:02d}.fits"
         write_frame(flat_path, generator, True, exposure=1.0, taken_after_seconds=20000.0 + 10.0 * index)
-    catalog.refresh("flat")
+    catalog.reindex_frames("flat")
 
     mixed = catalog.measure_sensor_noise(CAMERA, gain=0, offset=10, register_job=False)
     chosen = catalog.measure_sensor_noise(CAMERA, gain=0, offset=10, exposure_seconds=1.0, register_job=False)
@@ -199,19 +206,19 @@ def test_reading_writes_nothing_and_saving_writes_one_entry(
         encoding="utf-8",
     )
     monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: config_path)
-    camera_profile_store._load_profiles_from_config.cache_clear()
+    camera_profile_store.load_profiles_from_config.cache_clear()
     config = AppConfiguration()
     original_text = config_path.read_text(encoding="utf-8")
 
     unsaved = measure_sensor_noise_from_library(
-        catalog.library, config, CAMERA, 0, 10, measured_on=date(2026, 10, 22), save=False
+        catalog._calibration_library, config, CAMERA, 0, 10, measured_on=date(2026, 10, 22), save=False
     )
     assert unsaved.status == MeasurementStatus.MEASURED
     assert config_path.read_text(encoding="utf-8") == original_text
     assert list(tmp_path.glob("*.bak")) == []
 
     saved = measure_sensor_noise_from_library(
-        catalog.library, config, CAMERA, 0, 10, measured_on=date(2026, 10, 22), save=True
+        catalog._calibration_library, config, CAMERA, 0, 10, measured_on=date(2026, 10, 22), save=True
     )
 
     assert saved.saved is True
@@ -237,7 +244,7 @@ def test_flats_without_a_time_cannot_be_paired_and_say_so(
     for path in (frames_folder / "frames" / "flats").rglob("*.fits"):
         with fits.open(path, mode="update") as hdul:
             del hdul[0].header["DATE-OBS"]
-    catalog.refresh("flat")
+    catalog.reindex_frames("flat")
 
     result = catalog.measure_sensor_noise(CAMERA, gain=0, offset=10, register_job=False)
 

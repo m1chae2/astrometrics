@@ -10,8 +10,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib import FrameRecord, FrameSelection, NotFoundError, Target
-from wayfindinglib.tasks.control_tasks.frame_guiding import link_frames_to_guiding
+from astrometricslib import FrameRecord, Target
+from astrometricslib.api.targets import TargetCatalog
+from astrometricslib.exceptions import NotFoundError
+from wayfindinglib.tasks.control_tasks.frame_guiding import FrameRange, link_frames_to_guiding
 
 
 def _control(rows: list[dict[str, float]], library: object = None) -> SimpleNamespace:
@@ -31,6 +33,26 @@ def _control(rows: list[dict[str, float]], library: object = None) -> SimpleName
     """
     logger = SimpleNamespace(get_guiding_samples=lambda **_: rows)
     return SimpleNamespace(config=None, records=logger, astrometrics=library)
+
+
+def _targets(target: Target | None) -> SimpleNamespace:
+    """Build the stand-in for the library's target catalog.
+
+    Parameters
+    ----------
+    target : `Target` or `None`
+        The one target the catalog holds, if any.
+
+    Returns
+    -------
+    targets : `types.SimpleNamespace`
+        ``get`` finds the target, and ``select_frames`` runs the library's
+        own frame selection on it.
+    """
+    return SimpleNamespace(
+        get=lambda _id, refresh=False: target,
+        select_frames=lambda chosen, **arguments: TargetCatalog.select_frames(None, chosen, **arguments),
+    )
 
 
 def _samples(start: float, count: int, error: float) -> list[dict[str, float]]:
@@ -53,7 +75,7 @@ def _samples(start: float, count: int, error: float) -> list[dict[str, float]]:
     return [{"timestamp": start + 3.0 * index, "dra": error, "ddec": 0.0} for index in range(count)]
 
 
-def _link(frames: list[FrameRecord], rows: list[dict[str, float]], selection: FrameSelection) -> dict:
+def _link(frames: list[FrameRecord], rows: list[dict[str, float]], selection: FrameRange) -> dict:
     """Run the link on a one-target fake library.
 
     Parameters
@@ -62,7 +84,7 @@ def _link(frames: list[FrameRecord], rows: list[dict[str, float]], selection: Fr
         The target's frames.
     rows : `list` [`dict`]
         The guiding rows.
-    selection : `FrameSelection`
+    selection : `FrameRange`
         Which frames to cover.
 
     Returns
@@ -71,7 +93,7 @@ def _link(frames: list[FrameRecord], rows: list[dict[str, float]], selection: Fr
         The module's report.
     """
     target = Target(id="T 1", frames=frames)
-    library = SimpleNamespace(targets=SimpleNamespace(get=lambda _id, refresh=False: target))
+    library = SimpleNamespace(targets=_targets(target))
     return link_frames_to_guiding(_control(rows, library), "T 1", selection, 50)
 
 
@@ -102,7 +124,7 @@ def _frame(number: int, start: float) -> FrameRecord:
 def test_each_frame_gets_only_the_samples_inside_its_window() -> None:
     """Samples are cut at the frame edges and summarised."""
     rows = _samples(1000.0, 20, 1.0) + _samples(1060.0, 20, 4.0)
-    report = _link([_frame(1, 1000.0), _frame(2, 1060.0)], rows, FrameSelection())
+    report = _link([_frame(1, 1000.0), _frame(2, 1060.0)], rows, FrameRange())
     first, second = report["frames"]
     assert first["guide_samples"] in (20, 21)
     assert first["rms_ra_arcsec"] == pytest.approx(1.0)
@@ -112,7 +134,7 @@ def test_each_frame_gets_only_the_samples_inside_its_window() -> None:
 
 def test_a_frame_with_no_guiding_is_reported_not_guessed() -> None:
     """A frame outside the guide logs has zero samples and no statistics."""
-    report = _link([_frame(1, 5000.0)], _samples(1000.0, 20, 1.0), FrameSelection())
+    report = _link([_frame(1, 5000.0)], _samples(1000.0, 20, 1.0), FrameRange())
     assert report["frames"][0]["guide_samples"] == 0
     assert "rms_total_arcsec" not in report["frames"][0]
     assert report["frames_without_guiding"] == 1
@@ -124,15 +146,15 @@ def test_a_frame_far_above_the_group_is_flagged() -> None:
     rows = []
     for number in range(5):
         rows += _samples(1000.0 + 60.0 * number, 19, 10.0 if number == 3 else 1.0)
-    report = _link(frames, rows, FrameSelection())
+    report = _link(frames, rows, FrameRange())
     assert report["group"]["worse_than_group"] == ["T_1_003.fits"]
 
 
 def test_an_unknown_target_is_an_error() -> None:
     """A target that is not in the library raises `NotFoundError`."""
-    library = SimpleNamespace(targets=SimpleNamespace(get=lambda _id, refresh=False: None))
+    library = SimpleNamespace(targets=_targets(None))
     with pytest.raises(NotFoundError, match="No target"):
-        link_frames_to_guiding(_control([], library), "Nope", FrameSelection(), 10)
+        link_frames_to_guiding(_control([], library), "Nope", FrameRange(), 10)
 
 
 def test_image_quality_is_put_on_the_same_row_as_the_guide_error() -> None:
@@ -159,13 +181,11 @@ def test_image_quality_is_put_on_the_same_row_as_the_guide_error() -> None:
 
     diagnostics = SimpleNamespace(measure_frames=measure_frames)
     library = SimpleNamespace(
-        targets=SimpleNamespace(get=lambda _id, refresh=False: target),
+        targets=_targets(target),
         quality=diagnostics,
     )
     rows = _samples(1000.0, 20, 1.0) + _samples(1060.0, 20, 4.0)
-    report = link_frames_to_guiding(
-        _control(rows, library), "T 1", FrameSelection(), 50, include_quality=True
-    )
+    report = link_frames_to_guiding(_control(rows, library), "T 1", FrameRange(), 50, include_quality=True)
     first, second = report["frames"]
     assert (asked["first_file"], asked["last_file"]) == ("T_1_001.fits", "T_1_002.fits")
     assert asked["kind"] == "raw_check"
@@ -173,3 +193,11 @@ def test_image_quality_is_put_on_the_same_row_as_the_guide_error() -> None:
     assert second["quality_flags"] == ["soft"]
     assert second["rms_ra_arcsec"] == pytest.approx(4.0)
     assert "2 frame(s)" in report["image_quality"]
+
+
+def test_a_time_that_is_not_iso_8601_is_refused() -> None:
+    """The library's frame selection refuses a bad `since`."""
+    from astrometricslib.exceptions import InvalidArgumentError
+
+    with pytest.raises(InvalidArgumentError, match="ISO 8601"):
+        _link([_frame(1, 1000.0)], [], FrameRange(since="yesterday"))

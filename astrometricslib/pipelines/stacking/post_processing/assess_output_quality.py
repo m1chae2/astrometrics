@@ -2,25 +2,30 @@
 
 The builder here reads the measurements already made on the stacked image
 (rejected, saturated and zero pixel shares, sharpness, spectral registration
-concerns) and turns the ones past their limits into plain-language flag
-reasons. The limits live in `stack_quality` and `shared/quality`. The result
-is a `StackingOutputQuality` (see `models/quality/stacking_quality.py`).
+concerns) and builds one gate for each. A gate past its limit fails with a
+plain-language sentence. The limits live in `stack_quality` and
+`shared/quality`.
 """
 
 from astrometricslib.models.quality.gate_result import (
     GateResult,
-    GateStatus,
     failed_gate,
     passed_gate,
     unchecked_gate,
 )
 from astrometricslib.models.quality.quality_summary import StackingPipelineQualityMetrics
-from astrometricslib.models.quality.stacking_quality import StackingOutputQuality
-from astrometricslib.pipelines.shared.quality.saturation import DEFAULT_SATURATION_FLAG_THRESHOLD
+from astrometricslib.pipelines.shared.quality.saturation import (
+    DEFAULT_SATURATION_FLAG_THRESHOLD,
+    is_saturation_significant,
+)
 from astrometricslib.pipelines.stacking.post_processing.stack_quality import (
     DEFAULT_FWHM_DEGRADATION_RATIO,
     DEFAULT_NEGATIVE_PIXEL_FLAG_PERCENT,
     DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD,
+    is_negative_pixel_percent_significant,
+    is_rejected_fraction_significant,
+    is_stacked_fwhm_degraded,
+    is_zero_fraction_significant,
     zero_fraction_threshold,
 )
 
@@ -38,10 +43,9 @@ def output_quality_gates(
     """Build one gate for each measurement made on the finished stack.
 
     A measurement that was not made is ``not_checked`` with the reason, never
-    a pass: the ``*_flagged`` fields in `metrics` stay false both when a value
-    is within its limit and when it was never measured. The verdict of a
-    measured value is the ``*_flagged`` field the measuring code already set,
-    so the limit lives in one place.
+    a pass. A measured value fails when it reaches its limit; the limit and
+    the comparison live in `stack_quality` and `shared/quality`, so each is
+    written once.
 
     Parameters
     ----------
@@ -65,7 +69,7 @@ def output_quality_gates(
             else "the stacker did not report how many pixels it rejected"
         )
         gates.append(unchecked_gate(REJECTED_GATE_NAME, reason, rejected_source))
-    elif metrics.rejected_fraction_flagged:
+    elif is_rejected_fraction_significant(metrics.rejected_pixel_fraction):
         gates.append(
             failed_gate(
                 REJECTED_GATE_NAME,
@@ -110,7 +114,7 @@ def output_quality_gates(
         )
     else:
         ratio = metrics.stacked_fwhm_px / metrics.expected_stack_fwhm_px
-        if metrics.fwhm_degraded:
+        if is_stacked_fwhm_degraded(metrics.stacked_fwhm_px, metrics.expected_stack_fwhm_px):
             gates.append(
                 failed_gate(
                     SHARPNESS_GATE_NAME,
@@ -160,7 +164,7 @@ def output_quality_gates(
                 SATURATION_GATE_NAME, "the stack's saturated pixels could not be measured", saturation_source
             )
         )
-    elif metrics.saturation_flagged:
+    elif is_saturation_significant(metrics.saturated_pixel_fraction):
         gates.append(
             failed_gate(
                 SATURATION_GATE_NAME,
@@ -191,7 +195,7 @@ def output_quality_gates(
                 ZERO_FRACTION_GATE_NAME, "the stack file could not be read to count zero pixels", zero_source
             )
         )
-    elif metrics.zero_fraction_flagged:
+    elif is_zero_fraction_significant(metrics.zero_pixel_fraction, zero_limit):
         cause = (
             "calibration removed more than the sky or the raw frames are clipped at zero"
             if metrics.is_spectral
@@ -212,7 +216,9 @@ def output_quality_gates(
         )
 
     negative_source = "Siril's own 'many negative pixels' warning"
-    if metrics.negative_pixels_flagged:
+    if metrics.negative_pixel_max_percent is not None and is_negative_pixel_percent_significant(
+        metrics.negative_pixel_max_percent
+    ):
         gates.append(
             failed_gate(
                 NEGATIVE_PIXELS_GATE_NAME,
@@ -238,41 +244,3 @@ def output_quality_gates(
             )
         )
     return gates
-
-
-def assess_output_quality(
-    metrics: StackingPipelineQualityMetrics, quality_processing_applied: bool = True
-) -> StackingOutputQuality:
-    """Judge the stacked image from the measurements made on it.
-
-    Parameters
-    ----------
-    metrics : `StackingPipelineQualityMetrics`
-        The measurements of the finished stack. Each ``*_flagged`` field
-        already holds the result of that measurement's own threshold test.
-    quality_processing_applied : `bool`, optional
-        False for a single-frame stack.
-
-    Returns
-    -------
-    quality : `StackingOutputQuality`
-        The output judgement, with a sentence for each problem found. The
-        sentences are the failed gates' details (see `output_quality_gates`).
-    """
-    reasons = [
-        gate.detail
-        for gate in output_quality_gates(metrics, quality_processing_applied)
-        if gate.status is GateStatus.FAILED
-    ]
-    return StackingOutputQuality(
-        rejected_pixel_fraction=metrics.rejected_pixel_fraction,
-        saturated_pixel_fraction=metrics.saturated_pixel_fraction,
-        zero_pixel_fraction=metrics.zero_pixel_fraction,
-        negative_pixel_max_percent=metrics.negative_pixel_max_percent,
-        stacked_fwhm_px=metrics.stacked_fwhm_px,
-        median_input_fwhm_px=metrics.median_input_fwhm_px,
-        expected_stack_fwhm_px=metrics.expected_stack_fwhm_px,
-        spectral_registration_concern_count=len(metrics.spectral_registration_flags),
-        is_flagged=bool(reasons),
-        flag_reasons=reasons,
-    )

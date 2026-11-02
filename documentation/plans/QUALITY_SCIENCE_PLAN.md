@@ -281,8 +281,8 @@ they stay available beside the metrics above.
 
 | Value | Where it is computed |
 | :--- | :--- |
-| Guide error (RMS) for each frame | The guide-log join in `wayfindinglib` `control.history.frame_guiding` |
-| Pointing error (solved center against the commanded position) | The alignment history: `control.remote.sync_frames` and `control.history.query(kind="alignment")`, from the mount logs |
+| Guide error (RMS) for each frame | The guide-log join in `wayfindinglib` `review.frame_guiding` |
+| Pointing error (solved center against the commanded position) | The alignment history: `control.remote.sync_frames` and `review.query(kind="alignment")`, from the mount logs |
 | Moon separation and illumination; airmass | `wayfindinglib`'s sky engine, from the frame time and pointing |
 | Dew | A rule in `wayfindinglib` that reads two metrics: a rise in the corrected star width together with a fall in the zero point over the night. A night with known dew checks the signature. |
 | Polar-alignment error | Field rotation (section 2.1) grouped by guiding run and converted in `wayfindinglib` |

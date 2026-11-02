@@ -34,7 +34,7 @@ measure them on your own data.
 
 from pydantic import BaseModel, ConfigDict
 
-from astrometricslib import LimitTier, QualityLimit
+from astrometricslib.reports import LimitTier, QualityLimit
 from wayfindinglib.models.quality.rule import MetricRequirement, QualityRule
 from wayfindinglib.models.quality.statements import ActionClass, Confidence, Severity, StatementKind
 
@@ -49,8 +49,16 @@ ELONGATION_METRIC = "frame.star_elongation"
 RAW_FRAME_CLIPPING_METRIC = "stacking.gate_raw_frame_clipping"
 FLAT_NOISE_IN_APERTURE_METRIC = "stacking.flat_noise_in_aperture_stack_unit"
 EMPTY_APERTURE_NOISE_METRIC = "stacking.empty_aperture_noise_stack_unit"
+ODD_EVEN_APERTURE_RECORD_COUNT_METRIC = "stacking.odd_even_difference_aperture_record_count"
+ODD_EVEN_DIFFERENCE_ROW_SCATTER_METRIC = "stacking.odd_even_difference_row_average_scatter_stack_unit"
+ODD_EVEN_DIFFERENCE_COLUMN_SCATTER_METRIC = "stacking.odd_even_difference_column_average_scatter_stack_unit"
+ODD_EVEN_SUM_ROW_SCATTER_METRIC = "stacking.odd_even_sum_row_average_scatter_stack_unit"
+ODD_EVEN_SUM_COLUMN_SCATTER_METRIC = "stacking.odd_even_sum_column_average_scatter_stack_unit"
 FLAT_NOISE_FRACTION_METRIC = "stacking.flat_noise_fraction"
 FLAT_FRAME_COUNT_METRIC = "stacking.flat_frame_count"
+REJECTED_PIXEL_FRACTION_METRIC = "stacking.rejected_pixel_fraction"
+STACKED_STAR_WIDTH_METRIC = "stacking.stacked_fwhm_px"
+EXPECTED_STACK_STAR_WIDTH_METRIC = "stacking.expected_stack_fwhm_px"
 EFFECTIVE_TIME_METRIC = "stacking.effective_time_s"
 STAR_WIDTH_PIXELS_METRIC = "frame.star_width_moffat_px"
 STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC = "frame.star_width_effective_arcsec"
@@ -59,6 +67,17 @@ STAR_WIDTH_MOFFAT_ARCSEC_METRIC = "frame.star_width_moffat_arcsec"
 QUARANTINE_ROUNDNESS_METRIC = "frame.quarantine_roundness"
 QUARANTINE_SKY_MEDIAN_METRIC = "frame.quarantine_sky_median_adu"
 DETECTED_REGION_COUNT_METRIC = "frame.detected_region_count"
+# The stack's self-checks of its dark and bias frames (STK-47 to STK-53). The
+# value of each is the number the check measured, written so that it does not
+# depend on the check's limit; the row also holds the outcome.
+DARK_ZERO_PIXEL_GATE_METRIC = "stacking.gate_dark_zero_pixel_fraction"
+BIAS_ZERO_PIXEL_GATE_METRIC = "stacking.gate_bias_zero_pixel_fraction"
+DARK_LIGHT_LEAK_GATE_METRIC = "stacking.gate_dark_light_leak"
+DARK_LEVEL_GATE_METRIC = "stacking.gate_dark_level"
+BIAS_LEVEL_GATE_METRIC = "stacking.gate_bias_level"
+DARK_NOISE_GATE_METRIC = "stacking.gate_dark_noise"
+BIAS_NOISE_GATE_METRIC = "stacking.gate_bias_noise"
+CALIBRATION_FRAME_COUNT_GATE_METRIC = "stacking.gate_calibration_frame_count"
 
 # The brightest star's peak, as a fraction of the room between the sky and the
 # ceiling, at which the star clips. 1.0 is the ceiling by definition, so the
@@ -102,6 +121,20 @@ FLAT_VARIANCE_SHARE_TARGET = 0.01
 # It equals astrometricslib's `MAXIMUM_FLAT_NOISE_FRACTION` (0.5%), derived
 # in STK-05: a flat at 0.5% adds under 3% to the variance of a typical stack.
 MASTER_FLAT_NOISE_FRACTION_LIMIT = 0.005
+
+# The share of pixel values the stacker may throw out before the rule warns.
+# It equals astrometricslib's `DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD`
+# (15%), set in STK-24: three real sessions never passed about 10%, so 15% has
+# headroom. Partly measured: no session with a truly high share was available.
+# A test compares this copy with the library's value.
+REJECTED_PIXEL_FRACTION_LIMIT = 0.15
+
+# The most a stack's star width may exceed the width its input frames predict
+# (stack width divided by predicted width) before the rule warns. It equals
+# astrometricslib's `DEFAULT_FWHM_DEGRADATION_RATIO` (1.2), set in STK-25:
+# six normal stacks measured 0.77 to 1.16. Partly measured: no real failed
+# alignment was available. A test compares this copy with the library's value.
+STACK_SHARPNESS_RATIO_LIMIT = 1.2
 
 
 def build_limit(
@@ -241,8 +274,8 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         statement_kind=StatementKind.RECOMMENDATION,
         action_class=ActionClass.CAPTURE_SETTINGS,
         requires=[
-            MetricRequirement(name=SKY_NOISE_METRIC, definition_version=2),
-            MetricRequirement(name=READ_NOISE_METRIC, definition_version=1),
+            MetricRequirement(name=SKY_NOISE_METRIC, definition_version=3),
+            MetricRequirement(name=READ_NOISE_METRIC, definition_version=2),
         ],
         limits=[
             _design_limit(
@@ -396,6 +429,77 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         ),
     ),
     QualityRule(
+        name="stack_rejected_fraction_high",
+        statement_kind=StatementKind.WARNING,
+        action_class=ActionClass.DATA_SELECTION,
+        severity=Severity.ADVICE,
+        requires=[MetricRequirement(name=REJECTED_PIXEL_FRACTION_METRIC, definition_version=1)],
+        limits=[
+            QualityLimit(
+                value=REJECTED_PIXEL_FRACTION_LIMIT,
+                unit="fraction",
+                tier=LimitTier.VALIDATED_DATASET,
+                derivation=(
+                    "STK-24: three real sessions never passed about 10% of pixel values rejected, so 15% "
+                    "does not fire on a normal stack. No session with a truly high share was available."
+                ),
+                sample_count=3,
+                register_entry="STK-24",
+            )
+        ],
+        register_entry="STK-24",
+        confidence=Confidence.PARTLY_MEASURED,
+        wording=(
+            "The stacker rejected {rejected_percent:.1f}% of the pixel values, at or above the "
+            "{limit_percent:.0f}% limit."
+        ),
+        plain_wording=(
+            "About {rejected_percent:.1f}% of the pixel values were thrown out while stacking, which is at "
+            "or above the {limit_percent:.0f}% we expect to see. "
+            "The frames disagree, often from clouds or poor alignment, so look through them."
+        ),
+        purpose=(
+            "A high rejected share means the frames disagree, often from cloud or poor alignment. It is a "
+            "weaker signal of trouble than star width."
+        ),
+    ),
+    QualityRule(
+        name="stack_sharpness_poor",
+        statement_kind=StatementKind.WARNING,
+        action_class=ActionClass.DATA_SELECTION,
+        severity=Severity.WARNING,
+        requires=[
+            MetricRequirement(name=STACKED_STAR_WIDTH_METRIC, definition_version=1),
+            MetricRequirement(name=EXPECTED_STACK_STAR_WIDTH_METRIC, definition_version=1),
+        ],
+        limits=[
+            QualityLimit(
+                value=STACK_SHARPNESS_RATIO_LIMIT,
+                unit="ratio",
+                tier=LimitTier.VALIDATED_DATASET,
+                derivation=(
+                    "STK-25: six normal stacks measured 0.77 to 1.16 times the width their input frames "
+                    "predict, so 1.2 does not fire on them. Whether 1.2 catches a real failed alignment "
+                    "is untested."
+                ),
+                sample_count=6,
+                register_entry="STK-25",
+            )
+        ],
+        register_entry="STK-25",
+        confidence=Confidence.PARTLY_MEASURED,
+        wording=(
+            "The stack's stars are {ratio:.2f} times as wide as its input frames predict "
+            "({stacked_width:.2f} px against {expected_width:.2f} px), above the {limit:.1f} limit."
+        ),
+        plain_wording=(
+            "The stars in the stack are {ratio:.2f} times as wide as the single frames predict, above the "
+            "{limit:.1f} we expect to see. "
+            "The frames may not line up, so look through them."
+        ),
+        purpose=("A stack wider than its input frames predict has been blurred, usually by poor alignment."),
+    ),
+    QualityRule(
         name="frames_lost",
         statement_kind=StatementKind.WARNING,
         action_class=ActionClass.DATA_SELECTION,
@@ -427,20 +531,19 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         requires=[
             MetricRequirement(name=EMPTY_APERTURE_NOISE_METRIC, definition_version=3),
             MetricRequirement(name=EFFECTIVE_TIME_METRIC, definition_version=1),
-            MetricRequirement(name=SKY_RATE_METRIC, definition_version=2),
-            MetricRequirement(name=READ_NOISE_METRIC, definition_version=1),
+            MetricRequirement(name=SKY_RATE_METRIC, definition_version=3),
+            MetricRequirement(name=READ_NOISE_METRIC, definition_version=2),
         ],
         limits=[],
         register_entry="WAY-D61",
         confidence=Confidence.DESIGN_ESTIMATE,
         wording=(
-            "Take {frame_count} more at {exposure_text} (about {wall_clock_text}) to cut the noise "
-            "by about {noise_percent:.0f}%."
+            "Recommended additional frames: {frame_count} at {exposure_text} (about {wall_clock_text}), "
+            "which cuts the noise by about {noise_percent:.0f}%."
         ),
         plain_wording=(
-            "Take {frame_count} more {exposure_clause}frames: we expect roughly {noise_percent:.0f}% "
-            "less noise, "
-            "in about {wall_clock_text}."
+            "Recommended additional frames: {frame_count}, using {exposure_phrase}, for roughly "
+            "{noise_percent:.0f}% less noise in about {wall_clock_text}."
         ),
         produces="package_row",
         purpose=(
@@ -468,7 +571,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
             "{plain_advice_text}"
         ),
         purpose=(
-            "A noise floor means more frames do not help until the cause (flats, dither, a fixed "
+            "Fixed-pattern noise means more frames do not help until the cause (flats, dither, a fixed "
             "pattern) is fixed."
         ),
         computed_by="report_rules",
@@ -490,6 +593,62 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         purpose=(
             "A calibration frame taken at other settings does not remove the fixed pattern of the "
             "light frames."
+        ),
+        computed_by="report_rules",
+    ),
+    QualityRule(
+        name="retake_bad_calibration_set",
+        statement_kind=StatementKind.RECOMMENDATION,
+        action_class=ActionClass.CALIBRATION,
+        requires=[
+            MetricRequirement(name=metric, definition_version=1, optional=True)
+            for metric in (
+                DARK_ZERO_PIXEL_GATE_METRIC,
+                BIAS_ZERO_PIXEL_GATE_METRIC,
+                DARK_LIGHT_LEAK_GATE_METRIC,
+                DARK_LEVEL_GATE_METRIC,
+                BIAS_LEVEL_GATE_METRIC,
+                DARK_NOISE_GATE_METRIC,
+                BIAS_NOISE_GATE_METRIC,
+                CALIBRATION_FRAME_COUNT_GATE_METRIC,
+            )
+        ],
+        limits=[],
+        register_entry="WAY-D95",
+        confidence=Confidence.DESIGN_ESTIMATE,
+        wording="Retake the bad calibration set: {condition_text}. {advice_text}",
+        plain_wording=(
+            "A set of dark or bias frames is likely not good enough to calibrate these pictures: "
+            "{plain_condition_text}. {plain_advice_text}"
+        ),
+        produces="checklist_item",
+        purpose=(
+            "A master dark or bias that is cut off at zero, struck by light, at the wrong level or built "
+            "from too few frames puts its fault into every light frame, and more light frames cannot "
+            "remove it."
+        ),
+        computed_by=None,
+    ),
+    QualityRule(
+        name="retake_flats",
+        statement_kind=StatementKind.RECOMMENDATION,
+        action_class=ActionClass.CALIBRATION,
+        requires=[MetricRequirement(name=ODD_EVEN_APERTURE_RECORD_COUNT_METRIC, definition_version=1)],
+        limits=[],
+        register_entry="WAY-D32",
+        confidence=Confidence.DESIGN_ESTIMATE,
+        wording=(
+            "Retake flats: the stack's fixed-pattern noise changes with the distance from the image center "
+            "({statistic}; {sigmas:.1f} standard errors), as a flat-field or vignetting residual does."
+        ),
+        plain_wording=(
+            "Take new flat frames. The extra noise in the combined picture follows the distance from the "
+            "center, which is what a flat that no longer matches the optics looks like."
+        ),
+        produces="checklist_item",
+        purpose=(
+            "A trend of the fixed pattern with the distance from the center points to a flat-field residual, "
+            "which new flats can remove and more light frames cannot."
         ),
         computed_by="report_rules",
     ),
@@ -523,7 +682,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         name="sky_cost",
         statement_kind=StatementKind.RECOMMENDATION,
         action_class=ActionClass.SCHEDULING,
-        requires=[MetricRequirement(name=SKY_RATE_METRIC, definition_version=2)],
+        requires=[MetricRequirement(name=SKY_RATE_METRIC, definition_version=3)],
         limits=[],
         register_entry="WAY-D64",
         confidence=Confidence.DESIGN_ESTIMATE,
@@ -549,7 +708,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         action_class=ActionClass.SCHEDULING,
         requires=[
             MetricRequirement(name=STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC, definition_version=1),
-            MetricRequirement(name=SKY_RATE_METRIC, definition_version=2),
+            MetricRequirement(name=SKY_RATE_METRIC, definition_version=3),
         ],
         limits=[],
         register_entry="WAY-D65",
@@ -660,7 +819,7 @@ DEFERRED_RULES: tuple[DeferredRule, ...] = (
         reason=(
             "The best nights need a model that combines each night's visibility of the target, the Moon "
             "and the sky history. That nights-by-visibility model is not built. Tonight's ranking "
-            "(get_advisory, kind tonight) covers tonight only."
+            "(get_tonight_advice) covers tonight only."
         ),
         unblocked_by=(
             "A nights, visibility and Moon model that scores the coming nights, with a register entry."

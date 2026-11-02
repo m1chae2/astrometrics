@@ -1,6 +1,6 @@
 """Purpose: Tests that `Astrometrics` passes its drivers to the pipelines.
 
-Description: A caller can hand `Astrometrics(...)` a plate solver, a stacking
+Description: A test can build the root with a plate solver, a stacking
 program and a SIMBAD client. These tests give it fakes and check that the
 astrometry stage, `StellarCatalog.plate_solve` and `ProcessingPipelines.stack`
 use them, and that none of the real drivers (Astrometry.net, SIMBAD, Siril)
@@ -11,6 +11,7 @@ are what gets built. No network, solver or Siril is needed.
 from collections.abc import Callable
 from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -20,20 +21,18 @@ from astropy.io import fits
 from astropy.table import Table
 from astropy.wcs import WCS
 
-from astrometricslib import (
-    Astrometrics,
-    FilterType,
-    FrameRecord,
-    InvalidArgumentError,
+from astrometricslib import Astrometrics, FilterType, FrameRecord, Target
+from astrometricslib._internal.drivers import (
     PlateSolveDriver,
     SimbadDriver,
     StackingDriver,
     StackRunResult,
     StackSettings,
-    Target,
 )
-from astrometricslib.drivers.driver_set import Drivers
-from astrometricslib.drivers.interfaces import PipelineSteps
+from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.interfaces import PipelineSteps
+from astrometricslib._internal.testing import astrometrics_with_drivers
+from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.quality.quality_summary import StackingPipelineQualityMetrics, StackQualitySummary
 from astrometricslib.test.synthetic import SyntheticStar, make_photometry_fits
@@ -225,11 +224,11 @@ def real_drivers_are_forbidden(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError("A real driver was used instead of the one that was injected.")
 
     for path in (
-        "astrometricslib.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve",
-        "astrometricslib.drivers.astroquery_simbad_driver.AstroquerySimbadDriver.query_region",
-        "astrometricslib.drivers.astroquery_simbad_driver.AstroquerySimbadDriver.query_object",
-        "astrometricslib.drivers.astroquery_simbad_driver.AstroquerySimbadDriver.query_tap",
-        "astrometricslib.drivers.siril_stacking_driver.SirilStackingDriver.stack_batch",
+        "astrometricslib._internal.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve",
+        "astrometricslib._internal.drivers.astroquery_simbad_driver.AstroquerySimbadDriver.query_region",
+        "astrometricslib._internal.drivers.astroquery_simbad_driver.AstroquerySimbadDriver.query_object",
+        "astrometricslib._internal.drivers.astroquery_simbad_driver.AstroquerySimbadDriver.query_tap",
+        "astrometricslib._internal.drivers.siril_stacking_driver.SirilStackingDriver.stack_batch",
     ):
         monkeypatch.setattr(path, forbidden)
 
@@ -265,7 +264,7 @@ def test_the_astrometry_stage_uses_the_injected_solver_and_simbad(
     monkeypatch.setattr(
         "astrometricslib.pipelines.astrometry.runner.record_pipeline_stars", lambda stars, **_: (stars, None)
     )
-    astrometrics = Astrometrics(
+    astrometrics = astrometrics_with_drivers(
         AppConfiguration(), MagicMock(), plate_solve_driver=solver, simbad_driver=simbad
     )
     target = Target(id="Injection Field")
@@ -288,14 +287,70 @@ def test_the_astrometry_stage_uses_the_injected_solver_and_simbad(
     assert names == {f"Fake Star {index}" for index in range(len(STAR_PIXELS))}
 
 
-def test_plate_solve_on_the_star_catalog_uses_the_injected_solver(field_image: str) -> None:
-    """`stars.plate_solve` uses the fake solver and the fake SIMBAD."""
+def test_the_photometry_stage_uses_the_injected_solver_and_simbad(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Photometry identifies its stars with the fake solver and SIMBAD.
+
+    The fixture `real_drivers_are_forbidden` makes any built-in plate solver
+    or SIMBAD call fail, so the run passes only if photometry used the fakes.
+    """
+    frame_paths = []
+    for index in range(3):
+        frame_path = tmp_path / f"photometry_{index}.fits"
+        make_photometry_fits(
+            frame_path,
+            [SyntheticStar(x, y, flux_adu=40000.0, fwhm_px=3.0) for x, y in STAR_PIXELS],
+            date_obs=f"2026-05-01T00:0{index}:00",
+            exptime_s=30.0,
+            shape=(IMAGE_SIZE, IMAGE_SIZE),
+            seed=index + 1,
+            extra_header={"OBJECT": "Injection Field"},
+        )
+        frame_paths.append(str(frame_path))
+    frames = [
+        FrameRecord(
+            path=frame_path,
+            filter=FilterType.L,
+            camera="ZWO ASI 533MM Pro",
+            role="LIGHT",
+            exposure="30.0",
+            timestamp=1_777_593_600.0 + 60.0 * index,
+        )
+        for index, frame_path in enumerate(frame_paths)
+    ]
     solver, simbad = FakePlateSolver(), FakeSimbad()
-    astrometrics = Astrometrics(
+    # Saving stars to the shared test database is not under test here.
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.photometry.runner.record_pipeline_stars",
+        lambda stars, **_: (stars, SimpleNamespace(catalog_matched=0, position_only=0, unresolved=0)),
+    )
+    astrometrics = astrometrics_with_drivers(
+        AppConfiguration(), MagicMock(), plate_solve_driver=solver, simbad_driver=simbad
+    )
+    target = Target(id="Injection Field", frames=frames)
+
+    result = astrometrics.processing.process_target(
+        target,
+        stages=["photometry"],
+        photometry={"frames": frames, "max_workers": 1},
+        register_job=False,
+    )
+
+    assert "photometry" in result.results
+    assert len(solver.calls) == 1
+    assert solver.calls[0]["image_path"] == frame_paths[0]
+    assert simbad.region_calls
+
+
+def test_plate_solve_on_the_star_catalog_uses_the_injected_solver(field_image: str) -> None:
+    """`processing.plate_solve` uses the fake solver and the fake SIMBAD."""
+    solver, simbad = FakePlateSolver(), FakeSimbad()
+    astrometrics = astrometrics_with_drivers(
         AppConfiguration(), MagicMock(), plate_solve_driver=solver, simbad_driver=simbad
     )
 
-    wcs = astrometrics.stars.plate_solve(field_image)
+    wcs = astrometrics.processing.plate_solve(field_image)
 
     assert len(solver.calls) == 1
     assert simbad.region_calls
@@ -327,7 +382,7 @@ def make_stacking_target(tmp_path: Path) -> Target:
 def test_processing_stack_uses_the_injected_stacking_driver(tmp_path: Path) -> None:
     """`processing.stack` hands its frames to the fake stacking program."""
     stacker = FakeStacker(str(tmp_path / "Injection_Stack_L_Stacked.fits"))
-    astrometrics = Astrometrics(AppConfiguration(), MagicMock(), stacking_driver=stacker)
+    astrometrics = astrometrics_with_drivers(AppConfiguration(), MagicMock(), stacking_driver=stacker)
     target = make_stacking_target(tmp_path)
     summary = StackQualitySummary(
         pipeline_name="stacking",
@@ -340,7 +395,7 @@ def test_processing_stack_uses_the_injected_stacking_driver(tmp_path: Path) -> N
 
     with (
         patch("astrometricslib.pipelines.stacking.stage._build_stack_quality_summary", return_value=summary),
-        patch.object(astrometrics.processing, "acquire_stacking_slot", nullcontext),
+        patch.object(astrometrics.processing, "acquire_job_slot", nullcontext),
         patch.object(astrometrics.processing, "_target_catalog", MagicMock()),
     ):
         result = astrometrics.processing.stack(target, frames=list(target.frames), register_job=False)
@@ -349,11 +404,101 @@ def test_processing_stack_uses_the_injected_stacking_driver(tmp_path: Path) -> N
     assert result.stacked_path == stacker.output_path
 
 
+def record_pipeline_drivers(monkeypatch: pytest.MonkeyPatch, pipeline_class: type) -> list[Drivers | None]:
+    """Record the `drivers` each new pipeline of a class is built with.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        The test's patcher, which puts the constructor back afterwards.
+    pipeline_class : `type`
+        `AstrometryPipeline` or `SpectroscopyPipeline`.
+
+    Returns
+    -------
+    seen : `list` [`Drivers` or `None`]
+        Filled in as pipelines are built; one entry per pipeline.
+    """
+    seen: list[Drivers | None] = []
+    original_init = pipeline_class.__init__
+
+    def recording_init(self: Any, *arguments: Any, **keywords: Any) -> None:
+        """Note the drivers, then build the pipeline as usual."""
+        seen.append(keywords.get("drivers"))
+        original_init(self, *arguments, **keywords)
+
+    monkeypatch.setattr(pipeline_class, "__init__", recording_init)
+    return seen
+
+
+def test_the_spectroscopy_helpers_pass_the_drivers_on(
+    monkeypatch: pytest.MonkeyPatch, field_image: str
+) -> None:
+    """The tuner and the spectral frame check pass their drivers on.
+
+    The tuner builds an astrometry pipeline to find the star, and the
+    dispersion geometry reader builds a spectroscopy pipeline. Each must be
+    built with the caller's `Drivers`, not a fresh built-in set.
+    """
+    from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
+    from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
+    from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_frame_check import (
+        load_dispersion_geometry,
+    )
+    from astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner import (
+        SpectroscopyCalibrationTuner,
+    )
+
+    drivers = Drivers(plate_solve=FakePlateSolver(), simbad=FakeSimbad())
+    astrometry_seen = record_pipeline_drivers(monkeypatch, AstrometryPipeline)
+    spectroscopy_seen = record_pipeline_drivers(monkeypatch, SpectroscopyPipeline)
+
+    tuner = SpectroscopyCalibrationTuner(AppConfiguration(), drivers=drivers)
+    star_x, star_y = tuner._resolve_calibration_star_position(field_image, None)
+    load_dispersion_geometry("ZWO ASI 533MM Pro", drivers)
+
+    assert astrometry_seen == [drivers]
+    assert spectroscopy_seen == [drivers]
+    assert any(abs(star_x - x) < 3 and abs(star_y - y) < 3 for x, y in STAR_PIXELS)
+
+
+def test_the_stack_noise_plate_solve_uses_the_injected_solver(field_image: str) -> None:
+    """Solving a stack for its noise uses the fake solver and SIMBAD."""
+    from astrometricslib.pipelines.stacking.post_processing import stack_noise
+
+    # The fixture `no_stack_plate_solve` replaces the function; the real
+    # one is kept on it.
+    real_solve = stack_noise._plate_solve_stack_wcs.real_function  # type: ignore[attr-defined]
+    solver, simbad = FakePlateSolver(), FakeSimbad()
+
+    wcs, reason = real_solve(field_image, Drivers(plate_solve=solver, simbad=simbad))
+
+    assert reason == ""
+    assert len(solver.calls) == 1
+    assert wcs is not None
+    assert wcs.wcs.crval[1] == pytest.approx(FIELD_DEC_DEG)
+
+
+def test_group_derotation_passes_the_drivers_to_the_trail_measurement(
+    monkeypatch: pytest.MonkeyPatch, field_image: str
+) -> None:
+    """Measuring a group's trail tilt builds its pipeline with the drivers."""
+    from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
+    from astrometricslib.pipelines.stacking.processing.group_derotation import measure_trail_angle_degrees
+
+    drivers = Drivers(plate_solve=FakePlateSolver())
+    seen = record_pipeline_drivers(monkeypatch, SpectroscopyPipeline)
+
+    measure_trail_angle_degrees(field_image, (40.0, 50.0), "ZWO ASI 533MM Pro", drivers)
+
+    assert seen == [drivers]
+
+
 def test_defaults_build_the_real_drivers() -> None:
     """With no drivers given, the built-in drivers are the ones built."""
-    from astrometricslib.drivers.astrometry_net_driver import AstrometryNetPlateSolveDriver
-    from astrometricslib.drivers.astroquery_simbad_driver import AstroquerySimbadDriver
-    from astrometricslib.drivers.siril_stacking_driver import SirilStackingDriver
+    from astrometricslib._internal.drivers.astrometry_net_driver import AstrometryNetPlateSolveDriver
+    from astrometricslib._internal.drivers.astroquery_simbad_driver import AstroquerySimbadDriver
+    from astrometricslib._internal.drivers.siril_stacking_driver import SirilStackingDriver
     from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
     drivers = Drivers()
@@ -362,20 +507,20 @@ def test_defaults_build_the_real_drivers() -> None:
     assert isinstance(drivers.simbad_or_default(), AstroquerySimbadDriver)
 
     astrometrics = Astrometrics(AppConfiguration(), MagicMock())
-    identifier = StarIdentifier(AppConfiguration(), drivers=astrometrics.stars._drivers)
+    identifier = StarIdentifier(AppConfiguration(), drivers=astrometrics.processing._drivers)
     assert isinstance(identifier.solver, AstrometryNetPlateSolveDriver)
     assert isinstance(identifier.simbad, AstroquerySimbadDriver)
-    assert not astrometrics.stars._drivers.any_chosen
+    assert not astrometrics.processing._drivers.any_chosen
 
 
 def test_a_given_driver_is_used_and_the_others_stay_default() -> None:
     """A driver left out stays the built-in one when another is injected."""
-    from astrometricslib.drivers.astroquery_simbad_driver import AstroquerySimbadDriver
+    from astrometricslib._internal.drivers.astroquery_simbad_driver import AstroquerySimbadDriver
     from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
     solver = FakePlateSolver()
-    astrometrics = Astrometrics(AppConfiguration(), MagicMock(), plate_solve_driver=solver)
-    identifier = StarIdentifier(AppConfiguration(), drivers=astrometrics.stars._drivers)
+    astrometrics = astrometrics_with_drivers(AppConfiguration(), MagicMock(), plate_solve_driver=solver)
+    identifier = StarIdentifier(AppConfiguration(), drivers=astrometrics.processing._drivers)
 
     assert identifier.solver is solver
     assert isinstance(identifier.simbad, AstroquerySimbadDriver)
@@ -389,7 +534,39 @@ def test_processing_several_targets_refuses_injected_drivers(driver_name: str) -
         "stacking_driver": lambda: FakeStacker("/stack.fits"),
         "simbad_driver": FakeSimbad,
     }
-    astrometrics = Astrometrics(AppConfiguration(), MagicMock(), **{driver_name: fake[driver_name]()})
+    astrometrics = astrometrics_with_drivers(
+        AppConfiguration(), MagicMock(), **{driver_name: fake[driver_name]()}
+    )
 
     with pytest.raises(InvalidArgumentError, match="worker process"):
         astrometrics.processing.process_target(None, camera_id="ZWO ASI 533MM Pro")
+
+
+def test_open_in_siril_uses_the_stacking_driver_and_refuses_one_without_a_window() -> None:
+    """`open_in_siril` hands the path to the stacking driver's window."""
+    from astrometricslib.exceptions import ProcessingError
+
+    class WindowedStacker(FakeStacker):
+        """A fake stacking program that records the files it shows."""
+
+        def __init__(self, output_path: str) -> None:
+            """Start with nothing shown."""
+            super().__init__(output_path)
+            self.shown: list[str] = []
+
+        def open_in_viewer(self, file_path: str) -> None:
+            """Record the path."""
+            self.shown.append(file_path)
+
+    windowed = WindowedStacker("/stacks/x.fits")
+    astrometrics_with_drivers(
+        AppConfiguration(), MagicMock(), stacking_driver=windowed
+    ).processing.open_in_siril("/stacks/M 42/stack.fits")
+    assert windowed.shown == ["/stacks/M 42/stack.fits"]
+
+    windowless = FakeStacker("/stacks/x.fits")
+    processing = astrometrics_with_drivers(
+        AppConfiguration(), MagicMock(), stacking_driver=windowless
+    ).processing
+    with pytest.raises(ProcessingError):
+        processing.open_in_siril("/stacks/M 42/stack.fits")

@@ -8,12 +8,12 @@ computer and shapes each picture the way the viewer reads it.
 import logging
 from typing import Any
 
-from astrometricslib import RenderedImage, resolve_mounted_path
+from astrometricslib.drivers import resolve_mounted_path
 
 logger = logging.getLogger(__name__)
 
 
-def _viewer_payload(picture: RenderedImage | None) -> dict[str, Any] | None:
+def _viewer_payload(picture: Any | None) -> dict[str, Any] | None:
     """Shape a rendered picture the way the app's viewer reads it.
 
     The viewer reads the picture as ``imageData``; the last-image panel
@@ -136,7 +136,7 @@ class ImageService:
             could not be removed, with the reason).
         """
         resolved_paths = [resolve_mounted_path(path) for path in paths]
-        return self._astrometrics.targets.delete_images(resolved_paths, target=target_id)
+        return self._astrometrics.targets.delete_images(resolved_paths, target=target_id).model_dump()
 
     def get_last_image(self, stretch: bool = True) -> dict[str, Any] | None:
         """Find the most recently created FITS file and draw it.

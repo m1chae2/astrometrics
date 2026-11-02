@@ -65,6 +65,7 @@ extensions = [
     "ui_autodoc",
     "tutorial_indexer",
     "generate_pipeline_review_docs",
+    "library_result_fields",
 ]
 
 

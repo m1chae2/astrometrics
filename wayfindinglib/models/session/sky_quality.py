@@ -244,10 +244,6 @@ class SkyAnalysis(BaseModel):
         The nights covered, as ``"first..last"``.
     equipment_fingerprint : `str`
         The equipment the analysis is for.
-    flagged : `bool`
-        `True` if any statement is a warning.
-    flag_reasons : `list` [`str`]
-        The rule names of the warnings.
     resolved_parameters : `dict` [`str`, `Any`]
         The tolerance and definitions the analysis used.
     input_quality : `SkyInputQuality`
@@ -266,8 +262,6 @@ class SkyAnalysis(BaseModel):
     pipeline_version: str = Field(default=SKY_ANALYSIS_VERSION, alias="pipelineVersion")
     session_id: str = Field(alias="sessionId")
     equipment_fingerprint: str = Field(alias="equipmentFingerprint")
-    flagged: bool = False
-    flag_reasons: list[str] = Field(default_factory=list, alias="flagReasons")
     resolved_parameters: dict[str, Any] = Field(default_factory=dict, alias="resolvedParameters")
     input_quality: SkyInputQuality = Field(alias="inputQuality")
     performance: SkyPerformance

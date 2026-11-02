@@ -103,7 +103,7 @@ import numpy as np
 from astropy.modeling import fitting, models
 from scipy.ndimage import binary_dilation, median_filter
 
-from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.pipelines.spectroscopy.pre_processing.intensity_variance import (
     PixelNoiseModel,

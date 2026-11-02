@@ -19,7 +19,7 @@ import logging
 import os
 from collections.abc import Iterable, Sequence
 
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_header
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
 from astrometricslib.models.quality.excluded_frames import SetAsideFrameRecord
 from astrometricslib.models.quality.measurement import QualityMeasurement
 from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject_id
@@ -178,6 +178,13 @@ def build_set_aside_records(
                     exposure_seconds=exposure_seconds,
                     capture_setting_id=capture_setting_id,
                     moved_at=moved_at,
+                    restorable=entry is not None,
+                    restore_note=(
+                        ""
+                        if entry is not None
+                        else "No excluded_frames.json entry records where this frame came from, "
+                        "so it cannot be restored automatically. Move it back by hand."
+                    ),
                 )
             )
     return records

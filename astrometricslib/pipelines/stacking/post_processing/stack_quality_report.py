@@ -19,6 +19,7 @@ import os
 from collections.abc import Collection
 from typing import Literal
 
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import NotFoundError
 from astrometricslib.models.quality.quality_reports import RegistrationRow, StackQualityReport, StackSummary
 from astrometricslib.models.target import Target
@@ -66,6 +67,8 @@ def stack_quality_report(
     target_id: str | None,
     include: Collection[str],
     compare_to: str | None,
+    is_spectral: bool = False,
+    drivers: Drivers | None = None,
 ) -> StackQualityReport:
     """Measure a stack and, if asked, compare it with another stack.
 
@@ -81,6 +84,12 @@ def stack_quality_report(
         ``"previous"`` compares with the stack the last restack kept in the
         ``_previous`` folder. Any other text is the path of a stack to
         compare with. The other stack is ``before``; this one is ``after``.
+    is_spectral : `bool`, optional
+        Whether the stack is a spectral stack. Its noise in empty sky is then
+        reported as not measured.
+    drivers : `Drivers`, optional
+        The outside services the caller chose, for any plate solve of the
+        stack. Any left out is the built-in one.
 
     Returns
     -------
@@ -93,7 +102,10 @@ def stack_quality_report(
     NotFoundError
         If the stack file, or the stack to compare with, does not exist.
     """
-    from astrometricslib.drivers.siril_output_parsing import measure_rejected_fraction, parse_seq_file
+    from astrometricslib._internal.drivers.siril_output_parsing import (
+        measure_rejected_fraction,
+        parse_seq_file,
+    )
     from astrometricslib.pipelines.stacking.post_processing.previous_stack import previous_stack_path
     from astrometricslib.pipelines.stacking.post_processing.stack_comparison import (
         compare_stacks,
@@ -123,11 +135,11 @@ def stack_quality_report(
         if previous is None:
             notes.append("No previous stack is kept, so there is nothing to compare with.")
         else:
-            report.comparison = compare_stacks(previous, stack_path)
+            report.comparison = compare_stacks(previous, stack_path, is_spectral=is_spectral, drivers=drivers)
     elif compare_to:
         if not os.path.isfile(compare_to):
             raise NotFoundError(f"There is no stack file at {compare_to}.", details={"path": compare_to})
-        report.comparison = compare_stacks(compare_to, stack_path)
+        report.comparison = compare_stacks(compare_to, stack_path, is_spectral=is_spectral, drivers=drivers)
     report.notes = notes
     return report
 
@@ -167,6 +179,7 @@ def summarize_stack(target: Target, kind: StackKind) -> StackSummary:
         target_id=target.id,
         kind=kind,
         stack_path=getattr(stacking, "stacked_image", None),
+        job_id=quality.provenance_activity_id,
         made_at=quality.created_at.isoformat(),
         frames_submitted=metrics.frames_submitted,
         frames_stacked=metrics.frames_stacked,
@@ -174,7 +187,7 @@ def summarize_stack(target: Target, kind: StackKind) -> StackSummary:
         skipped_reasons=[
             {"file": frame.path.rsplit("/", 1)[-1], "reason": frame.reason} for frame in excluded[:10]
         ],
-        frames_set_aside_before_stacking=quality.input_quality.frames_quarantined,
+        frames_set_aside_before_stacking=metrics.frames_quarantined,
         sessions=[
             {
                 "session": session.session_id,
@@ -184,12 +197,10 @@ def summarize_stack(target: Target, kind: StackKind) -> StackSummary:
             for session in quality.target_session_breakdown
         ],
         rejected_pixel_fraction=metrics.rejected_pixel_fraction,
-        rejected_fraction_flagged=metrics.rejected_fraction_flagged,
         star_width_px={
             "stack": metrics.stacked_fwhm_px,
             "expected_from_inputs": metrics.expected_stack_fwhm_px,
             "median_of_inputs": metrics.median_input_fwhm_px,
-            "degraded": metrics.fwhm_degraded,
         },
         saturated_pixel_fraction=metrics.saturated_pixel_fraction,
         zero_pixel_fraction=metrics.zero_pixel_fraction,
@@ -204,12 +215,11 @@ def summarize_stack(target: Target, kind: StackKind) -> StackSummary:
                 "gain_mid_range": group.gain_mid_range,
                 "gain_bright_end_ratio": group.gain_bright_end_ratio,
                 "gain_disagreement": group.gain_disagreement,
+                "gain_applied": group.gain_applied,
                 "gain_nonlinear": group.gain_nonlinear,
                 "left_out_reason": group.left_out_reason,
             }
             for group in metrics.exposure_groups
         ],
-        flagged=quality.flagged,
-        flag_reasons=quality.flag_reasons,
         calibration_mismatches=len(metrics.calibration_mismatch_flags),
     )

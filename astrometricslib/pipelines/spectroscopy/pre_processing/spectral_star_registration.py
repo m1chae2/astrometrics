@@ -14,8 +14,13 @@ import logging
 from typing import Any
 
 import numpy as np
+from astropy import units as u
+from astropy.coordinates import SkyCoord
+from astropy.wcs.utils import fit_wcs_from_points
 
 from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.pipelines.astrometry.processing.wcs_refinement import CLIP_SIGMAS, MAXIMUM_PASSES
+from astrometricslib.pipelines.shared.star_recording import is_unresolved_star
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +82,43 @@ _BLENDED_PAIR_SEARCH_RADIUS_PX = 25.0
 # what makes the blob and would have no zero order of its own to extract.
 # Albireo B is 2 magnitudes fainter than A.
 _BLENDED_PAIR_MAXIMUM_MAGNITUDE_DIFFERENCE = 4.0
+
+# The fewest registered stars that may set a sky map fitted in the spectral
+# image. The map has six free numbers, so this is two stars for each. Measured
+# on M 27 and Mirach, 2026-11-01, by fitting random subsets and testing on the
+# stars left out: with 12 stars, 95% of trials had a worst held-out error of
+# at most 1.02 px (M 27) and 2.08 px (Mirach), inside
+# `_SKY_MAP_MATCH_RADIUS_PX`.
+# With 8 stars Mirach reached 2.67 px and with 6 it reached 3.44 px.
+_SKY_MAP_MINIMUM_STARS = 12
+
+# The most typical error, in pixels, a fitted sky map may have. Measured median
+# errors: M 27 0.10 px and Mirach 0.65 px. A map typically wrong by more than a
+# third of `_SKY_MAP_MATCH_RADIUS_PX` would lose real matches. A design limit.
+_SKY_MAP_MAXIMUM_MEDIAN_ERROR_PX = 1.0
+
+# How far from its mapped position a detection may be and still take a star's
+# name. On M 27 the number of matches is flat from 1.5 to 6 px (330 of 432
+# unnamed detections), so nothing real is lost by stopping at 3 px. Shifting
+# the detections by eight known offsets gave 0.9 chance matches on average at
+# 3 px (2 at most), against 2.0 at 4 px and 23.6 at the 15 px geometric limit.
+_SKY_MAP_MATCH_RADIUS_PX = 3.0
+
+# A star closer than this to the fit is never clipped. Clipping by the spread
+# alone would drop real stars when the fit is very good: the M 27 map has a
+# median error of 0.10 px while its held-out stars reach 0.92 px.
+_SKY_MAP_CLIP_FLOOR_PX = 1.0
+
+# Registered names can be chance matches, so at least this share of them must
+# agree with the fit. A map supported by a minority could be fitted to the
+# wrong stars. M 27 kept 78% (14 of its 67 names were chance matches on an old
+# pixel grid) and Mirach 98%. A design limit.
+_SKY_MAP_MINIMUM_KEPT_FRACTION = 0.5
+
+# The fitted stars must span at least this share of the detections' range along
+# each axis, so the map is not extended far past the stars that set it. M 27
+# spans 96% and Mirach 93%. A design limit.
+_SKY_MAP_MINIMUM_SPAN_FRACTION = 0.5
 
 
 def _pixel_position(obj: StellarObject) -> tuple[float, float] | None:
@@ -308,6 +350,7 @@ def identify_spectral_stars_via_solution(
     reference_stellar_objects: list[StellarObject],
     reference_wcs: Any,
     max_match_distance_px: float = _DEFAULT_MAX_MATCH_DISTANCE_PX,
+    solution_fits_this_image: bool = False,
 ) -> int | None:
     """Name a spectroscopy image's stars from a plate solution's sky positions.
 
@@ -337,6 +380,10 @@ def identify_spectral_stars_via_solution(
     max_match_distance_px : `float`, optional
         How far a detection may be from a star's shifted position and still
         be that star.
+    solution_fits_this_image : `bool`, optional
+        `True` when `reference_wcs` was fitted in the spectroscopy image
+        itself. No shift is measured, and no companion is added, because a
+        name then needs a detection of its own.
 
     Returns
     -------
@@ -359,13 +406,20 @@ def identify_spectral_stars_via_solution(
     # similarity transform between the detections and the placed stars is
     # tried instead.
     detection_points = np.array([pos for _, pos in detections])
-    offset = estimate_registration_offset(
-        spectral_stellar_objects,
-        reference_stellar_objects,
-        reference_wcs,
-        _SOLUTION_MAX_TRANSLATION_OFFSET_PX,
+    offset = (
+        None
+        if solution_fits_this_image
+        else estimate_registration_offset(
+            spectral_stellar_objects,
+            reference_stellar_objects,
+            reference_wcs,
+            _SOLUTION_MAX_TRANSLATION_OFFSET_PX,
+        )
     )
-    if offset is not None:
+    if solution_fits_this_image:
+        in_solved_frame = detection_points
+        how = "sky map fitted in this image"
+    elif offset is not None:
         in_solved_frame = detection_points - np.array(offset)
         how = f"shift dx={offset[0]:.2f}, dy={offset[1]:.2f} px"
     else:
@@ -420,6 +474,232 @@ def identify_spectral_stars_via_solution(
         how,
     )
     return matched_count
+
+
+def _fit_sky_map_from_named_detections(
+    named_detections: list[StellarObject],
+    reference_stellar_objects: list[StellarObject],
+    all_detections: list[StellarObject],
+) -> Any | None:
+    """Fit a pixel-to-sky map for a spectral image from its registered stars.
+
+    A spectral stack has no plate solution, but each correctly registered
+    detection links a pixel position in that image to a catalog sky position.
+    The stars' stored pixel positions are not used. Stars that do not fit are
+    removed and the map is fitted again, until the set of stars stops changing.
+
+    Parameters
+    ----------
+    named_detections : `list` [`StellarObject`]
+        The detections registration named. A name given to more than one
+        detection is left out, since at most one of them can be right.
+    reference_stellar_objects : `list` [`StellarObject`]
+        The named catalog stars, which supply the sky positions.
+    all_detections : `list` [`StellarObject`]
+        Every detection in the image, for the range the map must cover.
+
+    Returns
+    -------
+    sky_map : `astropy.wcs.WCS` or `None`
+        The fitted tangent-plane map, or `None` when the fit fails one of the
+        `_SKY_MAP_*` limits.
+    """
+    sky_by_id = {
+        star.id: (float(star.right_ascension), float(star.declination))
+        for star in reference_stellar_objects
+        if star.id and star.right_ascension is not None and star.declination is not None
+    }
+    names = [detection.id for detection in named_detections]
+    rows = [
+        (*position, *sky_by_id[detection.id])
+        for detection in named_detections
+        if detection.id in sky_by_id
+        and names.count(detection.id) == 1
+        and (position := _pixel_position(detection)) is not None
+    ]
+    if len(rows) < _SKY_MAP_MINIMUM_STARS:
+        logger.info("No sky map: only %s registered stars, need %s.", len(rows), _SKY_MAP_MINIMUM_STARS)
+        return None
+    pairs = np.array(rows)
+    sky = SkyCoord(pairs[:, 2] * u.deg, pairs[:, 3] * u.deg)
+
+    keep = np.ones(len(pairs), dtype=bool)
+    sky_map = None
+    errors = np.zeros(len(pairs))
+    for _ in range(MAXIMUM_PASSES):
+        if keep.sum() < _SKY_MAP_MINIMUM_STARS:
+            break
+        try:
+            sky_map = fit_wcs_from_points(
+                (pairs[keep, 0], pairs[keep, 1]), sky[keep], projection="TAN", sip_degree=None
+            )
+        except (ValueError, np.linalg.LinAlgError) as error:
+            logger.info("No sky map: the fit failed: %s", error)
+            return None
+        mapped_x, mapped_y = sky_map.all_world2pix(pairs[:, 2], pairs[:, 3], 0)
+        errors = np.hypot(mapped_x - pairs[:, 0], mapped_y - pairs[:, 1])
+        median = np.median(errors[keep])
+        spread = 1.4826 * np.median(np.abs(errors[keep] - median))
+        new_keep = errors <= max(median + CLIP_SIGMAS * spread, _SKY_MAP_CLIP_FLOOR_PX)
+        if np.array_equal(new_keep, keep):
+            break
+        keep = new_keep
+
+    kept_count = int(keep.sum())
+    median_error = float(np.median(errors[keep])) if kept_count else float("inf")
+    all_positions = np.array([pos for star in all_detections if (pos := _pixel_position(star))])
+    too_small_a_span = kept_count > 0 and bool(
+        np.any(
+            np.ptp(pairs[keep, :2], axis=0) < _SKY_MAP_MINIMUM_SPAN_FRACTION * np.ptp(all_positions, axis=0)
+        )
+    )
+    if (
+        sky_map is None
+        or kept_count < _SKY_MAP_MINIMUM_STARS
+        or kept_count < _SKY_MAP_MINIMUM_KEPT_FRACTION * len(pairs)
+        or median_error > _SKY_MAP_MAXIMUM_MEDIAN_ERROR_PX
+        or too_small_a_span
+    ):
+        logger.info(
+            "No sky map: %s of %s stars kept, median error %.2f px, too small a span: %s.",
+            kept_count,
+            len(pairs),
+            median_error,
+            too_small_a_span,
+        )
+        return None
+    logger.info(
+        "Fitted a sky map from %s of %s registered stars, median error %.2f px.",
+        kept_count,
+        len(pairs),
+        median_error,
+    )
+    return sky_map
+
+
+def identify_spectral_stars_via_registered_sky_map(
+    spectral_stellar_objects: list[StellarObject],
+    reference_stellar_objects: list[StellarObject],
+) -> tuple[int, Any | None]:
+    """Name a spectral image's stars when no plate solution is available.
+
+    Stored pixel positions cannot be trusted on their own. A catalog row keeps
+    the pixel position from the first image that found the star, so one
+    target's rows can sit on several pixel grids (M 27's are on a Nikon grid
+    and on several ZWO grids). Registration finds the shift from the rows on
+    the right grid, but misses every other star and can give a chance name up
+    to its 15 px limit.
+
+    So registration runs on copies, and the stars it names set a sky map in
+    the spectral image (`_fit_sky_map_from_named_detections`). The map then
+    places every catalog star by its sky position, and only stars within
+    `_SKY_MAP_MATCH_RADIUS_PX` of a detection name it. A registered name the
+    map does not support is not kept. When no good map can be fitted, the
+    registered names are used as they are.
+
+    Parameters
+    ----------
+    spectral_stellar_objects : `list` [`StellarObject`]
+        The detections in the spectroscopy image. Renamed in place.
+    reference_stellar_objects : `list` [`StellarObject`]
+        The named catalog stars.
+
+    Returns
+    -------
+    matched_count : `int`
+        How many detections were named.
+    sky_map : `astropy.wcs.WCS` or `None`
+        The fitted map, or `None` when the registered names were used as they
+        are.
+    """
+    trial_detections = [detection.model_copy(deep=True) for detection in spectral_stellar_objects]
+    registered_count = identify_spectral_stars_via_registration(trial_detections, reference_stellar_objects)
+    renamed = [
+        (detection, trial)
+        for detection, trial in zip(spectral_stellar_objects, trial_detections, strict=True)
+        if trial.id != detection.id
+    ]
+    sky_map = _fit_sky_map_from_named_detections(
+        [trial for _, trial in renamed], reference_stellar_objects, trial_detections
+    )
+    if sky_map is None:
+        for detection, trial in renamed:
+            _copy_identity(detection, trial)
+        return registered_count, None
+    matched_count = identify_spectral_stars_via_solution(
+        spectral_stellar_objects,
+        reference_stellar_objects,
+        sky_map,
+        max_match_distance_px=_SKY_MAP_MATCH_RADIUS_PX,
+        solution_fits_this_image=True,
+    )
+    return matched_count or 0, sky_map
+
+
+def solution_shifted_onto_spectral_image(
+    spectral_stellar_objects: list[StellarObject],
+    reference_stellar_objects: list[StellarObject],
+    reference_wcs: Any,
+) -> Any | None:
+    """Move a solved stack's plate solution onto the spectral image.
+
+    Parameters
+    ----------
+    spectral_stellar_objects : `list` [`StellarObject`]
+        The detections in the spectroscopy image.
+    reference_stellar_objects : `list` [`StellarObject`]
+        The named catalog stars.
+    reference_wcs : `astropy.wcs.WCS`
+        The plate solution of the solved standard stack.
+
+    Returns
+    -------
+    spectral_wcs : `astropy.wcs.WCS` or `None`
+        A map for the spectral image, or `None` when the two star fields do
+        not share one shift.
+    """
+    offset = estimate_registration_offset(
+        spectral_stellar_objects,
+        reference_stellar_objects,
+        reference_wcs,
+        _SOLUTION_MAX_TRANSLATION_OFFSET_PX,
+    )
+    return None if offset is None else shift_wcs_to_frame(reference_wcs, offset)
+
+
+def set_sky_positions_of_unnamed_detections(
+    spectral_stellar_objects: list[StellarObject], spectral_image_wcs: Any
+) -> int:
+    """Record where each unnamed detection sits on the sky.
+
+    The position lets a detection that no catalog names be stored under a
+    position-based id if its spectrum proves strong enough (see
+    `SpectroscopyPipeline.process_image`). A detection with no map keeps no
+    position and is never stored.
+
+    Parameters
+    ----------
+    spectral_stellar_objects : `list` [`StellarObject`]
+        The detections. Those still unnamed are changed in place.
+    spectral_image_wcs : `astropy.wcs.WCS`
+        A map from this spectral image's pixels to the sky.
+
+    Returns
+    -------
+    placed_count : `int`
+        How many detections were given a sky position.
+    """
+    placed_count = 0
+    for detection in spectral_stellar_objects:
+        position = _pixel_position(detection)
+        if position is None or not is_unresolved_star(detection):
+            continue
+        right_ascension, declination = spectral_image_wcs.all_pix2world(position[0], position[1], 0)
+        if np.isfinite(right_ascension) and np.isfinite(declination):
+            detection.right_ascension = float(right_ascension)
+            detection.declination = float(declination)
+            placed_count += 1
+    return placed_count
 
 
 def _split_blended_pairs(

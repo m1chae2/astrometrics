@@ -13,9 +13,10 @@ import numpy as np
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 
-from astrometricslib.drivers.driver_set import Drivers
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import ExternalServiceError
+from astrometricslib.foundation.run_tally import RunTally
 from astrometricslib.models.quality.gate_result import failed_gate, passed_gate
 from astrometricslib.models.quality.quality_summary import (
     ASTROMETRY_PIPELINE_VERSION,
@@ -307,10 +308,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
             Carries the `AnalysisContext`, the saved stars, and the
             counters `validate_output` needs.
         """
-        from astrometricslib.drivers.astrometry_net_driver import (
-            get_plate_solve_attempt_count,
-            reset_plate_solve_statistics,
-        )
+        from astrometricslib._internal.drivers.astrometry_net_driver import bind_plate_solve_attempts
         from astrometricslib.pipelines.astrometry.pipeline import (
             AstrometryPipeline,
         )
@@ -322,31 +320,33 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         target = request.target
         path = request.path
 
-        # Reset before this target's own solve/query work starts, so
-        # the counts read back below describe this target alone --
-        # both tallies are process-global and a worker handles many
-        # targets in sequence. reset_gaia_query_statistics leaves the
-        # circuit breaker itself untouched; see its docstring.
-        reset_plate_solve_statistics()
+        # The Gaia tally is process-global and a worker handles many targets
+        # in sequence, so it is reset before this target's own query work
+        # starts and the counts read back below describe this target alone.
+        # reset_gaia_query_statistics leaves the circuit breaker itself
+        # untouched; see its docstring. The plate-solve tries are counted in
+        # a tally that belongs to this run.
         reset_gaia_query_statistics()
+        plate_solve_attempt_tally = RunTally()
 
         pipeline = AstrometryPipeline(drivers=request.options.get("drivers"))
-        context = pipeline.process(
-            path, attempt_plate_solving=True, target_ra=target.ra, target_dec=target.dec
-        )
+        with bind_plate_solve_attempts(plate_solve_attempt_tally):
+            context = pipeline.process(
+                path, attempt_plate_solving=True, target_ra=target.ra, target_dec=target.dec
+            )
 
         context.stellar_objects, star_id_breakdown = _drop_unresolved_stars(
             context.stellar_objects, target_id=target.id, pipeline_name="astrometry"
         )
-        # Read from the identification and solver modules rather than
-        # threaded through the call chain: both keep per-process
-        # tallies precisely so a summary can record what the run
-        # actually experienced against the remote services.
+        # The Gaia counts are read from the identification module rather
+        # than threaded through the call chain: it keeps a per-process tally
+        # precisely so a summary can record what the run actually experienced
+        # against the remote services.
         simbad_matched_count = sum(
             1 for stellar_object in context.stellar_objects if stellar_object.spectral_type
         )
         gaia_statistics = get_gaia_query_statistics()
-        plate_solve_attempts = get_plate_solve_attempt_count()
+        plate_solve_attempts = int(plate_solve_attempt_tally.total)
 
         # The target's catalog position as the record held it before this run:
         # the fill below may set an empty position, and target clipping must
@@ -478,7 +478,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         camera_name = camera_name_from_header(result.context.image.header) or most_common_camera_name(
             request.frames or request.target.frames
         )
-        record_camera_profile(summary, camera_name)
+        record_camera_profile(summary, camera_name, measurement_context)
         return summary
 
     def to_result_dict(

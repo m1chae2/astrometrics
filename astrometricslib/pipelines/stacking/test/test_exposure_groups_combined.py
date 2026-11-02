@@ -16,7 +16,7 @@ import pytest
 
 from astrometricslib.models.quality.gate_result import GateStatus
 from astrometricslib.models.quality.quality_summary import StackingPipelineQualityMetrics
-from astrometricslib.pipelines.stacking import stage
+from astrometricslib.pipelines.stacking import fwhm_sampling, stage
 from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import (
     EXPOSURE_GROUPS_COMBINED_GATE_NAME,
     build_group_summary,
@@ -126,7 +126,7 @@ def test_frames_stacked_is_unchanged_without_group_information() -> None:
 
 def test_the_sharpness_sample_uses_only_combined_frames(monkeypatch: pytest.MonkeyPatch) -> None:
     """Frames of a left-out group are not measured for the expected width."""
-    monkeypatch.setattr(stage, "_fwhm_worker_count", lambda sample_size: 1)
+    monkeypatch.setattr(fwhm_sampling, "_fwhm_worker_count", lambda sample_size: 1)
     frames = [*make_frames("kept", 30), *make_frames("dropped", 30)]
     combined = stage._frames_in_combined_groups(
         frames, {"combined_frame_paths": [frame.path for frame in frames[:30]]}
@@ -150,7 +150,7 @@ def test_the_sharpness_sample_uses_only_combined_frames(monkeypatch: pytest.Monk
         )
     )
     with patch(MEASURE, side_effect=fake_measure):
-        stage._measure_fwhm_degradation(summary, "stack.fits", combined, stacked_fwhm=2.0)
+        fwhm_sampling.measure_fwhm_degradation(summary, "stack.fits", combined, stacked_fwhm=2.0)
 
     assert measured
     assert all(path.startswith("kept") for path in measured)

@@ -199,13 +199,13 @@ def _empty_photometry_result(no_work_reason: str) -> Result:
     Structured exactly like a real run that happened to process zero
     sessions and find zero stars, so `run` can be skipped while
     `validate_output`/`to_result_dict` still produce a normal (empty)
-    summary and result dict, with `no_work_reason` surfaced as a flag
+    summary and result dict, with `no_work_reason` surfaced as a failed gate
     rather than a one-off status/message pair.
 
     Parameters
     ----------
     no_work_reason : `str`
-        Why there was nothing to do; recorded as a flag reason on the
+        Why there was nothing to do; recorded as a failed gate on the
         quality summary `validate_output` builds from this `Result`.
 
     Returns
@@ -270,7 +270,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         `has_work=False` `Result` instead of running -- `validate_output`
         and `to_result_dict` still run on it, same as a real run's
         `Result`, so the target still gets a real (empty) quality
-        summary and the reason still surfaces, as a flag rather than a
+        summary and the reason still surfaces, as a failed gate rather than a
         one-off status/message pair.
 
         Returns
@@ -403,7 +403,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         if use_astrometry_seed:
             from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
-            star_identifier = StarIdentifier()
+            star_identifier = StarIdentifier(drivers=options.get("drivers"))
 
         session_wcs_map: dict[str, Any] = {}
         astrometry_identified_star_count = 0
@@ -495,7 +495,11 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         if id_prefix_enabled:
             all_stellar_objects, sessions_missing_wcs, cross_session_match_count = (
                 _match_and_merge_across_sessions(
-                    photometry_sessions, per_session_results, target, session_wcs_map=session_wcs_map
+                    photometry_sessions,
+                    per_session_results,
+                    target,
+                    session_wcs_map=session_wcs_map,
+                    drivers=options.get("drivers"),
                 )
             )
             if cross_session_match_count > 0:
@@ -735,6 +739,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             summary,
             camera_name_for_paths(target.frames, payload.get("image_paths") or [])
             or most_common_camera_name(target.frames),
+            measurement_context,
         )
         return summary
 
@@ -836,8 +841,8 @@ def run_photometry_analysis(
     result : `dict`
         The completed dict carrying every brightness-tracking metric,
         even when there was no usable data -- in that case every metric
-        is zero/empty and the reason surfaces as a flag in
-        `target.quality.photometry.flag_reasons` rather than as
+        is zero/empty and the reason surfaces as a failed gate in
+        `target.quality.photometry.gates` rather than as
         a differently-structured return value.
     """
     request = PipelineRequest(

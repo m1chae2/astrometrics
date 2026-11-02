@@ -5,6 +5,7 @@
  * the right and times read "60 s". A package with no rows says how to add one.
  */
 import React from 'react';
+import { filterLabel } from './packageModel';
 import '../common/styles/tables.css'; // Shared table styles
 
 interface Props {
@@ -57,7 +58,7 @@ export const ImageList: React.FC<Props> = ({ items, onRemove, onEdit }) => {
                             <td className="image-list__number">{item.count}</td>
                             <td className="image-list__number">{item.exposure} s</td>
                             <td className="image-list__number">{item.delay || 0} s</td>
-                            <td>{item.filter}</td>
+                            <td>{filterLabel(String(item.filter ?? ''))}</td>
                             <td className="image-list__actions">
                                 {onEdit && (
                                     <button

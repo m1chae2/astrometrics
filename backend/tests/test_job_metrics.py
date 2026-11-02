@@ -6,7 +6,7 @@ in SQLite via JobStore and JobService.
 
 from pathlib import Path
 
-from astrometricslib import JobStore, ProcessingJob
+from astrometricslib.jobs import JobStore, ProcessingJob
 from backend.services.processing.job_service import JobService
 
 

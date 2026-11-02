@@ -10,7 +10,9 @@ injected dips over many random spectra) is checked in
 validate_spectral_and_period_analysis.py; these tests only pin the behavior.
 """
 
+import json
 import math
+import pathlib
 
 import numpy as np
 import pytest
@@ -27,9 +29,10 @@ from astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector
     VERDICT_NOT_DETECTED,
     VERDICT_POSSIBLE,
     _control_centers,
-    _mark_features_sharing_a_dip,
+    _label_features_sharing_a_dip,
     _one_sided_p_value,
     _shoulder_edges,
+    count_shared_dips_once,
     detect_named_features,
     expected_feature_depth,
 )
@@ -220,14 +223,14 @@ def test_no_feature_core_is_narrower_than_twenty_angstroms() -> None:
     assert all(float(feature["window_angstrom"]) >= 20.0 for feature in NAMED_FEATURES)
 
 
-def test_one_dip_is_not_credited_to_two_lines_too_close_to_tell_apart() -> None:
-    """A lone H-gamma dip must not also be reported as the G band.
+def test_a_dip_shared_by_two_lines_is_detected_for_both_with_a_label() -> None:
+    """A lone H-gamma dip is also reported for the G band, with a label.
 
     The G band (4300 A) is 40 A from H-gamma (4340 A), less than the
     instrument's resolution element, and each feature searches 30 A either
-    side of its rest wavelength, so both find the same dip. Seen on real
-    Vega, Albireo B and Deneb spectra, where the G band came out with the
-    same depth and p-value as H-gamma.
+    side of its rest wavelength, so both find the same dip. The spectrum
+    cannot say which line made it, so both stay detected and each names the
+    other (issue 144).
     """
     wavelength, intensity = _spectrum_with_dip(center=4335.0, depth=0.3, half_width=20.0)
 
@@ -236,9 +239,86 @@ def test_one_dip_is_not_credited_to_two_lines_too_close_to_tell_apart() -> None:
     h_gamma = _entry(features, "H-gamma")
     g_band = _entry(features, "G band")
     assert h_gamma["verdict"] == VERDICT_DETECTED
-    assert h_gamma["blended_with"] is None
-    assert g_band["verdict"] == VERDICT_INCONCLUSIVE
+    assert g_band["verdict"] == VERDICT_DETECTED
+    assert h_gamma["blended_with"] == g_band["feature"]
     assert g_band["blended_with"] == h_gamma["feature"]
+
+
+def test_a_shared_dip_that_fails_the_p_value_stays_not_detected() -> None:
+    """A dip that noise could make is not reported, and so is not labeled."""
+    wavelength, intensity = _spectrum_with_dip(center=4335.0, depth=0.0, half_width=20.0)
+
+    features = detect_named_features(wavelength, intensity)
+
+    for name_part in ("H-gamma", "G band"):
+        entry = _entry(features, name_part)
+        assert entry["verdict"] in (VERDICT_NOT_DETECTED, VERDICT_INCONCLUSIVE)
+        assert entry["blended_with"] is None
+
+
+def test_a_reported_dip_and_one_that_failed_are_not_labeled_as_shared() -> None:
+    """Only two features that are both reported share a dip."""
+    entries = [
+        {
+            "feature": "A",
+            "wavelength_angstrom": 4340.0,
+            "verdict": VERDICT_DETECTED,
+            "kind": "absorption",
+            "measured_wavelength_angstrom": 4335.0,
+            "blended_with": None,
+        },
+        {
+            "feature": "B",
+            "wavelength_angstrom": 4300.0,
+            "verdict": VERDICT_NOT_DETECTED,
+            "kind": "absorption",
+            "measured_wavelength_angstrom": 4336.0,
+            "blended_with": None,
+        },
+    ]
+
+    _label_features_sharing_a_dip(entries, 50.0)
+
+    assert entries[0]["blended_with"] is None
+    assert entries[1]["blended_with"] is None
+
+
+def test_a_possible_dip_stays_possible_when_shared() -> None:
+    """Sharing a dip changes the label, never the verdict."""
+    entries = [
+        {
+            "feature": "A",
+            "wavelength_angstrom": 4340.0,
+            "verdict": VERDICT_POSSIBLE,
+            "kind": "absorption",
+            "measured_wavelength_angstrom": 4335.0,
+            "blended_with": None,
+        },
+        {
+            "feature": "B",
+            "wavelength_angstrom": 4300.0,
+            "verdict": VERDICT_DETECTED,
+            "kind": "absorption",
+            "measured_wavelength_angstrom": 4336.0,
+            "blended_with": None,
+        },
+    ]
+
+    _label_features_sharing_a_dip(entries, 50.0)
+
+    assert [entry["verdict"] for entry in entries] == [VERDICT_POSSIBLE, VERDICT_DETECTED]
+    assert [entry["blended_with"] for entry in entries] == ["B", "A"]
+
+
+def test_a_shared_dip_is_counted_once() -> None:
+    """Two names for one dip count as one; a lone dip counts as itself."""
+    features = [
+        {"feature": "A", "blended_with": "B"},
+        {"feature": "B", "blended_with": "A"},
+        {"feature": "C", "blended_with": None},
+    ]
+
+    assert [feature["feature"] for feature in count_shared_dips_once(features)] == ["A", "C"]
 
 
 def test_a_real_g_band_away_from_h_gamma_is_still_detected() -> None:
@@ -253,47 +333,12 @@ def test_a_real_g_band_away_from_h_gamma_is_still_detected() -> None:
 
 
 def test_a_feature_that_was_not_detected_is_never_marked_as_blended() -> None:
-    """Only a feature that would have been reported can be blended away."""
+    """Only a feature that would have been reported can get a label."""
     wavelength, intensity = _spectrum_with_dip(center=6563.0, depth=0.3, half_width=25.0)
 
     features = detect_named_features(wavelength, intensity)
 
     assert all(entry.get("blended_with") is None for entry in features)
-
-
-def test_an_a_type_star_gives_a_shared_dip_to_h_gamma_despite_distance() -> None:
-    """The reference type's expected depths break the tie, not the distance.
-
-    A dip at 4314 A is 14 A from the G band and 26 A from H-gamma, but an
-    A0V star shows H-gamma (expected depth 0.13) and not the G band (0.0).
-    """
-    wavelength, intensity = _spectrum_with_dip(center=4314.0, depth=0.3, half_width=20.0)
-
-    features = detect_named_features(wavelength, intensity, reference_spectral_type="A0V")
-
-    h_gamma = _entry(features, "H-gamma")
-    g_band = _entry(features, "G band")
-    assert h_gamma["blended_with"] is None
-    assert h_gamma["verdict"] in (VERDICT_DETECTED, VERDICT_POSSIBLE)
-    assert g_band["verdict"] == VERDICT_INCONCLUSIVE
-    assert g_band["blended_with"] == h_gamma["feature"]
-
-
-def test_a_k_type_star_gives_a_shared_dip_to_the_g_band_despite_distance() -> None:
-    """A K giant expects the G band, not H-gamma, so the G band keeps it.
-
-    A dip at 4322 A is 18 A from H-gamma and 22 A from the G band.
-    """
-    wavelength, intensity = _spectrum_with_dip(center=4322.0, depth=0.3, half_width=20.0)
-
-    features = detect_named_features(wavelength, intensity, reference_spectral_type="K0III")
-
-    h_gamma = _entry(features, "H-gamma")
-    g_band = _entry(features, "G band")
-    assert g_band["blended_with"] is None
-    assert g_band["verdict"] in (VERDICT_DETECTED, VERDICT_POSSIBLE)
-    assert h_gamma["verdict"] == VERDICT_INCONCLUSIVE
-    assert h_gamma["blended_with"] == g_band["feature"]
 
 
 def _blurred_line_spectrum(
@@ -472,7 +517,7 @@ def test_features_of_opposite_kinds_are_not_blended_into_one_dip() -> None:
         },
     ]
 
-    _mark_features_sharing_a_dip(entries, 50.0)
+    _label_features_sharing_a_dip(entries, 50.0)
 
     assert entries[1]["blended_with"] is None
     assert entries[1]["verdict"] == VERDICT_DETECTED
@@ -489,3 +534,73 @@ def test_only_h_alpha_and_h_beta_are_tested_for_emission() -> None:
     assert h_gamma["verdict"] == VERDICT_NOT_DETECTED
     h_beta_wavelength, h_beta_intensity = _spectrum_with_hump(4861.0, 0.25, 25.0)
     assert _entry(detect_named_features(h_beta_wavelength, h_beta_intensity), "H-beta")["kind"] == "emission"
+
+
+def _assert_same_entries(actual: object, expected: object, path: str = "") -> None:
+    """Compare two detector results, floats to a relative 1e-12.
+
+    Parameters
+    ----------
+    actual, expected : `object`
+        Nested lists, dicts and values from `detect_named_features`.
+    path : `str`
+        Where in the result the comparison is, for the failure message.
+    """
+    if isinstance(expected, dict):
+        assert isinstance(actual, dict) and actual.keys() == expected.keys(), path
+        for key, value in expected.items():
+            _assert_same_entries(actual[key], value, f"{path}.{key}")
+    elif isinstance(expected, list):
+        assert isinstance(actual, list) and len(actual) == len(expected), path
+        for index, value in enumerate(expected):
+            _assert_same_entries(actual[index], value, f"{path}[{index}]")
+    elif isinstance(expected, float):
+        assert isinstance(actual, float), path
+        assert actual == pytest.approx(expected, rel=1e-12, abs=0.0), path
+    else:
+        assert actual == expected, path
+
+
+@pytest.mark.parametrize("tag", ["a", "b"])
+def test_detector_matches_outputs_stored_from_real_m13_spectra(tag: str) -> None:
+    """Two real M 13 spectra give the same entries as before the speed-up.
+
+    The spectra were extracted from the M 13 stack, and the expected entries
+    were produced by the detector before the continuum fit was made cheaper
+    and the control measurements were shared between features with the same
+    window. The speed-up changes no number: the comparison is to a relative
+    1e-12 and the two runs agree to the last bit on this machine.
+    """
+    data_directory = pathlib.Path(__file__).parent / "data"
+    spectra = np.load(data_directory / "feature_detector_m13_spectra.npz")
+    expected = json.loads((data_directory / "feature_detector_m13_expected.json").read_text())[tag]
+
+    actual = detect_named_features(
+        spectra[f"{tag}_wavelength"],
+        spectra[f"{tag}_intensity"],
+        reference_spectral_type=expected["reference_spectral_type"],
+        resolution_element_angstrom=float(spectra[f"{tag}_resolution"]),
+        errors=spectra[f"{tag}_errors"],
+    )
+
+    _assert_same_entries(actual, expected["features"])
+
+
+def test_fast_continuum_fit_matches_numpy_polyfit_and_polyval() -> None:
+    """The cheaper continuum fit gives numpy's coefficients and values."""
+    from astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector import (
+        CONTINUUM_POLYNOMIAL_DEGREE,
+        _evaluate_continuum,
+        _fit_continuum,
+    )
+
+    generator = np.random.default_rng(3)
+    offsets = np.sort(generator.uniform(-200.0, 200.0, 40))
+    values = 100.0 + 0.05 * offsets + generator.normal(0.0, 1.0, 40)
+
+    coefficients = _fit_continuum(offsets, values)
+
+    np.testing.assert_array_equal(coefficients, np.polyfit(offsets, values, CONTINUUM_POLYNOMIAL_DEGREE))
+    np.testing.assert_array_equal(
+        _evaluate_continuum(coefficients, offsets), np.polyval(coefficients, offsets)
+    )

@@ -14,7 +14,7 @@ already exactly known from `EquipmentConfiguration.plate_scale_arcsec_per_px`.
 
 import math
 
-from astrometricslib import ProcessingError
+from astrometricslib.exceptions import ProcessingError
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
 
 

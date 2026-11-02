@@ -13,7 +13,7 @@ import logging
 import os
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.drivers.ekos.analyze_log_parser import parse_ekos_analyze_log
 from wayfindinglib.drivers.ekos.kstars_log_parser import parse_dither_events
 from wayfindinglib.models.session.live_session_status import LiveSessionStatus

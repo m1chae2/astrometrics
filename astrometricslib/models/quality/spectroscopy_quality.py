@@ -197,11 +197,9 @@ class CatalogComparison(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    # Whether the self-determined type is close enough to the catalog type
-    # to call it agreement. `None` when there was nothing to compare (no
-    # catalog type, or no self-determined type).
-    spectral_type_agrees: bool | None = Field(default=None, alias="spectralTypeAgrees")
-    # Why `spectral_type_agrees` is `False`, or an empty string otherwise.
+    # Why the self-determined type is more than `DIFFERS_FROM_CATALOG_SUBTYPES`
+    # steps from the catalog type, or an empty string when it is not. The
+    # number of steps is the checkpoint 3 metric `catalog_type_steps_apart`.
     spectral_type_note: str = Field(default="", alias="spectralTypeNote")
     # True when the catalog calls this star a giant or supergiant. The
     # classifier only ever compares against main-sequence (dwarf)
@@ -216,11 +214,15 @@ class CatalogComparison(BaseModel):
     # when the catalog calls the star a giant. `None` when not looked up.
     closest_giant_type: str | None = Field(default=None, alias="closestGiantType")
     closest_giant_rms: float | None = Field(default=None, alias="closestGiantRms")
-    # Whether the spectrum's own colour (see `synthetic_b_minus_v`) is
-    # close enough to the catalog's B-V to call it agreement. `None` when
-    # there was nothing to compare.
-    colour_agrees: bool | None = Field(default=None, alias="colourAgrees")
-    # Why `colour_agrees` is `False`, or an empty string otherwise.
+    # The spectrum's own B-V minus the catalog's B-V, in magnitudes. The
+    # sign is spectrum minus catalog: positive means the spectrum is redder
+    # than the catalog says, negative means bluer. `None` when either
+    # colour is missing or not finite, or when the catalog colour is
+    # redder than the range the colour map is calibrated for. Old stored
+    # rows lack this field and load with `None`.
+    b_minus_v_difference_mag: float | None = Field(default=None, alias="bMinusVDifferenceMag")
+    # Why the colour is more than `COLOUR_DISAGREEMENT_MAGNITUDES` from the
+    # catalog colour, or an empty string otherwise.
     colour_note: str = Field(default="", alias="colourNote")
 
     def joined_note(self) -> str:
@@ -241,6 +243,70 @@ class CatalogComparison(BaseModel):
         return "; ".join(
             note for note in (self.colour_note, self.spectral_type_note, self.luminosity_class_note) if note
         )
+
+
+class AbsorptionFeatureLimits(BaseModel):
+    """The limits behind every absorption-feature label in one spectrum.
+
+    Each feature entry carries a label (detected, possible, inconclusive,
+    not detected, not covered) and its statistic (p-value, depth). The limits
+    that turned the statistic into the label are the same for every feature
+    in the spectrum, so they are stored here once instead of on each entry.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    # A feature is "detected" at or below this p-value.
+    detected_p_value: float = Field(alias="detectedPValue")
+    # A feature is "possible" at or below this p-value.
+    possible_p_value: float = Field(alias="possiblePValue")
+    # A feature that is neither is "inconclusive" at or below this p-value...
+    inconclusive_p_value: float = Field(alias="inconclusivePValue")
+    # ...and at least this deep, as a fraction of the continuum.
+    inconclusive_minimum_depth: float = Field(alias="inconclusiveMinimumDepth")
+    # A dip shallower than this fraction of the continuum is never reported.
+    minimum_reported_depth: float = Field(alias="minimumReportedDepth")
+    # A depth uncertainty above this caps the label at "inconclusive".
+    maximum_depth_uncertainty_for_label: float = Field(alias="maximumDepthUncertaintyForLabel")
+    # The validation register entry that checked these limits ("SPE-24").
+    register_entry: str = Field(alias="registerEntry")
+
+
+class EmissionLineLimits(BaseModel):
+    """The limits behind every emission-line label in one spectrum.
+
+    Each line entry carries a label (detected, unclear, not seen, not
+    covered) and its significance. The limits are the same for every line in
+    the spectrum, so they are stored here once.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    # A line is "detected" at or above this many error bars above zero.
+    detected_significance: float = Field(alias="detectedSignificance")
+    # A line is "unclear" at or above this many error bars, below the above.
+    unclear_significance: float = Field(alias="unclearSignificance")
+    # A line is "covered" only when this fraction of its box was fitted.
+    minimum_covered_fraction: float = Field(alias="minimumCoveredFraction")
+    # The spectrum is an emission-line source at this many detected lines.
+    minimum_detected_for_emission_source: int = Field(alias="minimumDetectedForEmissionSource")
+    # The validation register entry that checked these limits ("SPE-25").
+    register_entry: str = Field(alias="registerEntry")
+
+
+class DetectionLabelLimits(BaseModel):
+    """The limits and register entries behind one spectrum's labels.
+
+    Spectral feature and emission-line entries keep only their statistics and
+    labels. This record, stored once per spectrum, says which limits turned
+    those statistics into labels and which register entry checked them. Old
+    stored rows lack it and load with `None` where it is used.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    absorption_features: AbsorptionFeatureLimits = Field(alias="absorptionFeatures")
+    emission_lines: EmissionLineLimits = Field(alias="emissionLines")
 
 
 class InputQualityAssessment(BaseModel):
@@ -281,51 +347,3 @@ class InputQualityAssessment(BaseModel):
     # `estimate_spectrum_signal_to_noise`). `None` when it could not be
     # judged (for example too few usable samples).
     signal_to_noise: float | None = Field(default=None, alias="signalToNoise")
-
-
-class OutputQualityAssessment(BaseModel):
-    """How much to trust a spectrum's classification, given everything found.
-
-    Combines the classifier's own match statistics (is the winning type a
-    weak match, or nearly tied with the runner-up) with the catalog
-    comparison above, into one overall verdict. Unlike
-    `InputQualityAssessment`, this depends on what classifying the
-    spectrum actually produced.
-    """
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    # The winning type's relative RMS is above `NO_GOOD_MATCH_RMS`, so the
-    # closest reference still fits badly (see `is_classification_poor_match`).
-    # `False` for an unclassified star -- that is a separate "nothing to
-    # compare" case, not a shaky match. `None` in a record saved before
-    # 2026-10-10, which carries the older `isLowConfidence` judgement instead;
-    # `scripts/recompute_spectral_analysis.py` re-judges such records. Without
-    # the default, loading one of the 68 stars stored that way stopped every
-    # pipeline that records stars for its target.
-    is_poor_match: bool | None = Field(default=None, alias="isPoorMatch")
-    # (Subtype level.) The best and second-best reference types are less than
-    # `AMBIGUOUS_RMS_GAP` apart in relative RMS (see
-    # `is_classification_ambiguous`). `False` when fewer than two references
-    # were compared.
-    is_ambiguous: bool = Field(alias="isAmbiguous")
-    # The best reference and the best reference of a different spectral
-    # class letter are less than `AMBIGUOUS_RMS_GAP` apart in relative RMS
-    # (see `is_classification_class_ambiguous`), so the class letter itself
-    # is uncertain. `False` when no other class was compared. `None` in a
-    # record saved before 2026-10-10 (see `is_poor_match`).
-    is_class_ambiguous: bool | None = Field(default=None, alias="isClassAmbiguous")
-    # Whether the classifier's own top two candidates are closer together
-    # than the instrument's resolution can actually distinguish. `None`
-    # until the Angstrom-per-subtype-step conversion this needs has been
-    # calibrated (see `post_processing.assess_output_quality`) -- not
-    # `False`, since "not computed" and "computed and found precise
-    # enough" are different claims.
-    is_subtype_finer_than_resolution: bool | None = Field(default=None, alias="isSubtypeFinerThanResolution")
-    # `CatalogComparison.spectral_type_agrees`, repeated here so a reader
-    # can see the overall trust verdict without also fetching the
-    # comparison object. `None` when there was nothing to compare.
-    catalog_agrees: bool | None = Field(default=None, alias="catalogAgrees")
-    # The overall verdict: `False` when any of the above says this result
-    # should be treated with caution, `True` when none of them do.
-    is_trustworthy: bool = Field(alias="isTrustworthy")

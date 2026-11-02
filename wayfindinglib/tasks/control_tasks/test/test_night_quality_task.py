@@ -1,4 +1,4 @@
-"""Purpose: Tests for the night review, `control.history` kind night_quality.
+"""Purpose: Tests for the night review, `review` kind night_quality.
 
 Description: Builds a made-up science library of several nights, then reviews
 one night. Checks the loss account against the user's own baseline, the
@@ -15,7 +15,8 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import AppConfiguration, FrameRecord, NotFoundError
+from astrometricslib import AppConfiguration, FrameRecord
+from astrometricslib.exceptions import NotFoundError
 from wayfindinglib.analytics.result_quality.efficiency import STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC
 from wayfindinglib.analytics.result_quality.judge_results import needs_attention
 from wayfindinglib.analytics.result_quality.science_goal import science_goal_for_setting
@@ -209,8 +210,6 @@ def test_a_night_with_only_guiding_still_answers(monkeypatch: pytest.MonkeyPatch
     analysis = GuidingSessionAnalysis(
         session_id="2020-01-01",
         equipment_fingerprint="x",
-        flagged=True,
-        flag_reasons=["guiding_above_limit"],
         input_quality=GuidingInputQuality(
             runs=1,
             guided_seconds=3600.0,
@@ -235,71 +234,17 @@ def test_a_night_with_only_guiding_still_answers(monkeypatch: pytest.MonkeyPatch
     assert quality.targets == []
     guiding = quality.guiding
     assert isinstance(guiding, GuidingNightSummary)
-    assert guiding.available and guiding.flagged
+    assert guiding.available
+    assert guiding.statements == analysis.recommendations
     assert guiding.rms_per_axis_arcsec == pytest.approx(1.4)
     assert guiding.lost_fraction == pytest.approx(0.2)
     assert guiding.excursion_count == 3
     assert guiding.runs[0].run_id == "r1"
 
 
-def test_a_review_with_long_evidence_lists_is_cut_for_the_mcp_reply_budget() -> None:
-    """Statements keep fewer references, count the lost ones, and all stay."""
-    from astrometricslib import MeasurementReference
-    from wayfindinglib.analytics.result_quality.reply_budget import (
-        MAXIMUM_REPLY_CHARACTERS,
-        fit_reply_to_budget,
-        reply_characters,
-    )
-    from wayfindinglib.models.quality.statements import (
-        ActionClass,
-        Confidence,
-        NeedsAttention,
-        Severity,
-        StatementKind,
-        TargetStatement,
-    )
-    from wayfindinglib.models.session.night_quality import NightTargetQuality
-
-    statement = TargetStatement(
-        rule="trailed_stars",
-        kind=StatementKind.WARNING,
-        severity=Severity.ADVICE,
-        action_class=ActionClass.SESSION_PROCEDURE,
-        message="Stars are trailed.",
-        confidence=Confidence.DESIGN_ESTIMATE,
-        evidence=[MeasurementReference(row_id=row) for row in range(1, 701)],
-    )
-    entries = [
-        NightTargetQuality(
-            target_id=f"T{index}",
-            goal="faint_point_source",
-            frames_taken=700,
-            frames_set_aside=0,
-            captured_seconds=1.0,
-            statements=[statement, statement],
-            needs_attention=NeedsAttention(warning_count=2, worst_severity=Severity.ADVICE),
-        )
-        for index in range(6)
-    ]
-    review = NightQuality(
-        night_id="2026-10-02",
-        targets=entries,
-        needs_attention=NeedsAttention(warning_count=12, worst_severity=Severity.ADVICE),
-        guiding=GuidingNightSummary(available=False, reason="No guiding."),
-    )
-    assert reply_characters(review) > MAXIMUM_REPLY_CHARACTERS
-    fitted = fit_reply_to_budget(review)
-    assert reply_characters(fitted) <= MAXIMUM_REPLY_CHARACTERS
-    for entry in fitted.targets:
-        assert len(entry.statements) == 2
-        assert len(entry.statements[0].evidence) + entry.statements[0].evidence_omitted_count == 700
-    assert fitted.needs_attention == review.needs_attention
-    assert any("cut to fit" in note for note in fitted.notes)
-
-
 def test_the_night_review_fits_focus_drift_and_estimates_polar_alignment() -> None:
     """Focus drift and polar alignment are worked out for the night."""
-    from astrometricslib import frame_subject_id
+    from astrometricslib._internal.frames import frame_subject_id
     from wayfindinglib.models.session.ekos_session import EkosAutofocusRun, EkosSessionContext
     from wayfindinglib.models.session.guiding_run import GuidingRunSummary
 
@@ -358,7 +303,8 @@ def test_a_night_without_rotation_or_focus_rows_says_so() -> None:
 
 def test_a_target_with_two_goals_states_each_setting_goal() -> None:
     """Decision U2: a grating and an imaging setting are judged apart."""
-    from astrometricslib import CaptureSetting, Target
+    from astrometricslib import Target
+    from astrometricslib.reports import CaptureSetting
     from wayfindinglib.analytics.result_quality.efficiency import FrameObservation
     from wayfindinglib.models.quality.efficiency import ScienceGoal
 

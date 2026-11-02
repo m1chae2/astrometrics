@@ -9,13 +9,13 @@ Note: Import from this folder should not be done directly. Import these
 classes from the main `astrometricslib` package instead.
 """
 
+from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess, CatalogAccess
 from astrometricslib.api.jobs import Jobs
 from astrometricslib.api.processing import CalibrationCatalog, ProcessingPipelines
 from astrometricslib.api.quality import QualityRecords
 from astrometricslib.api.stars import StellarCatalog
 from astrometricslib.api.targets import TargetCatalog
 from astrometricslib.api.visualization import Visualization
-from astrometricslib.drivers.catalog_access import AbstractCatalogAccess, CatalogAccess
 
 __all__ = [
     "AbstractCatalogAccess",

@@ -1,13 +1,69 @@
-"""The main Astrometrics software library.
+"""Process, measure and catalog astronomical images.
 
-This library is a collection of tools for processing astronomical images.
-It handles everything from aligning and stacking images (calibration),
-to figuring out exactly what stars are in the picture (plate-solving),
-to measuring star brightness and colors (photometry and spectroscopy).
+`astrometricslib` provides utilities for a target's stack and performs
+astrometry (finding where the image points), photometry (measuring star
+brightness) and spectroscopy (splitting star light by color). It also
+identifies moving objects. It keeps the database of the targets that have
+been imaged and of the stellar objects that have been identified. It manages
+the calibration images (darks, flats and bias) that improve the analysis. For
+every major processing stage it gives quality metrics that help you judge how
+useful the images are. It measures and reports; it gives no advice about what
+to image next. That is the job of `wayfindinglib`.
 
-To use the library, just import `Astrometrics` from here. It acts as the
-main control panel, giving you access to all the sub-tools like targets,
-stars, and image processing.
+To use the library, build the entry point with no arguments. It loads the
+settings by itself::
+
+    from astrometricslib import Astrometrics
+
+    astrometrics = Astrometrics()
+
+`Astrometrics` has one attribute for each sub-API:
+
+- `targets` (`TargetCatalog`): create, read and save targets, and keep their
+  frame lists current.
+- `stars` (`StellarCatalog`): the library's star records, catalog queries
+  and light-curve (brightness over time) analysis.
+- `processing` (`ProcessingPipelines`): stack a target, remake its preview
+  and run the analysis stages and noise measurements. Its `calibration`
+  child (`CalibrationCatalog`) manages darks, biases and flats.
+- `quality` (`QualityRecords`): stored quality measurements, the metric list
+  and live checks of raw frames and stacks.
+- `visualization` (`Visualization`): draw frames and stacks as pictures and
+  plot results.
+- `jobs` (`Jobs`): read the history of running and finished jobs.
+
+The sub-APIs work on three core records: a `Target` (a place on the sky,
+with its frames and stacks), the `FrameRecord`s that are part of it, and a
+`StellarObject` for each identified star.
+
+What to import from where
+-------------------------
+The package root holds 16 names:
+
+- the entry point and setup: `Astrometrics`, `AppConfiguration`,
+  `get_configuration`, `configure_logging`, `configure_offline_iers` and
+  `warm_earth_orientation_data`;
+- the sub-API classes, which you normally reach as attributes of
+  `Astrometrics` (`TargetCatalog`, `StellarCatalog`, `ProcessingPipelines`,
+  `CalibrationCatalog`, `QualityRecords` and `Visualization`);
+- the core records: `Target`, `FrameRecord`, `StellarObject` and
+  `FilterType`.
+
+Four public modules hold the rest:
+
+- `astrometricslib.exceptions`: the errors a script catches, and the helpers
+  that turn an error into a plain record and back;
+- `astrometricslib.reports`: the quality reports and row shapes that checks
+  return, plus `CaptureSetting` and `observing_night_id`;
+- `astrometricslib.jobs`: the job history, and the tools that run a function
+  as a tracked background job;
+- `astrometricslib.drivers`: the data store and file tools that other apps
+  share.
+
+Everything else is private, including `astrometricslib._internal`. Only
+`astrometricslib` itself may import it. The result models that the calls
+return are private too: use their fields, as listed on the API reference
+page, and do not import the classes.
 """
 
 import logging
@@ -25,222 +81,23 @@ except PackageNotFoundError:  # running from a source tree without an install
     __version__ = "0.0.0+unknown"
 
 from astrometricslib.api import AbstractCatalogAccess, CatalogAccess
-from astrometricslib.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
-from astrometricslib.drivers.interfaces import (
-    GaiaXpDriver,
-    PlateSolveDriver,
-    PlateSolveHeader,
-    ReddeningDriver,
-    ReddeningEstimate,
-    SimbadDriver,
-    StackingDriver,
-    StackRunResult,
-    StackSettings,
-)
-from astrometricslib.drivers.provenance_store import ProvenanceStore, export_target_lineage_as_prov_xml
 from astrometricslib.foundation.astropy_setup import configure_offline_iers, warm_earth_orientation_data
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
 from astrometricslib.foundation.enums import FilterType
-from astrometricslib.foundation.errors import (
-    RPC_CODES,
-    AstrometricsError,
-    ConfigurationError,
-    ConflictError,
-    ErrorInfo,
-    ExternalServiceError,
-    HardwareError,
-    InvalidArgumentError,
-    NotFoundError,
-    PermissionDeniedError,
-    ProcessingError,
-    StorageError,
-    error_from_info,
-    to_error_info,
-)
-from astrometricslib.foundation.jobs import (
-    DbLogHandler,
-    JobStore,
-    ProcessingJob,
-    background_job,
-    capture_job_logs,
-    close_interrupted_jobs,
-    get_current_job,
-    register_interrupted_job_cleanup,
-    registered_job,
-    run_as_background_job,
-)
-from astrometricslib.foundation.logging import configure_logging, get_log_context, log_context, new_request_id
-from astrometricslib.foundation.paths import (
-    is_path_inside,
-    locks_directory,
-    resolve_mounted_path,
-    scratch_directory,
-)
-from astrometricslib.foundation.storage import (
-    AbstractButler,
-    Butler,
-    DatasetSpec,
-    DeviceInUseError,
-    NumpyEncoder,
-    StorageNotMountedError,
-    acquire_resource_slot,
-    connect_db,
-    file_lock,
-    require_mounted_storage,
-    safe_json_dumps,
-)
-from astrometricslib.models.applied_camera_profile import AppliedCameraProfile
-from astrometricslib.models.catalog_queries import (
-    CalibrationQueryResult,
-    OverlayStar,
-    ReindexReport,
-    StarQueryResult,
-    TargetQueryResult,
-    TargetReindexChange,
-    TargetStarCount,
-)
-from astrometricslib.models.moving_object import AsteroidDetectionCandidate
-from astrometricslib.models.moving_object_config import MovingObjectConfig
-from astrometricslib.models.processing_results import PreviewRemakeResult, ProcessTargetResult, StackResult
-from astrometricslib.models.provenance import (
-    Activity,
-    ActivityDescription,
-    Agent,
-    AgentType,
-    Collection,
-    ConfigFile,
-    ConfigFileDescription,
-    DatasetDescription,
-    DatasetEntity,
-    Entity,
-    EntityDescription,
-    GenerationDescription,
-    Parameter,
-    ParameterDescription,
-    UsageDescription,
-    Used,
-    ValueDescription,
-    ValueEntity,
-    WasAssociatedWith,
-    WasAttributedTo,
-    WasConfiguredBy,
-    WasGeneratedBy,
-)
-from astrometricslib.models.quality.capture_setting import UNKNOWN_CAPTURE_SETTING_CAMERA, CaptureSetting
-from astrometricslib.models.quality.excluded_frames import (
-    QuarantinePreview,
-    RestoreReport,
-    SetAsideFrame,
-    SetAsideFrameRecord,
-)
-from astrometricslib.models.quality.frame_measurement_summary import FrameMeasurementSummary
-from astrometricslib.models.quality.limit import LimitTier, QualityLimit
-from astrometricslib.models.quality.measurement import (
-    MeasurementOrigin,
-    MeasurementReference,
-    MeasurementStatus,
-    QualityMeasurement,
-    QualitySubject,
-    StarResultReference,
-    SubjectLevel,
-)
-from astrometricslib.models.quality.metric_spec import (
-    Checkpoint,
-    Direction,
-    MetricPurpose,
-    MetricSpec,
-    MetricSummary,
-    UncertaintyKind,
-)
-from astrometricslib.models.quality.quality_reports import (
-    InputQualityReport,
-    RawFrameCheckReport,
-    SpectralFrameCheckReport,
-    StackQualityReport,
-    StackSummary,
-)
-from astrometricslib.models.quality.quality_summary import (
-    AstrometryPipelineQualityMetrics,
-    AstrometryQualitySummary,
-    ExposureGroupSummary,
-    TargetSessionContribution,
-)
-from astrometricslib.models.quality.row_frames import QualityRowFile, QualityRowResolution
-from astrometricslib.models.quality.subset_stacks import (
-    HalfDifferenceNoiseResult,
-    NightContribution,
-    NightContributionResult,
-    NoiseGrowthResult,
-    SubsetStackResult,
-)
-from astrometricslib.models.stellar_source import (
-    AMBIGUOUS_RMS_GAP,
-    NO_GOOD_MATCH_RMS,
-    AnalysisResult,
-    FileItem,
-    GroupedFrameStat,
-    PhotometryResult,
-    PlotData,
-    SpectroscopyResult,
-    StellarObject,
-    TargetFilesResponse,
-    VariableCandidate,
-    has_catalog_magnitude,
-)
-from astrometricslib.models.target import (
-    FitsHeaderEntry,
-    FrameRecord,
-    RenderedImage,
-    Target,
-    ViewableImage,
-)
-from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
-from astrometricslib.pipelines.shared.frame_scanning import classify_and_sort_fits_files
-from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
-from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
-    SATURATED_BLOB_MINIMUM_PIXELS,
-    SATURATED_FRAME_FRACTION,
-)
+from astrometricslib.foundation.jobs import register_interrupted_job_cleanup
+from astrometricslib.foundation.logging import configure_logging
+from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.stacking.post_processing.interrupted_jobs import restore_interrupted_stacks
-from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
-from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS, PlateSolveFailedError
-from astrometricslib.utilities.observing_night import observing_night_id
-from astrometricslib.utilities.parallel_batch import BatchRunSummary
 
 if TYPE_CHECKING:
+    from astrometricslib._internal.drivers.driver_set import Drivers
     from astrometricslib.api.jobs import Jobs
     from astrometricslib.api.processing import CalibrationCatalog, ProcessingPipelines
     from astrometricslib.api.quality import QualityRecords
     from astrometricslib.api.stars import StellarCatalog
     from astrometricslib.api.targets import TargetCatalog
     from astrometricslib.api.visualization import Visualization
-    from astrometricslib.drivers.siril_interface import ImageProcessing
-    from astrometricslib.pipelines.shared.api_arguments import (
-        check_choice,
-        check_include,
-        reject_unused_arguments,
-        resolve_target,
-        to_epoch_seconds,
-    )
-    from astrometricslib.pipelines.shared.quality.frame_measurement import (
-        PIXEL_BLUR_FWHM_SQUARED_FACTOR,
-        frame_subject_id,
-    )
-    from astrometricslib.pipelines.shared.quality.frame_selection import (
-        FrameSelection,
-        parse_iso_time,
-        select_library_frames,
-    )
-    from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for
-    from astrometricslib.pipelines.stacking.post_processing.stack_membership import wfwhm_weights
-    from astrometricslib.pipelines.stacking.pre_processing.exposure_weighting import (
-        MINIMUM_PENALTY_TO_WEIGHT,
-        NOISE_WEIGHT_MODE,
-        choose_stack_weight,
-        equal_weight_noise_penalty,
-    )
 
 # A library only writes log messages. A program decides where they go, by
 # calling `configure_logging`. The null handler stops Python from printing a
@@ -256,27 +113,9 @@ configure_offline_iers()
 register_interrupted_job_cleanup(restore_interrupted_stacks)
 
 _DEFERRED_EXPORTS = {
-    "ImageProcessing": "astrometricslib.drivers.siril_interface",
     "CalibrationCatalog": "astrometricslib.api.processing",
     "ProcessingPipelines": "astrometricslib.api.processing",
     "QualityRecords": "astrometricslib.api.quality",
-    "Jobs": "astrometricslib.api.jobs",
-    "FrameSelection": "astrometricslib.pipelines.shared.quality.frame_selection",
-    "parse_iso_time": "astrometricslib.pipelines.shared.quality.frame_selection",
-    "frame_subject_id": "astrometricslib.pipelines.shared.quality.frame_measurement",
-    "PIXEL_BLUR_FWHM_SQUARED_FACTOR": "astrometricslib.pipelines.shared.quality.frame_measurement",
-    "MINIMUM_PENALTY_TO_WEIGHT": "astrometricslib.pipelines.stacking.pre_processing.exposure_weighting",
-    "NOISE_WEIGHT_MODE": "astrometricslib.pipelines.stacking.pre_processing.exposure_weighting",
-    "choose_stack_weight": "astrometricslib.pipelines.stacking.pre_processing.exposure_weighting",
-    "equal_weight_noise_penalty": "astrometricslib.pipelines.stacking.pre_processing.exposure_weighting",
-    "wfwhm_weights": "astrometricslib.pipelines.stacking.post_processing.stack_membership",
-    "check_choice": "astrometricslib.pipelines.shared.api_arguments",
-    "check_include": "astrometricslib.pipelines.shared.api_arguments",
-    "reject_unused_arguments": "astrometricslib.pipelines.shared.api_arguments",
-    "resolve_target": "astrometricslib.pipelines.shared.api_arguments",
-    "to_epoch_seconds": "astrometricslib.pipelines.shared.api_arguments",
-    "preview_path_for": "astrometricslib.pipelines.shared.stack_preview_path",
-    "select_library_frames": "astrometricslib.pipelines.shared.quality.frame_selection",
     "StellarCatalog": "astrometricslib.api.stars",
     "TargetCatalog": "astrometricslib.api.targets",
     "Visualization": "astrometricslib.api.visualization",
@@ -330,25 +169,13 @@ class Astrometrics:
     catalog_access : `AbstractCatalogAccess`, optional
         The database used to save and load data. If not given, a default
         one is built from ``config``.
-    plate_solve_driver : `PlateSolveDriver`, optional
-        The plate solver. If not given, Astrometry.net is used.
-    stacking_driver : `StackingDriver`, optional
-        The stacking program. If not given, Siril is used.
-    simbad_driver : `SimbadDriver`, optional
-        The SIMBAD database client. If not given, astroquery is used.
-    gaia_xp_driver : `GaiaXpDriver`, optional
-        The source of Gaia DR3 XP spectra. If not given, astroquery is used,
-        with the spectra cached in the library's data folder.
-    reddening_driver : `ReddeningDriver`, optional
-        The source of interstellar reddening values. If not given, Gaia DR3
-        is queried through astroquery.
 
     Attributes
     ----------
     targets : `TargetCatalog`
         Observation targets, folder rescanning, and frame records.
     stars : `StellarCatalog`
-        Identified stars, catalog queries, and plate solving.
+        Identified stars, catalog queries, and light-curve analysis.
     processing : `ProcessingPipelines`
         Frame calibration, stacking, and scientific analysis stages.
     visualization : `Visualization`
@@ -362,243 +189,86 @@ class Astrometrics:
 
     Notes
     -----
-    The drivers are for one process. Processing several targets at once
-    starts worker processes that cannot receive them, so that call is
-    refused when any driver was given.
+    The outside programs and services the library talks to (the plate
+    solver, Siril, SIMBAD and the Gaia services) cannot be swapped through
+    this signature. A test swaps them through
+    `astrometricslib._internal.testing.astrometrics_with_drivers`.
     """
 
     def __init__(
         self,
         config: AppConfiguration | None = None,
         catalog_access: AbstractCatalogAccess | None = None,
-        *,
-        plate_solve_driver: PlateSolveDriver | None = None,
-        stacking_driver: StackingDriver | None = None,
-        simbad_driver: SimbadDriver | None = None,
-        gaia_xp_driver: GaiaXpDriver | None = None,
-        reddening_driver: ReddeningDriver | None = None,
     ) -> None:
+        from astrometricslib._internal.drivers.driver_set import Drivers
+
+        self._build(config, catalog_access, Drivers())
+
+    def _build(
+        self,
+        config: AppConfiguration | None,
+        catalog_access: AbstractCatalogAccess | None,
+        drivers: Drivers,
+    ) -> None:
+        """Build the sub-APIs over the given drivers.
+
+        Parameters
+        ----------
+        config : `AppConfiguration` or `None`
+            The application settings. The default settings are loaded if
+            `None`.
+        catalog_access : `AbstractCatalogAccess` or `None`
+            The database. A default one is built if `None`.
+        drivers : `Drivers`
+            The outside programs and services to use. `Drivers()` means the
+            built-in ones.
+        """
         from astrometricslib.api.jobs import Jobs
         from astrometricslib.api.processing import ProcessingPipelines
         from astrometricslib.api.quality import QualityRecords
         from astrometricslib.api.stars import StellarCatalog
         from astrometricslib.api.targets import TargetCatalog
         from astrometricslib.api.visualization import Visualization
-        from astrometricslib.drivers.driver_set import Drivers
 
         self.config = config or get_configuration()
-        self.catalog_access = catalog_access or CatalogAccess(self.config)
-        drivers = Drivers(
-            plate_solve=plate_solve_driver,
-            stacking=stacking_driver,
-            simbad=simbad_driver,
-            gaia_xp=gaia_xp_driver,
-            reddening=reddening_driver,
-        )
+        self._catalog_access = catalog_access or CatalogAccess(self.config)
 
         # There is deliberately no in-memory copy of the star catalog here.
         # The database is the one copy, reached through `self.stars`, which
         # answers each question with a query for just the stars it needs.
-        self.targets = TargetCatalog(self.config, self.catalog_access, drivers=drivers)
-        self.stars = StellarCatalog(self.config, self.catalog_access, drivers=drivers)
+        self.targets = TargetCatalog(self.config, self._catalog_access, drivers=drivers)
+        self.stars = StellarCatalog(self.config, self._catalog_access)
         self.processing = ProcessingPipelines(
-            self.config, self.catalog_access, targets=self.targets, drivers=drivers
+            self.config, self._catalog_access, targets=self.targets, drivers=drivers
         )
         self.visualization = Visualization(
-            self.config, self.catalog_access, targets=self.targets, stars=self.stars
+            self.config, self._catalog_access, targets=self.targets, stars=self.stars
         )
-        self.quality = QualityRecords(self.config, self.catalog_access, targets=self.targets)
-        self.jobs = Jobs(self.config, self.catalog_access)
+        self.quality = QualityRecords(
+            self.config,
+            self._catalog_access,
+            targets=self.targets,
+            calibration_library=lambda: self.processing.calibration._calibration_library,
+            drivers=drivers,
+        )
+        self.jobs = Jobs(self.config, self._catalog_access)
 
 
 __all__ = [
-    "AMBIGUOUS_RMS_GAP",
-    "DATA_ERRORS",
-    "DEFAULT_DARK_TEMPERATURE_TOLERANCE_C",
-    "FITS_READ_ERRORS",
-    "MINIMUM_PENALTY_TO_WEIGHT",
-    "NOISE_WEIGHT_MODE",
-    "NO_GOOD_MATCH_RMS",
-    "ONLINE_QUERY_ERRORS",
-    "PIXEL_BLUR_FWHM_SQUARED_FACTOR",
-    "RPC_CODES",
-    "SATURATED_BLOB_MINIMUM_PIXELS",
-    "SATURATED_FRAME_FRACTION",
-    "UNKNOWN_CAPTURE_SETTING_CAMERA",
-    "AbstractButler",
-    "AbstractCatalogAccess",
-    "Activity",
-    "ActivityDescription",
-    "Agent",
-    "AgentType",
-    "AnalysisResult",
     "AppConfiguration",
-    "AppliedCameraProfile",
-    "AsteroidDetectionCandidate",
     "Astrometrics",
-    "AstrometricsError",
-    "AstrometryPipelineQualityMetrics",
-    "AstrometryQualitySummary",
-    "BatchRunSummary",
-    "Butler",
     "CalibrationCatalog",
-    "CalibrationQueryResult",
-    "CaptureSetting",
-    "CatalogAccess",
-    "Checkpoint",
-    "Collection",
-    "ConfigFile",
-    "ConfigFileDescription",
-    "ConfigurationError",
-    "ConflictError",
-    "DatasetDescription",
-    "DatasetEntity",
-    "DatasetSpec",
-    "DbLogHandler",
-    "DeviceInUseError",
-    "Direction",
-    "Entity",
-    "EntityDescription",
-    "ErrorInfo",
-    "ExposureGroupSummary",
-    "ExternalServiceError",
-    "FileItem",
     "FilterType",
-    "FitsHeaderEntry",
-    "FrameMeasurementSummary",
     "FrameRecord",
-    "FrameSelection",
-    "GaiaXpDriver",
-    "GenerationDescription",
-    "GroupedFrameStat",
-    "HalfDifferenceNoiseResult",
-    "HardwareError",
-    "ImageProcessing",
-    "InputQualityReport",
-    "InvalidArgumentError",
-    "JobStore",
-    "Jobs",
-    "LimitTier",
-    "MeasurementOrigin",
-    "MeasurementReference",
-    "MeasurementStatus",
-    "MetricPurpose",
-    "MetricSpec",
-    "MetricSummary",
-    "MovingObjectConfig",
-    "NightContribution",
-    "NightContributionResult",
-    "NoiseGrowthResult",
-    "NotFoundError",
-    "NumpyEncoder",
-    "OverlayStar",
-    "Parameter",
-    "ParameterDescription",
-    "PermissionDeniedError",
-    "PhotometryResult",
-    "PlateSolveDriver",
-    "PlateSolveFailedError",
-    "PlateSolveHeader",
-    "PlotData",
-    "PreviewRemakeResult",
-    "ProcessTargetResult",
-    "ProcessingError",
-    "ProcessingJob",
     "ProcessingPipelines",
-    "ProvenanceStore",
-    "QualityLimit",
-    "QualityMeasurement",
     "QualityRecords",
-    "QualityRowFile",
-    "QualityRowResolution",
-    "QualitySubject",
-    "QuarantinePreview",
-    "RawFrameCheckReport",
-    "ReddeningDriver",
-    "ReddeningEstimate",
-    "ReindexReport",
-    "RenderedImage",
-    "RestoreReport",
-    "SetAsideFrame",
-    "SetAsideFrameRecord",
-    "SimbadDriver",
-    "SpectralFrameCheckReport",
-    "SpectroscopyResult",
-    "StackQualityReport",
-    "StackResult",
-    "StackRunResult",
-    "StackSettings",
-    "StackSummary",
-    "StackingDriver",
-    "StarQueryResult",
-    "StarResultReference",
     "StellarCatalog",
     "StellarObject",
-    "StorageError",
-    "StorageNotMountedError",
-    "SubjectLevel",
-    "SubsetStackResult",
     "Target",
     "TargetCatalog",
-    "TargetFilesResponse",
-    "TargetQueryResult",
-    "TargetReindexChange",
-    "TargetSessionContribution",
-    "TargetStarCount",
-    "UncertaintyKind",
-    "UsageDescription",
-    "Used",
-    "ValueDescription",
-    "ValueEntity",
-    "VariableCandidate",
-    "ViewableImage",
     "Visualization",
-    "WasAssociatedWith",
-    "WasAttributedTo",
-    "WasConfiguredBy",
-    "WasGeneratedBy",
-    "acquire_resource_slot",
-    "background_job",
-    "capture_job_logs",
-    "check_choice",
-    "check_include",
-    "choose_stack_weight",
-    "classify_and_sort_fits_files",
-    "close_interrupted_jobs",
     "configure_logging",
     "configure_offline_iers",
-    "connect_db",
-    "derive_target_sessions",
-    "equal_weight_noise_penalty",
-    "error_from_info",
-    "export_target_lineage_as_prov_xml",
-    "file_lock",
-    "frame_is_spectral",
-    "frame_subject_id",
     "get_configuration",
-    "get_current_job",
-    "get_log_context",
-    "has_catalog_magnitude",
-    "is_path_inside",
-    "locks_directory",
-    "log_context",
-    "new_request_id",
-    "observing_night_id",
-    "parse_coordinate_string",
-    "parse_iso_time",
-    "preview_path_for",
-    "registered_job",
-    "reject_unused_arguments",
-    "require_mounted_storage",
-    "resolve_camera_profile",
-    "resolve_mounted_path",
-    "resolve_target",
-    "run_as_background_job",
-    "safe_json_dumps",
-    "scratch_directory",
-    "select_library_frames",
-    "to_epoch_seconds",
-    "to_error_info",
     "warm_earth_orientation_data",
-    "wfwhm_weights",
 ]

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure, EnclosureType
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
@@ -121,7 +121,7 @@ def test_generic_persistence_handles_bare_date_fields(isolated_butler: DiskButle
 
 def test_disk_butler_implements_the_shared_abstract_butler(isolated_butler: DiskButler) -> None:
     """Verify DiskButler implements astrometricslib's shared AbstractButler."""
-    from astrometricslib import AbstractButler
+    from astrometricslib.drivers import AbstractButler
 
     assert isinstance(isolated_butler, AbstractButler)
 

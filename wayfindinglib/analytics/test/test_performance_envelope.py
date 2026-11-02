@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import LimitTier
+from astrometricslib.reports import LimitTier
 from wayfindinglib.analytics.performance_envelope import (
     DEFAULT_BLUR_TOLERANCE_FRACTION,
     SIDEREAL_RATE_ARCSEC_PER_SECOND,

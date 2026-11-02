@@ -26,7 +26,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import AstrometricsError, ConflictError, InvalidArgumentError, NotFoundError
+from astrometricslib.exceptions import AstrometricsError, ConflictError, InvalidArgumentError, NotFoundError
 from wayfindinglib.models.planning.observation_package import FrameType
 from wayfindinglib.models.policy.delegation import ObservatoryCapability
 from wayfindinglib.tasks.execution_tasks.session_runner import ActionDisposition, SessionRunnerDependencies

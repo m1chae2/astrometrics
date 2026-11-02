@@ -34,7 +34,8 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import AstrometricsError, observing_night_id
+from astrometricslib.exceptions import AstrometricsError
+from astrometricslib.reports import observing_night_id
 from wayfindinglib.drivers.ekos.analyze_log_parser import parse_ekos_analyze_log
 from wayfindinglib.drivers.phd2.guide_log_parser import parse_guide_log_file
 from wayfindinglib.models.equipment_and_site.equipment_fingerprint import build_equipment_fingerprint

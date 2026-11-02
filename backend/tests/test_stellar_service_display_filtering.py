@@ -11,15 +11,17 @@ limited to two at a time.
 """
 
 import threading
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 from pytest_mock import MockerFixture
 
-from astrometricslib import StarQueryResult, StellarObject, TargetStarCount
+from astrometricslib import StellarObject
+from astrometricslib._internal.catalog import StarQueryResult, TargetStarCount
 from backend.services.data import stellar_service as stellar_service_module
 from backend.services.data.stellar_service import DEEP_CATALOG_INSTALL_COMMAND, StellarService
-from wayfindinglib import DeepCatalogStatus, SkySource
+from wayfindinglib._internal.planning import DeepCatalogStatus, SkySource
 
 
 def _service() -> StellarService:
@@ -119,13 +121,13 @@ def test_whole_catalog_answers_are_cached_until_the_version_changes() -> None:
     """A repeat is served from memory; a catalog write forces a new answer."""
     service = _service()
     service.astrometrics.stars.query.return_value = StarQueryResult(detail="class_counts", classes=[])
-    service.astrometrics.catalog_access.get_dataset_version.return_value = 1
+    service.astrometrics.stars.dataset_version.return_value = 1
 
     service.get_spectral_class_summary()
     service.get_spectral_class_summary()
     assert service.astrometrics.stars.query.call_count == 1
 
-    service.astrometrics.catalog_access.get_dataset_version.return_value = 2
+    service.astrometrics.stars.dataset_version.return_value = 2
     service.get_spectral_class_summary()
     assert service.astrometrics.stars.query.call_count == 2
 
@@ -149,7 +151,7 @@ def test_warming_the_cache_answers_the_first_requests() -> None:
 def test_simultaneous_requests_for_one_answer_share_one_scan() -> None:
     """A request that arrives mid-scan waits instead of starting a second."""
     service = _service()
-    service.astrometrics.catalog_access.get_dataset_version.return_value = 1
+    service.astrometrics.stars.dataset_version.return_value = 1
     scan_started = threading.Event()
     release_scan = threading.Event()
 
@@ -203,7 +205,7 @@ def test_a_new_catalog_version_is_announced_once() -> None:
     )
     socket_manager = MagicMock()
     service.set_socket_manager(socket_manager)
-    service.astrometrics.catalog_access.get_dataset_version.return_value = 1
+    service.astrometrics.stars.dataset_version.return_value = 1
 
     service.get_spectral_class_summary()
     service.get_target_data_availability()
@@ -238,22 +240,34 @@ def _sky_source(source_id: str, kind: str = "star") -> SkySource:
     return SkySource(id=source_id, ra=10.0, dec=20.0, name=source_id, common_name=source_id, type=kind)
 
 
+def _found(sources: list[SkySource]) -> SimpleNamespace:
+    """Wrap sources the way `query_sources` returns them.
+
+    Returns
+    -------
+    result : `types.SimpleNamespace`
+        A stand-in result with the ``sources`` the service reads.
+    """
+    return SimpleNamespace(sources=sources)
+
+
 def test_sky_map_sources_pass_the_limits_and_use_the_planetarium_keys() -> None:
     """The map's limits reach the library, and replies use camelCase keys."""
     service = _service()
-    service.wayfinder.planning.get_sources.return_value = [_sky_source("Vega")]
+    service.wayfinder.planning.query_sources.return_value = _found([_sky_source("Vega")])
 
     (source,) = service.get_sources(
         ra=10.0, dec=20.0, radius=2.0, limiting_magnitude=6.0, include_stars_without_catalog_magnitude=False
     )
 
-    service.wayfinder.planning.get_sources.assert_called_once_with(
+    service.wayfinder.planning.query_sources.assert_called_once_with(
         10.0,
         20.0,
         2.0,
-        include=["stars"],
-        limiting_magnitude=6.0,
+        source=["targets", "stars"],
+        magnitude_max=6.0,
         include_stars_without_catalog_magnitude=False,
+        limit=None,
     )
     assert source["id"] == "Vega"
     assert source["global"] is False
@@ -263,21 +277,27 @@ def test_sky_map_sources_pass_the_limits_and_use_the_planetarium_keys() -> None:
 def test_sky_map_sources_with_the_global_catalog_ask_for_online_objects() -> None:
     """include_catalog adds the online section."""
     service = _service()
-    service.wayfinder.planning.get_sources.return_value = []
+    service.wayfinder.planning.query_sources.return_value = _found([])
 
     service.get_sources(ra=10.0, dec=20.0, radius=2.0, include_catalog=True)
 
-    assert service.wayfinder.planning.get_sources.call_args.kwargs["include"] == ["stars", "online"]
+    assert service.wayfinder.planning.query_sources.call_args.kwargs["source"] == [
+        "targets",
+        "stars",
+        "simbad",
+    ]
 
 
 def test_planetarium_targets_are_every_library_target() -> None:
     """The targets layer asks for targets only, over the whole sky."""
     service = _service()
-    service.wayfinder.planning.get_sources.return_value = [_sky_source("M 13", "target")]
+    service.wayfinder.planning.query_sources.return_value = _found([_sky_source("M 13", "target")])
 
     targets = service.get_planetarium_targets()
 
-    service.wayfinder.planning.get_sources.assert_called_once_with(0.0, 0.0, 180.0, include=[])
+    service.wayfinder.planning.query_sources.assert_called_once_with(
+        0.0, 0.0, 180.0, source=["targets"], limit=None
+    )
     assert targets[0]["id"] == "M 13"
     assert targets[0]["type"] == "target"
 
@@ -286,14 +306,20 @@ def test_online_catalog_sources_pass_the_limiting_magnitude_to_the_drivers() -> 
     """The map's limit travels to the drivers; replies name the driver."""
     service = _service()
     online = _sky_source("Gaia 1").model_copy(update={"is_global": True, "catalog_source": "deep_stars"})
-    service.wayfinder.planning.get_online_catalog_sources.return_value = [online]
+    service.wayfinder.planning.query_sources.return_value = _found([online])
 
     (source,) = service.get_online_catalog_sources(
         ra=250.0, dec=36.0, radius=2.0, enabled_drivers=["deep_stars"], limiting_magnitude=14.0
     )
 
-    service.wayfinder.planning.get_online_catalog_sources.assert_called_once_with(
-        ra_deg=250.0, dec_deg=36.0, radius_deg=2.0, enabled_driver_names=["deep_stars"], magnitude_limit=14.0
+    service.wayfinder.planning.query_sources.assert_called_once_with(
+        ra_deg=250.0,
+        dec_deg=36.0,
+        radius_deg=2.0,
+        source=["catalogs"],
+        catalog_drivers=["deep_stars"],
+        magnitude_max=14.0,
+        limit=None,
     )
     assert source["catalogSource"] == "deep_stars"
     assert source["global"] is True
@@ -302,7 +328,7 @@ def test_online_catalog_sources_pass_the_limiting_magnitude_to_the_drivers() -> 
 def test_deep_catalog_status_adds_the_install_command() -> None:
     """The status the UI sees names the command that downloads the catalog."""
     service = _service()
-    service.wayfinder.planning.deep_catalog_status.return_value = DeepCatalogStatus(
+    service.wayfinder.planning.get_deep_catalog_status.return_value = DeepCatalogStatus(
         installed=False, complete=False, star_count=0, pixels_downloaded=0, size_megabytes=0.0
     )
 
@@ -315,7 +341,7 @@ def test_deep_catalog_status_adds_the_install_command() -> None:
 
 def test_star_records_serialize_their_data_flags_for_the_app() -> None:
     """The data flags of a star record reach the RPC reply."""
-    from astrometricslib import SpectroscopyResult
+    from astrometricslib._internal.results import SpectroscopyResult
     from backend.services.rpc_protocol import serialize_rpc_result
 
     star = StellarObject(
@@ -353,9 +379,9 @@ async def test_rpc_registry_routes_analyze_periodicity_to_the_stellar_service(
     monkeypatch.setattr(rpc_router.container, "stellar_service", stellar_service, raising=False)
 
     registry = rpc_router.RPCHandlerRegistry()
-    result = await registry.execute("astronomy:analyze_periodicity", {"object_id": "Gaia DR3 1"})
+    result = await registry.execute("astronomy:analyze_periodicity", {"star_id": "Gaia DR3 1"})
 
-    stellar_service.analyze_periodicity.assert_called_once_with(object_id="Gaia DR3 1")
+    stellar_service.analyze_periodicity.assert_called_once_with(star_id="Gaia DR3 1")
     assert result is stellar_service.analyze_periodicity.return_value
 
 
@@ -366,7 +392,7 @@ def test_period_searches_are_limited_to_two_at_a_time() -> None:
     lock = threading.Lock()
     release = threading.Event()
 
-    def slow_search(_object_id: str) -> None:
+    def slow_search(_star_id: str) -> None:
         """Hold a search slot until released, recording the peak count."""
         nonlocal running, peak
         with lock:

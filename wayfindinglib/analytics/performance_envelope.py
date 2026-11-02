@@ -27,7 +27,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from astrometricslib import LimitTier, QualityLimit
+from astrometricslib.reports import LimitTier, QualityLimit
 from wayfindinglib.models.equipment_and_site.equipment import Camera, EquipmentConfiguration, GuideScope
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
 

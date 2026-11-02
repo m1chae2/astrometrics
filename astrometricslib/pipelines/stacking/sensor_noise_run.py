@@ -31,8 +31,11 @@ import math
 import os
 from datetime import date
 
-from astrometricslib.drivers.calibration_library import CalibrationLibrary, FlatGroup
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile, save_sensor_setting_noise
+from astrometricslib._internal.drivers.calibration_library import CalibrationLibrary, FlatGroup
+from astrometricslib._internal.drivers.camera_profile_store import (
+    resolve_camera_profile,
+    save_sensor_setting_noise,
+)
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.camera_profile import (
     ProvenancedValue,

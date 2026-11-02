@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import astrometricslib
-from astrometricslib import NotFoundError
+from astrometricslib.exceptions import NotFoundError
 from mcp_servers.common.tool_registry import ToolRegistry
 
 TOOL_NAME = "typegen_contract_validator"

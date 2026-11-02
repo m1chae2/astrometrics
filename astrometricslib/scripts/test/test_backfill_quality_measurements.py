@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.models.quality.gaia_xp_comparison import GaiaXpBandSummary, GaiaXpRunSummary
 from astrometricslib.models.quality.gate_result import failed_gate, passed_gate, unchecked_gate
 from astrometricslib.models.quality.measurement import MeasurementOrigin, MeasurementStatus, SubjectLevel
@@ -36,7 +36,6 @@ from astrometricslib.models.quality.quality_summary import (
     StackQualitySummary,
 )
 from astrometricslib.models.quality.spectroscopy_quality import StageQualityRollup
-from astrometricslib.models.quality.stacking_quality import StackingInputQuality
 from astrometricslib.models.wavelength_scale import WavelengthScaleSummary
 from astrometricslib.pipelines.asteroid_detection import record_quality as asteroid_record
 from astrometricslib.pipelines.astrometry.post_processing import record_quality as astrometry_record
@@ -109,9 +108,9 @@ def stack_summary(*, with_groups: bool = True) -> dict[str, Any]:
             stackingDurationSeconds=61.5,
             registrationReferenceStarCount=210,
             exposureGroups=groups if with_groups else [],
-        ),
-        inputQuality=StackingInputQuality(
-            framesSubmitted=25, framesAccepted=21, framesExcludedForGain=1, framesQuarantined=3
+            framesAccepted=21,
+            framesExcludedForGain=1,
+            framesQuarantined=3,
         ),
     )
     summary.record_gate(passed_gate("flat_noise", 0.002, 0.01, "the flat noise limit"))
@@ -615,12 +614,12 @@ def test_spectroscopy_tables_and_the_asteroid_gates_are_copied(tmp_path: Path) -
 
 
 def test_what_the_json_never_held_is_counted_not_written(tmp_path: Path) -> None:
-    """Noise, weights and run-data gates are skipped and counted."""
+    """Skip and count noise, weights, run-data gates and notice rows."""
     database = make_database(tmp_path, {TARGET: full_document()})
     report = backfill.run_backfill(database, log=lambda _: None)
-    assert report.skipped["stacking", backfill.SkipReason.NOT_HELD] == 63
-    assert report.skipped["astrometry", backfill.SkipReason.NOT_HELD] == 6
-    assert report.skipped["photometry", backfill.SkipReason.NOT_HELD] == 10 + 9 + 1 + 6 + 3
+    assert report.skipped["stacking", backfill.SkipReason.NOT_HELD] == 82 + 5
+    assert report.skipped["astrometry", backfill.SkipReason.NOT_HELD] == 6 + 1
+    assert report.skipped["photometry", backfill.SkipReason.NOT_HELD] == 10 + 9 + 1 + 6 + 3 + 1
     assert report.skipped["photometry", backfill.SkipReason.NEEDS_RUN_DATA] == 1
     rows = backfill_rows_planned(database)
     assert "stacking.frame_weight" not in rows
@@ -656,6 +655,7 @@ def test_an_old_flat_summary_with_no_gates_is_read(tmp_path: Path) -> None:
     metrics["catalogMatchSeparationRmsArcsec"] = None
     old_stack = stack_summary()
     old_stack["inputQuality"] = None
+    old_stack["stackingMetrics"].pop("framesAccepted", None)
     document = {
         "id": TARGET,
         "frames": [
@@ -1025,20 +1025,13 @@ def test_every_stacking_summary_field_is_a_measurement_or_listed_as_not_one() ->
     not_measurements = {
         "is_spectral": "a yes/no label of the stack kind",
         "excluded_frames": "a list of excluded frames",
-        "rejected_fraction_flagged": "a verdict",
         "background_split_detected": "a verdict",
         "background_split_detail": "text",
         "calibration_mismatch_flags": "a list of flag sentences",
         "flat_calibration_issues": "a list of sentences",
-        "saturation_flagged": "a verdict",
         "exposure_groups": "a list; the group metrics hold each group's numbers",
-        "recommended_exposure_seconds": "a recommendation, not a measurement",
-        "zero_fraction_flagged": "a verdict",
-        "negative_pixels_flagged": "a verdict",
-        "fwhm_degraded": "a verdict",
         "spectral_registration_flags": "a list of flagged frames",
         "spectral_registration_checked": "a yes/no fact; the spectral-registration gate holds it",
-        "timed_out": "a verdict",
         "debayer_applied": "a yes/no setting",
         "stacking_engine": "text",
         "stacking_engine_version": "text",

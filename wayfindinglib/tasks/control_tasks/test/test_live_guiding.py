@@ -26,7 +26,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from astrometricslib import ConfigurationError, ConflictError
+from astrometricslib.exceptions import ConfigurationError, ConflictError
 from wayfindinglib.drivers.indi.guiding_driver import IndiGuidingDriver, samples_from_pulses
 from wayfindinglib.drivers.interfaces.guiding_driver import GuideCommands
 from wayfindinglib.drivers.interfaces.registry import build_guiding_driver_registry
@@ -74,16 +74,16 @@ def mount(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """
     state: dict[str, Any] = {"tracking": ["Tracking"], "pulses": [], "exposures": []}
 
-    def mount_status(context: Any, include: list[str]) -> dict[str, Any]:
+    def mount_status(context: Any) -> SimpleNamespace:
         """Report the next tracking state and a target name.
 
         Returns
         -------
-        status : `dict` [`str`, `Any`]
-            ``trackingStatus`` and ``targetName``.
+        status : `types.SimpleNamespace`
+            ``tracking_status`` and ``target_name``.
         """
         tracking = state["tracking"].pop(0) if len(state["tracking"]) > 1 else state["tracking"][0]
-        return {"trackingStatus": tracking, "targetName": "M31"}
+        return SimpleNamespace(tracking_status=tracking, target_name="M31")
 
     monkeypatch.setattr(hardware_operations, "mount_status", mount_status)
     monkeypatch.setattr(hardware_operations, "connect", lambda context: True)

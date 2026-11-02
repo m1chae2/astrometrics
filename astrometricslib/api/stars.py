@@ -14,12 +14,11 @@ The methods check their arguments and hand the work to
 import logging
 from typing import Any, Literal
 
-from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
-from astrometricslib.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.catalog_queries import StarQueryResult
-from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 from astrometricslib.pipelines.shared.api_arguments import check_choice
 
 __all__ = ["StellarCatalog"]
@@ -40,24 +39,39 @@ class StellarCatalog:
         The application settings.
     storage : `AbstractCatalogAccess`
         The database the star catalog is read from and saved to.
-    drivers : `Drivers`, optional
-        The plate solver and SIMBAD driver that `plate_solve` uses. Any
-        left out is the built-in one.
     """
 
-    def __init__(
-        self, config: AppConfiguration, storage: AbstractCatalogAccess, *, drivers: Drivers | None = None
-    ) -> None:
+    def __init__(self, config: AppConfiguration, storage: AbstractCatalogAccess) -> None:
         self._config = config
-        self._drivers = drivers or Drivers()
-        self.catalog_access = storage
+        self._catalog_access = storage
 
-    def get(self, object_id: str) -> StellarObject | None:
+    def dataset_version(self) -> int:
+        """Report how many times the star catalog has been written to.
+
+        A caller that keeps an expensive answer built from the whole catalog
+        can remember this number and compare it later. If it is unchanged,
+        no star was saved, changed or deleted through this process.
+
+        This is one in-memory counter per running process. It does not see a
+        write made by another process, and it starts again at 0 when the
+        process restarts. A caller that relies on it for correctness, not
+        only to avoid repeated work, should also expire its answer on a
+        timer.
+
+        Returns
+        -------
+        version : `int`
+            The number of star catalog writes this process has made. It is
+            0 before the first write.
+        """
+        return self._catalog_access.get_dataset_version("stellar_catalog")
+
+    def get(self, star_id: str) -> StellarObject | None:
         """Find one star's full record by its id.
 
         Parameters
         ----------
-        object_id : `str`
+        star_id : `str`
             The star's id. Spaces, underscores and capital letters may
             differ from the stored id.
 
@@ -68,7 +82,37 @@ class StellarCatalog:
         """
         from astrometricslib.pipelines.shared.star_catalog_queries import find_star
 
-        return find_star(self.catalog_access, object_id)
+        return find_star(self._catalog_access, star_id)
+
+    def get_spectrum(self, star_id: str) -> SpectroscopyResult | None:
+        """Read a star's spectrum from the star itself.
+
+        The spectrum lives on the star's own record, so this needs only the
+        star's id. Older libraries also hold a separate copy of the star
+        whose id ends in ``::spectroscopy``. When the star's own record has
+        no spectrum, that copy is read instead, so a script does not need
+        to know the copy exists. An id that ends in ``::spectroscopy`` is
+        accepted and read the same way.
+
+        Parameters
+        ----------
+        star_id : `str`
+            The star's id. Spaces, underscores and capital letters may
+            differ from the stored id.
+
+        Returns
+        -------
+        spectrum : `SpectroscopyResult` or `None`
+            The star's spectrum, or `None` if there is no such star or it
+            has no spectrum.
+        """
+        suffix = "::spectroscopy"
+        base_id = star_id[: -len(suffix)] if star_id.endswith(suffix) else star_id
+        for candidate_id in (base_id, base_id + suffix):
+            star = self.get(candidate_id)
+            if star is not None and star.has_spectra:
+                return star.spectroscopy
+        return None
 
     def query(
         self,
@@ -227,7 +271,7 @@ class StellarCatalog:
         )
         if order is not None:
             check_choice("order", order, QUERY_ORDERS)
-        return run_star_query(self.catalog_access, star_query, detail, limit, offset, order)
+        return run_star_query(self._catalog_access, star_query, detail, limit, offset, order)
 
     def find_or_create_by_position(
         self,
@@ -272,7 +316,7 @@ class StellarCatalog:
         from astrometricslib.pipelines.shared.star_catalog_queries import find_or_create_star
 
         return find_or_create_star(
-            self.catalog_access,
+            self._catalog_access,
             self.update,
             self.create,
             self.delete,
@@ -285,7 +329,7 @@ class StellarCatalog:
             tolerance_arcsec,
         )
 
-    def analyze_periodicity(self, object_id: str) -> StellarObject | None:
+    def analyze_periodicity(self, star_id: str) -> StellarObject | None:
         """Search a star's light curve for a repeating pattern, and save it.
 
         Runs the Lomb-Scargle periodogram (needs at least 5 brightness
@@ -297,7 +341,7 @@ class StellarCatalog:
 
         Parameters
         ----------
-        object_id : `str`
+        star_id : `str`
             The id of the star to analyze.
 
         Returns
@@ -308,7 +352,7 @@ class StellarCatalog:
         """
         from astrometricslib.pipelines.photometry.processing.variability_analyzer import VariabilityAnalyzer
 
-        star = self.get(object_id)
+        star = self.get(star_id)
         if star is None or not star.photometry:
             return star
 
@@ -319,45 +363,12 @@ class StellarCatalog:
             return star
         return self.update(star.id, {"photometry": star.photometry})
 
-    def tune_spectroscopy_calibration(
-        self,
-        image_path: str,
-        camera_id: str | None = None,
-        star_x: float | None = None,
-        star_y: float | None = None,
-    ) -> dict[str, Any]:
-        """Fit the spectroscope's physical model to one spectrum image.
-
-        Parameters
-        ----------
-        image_path : `str`
-            Path to the spectroscopy FITS image to calibrate against.
-        camera_id : `str`, optional
-            The camera, used to look up its quantum-efficiency curve.
-        star_x : `float`, optional
-            Zero-order star's x pixel position, if already known.
-        star_y : `float`, optional
-            Zero-order star's y pixel position, if already known.
-
-        Returns
-        -------
-        calibration_result : `dict`
-            The fitted calibration values and how well they fit.
-        """
-        from astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner import (
-            SpectroscopyCalibrationTuner,
-        )
-
-        tuner = SpectroscopyCalibrationTuner(config=self._config)
-        star_position = (star_x, star_y) if (star_x is not None and star_y is not None) else None
-        return tuner.tune_calibration(image_path, camera_name=camera_id, star_pos=star_position)
-
-    def delete(self, object_id: str) -> bool:
+    def delete(self, star_id: str) -> bool:
         """Delete a star from the catalog by its id.
 
         Parameters
         ----------
-        object_id : `str`
+        star_id : `str`
             The id of the star to delete.
 
         Returns
@@ -365,18 +376,18 @@ class StellarCatalog:
         deleted : `bool`
             `True` if a matching star was found and removed.
         """
-        existing = self.get(object_id)
+        existing = self.get(star_id)
         if existing is None:
             return False
-        self.catalog_access.delete_by_ids("stellar_catalog", [existing.id])
+        self._catalog_access.delete_by_ids("stellar_catalog", [existing.id])
         return True
 
-    def update(self, object_id: str, updates: dict[str, Any]) -> StellarObject | None:
+    def update(self, star_id: str, updates: dict[str, Any]) -> StellarObject | None:
         """Change some of a star's fields and save it.
 
         Parameters
         ----------
-        object_id : `str`
+        star_id : `str`
             The id of the star to update.
         updates : `dict`
             Field name and new value pairs. Unknown names are ignored.
@@ -384,9 +395,9 @@ class StellarCatalog:
         Returns
         -------
         star : `StellarObject` or `None`
-            The updated star, or `None` if ``object_id`` is not found.
+            The updated star, or `None` if ``star_id`` is not found.
         """
-        existing = self.get(object_id)
+        existing = self.get(star_id)
         if not existing:
             return None
 
@@ -401,15 +412,15 @@ class StellarCatalog:
                     setattr(target_obj, key, value)
             return target_obj
 
-        self.catalog_access.merge_and_record("stellar_catalog", [existing], _apply_updates)
-        return self.get(object_id)
+        self._catalog_access.merge_and_record("stellar_catalog", [existing], _apply_updates)
+        return self.get(star_id)
 
-    def create(self, object_id: str, ra: str | None = None, dec: str | None = None) -> StellarObject:
+    def create(self, star_id: str, ra: str | None = None, dec: str | None = None) -> StellarObject:
         """Record a new star in the catalog, or return the one with that id.
 
         Parameters
         ----------
-        object_id : `str`
+        star_id : `str`
             The id of the star to create.
         ra : `str`, optional
             Right ascension, in sexagesimal or degrees.
@@ -424,112 +435,26 @@ class StellarCatalog:
         Raises
         ------
         InvalidArgumentError
-            If ``object_id`` is empty.
+            If ``star_id`` is empty.
         """
-        if not object_id or not str(object_id).strip():
-            raise InvalidArgumentError("object_id cannot be empty.")
+        if not star_id or not str(star_id).strip():
+            raise InvalidArgumentError("star_id cannot be empty.")
 
-        existing = self.get(object_id)
+        existing = self.get(star_id)
         if existing:
             return existing
 
         new_star = StellarObject()
-        new_star.id = object_id
-        new_star.name = object_id
+        new_star.id = star_id
+        new_star.name = star_id
         if ra:
             new_star.right_ascension = ra
         if dec:
             new_star.declination = dec
 
-        self.catalog_access.merge_and_record(
+        self._catalog_access.merge_and_record(
             "stellar_catalog",
             [new_star],
             lambda current, updated: current if current is not None else updated,
         )
         return new_star
-
-    def save_all(self, objects: list[StellarObject], allow_empty: bool = False) -> str:
-        """Save a complete list of stars, replacing the whole catalog.
-
-        Warning: this deletes every star that is not in the new list. To
-        change a few stars, use `update` instead.
-
-        Parameters
-        ----------
-        objects : `list` [`StellarObject`]
-            The full set of stars to record.
-        allow_empty : `bool`, optional
-            Saving an empty list is refused unless this is `True`, so the
-            whole catalog is never deleted by accident.
-
-        Returns
-        -------
-        result : `str`
-            A short note saying the catalog was saved.
-
-        Raises
-        ------
-        InvalidArgumentError
-            If ``objects`` is empty and ``allow_empty`` is `False`.
-        """
-        if not objects and not allow_empty:
-            raise InvalidArgumentError(
-                "save_all() received an empty list, which would delete every star. "
-                "Pass allow_empty=True to clear the catalog on purpose."
-            )
-        self.catalog_access.put(objects, "stellar_catalog", {})
-        return "stellar catalog saved"
-
-    def detect_point_sources(
-        self,
-        image_data: Any,
-        threshold_sigma: float = 5.0,
-        fwhm: float = 4.0,
-    ) -> list[dict[str, Any]]:
-        """Find stars (point sources) in an image's pixel data.
-
-        Parameters
-        ----------
-        image_data : `numpy.ndarray`
-            2D pixel array to search.
-        threshold_sigma : `float`, optional
-            Detection threshold, in noise standard deviations above the
-            background. Defaults to 5.0.
-        fwhm : `float`, optional
-            Expected star width (FWHM), in pixels. Defaults to 4.0.
-
-        Returns
-        -------
-        sources : `list` [`dict`]
-            The stars found, brightest first.
-        """
-        from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
-
-        return SourceDetector(threshold_sigma=threshold_sigma, fwhm=fwhm).detect(image_data)
-
-    def plate_solve(self, image_path: str) -> Any | None:
-        """Work out where on the sky an image points, from its stars.
-
-        Plate solving matches the pattern of stars in the image against a
-        star catalog. The result is a World Coordinate System (WCS): the
-        mapping from each pixel to a sky position.
-
-        Parameters
-        ----------
-        image_path : `str`
-            The FITS file to solve.
-
-        Returns
-        -------
-        wcs : `astropy.wcs.WCS` or `None`
-            The pixel-to-sky mapping, or `None` when the image cannot be
-            read or too few stars are found to try a solve. When a solve is
-            tried and the star pattern cannot be matched, the star
-            identifier raises `PlateSolveFailedError` instead.
-        """
-        from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
-
-        _, wcs = StarIdentifier(config=self._config, drivers=self._drivers).process_image(
-            image_path, attempt_plate_solving=True
-        )
-        return wcs

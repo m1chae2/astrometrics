@@ -23,6 +23,7 @@ from astrometricslib.models.quality.metric_spec import (
     MetricSpec,
     UncertaintyKind,
 )
+from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_spec, notice_spec
 
 ASTEROID_FRAMES_WITH_WCS_ESTIMATE = "asteroid_detection.frames_with_wcs_estimate_count"
 ASTEROID_FRAMES_EXCLUDED_MISSING_POINTING = (
@@ -34,6 +35,7 @@ ASTEROID_CANDIDATES_RATE_LINEARITY_CONFIRMED = "asteroid_detection.candidates_ra
 ASTEROID_CANDIDATES_EPHEMERIS_MATCHED = "asteroid_detection.candidates_ephemeris_matched_count"
 ASTEROID_EPHEMERIS_QUERIES_ATTEMPTED = "asteroid_detection.ephemeris_queries_attempted_count"
 ASTEROID_EPHEMERIS_QUERIES_FAILED = "asteroid_detection.ephemeris_queries_failed_count"
+ASTEROID_NOTICE_EPHEMERIS_QUERY_CAP = "asteroid_detection.notice_ephemeris_query_cap_reached"
 ASTEROID_RESIDUAL_CHAINS_TESTED = "asteroid_detection.residual_chains_tested_count"
 ASTEROID_RESIDUAL_CHAINS_REJECTED = "asteroid_detection.residual_chains_rejected_count"
 ASTEROID_RESIDUAL_CHAINS_NON_MONOTONIC = "asteroid_detection.residual_chains_non_monotonic_count"
@@ -160,6 +162,30 @@ def _gate_metric(
         register_entry=register_entry,
         purpose=MetricPurpose.DECISION,
         purpose_reason=_GATE_PURPOSE_REASON,
+    )
+
+
+def ephemeris_query_cap_notice_spec() -> MetricSpec:
+    """Declare the notice for a run that hit the known-asteroid question limit.
+
+    Returns
+    -------
+    spec : `MetricSpec`
+        A run-level notice. Its value is the number of confirmed movers left
+        unchecked; the row is stored only when the limit was reached.
+    """
+    return notice_spec(
+        ASTEROID_NOTICE_EPHEMERIS_QUERY_CAP,
+        Checkpoint("asteroid_detection"),
+        SubjectLevel.RUN,
+        "count",
+        "Whether the limit on questions to the known-asteroid database was reached.",
+        "The number of confirmed movers left unchecked because the run reached its SkyBoT question limit.",
+        "pipelines.asteroid_detection.record_quality.ephemeris_query_cap_notice_measurement",
+        (
+            "A mover that was not checked is neither matched nor known to be new, so a person should "
+            "look at the run before treating its unmatched movers as discoveries."
+        ),
     )
 
 
@@ -310,9 +336,10 @@ ASTEROID_DETECTION_METRICS: tuple[MetricSpec, ...] = (
         ASTEROID_GATE_EPHEMERIS_CROSS_MATCH,
         "count",
         "Whether the known-asteroid database could be asked about the confirmed movers.",
-        "The value is the number of failed SkyBoT cone searches. The limit is 0. The check fails above 0 "
-        "and is not checked when no mover was confirmed or no search was sent. The gate's own record "
-        "holds the number of matches in its detail.",
+        "The value is the number of failed SkyBoT cone searches or, when none failed but the run reached "
+        "its limit on searches, the number of confirmed movers left unchecked. The limit is 0. The check "
+        "fails above 0 and is not checked when no mover was confirmed or no search was sent. The gate's "
+        "own record holds the number of matches in its detail.",
         "The cone searches sent for the confirmed movers.",
     ),
     _gate_metric(
@@ -335,4 +362,6 @@ ASTEROID_DETECTION_METRICS: tuple[MetricSpec, ...] = (
         "The chains that reached the straight-line test.",
         register_entry="MOV-03",
     ),
+    camera_without_profile_spec("asteroid_detection"),
+    ephemeris_query_cap_notice_spec(),
 )

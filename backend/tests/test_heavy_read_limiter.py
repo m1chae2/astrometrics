@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from astrometricslib import ConflictError
+from astrometricslib.exceptions import ConflictError
 from backend.services.data.stellar_service import StellarService
 from backend.services.infrastructure.heavy_read_limiter import HeavyReadLimiter
 

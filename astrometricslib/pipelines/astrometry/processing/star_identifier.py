@@ -30,11 +30,14 @@ from astropy.wcs import WCS, FITSFixedWarning
 from astropy.wcs.utils import proj_plane_pixel_scales
 from erfa import ErfaWarning
 
-from astrometricslib.drivers.driver_set import Drivers
-from astrometricslib.drivers.fits_access import collapse_to_2d
-from astrometricslib.drivers.image import AstrometricsImage
-from astrometricslib.drivers.interfaces.plate_solve_driver import PlateSolveDriver, read_fit_statistics
-from astrometricslib.drivers.interfaces.simbad_driver import SimbadDriver
+from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.fits_access import collapse_to_2d
+from astrometricslib._internal.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.interfaces.plate_solve_driver import (
+    PlateSolveDriver,
+    read_fit_statistics,
+)
+from astrometricslib._internal.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.stellar_source import StellarObject
@@ -47,6 +50,7 @@ from astrometricslib.pipelines.shared.catalog_star_identity import (
     gaia_dr3_source_id_from_names,
 )
 from astrometricslib.pipelines.shared.simbad_object_types import read_simbad_object_types
+from astrometricslib.pipelines.shared.star_kinds import position_only_star_id
 from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS, PlateSolveFailedError
 from astrometricslib.utilities.solar_system_targets import is_solar_system_target
 
@@ -282,7 +286,7 @@ def _fetch_gaia_cone(
         service that answered, and ``meta["row_limit_reached"]`` is True when
         the table holds `row_limit` rows.
     """
-    from astrometricslib.drivers.gaia_cone_driver import query_gaia_cone_esa, query_gaia_cone_vizier
+    from astrometricslib._internal.drivers.gaia_cone_driver import query_gaia_cone_esa, query_gaia_cone_vizier
 
     attempts: list[tuple[str, float, Callable[[], Any], int]] = []
     for step in range(GAIA_DEPTH_STEPS_DOWN + 1):
@@ -1518,7 +1522,7 @@ class StarIdentifier:
         """
         from astropy.table import Table
 
-        from astrometricslib.drivers import catalog_store
+        from astrometricslib._internal.drivers import catalog_store
         from astrometricslib.foundation.config import get_configuration
 
         radius_deg = min(max(0.1, radius_deg), 1.0)
@@ -1738,7 +1742,7 @@ class StarIdentifier:
         """
         from astropy.table import Table
 
-        from astrometricslib.drivers import catalog_store
+        from astrometricslib._internal.drivers import catalog_store
 
         cache_db_path = catalog_store.get_catalog_cache_path(config)
         try:
@@ -1876,7 +1880,7 @@ class StarIdentifier:
             cut short. Without it the stars are saved but no region is
             recorded, so they are never reused as a complete download.
         """
-        from astrometricslib.drivers import catalog_store
+        from astrometricslib._internal.drivers import catalog_store
 
         cache_db_path = catalog_store.get_catalog_cache_path(config)
         try:
@@ -2351,7 +2355,7 @@ class StarIdentifier:
         for stellar_object in still_unmatched:
             ra, dec = sky_positions.get(id(stellar_object), (None, None))
             if ra is not None:
-                field_id = f"FIELD_J{ra:.4f}{dec:+.4f}"
+                field_id = position_only_star_id(ra, dec)
                 stellar_object.id = field_id
                 stellar_object.name = field_id
                 stellar_object.right_ascension = ra

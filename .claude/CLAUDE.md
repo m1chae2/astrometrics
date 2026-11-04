@@ -55,3 +55,12 @@ The MCP servers live in `mcp_servers/` (the UI server in `ui/mcp/`). Claude Code
 - **Diagnose Backend Health**: Call `app_status()`. Confirms whether the FastAPI server and container are responding.
 - **Diagnose Domain Calculations**: Call `astrometricslib-core` or `wayfindinglib-core` tools directly on disk data.
 - **Diagnose Frontend Code & Builds**: Call `ui_diagnose_code`, `ui_run_tests`, or `ui_build_check`.
+
+## 6. Commits, Issues, Branches and Pull Requests
+A hook or a bot rejects each of these when it is wrong, so get them right the first time. `CONTRIBUTING.md` has the full text.
+- **Commit messages**: the first line starts with `doc:`, `refactor:`, `new:`, `fix:` or `maintenance:`, a space, then a short description. Put the issue number at the end, for example `fix: reject frames with no pointing data (#150)`. The `commit-msg` hook (`build/hooks/check_commit_message.sh`) rejects anything else, and a rejected commit leaves your files staged.
+- **Issue titles**: `type(scope): summary`, where `type` is one of the same five words (`new(ui): ...`, not `enhancement(ui): ...`). The `Issue Labels` workflow flags a wrong title with the `incomplete` label.
+- **Issue labels**: every issue needs a subsystem (`astrometricslib`, `wayfindinglib`, `ui`), a component (`api`, `pipelines`, `drivers`, `infrastructure`) and a type (`enhancement`, `problem`). Use the form fields in `.github/ISSUE_TEMPLATE/issue.yml` for the body: `## Problem / Enhancement` and `## Acceptance Criteria`.
+- **Analysis and Plan**: before a pull request that closes an issue can merge, write an `## Analysis and Plan` section into the issue (what you found, what the change will do). Close the issue from the pull request description with `Closes #123`.
+- **Branch names**: `<issue number>-<short-slug>`, for example `150-ux-clean-up`.
+- **Ask first**: ask the user before creating an issue, committing or pushing, unless they have just told you to.

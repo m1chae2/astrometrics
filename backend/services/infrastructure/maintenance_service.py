@@ -7,6 +7,8 @@ import logging
 import threading
 from typing import TYPE_CHECKING
 
+from backend.services.infrastructure.background_logging import background_log_context
+
 if TYPE_CHECKING:
     from backend.services.infrastructure.system_status_service import SystemStatusService
     from backend.services.observatory.telescope_service import TelescopeService
@@ -64,7 +66,8 @@ class MaintenanceService:
 
         while not self._stop_event.is_set():
             try:
-                self.perform_cleanup()
+                with background_log_context("maintenance"):
+                    self.perform_cleanup()
             except Exception:
                 # This loop runs for the life of the app and must not die.
                 # The traceback is logged and the next pass tries again.

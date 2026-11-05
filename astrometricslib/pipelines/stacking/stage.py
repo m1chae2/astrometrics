@@ -13,7 +13,6 @@ from astrometricslib._internal.drivers.camera_profile_store import camera_identi
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import AstrometricsError, ConflictError
-from astrometricslib.foundation.jobs.runner import get_current_job
 from astrometricslib.foundation.run_abandonment import raise_if_abandoned
 from astrometricslib.models.quality.gate_result import GateResult
 from astrometricslib.models.target import Target
@@ -25,6 +24,19 @@ from astrometricslib.pipelines.stacking.registration_records import (
     update_frame_registration_results,
 )
 from astrometricslib.pipelines.stacking.stack_run_context import StackRun
+from astrometricslib.pipelines.stacking.stage_progress import (
+    CHOOSE_FRAMES_STAGE,
+    PREPARE_STAGE,
+    PREVIEW_STAGE,
+    QUALITY_STAGE,
+    SCREEN_FRAMES_STAGE,
+    STACKING_STAGE,
+    SUMMARIZE_STAGE,
+    begin_stage,
+    finish_stages,
+    skip_remaining_stages,
+    track_stages,
+)
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 if TYPE_CHECKING:
@@ -32,25 +44,6 @@ if TYPE_CHECKING:
     from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
 
 logger = logging.getLogger(__name__)
-
-
-def _report_stage(progress_current: int, message: str) -> None:
-    """Tell the running job which step the stack has reached.
-
-    The step goes to the job's log and moves its progress bar, so a person
-    watching the job list can tell a slow stack from a stuck one. Does
-    nothing when the stack is not running as a tracked job.
-
-    Parameters
-    ----------
-    progress_current : `int`
-        How far along the stack is, out of 100.
-    message : `str`
-        A short description of the step.
-    """
-    job = get_current_job()
-    if job is not None:
-        job.stage(progress_current, message)
 
 
 def stack_frames(
@@ -215,18 +208,39 @@ def _stack_frames_guarded(
         measured_at,
         quality_recording,
     )
-    _choose_frames(run)  # run.target_frames
-    _check_frame_types(run)  # run.has_spectral
-    _name_output_file(run)  # run.stack_file
-    _screen_frames(run)  # run.target_frames, excluded_frames, gate_results, background_split
-    _prepare_stack(run)  # run.engine, stack_weight, expected_path, inputs_record
-    if _stack_is_unchanged(run):
-        return run.stacked_path
-    _run_stacking_engine(run)  # run.stacked_path, diagnostics
-    _trim_stack_edges(run)  # run.crop_offset, excluded_frames
-    summary = _summarize_stack(run)
-    if run.stacked_path:
-        _finish_made_stack(run, run.stacked_path, summary)
+    # Each `begin_stage` writes one "Stage N of M" line to the job's log and
+    # moves the job's progress (see `stage_progress.py`).
+    with track_stages():
+        begin_stage(CHOOSE_FRAMES_STAGE, "choosing the frames to stack")
+        _choose_frames(run)  # run.target_frames
+        _check_frame_types(run)  # run.has_spectral
+        _name_output_file(run)  # run.stack_file
+        begin_stage(
+            SCREEN_FRAMES_STAGE,
+            f"checking {len(run.target_frames)} frames before stacking (gain, clouds, trailing, sky)",
+        )
+        _screen_frames(run)  # run.target_frames, excluded_frames, gate_results, background_split
+        begin_stage(
+            PREPARE_STAGE, "preparing the stack settings and checking whether the stack is up to date"
+        )
+        _prepare_stack(run)  # run.engine, stack_weight, expected_path, inputs_record
+        if _stack_is_unchanged(run):
+            skip_remaining_stages("the stack is already up to date")
+            finish_stages()
+            return run.stacked_path
+        begin_stage(
+            STACKING_STAGE,
+            f"calibrating, aligning and stacking {len(run.target_frames)} frames in Siril",
+        )
+        _run_stacking_engine(run)  # run.stacked_path, diagnostics
+        begin_stage(SUMMARIZE_STAGE, "trimming the stack edges and summarizing the stack")
+        _trim_stack_edges(run)  # run.crop_offset, excluded_frames
+        summary = _summarize_stack(run)
+        if run.stacked_path:
+            _finish_made_stack(run, run.stacked_path, summary)
+        else:
+            skip_remaining_stages("Siril made no stack")
+        finish_stages()
     return run.stacked_path
 
 
@@ -264,8 +278,6 @@ def _choose_frames(run: StackRun) -> None:
     from astrometricslib.pipelines.stacking.pre_processing.camera_selection import ensure_single_camera
 
     ensure_single_camera(run.target_frames)
-
-    _report_stage(5, f"Checking {len(run.target_frames)} frames")
 
 
 def _check_frame_types(run: StackRun) -> None:
@@ -367,7 +379,7 @@ def _screen_frames(run: StackRun) -> None:
     run.excluded_frames = screening.excluded_frames
     run.gate_results = screening.gate_results
     run.background_split = screening.background_split
-    _report_stage(15, f"Frame checks done, {len(run.target_frames)} frames kept")
+    logger.info("Frame checks done: %d of %d frames kept.", len(run.target_frames), run.frames_submitted)
 
 
 def _prepare_stack(run: StackRun) -> None:
@@ -478,7 +490,6 @@ def _run_stacking_engine(run: StackRun) -> None:
     if run.engine is None:
         raise RuntimeError("The stack must be prepared before the stacking program runs.")
     run.staging = _archive_stack_before_restack(run.target.id, run.stack_file)
-    _report_stage(20, f"Calibrating, aligning and stacking {len(run.target_frames)} frames in Siril")
     try:
         run.stacked_path, run.diagnostics = run_stack(
             run.engine,
@@ -503,7 +514,7 @@ def _run_stacking_engine(run: StackRun) -> None:
         _finish_stack_archive(run.staging, run.stack_file, run.target.id, kept=False)
         raise
     _finish_stack_archive(run.staging, run.stack_file, run.target.id, kept=bool(run.stacked_path))
-    _report_stage(70, "Siril stack finished" if run.stacked_path else "Siril produced no stack")
+    logger.info("Siril stack finished." if run.stacked_path else "Siril produced no stack.")
 
 
 def _trim_stack_edges(run: StackRun) -> None:
@@ -619,7 +630,12 @@ def _finish_made_stack(run: StackRun, stacked_path: str, summary: StackQualitySu
     _point_target_at_stack(run, stacked_path)
     _record_provenance(run, stacked_path, summary)
     _save_registration_record(run, stacked_path, summary)
+    begin_stage(
+        QUALITY_STAGE,
+        "measuring the stack's quality (reads up to 16 flat, 24 light and 5 bias frames again)",
+    )
     _store_stack_quality(run, stacked_path, summary)
+    begin_stage(PREVIEW_STAGE, "making the preview picture (GraXpert, Cosmic Clarity, star toning)")
     _make_preview(run, stacked_path)  # run.preview_path
     _save_stack_inputs(run, stacked_path)
     _log_finished_stack(run)
@@ -711,7 +727,7 @@ def _store_stack_quality(run: StackRun, stacked_path: str, summary: StackQuality
     A failure here never fails the stack. The flat-to-light match in it reads
     up to 16 flat, 24 light and 5 bias frames again from storage, which can
     take a while on a network mount (the job's time limit is in the
-    configuration), so the job's progress says so first.
+    configuration). The caller announces the step first.
 
     Parameters
     ----------
@@ -722,7 +738,6 @@ def _store_stack_quality(run: StackRun, stacked_path: str, summary: StackQuality
     summary : `StackQualitySummary`
         The stack's quality summary.
     """
-    _report_stage(75, "Measuring the stack's quality (reads up to 16 flat, 24 light and 5 bias frames again)")
     _record_stack_quality(
         summary,
         run.target.id,
@@ -761,7 +776,6 @@ def _make_preview(run: StackRun, stacked_path: str) -> None:
         write_stack_preview,
     )
 
-    _report_stage(80, "Making the preview picture (GraXpert, Cosmic Clarity, star toning)")
     skipped_steps: list[SkippedPreviewStep] = []
     run.preview_path = write_stack_preview(stacked_path, run.preview_settings, skipped_steps=skipped_steps)
     # A skipped step is a warning of this job, not only a line in the log.

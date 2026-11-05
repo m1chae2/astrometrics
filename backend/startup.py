@@ -18,6 +18,7 @@ import time
 
 from astrometricslib import warm_earth_orientation_data
 from backend.container import container
+from backend.services.infrastructure.background_logging import background_log_context
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,8 @@ async def periodic_telemetry_loop() -> None:
                 # event loop, like this one. A worker thread has no loop, and
                 # it also keeps a slow hardware query from blocking every
                 # other request.
-                await asyncio.to_thread(container.telescope_service.get_status)
+                with background_log_context("telemetry"):
+                    await asyncio.to_thread(container.telescope_service.get_status)
         except Exception:
             logger.exception("Error in periodic telemetry loop")
         await asyncio.sleep(2.0)

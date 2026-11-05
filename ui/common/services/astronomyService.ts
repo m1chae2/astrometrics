@@ -211,7 +211,8 @@ export interface AstrometryOverlayResult {
 /**
  * Fetches identified stars and their pixel coordinates for astrometry overlay.
  * @param targetId The target identifier to fetch stars for.
- * @param limit Maximum number of stars to return (defaults to 35).
+ * @param limit Maximum number of stars to return. Zero (the default) means
+ *   every star the library places on the image.
  * @param imagePath The image being shown. The stars are placed on it. When
  *   omitted, the target's current stack is used.
  * @returns The star overlay items with pixel coordinates and labels, and the
@@ -219,7 +220,7 @@ export interface AstrometryOverlayResult {
  */
 export async function fetchAstrometryOverlayStars(
     targetId: string,
-    limit = 35,
+    limit = 0,
     imagePath?: string | null
 ): Promise<AstrometryOverlayResult> {
     if (!targetId || targetId.trim() === '') return { stars: [], reason: null };

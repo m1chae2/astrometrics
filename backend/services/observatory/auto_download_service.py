@@ -15,6 +15,8 @@ import time
 from collections.abc import Callable
 from typing import Any, Protocol
 
+from backend.services.infrastructure.background_logging import background_log_context
+
 logger = logging.getLogger(__name__)
 
 # Seconds to wait after a frame ends before syncing. Ekos writes the FITS
@@ -226,6 +228,11 @@ class AutoDownloadService:
 
     def _fire(self, target: str) -> None:
         """Run when a timer fires: start the sync or wait again."""
+        with background_log_context("auto-download", target_id=target):
+            self._fire_in_context(target)
+
+    def _fire_in_context(self, target: str) -> None:
+        """Start the sync or wait again; the body of `_fire`."""
         try:
             with self._lock:
                 self._timers.pop(target, None)

@@ -235,7 +235,9 @@ class JobLogRouter(logging.Handler):
 
     A record that carries a request id but no job id was written by work for
     a request, such as one made by the user interface while a job runs. It
-    belongs to that request, so it is never copied into a job's log.
+    belongs to that request, so it is never copied into a job's log. The
+    backend gives its own background work (status polling, the automatic
+    frame download) a request-style id for the same reason.
     """
 
     def __init__(self) -> None:

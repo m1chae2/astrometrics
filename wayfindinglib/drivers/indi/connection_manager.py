@@ -1,21 +1,28 @@
 """Manages the lifecycle and health of the INDI server connection."""
 
-import concurrent.futures
 import logging
 import socket
 import time
 
+from wayfindinglib.drivers.host_resolver import KnownHostAddress
+
 logger = logging.getLogger(__name__)
 
-_LOOKUP_THREAD = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="IndiHostLookup")
-"""One helper thread for name lookups; slow lookups cannot pile up."""
+MAX_CONSECUTIVE_PROBE_FAILURES = 3
+"""Failed handshakes in a row before a connected server counts as lost.
+
+Design estimate. Handshakes run at least 5 s apart, so 3 in a row means the
+server stayed silent for about 15 s or more. That rides out a short stall of
+the network or of the server, and a hung server is still replaced in well
+under a minute. A failure of the name lookup alone never counts.
+"""
 
 
 class ConnectionManager:
     """Handle the INDI server connection lifecycle and responsiveness."""
 
     def __init__(self, hostname: str, port: int = 7624) -> None:
-        self.hostname = hostname
+        self.known_address = KnownHostAddress(hostname)
         self.port = port
         self.base_connection_cooldown = 5.0  # Seconds between attempts while connected or newly failed
         self.max_connection_cooldown = 30.0  # Longest wait between attempts to a host that stays down
@@ -24,6 +31,33 @@ class ConnectionManager:
         self.last_connection_attempt = 0
         self.last_responsive_check = 0
         self.last_responsive_value = False
+        self.consecutive_probe_failures = 0
+        self.connect_address: str | None = None  # Address chosen by the last `is_host_resolvable`
+
+    @property
+    def hostname(self) -> str:
+        """Host name (or address) the manager talks to."""
+        return self.known_address.hostname
+
+    @hostname.setter
+    def hostname(self, hostname: str) -> None:
+        """Use a new host name; this also forgets the saved address."""
+        self.known_address.set_hostname(hostname)
+
+    def probe_failures_exhausted(self) -> bool:
+        """Tell whether enough handshakes failed in a row.
+
+        Returns
+        -------
+        lost : `bool`
+            `True` after `MAX_CONSECUTIVE_PROBE_FAILURES` failed handshakes in
+            a row. A failed name lookup is not counted.
+        """
+        return self.consecutive_probe_failures >= MAX_CONSECUTIVE_PROBE_FAILURES
+
+    def reset_probe_failures(self) -> None:
+        """Forget earlier failed handshakes (after a reconnect)."""
+        self.consecutive_probe_failures = 0
 
     def is_server_responsive(self) -> bool:
         """Check if the INDI server is reachable and responsive.
@@ -41,24 +75,32 @@ class ConnectionManager:
             return self.last_responsive_value
 
         self.last_responsive_check = now
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2.0)
-            sock.connect((self.hostname, self.port))
-            # Send a basic command to elicit a response.
-            sock.sendall(b"<getProperties version='1.7'/>")
-            data = sock.recv(1024)
-            sock.close()
-            self.last_responsive_value = len(data) > 0
-            return self.last_responsive_value
-        except OSError:
-            # OSError covers a refused connection, a timeout, and an
-            # unknown host name.
+        address = self.known_address.resolve(self.port)
+        if address is None:
+            # Only the name lookup failed and no earlier address is known.
+            # That says nothing about the server, so it is not counted.
             self.last_responsive_value = False
             return False
+        try:
+            with socket.create_connection((address, self.port), timeout=2.0) as sock:
+                # Send a basic command to elicit a response.
+                sock.sendall(b"<getProperties version='1.7'/>")
+                data = sock.recv(1024)
+            self.last_responsive_value = len(data) > 0
+        except OSError:
+            # OSError covers a refused connection and a timeout.
+            self.last_responsive_value = False
+        if self.last_responsive_value:
+            self.consecutive_probe_failures = 0
+        else:
+            self.consecutive_probe_failures += 1
+        return self.last_responsive_value
 
     def is_host_resolvable(self, host: str, port: int, timeout: float = 1.0) -> bool:
         """Check, without waiting long, that the server name can be looked up.
+
+        If the name does not resolve but did earlier, the last known
+        address is used instead and left in `connect_address`.
 
         Looking up a ``.local`` name that nothing answers takes about 5 seconds
         inside the INDI client's own connect call, and that call holds the one
@@ -80,14 +122,12 @@ class ConnectionManager:
         Returns
         -------
         resolvable : `bool`
-            `True` if the name resolved within `timeout`.
+            `True` if the name resolved within `timeout`, or an earlier
+            address is known for it.
         """
-        lookup = _LOOKUP_THREAD.submit(socket.getaddrinfo, host, port, type=socket.SOCK_STREAM)
-        try:
-            lookup.result(timeout=timeout)
-            return True
-        except concurrent.futures.TimeoutError, OSError:
-            return False
+        self.known_address.set_hostname(host)
+        self.connect_address = self.known_address.resolve(port, timeout)
+        return self.connect_address is not None
 
     def record_connection_result(self, connected: bool) -> None:
         """Remember whether a connection attempt worked, and adjust the wait.
@@ -104,6 +144,7 @@ class ConnectionManager:
             Whether the attempt ended with a connected server.
         """
         if connected:
+            self.consecutive_probe_failures = 0
             self.consecutive_failures = 0
             self.connection_cooldown = self.base_connection_cooldown
             return

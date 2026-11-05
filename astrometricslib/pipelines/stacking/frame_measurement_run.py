@@ -119,6 +119,7 @@ from astrometricslib.pipelines.shared.quality.time_budget import TIME_BUDGET_REA
 from astrometricslib.pipelines.stacking.exact_bias_frames import exact_setting_bias_frames
 from astrometricslib.pipelines.stacking.metrics import FRAME_QUARANTINE_ROUNDNESS, FRAME_QUARANTINE_SKY_MEDIAN
 from astrometricslib.pipelines.stacking.processing.group_gains import CLIPPED_FRAME_ZERO_FRACTION
+from astrometricslib.pipelines.stacking.stage_progress import LoopProgress
 from astrometricslib.utilities.camera_setting_text import (
     canonical_binning_setting,
     canonical_gain_setting,
@@ -1160,6 +1161,9 @@ def _measure_target_frames(
             """
             return pool.submit(measure_in_job_context, item)
 
+    # A run with its own job reports through the job. A run nested in a
+    # parent job writes progress lines for the parent's stage instead.
+    nested_progress = LoopProgress("Measured", len(pending)) if progress_job is None else None
     try:
         with pool:
             futures = {submit(item): item for item in pending}
@@ -1202,6 +1206,8 @@ def _measure_target_frames(
                         int(100 * done_count / len(pending)),
                         f"Measured {done_count} of {len(pending)} frames",
                     )
+                if nested_progress is not None:
+                    nested_progress.tick()
     finally:
         if unsaved_stamp_count:
             _save_stamps(save_target, failure_notes)

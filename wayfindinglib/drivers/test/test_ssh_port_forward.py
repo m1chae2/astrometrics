@@ -1,9 +1,11 @@
 """Purpose: Tests for the supervised SSH port forward.
 
 Description: Checks the ssh command the StellarMate driver builds, and that
-`SshPortForward` restarts a dead process after the cooldown, logs the first
-failure as a warning and repeats at debug, and stops cleanly. A fake process
-stands in for ssh, so no test starts ssh or touches the network.
+`SshPortForward` restarts a dead process after the cooldown, rebuilds the
+command on each start, logs the first failure as a warning and repeats at
+debug, calls the tunnel restored only when the local port accepts a
+connection, keeps its log lines out of job logs, and stops cleanly. A fake
+process and a fake port probe stand in for ssh and the network.
 """
 
 import logging
@@ -14,6 +16,7 @@ from typing import Any
 
 import pytest
 
+from astrometricslib.foundation.logging import get_log_context
 from wayfindinglib.drivers.ssh_port_forward import SshPortForward, pick_free_local_port
 from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
 
@@ -21,9 +24,14 @@ from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
 class FakeProcess:
     """A stand-in for a running ssh process."""
 
-    def __init__(self, exit_code: int | None = None) -> None:
-        """Start alive, or already exited when `exit_code` is given."""
+    def __init__(self, exit_code: int | None = None, alive_polls: int = 0) -> None:
+        """Start alive, or already exited when `exit_code` is given.
+
+        With `alive_polls`, the process reports running for that many polls
+        and then exits with `exit_code`, like an ssh that hangs on a lookup.
+        """
         self.exit_code = exit_code
+        self.alive_polls = alive_polls
         self.terminated = False
         self.killed = False
         self.stderr = None
@@ -37,6 +45,9 @@ class FakeProcess:
         exit_code : `int` or `None`
             The exit code, or `None` while running.
         """
+        if self.alive_polls > 0 and self.exit_code is not None:
+            self.alive_polls -= 1
+            return None
         return self.exit_code
 
     def terminate(self) -> None:
@@ -105,19 +116,25 @@ def _wait_until(condition: Callable[[], bool], timeout: float = 3.0) -> bool:
     return condition()
 
 
-def _forward(launcher: FakeLauncher, cooldown: float = 0.05) -> SshPortForward:
+def _forward(
+    launcher: FakeLauncher,
+    cooldown: float = 0.05,
+    port_probe: Callable[[int], bool] = lambda _port: True,
+    command_for_port: Callable[[int], list[str]] = lambda port: ["ssh", str(port)],
+) -> SshPortForward:
     """Build a forward over a fake launcher with a short cooldown.
 
     Returns
     -------
     forward : `SshPortForward`
-        A forward that has not started.
+        A forward that has not started. The fake probe says the port is
+        open unless a test passes another.
     """
     return SshPortForward(
-        lambda port: ["ssh", str(port)],
+        command_for_port,
         process_launcher=launcher,
         restart_cooldown_seconds=cooldown,
-        settle_seconds=0.05,
+        port_probe=port_probe,
         executable_finder=lambda _name: None,
     )
 
@@ -242,3 +259,103 @@ def test_command_is_plain_ssh_when_setpriv_is_missing() -> None:
     )
 
     assert forward.command == ["ssh", "4567"]
+
+
+def test_command_is_rebuilt_on_every_start() -> None:
+    """A changed address option shows up in the next start's command."""
+    launcher = FakeLauncher([FakeProcess(exit_code=255), FakeProcess()])
+    # The first call happens in the constructor; the next two are the starts.
+    address_options = [["-o", "HostName=unused"], ["-o", "HostName=none"], ["-o", "HostName=10.0.0.5"]]
+    calls: list[int] = []
+
+    def command_for_port(port: int) -> list[str]:
+        """Build a command whose address option changes per call.
+
+        Returns
+        -------
+        command : `list` [`str`]
+            An ssh command with the next address option.
+        """
+        calls.append(port)
+        return ["ssh", *address_options[min(len(calls) - 1, 2)], str(port)]
+
+    forward = _forward(launcher, cooldown=0.01, command_for_port=command_for_port)
+    forward.start()
+    try:
+        assert _wait_until(lambda: len(launcher.commands) >= 2)
+    finally:
+        forward.stop()
+
+    assert launcher.commands[0][1:3] == ["-o", "HostName=none"]
+    assert launcher.commands[1][1:3] == ["-o", "HostName=10.0.0.5"]
+
+
+def test_alive_but_not_listening_is_not_restored(caplog: pytest.LogCaptureFixture) -> None:
+    """An ssh that lives on without opening the port never logs restored."""
+    launcher = FakeLauncher([FakeProcess(exit_code=255, alive_polls=3)])
+    forward = _forward(launcher, cooldown=0.01, port_probe=lambda _port: False)
+    with caplog.at_level(logging.DEBUG, logger="wayfindinglib.drivers.ssh_port_forward"):
+        forward.start()
+        try:
+            assert _wait_until(lambda: len(launcher.commands) >= 4)
+        finally:
+            forward.stop()
+
+    assert not any("restored" in record.getMessage() for record in caplog.records)
+    assert sum(record.levelno == logging.WARNING for record in caplog.records) == 1
+
+
+def test_real_recovery_logs_restored_once(caplog: pytest.LogCaptureFixture) -> None:
+    """A failure, then an answering port, gives one warning, one restored."""
+    launcher = FakeLauncher([FakeProcess(exit_code=255, alive_polls=2), FakeProcess()])
+    forward = _forward(launcher, cooldown=0.01, port_probe=lambda _port: len(launcher.commands) >= 2)
+    with caplog.at_level(logging.INFO, logger="wayfindinglib.drivers.ssh_port_forward"):
+        forward.start()
+        try:
+            assert _wait_until(lambda: any("restored" in record.getMessage() for record in caplog.records))
+            time.sleep(0.1)
+        finally:
+            forward.stop()
+
+    assert sum("restored" in record.getMessage() for record in caplog.records) == 1
+    assert sum(record.levelno == logging.WARNING for record in caplog.records) == 1
+
+
+def test_supervisor_records_carry_a_background_request_id() -> None:
+    """Supervisor records carry a request id and no job id."""
+    seen: list[dict[str, object]] = []
+
+    class ContextCapture(logging.Filter):
+        """Notes the log context in force when a record is made."""
+
+        def filter(self, record: logging.LogRecord) -> bool:
+            """Store the current context and keep the record.
+
+            Returns
+            -------
+            keep : `bool`
+                Always True.
+            """
+            seen.append(get_log_context())
+            return True
+
+    capture = ContextCapture()
+    logger = logging.getLogger("wayfindinglib.drivers.ssh_port_forward")
+    logger.addFilter(capture)
+    launcher = FakeLauncher([FakeProcess(exit_code=255)])
+    forward = _forward(launcher, cooldown=0.01)
+    try:
+        forward.start()
+        try:
+            assert _wait_until(lambda: len(launcher.commands) >= 2)
+        finally:
+            forward.stop()
+    finally:
+        logger.removeFilter(capture)
+
+    assert seen
+    for context in seen:
+        assert str(context.get("request_id", "")).startswith(
+            f"background:ssh-port-forward:{forward.local_port}"
+        )
+        assert "job_id" not in context

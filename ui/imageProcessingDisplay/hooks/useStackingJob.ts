@@ -176,7 +176,12 @@ export function useStackingJob(
         let cancelStream: (() => void) | undefined;
         let cancelled = false;
         if (isProcessing && activeJobId) {
+            // A new stream replays the job's whole log, so start from an
+            // empty panel to avoid showing lines twice or from another job.
+            setLogLines([]);
             streamJobLog(activeJobId, (line) => {
+                // Ignore late lines from a stream that was already cancelled.
+                if (cancelled) return;
                 setLogLines((prev) => {
                     if (prev.length > 0 && prev[prev.length - 1] === line) return prev;
                     return [...prev, line];
@@ -200,6 +205,9 @@ export function useStackingJob(
     const startProcessing = async (imageFiles?: string[], logFile?: string) => {
         if (!selectedTarget) return;
         setLogLines([]);
+        // Forget the previous job so its log is not streamed while we wait
+        // for the new job's id.
+        setActiveJobId(null);
         setIsProcessing(true);
         try {
             const result = await processTarget(selectedTarget, imageFiles, logFile);

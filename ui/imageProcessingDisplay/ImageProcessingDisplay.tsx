@@ -210,7 +210,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
       return;
     }
     setIsLoadingOverlay(true);
-    fetchAstrometryOverlayStars(selectedTarget, 35, selectedFile)
+    fetchAstrometryOverlayStars(selectedTarget, 0, selectedFile)
       .then(({ stars, reason }) => {
         if (active) {
           setOverlayStars(stars);
@@ -253,7 +253,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
 
     setIsLoadingOverlay(true);
     try {
-      const { stars, reason } = await fetchAstrometryOverlayStars(selectedTarget, 35, selectedFile);
+      const { stars, reason } = await fetchAstrometryOverlayStars(selectedTarget, 0, selectedFile);
       setOverlayStars(stars);
       setOverlayReason(reason);
       if (stars.length > 0) {

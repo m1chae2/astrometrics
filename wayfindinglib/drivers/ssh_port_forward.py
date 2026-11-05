@@ -19,18 +19,17 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
+from astrometricslib.jobs import log_context
+
 logger = logging.getLogger(__name__)
 
 # Matches PHD2Client and ConnectionManager.connection_cooldown, so every
 # hardware link in the app backs off from a dead endpoint the same way.
 _RESTART_COOLDOWN_SECONDS = 5.0
 
-# How long a new ssh must stay alive before the tunnel counts as up. With
-# ExitOnForwardFailure, ssh exits at once if the login or the forward fails.
-# Design estimate: a login that is going to fail normally does so within the
-# SSH connect timeout (2 s), but a name lookup can take longer, so this only
-# decides when the "restored" message is logged, not whether the tunnel works.
-_SETTLE_SECONDS = 1.0
+# How long one probe waits to connect to the forwarded local port. The port is
+# on this computer, so a listening port answers at once.
+_PROBE_TIMEOUT_SECONDS = 0.2
 
 # How long a stop waits for ssh to exit after a terminate before killing it.
 _TERMINATE_WAIT_SECONDS = 2.0
@@ -40,6 +39,31 @@ _PARENT_DEATH_TOOL = "setpriv"
 
 # How often the supervisor checks whether ssh is still running.
 _POLL_SECONDS = 0.2
+
+
+def local_port_accepts_connections(local_port: int) -> bool:
+    """Report whether something is listening on a loopback port.
+
+    ssh opens the local end of the forward only after the login worked, so a
+    connection here is the sign that the tunnel is really up. A process that
+    is merely alive (for example, still looking up a host name) does not
+    pass this test.
+
+    Parameters
+    ----------
+    local_port : `int`
+        Port on 127.0.0.1 to try.
+
+    Returns
+    -------
+    accepts : `bool`
+        True when a TCP connection was made.
+    """
+    try:
+        with socket.create_connection(("127.0.0.1", local_port), timeout=_PROBE_TIMEOUT_SECONDS):
+            return True
+    except OSError:
+        return False
 
 
 def pick_free_local_port() -> int:
@@ -72,8 +96,10 @@ class SshPortForward:
         `subprocess.Popen`. Tests pass a fake, so they never run ssh.
     restart_cooldown_seconds : `float`, optional
         Wait before a restart (default 5 s).
-    settle_seconds : `float`, optional
-        How long a new ssh must survive to count as up (default 1 s).
+    port_probe : `Callable` [[`int`], `bool`], optional
+        Tells whether the forwarded local port accepts a connection. The
+        tunnel counts as up only when it does. Defaults to
+        `local_port_accepts_connections`. Tests pass a fake.
     executable_finder : `Callable` [[`str`], `str` or `None`], optional
         Finds a program on the search path, like `shutil.which`. Used to
         look for ``setpriv``. Tests pass a fake so they do not depend on
@@ -84,6 +110,11 @@ class SshPortForward:
     When ``setpriv`` is found, ssh runs as ``setpriv --pdeathsig KILL ssh
     ...``, so the kernel kills ssh when its parent thread ends. That covers
     a crash or ``kill -9`` of the app, where `atexit` does not run.
+
+    The command is built again on every start, so a changed host address
+    (for example the remembered one used while the name will not resolve)
+    takes effect on the next restart. The supervisor thread logs under a
+    background request id, so its lines stay out of job logs.
     """
 
     def __init__(
@@ -92,21 +123,35 @@ class SshPortForward:
         local_port: int | None = None,
         process_launcher: Callable[..., Any] | None = None,
         restart_cooldown_seconds: float = _RESTART_COOLDOWN_SECONDS,
-        settle_seconds: float = _SETTLE_SECONDS,
+        port_probe: Callable[[int], bool] = local_port_accepts_connections,
         executable_finder: Callable[[str], str | None] = shutil.which,
     ) -> None:
         """Pick the local port and store the settings. Nothing starts yet."""
         self.local_port = local_port if local_port is not None else pick_free_local_port()
-        self._command = self._with_parent_death_signal(command_for_port(self.local_port), executable_finder)
+        self._command_for_port = command_for_port
+        self._executable_finder = executable_finder
+        self._command = self._build_command()
         self._process_launcher = process_launcher or subprocess.Popen
         self._restart_cooldown_seconds = restart_cooldown_seconds
-        self._settle_seconds = settle_seconds
+        self._port_probe = port_probe
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._process: Any | None = None
         self._lock = threading.Lock()
         # True after a failure was logged as a warning, so repeats stay quiet.
         self._failure_reported = False
+
+    def _build_command(self) -> list[str]:
+        """Build the full command from the current host settings.
+
+        Returns
+        -------
+        command : `list` [`str`]
+            The ssh command, wrapped with the parent-death signal.
+        """
+        return self._with_parent_death_signal(
+            self._command_for_port(self.local_port), self._executable_finder
+        )
 
     @staticmethod
     def _with_parent_death_signal(
@@ -141,7 +186,7 @@ class SshPortForward:
 
     @property
     def command(self) -> list[str]:
-        """The ssh command this forward runs.
+        """The ssh command the forward ran last, or will run first.
 
         Returns
         -------
@@ -188,8 +233,16 @@ class SshPortForward:
 
     def _supervise(self) -> None:
         """Run ssh, and start it again after a cooldown whenever it exits."""
+        # Request-style id, so the job log router never copies these lines
+        # into a job's log. Context variables are per thread, so set it here.
+        with log_context(request_id=f"background:ssh-port-forward:{self.local_port}"):
+            self._supervise_loop()
+
+    def _supervise_loop(self) -> None:
+        """Launch ssh in a loop until a stop is requested."""
         while not self._stop_event.is_set():
             try:
+                self._command = self._build_command()
                 process = self._process_launcher(
                     self._command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True
                 )
@@ -208,20 +261,20 @@ class SshPortForward:
     def _watch(self, process: Any) -> None:
         """Wait until `process` exits or a stop is requested.
 
-        Logs once when a process that failed before has stayed up.
+        Each cycle it checks the forwarded port. The first time the port
+        accepts a connection after a reported failure, it logs "restored"
+        once. A process that is alive but not yet listening is not up.
 
         Parameters
         ----------
         process : `Any`
             The running ssh process.
         """
-        waited = 0.0
         while not self._stop_event.is_set() and process.poll() is None:
-            self._stop_event.wait(_POLL_SECONDS)
-            waited += _POLL_SECONDS
-            if self._failure_reported and waited >= self._settle_seconds and process.poll() is None:
+            if self._failure_reported and self._port_probe(self.local_port) and process.poll() is None:
                 logger.info("SSH port forward on 127.0.0.1:%s restored", self.local_port)
                 self._failure_reported = False
+            self._stop_event.wait(_POLL_SECONDS)
 
     @staticmethod
     def _exit_reason(process: Any) -> str:

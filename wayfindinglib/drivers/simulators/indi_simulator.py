@@ -324,6 +324,7 @@ class _SimulatedConnectionManager:
         """Initialize minimal connection-health state IndiInterface reads."""
         self.hostname = None
         self.last_connection_attempt = None
+        self.connect_address = None
 
     def is_server_responsive(self) -> bool:
         """Report responsive: the simulator has no real socket to check.
@@ -334,6 +335,19 @@ class _SimulatedConnectionManager:
             Always `True`.
         """
         return True
+
+    def probe_failures_exhausted(self) -> bool:
+        """Report no lost server: the simulator has no handshake to fail.
+
+        Returns
+        -------
+        lost : `bool`
+            Always `False`.
+        """
+        return False
+
+    def reset_probe_failures(self) -> None:
+        """Ignore the call: the simulator counts no failures."""
 
     def can_attempt_reconnect(self) -> bool:
         """Allow every attempt: the simulator has no connection to wait for.

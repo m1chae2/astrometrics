@@ -56,7 +56,8 @@ always says which route gave its coordinates.
 When none of those gives a solution (the raw frames carry none, which is the
 case for a target imaged without a plate-solving mount or camera program), the
 last source is the stack itself. The stack is plate-solved in memory by the
-same code the astrometry step uses (`_plate_solve_stack_wcs`). The stack's
+solving part of the code the astrometry step uses (`_plate_solve_stack_wcs`),
+without its Gaia refit or star naming. The stack's
 header is not changed: the astrometry step writes its own solution later, and
 a header changed here could make the stack look new to the checks that compare
 a stack against its earlier record. The solved grid is the stack's own, so no
@@ -114,6 +115,7 @@ difference of two stacks and compares two stacks' noise aperture by aperture.
 import logging
 import math
 import os
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from subprocess import SubprocessError  # ruff: ignore[suspicious-subprocess-import] -- only to name the solver's time-limit error
@@ -644,14 +646,30 @@ def _frame_lines_up(frame_path: str, stack_plane: np.ndarray, crop_offset: tuple
 def _plate_solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> tuple[WCS | None, str]:
     """Plate-solve the stack itself, in memory, as the last source.
 
-    This runs the astrometry step's own solver path (`AstrometryPipeline`): the
-    same configuration, the same index lookup, the same scale and position
-    hints taken from the stack's header, the same Gaia refit and the same
-    time limit (`solve_timeout` of 300 s for each of the hinted and the blind
-    try, set in `StarIdentifier.process_image`). A solve with a good star
-    list normally takes a few seconds to a minute; a failed one can use the
-    whole limit. The stack file is only read: the solution is not written to
-    its header (see the module description).
+    This runs only the solving part of the astrometry step
+    (`AstrometryPipeline.solve_wcs`): star detection and the plate solver,
+    with the same configuration, index lookup, scale and position hints from
+    the stack's header, and the same time limit (`solve_timeout` of 300 s for
+    each of the hinted and the blind try, set in
+    `StarIdentifier.process_image`). It does not refit the solution to Gaia,
+    name stars or seed the Gaia cache, so it asks no online catalog; those
+    steps waited on network time-outs for minutes and the noise needs none of
+    them. A solve with a good star list normally takes tens of seconds; a
+    failed one can use the whole limit.
+
+    The solution is the solver's own, without the small shift a Gaia refit
+    would add (see the astrometry README). That is acceptable here. The
+    apertures are picked on the stack's own pixels, at least
+    `FAINT_SOURCE_CLEARANCE_PX` from every detected source, so the choice does
+    not depend on the solution. The solution only gives each aperture its sky
+    position, for carrying the set to other stacks. A refit moves a solution
+    by about a pixel or less, under the depth zero point's 3 arcsec match
+    radius (`STAR_MATCH_RADIUS_ARCSEC`). Sets chosen with the unrefined
+    solution have not been measured against Gaia (the measurement in
+    `PLATE_SOLVE_WCS_SOURCE` was made with the refit). The stack file
+    is only read: the solution is not written to its header (see the module
+    description), and the astrometry step later solves the stack again for
+    itself.
 
     Parameters
     ----------
@@ -659,8 +677,7 @@ def _plate_solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> t
         The finished stack.
     drivers : `Drivers`, optional
         The outside services the caller chose. A plate solve of the stack
-        uses its plate solver and SIMBAD driver. Any left out is the
-        built-in one.
+        uses its plate solver. Any left out is the built-in one.
 
     Returns
     -------
@@ -673,8 +690,10 @@ def _plate_solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> t
     # solution never needs it.
     from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
 
+    logger.info("Solving the stack for its sky coordinates...")
+    started = time.monotonic()
     try:
-        context = AstrometryPipeline(drivers=drivers).process(stack_path, attempt_plate_solving=True)
+        solved_wcs = AstrometryPipeline(drivers=drivers).solve_wcs(stack_path)
     except (
         PlateSolveFailedError,
         RuntimeError,
@@ -686,13 +705,19 @@ def _plate_solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> t
         # a missing index or program, a time limit, an online query) must not
         # fail the stack. Anything else is a bug and is caught, with the stack
         # still recorded, by `record_quality`.
-        logger.warning("Plate-solving the stack %s failed: %s", stack_path, error)
+        logger.warning(
+            "Could not solve the stack %s after %.1f s: %s", stack_path, time.monotonic() - started, error
+        )
         return None, f"plate-solving the stack itself was tried and failed ({type(error).__name__}: {error})"
-    if context.wcs is None or context.wcs_is_header_fallback:
+    elapsed = time.monotonic() - started
+    if solved_wcs is None:
+        logger.warning("Could not solve the stack for its sky coordinates (after %.1f s).", elapsed)
         return None, "plate-solving the stack itself was tried and found no solution"
-    celestial = context.wcs.celestial if context.wcs.has_celestial else None
+    celestial = solved_wcs.celestial if solved_wcs.has_celestial else None
     if celestial is None:
+        logger.warning("Could not solve the stack for its sky coordinates (after %.1f s).", elapsed)
         return None, "plate-solving the stack itself was tried and gave no sky solution"
+    logger.info("Solved in %.1f s.", elapsed)
     return celestial, ""
 
 

@@ -75,7 +75,7 @@ describe('astrometry overlay for the displayed image', () => {
     it('omits the path when no file is shown, and returns the reason', async () => {
         callBackendMock.mockResolvedValue({ stars: [], reason: 'No sky solution for this image yet' });
         const result = await fetchAstrometryOverlayStars('M 31');
-        expect(callBackendMock.mock.calls[0][1]).toEqual({ target_id: 'M 31', limit: 35 });
+        expect(callBackendMock.mock.calls[0][1]).toEqual({ target_id: 'M 31', limit: 0 });
         expect(result.reason).toBe('No sky solution for this image yet');
     });
 

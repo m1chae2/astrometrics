@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from astrometricslib.exceptions import AstrometricsError
 from backend.services.infrastructure import thread_management
+from backend.services.infrastructure.background_logging import background_log_context
 from wayfindinglib import ObservatoryControl
 
 if TYPE_CHECKING:
@@ -82,7 +83,12 @@ class SyncService:
         """
 
         def run() -> None:
-            """Copy the frames; the top of a background thread."""
+            """Copy the frames in a background log context; top of a thread."""
+            with background_log_context("sync", target_id=object_id):
+                run_sync()
+
+        def run_sync() -> None:
+            """Copy the frames, tell the app and call the finish listener."""
             result = None
             try:
 

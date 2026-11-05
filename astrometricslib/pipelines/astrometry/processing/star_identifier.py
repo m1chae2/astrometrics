@@ -15,6 +15,7 @@ the database, replacing temporary labels so duplicates are not saved.
 import logging
 import math
 import queue
+import socket
 import sqlite3
 import threading
 import warnings
@@ -22,6 +23,7 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
+import requests
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.nddata import block_reduce
@@ -186,6 +188,7 @@ FLAG_GAIA_PROPER_MOTION_UNKNOWN = "gaia_proper_motion_unknown"
 FLAG_GAIA_EPOCH_UNKNOWN = "gaia_epoch_unknown"
 FLAG_SCALE_HINT_BINNING_MISMATCH = "scale_hint_binning_mismatch"
 FLAG_GAIA_DEPTH_REDUCED = "gaia_depth_reduced"
+FLAG_GAIA_PARTIAL_CACHE = "gaia_partial_cache"
 FLAG_WCS_REFINED = "wcs_refined_against_gaia"
 FLAG_WCS_REFINEMENT_SKIPPED = "wcs_refinement_skipped"
 
@@ -207,6 +210,17 @@ GAIA_DEPTH_STEPS_DOWN = 2
 _gaia_failure_state_lock = threading.Lock()
 _gaia_consecutive_failures = 0
 _gaia_circuit_open = False
+
+# The services (`"VizieR"`, `"ESA Gaia archive"`) that could not be reached
+# during the current run: the name did not resolve, the connection was
+# refused, or the connection attempt timed out. Such a service stays dead for
+# the rest of the run, because asking it again at a brighter limit only
+# repeats the wait. A service that was reached but answered too slowly (a
+# read timeout, or no answer within the deadline) is NOT added: the brighter
+# limits ask for fewer stars and may finish in time. The set is cleared when
+# a new run starts (`reset_gaia_query_statistics`), so the next target tries
+# each service again. This is a design choice, not a measured limit.
+_gaia_unreachable_services: set[str] = set()
 
 # Cumulative per-process tallies, distinct from the consecutive-failure
 # counter above (which resets on any success). These record what the run
@@ -250,6 +264,67 @@ def _record_gaia_success() -> None:
         _gaia_consecutive_failures = 0
 
 
+def _is_connection_failure(error: BaseException) -> bool:
+    """Check whether an error means the server could not be reached at all.
+
+    A connection failure is a name that does not resolve, a refused or reset
+    connection, or a connection attempt that timed out. A read timeout (the
+    server was reached but was slow) and an error reply are not connection
+    failures. The error's causes are checked too, because the web libraries
+    wrap the low-level error.
+
+    Parameters
+    ----------
+    error : `BaseException`
+        The error a Gaia query raised.
+
+    Returns
+    -------
+    is_connection_failure : `bool`
+        True if the error, or one of its causes, is a connection failure.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, requests.exceptions.ReadTimeout):
+            return False
+        if isinstance(current, requests.exceptions.ConnectionError | ConnectionError | socket.gaierror):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _mark_gaia_service_unreachable(service: str) -> None:
+    """Remember that a Gaia service cannot be reached, so this run skips it.
+
+    Parameters
+    ----------
+    service : `str`
+        The service's name, as used in `_fetch_gaia_cone`.
+    """
+    with _gaia_failure_state_lock:
+        _gaia_unreachable_services.add(service)
+
+
+def _is_gaia_service_unreachable(service: str) -> bool:
+    """Check whether a Gaia service has already failed in this run.
+
+    Parameters
+    ----------
+    service : `str`
+        The service's name, as used in `_fetch_gaia_cone`.
+
+    Returns
+    -------
+    unreachable : `bool`
+        True if the service timed out or refused a connection since the run
+        started.
+    """
+    with _gaia_failure_state_lock:
+        return service in _gaia_unreachable_services
+
+
 def _fetch_gaia_cone(
     ra_center: float,
     dec_center: float,
@@ -262,8 +337,12 @@ def _fetch_gaia_cone(
 
     The order is VizieR, then the ESA Gaia archive, both at `max_magnitude`;
     then VizieR again at up to `GAIA_DEPTH_STEPS_DOWN` brighter limits. The
-    first answer wins. The whole attempt counts as one success or one failure
-    for the circuit breaker.
+    first answer wins. A service that cannot be reached (a connection
+    failure) is skipped for the rest of the run (see
+    `_gaia_unreachable_services`), so its later, brighter attempts are not
+    made. A service that was reached but was slow keeps its brighter
+    attempts. The whole attempt counts as one success or one failure for
+    the circuit breaker.
 
     Parameters
     ----------
@@ -320,6 +399,14 @@ def _fetch_gaia_cone(
             attempts.append(("ESA Gaia archive", magnitude, esa, GAIA_ESA_TIMEOUT_SECONDS))
 
     for service, magnitude, query, deadline in attempts:
+        if _is_gaia_service_unreachable(service):
+            logger.debug(
+                "Skipping Gaia %s from %s (G < %.1f): it failed earlier in this run.",
+                purpose,
+                service,
+                magnitude,
+            )
+            continue
         try:
             table = _run_with_daemon_thread_timeout(query, timeout_seconds=deadline)
         except ExternalServiceError:
@@ -334,6 +421,8 @@ def _fetch_gaia_cone(
             )
             continue
         except ONLINE_QUERY_ERRORS as error:
+            if _is_connection_failure(error):
+                _mark_gaia_service_unreachable(service)
             logger.warning("Gaia %s from %s failed (G < %.1f): %s", purpose, service, magnitude, error)
             continue
         _record_gaia_success()
@@ -390,16 +479,20 @@ def reset_gaia_circuit_breaker() -> None:
         _gaia_circuit_open = False
         _gaia_queries_attempted = 0
         _gaia_queries_failed = 0
+        _gaia_unreachable_services.clear()
 
 
 def reset_gaia_query_statistics() -> None:
-    """Reset the tracking stats back to zero for a new image.
+    """Reset the tracking stats back to zero for a new run.
 
     This does NOT reset the safety switch. If Gaia was offline for the
     last image, we assume it's still offline and don't bother trying again.
+    It does forget which services failed during the last run, so the new run
+    tries each service once more.
     """
     global _gaia_queries_attempted, _gaia_queries_failed
     with _gaia_failure_state_lock:
+        _gaia_unreachable_services.clear()
         _gaia_queries_attempted = 0
         _gaia_queries_failed = 0
 
@@ -1107,8 +1200,13 @@ class StarIdentifier:
         center_dec: float | None = None,
         maximum_identified_stars: int | None = None,
         target_name: str | None = None,
+        solve_only: bool = False,
     ) -> tuple[list[StellarObject], WCS | None]:
         """Run the full process: find the stars, map the image, and name them.
+
+        With `solve_only`, the process stops as soon as the solver has
+        answered: no Gaia refit, no SIMBAD or Gaia naming, and no online
+        query of any kind.
 
         Parameters
         ----------
@@ -1125,11 +1223,14 @@ class StarIdentifier:
             not solved: it names the star at the frame centre (see
             `_identify_stars_with_simbad`) and stops a planet from being
             given a star's name.
+        solve_only : `bool`, optional
+            If True, return the solver's solution as it is and skip every
+            step that asks an online catalog. The stars come back unnamed.
 
         Returns
         -------
         stellar_objects : `list` [`StellarObject`]
-            The final list of named stars.
+            The final list of named stars (unnamed when `solve_only`).
         wcs : `astropy.wcs.WCS` or `None`
             The map data, or None if the mapping process failed.
 
@@ -1246,7 +1347,7 @@ class StarIdentifier:
                 )
 
                 if solved_header:
-                    logger.info("Field solved! Querying SIMBAD...")
+                    logger.info("Field solved!" if solve_only else "Field solved! Querying SIMBAD...")
                     # The solver's own fit statistics, when it gave any. They
                     # are the residual the quality gate judges; the catalog
                     # match separation stays a separate, weaker number.
@@ -1257,6 +1358,8 @@ class StarIdentifier:
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore", FITSFixedWarning)
                         wcs = WCS(solved_header, naxis=2)
+                    if solve_only:
+                        return self.stellar_objects, wcs
                     wcs = self._refine_wcs_against_gaia(wcs, all_detected_sources, h, w)
                     self._identify_stars_with_simbad(wcs, center_ra, center_dec, w, h)
                 else:
@@ -1613,7 +1716,9 @@ class StarIdentifier:
         download covers this area, is at least as deep as `max_magnitude` and
         was not cut short by the row limit. Otherwise we download from the
         internet and save it, with a record of how it was fetched, for next
-        time.
+        time. If every remote service fails, the stars the cache holds in the
+        search box are returned instead (``meta["partial_cache"]`` is True),
+        since some stars beat none.
 
         Parameters
         ----------
@@ -1643,6 +1748,11 @@ class StarIdentifier:
             config, ra_center, dec_center, radius_deg, max_magnitude
         )
         if cached is not None:
+            logger.info(
+                "Gaia stars for (%.4f, %.4f) came from the local cache; no remote query.",
+                ra_center,
+                dec_center,
+            )
             return cached
 
         # We didn't find the stars in our local database. Like before, we
@@ -1658,6 +1768,14 @@ class StarIdentifier:
 
         result_table = StarIdentifier._download_gaia_region(ra_center, dec_center, radius_deg, max_magnitude)
 
+        if result_table is None:
+            # Every service failed. Stars already in the cache are real Gaia
+            # stars, so a partial answer beats none.
+            partial = StarIdentifier._query_gaia_region_from_cache(
+                config, ra_center, dec_center, radius_deg, max_magnitude, allow_partial=True
+            )
+            if partial is not None:
+                return partial
         if result_table is None or len(result_table) == 0:
             logger.info("No Gaia results for this region.")
             return None, None
@@ -1713,6 +1831,8 @@ class StarIdentifier:
         dec_center: float,
         radius_deg: float,
         max_magnitude: float = GAIA_DEFAULT_MAGNITUDE_LIMIT,
+        *,
+        allow_partial: bool = False,
     ) -> tuple[Any, SkyCoord] | None:
         """Look for cached Gaia DR3 sources covering this region.
 
@@ -1726,6 +1846,11 @@ class StarIdentifier:
             Cached stars fainter than this Gaia G magnitude are left out. A
             star stored without a magnitude (stored as 0) is kept. The cache
             is also used only if a recorded download is at least this deep.
+        allow_partial : `bool`, optional
+            If `True`, skip the completeness check and return whatever stars
+            the cache holds in the search box, marked
+            ``meta["partial_cache"] = True``. Used only when every remote
+            service has failed, so some stars may be missing.
 
         Returns
         -------
@@ -1749,7 +1874,7 @@ class StarIdentifier:
             # A star count says nothing about completeness: a region cut off
             # by the old 10,000-row limit, or downloaded to a brighter limit,
             # holds plenty of rows. Only a recorded download counts.
-            if not catalog_store.is_gaia_region_complete(
+            if not allow_partial and not catalog_store.is_gaia_region_complete(
                 config, ra_center, dec_center, radius_deg, max_magnitude
             ):
                 logger.debug(
@@ -1779,9 +1904,10 @@ class StarIdentifier:
 
             if cached_rows:
                 logger.info(
-                    "Loaded %s Gaia DR3 sources from local SQLite cache (%s).",
+                    "Loaded %s Gaia DR3 sources from local SQLite cache (%s)%s.",
                     len(cached_rows),
                     cache_db_path,
+                    " (partial: no complete download covers this field)" if allow_partial else "",
                 )
                 source_ids = [r[0] for r in cached_rows]
                 ras = [r[1] for r in cached_rows]
@@ -1798,6 +1924,8 @@ class StarIdentifier:
                 result_table.meta["proper_motion_known"] = StarIdentifier._table_has_proper_motion(
                     result_table
                 )
+                if allow_partial:
+                    result_table.meta["partial_cache"] = True
                 gaia_coords = SkyCoord(ra=np.array(ras) * u.deg, dec=np.array(decs) * u.deg)
                 return result_table, gaia_coords
         except (*DATA_ERRORS, sqlite3.Error, OSError) as e:
@@ -2247,6 +2375,8 @@ class StarIdentifier:
                 self._add_flag(FLAG_GAIA_ROW_LIMIT_REACHED)
             if gaia_table.meta.get("depth_reduced"):
                 self._add_flag(FLAG_GAIA_DEPTH_REDUCED)
+            if gaia_table.meta.get("partial_cache"):
+                self._add_flag(FLAG_GAIA_PARTIAL_CACHE)
             gaia_coords = self._move_gaia_coords_to_observation_epoch(gaia_table, gaia_coords)
 
         still_unmatched: list[StellarObject] = []

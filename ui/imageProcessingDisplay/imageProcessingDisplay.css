@@ -164,15 +164,6 @@
   user-select: none;
 }
 
-.fits-renderer__badge-type {
-  fill: var(--ubuntu-cyan, #33c7de);
-  font-family: var(--font-family-base, system-ui, sans-serif);
-  font-size: 10px;
-  font-weight: 500;
-  dominant-baseline: central;
-  user-select: none;
-}
-
 .fits-renderer__badge-action {
   fill: var(--adwaita-blue-light, #3584e4);
   font-family: var(--font-family-base, system-ui, sans-serif);
@@ -1606,4 +1597,29 @@
 .stack-comparison__status ul {
   margin: var(--space-1) 0;
   padding-left: var(--space-3);
+}
+
+/* Thin circles drawn on every identified star (the color is read by the canvas). */
+.fits-renderer__marker-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  color: var(--ubuntu-cyan);
+}
+
+/* Name shown when the pointer is over a star with no label. */
+.fits-renderer__star-tooltip {
+  position: absolute;
+  display: flex;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  background: var(--grey-darker);
+  border: 1px solid var(--ubuntu-cyan);
+  color: var(--text-primary);
+  font-size: 11px;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 5;
 }

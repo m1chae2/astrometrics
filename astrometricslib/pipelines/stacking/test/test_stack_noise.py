@@ -1432,7 +1432,7 @@ def test_the_real_stack_solve_turns_an_exception_into_a_reason(
         def __init__(self, drivers: object = None) -> None:
             """Accept the drivers the caller passes."""
 
-        def process(self, image: str, attempt_plate_solving: bool = True) -> None:
+        def solve_wcs(self, image: str) -> None:
             """Fail as the star identifier does for an unsolvable field.
 
             Raises
@@ -1449,6 +1449,99 @@ def test_the_real_stack_solve_turns_an_exception_into_a_reason(
     assert wcs is None
     assert "tried and failed" in reason
     assert "PlateSolveFailedError" in reason
+
+
+def test_the_real_stack_solve_uses_the_solve_only_path_and_logs_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The stack solve calls `solve_wcs`, never `process`, and logs it."""
+    from astrometricslib.pipelines.stacking.post_processing import stack_noise
+
+    calls: list[str] = []
+
+    class SolveOnlyPipeline:
+        """A pipeline that fails the test if the full process is used."""
+
+        def __init__(self, drivers: object = None) -> None:
+            """Accept the drivers the caller passes."""
+
+        def solve_wcs(self, image: str) -> WCS:
+            """Record the call and give a solution.
+
+            Returns
+            -------
+            wcs : `astropy.wcs.WCS`
+                The test solution.
+            """
+            calls.append(image)
+            return WCS(_sky_header())
+
+        def process(self, *arguments: object, **keywords: object) -> None:
+            """Fail: the full pipeline asks online catalogs.
+
+            Raises
+            ------
+            AssertionError
+                Always.
+            """
+            raise AssertionError("the noise step must not run the full astrometry process")
+
+    monkeypatch.setattr("astrometricslib.pipelines.astrometry.pipeline.AstrometryPipeline", SolveOnlyPipeline)
+    real = stack_noise._plate_solve_stack_wcs.real_function  # type: ignore[attr-defined]
+    with caplog.at_level("INFO"):
+        wcs, reason = real(str(tmp_path / "stack.fits"))
+    assert wcs is not None
+    assert reason == ""
+    assert calls == [str(tmp_path / "stack.fits")]
+    messages = [record.getMessage() for record in caplog.records]
+    assert "Solving the stack for its sky coordinates..." in messages
+    assert any(message.startswith("Solved in ") and message.endswith(" s.") for message in messages)
+
+
+def test_the_real_stack_solve_logs_when_it_finds_no_solution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A solve with no answer says it could not solve."""
+    from astrometricslib.pipelines.stacking.post_processing import stack_noise
+
+    class NoAnswerPipeline:
+        """A stand-in pipeline whose solve gives nothing."""
+
+        def __init__(self, drivers: object = None) -> None:
+            """Accept the drivers the caller passes."""
+
+        def solve_wcs(self, image: str) -> None:
+            """Give no solution."""
+            return
+
+    monkeypatch.setattr("astrometricslib.pipelines.astrometry.pipeline.AstrometryPipeline", NoAnswerPipeline)
+    real = stack_noise._plate_solve_stack_wcs.real_function  # type: ignore[attr-defined]
+    with caplog.at_level("INFO"):
+        wcs, reason = real(str(tmp_path / "stack.fits"))
+    assert wcs is None
+    assert "found no solution" in reason
+    messages = [record.getMessage() for record in caplog.records]
+    assert "Solving the stack for its sky coordinates..." in messages
+    assert any(
+        message.startswith("Could not solve the stack for its sky coordinates") for message in messages
+    )
+
+
+def test_the_noise_is_the_same_whether_the_solution_comes_from_the_header_or_the_solve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A solve on the same grid gives the same noise as the header."""
+    image = _sky_image(2.0, seed=1)
+    header_stack = _write(tmp_path / "header_stack.fits", image, _sky_header())
+    header_outcome = measure_stack_noise(header_stack, None, str(tmp_path / "header_apertures.json"))
+    _fake_stack_solver(monkeypatch, WCS(_sky_header()).celestial)
+    bare_stack = _write(tmp_path / "bare_stack.fits", image, None)
+    solved_outcome = measure_stack_noise(bare_stack, None, str(tmp_path / "solved_apertures.json"))
+    assert header_outcome.result is not None
+    assert solved_outcome.result is not None
+    assert solved_outcome.result.wcs_source == PLATE_SOLVE_WCS_SOURCE
+    assert solved_outcome.result.noise_adu == pytest.approx(header_outcome.result.noise_adu)
+    assert solved_outcome.result.aperture_count == header_outcome.result.aperture_count
 
 
 def test_a_stack_with_a_header_solution_is_solved_only_to_choose_a_set(

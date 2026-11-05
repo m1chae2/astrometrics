@@ -25,6 +25,7 @@ from typing import Any
 
 from astrometricslib.drivers import require_mounted_storage, scratch_directory, stop_process_group
 from astrometricslib.exceptions import ConfigurationError, ExternalServiceError
+from wayfindinglib.drivers.host_resolver import KnownHostAddress
 from wayfindinglib.drivers.interfaces.remote_transfer_driver import RemoteTransferDriver
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,9 @@ one call hold a thread (or an MCP reply) for minutes. Downloads do not use it;
 `_run_rsync` has its own limits.
 """
 
+_SSH_PORT = 22
+"""Port passed to the name lookup for the saved-address check."""
+
 _OFFLINE_REPROBE_SECONDS = 10.0
 """While the host is offline, recheck in the background this often."""
 
@@ -114,6 +118,7 @@ class StellarMateInterface(RemoteTransferDriver):
             Local frames directory base destination path.
         """
         self.host_alias = host_alias
+        self._known_address = KnownHostAddress(host_alias)
         self.remote_pictures_path = remote_pictures_path
         self.frames_path = frames_path
         self._last_connection_status = None  # None=Unknown, True=Online, False=Offline
@@ -125,6 +130,30 @@ class StellarMateInterface(RemoteTransferDriver):
     def driver_name(self) -> str:
         """Registry key for this driver."""
         return "stellarmate"
+
+    def _ssh_address_options(self) -> list[str]:
+        """Build the ssh options that reach the host by its saved address.
+
+        While the host name resolves, the list is empty and ssh uses the name
+        as before. While only the name lookup fails and an earlier address is
+        known, the options point ssh at that address. ``HostName`` replaces
+        only where ssh connects, so the user name and keys from the ssh
+        configuration still match the alias. ``HostKeyAlias`` makes ssh check
+        the host key under the alias, so ``known_hosts`` still matches and the
+        key check is not weakened.
+
+        Returns
+        -------
+        options : `list` [`str`]
+            Tokens to put right after ``ssh``, possibly empty.
+        """
+        if not self.host_alias:
+            return []
+        self._known_address.set_hostname(self.host_alias)
+        address = self._known_address.fallback_address(_SSH_PORT)
+        if address is None:
+            return []
+        return ["-o", f"HostName={address}", "-o", f"HostKeyAlias={self.host_alias}"]
 
     def _update_connection_status(self, is_online: bool, reason: str = "") -> None:
         """Update the internal connection status and log state changes.
@@ -212,6 +241,7 @@ class StellarMateInterface(RemoteTransferDriver):
             "ssh",
             "-N",
             *option_tokens,
+            *self._ssh_address_options(),
             "-L",
             f"127.0.0.1:{local_port}:localhost:{remote_port}",
             self.host_alias,
@@ -261,6 +291,7 @@ class StellarMateInterface(RemoteTransferDriver):
             cmd_list = cmd_list.copy()
             cmd_list.insert(1, "-o")
             cmd_list.insert(2, _SSH_CONNECT_TIMEOUT_OPTION)
+            cmd_list[3:3] = self._ssh_address_options()
 
         self._last_probe_time = time.time()
 
@@ -597,9 +628,12 @@ class StellarMateInterface(RemoteTransferDriver):
             ``--timeout``), and one that runs past
             `_RSYNC_OVERALL_LIMIT_SECONDS` is stopped.
         """
+        address_options = self._ssh_address_options()
+        remote_shell = ["-e", " ".join(["ssh", *address_options])] if address_options else []
         rsync_cmd = [
             "rsync",
             *_RSYNC_BASE_OPTIONS,
+            *remote_shell,
             f"--timeout={_RSYNC_STALL_TIMEOUT_SECONDS}",
             *extra_options,
             f"{self.host_alias}:{remote_path}",

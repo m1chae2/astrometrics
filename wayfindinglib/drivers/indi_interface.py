@@ -362,7 +362,8 @@ class IndiInterface(IndiClient):
         # first if host changed
         if self.isServerConnected():
             current_host = self.getHost()
-            if current_host != self.hostname:
+            known_address = self.connection_manager.known_address.cached_address
+            if current_host not in (self.hostname, known_address):
                 logger.info("Hostname changed from %s to %s. Reconnecting...", current_host, self.hostname)
                 self._expected_disconnect = True
                 self.disconnectServer()
@@ -400,6 +401,11 @@ class IndiInterface(IndiClient):
             logger.warning("No indiserver running on %s:%s", self.getHost(), self.getPort())
             self._reset_status()
             return None
+
+        # The name, or its last known address while the name lookup fails.
+        connect_address = self.connection_manager.connect_address
+        if connect_address and connect_address != self.getHost():
+            self.setServer(connect_address, self.getPort())
 
         if not self.connectServer():
             # Only print if we haven't already logged this recently
@@ -447,7 +453,11 @@ class IndiInterface(IndiClient):
             # is re-checked here too: the INDI client runs a background
             # thread that can flip it False concurrently with the
             # responsiveness probe above.
-            server_ok = self._is_server_responsive() and self.isServerConnected()
+            # One failed handshake is not enough to drop a working connection:
+            # only a run of them is (see `MAX_CONSECUTIVE_PROBE_FAILURES`). A
+            # lost connection itself shows in `isServerConnected()`.
+            self._is_server_responsive()
+            server_ok = not connection_manager.probe_failures_exhausted() and self.isServerConnected()
             if not server_ok and cooldown_elapsed:
                 self._reconnect(now)
 
@@ -476,6 +486,7 @@ class IndiInterface(IndiClient):
         _ensure_connection share one debounce timer.
         """
         self.connection_manager.last_connection_attempt = now
+        self.connection_manager.reset_probe_failures()
         if self.supports_rebuild:
             # A client object that lost its server is not trusted to
             # reconnect: after an indiserver restart a reused client kept

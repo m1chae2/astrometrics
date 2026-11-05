@@ -1,11 +1,26 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useStatusData } from './hooks/useStatusData';
+import { useGuidingRms } from './hooks/useGuidingRms';
 import { useSettingsModal } from './hooks/useSettingsModal';
+import { describeFrameCopy } from './hooks/useFrameCopyNotice';
 import { SettingsPanel } from './SettingsPanel';
 import { useAstrometrics } from '../common/context/AstrometricsContext';
+import { useOptionalTargetContext } from '../common/context/TargetContext';
 import { getEnabledDisplayModes } from '../common/constants/displayFlags';
 import './statusHeader.css';
+
+/** If the server's time left is lower than ours by more than this (ms), snap down to it. */
+const EXPOSURE_SNAP_DOWN_THRESHOLD_MS = 1000;
+
+/** If the server's time left is higher than ours by more than this (ms), a new frame started. */
+const EXPOSURE_NEW_FRAME_THRESHOLD_MS = 3000;
+
+/** Name of the view the telemetry strip opens. */
+const OBSERVATORY_MODE = 'Observatory Manager';
+
+/** Name of the view the Target item opens while the Observatory Manager is showing. */
+const IMAGE_PROCESSING_MODE = 'Image Processing';
 
 /**
  * Component representing the application's top status header and settings menu.
@@ -18,14 +33,28 @@ export const StatusHeader: React.FC = () => {
   } = useStatusData();
 
   const { config, telescope } = useAstrometrics();
+  const targetContext = useOptionalTargetContext();
 
   const { open: settingsOpen, closing: settingsClosing, handleOpen: handleOpenSettings, handleClose: handleCloseSettings } = useSettingsModal();
   const { altitude, azimuth, temperature, humidity, ra, dec, cameraTemperature, cameraStatus } = telemetry;
   const targetName = telescope?.targetName;
+  const guidingRms = useGuidingRms(telescope?.guidingHistory);
+  const guidingValueText = guidingRms ? `${guidingRms.total.toFixed(2)}″` : '—';
+  const guidingTooltip = guidingRms
+    ? `RA ${guidingRms.ra.toFixed(2)}″ · Dec ${guidingRms.dec.toFixed(2)}″`
+    : 'Guiding RMS: not guiding';
+
+  // New frames are copied to this computer after each exposure. Show that
+  // next to the camera state.
+  const frameCopy = describeFrameCopy(telescope?.frameCopy, targetName);
 
   // Real-time camera exposure countdown clock
   const [displayCameraStatus, setDisplayCameraStatus] = useState<string>(cameraStatus || 'Idle');
   const targetEndTimeRef = useRef<number | null>(null);
+  // The camera's own picture download (about a second at the end of each frame)
+  // is called "Downloading" by the backend. Here it reads "Reading out" so it
+  // is not mistaken for the copy of frames to this computer.
+  const shownCameraStatus = displayCameraStatus === 'Downloading' ? 'Reading out' : displayCameraStatus;
 
   useEffect(() => {
     if (!cameraStatus) {
@@ -40,13 +69,21 @@ export const StatusHeader: React.FC = () => {
       const now = Date.now();
       const newEndTime = now + remainingSec * 1000;
 
+      // The server value is rounded up and a little old, so it is usually a bit
+      // higher than our own countdown. Keep the local countdown unless the
+      // server clearly disagrees, otherwise the display steps back.
+      const differenceMs = targetEndTimeRef.current === null
+        ? null
+        : newEndTime - targetEndTimeRef.current;
       if (
-        targetEndTimeRef.current === null ||
-        Math.abs(targetEndTimeRef.current - newEndTime) > 1200
+        differenceMs === null ||
+        differenceMs < -EXPOSURE_SNAP_DOWN_THRESHOLD_MS ||
+        differenceMs > EXPOSURE_NEW_FRAME_THRESHOLD_MS
       ) {
         targetEndTimeRef.current = newEndTime;
       }
-      setDisplayCameraStatus(`Exposing (${Math.ceil(remainingSec)}s)`);
+      const localRemainingMs = (targetEndTimeRef.current ?? newEndTime) - now;
+      setDisplayCameraStatus(`Exposing (${Math.ceil(Math.max(localRemainingMs, 0) / 1000)}s)`);
     } else {
       targetEndTimeRef.current = null;
       setDisplayCameraStatus(cameraStatus);
@@ -142,6 +179,20 @@ export const StatusHeader: React.FC = () => {
 
   const availableModes = getEnabledDisplayModes(config);
 
+  // The telemetry strip is also a shortcut. In the Observatory Manager the strip
+  // does nothing, except that the Target item opens that target in Image Processing.
+  const inObservatory = selectedMode === OBSERVATORY_MODE;
+  const stripLabel = `Open ${OBSERVATORY_MODE}`;
+  const targetLabel = targetName ? `Open ${targetName} in ${IMAGE_PROCESSING_MODE}` : '';
+
+  /** Opens Image Processing with the header's target selected. */
+  const handleOpenTargetInImageProcessing = (): void => {
+    if (!targetName) return;
+    targetContext?.setSelectedTarget(targetName);
+    targetContext?.setPendingTarget(targetName);
+    chooseMode(IMAGE_PROCESSING_MODE);
+  };
+
   return (
     <>
       <div className="header" role="banner" aria-label="Application header">
@@ -209,7 +260,23 @@ export const StatusHeader: React.FC = () => {
             </div>
           </div>
 
-          <div className="header__right">
+          {/* Outside the Observatory Manager the whole strip opens it. The
+              mouse click is caught by the strip itself, so a click on any word
+              or number works and each item keeps its own tooltip. The hidden
+              button below is for the keyboard and screen readers: pressing
+              Enter on it sends a click that bubbles up to the strip. */}
+          <div
+            className={`header__right${inObservatory ? '' : ' header__right--clickable'}`}
+            onClick={inObservatory ? undefined : () => chooseMode(OBSERVATORY_MODE)}
+          >
+            {!inObservatory && (
+              <button
+                type="button"
+                className="header__strip-button"
+                aria-label={stripLabel}
+                title={stripLabel}
+              />
+            )}
             <div className="header__telemetry-item" title={`Mount: ${connTxt}, ${trackVal}`}>
               <span className={`header__status-dot header__status-dot--${connModifier}`} aria-hidden="true" />
               <span className={`header__telemetry-value header__telemetry-value--${trackModifier}`}>
@@ -221,6 +288,15 @@ export const StatusHeader: React.FC = () => {
               <>
                 <span className="header__divider" aria-hidden="true" />
                 <div className="header__telemetry-item" title="Identified Target Pointing">
+                  {inObservatory && (
+                    <button
+                      type="button"
+                      className="header__target-button"
+                      aria-label={targetLabel}
+                      title={targetLabel}
+                      onClick={handleOpenTargetInImageProcessing}
+                    />
+                  )}
                   <span className="header__telemetry-label">TARGET</span>
                   <span className="header__telemetry-value header__telemetry-value--coord" style={{ color: '#00ffff', fontWeight: 600 }}>
                     {targetName}
@@ -244,8 +320,14 @@ export const StatusHeader: React.FC = () => {
                       color: displayCameraStatus && /expos/i.test(displayCameraStatus) ? '#38bdf8' : '#e2e8f0',
                     }}
                   >
-                    {displayCameraStatus || 'Idle'}
+                    {shownCameraStatus || 'Idle'}
                   </span>
+                  {frameCopy && (
+                    <span className="header__frame-copy" title={frameCopy.description} data-testid="frame-copy">
+                      <span aria-hidden="true">· {frameCopy.text}</span>
+                      <span className="header__visually-hidden">{frameCopy.description}</span>
+                    </span>
+                  )}
                   {cameraTemperature && cameraTemperature !== '-' && (
                     <span
                       className="header__telemetry-value"
@@ -257,6 +339,22 @@ export const StatusHeader: React.FC = () => {
                 </div>
               </>
             )}
+
+            <span className="header__divider hide-mobile" aria-hidden="true" />
+            <div
+              className="header__telemetry-item hide-mobile"
+              title={guidingTooltip}
+              aria-label={`Guiding RMS ${guidingRms ? guidingValueText + ', ' + guidingTooltip : 'unavailable'}`}
+              role="group"
+            >
+              <span className="header__telemetry-label" aria-hidden="true">GUIDE</span>
+              <span
+                className={`header__telemetry-value ${guidingRms ? '' : 'header__telemetry-value--muted'}`}
+                data-testid="guiding-rms-value"
+              >
+                {guidingValueText}
+              </span>
+            </div>
 
             <span className="header__divider" aria-hidden="true" />
 

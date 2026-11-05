@@ -53,11 +53,63 @@
 }
 
 .header__right {
+  position: relative;
   display: flex;
   gap: 12px;
   align-items: center;
   flex-wrap: nowrap;
   overflow: visible;
+}
+
+/* Outside the Observatory Manager the whole strip is clickable. The strip
+   itself takes the click, so every word and number works and keeps its own
+   tooltip. The highlight is drawn behind the text and reaches a little past
+   the edges with a shadow of the same color. */
+.header__right--clickable {
+  cursor: pointer;
+  border-radius: var(--radius-md);
+}
+
+.header__right--clickable:hover,
+.header__right--clickable:has(> .header__strip-button:focus-visible) {
+  background: var(--surface-hover);
+  box-shadow: 0 0 0 6px var(--surface-hover);
+}
+
+/* The hidden button for the keyboard and screen readers. The mouse passes
+   through it to the strip. */
+.header__strip-button {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  pointer-events: none;
+}
+
+.header__strip-button:focus-visible {
+  outline: none;
+}
+
+/* The Target item sits above the strip button so it can have its own action. */
+.header__telemetry-item:has(> .header__target-button) {
+  position: relative;
+  z-index: 1;
+}
+
+.header__target-button {
+  position: absolute;
+  inset: -6px -8px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  cursor: pointer;
+}
+
+.header__target-button:hover,
+.header__target-button:focus-visible {
+  background: var(--surface-hover);
 }
 
 .header__settings {
@@ -320,6 +372,26 @@
 
 .header__telemetry-value--exposing {
   color: #38bdf8;
+}
+
+/* Small muted text after the camera state while new frames are being copied. */
+.header__frame-copy {
+  color: var(--text-muted, #888);
+  font-weight: 400;
+}
+
+/* Text for screen readers only. */
+.header__visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.header__telemetry-value--muted {
+  color: var(--text-muted, #888);
 }
 
 .header__telemetry-value--coord {

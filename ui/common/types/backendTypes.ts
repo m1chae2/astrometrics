@@ -971,6 +971,16 @@ export interface PhotometryResult {
 }
 
 /**
+ * Progress of copying new frames of a target to this computer.
+ */
+export interface FrameCopyPulse {
+  active?: boolean;
+  targetId?: string | null;
+  measured?: number | null;
+  total?: number | null;
+}
+
+/**
  * Lightweight snapshot of current telescope state for polling.
  */
 export interface TelescopePulse {
@@ -992,6 +1002,7 @@ export interface TelescopePulse {
   cameraTemperature?: string | null;
   cameraStatus?: string | null;
   targetName?: string | null;
+  frameCopy?: FrameCopyPulse | null;
 }
 
 /**
@@ -5889,6 +5900,8 @@ export const UI_EVENTS = {
   "catalog:changed": "catalog:changed",
   /** A frame measurement job stored new quality rows. The payload is {targetId, framesMeasured, rowsWritten, observingNightIds}. */
   "quality:measured": "quality:measured",
+  /** An automatic download of a finished camera frame added frames to the library. The payload is {targetId, framesAdded}. */
+  "library:frames_updated": "library:frames_updated",
   /** A write changed the night plan. The payload is {sessionId, revision, changed}, where revision is the plan revision now stored and changed lists the kind of each change. */
   "plan:changed": "plan:changed",
   /** A write created, edited, reopened, dismissed, brought back, re-framed, deleted or promoted an observation package, or a suggestion refresh ran. The payload is {packageId, targetId, kind, revision}; kind says which, and a promotion has no revision. After a refresh, kind is "refreshed", packageId and targetId are null, and the payload adds the counts added, updated, deleted, completed, reverted and checklistItemsAdded, and the ids deletedPackageIds (suggestions removed) and completedPackageIds. */

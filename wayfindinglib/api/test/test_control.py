@@ -871,12 +871,12 @@ def test_remote_methods_delegate_to_the_task_module(
         "measurements": [],
     }
     remote_transfer_tasks.download_remote_targets.assert_called_once_with(
-        context, "M 81", local_path="/local/M81", measurement_summaries=[]
+        context, "M 81", local_path="/local/M81", measurement_summaries=[], on_copied=None
     )
     assert control.remote.sync_frames("Dark").model_dump() == {"success": True}
     remote_transfer_tasks.sync_calibration_folder.assert_called_once_with(context, "Dark")
     assert control.remote.sync_frames("M 81", dry_run=True).model_dump() == {"dry_run": True}
-    remote_transfer_tasks.sync_target_frames.assert_called_once_with(context, "M 81", True)
+    remote_transfer_tasks.sync_target_frames.assert_called_once_with(context, "M 81", True, None)
     assert control.remote.sync_frames(register_job=False).model_dump() == {"succeeded": []}
     remote_transfer_tasks.sync_all_remote_folders.assert_called_once_with(context, None, False)
 

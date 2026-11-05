@@ -273,6 +273,12 @@ class JobHandle:
             logger.debug("Could not update job '%s' to '%s': %s", self.job_id, status, update_error)
 
 
+#: The (job id, absolute log file path) pairs that have a file sink right now,
+#: so a run nested inside a job does not open a second handler on the job's
+#: own file, which would write every line twice.
+_open_log_files: set[tuple[str, str]] = set()
+_open_log_files_lock = threading.Lock()
+
 #: The library packages whose messages reach a job's log even when the work
 #: that wrote them lost the job's log context, such as a worker thread that
 #: was started without copying it.
@@ -319,7 +325,17 @@ def capture_job_logs(
         The block runs with the job's log context.
     """
     sinks: list[logging.Handler] = []
+    file_key: tuple[str, str] | None = None
     if log_file_path:
+        candidate_key = (job_id, os.path.abspath(log_file_path))
+        with _open_log_files_lock:
+            # A nested capture for the same job and file adds nothing: the
+            # outer capture already writes there, and a second handler would
+            # write each line twice.
+            if candidate_key not in _open_log_files:
+                _open_log_files.add(candidate_key)
+                file_key = candidate_key
+    if log_file_path and file_key is not None:
         log_directory = os.path.dirname(log_file_path)
         if log_directory:
             os.makedirs(log_directory, exist_ok=True)
@@ -342,6 +358,9 @@ def capture_job_logs(
                 handler.close()
             except OSError as close_error:
                 logger.debug("Could not close a job log handler: %s", close_error)
+        if file_key is not None:
+            with _open_log_files_lock:
+                _open_log_files.discard(file_key)
 
 
 def _create_job_row(*, job_type: str, target_id: str, log_file: str | None) -> tuple[str, str, JobStore]:

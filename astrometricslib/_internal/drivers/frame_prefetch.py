@@ -15,6 +15,7 @@ The step is optional and off by default (``prefetch_frames`` in
 counted, never raised: Siril will report the real error for that file later.
 """
 
+import contextvars
 import logging
 import os
 import time
@@ -114,7 +115,11 @@ def prefetch_frames(
     report_progress = len(existing_paths) >= PROGRESS_MINIMUM_FILES
 
     with ThreadPoolExecutor(max_workers=max(1, worker_count)) as executor:
-        futures = {executor.submit(_read_whole_file, path, chunk_bytes): path for path in existing_paths}
+        # Each read runs in a copy of the caller's log context.
+        futures = {
+            executor.submit(contextvars.copy_context().run, _read_whole_file, path, chunk_bytes): path
+            for path in existing_paths
+        }
         finished = 0
         for future in as_completed(futures):
             finished += 1

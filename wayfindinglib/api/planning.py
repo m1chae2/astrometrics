@@ -794,7 +794,9 @@ class ObservationPlanning:
     ) -> CalibrationAdvisory:
         """Say how many calibration frames of one kind the library holds.
 
-        The count is worked out on demand and never stored.
+        The count is worked out on demand from the calibration library's
+        own index of files, the same source the Calibration Library view
+        shows. It is never stored.
 
         Parameters
         ----------
@@ -823,12 +825,8 @@ class ObservationPlanning:
         """
         from wayfindinglib.tasks.planning_tasks.calibration_advisory_tasks import build_calibration_advisory
 
-        tolerance = None
-        if FrameType(frame_type) == FrameType.DARK and temperature_c is not None:
-            answer = self._astrometrics.processing.calibration.query(kind="dark")
-            tolerance = answer.dark_temperature_tolerance_c
         return build_calibration_advisory(
-            self._butler,
+            self._astrometrics.processing.calibration,
             camera_id,
             FrameType(frame_type),
             exposure_seconds,
@@ -837,7 +835,6 @@ class ObservationPlanning:
             offset=offset,
             binning=binning,
             sensor_temperature_c=temperature_c,
-            dark_temperature_tolerance_c=tolerance,
         )
 
     # -- Mosaics -------------------------------------------------------------

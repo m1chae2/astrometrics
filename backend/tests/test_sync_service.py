@@ -7,6 +7,7 @@ reply into the shape the app shows.
 """
 
 import threading
+from collections.abc import Callable
 from types import SimpleNamespace
 
 from backend.services.infrastructure import thread_management
@@ -21,8 +22,8 @@ class _Remote:
         self.synced: list[str] = []
         self.release = threading.Event()
 
-    def sync_frames(self, target: str) -> SimpleNamespace:
-        """Record the target and wait to be released.
+    def sync_frames(self, target: str, on_copied: Callable[[int], None] | None = None) -> SimpleNamespace:
+        """Record the target, report 2 copied frames and wait to be released.
 
         Returns
         -------
@@ -30,6 +31,8 @@ class _Remote:
             A successful sync with no measurements.
         """
         self.synced.append(target)
+        if on_copied is not None:
+            on_copied(2)
         self.release.wait(timeout=5.0)
         return SimpleNamespace(success=True, measurements=None)
 
@@ -72,3 +75,22 @@ def test_the_log_sync_reply_keeps_the_apps_shape() -> None:
     assert reply["guideLogsDownloaded"] == 3
     assert reply["guidingSamplesIngested"] == 42
     assert reply["fitsSolvesRecorded"] == 0
+
+
+def test_new_frames_are_announced_when_copied_not_when_the_sync_ends() -> None:
+    """The UI event goes out from the copy callback, before the sync ends."""
+    events: list[tuple[str, dict]] = []
+    socket_manager = SimpleNamespace(
+        broadcast_ui_event_sync=lambda action, payload: events.append((action, payload))
+    )
+    remote = _Remote()
+    service = SyncService(observatory_api=SimpleNamespace(remote=remote), socket_manager=socket_manager)
+
+    service.start_sync("M 31")
+    thread_management._syncing["M 31"].join(timeout=0.5)
+    assert service.is_syncing("M 31") is True
+    assert events == [("library:frames_updated", {"targetId": "M 31", "framesAdded": 2})]
+
+    remote.release.set()
+    thread_management._syncing["M 31"].join(timeout=5.0)
+    assert len(events) == 1

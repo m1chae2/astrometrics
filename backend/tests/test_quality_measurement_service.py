@@ -249,8 +249,11 @@ class _Remote:
         self.fail = fail
         self.measurements = measurements if measurements is not None else []
 
-    def sync_frames(self, target: str) -> SimpleNamespace:
+    def sync_frames(self, target: str, on_copied: object = None) -> SimpleNamespace:
         """Finish, or fail.
+
+        ``on_copied`` is accepted and ignored, like a sync that copied
+        nothing.
 
         Returns
         -------

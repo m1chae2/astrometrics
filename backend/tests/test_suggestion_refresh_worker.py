@@ -198,7 +198,7 @@ def test_a_failing_trigger_never_breaks_the_announcement() -> None:
 def test_a_finished_target_sync_asks_for_a_refresh_and_a_calibration_sync_does_not() -> None:
     """A target sync triggers a refresh for it; a Flat folder sync does not."""
     triggers: list[list[str]] = []
-    remote = SimpleNamespace(sync_frames=lambda object_id: {})
+    remote = SimpleNamespace(sync_frames=lambda object_id, on_copied=None: {})
     service = SyncService(SimpleNamespace(remote=remote), suggestion_trigger=triggers.append)
 
     service._trigger_suggestions("M 81")
@@ -212,7 +212,7 @@ def test_the_sync_thread_triggers_after_the_library_sync() -> None:
     from backend.services.infrastructure import thread_management
 
     triggers: list[list[str]] = []
-    remote = SimpleNamespace(sync_frames=lambda object_id: {})
+    remote = SimpleNamespace(sync_frames=lambda object_id, on_copied=None: {})
     service = SyncService(SimpleNamespace(remote=remote), suggestion_trigger=triggers.append)
 
     service.start_sync("M 42")

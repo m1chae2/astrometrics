@@ -232,6 +232,10 @@ class JobLogRouter(logging.Handler):
     without copying it, cannot be told apart. A record from such work is sent
     to every registered sink, but only if its logger belongs to one of the
     packages the sink registered for (`package_logger_names`).
+
+    A record that carries a request id but no job id was written by work for
+    a request, such as one made by the user interface while a job runs. It
+    belongs to that request, so it is never copied into a job's log.
     """
 
     def __init__(self) -> None:
@@ -303,6 +307,10 @@ class JobLogRouter(logging.Handler):
                     if job_id in job_ids
                     for handler in handlers
                 ]
+            elif getattr(record, "request_id", None):
+                # Work for a request, not for a job: leave it out of every
+                # job's log.
+                sinks = []
             else:
                 sinks = [
                     handler

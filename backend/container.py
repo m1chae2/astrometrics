@@ -54,6 +54,7 @@ class Container:
         self.stack_review_service = None
         self.socket_manager = None
         self.telescope_service = None
+        self.auto_download_service = None
         self.notification_service = None
         self.handoff_service = None
         self.settings_service = None
@@ -108,6 +109,8 @@ class Container:
         """
         if self.maintenance_service is not None:
             self.maintenance_service.stop()
+        if self.auto_download_service is not None:
+            self.auto_download_service.stop()
         if self.astrometrics is not None:
             try:
                 self.astrometrics.processing.stop_stacking_programs()
@@ -252,7 +255,22 @@ class Container:
             observatory_api=self.wayfinder.control,
             measurement_announcer=self.quality_measurement_service,
             suggestion_trigger=self.suggestion_refresh_worker.request,
+            socket_manager=self.socket_manager,
         )
+
+        # The telescope status reports a running copy of new frames.
+        self.telescope_service.set_frame_copy_sources(self.sync_service, self.job_service)
+
+        # Copy each finished camera frame into the library. Off in tests, which
+        # have no observatory computer to copy from.
+        if not testing:
+            from backend.services.observatory.auto_download_service import AutoDownloadService
+
+            self.auto_download_service = AutoDownloadService(
+                sync_service=self.sync_service,
+                is_enabled=self.config_service.get_auto_download_frames,
+            )
+            self.telescope_service.set_auto_download_service(self.auto_download_service)
 
         from backend.services.observatory.imaging_service import ImagingService
 

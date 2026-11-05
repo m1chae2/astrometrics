@@ -151,6 +151,23 @@ def test_a_nested_capture_of_the_same_job_writes_each_line_once(isolated_logs: s
     assert inner_file.read_text().count("one line") == 1
 
 
+def test_a_nested_capture_on_the_same_file_writes_each_line_once(isolated_logs: str) -> None:
+    """Verify a Siril run on its job log file writes each line once."""
+    from astrometricslib.foundation.jobs.runner import capture_job_logs
+
+    siril_logger = logging.getLogger("astrometricslib._internal.drivers.siril_interface.imaging_stacker")
+    with registered_job(enabled=True, job_type="analysis", target_id="Vega") as job:
+        with capture_job_logs(job_id=job.job_id, log_file_path=job.log_file_path):
+            siril_logger.info("log: Conversion succeeded")
+        siril_logger.info("log: after the run")
+        for handler in _job_sinks(job.job_id):
+            handler.flush()
+        with open(job.log_file_path) as log_file:
+            text = log_file.read()
+    assert text.count("log: Conversion succeeded") == 1
+    assert text.count("log: after the run") == 1
+
+
 def test_the_log_files_are_closed_not_just_detached(isolated_logs: str) -> None:
     """Verify the opened log file is actually closed on the way out.
 

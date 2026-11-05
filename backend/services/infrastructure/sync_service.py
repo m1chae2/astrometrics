@@ -34,6 +34,7 @@ class SyncService:
         observatory_api: ObservatoryControl,
         measurement_announcer: MeasurementAnnouncer | None = None,
         suggestion_trigger: Callable[[list[str]], None] | None = None,
+        socket_manager: Any = None,
     ) -> None:
         """Keep the observatory control.
 
@@ -48,18 +49,31 @@ class SyncService:
             Called with the synced target's id when a target sync finishes,
             so the package suggestions can be refreshed (new frames change
             what is complete). It must not raise; a failure is logged here too.
+        socket_manager : `SocketManager`, optional
+            Sends the ``library:frames_updated`` event as soon as new frames
+            are copied and indexed, before they are measured. None sends
+            nothing.
         """
         self._observatory = observatory_api
         self._measurement_announcer = measurement_announcer
         self._suggestion_trigger = suggestion_trigger
+        self._socket_manager = socket_manager
 
-    def start_sync(self, object_id: str) -> dict[str, Any]:
+    def start_sync(
+        self,
+        object_id: str,
+        on_finished: Callable[[str, Any], None] | None = None,
+    ) -> dict[str, Any]:
         """Start copying one target's (or calibration folder's) new frames.
 
         Parameters
         ----------
         object_id : `str`
             The target, or ``Bias``, ``Dark`` or ``Flat``.
+        on_finished : `Callable` [[`str`, `Any`], `None`], optional
+            Called on the sync thread when the sync ends, with the id and the
+            sync's result (`None` when the sync failed). It must not raise;
+            a failure is logged here. The app's own sync button passes none.
 
         Returns
         -------
@@ -69,19 +83,55 @@ class SyncService:
 
         def run() -> None:
             """Copy the frames; the top of a background thread."""
+            result = None
             try:
-                result = self._observatory.remote.sync_frames(object_id)
+
+                def announce_copied(frames_added: int) -> None:
+                    """Tell the app the new frames are in the library."""
+                    self._announce_frames_updated(object_id, frames_added)
+
+                result = self._observatory.remote.sync_frames(object_id, on_copied=announce_copied)
                 self._announce_measurements(object_id, result)
                 self._trigger_suggestions(object_id)
             except AstrometricsError as error:
+                result = None
                 logger.warning("Sync of %s failed (%s): %s", object_id, error.code, error.message)
             except Exception:  # the top of a background thread: log it, never lose it
+                result = None
                 logger.exception("Sync of %s failed", object_id)
+            if on_finished is not None:
+                try:
+                    on_finished(object_id, result)
+                except Exception:  # a listener must never break the sync thread: log it
+                    logger.exception("The finish listener of the %s sync failed", object_id)
 
         sync_thread = threading.Thread(target=run, name=f"sync-{object_id}", daemon=True)
         sync_thread.start()
         thread_management._syncing[object_id] = sync_thread
         return {"started": True, "target_id": object_id}
+
+    def _announce_frames_updated(self, object_id: str, frames_added: int) -> None:
+        """Tell the app that frames were added, so its frame lists reload.
+
+        This runs after the copy and re-index, before the frames are
+        measured, so a new frame shows up at once. A failure is logged and
+        never changes the sync's result.
+
+        Parameters
+        ----------
+        object_id : `str`
+            The target (or calibration folder) that was synced.
+        frames_added : `int`
+            How many frames the sync added.
+        """
+        if self._socket_manager is None:
+            return
+        try:
+            self._socket_manager.broadcast_ui_event_sync(
+                "library:frames_updated", {"targetId": object_id, "framesAdded": int(frames_added)}
+            )
+        except Exception:  # an announcement must never fail the sync: log it
+            logger.exception("Could not announce the new frames of the %s sync", object_id)
 
     def _trigger_suggestions(self, object_id: str) -> None:
         """Ask for a suggestion refresh after a target's frames arrived.

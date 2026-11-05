@@ -49,3 +49,38 @@ def test_remote_port_defaults_to_4400_and_can_be_overridden() -> None:
     """The remote PHD2 port is 4400 unless the setting says otherwise."""
     assert _configuration({}).get_phd2_remote_port() == 4400
     assert _configuration({("Observatory.Guiding", "phd2_port"): "4401"}).get_phd2_remote_port() == 4401
+
+
+def _auto_download_configuration(values: dict[tuple[str, str], str]) -> AppConfiguration:
+    """Build a configuration whose ``getboolean`` answers from `values`.
+
+    Returns
+    -------
+    configuration : `AppConfiguration`
+        An object whose settings come from `values`.
+    """
+    configuration = _configuration(values)
+    configuration.app_config.getboolean.side_effect = lambda section, key, fallback=None: (
+        str(values[section, key]).lower() in ("true", "1", "yes", "on")
+        if (section, key) in values
+        else fallback
+    )
+    return configuration
+
+
+def test_auto_download_defaults_on_for_stellarmate_and_off_otherwise() -> None:
+    """With no setting, the automatic download follows the transfer driver."""
+    assert _auto_download_configuration({}).get_auto_download_frames() is True
+    other = _auto_download_configuration({("Observatory.RemoteTransfer", "driver"): "other"})
+    assert other.get_auto_download_frames() is False
+
+
+def test_auto_download_explicit_value_wins() -> None:
+    """An explicit ``auto_download`` setting overrides the driver default."""
+    off = _auto_download_configuration({("Observatory.RemoteTransfer", "auto_download"): "false"})
+    assert off.get_auto_download_frames() is False
+    on = _auto_download_configuration({
+        ("Observatory.RemoteTransfer", "driver"): "other",
+        ("Observatory.RemoteTransfer", "auto_download"): "true",
+    })
+    assert on.get_auto_download_frames() is True

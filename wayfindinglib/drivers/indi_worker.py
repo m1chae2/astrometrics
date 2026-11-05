@@ -41,6 +41,7 @@ from multiprocessing.process import BaseProcess
 from typing import Any
 
 from astrometricslib.exceptions import HardwareError
+from wayfindinglib.drivers.indi.pyindi_compatibility import INDI_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,7 @@ def _worker_main(testing: bool, command_queue: Queue, result_queue: Queue, paren
         else:
             from wayfindinglib.drivers.indi_interface import IndiInterface
 
-            session = IndiInterface(config=config)
+            session = RebuildingSession(lambda: IndiInterface(config=config))
     except Exception:
         # This is the top of the worker process, so any error has to stop
         # here. The traceback is logged, and the loop below still runs so
@@ -106,6 +107,88 @@ def _worker_main(testing: bool, command_queue: Queue, result_queue: Queue, paren
         logger.exception("INDI worker failed to build its session")
 
     serve_requests(session, command_queue, result_queue, parent_pid)
+
+
+class RebuildingSession:
+    """Holds the INDI client and swaps in a new one when it goes stale.
+
+    A `PyIndi.BaseClient` that has lost its server is not reliable to reuse:
+    after an indiserver restart, the long-lived client kept connecting and
+    being dropped about 6 seconds later, while a new client connected fine.
+    So when the client asks (`stale_client`), this holder closes it, builds
+    a new one from `factory`, and connects. The swap runs on the worker's
+    request thread, after the call that asked for it has returned, never on
+    PyIndi's callback thread. Every other attribute is passed through to the
+    current client.
+    """
+
+    def __init__(self, factory: Any) -> None:
+        """Build the first client.
+
+        Parameters
+        ----------
+        factory : `Callable`
+            Returns a new, unconnected client each time it is called.
+        """
+        self._factory = factory
+        self._client = self._new_client()
+
+    def _new_client(self, previous: Any = None) -> Any:
+        """Build a client and carry the retry timing over from `previous`.
+
+        Returns
+        -------
+        client : `Any`
+            The new client, marked as able to be replaced.
+        """
+        client = self._factory()
+        client.supports_rebuild = True
+        if previous is not None:
+            old_timing = previous.connection_manager
+            new_timing = client.connection_manager
+            new_timing.last_connection_attempt = old_timing.last_connection_attempt
+            new_timing.connection_cooldown = old_timing.connection_cooldown
+            new_timing.consecutive_failures = old_timing.consecutive_failures
+            client._connection_loss_reported = previous._connection_loss_reported
+        return client
+
+    def _replace_client_if_stale(self) -> None:
+        """Swap in a new connected client if the current one asked for it."""
+        old = self._client
+        if not getattr(old, "stale_client", False):
+            return
+        try:
+            old._expected_disconnect = True
+            old.disconnectServer()
+        except INDI_ERRORS as close_error:
+            # The old client is being dropped anyway, so closing it is best
+            # effort.
+            logger.debug("Closing the stale INDI client failed: %s", close_error)
+        self._client = self._new_client(old)
+        del old
+        self._client.connect_to_server()
+        self._client.connection_manager.record_connection_result(self._client.isServerConnected())
+
+    def __getattr__(self, name: str) -> Any:
+        """Pass `name` to the current client; swap clients after a method call.
+
+        Returns
+        -------
+        attribute : `Any`
+            The client's attribute, or for a method a wrapper that runs it
+            and then replaces the client if it went stale.
+        """
+        attribute = getattr(self._client, name)
+        if not callable(attribute):
+            return attribute
+
+        def _call(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return attribute(*args, **kwargs)
+            finally:
+                self._replace_client_if_stale()
+
+        return _call
 
 
 def serve_requests(session: Any, command_queue: Queue, result_queue: Queue, parent_pid: int) -> None:

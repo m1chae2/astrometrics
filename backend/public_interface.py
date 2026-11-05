@@ -280,6 +280,11 @@ UI_EVENTS: tuple[UiEvent, ...] = (
         "{targetId, framesMeasured, rowsWritten, observingNightIds}.",
     ),
     UiEvent(
+        "library:frames_updated",
+        "An automatic download of a finished camera frame added frames to the library. The payload is "
+        "{targetId, framesAdded}.",
+    ),
+    UiEvent(
         "plan:changed",
         "A write changed the night plan. The payload is {sessionId, revision, changed}, where "
         "revision is the plan revision now stored and changed lists the kind of each change.",

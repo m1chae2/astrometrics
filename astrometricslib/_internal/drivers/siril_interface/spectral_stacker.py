@@ -6,6 +6,7 @@ Siril run. `SirilSpectralStacker` is the layer of the driver class
 `ImageProcessing` that does this.
 """
 
+import contextvars
 import glob
 import logging
 import os
@@ -165,7 +166,9 @@ class SirilSpectralStacker(SirilStaging):
                 process=process,
             )
 
-        calibration_writer = threading.Thread(target=write_calibration_commands, daemon=True)
+        calibration_writer = threading.Thread(
+            target=contextvars.copy_context().run, args=(write_calibration_commands,), daemon=True
+        )
         calibration_writer.start()
         # No stack command was sent, so this only ever reaches Siril's
         # own exit and returns None; it is read for its side effect of
@@ -244,7 +247,9 @@ class SirilSpectralStacker(SirilStaging):
                 process=stack_process,
             )
 
-        stack_writer = threading.Thread(target=write_stack_commands, daemon=True)
+        stack_writer = threading.Thread(
+            target=contextvars.copy_context().run, args=(write_stack_commands,), daemon=True
+        )
         stack_writer.start()
         res = self.read_output(
             stack_output_pipe,

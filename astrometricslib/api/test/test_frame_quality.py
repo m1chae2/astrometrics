@@ -7,7 +7,7 @@ kind, the newest-frames limit, the summary, and above all that the saved
 target is never changed.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any
 from unittest.mock import patch
 
@@ -53,6 +53,19 @@ def _fake_measure(
         frame.measurements.background_level = 300.0 + number
         frame.measurements.saturated_pixel_fraction = 0.001 * (number + 1)
     return {"measured": len(working.frames), "skipped": 0, "failed": 0}
+
+
+@pytest.fixture(autouse=True)
+def no_stored_sky_rates() -> Iterator[None]:
+    """Stop the tests from opening the quality database.
+
+    Yields
+    ------
+    None
+        Control, while the stored-rate lookup returns no rates.
+    """
+    with patch.object(QualityRecords, "_stored_sky_rates", return_value={}):
+        yield
 
 
 @pytest.fixture

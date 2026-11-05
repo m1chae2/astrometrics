@@ -1619,6 +1619,25 @@ class AppConfiguration:
         """
         return self.app_config.get("Observatory.RemoteTransfer", "driver", fallback="stellarmate")
 
+    def get_auto_download_frames(self) -> bool:
+        """Return whether finished camera frames are copied by themselves.
+
+        The key is ``auto_download`` in ``Observatory.RemoteTransfer``. When
+        it is not set, the answer is `True` if the remote-transfer driver is
+        ``"stellarmate"`` (the camera runs on the observatory computer) and
+        `False` otherwise. The value is read on every call, so a change in
+        the settings file applies without a restart.
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` when a finished frame should start a download.
+        """
+        default = self.get_remote_transfer_driver_name() == "stellarmate"
+        return bool(
+            self.app_config.getboolean("Observatory.RemoteTransfer", "auto_download", fallback=default)
+        )
+
     def get_phd2_location(self) -> str:
         """Return where PHD2 runs: ``"observatory"`` or ``"local"``.
 

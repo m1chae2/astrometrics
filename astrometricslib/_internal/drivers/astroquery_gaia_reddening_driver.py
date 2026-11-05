@@ -52,6 +52,7 @@ once, so a run without a connection does not wait for a timeout on every
 star.
 """
 
+import contextvars
 import logging
 import math
 import threading
@@ -328,7 +329,7 @@ def _run_with_timeout(run_query: Callable[[str], Any], adql_query: str, timeout_
         except ONLINE_QUERY_ERRORS as query_error:
             outcome["error"] = query_error
 
-    worker = threading.Thread(target=work, daemon=True)
+    worker = threading.Thread(target=contextvars.copy_context().run, args=(work,), daemon=True)
     worker.start()
     worker.join(timeout_seconds)
     if worker.is_alive():

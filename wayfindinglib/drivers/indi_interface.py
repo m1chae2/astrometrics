@@ -287,6 +287,13 @@ class IndiInterface(IndiClient):
         self.connection_manager = ConnectionManager(config.get_indi_host(), config.get_indi_port())
         self.device_discovery = DeviceDiscovery(self)
 
+        # Fresh-client recovery (see `_reconnect`). The worker sets
+        # `supports_rebuild` when it can swap in a new client object.
+        self.supports_rebuild: bool = False
+        self.stale_client: bool = False
+        self._connection_loss_reported: bool = False
+        self._expected_disconnect: bool = False
+
         self._reset_status()
         # self._ensure_connection() is removed to prevent blocking startup.
         # Connection will be established lazily on first use.
@@ -357,6 +364,7 @@ class IndiInterface(IndiClient):
             current_host = self.getHost()
             if current_host != self.hostname:
                 logger.info("Hostname changed from %s to %s. Reconnecting...", current_host, self.hostname)
+                self._expected_disconnect = True
                 self.disconnectServer()
                 # self.setServer is called in _load_config
 
@@ -416,6 +424,9 @@ class IndiInterface(IndiClient):
             except INDI_ERRORS as e:
                 logger.debug("Failed to resolve device name in connect_to_server: %s", e)
 
+        if self._connection_loss_reported and self.deviceMap:
+            self._connection_loss_reported = False
+            logger.info("INDI connection restored with %d device(s).", len(self.deviceMap))
         return self
 
     def _ensure_connection(self) -> None:
@@ -465,7 +476,16 @@ class IndiInterface(IndiClient):
         _ensure_connection share one debounce timer.
         """
         self.connection_manager.last_connection_attempt = now
+        if self.supports_rebuild:
+            # A client object that lost its server is not trusted to
+            # reconnect: after an indiserver restart a reused client kept
+            # connecting and being dropped, so the owner builds a new one.
+            # Nothing is closed or opened here; the owner does that after
+            # this call returns, outside any PyIndi callback.
+            self.stale_client = True
+            return
         if self.isServerConnected():
+            self._expected_disconnect = True
             self.disconnectServer()
         self.deviceMap = {}
         self._reset_status()
@@ -501,8 +521,20 @@ class IndiInterface(IndiClient):
         return self.connection_manager.is_server_responsive()
 
     def serverDisconnected(self, code: int) -> None:
-        """Handle the server-disconnected callback."""
-        logger.warning("INDI Server disconnected (code %s)", code)
+        """Handle the server-disconnected callback.
+
+        Runs on PyIndi's own thread, so it only logs and resets the status.
+        It never connects or disconnects. A loss is logged as a warning once;
+        the matching "restored" line is logged by `connect_to_server`.
+        """
+        if self._expected_disconnect:
+            self._expected_disconnect = False
+            logger.debug("INDI client closed its own connection (code %s)", code)
+        elif not self._connection_loss_reported:
+            self._connection_loss_reported = True
+            logger.warning("INDI Server connection lost (code %s); will reconnect.", code)
+        else:
+            logger.debug("INDI Server disconnected again (code %s)", code)
         self._reset_status()
 
     def _reset_status(self) -> None:

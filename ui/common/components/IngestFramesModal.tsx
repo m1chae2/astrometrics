@@ -19,6 +19,9 @@ interface IngestFramesModalProps {
     onIngestComplete?: (targetName: string) => void;
 }
 
+/** How long to show the "completed" status before reporting completion, in milliseconds. */
+const COMPLETION_CLOSE_DELAY_MS = 1000;
+
 /**
  * Extracts only the trailing filename from a full filesystem or web path.
  * Supports both forward and backward slashes as path separators.
@@ -75,6 +78,7 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
         setSelectedFiles,
         isLoadingStats,
         status,
+        jobId,
         progress,
         logs,
         scanningRemote,
@@ -103,31 +107,45 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
     // User said: "If I close that window... process should continue... If I reopen... should show current process"
     // This implies we KEEP state.
 
-    // Track if complete callback was already fired for the current ingestion run
-    const completedFiredRef = React.useRef(false);
-
-    // Check completion callback
+    // Keep the newest callbacks and target name in refs. The parent passes new
+    // function objects on almost every render. If the effect below depended on
+    // them, each re-render would cancel the pending timer and the completion
+    // would never fire.
+    const onIngestCompleteRef = React.useRef(onIngestComplete);
+    const onCloseRef = React.useRef(onClose);
+    const targetNameRef = React.useRef(targetName);
     useEffect(() => {
-        let timer: any = null;
-        if (status === 'completed') {
-            if (!completedFiredRef.current) {
-                completedFiredRef.current = true;
-                if (onIngestComplete) {
-                    timer = setTimeout(() => {
-                        onIngestComplete(targetName);
-                        // Close the modal after completion to allow further interaction
-                        onClose();
-                    }, 1000);
-                }
-            }
-        } else {
-            completedFiredRef.current = false;
-        }
+        onIngestCompleteRef.current = onIngestComplete;
+        onCloseRef.current = onClose;
+        targetNameRef.current = targetName;
+    });
 
-        return () => {
-            if (timer) clearTimeout(timer);
-        };
-    }, [status, onIngestComplete, targetName, onClose]);
+    // Remembers which ingestion run (job) already reported completion, so each
+    // run reports once. An empty string stands for "no job id known".
+    const completedRunRef = React.useRef<string | null>(null);
+
+    // Report completion once per run. This runs even while the dialog is
+    // closed (the component stays mounted), so the frame list still refreshes
+    // when the person closes the dialog before the job finishes.
+    useEffect(() => {
+        if (status !== 'completed') {
+            completedRunRef.current = null;
+            return undefined;
+        }
+        const runKey = jobId ?? '';
+        if (completedRunRef.current === runKey || !onIngestCompleteRef.current) {
+            return undefined;
+        }
+        completedRunRef.current = runKey;
+        // Short pause so the person sees the "completed" status before the
+        // dialog closes.
+        const timer = setTimeout(() => {
+            onIngestCompleteRef.current?.(targetNameRef.current);
+            // Close the modal after completion to allow further interaction
+            onCloseRef.current();
+        }, COMPLETION_CLOSE_DELAY_MS);
+        return () => clearTimeout(timer);
+    }, [status, jobId]);
 
 
     if (!isOpen) return null;

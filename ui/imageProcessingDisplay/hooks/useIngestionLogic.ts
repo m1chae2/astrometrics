@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useBackendFetch } from '../../common/hooks/useBackendFetch';
 import { usePollTick } from '../../common/hooks/usePollTick';
 import { scanRemoteTargets } from '../../common/services/imaging/ingestionService';
@@ -36,7 +36,8 @@ export const useIngestionLogic = () => {
     );
 
     const openIngestModal = () => setIsIngestModalOpen(true);
-    const closeIngestModal = () => setIsIngestModalOpen(false);
+    // Stable identity so effects that depend on it are not re-run on every render.
+    const closeIngestModal = useCallback(() => setIsIngestModalOpen(false), []);
 
     return {
         isIngestModalOpen,

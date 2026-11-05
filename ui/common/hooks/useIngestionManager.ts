@@ -207,7 +207,7 @@ export const useIngestionManager = (initialTargetName: string = ''): IngestionSt
 
     const isActive = status === 'running' || status === 'queued';
     const openIngestModal = () => setIsIngestModalOpen(true);
-    const closeIngestModal = () => setIsIngestModalOpen(false);
+    const closeIngestModal = useCallback(() => setIsIngestModalOpen(false), []);
 
     return {
         targetName, setTargetName,

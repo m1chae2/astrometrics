@@ -1,12 +1,13 @@
 /**
  * @file test_ingestFramesModal.test.tsx
  * @description Unit tests for IngestFramesModal component, verifying file list rendering,
- * auto-refreshing on modal open, and manual refresh button triggering.
+ * auto-refreshing on modal open, manual refresh button triggering, and the
+ * once-per-run completion report.
  */
 
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { IngestFramesModal } from '../common/components/IngestFramesModal';
 import { IngestionState } from '../common/hooks/useIngestionManager';
 
@@ -96,5 +97,109 @@ describe('IngestFramesModal Component', () => {
 
     fireEvent.click(refreshBtn);
     expect(mockIngestionState.refreshFiles).toHaveBeenCalled();
+  });
+
+  describe('completion reporting', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /**
+     * Test that re-renders with new callback identities do not cancel the pending completion.
+     */
+    it('fires completion once even when the parent re-renders with new callbacks', () => {
+      const firstComplete = vi.fn();
+      const firstClose = vi.fn();
+      const { rerender } = render(
+        <IngestFramesModal
+          isOpen={true}
+          onClose={firstClose}
+          onIngestComplete={firstComplete}
+          ingestionState={{ ...mockIngestionState, status: 'running', jobId: 'job-1' }}
+        />
+      );
+
+      const latestComplete = vi.fn();
+      const latestClose = vi.fn();
+      rerender(
+        <IngestFramesModal
+          isOpen={true}
+          onClose={firstClose}
+          onIngestComplete={firstComplete}
+          ingestionState={{ ...mockIngestionState, status: 'completed', jobId: 'job-1' }}
+        />
+      );
+      act(() => { vi.advanceTimersByTime(400); });
+      // New function identities, as a parent produces on each render.
+      rerender(
+        <IngestFramesModal
+          isOpen={true}
+          onClose={latestClose}
+          onIngestComplete={latestComplete}
+          ingestionState={{ ...mockIngestionState, status: 'completed', jobId: 'job-1' }}
+        />
+      );
+      act(() => { vi.advanceTimersByTime(2000); });
+
+      expect(firstComplete).not.toHaveBeenCalled();
+      expect(latestComplete).toHaveBeenCalledTimes(1);
+      expect(latestComplete).toHaveBeenCalledWith('M 27');
+      expect(latestClose).toHaveBeenCalledTimes(1);
+      expect(firstClose).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Test that completion still reports when the dialog was closed before the job finished.
+     */
+    it('reports completion when the dialog is closed', () => {
+      const onIngestComplete = vi.fn();
+      const { rerender } = render(
+        <IngestFramesModal
+          isOpen={false}
+          onClose={vi.fn()}
+          onIngestComplete={onIngestComplete}
+          ingestionState={{ ...mockIngestionState, status: 'running', jobId: 'job-1' }}
+        />
+      );
+      rerender(
+        <IngestFramesModal
+          isOpen={false}
+          onClose={vi.fn()}
+          onIngestComplete={onIngestComplete}
+          ingestionState={{ ...mockIngestionState, status: 'completed', jobId: 'job-1' }}
+        />
+      );
+      act(() => { vi.advanceTimersByTime(2000); });
+
+      expect(onIngestComplete).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * Test that a second ingestion run reports completion again.
+     */
+    it('fires again for a second ingestion run', () => {
+      const onIngestComplete = vi.fn();
+      const renderWith = (status: string, jobId: string) => (
+        <IngestFramesModal
+          isOpen={false}
+          onClose={vi.fn()}
+          onIngestComplete={onIngestComplete}
+          ingestionState={{ ...mockIngestionState, status, jobId }}
+        />
+      );
+      const { rerender } = render(renderWith('running', 'job-1'));
+      rerender(renderWith('completed', 'job-1'));
+      act(() => { vi.advanceTimersByTime(2000); });
+      expect(onIngestComplete).toHaveBeenCalledTimes(1);
+
+      rerender(renderWith('running', 'job-2'));
+      rerender(renderWith('completed', 'job-2'));
+      act(() => { vi.advanceTimersByTime(2000); });
+      expect(onIngestComplete).toHaveBeenCalledTimes(2);
+    });
   });
 });

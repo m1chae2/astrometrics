@@ -6,6 +6,8 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 import { on as onEvent } from '../utils/eventBus';
+import { socketClient } from '../utils/socketClient';
+import { UI_EVENTS } from '../types/backendTypes';
 import { DisplayActiveContext } from './DisplayActiveContext';
 import { useOptionalHandoff } from './HandoffContext';
 
@@ -145,6 +147,17 @@ export const TargetProvider: React.FC<TargetProviderProps> = ({ children }) => {
             } catch {
                 // Ignore
             }
+        };
+    }, [invalidate]);
+
+    // An automatic download added frames to the library: read the frame lists again.
+    useEffect(() => {
+        const onAction = (action: string): void => {
+            if (action === UI_EVENTS['library:frames_updated']) invalidate('frames');
+        };
+        socketClient.on('action', onAction);
+        return () => {
+            socketClient.off('action', onAction);
         };
     }, [invalidate]);
 

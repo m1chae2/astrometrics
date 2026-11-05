@@ -27,6 +27,8 @@ class SocketClient extends EventEmitter {
     private socket: WebSocket | null = null;
     private reconnectTimer: any = null;
     private pingInterval: any = null;
+    /** True between a 'connected' event and the matching 'disconnected' event. */
+    private announcedConnected = false;
 
     constructor() {
         super();
@@ -34,6 +36,21 @@ class SocketClient extends EventEmitter {
 
     private getWsUrl(): string {
         return backendSocketUrl(BACKEND_ROUTES.eventsSocket);
+    }
+
+    /**
+     * Tells whether the event socket is open right now.
+     * @return True if the socket exists and is open.
+     */
+    public isConnected(): boolean {
+        return this.socket !== null && this.socket.readyState === WebSocket.OPEN;
+    }
+
+    /** Emits 'disconnected' once, and only if 'connected' was announced first. */
+    private announceDisconnected(): void {
+        if (!this.announcedConnected) return;
+        this.announcedConnected = false;
+        this.emit('disconnected');
     }
 
     public async connect() {
@@ -58,6 +75,7 @@ class SocketClient extends EventEmitter {
             this.socket.onopen = () => {
                 hasOpened = true;
                 console.log("[Socket] Connected");
+                this.announcedConnected = true;
                 this.emit('connected');
                 if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
                 this.startHeartbeat();
@@ -82,6 +100,7 @@ class SocketClient extends EventEmitter {
                 // attempt fetches the current token instead of retrying a dead one.
                 if (!hasOpened) resetSessionToken();
                 this.cleanup();
+                this.announceDisconnected();
                 this.scheduleReconnect();
             };
 
@@ -91,6 +110,7 @@ class SocketClient extends EventEmitter {
 
         } catch (e) {
             console.error("[Socket] Connection failed:", e);
+            this.announceDisconnected();
             this.scheduleReconnect();
         }
     }

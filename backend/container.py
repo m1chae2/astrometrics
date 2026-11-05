@@ -143,6 +143,7 @@ class Container:
             astrometrics=self.astrometrics,
             simulated=testing,
             separate_process=not testing,
+            open_port_forwards=not testing,
         )
 
         self.target_service = TargetService(self.config_service, astrometrics=self.astrometrics)

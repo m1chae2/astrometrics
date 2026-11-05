@@ -83,31 +83,34 @@ describe('StackSummaryPanel', () => {
         callBackendMock.mockReset();
     });
 
-    it('shows frames, rejected share and star width with units', async () => {
+    it('shows frames and the rejected share with units, and no star width row', async () => {
         answerWith({ 'processing:stack_summary': summary });
         renderPanel();
-        expect(await screen.findByText('36 of 40 frames')).toBeTruthy();
+        expect(await screen.findByText('Imaging stack summary: 36 of 40 frames')).toBeTruthy();
         expect(screen.getByText('3 frames')).toBeTruthy();
         expect(screen.getByText(/1\.2% of pixels/)).toBeTruthy();
-        expect(screen.getByText(/2\.31 px in the stack/)).toBeTruthy();
+        expect(screen.queryByText(/Star width/)).toBeNull();
         expect(callBackendMock).toHaveBeenCalledWith(
             'processing:stack_summary', { target: 'M 81', kind: 'imaging' }, { silent: true });
     });
 
-    it('is closed at first and shows one line with frames and date, with no flag count', async () => {
+    it('is closed at first and shows one line with the frames only, and the date row inside', async () => {
         answerWith({ 'processing:stack_summary': summary, 'jobs:query': { detail: 'warnings', warnings: [jobWarning] } });
         const { container } = renderPanel();
-        await screen.findByText('36 of 40 frames');
+        await screen.findByText('Imaging stack summary: 36 of 40 frames');
         const disclosure = container.querySelector('details.stack-summary') as HTMLDetailsElement;
         expect(disclosure.open).toBe(false);
         const line = disclosure.querySelector(':scope > summary') as HTMLElement;
-        expect(line.textContent).toMatch(/^Imaging stack summary: 36 of 40 frames, made /);
+        expect(line.textContent).toBe('Imaging stack summary: 36 of 40 frames');
+        const firstLabel = disclosure.querySelector('dl > dt') as HTMLElement;
+        expect(firstLabel.textContent).toBe('Stack date');
+        expect((firstLabel.nextElementSibling as HTMLElement).textContent).not.toBe('');
     });
 
     it('keeps the summary content reachable by keyboard through the summary element', async () => {
         answerWith({ 'processing:stack_summary': summary });
         const { container } = renderPanel();
-        await screen.findByText('36 of 40 frames');
+        await screen.findByText('Imaging stack summary: 36 of 40 frames');
         const summaries = container.querySelectorAll('summary');
         // A summary element is focusable and opens with Enter or Space in a browser.
         expect(summaries.length).toBeGreaterThan(1);
@@ -125,7 +128,7 @@ describe('StackSummaryPanel', () => {
             ] },
         });
         const { container } = renderPanel();
-        await screen.findByText('36 of 40 frames');
+        await screen.findByText('Imaging stack summary: 36 of 40 frames');
         expect(callBackendMock).toHaveBeenCalledWith(
             'jobs:query', { job_id: 'job-stack-1', detail: 'warnings' }, { silent: true });
         const items = await screen.findAllByRole('listitem', {}).then(
@@ -155,7 +158,7 @@ describe('StackSummaryPanel', () => {
             ],
         });
         const { container } = renderPanel();
-        await screen.findByText('36 of 40 frames');
+        await screen.findByText('Imaging stack summary: 36 of 40 frames');
         const items = await screen.findAllByText(/Many zero pixels in the stack/);
         expect(items).toHaveLength(1);
         expect(container.querySelectorAll('.stack-summary__flag-list > li')).toHaveLength(1);
@@ -179,7 +182,7 @@ describe('StackSummaryPanel', () => {
     it('says when the warnings could not be read', async () => {
         answerWith({ 'processing:stack_summary': summary, 'jobs:query': new Error('down') });
         renderPanel();
-        await screen.findByText('36 of 40 frames');
+        await screen.findByText('Imaging stack summary: 36 of 40 frames');
         expect(await screen.findByText('Could not read the warnings.')).toBeTruthy();
     });
 

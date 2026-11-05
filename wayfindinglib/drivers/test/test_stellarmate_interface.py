@@ -61,7 +61,7 @@ def test_run_command_fails_fast_within_offline_cooldown() -> None:
 def test_check_connection_returns_false_on_failure() -> None:
     """Verify check_connection() returns False rather than raising."""
     driver = StellarMateInterface(host_alias="test-host")
-    with patch.object(driver, "_run_command", side_effect=ExternalServiceError("unreachable")):
+    with patch.object(driver, "_execute_command", side_effect=ExternalServiceError("unreachable")):
         assert driver.check_connection() is False
 
 
@@ -74,7 +74,7 @@ def test_check_connection_does_not_hide_a_bug() -> None:
     """
     driver = StellarMateInterface(host_alias="test-host")
     with (
-        patch.object(driver, "_run_command", side_effect=AttributeError("a coding mistake")),
+        patch.object(driver, "_execute_command", side_effect=AttributeError("a coding mistake")),
         pytest.raises(AttributeError),
     ):
         driver.check_connection()
@@ -482,3 +482,68 @@ def test_a_transfer_past_the_overall_limit_ends_rsync_and_its_helper(
         time.sleep(0.05)
     stat_path = Path(f"/proc/{helper_process_id}/stat")
     assert not stat_path.exists() or stat_path.read_text().rsplit(")", 1)[1].split()[0] == "Z"
+
+
+def _refused() -> subprocess.CalledProcessError:
+    """Build the error ssh gives when the host refuses the connection.
+
+    Returns
+    -------
+    error : `subprocess.CalledProcessError`
+        A failed ssh run with a connection-refused message.
+    """
+    return subprocess.CalledProcessError(
+        255, "ssh", stderr="ssh: connect to host localhost port 22: Connection refused\n"
+    )
+
+
+def test_check_connection_probes_even_when_the_host_is_known_offline() -> None:
+    """The explicit question runs a real probe and records the new answer."""
+    driver = StellarMateInterface(host_alias="test-host")
+    driver._last_connection_status = False
+    driver._last_probe_time = time.time()
+
+    with patch("subprocess.run", return_value=MagicMock(stdout="connected\n")) as mock_run:
+        assert driver.check_connection() is True
+
+    mock_run.assert_called_once()
+    assert driver._last_connection_status is True
+
+
+def test_going_offline_logs_one_info_line_with_the_ssh_error(caplog: pytest.LogCaptureFixture) -> None:
+    """The switch to OFFLINE is logged once, at info level, with ssh's text."""
+    driver = StellarMateInterface(host_alias="localhost")
+
+    with (
+        caplog.at_level("INFO", logger="wayfindinglib.drivers.stellarmate_interface"),
+        patch("subprocess.run", side_effect=_refused()),
+    ):
+        assert driver.check_connection() is False
+        assert driver.check_connection() is False
+
+    offline = [record for record in caplog.records if "OFFLINE" in record.getMessage()]
+    assert len(offline) == 1
+    assert offline[0].levelname == "INFO"
+    assert "localhost" in offline[0].getMessage()
+    assert "Connection refused" in offline[0].getMessage()
+
+
+def test_a_timeout_marks_the_host_offline() -> None:
+    """A command that hangs counts as a failed connection."""
+    driver = StellarMateInterface(host_alias="test-host")
+
+    with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("ssh", 30)):
+        assert driver.check_connection() is False
+
+    assert driver._last_connection_status is False
+
+
+def test_ssh_commands_do_not_read_stdin_and_have_a_hard_timeout() -> None:
+    """Every ssh run gets stdin from /dev/null and a timeout."""
+    driver = StellarMateInterface(host_alias="test-host")
+
+    with patch("subprocess.run", return_value=MagicMock(stdout="")) as mock_run:
+        driver._run_command(["ssh", "test-host", "ls"])
+
+    assert mock_run.call_args.kwargs["stdin"] == subprocess.DEVNULL
+    assert mock_run.call_args.kwargs["timeout"] > 0

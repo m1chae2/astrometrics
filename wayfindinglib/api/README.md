@@ -52,6 +52,6 @@ The rules:
 
 Each of `mount`, `imaging`, `guiding`, `safety` and `equipment` has a `status` call with the same shape: it takes an optional `include` list of sections and returns a typed status. `mount.status` reads only the mount. `close` stops the INDI session (INDI is the protocol that talks to the devices) when a program is done.
 
-`Wayfinder` builds its own INDI session. Give `simulated=True` for the simulator, or leave it unset to use the simulator when `ASTROMETRICS_TESTING` is set. `separate_process=True` runs the session in a process of its own, which a program with a busy event loop needs. The driver properties on `control` are private.
+`Wayfinder` builds its own INDI session. Give `simulated=True` for the simulator, or leave it unset to use the simulator when `ASTROMETRICS_TESTING` is set. `separate_process=True` runs the session in a process of its own, which a program with a busy event loop needs. `open_port_forwards=True` lets the library open live SSH tunnels, such as the one to PHD2 on the observatory computer; it is off by default and only the backend turns it on. The driver properties on `control` are private.
 
 For exact behavior, read the code.

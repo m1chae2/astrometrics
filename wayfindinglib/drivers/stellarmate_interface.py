@@ -51,6 +51,40 @@ telescope computer is tens of gigabytes, and 100 GB at a slow 5 MB/s over
 Wi-Fi takes about 5.6 hours, so 12 hours leaves more than twice that margin.
 """
 
+_SSH_CONNECT_TIMEOUT_OPTION = "ConnectTimeout=2"
+"""SSH option that every ssh command to the telescope computer carries.
+
+Design estimate. Without it, a host that does not answer holds each command
+for the operating system's connect timeout, which is far longer than a screen
+should wait.
+"""
+
+_PORT_FORWARD_OPTIONS = (
+    "ExitOnForwardFailure=yes",
+    "BatchMode=yes",
+    "ServerAliveInterval=15",
+    "ServerAliveCountMax=3",
+)
+"""SSH options for the long-lived port forward.
+
+Design estimate. ``ExitOnForwardFailure`` makes ssh exit when the forward
+cannot be set up, so the supervisor sees the failure. ``BatchMode`` stops ssh
+from asking for a password, which nobody could answer. The two keep-alive
+options end a link that went silent after 15 s x 3 = 45 s, so a dead Wi-Fi
+connection is replaced instead of left half-open.
+"""
+
+_COMMAND_TIMEOUT_SECONDS = 30
+"""Hard limit on one ssh command (a probe or a listing), in seconds.
+
+Design estimate. The connect step already gives up after 2 s, so this only
+guards a command that connected and then hangs, such as a listing on a stalled
+disk. A recursive ``find`` over a night of frames on the telescope computer
+should finish in a few seconds, so 30 s leaves a wide margin without letting
+one call hold a thread (or an MCP reply) for minutes. Downloads do not use it;
+`_run_rsync` has its own limits.
+"""
+
 _OFFLINE_REPROBE_SECONDS = 10.0
 """While the host is offline, recheck in the background this often."""
 
@@ -92,19 +126,26 @@ class StellarMateInterface(RemoteTransferDriver):
         """Registry key for this driver."""
         return "stellarmate"
 
-    def _update_connection_status(self, is_online: bool) -> None:
+    def _update_connection_status(self, is_online: bool, reason: str = "") -> None:
         """Update the internal connection status and log state changes.
+
+        Each change is logged once, at info level.
 
         Parameters
         ----------
         is_online : `bool`
             Whether the remote host is currently reachable.
+        reason : `str`, optional
+            Why the host is offline, such as ssh's error text. Only used
+            for the offline message.
         """
         if self._last_connection_status != is_online:
             if is_online:
                 logger.info("Remote Host '%s' is now ONLINE.", self.host_alias)
             else:
-                logger.debug("Remote Host '%s' is now OFFLINE.", self.host_alias)
+                logger.info(
+                    "Remote Host '%s' is now OFFLINE: %s", self.host_alias, reason or "no reason given"
+                )
             self._last_connection_status = is_online
 
     def _run_command(self, cmd_list: list[str]) -> str:
@@ -145,6 +186,36 @@ class StellarMateInterface(RemoteTransferDriver):
             raise ExternalServiceError("SSH/Command Failed: Remote host is known offline (cooldown active).")
 
         return self._execute_command(cmd_list)
+
+    def port_forward_command(self, local_port: int, remote_port: int) -> list[str]:
+        """Build the ssh command that forwards a local port to the host.
+
+        The forward listens only on the loopback address and reaches
+        ``localhost:<remote_port>`` as seen from the telescope computer.
+        This only builds the command; `SshPortForward` runs it.
+
+        Parameters
+        ----------
+        local_port : `int`
+            Port to listen on, on this computer.
+        remote_port : `int`
+            Port to reach on the telescope computer.
+
+        Returns
+        -------
+        command : `list` [`str`]
+            The ssh command tokens.
+        """
+        options = [_SSH_CONNECT_TIMEOUT_OPTION, *_PORT_FORWARD_OPTIONS]
+        option_tokens = [token for option in options for token in ("-o", option)]
+        return [
+            "ssh",
+            "-N",
+            *option_tokens,
+            "-L",
+            f"127.0.0.1:{local_port}:localhost:{remote_port}",
+            self.host_alias,
+        ]
 
     def _start_background_probe(self) -> None:
         """Check in a background thread whether the offline host is back.
@@ -189,14 +260,26 @@ class StellarMateInterface(RemoteTransferDriver):
         if cmd_list and cmd_list[0] == "ssh":
             cmd_list = cmd_list.copy()
             cmd_list.insert(1, "-o")
-            cmd_list.insert(2, "ConnectTimeout=2")
+            cmd_list.insert(2, _SSH_CONNECT_TIMEOUT_OPTION)
 
         self._last_probe_time = time.time()
 
         try:
-            result = subprocess.run(cmd_list, capture_output=True, text=True, check=True)
+            result = subprocess.run(
+                cmd_list,
+                capture_output=True,
+                text=True,
+                check=True,
+                stdin=subprocess.DEVNULL,
+                timeout=_COMMAND_TIMEOUT_SECONDS,
+            )
             self._update_connection_status(True)
             return result.stdout.strip()
+
+        except subprocess.TimeoutExpired as e:
+            reason = f"no answer within {_COMMAND_TIMEOUT_SECONDS} s"
+            self._update_connection_status(False, reason)
+            raise ExternalServiceError(f"SSH/Command Failed: {reason}") from e
 
         except subprocess.CalledProcessError as e:
             err_msg = e.stderr.lower() if e.stderr else ""
@@ -208,9 +291,7 @@ class StellarMateInterface(RemoteTransferDriver):
             )
 
             if is_conn_error:
-                if self._last_connection_status is not False:
-                    logger.debug("SSH Connection Failed: %s", e.stderr.strip())
-                self._update_connection_status(False)
+                self._update_connection_status(False, (e.stderr or "").strip())
             else:
                 logger.exception("Command failed: %s\nStderr: %s", cmd_list, e.stderr)
                 self._update_connection_status(True)
@@ -220,13 +301,17 @@ class StellarMateInterface(RemoteTransferDriver):
     def check_connection(self) -> bool:
         """Probe the host connection to check if the telescope is online.
 
+        This is the explicit "is it reachable right now?" question, so it
+        always runs a real probe, even when the host is known to be
+        offline, and records the answer as the new status.
+
         Returns
         -------
         is_online : `bool`
             `True` if the SSH probe succeeded; `False` otherwise.
         """
         try:
-            self._run_command(["ssh", self.host_alias, "echo", "connected"])
+            self._execute_command(["ssh", self.host_alias, "echo", "connected"])
             return True
         except ExternalServiceError, OSError:
             return False

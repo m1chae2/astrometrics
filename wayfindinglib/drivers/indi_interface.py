@@ -9,6 +9,7 @@ wheels, and weather/environmental telemetry.
 #   sudo apt-add-repository ppa:mutlaqja/ppa
 #   sudo apt-get -y install python3-indi-client
 import logging
+import math
 import threading
 import time
 from datetime import datetime
@@ -30,6 +31,7 @@ from .indi.enclosure_controller import EnclosureController
 from .indi.filter_wheel_controller import FilterWheelController
 from .indi.focuser_controller import FocuserController
 from .indi.mount_controller import MountController
+from .indi.property_state import get_property_state, property_state_name
 from .indi.pyindi_compatibility import INDI_ERRORS, PyIndi
 from .indi.switch_controller import SwitchController
 from .indi.weather_controller import WeatherController
@@ -44,6 +46,12 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+# How far (seconds) the camera's reported remaining time may fall below the
+# countdown clock before the clock is moved to match. About one poll interval
+# plus transport delay; stale readings are always too high, so they never
+# reach this rule.
+_EXPOSURE_CLOCK_TOLERANCE_SECONDS = 3.0
 
 
 class TelescopeStatus(BaseModel):
@@ -264,7 +272,9 @@ class IndiInterface(IndiClient):
         self._active_exposure_duration: float | None = None
         self._exposure_start_time: float | None = None
         self._last_exposure_val: float | None = None
-        self._exposure_counts_up: bool | None = None
+        self._exposure_lock = threading.Lock()
+        # Clock used for the countdown. Tests replace it with a fake clock.
+        self._monotonic_clock = time.monotonic
 
         # Modular Controllers
         self.mount_controller = MountController(self)
@@ -927,10 +937,12 @@ class IndiInterface(IndiClient):
         ccd_exposure = camera.getNumber("CCD_EXPOSURE")
         if ccd_exposure and len(ccd_exposure) > 0:
             val = ccd_exposure[0].value
-            state = getattr(ccd_exposure, "s", None)
-            is_busy = (state == PyIndi.IPS_BUSY) if PyIndi else False
-            fits_exptime = self._extract_exptime_from_camera(camera)
-            self._handle_exposure_update(val, is_busy, fits_exptime)
+            state = get_property_state(ccd_exposure)
+            if state is None:
+                self.status["CAMERA_STATUS"] = "Unknown"
+            else:
+                fits_exptime = self._extract_exptime_from_camera(camera)
+                self._handle_exposure_update(val, state == PyIndi.IPS_BUSY, fits_exptime)
         else:
             self.status["CAMERA_STATUS"] = "Idle"
 
@@ -967,77 +979,82 @@ class IndiInterface(IndiClient):
         return None
 
     def _handle_exposure_update(self, val: float, is_busy: bool, fits_exptime: float | None = None) -> None:
-        """Process camera exposure progress and maintain a countdown clock.
+        """Process camera exposure progress with a clock-based countdown.
 
-        Normalizes camera drivers that report elapsed seconds vs drivers that
-        report remaining seconds into a monotonically decreasing countdown.
+        INDI camera drivers report the REMAINING time in
+        ``CCD_EXPOSURE_VALUE``.
+        Readings can arrive late or out of order, and the poll and the
+        ``newNumber`` callback both feed this method. So the countdown is
+        driven by a clock and the reported value is used only for two things:
+
+        * Detecting a new frame. A frame starts when the property goes from
+          not busy to busy, or when it is busy and the reported value jumps up
+          by more than ``max(1 s, half the frame length)``. The jump rule
+          catches back-to-back frames (for example from Ekos), where the
+          property stays busy between frames. A small rise, such as a stale
+          57 s reading followed by 59 s, is not a new frame.
+        * Correcting the clock when the camera is clearly ahead of it. If the
+          reported value is more than ``_EXPOSURE_CLOCK_TOLERANCE_SECONDS``
+          below the clock's remaining time, the clock is moved to match. A
+          reported value above the clock is ignored, because a stale reading
+          is always too high.
+
+        The frame length is the FITS header EXPTIME when present, otherwise
+        the first value seen for the frame. When the countdown reaches 0 while
+        the camera is still busy, the status is "Downloading".
 
         Parameters
         ----------
         val : `float`
-            Current exposure value reported by the camera driver.
+            Current remaining exposure time reported by the camera driver.
         is_busy : `bool`
             Whether the camera exposure property state is IPS_BUSY.
         fits_exptime : `float` | `None`, optional
             Target exposure duration extracted from FITS_HEADER.
         """
-        import time
+        with self._exposure_lock:
+            if not is_busy:
+                self._exposure_in_progress = False
+                self._active_exposure_duration = None
+                self._exposure_start_time = None
+                self._last_exposure_val = None
+                self.status["CAMERA_STATUS"] = "Idle"
+                return
 
-        if not is_busy:
-            self._exposure_in_progress = False
-            self._active_exposure_duration = None
-            self._exposure_start_time = None
-            self._last_exposure_val = None
-            self._exposure_counts_up = None
-            self.status["CAMERA_STATUS"] = "Idle"
-            return
+            now = self._monotonic_clock()
+            length = self._active_exposure_duration
+            new_frame = not self._exposure_in_progress or length is None or self._exposure_start_time is None
+            if not new_frame and self._last_exposure_val is not None:
+                jump_threshold = max(1.0, 0.5 * length)
+                new_frame = val - self._last_exposure_val > jump_threshold
 
-        now = time.time()
-        if not self._exposure_in_progress:
-            self._exposure_in_progress = True
-            self._exposure_start_time = now
+            if new_frame:
+                if fits_exptime is not None and fits_exptime > 0:
+                    length = fits_exptime
+                elif val > 0:
+                    length = val
+                else:
+                    length = 0.0
+                self._exposure_in_progress = True
+                self._active_exposure_duration = length
+                self._exposure_start_time = now
             self._last_exposure_val = val
-            self._exposure_counts_up = None
 
-        if fits_exptime is not None and fits_exptime > 0:
-            self._active_exposure_duration = fits_exptime
-        elif self._active_exposure_duration is None and val > 0:
-            self._active_exposure_duration = val
-
-        # Detect direction of counter if changing
-        if self._last_exposure_val is not None and abs(val - self._last_exposure_val) > 0.02:
-            if val > self._last_exposure_val:
-                self._exposure_counts_up = True
-            elif val < self._last_exposure_val:
-                self._exposure_counts_up = False
-        self._last_exposure_val = val
-
-        # Calculate remaining countdown seconds
-        if self._exposure_counts_up is True:
-            # val is elapsed time, so remaining is duration - val
-            total = self._active_exposure_duration or val
-            remaining = max(0.0, total - val)
-        elif self._exposure_counts_up is False:
-            # val is already remaining time
-            remaining = val
-        else:
-            # Initial sample before direction is established:
-            # If we know total duration and val is a small fraction (< 50%),
-            # val is elapsed time (e.g. 0.4s into a 30s exposure).
-            if (
-                self._active_exposure_duration
-                and self._active_exposure_duration > 1.0
-                and val < self._active_exposure_duration * 0.5
-            ):
-                self._exposure_counts_up = True
-                remaining = max(0.0, self._active_exposure_duration - val)
-            else:
+            if length is None or self._exposure_start_time is None:
+                return
+            if val <= 0:
+                # The camera says the exposure is over; hold the clock at zero.
+                self._exposure_start_time = now - length
+            remaining = max(0.0, length - (now - self._exposure_start_time))
+            if val > 0 and val < remaining - _EXPOSURE_CLOCK_TOLERANCE_SECONDS:
+                # The camera is ahead of the clock, so move the clock forward.
+                self._exposure_start_time = now - (length - val)
                 remaining = val
 
-        if remaining > 0:
-            self.status["CAMERA_STATUS"] = f"Exposing ({remaining:.1f}s)"
-        else:
-            self.status["CAMERA_STATUS"] = "Downloading"
+            if remaining > 0:
+                self.status["CAMERA_STATUS"] = f"Exposing ({math.ceil(remaining)}s)"
+            else:
+                self.status["CAMERA_STATUS"] = "Downloading"
 
     def _extract_target_from_camera(self, camera: Any) -> None:
         """Check camera device properties for celestial target metadata.
@@ -1588,11 +1605,13 @@ class IndiInterface(IndiClient):
             elif property_name == "CCD_EXPOSURE":
                 if len(number_vector) > 0:
                     val = number_vector[0].getValue()
-                    state = getattr(number_vector, "s", None)
-                    is_busy = (state == PyIndi.IPS_BUSY) if PyIndi else False
-                    camera = self._find_main_camera_device()
-                    fits_exptime = self._extract_exptime_from_camera(camera) if camera else None
-                    self._handle_exposure_update(val, is_busy, fits_exptime)
+                    state = get_property_state(number_vector)
+                    if state is None:
+                        self.status["CAMERA_STATUS"] = "Unknown"
+                    else:
+                        camera = self._find_main_camera_device()
+                        fits_exptime = self._extract_exptime_from_camera(camera) if camera else None
+                        self._handle_exposure_update(val, state == PyIndi.IPS_BUSY, fits_exptime)
 
         except Exception:
             # PyIndi calls this from its own thread. An error that escaped
@@ -1685,7 +1704,7 @@ class IndiInterface(IndiClient):
                         )
                         else "rw"
                     ),
-                    "state": "Idle",
+                    "state": property_state_name(get_property_state(property_item)),
                 }
 
                 # Extract elements based on type
@@ -1714,15 +1733,7 @@ class IndiInterface(IndiClient):
                         vector = device.getLight(property_name)
                         if vector:
                             for i in range(len(vector)):
-                                state = vector[i].s
-                                state_str = "Idle"
-                                if state == PyIndi.IPS_OK:
-                                    state_str = "Ok"
-                                elif state == PyIndi.IPS_BUSY:
-                                    state_str = "Busy"
-                                elif state == PyIndi.IPS_ALERT:
-                                    state_str = "Alert"
-                                elements[vector[i].name] = state_str
+                                elements[vector[i].name] = property_state_name(vector[i].s)
                 except INDI_ERRORS as element_error:
                     property_info["error"] = str(element_error)
 

@@ -47,6 +47,8 @@ if TYPE_CHECKING:
     from wayfindinglib.drivers.interfaces.remote_transfer_driver import RemoteTransferDriver
     from wayfindinglib.drivers.interfaces.switch_driver import SwitchDriver
     from wayfindinglib.drivers.interfaces.weather_driver import WeatherDriver
+    from wayfindinglib.drivers.phd2.phd2_client import PHD2Client
+    from wayfindinglib.drivers.ssh_port_forward import SshPortForward
     from wayfindinglib.models.equipment_and_site.enclosure import Enclosure
     from wayfindinglib.models.equipment_and_site.equipment import Camera, GuideScope, Telescope
     from wayfindinglib.models.equipment_and_site.focus_model import FocusModel
@@ -87,6 +89,11 @@ class ControlContext:
     separate_process : `bool`, optional
         Run the INDI session in a process of its own (see
         `wayfindinglib.drivers.indi_worker`). `False` by default.
+    open_port_forwards : `bool`, optional
+        Allow this context to open live SSH port forwards, such as the one
+        to PHD2 on the observatory computer. `False` by default: each
+        process would otherwise open its own SSH connection, and the
+        backend is the one process that should hold live links.
     """
 
     def __init__(
@@ -98,6 +105,7 @@ class ControlContext:
         astrometrics: Astrometrics | None = None,
         simulated: bool | None = None,
         separate_process: bool = False,
+        open_port_forwards: bool = False,
     ) -> None:
         """Store the shared inputs. No driver is built yet."""
         self.config = config
@@ -110,6 +118,7 @@ class ControlContext:
         self._driver = driver
         self._simulated = simulated
         self._separate_process = separate_process
+        self._open_port_forwards = open_port_forwards
         self._worker_client: IndiWorkerClient | None = None
         # Builds the INDI session once, even when callers on several
         # threads ask for it at the same moment (two would mean two
@@ -124,7 +133,16 @@ class ControlContext:
         self._switch_driver: SwitchDriver | None = None
         self._weather_driver: WeatherDriver | None = None
         self._remote_transfer_driver: RemoteTransferDriver | None = None
+        # The (driver name, host, pictures path) the cached remote transfer
+        # driver was built from. `None` when no driver is cached or when one
+        # was set by hand, which is never replaced.
+        self._remote_transfer_settings: tuple[str, str, str] | None = None
+        # Builds or replaces the remote transfer driver, one thread at a time.
+        # Never held while taking `_guiding_driver_lock`, because building the
+        # guiding driver (which holds that lock) asks for this driver.
+        self._remote_transfer_lock = threading.Lock()
         self._guiding_driver: GuidingDriver | None = None
+        self._phd2_port_forward: SshPortForward | None = None
         # Builds the guiding driver once, even when callers on several
         # threads ask for it at the same moment.
         self._guiding_driver_lock = threading.Lock()
@@ -397,7 +415,12 @@ class ControlContext:
 
         Chosen by `AppConfiguration.get_remote_transfer_driver_name`
         (``"stellarmate"`` by default). File transfer is not part of INDI,
-        so this choice is separate from the device protocols.
+        so this choice is separate from the device protocols. The driver
+        is cached, but each access compares the configured driver name,
+        host and pictures folder with the ones it was built from. If any
+        changed, a new driver replaces it (and the PHD2 port forward built
+        from the old one is stopped), so a settings change takes effect
+        without a restart. A driver set by hand is never replaced.
 
         Returns
         -------
@@ -410,10 +433,18 @@ class ControlContext:
             If the configured driver has no construction code yet. Only
             ``"stellarmate"`` has it today.
         """
-        if self._remote_transfer_driver is None:
+        driver_name = self.config.get_remote_transfer_driver_name()
+        host = self.config.get_telescope_hostname()
+        pictures_path = self.config.get_remote_pictures_path()
+        settings = (driver_name, host, pictures_path)
+        replaced_host: str | None = None
+        with self._remote_transfer_lock:
+            cached_settings = self._remote_transfer_settings
+            hand_set = self._remote_transfer_driver is not None and cached_settings is None
+            if self._remote_transfer_driver is not None and (hand_set or cached_settings == settings):
+                return self._remote_transfer_driver
             from wayfindinglib.drivers.interfaces.registry import build_remote_transfer_driver_registry
 
-            driver_name = self.config.get_remote_transfer_driver_name()
             driver_class = cast(
                 "Callable[..., RemoteTransferDriver]", build_remote_transfer_driver_registry()[driver_name]
             )
@@ -421,16 +452,43 @@ class ControlContext:
                 raise NotImplementedError(
                     f"No constructor wiring yet for remote transfer driver '{driver_name}'"
                 )
-            self._remote_transfer_driver = driver_class(
-                host_alias=self.config.get_telescope_hostname(),
-                remote_pictures_path=self.config.get_remote_pictures_path(),
-            )
-        return self._remote_transfer_driver
+            if cached_settings is not None:
+                replaced_host = cached_settings[1]
+                logger.info(
+                    "Remote transfer settings changed (%s -> %s); building a new driver",
+                    cached_settings[1],
+                    host,
+                )
+            self._remote_transfer_driver = driver_class(host_alias=host, remote_pictures_path=pictures_path)
+            self._remote_transfer_settings = settings
+            driver = self._remote_transfer_driver
+        if replaced_host is not None:
+            self._drop_phd2_port_forward()
+        return driver
+
+    def _drop_phd2_port_forward(self) -> None:
+        """Stop the PHD2 SSH port forward and the guiding driver that uses it.
+
+        Called when the observatory host changed. The forward was built for
+        the old host, and the guiding driver's PHD2 client points at it, so
+        both go. The next use of `guiding_driver` builds them again for the
+        new host. Does nothing when no forward was started.
+        """
+        with self._guiding_driver_lock:
+            port_forward, self._phd2_port_forward = self._phd2_port_forward, None
+            if port_forward is None:
+                return
+            guiding_driver, self._guiding_driver = self._guiding_driver, None
+        port_forward.stop()
+        if guiding_driver is not None:
+            guiding_driver.close()
 
     @remote_transfer_driver.setter
     def remote_transfer_driver(self, remote_transfer_driver: RemoteTransferDriver) -> None:
-        """Set the remote transfer driver."""
-        self._remote_transfer_driver = remote_transfer_driver
+        """Set the remote transfer driver, which is then kept as given."""
+        with self._remote_transfer_lock:
+            self._remote_transfer_driver = remote_transfer_driver
+            self._remote_transfer_settings = None
 
     @property
     def guiding_driver(self) -> GuidingDriver:
@@ -483,11 +541,44 @@ class ControlContext:
         if protocol == "internal":
             return pulses
         if protocol == "phd2":
-            from wayfindinglib.drivers.phd2.phd2_client import PHD2Client
             from wayfindinglib.drivers.phd2.phd2_guiding_service import PHD2GuidingService
 
-            return registry[protocol](PHD2GuidingService(PHD2Client()), fallback=pulses)
+            return registry[protocol](PHD2GuidingService(self._build_phd2_client()), fallback=pulses)
         return registry[protocol](fallback=pulses)
+
+    def _build_phd2_client(self) -> PHD2Client:
+        """Build the PHD2 client for where PHD2 runs.
+
+        When PHD2 runs on the observatory computer its event server accepts
+        only local connections, so this starts an SSH port forward (once)
+        and points the client at the forwarded local port, but only when
+        the context was built with ``open_port_forwards``. Without it the
+        client uses ``localhost:4400`` (it warns once, and guiding falls
+        back to the mount's guide pulses). When PHD2 runs here, the client
+        always uses ``localhost:4400``.
+
+        Returns
+        -------
+        client : `PHD2Client`
+            The new client.
+        """
+        from wayfindinglib.drivers.phd2.phd2_client import PHD2Client
+
+        if self.config.get_phd2_location() != "observatory":
+            return PHD2Client()
+        if not self._open_port_forwards:
+            logger.info("PHD2 is on the observatory computer; the SSH tunnel is left to the backend")
+            return PHD2Client()
+        from wayfindinglib.drivers.ssh_port_forward import SshPortForward
+
+        remote_port = self.config.get_phd2_remote_port()
+        remote_transfer_driver = self.remote_transfer_driver
+        port_forward = SshPortForward(
+            lambda local_port: remote_transfer_driver.port_forward_command(local_port, remote_port)
+        )
+        port_forward.start()
+        self._phd2_port_forward = port_forward
+        return PHD2Client(host="127.0.0.1", port=port_forward.local_port)
 
     @guiding_driver.setter
     def guiding_driver(self, guiding_driver: GuidingDriver) -> None:
@@ -505,6 +596,9 @@ class ControlContext:
             guiding_driver = self._guiding_driver
         if guiding_driver is not None:
             guiding_driver.close()
+        port_forward, self._phd2_port_forward = self._phd2_port_forward, None
+        if port_forward is not None:
+            port_forward.stop()
         with self._driver_lock:
             worker_client = self._worker_client
             self._worker_client = None

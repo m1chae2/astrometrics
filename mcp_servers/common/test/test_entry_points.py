@@ -49,3 +49,33 @@ def test_entry_point_builds_its_registry_and_lists_tools(
     tool_names = {tool.name for tool in served["tools"].get_tool_definitions()}
     assert expected_tool in tool_names
     assert len(tool_names) > minimum_tools
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "mcp_servers.astrometrics_core.__main__",
+        "mcp_servers.wayfinding_core.__main__",
+        "mcp_servers.backend.__main__",
+    ],
+)
+def test_entry_point_watches_the_config_file_before_serving(
+    module_name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The server turns on config watching in its start-up step."""
+    entry_module = importlib.import_module(module_name)
+    watched: list[bool] = []
+
+    class FakeConfiguration:
+        """A stand-in configuration that records the watch request."""
+
+        def watch_for_changes(self) -> None:
+            """Record that watching was turned on."""
+            watched.append(True)
+
+    monkeypatch.setattr(entry_module, "get_configuration", lambda: FakeConfiguration())
+    monkeypatch.setattr(entry_module, "close_interrupted_jobs", lambda: None, raising=False)
+
+    entry_module.prepare()
+
+    assert watched == [True]

@@ -2,15 +2,16 @@
  * @file StackSummaryPanel.tsx
  * @description The "Stack Summary" block of the Image Processing Display's Data tab.
  * It answers in plain words how a target's current stack was made: how many frames
- * went in and how many were set aside, how many pixels were rejected, how wide the
- * stars are against what the input frames predict, the warnings, and what happened to
- * each exposure group. The numbers are the ones the stacking step saved with the
+ * went in and how many were set aside, how many pixels were rejected, the warnings
+ * (one says when the stars are wider than the input frames predict), and what happened
+ * to each exposure group. The numbers are the ones the stacking step saved with the
  * stack, so nothing is measured again. The warnings are the failed checks of the stacking
  * job that made the stack, each with its number and its limit. A stack that has no job id
  * (older data) shows the failed checks stored for its target and file instead. The panel
  * only reports; it does not rate a stack. The whole block is a disclosure that is closed
- * at first and shows one line (frames, date), so it does not push the session frames far
- * down the tab. It remembers nothing between visits.
+ * at first and shows one short line (how many frames were stacked), so it does not push the
+ * session frames far down the tab. The stack date is the first row inside. It remembers
+ * nothing between visits.
  */
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -54,13 +55,6 @@ export interface ExposureGroupView {
     left_out_reason?: string | null;
 }
 
-/** The star width numbers, as the backend sends them inside `StackSummary.star_width_px`. */
-export interface StarWidthView {
-    stack?: number | null;
-    expected_from_inputs?: number | null;
-    median_of_inputs?: number | null;
-}
-
 /** One frame left out of the stack, as the backend sends it inside `StackSummary.skipped_reasons`. */
 export interface SkippedFrameView {
     file?: string;
@@ -78,14 +72,6 @@ export const formatPixelShare = (fraction: number | null | undefined): string =>
     const digits = percent > 0 && percent < 0.1 ? 3 : 1;
     return `${percent.toFixed(digits)}% of pixels`;
 };
-
-/**
- * Writes a star width in pixels.
- * @param pixels The width (FWHM), in pixels.
- * @return Text such as `2.31 px`, or `not recorded`.
- */
-export const formatStarWidth = (pixels: number | null | undefined): string =>
-    pixels == null ? 'not recorded' : `${pixels.toFixed(2)} px`;
 
 export { formatExposureSeconds };
 
@@ -171,7 +157,6 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
         );
     }
 
-    const starWidth = (summary.star_width_px ?? {}) as StarWidthView;
     const groups = (summary.exposure_groups ?? []) as unknown as ExposureGroupView[];
     const skipped = (summary.skipped_reasons ?? []) as SkippedFrameView[];
     const madeAt = new Date(summary.made_at);
@@ -181,14 +166,13 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
         <details className="stack-summary">
             <summary className="stack-summary__title">
                 <span className="stacked-image-panel__label">
-                    {`${label} summary: ${summary.frames_stacked} of ${summary.frames_submitted} frames, `
-                        + `made ${madeAtText}`}
+                    {`${label} summary: ${summary.frames_stacked} of ${summary.frames_submitted} frames`}
                 </span>
             </summary>
 
             <dl className="stack-summary__list">
-                <dt>Frames used</dt>
-                <dd>{summary.frames_stacked} of {summary.frames_submitted} frames</dd>
+                <dt>Stack date</dt>
+                <dd>{madeAtText}</dd>
 
                 {summary.frames_set_aside_before_stacking != null && (
                     <>
@@ -240,22 +224,6 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
                 <dd>
                     {formatPixelShare(summary.rejected_pixel_fraction)}
                 </dd>
-
-                <dt>Star width (FWHM)</dt>
-                <dd>
-                    {formatStarWidth(starWidth.stack)} in the stack
-                    {starWidth.expected_from_inputs != null && (
-                        <>, against {formatStarWidth(starWidth.expected_from_inputs)} expected from the input frames</>
-                    )}{' '}
-                    (the input frames' median is {formatStarWidth(starWidth.median_of_inputs)}).
-                </dd>
-
-                {summary.calibration_mismatches ? (
-                    <>
-                        <dt>Calibration mismatches</dt>
-                        <dd>{summary.calibration_mismatches} (frames whose calibration files did not match)</dd>
-                    </>
-                ) : null}
             </dl>
 
             <div className="stack-summary__flags">

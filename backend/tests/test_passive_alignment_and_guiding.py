@@ -192,13 +192,13 @@ def test_indi_interface_camera_status_exposure_and_download() -> None:
     exp_prop = MagicMock()
     exp_prop.__len__.return_value = 1
     exp_prop.__getitem__.return_value = MagicMock(value=45.0)
-    exp_prop.s = 2  # PyIndi.IPS_BUSY
+    exp_prop.getState.return_value = 2  # PyIndi.IPS_BUSY
 
     interface._find_main_camera_device = MagicMock(return_value=camera_mock)
     interface._refresh_camera_status()
 
     assert interface.status.get("CAMERA_TEMPERATURE") == "-15.2°C"
-    assert interface.status.get("CAMERA_STATUS") == "Exposing (45.0s)"
+    assert interface.status.get("CAMERA_STATUS") == "Exposing (45s)"
 
     # Now verify downloading state (countdown reaches 0 but still busy)
     exp_prop.__getitem__.return_value = MagicMock(value=0.0)
@@ -206,8 +206,8 @@ def test_indi_interface_camera_status_exposure_and_download() -> None:
     assert interface.status.get("CAMERA_STATUS") == "Downloading"
 
 
-def test_indi_interface_camera_status_normalizes_elapsed_to_countdown() -> None:
-    """Verify camera status normalizes elapsed counter to countdown clock."""
+def test_indi_interface_camera_status_counts_down_on_clock() -> None:
+    """Verify the clock countdown, then Downloading, then Idle."""
     from wayfindinglib.drivers.indi_interface import IndiInterface
 
     config_mock = MagicMock()
@@ -216,20 +216,20 @@ def test_indi_interface_camera_status_normalizes_elapsed_to_countdown() -> None:
     config_mock.get_indi_port.return_value = 7624
 
     interface = IndiInterface(config_mock)
+    now = [100.0]
+    interface._monotonic_clock = lambda: now[0]
 
-    # When driver reports elapsed time (e.g. 0.4s into a 30s exposure)
-    interface._handle_exposure_update(val=0.4, is_busy=True, fits_exptime=30.0)
-    assert interface.status.get("CAMERA_STATUS") == "Exposing (29.6s)"
-
-    # Second elapsed sample (e.g. 2.5s elapsed)
-    interface._handle_exposure_update(val=2.5, is_busy=True, fits_exptime=30.0)
-    assert interface.status.get("CAMERA_STATUS") == "Exposing (27.5s)"
-
-    # When exposure completes (remaining <= 0 while busy)
     interface._handle_exposure_update(val=30.0, is_busy=True, fits_exptime=30.0)
+    assert interface.status.get("CAMERA_STATUS") == "Exposing (30s)"
+
+    now[0] += 2.5
+    interface._handle_exposure_update(val=27.5, is_busy=True, fits_exptime=30.0)
+    assert interface.status.get("CAMERA_STATUS") == "Exposing (28s)"
+
+    # The camera reports no time left while still busy: readout.
+    interface._handle_exposure_update(val=0.0, is_busy=True, fits_exptime=30.0)
     assert interface.status.get("CAMERA_STATUS") == "Downloading"
 
-    # When camera returns to idle
     interface._handle_exposure_update(val=0.0, is_busy=False)
     assert interface.status.get("CAMERA_STATUS") == "Idle"
 

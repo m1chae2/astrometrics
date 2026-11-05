@@ -46,7 +46,7 @@ export const StatusHeader: React.FC = () => {
       ) {
         targetEndTimeRef.current = newEndTime;
       }
-      setDisplayCameraStatus(`Exposing (${remainingSec.toFixed(1)}s)`);
+      setDisplayCameraStatus(`Exposing (${Math.ceil(remainingSec)}s)`);
     } else {
       targetEndTimeRef.current = null;
       setDisplayCameraStatus(cameraStatus);
@@ -60,7 +60,7 @@ export const StatusHeader: React.FC = () => {
       if (!targetEndTimeRef.current) return;
       const remainingMs = targetEndTimeRef.current - Date.now();
       if (remainingMs > 0) {
-        setDisplayCameraStatus(`Exposing (${(remainingMs / 1000).toFixed(1)}s)`);
+        setDisplayCameraStatus(`Exposing (${Math.ceil(remainingMs / 1000)}s)`);
       } else {
         setDisplayCameraStatus('Downloading');
         targetEndTimeRef.current = null;

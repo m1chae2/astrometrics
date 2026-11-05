@@ -8,10 +8,15 @@ over stdin and stdout. Every tool reaches the running backend through its
 
 import logging
 
-from astrometricslib import configure_logging
+from astrometricslib import configure_logging, get_configuration
 from mcp_servers.backend.definition import MANIFEST_PATH, SERVER_NAME, NotificationResource, build_registry
 from mcp_servers.common.profile import GAP_REPORT_GUIDANCE
 from mcp_servers.common.server import run_server
+
+
+def prepare() -> None:
+    """Watch the config file, so a changed library path is used."""
+    get_configuration().watch_for_changes()
 
 
 def main() -> None:
@@ -20,7 +25,9 @@ def main() -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     registry = build_registry()
     registry.apply_profile(MANIFEST_PATH)
-    run_server(SERVER_NAME, GAP_REPORT_GUIDANCE, registry, resources=NotificationResource())
+    run_server(
+        SERVER_NAME, GAP_REPORT_GUIDANCE, registry, resources=NotificationResource(), before_start=prepare
+    )
 
 
 if __name__ == "__main__":

@@ -223,7 +223,10 @@ The `kind` values of `review.query` are `capture`, `guiding`, `sky_coverage`, `r
 
 `Telescope.guiding_protocol` picks the guiding driver (`build_guiding_driver_registry`): `phd2`, `internal` or `simulator`. Only the simulator runs the guide loop. `validate_altitude_limits` and `validate_hour_angle_limits` in `drivers/indi/mount_controller.py` run before each slew. Only the altitude range falls back to `[Observatory.Constraints]`.
 
+When PHD2 runs on the observatory computer (`[Observatory.Guiding] phd2_location`, which defaults to `observatory` with the `stellarmate` transfer driver and to `local` otherwise), its event server accepts only local connections. Only the backend opens the tunnel: `ControlContext` starts an `SshPortForward` (`drivers/ssh_port_forward.py`) only when it was built with `open_port_forwards=True`, an option that is off by default and that `backend/container.py` turns on. A script or an MCP server therefore never opens its own SSH connection, and its guiding driver falls back to the mount's guide pulses. When the option is on, the forward goes to the server's port (`phd2_port`, default 4400) and the PHD2 client is pointed at the forwarded local port. When the Linux tool `setpriv` is installed, ssh runs under `setpriv --pdeathsig KILL`, so the kernel ends ssh if the app is killed without a clean shutdown. The ssh command comes from `StellarMateInterface.port_forward_command`. The forward restarts a dead ssh after 5 s (the cooldown of `PHD2Client` and `ConnectionManager`), counts it up after 1 s alive, and asks ssh to end a silent link after 45 s (`ServerAliveInterval=15`, `ServerAliveCountMax=3`). These values are design estimates, not yet measured.
+
 <!-- impl: wayfindinglib.drivers.interfaces.registry.build_guiding_driver_registry -->
+<!-- impl: wayfindinglib.drivers.ssh_port_forward.SshPortForward -->
 <!-- impl: wayfindinglib.drivers.indi_interface.IndiInterface -->
 <!-- impl: wayfindinglib.drivers.simulators.indi_simulator.SimulatorIndiInterface -->
 <!-- impl: wayfindinglib.drivers.stellarmate_interface.StellarMateInterface -->

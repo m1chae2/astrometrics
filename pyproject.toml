@@ -266,6 +266,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "backend/services/infrastructure/handoff_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "backend/services/infrastructure/phone_share.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "wayfindinglib/drivers/stellarmate_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"wayfindinglib/drivers/ssh_port_forward.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/_internal/drivers/test/test_target_records.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/test/test_scripts.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/foundation/test/test_astropy_setup.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"] # runs this interpreter on a fixed script to import a library in a fresh process
@@ -307,6 +308,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "wayfindinglib/drivers/indi/test/test_mount_controller.py" = ["invalid-function-name"] # fake telescope device mocks PyIndi's camelCase getNumber
 "wayfindinglib/drivers/test/test_indi_property_dispatch.py" = ["invalid-function-name"] # recording client overrides the same PyIndi camelCase callbacks
 "wayfindinglib/drivers/indi/test/test_enclosure_controller.py" = ["invalid-function-name"] # fake enclosure device/client mocks PyIndi's camelCase interface
+"wayfindinglib/drivers/test/test_indi_property_state.py" = ["invalid-function-name"] # fake properties mock the same PyIndi camelCase interface
 "wayfindinglib/drivers/indi/test/test_switch_controller.py" = ["invalid-function-name"] # fake powerbox device/client mocks PyIndi's camelCase interface
 "wayfindinglib/drivers/indi/test/test_weather_controller.py" = ["invalid-function-name"] # fake powerbox device mocks PyIndi's camelCase getNumber
 
@@ -551,7 +553,7 @@ forbidden_modules = [
 #               api.review (it reads the same records as control),
 #               and the hardware drivers (drivers.indi, drivers.indi_interface,
 #               drivers.indi_worker, drivers.interfaces, drivers.phd2, drivers.simulators,
-#               drivers.ekos, drivers.stellarmate_interface)
+#               drivers.ekos, drivers.stellarmate_interface, drivers.ssh_port_forward)
 #   Planning    tasks.planning_tasks, api.planning
 #   Execution   tasks.execution_tasks, api.execution
 #   Root        wayfindinglib (package __init__), wayfindinglib.api (__init__)
@@ -586,6 +588,7 @@ forbidden_modules = [
     "wayfindinglib.drivers.simulators",
     "wayfindinglib.drivers.ekos",
     "wayfindinglib.drivers.stellarmate_interface",
+    "wayfindinglib.drivers.ssh_port_forward",
     # Planning
     "wayfindinglib.tasks.planning_tasks",
     "wayfindinglib.api.planning",
@@ -614,6 +617,7 @@ source_modules = [
     "wayfindinglib.drivers.simulators",
     "wayfindinglib.drivers.ekos",
     "wayfindinglib.drivers.stellarmate_interface",
+    "wayfindinglib.drivers.ssh_port_forward",
 ]
 forbidden_modules = [
     "wayfindinglib.tasks.planning_tasks",
@@ -657,6 +661,7 @@ forbidden_modules = [
     "wayfindinglib.drivers.simulators",
     "wayfindinglib.drivers.ekos",
     "wayfindinglib.drivers.stellarmate_interface",
+    "wayfindinglib.drivers.ssh_port_forward",
 ]
 # Indirect imports are counted (the default): a chain such as
 # Planning -> Foundation reader -> driver registry is a violation too.

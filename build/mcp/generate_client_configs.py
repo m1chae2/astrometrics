@@ -50,7 +50,16 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 CLAUDE_ROOT_VARIABLE = "$CLAUDE_PROJECT_DIR"
-"""How Claude config files refer to the project folder."""
+"""How the companion Claude config refers to the project folder."""
+
+RELATIVE_ROOT = "."
+"""The project folder as a relative path, for configs started from the root.
+
+``.mcp.json`` and ``mcp_servers.json`` use it. The Claude desktop app starts
+project MCP servers from the project folder, and it did not reliably expand
+``$CLAUDE_PROJECT_DIR`` there, so these files use plain relative paths and
+leave out ``cwd``.
+"""
 
 EXAMPLE_ROOT = "/path/to/astrometrics"
 """The placeholder used in the tracked example file."""
@@ -246,22 +255,41 @@ def server_entry(
     Returns
     -------
     entry : `dict` [`str`, `Any`]
-        The ``command``, ``args``, ``cwd`` and ``env`` of the server.
+        The ``command``, ``args``, ``cwd`` and ``env`` of the server. With
+        `RELATIVE_ROOT` the paths are relative and ``cwd`` is left out.
     """
+    relative = root_text == RELATIVE_ROOT
+
+    def project_path(path: str) -> str:
+        """Join a project-relative path to the root, as the config writes it.
+
+        Parameters
+        ----------
+        path : `str`
+            A path relative to the project folder.
+
+        Returns
+        -------
+        written : `str`
+            The path itself for a relative config, else ``<root>/<path>``.
+        """
+        return path if relative else f"{root_text}/{path}"
+
+    location = {} if relative else {"cwd": root_text}
     if spec.node_script:
         return {
             "command": "node",
-            "args": [f"{root_text}/{spec.node_script}"],
-            "cwd": root_text,
+            "args": [project_path(spec.node_script)],
+            **location,
             "env": {"ASTROMETRICS_MCP_PROFILE": profile} if profile else {},
         }
     environment: dict[str, str] = {**spec.extra_environment, "PYTHONPATH": root_text}
     if profile:
         environment["ASTROMETRICS_MCP_PROFILE"] = profile
     return {
-        "command": f"{root_text}/.venv/bin/python",
+        "command": project_path(".venv/bin/python"),
         "args": ["-m", spec.python_module],
-        "cwd": root_text,
+        **location,
         "env": dict(sorted(environment.items())),
     }
 
@@ -454,7 +482,7 @@ def render_all(root: Path = PROJECT_ROOT) -> dict[str, str]:
         """
         return json.dumps(data, indent=2) + "\n"
 
-    developer = as_json(build_claude_config(companion=False))
+    developer = as_json(build_claude_config(companion=False, root_text=RELATIVE_ROOT))
     return {
         CLAUDE_OUTPUT_PATHS["developer"]: developer,
         CLAUDE_OUTPUT_PATHS["local"]: developer,

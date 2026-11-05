@@ -176,7 +176,7 @@ export interface ActionRegistry {
     "astronomy:delete": { payload: { star_id: string }; response: boolean };
     "astronomy:save": { payload: Record<string, never>; response: void };
     "astronomy:get_stellar_objects": { payload: { target_id?: string }; response: Spectrum[] };
-    "astronomy:get_overlay_stars": { payload: { target_id: string; limit?: number }; response: any[] };
+    "astronomy:get_overlay_stars": { payload: { target_id: string; limit?: number; image_path?: string }; response: { stars: any[]; reason: string | null } };
     "astronomy:target_data_availability": { payload: Record<string, never>; response: Record<string, { hasSpectra: boolean; hasPhotometry: boolean; starCount: number }> };
     "astronomy:spectral_class_summary": { payload: Record<string, never>; response: { spectralClass: string; label: string; count: number }[] };
     "astronomy:stars_by_spectral_class": { payload: { spectral_class: string }; response: { id: string; name: string; ra: number | null; dec: number | null; magnitude: number | null; spectralType: string; hasSpectra: boolean; hasPhotometry: boolean; selfDeterminedSpectralTypeRms: number | null }[] };

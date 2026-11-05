@@ -134,6 +134,8 @@ class StarQuery:
     include_unresolved : `bool`
         Keep the single-frame photometry detections (see
         `is_unresolved_detection`). They are hidden by default.
+    image_path : `str` or `None`
+        For ``detail="overlay"`` only: the image to place the stars on.
     """
 
     ids: list[str] | None = None
@@ -150,6 +152,7 @@ class StarQuery:
     spectral_class: str | None = None
     search: str | None = None
     include_unresolved: bool = False
+    image_path: str | None = None
 
     def selector(self) -> str | None:
         """Name the one selector given.
@@ -713,6 +716,8 @@ def run_star_query(
     from astrometricslib.pipelines.shared.star_overlay import build_overlay
 
     selector = query.selector()
+    if query.image_path is not None and detail != "overlay":
+        raise InvalidArgumentError("image_path is used only with detail='overlay'.")
     if detail in ("stats", "class_counts", "target_counts"):
         _refuse_unused(detail, {"order": order is not None, "offset": bool(offset)})
         return _whole_library_answer(storage, query, selector, detail)
@@ -747,8 +752,10 @@ def run_star_query(
             },
         )
         cap = None if limit is None else max(1, min(int(limit), QUERY_LIMITS["overlay"]))
-        overlay = build_overlay(storage, query.target_id, cap)
-        return StarQueryResult(detail=detail, total_matching=len(overlay), offset=0, overlay=overlay)
+        overlay, reason = build_overlay(storage, query.target_id, cap, query.image_path)
+        return StarQueryResult(
+            detail=detail, total_matching=len(overlay), offset=0, overlay=overlay, overlay_reason=reason
+        )
     # The radius cap protects a capped answer, meant to be read in full.
     # A program that asks for every match (limit=None), such as the sky
     # map, may search a wider circle.

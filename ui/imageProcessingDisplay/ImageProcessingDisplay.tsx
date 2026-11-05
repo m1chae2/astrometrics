@@ -133,6 +133,8 @@ const ImageProcessingDisplayInner: React.FC = () => {
     }
   });
   const [isLoadingOverlay, setIsLoadingOverlay] = useState(false);
+  const overlayTargetRef = useRef<string | null>(null);
+  const [overlayReason, setOverlayReason] = useState<string | null>(null);
 
   const [selectedStarId, setSelectedStarId] = useState<string | null>(() => {
     try {
@@ -181,6 +183,10 @@ const ImageProcessingDisplayInner: React.FC = () => {
 
   useEffect(() => {
     let active = true;
+    // The overlay switch is reset only when the target changes. Showing a
+    // different file of the same target keeps it as it is.
+    const targetChanged = overlayTargetRef.current !== selectedTarget;
+    overlayTargetRef.current = selectedTarget;
     let shouldEnable = pendingEnableAstrometryRef.current;
     try {
       if (localStorage.getItem('astrometrics:enableAstrometryOverlay') === 'true') {
@@ -194,19 +200,21 @@ const ImageProcessingDisplayInner: React.FC = () => {
 
     if (shouldEnable) {
       setShowAstrometryOverlay(true);
-    } else {
+    } else if (targetChanged) {
       setShowAstrometryOverlay(false);
     }
 
     if (!selectedTarget) {
       setOverlayStars([]);
+      setOverlayReason(null);
       return;
     }
     setIsLoadingOverlay(true);
-    fetchAstrometryOverlayStars(selectedTarget)
-      .then((stars) => {
+    fetchAstrometryOverlayStars(selectedTarget, 35, selectedFile)
+      .then(({ stars, reason }) => {
         if (active) {
           setOverlayStars(stars);
+          setOverlayReason(reason);
           if (shouldEnable && stars.length > 0) {
             setShowAstrometryOverlay(true);
           }
@@ -225,7 +233,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [selectedTarget]);
+  }, [selectedTarget, selectedFile]);
 
   const handleToggleAstrometryOverlay = React.useCallback(async () => {
     if (showAstrometryOverlay) {
@@ -245,9 +253,12 @@ const ImageProcessingDisplayInner: React.FC = () => {
 
     setIsLoadingOverlay(true);
     try {
-      const stars = await fetchAstrometryOverlayStars(selectedTarget);
+      const { stars, reason } = await fetchAstrometryOverlayStars(selectedTarget, 35, selectedFile);
       setOverlayStars(stars);
+      setOverlayReason(reason);
       if (stars.length > 0) {
+        setShowAstrometryOverlay(true);
+      } else if (reason) {
         setShowAstrometryOverlay(true);
       } else {
         emitToast(`No astrometry stars identified for ${selectedTarget}. Run astrometry plate solving first.`, 'info', 'Astrometry');
@@ -258,7 +269,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
     } finally {
       setIsLoadingOverlay(false);
     }
-  }, [showAstrometryOverlay, overlayStars, selectedTarget, setShowAstrometryOverlay]);
+  }, [showAstrometryOverlay, overlayStars, selectedTarget, selectedFile, setShowAstrometryOverlay]);
 
   /**
    * Handles clicking an astrometry star reticle or badge in the FITS viewer.
@@ -448,6 +459,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
       showAstrometryOverlay={showAstrometryOverlay}
       onToggleAstrometryOverlay={handleToggleAstrometryOverlay}
       isLoadingOverlay={isLoadingOverlay}
+      overlayReason={overlayReason}
       onStarClick={handleStarClick}
       selectedStarId={selectedStarId}
       allFiles={allFiles}

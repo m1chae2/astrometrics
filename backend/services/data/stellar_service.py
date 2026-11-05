@@ -97,7 +97,7 @@ class StellarService:
             The planning library. Built on first use when omitted.
         """
         self.config = config
-        self._overlay_cache: OrderedDict[tuple, list[dict]] = OrderedDict()
+        self._overlay_cache: OrderedDict[tuple, tuple[list[dict], str | None]] = OrderedDict()
         self.astrometrics = astrometrics or Astrometrics(config)
         self._wayfinder = wayfinder
         self._period_search_slots = threading.BoundedSemaphore(_MAXIMUM_CONCURRENT_PERIOD_SEARCHES)
@@ -263,13 +263,49 @@ class StellarService:
                 times.append(0)
         return tuple(times)
 
-    def get_astrometry_overlay_stars(self, target_id: str, limit: int = 35) -> list[dict]:
-        """Place a target's catalog stars on its image, remembering answers.
+    def _allowed_image_roots(self) -> list[Path]:
+        """List the folders an overlay image may be in.
+
+        Returns
+        -------
+        roots : `list` [`Path`]
+            The library folder, plus the frames and stacks folders when the
+            configuration names them.
+        """
+        roots = [Path(self.config.get_library_path())]
+        for getter in ("get_frames_path", "get_stacks_path"):
+            method = getattr(self.config, getter, None)
+            if callable(method):
+                roots.append(Path(method()))
+        return [root.resolve() for root in roots]
+
+    def _checked_image_path(self, image_path: str) -> str:
+        """Refuse an image path that is outside the library folders.
+
+        Returns
+        -------
+        path : `str`
+            The resolved path.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If the path is not inside the library, frames or stacks folder.
+        """
+        resolved = Path(image_path).resolve()
+        if not any(resolved.is_relative_to(root) for root in self._allowed_image_roots()):
+            raise InvalidArgumentError("The image must be inside the library folders.")
+        return str(resolved)
+
+    def get_astrometry_overlay_stars(
+        self, target_id: str, limit: int = 35, image_path: str | None = None
+    ) -> dict[str, Any]:
+        """Place a target's catalog stars on an image, remembering answers.
 
         Working out the overlay for a target with tens of thousands of
         stars takes seconds. The answer only changes when the library
-        database or the target's reference image changes, so it is kept
-        (the 64 most recent) and reused until one of them does.
+        database or the image changes, so it is kept (the 64 most recent)
+        and reused until one of them does.
 
         Parameters
         ----------
@@ -278,46 +314,63 @@ class StellarService:
         limit : `int`, optional
             Maximum number of stars to return (default 35). Zero or less
             returns every star the library places, up to its cap.
+        image_path : `str`, optional
+            The image the app is showing. The stars are placed on it. By
+            default, the target's current stack. It must be inside the
+            library, frames or stacks folder; otherwise the call is refused.
 
         Returns
         -------
-        result : `list` of `dict`
-            One `OverlayStar` per star, with the keys ``id``, ``name``,
-            ``x``, ``y``, ``spectralType``, ``isCatalogIdentified``,
+        result : `dict`
+            ``stars``: one `OverlayStar` per star, with the keys ``id``,
+            ``name``, ``x``, ``y``, ``spectralType``, ``isCatalogIdentified``,
             ``referenceWidth``, ``referenceHeight`` and ``radiusPx``.
+            ``reason``: why there are no stars when the image has no sky
+            solution, else `None`.
         """
         if not target_id:
-            return []
+            return {"stars": [], "reason": None}
+        checked_path = self._checked_image_path(image_path) if image_path else None
         try:
             target = self.astrometrics.targets.get(target_id)
-            image_path = _overlay_reference_image_path(target)
-            image_time = Path(image_path).stat().st_mtime_ns if image_path else 0
-            key = (target_id, limit, str(image_path), image_time, self._catalog_version())
+            reference_path = checked_path or _overlay_reference_image_path(target)
+            image_time = Path(reference_path).stat().st_mtime_ns if reference_path else 0
+            key = (target_id, limit, str(reference_path), image_time, self._catalog_version())
         except AstrometricsError, OSError:
-            return self._compute_overlay(target_id, limit)
+            return self._compute_overlay(target_id, limit, checked_path)
 
         cache = self._overlay_cache
         if key in cache:
             cache.move_to_end(key)
-            return [dict(star) for star in cache[key]]
-        result = self._compute_overlay(target_id, limit)
-        cache[key] = [dict(star) for star in result]
+            stars, reason = cache[key]
+            return {"stars": [dict(star) for star in stars], "reason": reason}
+        result = self._compute_overlay(target_id, limit, checked_path)
+        cache[key] = ([dict(star) for star in result["stars"]], result["reason"])
         while len(cache) > _OVERLAY_CACHE_SIZE:
             cache.popitem(last=False)
         return result
 
-    def _compute_overlay(self, target_id: str, limit: int) -> list[dict]:
-        """Ask the library to place a target's stars on its image.
+    def _compute_overlay(self, target_id: str, limit: int, image_path: str | None = None) -> dict[str, Any]:
+        """Ask the library to place a target's stars on an image.
 
         Returns
         -------
-        result : `list` of `dict`
-            The library's overlay stars, with the app's camelCase keys.
+        result : `dict`
+            ``stars``: the library's overlay stars, with the app's camelCase
+            keys. ``reason``: why there are none, or `None`.
         """
-        answer = self.astrometrics.stars.query(
-            target_id=target_id, detail="overlay", limit=limit if limit and limit > 0 else None
-        )
-        return [star.model_dump(by_alias=True) for star in answer.overlay or []]
+        query_arguments: dict[str, Any] = {
+            "target_id": target_id,
+            "detail": "overlay",
+            "limit": limit if limit and limit > 0 else None,
+        }
+        if image_path:
+            query_arguments["image_path"] = image_path
+        answer = self.astrometrics.stars.query(**query_arguments)
+        return {
+            "stars": [star.model_dump(by_alias=True) for star in answer.overlay or []],
+            "reason": answer.overlay_reason,
+        }
 
     def _query_listing(
         self,

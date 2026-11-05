@@ -17,6 +17,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from astrometricslib._internal.catalog import OverlayStar, StarQueryResult
+from astrometricslib.exceptions import InvalidArgumentError
 from backend.services.data.stellar_service import StellarService
 
 
@@ -25,7 +26,7 @@ def test_an_empty_target_id_returns_no_stars() -> None:
     astrometrics = MagicMock()
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
-    assert service.get_astrometry_overlay_stars(target_id="") == []
+    assert service.get_astrometry_overlay_stars(target_id="") == {"stars": [], "reason": None}
     astrometrics.stars.query.assert_not_called()
 
 
@@ -35,6 +36,7 @@ def test_the_overlay_comes_from_the_library_with_camel_case_keys(tmp_path: Path)
     astrometrics.targets.get.return_value = None
     astrometrics.stars.query.return_value = StarQueryResult(
         detail="overlay",
+        overlay_reason=None,
         overlay=[
             OverlayStar(
                 id="HD 1",
@@ -55,7 +57,8 @@ def test_the_overlay_comes_from_the_library_with_camel_case_keys(tmp_path: Path)
     results = service.get_astrometry_overlay_stars(target_id="M 13", limit=3)
 
     astrometrics.stars.query.assert_called_once_with(target_id="M 13", detail="overlay", limit=3)
-    assert results == [
+    assert results["reason"] is None
+    assert results["stars"] == [
         {
             "id": "HD 1",
             "name": "HD 1",
@@ -92,16 +95,16 @@ def _service_with_counting_overlay(library_path: Path) -> tuple[StellarService, 
     )
     calls: list[str] = []
 
-    def compute(target_id: str, limit: int = 35) -> list[dict]:
+    def compute(target_id: str, limit: int = 35, image_path: str | None = None) -> dict:
         """Count the call and return one star.
 
         Returns
         -------
-        stars : `list` [`dict`]
-            A single fake overlay star.
+        result : `dict`
+            A single fake overlay star and no reason.
         """
-        calls.append(target_id)
-        return [{"id": "S1", "x": 1.0}]
+        calls.append(f"{target_id}|{image_path}")
+        return {"stars": [{"id": "S1", "x": 1.0}], "reason": None}
 
     service._compute_overlay = compute
     return service, calls
@@ -113,14 +116,43 @@ def test_the_overlay_is_reused_until_the_database_changes(tmp_path: Path) -> Non
     database.write_text("a")
     service, calls = _service_with_counting_overlay(tmp_path)
 
-    first = service.get_astrometry_overlay_stars("M 51")
-    second = service.get_astrometry_overlay_stars("M 51")
-    assert calls == ["M 51"]
+    first = service.get_astrometry_overlay_stars("M 51")["stars"]
+    second = service.get_astrometry_overlay_stars("M 51")["stars"]
+    assert calls == ["M 51|None"]
     assert first == second
 
     second[0]["x"] = 99.0
-    assert service.get_astrometry_overlay_stars("M 51")[0]["x"] == pytest.approx(1.0)
+    assert service.get_astrometry_overlay_stars("M 51")["stars"][0]["x"] == pytest.approx(1.0)
 
     os.utime(database, ns=(1, 1))
     service.get_astrometry_overlay_stars("M 51")
-    assert calls == ["M 51", "M 51"]
+    assert calls == ["M 51|None", "M 51|None"]
+
+
+def test_the_image_path_is_part_of_the_cache_key(tmp_path: Path) -> None:
+    """The same target with two different images is computed twice."""
+    (tmp_path / "astrometrics.db").write_text("a")
+    first_image = tmp_path / "first.fits"
+    second_image = tmp_path / "second.fits"
+    first_image.write_text("x")
+    second_image.write_text("y")
+    service, calls = _service_with_counting_overlay(tmp_path)
+
+    service.get_astrometry_overlay_stars("M 31", image_path=str(first_image))
+    service.get_astrometry_overlay_stars("M 31", image_path=str(second_image))
+    service.get_astrometry_overlay_stars("M 31", image_path=str(first_image))
+
+    assert calls == [f"M 31|{first_image.resolve()}", f"M 31|{second_image.resolve()}"]
+
+
+def test_an_image_outside_the_library_is_refused(tmp_path: Path) -> None:
+    """A path outside the library, frames and stacks folders is not read."""
+    library = tmp_path / "library"
+    library.mkdir()
+    outside = tmp_path / "outside.fits"
+    outside.write_text("x")
+    service, calls = _service_with_counting_overlay(library)
+
+    with pytest.raises(InvalidArgumentError, match="library"):
+        service.get_astrometry_overlay_stars("M 31", image_path=str(outside))
+    assert calls == []

@@ -699,10 +699,34 @@ def render_types() -> str:
     return "\n".join(line.rstrip() for line in content.split("\n"))
 
 
+def write_atomically(path: str, text: str) -> None:
+    """Write a file so a reader never sees it half written.
+
+    The text goes to a temporary file in the same folder, which then
+    replaces the target in one step. A dev server that reloads while the
+    generator runs sees either the old file or the new one, never an empty
+    one.
+
+    Parameters
+    ----------
+    path : `str`
+        The file to write.
+    text : `str`
+        The new contents.
+    """
+    temporary_path = f"{path}.{os.getpid()}.tmp"
+    try:
+        with open(temporary_path, "w") as temporary_file:
+            temporary_file.write(text)
+        os.replace(temporary_path, path)
+    finally:
+        if os.path.exists(temporary_path):
+            os.remove(temporary_path)
+
+
 def main() -> None:
     """Run the entry point for generating backend TypeScript interfaces."""
-    with open("ui/common/types/backendTypes.ts", "w") as f:
-        f.write(render_types())
+    write_atomically("ui/common/types/backendTypes.ts", render_types())
     print("Successfully generated ui/common/types/backendTypes.ts")
 
 

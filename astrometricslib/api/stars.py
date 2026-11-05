@@ -131,6 +131,7 @@ class StellarCatalog:
         spectral_class: str | None = None,
         search: str | None = None,
         include_unresolved: bool = False,
+        image_path: str | None = None,
         detail: Literal[
             "exists",
             "ids",
@@ -198,6 +199,10 @@ class StellarCatalog:
             photometry finds in one frame and saves with ids ending in
             ``":Star_<n>"``. They are working records, not catalog stars, so
             they are hidden by default.
+        image_path : `str`, optional
+            With ``detail="overlay"`` only: the image to place the stars on
+            (for example the file the app is showing). By default, the
+            target's current stack.
         detail : `str`, optional
             ``"summary"`` (default): id, name, position, magnitude (and
             whether it is a real catalog magnitude), spectral type, targets
@@ -268,6 +273,7 @@ class StellarCatalog:
             spectral_class=spectral_class,
             search=search,
             include_unresolved=include_unresolved,
+            image_path=image_path,
         )
         if order is not None:
             check_choice("order", order, QUERY_ORDERS)

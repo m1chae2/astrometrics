@@ -22,6 +22,8 @@ interface ViewerPanelContainerProps {
   showAstrometryOverlay?: boolean;
   onToggleAstrometryOverlay?: () => void;
   isLoadingOverlay?: boolean;
+  /** Why no overlay markers are drawn (for example, no sky solution), or null. */
+  overlayReason?: string | null;
   onStarClick?: (star: AstrometryOverlayStar) => void;
   selectedStarId?: string | null;
 
@@ -48,7 +50,7 @@ interface ViewerPanelContainerProps {
 export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
   fitsRendererRef, imageUrl, imageBlob, imageFrameInfo, loading, error, selectedTarget,
   autoPanTrigger, disableStretch, stretch, toggleStretch,
-  overlayStars, showAstrometryOverlay, onToggleAstrometryOverlay, isLoadingOverlay, onStarClick,
+  overlayStars, showAstrometryOverlay, onToggleAstrometryOverlay, isLoadingOverlay, overlayReason, onStarClick,
   selectedStarId,
   allFiles, filteredFiles, fileFilterText, setFileFilterText, fileBrowserCamera, setFileBrowserCamera,
   checkedFiles, handleRequestDeleteFiles, onOpenHeaderModal, onFileClick, selectedFile,
@@ -80,6 +82,15 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
             >
               {isLoadingOverlay ? "Loading..." : "Astrometry"}
             </button>
+            {showAstrometryOverlay && overlayReason && !isLoadingOverlay && (
+              <span
+                className="fits-header-controls__note"
+                data-testid="astrometry-overlay-reason"
+                style={{ fontSize: '0.8em', opacity: 0.7 }}
+              >
+                {overlayReason}
+              </span>
+            )}
             <button className="btn btn--tiny" onClick={() => fitsRendererRef.current?.zoomIn()} title="Zoom In">+</button>
             <button className="btn btn--tiny" onClick={() => fitsRendererRef.current?.zoomOut()} title="Zoom Out">-</button>
             <button className="btn btn--tiny" onClick={() => fitsRendererRef.current?.zoomToFit()} title="Zoom to Fit">Fit</button>

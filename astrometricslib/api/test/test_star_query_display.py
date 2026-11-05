@@ -25,7 +25,7 @@ from astrometricslib.models.stellar_source import (
     StellarObject,
     has_catalog_magnitude,
 )
-from astrometricslib.models.target import Target, TargetStackingResult
+from astrometricslib.models.target import StackConfigurationResult, Target, TargetStackingResult
 from astrometricslib.pipelines.shared.star_catalog_queries import is_unresolved_detection
 
 DETECTION_ID = "M13:2026-05-01:100:30:Star_7"
@@ -246,6 +246,106 @@ def test_overlay_uses_saved_centers_when_the_image_has_no_wcs(tmp_path: Path) ->
 
     assert [(star.id, star.x, star.y, star.radius_px) for star in overlay] == [("HD 5", 12.2, 40.0, 3.5)]
     assert overlay[0].is_catalog_identified
+
+
+def _write_plain_image(path: Path, width: int, height: int) -> None:
+    """Write a FITS image of the given size that has no WCS.
+
+    Parameters
+    ----------
+    path : `pathlib.Path`
+        Where to write the image.
+    width, height : `int`
+        The image size in pixels.
+    """
+    fits.PrimaryHDU(data=np.zeros((height, width), dtype=np.float32)).writeto(path)
+
+
+def _put_centered_star(catalog: StellarCatalog) -> None:
+    """Save one M 13 star that has a saved pixel center and no sky position."""
+    centered = StellarObject(
+        id="HD 5", name="Delta", target_ids=["M 13"], magnitude=7.0, is_catalog_identified=True
+    )
+    centered.star_data = {"xcentroid": 12.25, "ycentroid": 40.0}
+    catalog._catalog_access.put([centered], "stellar_catalog", {})
+
+
+def _two_stack_target(stack_path: Path, other_path: Path) -> Target:
+    """Build an M 13 target with two stacks, the first one current.
+
+    Returns
+    -------
+    target : `Target`
+        A target with a stack for each of two camera setups.
+    """
+    return Target(
+        id="M 13",
+        stacking=TargetStackingResult(
+            stacked_image=str(stack_path),
+            stacks_by_configuration={
+                "Camera A@300mm": StackConfigurationResult(
+                    configuration_key="Camera A@300mm", stacked_image=str(stack_path)
+                ),
+                "Camera B@400mm": StackConfigurationResult(
+                    configuration_key="Camera B@400mm", stacked_image=str(other_path)
+                ),
+            },
+        ),
+    )
+
+
+def test_overlay_follows_the_named_image_not_the_current_stack(
+    catalog: StellarCatalog, tmp_path: Path
+) -> None:
+    """A named image with a WCS places the stars through that WCS and size."""
+    current_stack = tmp_path / "current_stack.fits"
+    _write_plain_image(current_stack, 300, 150)
+    shown = tmp_path / "shown_stack.fits"
+    _write_reference_image(shown)
+    catalog._catalog_access.put([_two_stack_target(current_stack, shown)], "target_catalog", {})
+
+    overlay = catalog.query(target_id="M 13", detail="overlay", image_path=str(shown)).overlay
+
+    assert [star.id for star in overlay] == ["HD 3"]
+    assert overlay[0].x == pytest.approx(99.0, abs=0.2)
+    assert (overlay[0].reference_width, overlay[0].reference_height) == (200, 100)
+
+
+def test_overlay_ignores_saved_centers_from_another_stack(tmp_path: Path) -> None:
+    """Two stacks and no WCS: saved centers are not used; a reason shows."""
+    catalog = _catalog(tmp_path)
+    _put_centered_star(catalog)
+    current_stack = tmp_path / "current_stack.fits"
+    _write_plain_image(current_stack, 300, 150)
+    other = tmp_path / "other_stack.fits"
+    _write_plain_image(other, 600, 400)
+    catalog._catalog_access.put([_two_stack_target(current_stack, other)], "target_catalog", {})
+
+    answer = catalog.query(target_id="M 13", detail="overlay", image_path=str(current_stack))
+
+    assert answer.overlay == []
+    assert answer.overlay_reason == "No sky solution for this image yet"
+
+
+def test_overlay_uses_saved_centers_for_the_only_stack(tmp_path: Path) -> None:
+    """With one stack and no WCS, saved centers belong to that stack."""
+    catalog = _catalog(tmp_path)
+    _put_centered_star(catalog)
+    stack = tmp_path / "only_stack.fits"
+    _write_plain_image(stack, 300, 150)
+    target = Target(id="M 13", stacking=TargetStackingResult(stacked_image=str(stack)))
+    catalog._catalog_access.put([target], "target_catalog", {})
+
+    answer = catalog.query(target_id="M 13", detail="overlay", image_path=str(stack))
+
+    assert [(star.id, star.x, star.y) for star in answer.overlay] == [("HD 5", 12.2, 40.0)]
+    assert answer.overlay_reason is None
+
+
+def test_an_image_path_is_refused_with_other_details(catalog: StellarCatalog) -> None:
+    """Only the overlay takes an image path."""
+    with pytest.raises(InvalidArgumentError, match="image_path"):
+        catalog.query(detail="ids", image_path="/tmp/x.fits")
 
 
 def test_catalog_magnitude_filter_in_a_region(catalog: StellarCatalog) -> None:

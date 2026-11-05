@@ -1145,8 +1145,19 @@
   padding-top: 4px;
 }
 
+/* Session Frames fills the rest of the Data tab. The table scrolls inside
+   it, and never gets shorter than 280px; when the panels above it are
+   opened, the whole tab scrolls instead. */
+.frame-analysis-content {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 280px;
+}
+
 .frame-analysis-table-container {
-  max-height: 280px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -1526,12 +1537,6 @@
   width: 100%;
   border-collapse: collapse;
   text-align: left;
-}
-
-.stack-summary__groups caption {
-  text-align: left;
-  color: var(--text-muted);
-  padding-bottom: var(--space-1);
 }
 
 .stack-summary__groups th,

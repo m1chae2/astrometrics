@@ -118,8 +118,10 @@ class TelescopeService:
         status : `dict` [`str`, `Any`]
             ``active`` (a copy of this target's frames is running),
             ``targetId``, and ``measured`` and ``total`` (the frames measured
-            so far and the frames to measure, both `None` until the
-            measuring job reports them).
+            so far and the frames to measure). Both are `None` while the
+            files copy. Once the measuring job runs, ``measured`` is a number
+            (0 until the job reports progress) and ``total`` is the frame
+            count if the job has said it, else `None`.
         """
         status: dict[str, Any] = {"active": False, "targetId": target_name, "measured": None, "total": None}
         if not target_name or self._sync_service is None:
@@ -134,10 +136,12 @@ class TelescopeService:
             for job in jobs:
                 if job.status not in _RUNNING_JOB_STATES:
                     continue
+                # A running measuring job means the copy is done. The job
+                # posts "Measured X of Y" only after a frame finishes, so a
+                # single frame shows no count until it is done: report 0 then.
                 match = _MEASURED_PATTERN.search(job.message or "")
-                if match:
-                    status["measured"] = int(match.group(1))
-                    status["total"] = int(match.group(2))
+                status["measured"] = int(match.group(1)) if match else 0
+                status["total"] = int(match.group(2)) if match else None
                 break
         except Exception:  # a status detail must never break the telescope poll
             logger.debug("Could not read the frame copy status of %s", target_name, exc_info=True)

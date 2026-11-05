@@ -40,24 +40,43 @@ function mockHeader(cameraStatus: string, frameCopy?: Record<string, unknown>): 
 }
 
 describe('StatusHeader frame copy text', () => {
-  /** Counts are shown after the camera state, with a tooltip. */
+  /** Analyzing counts are shown after the camera state, with a tooltip. */
   it('shows the measured count next to the camera state', () => {
     mockHeader('Idle', { active: true, targetId: 'M 31', measured: 24, total: 40 });
     render(<StatusHeader />);
     const suffix = screen.getByTestId('frame-copy');
-    expect(suffix.textContent).toContain('· ↓ 24/40');
-    expect(suffix.getAttribute('title')).toBe('Copying new M 31 frames to this computer: 24 of 40 measured');
+    expect(suffix.textContent).toContain('· Analyzing 24/40');
+    expect(suffix.getAttribute('title')).toBe('Measuring the new M 31 frames: 24 of 40 done');
     expect(screen.getByText('Idle')).toBeTruthy();
   });
 
-  /** Before the count is known only the arrow is shown. */
-  it('shows only the arrow when the count is not known', () => {
+  /** Before the count is known the word Downloading is shown. */
+  it('shows Downloading when the count is not known', () => {
     mockHeader('Idle', { active: true, targetId: 'M 31', measured: null, total: null });
     render(<StatusHeader />);
     const suffix = screen.getByTestId('frame-copy');
-    expect(suffix.textContent).toContain('· ↓');
+    expect(suffix.textContent).toContain('· Downloading');
     expect(suffix.textContent).not.toMatch(/\d\/\d/);
     expect(suffix.getAttribute('title')).toBe('Copying new M 31 frames to this computer');
+  });
+
+  /** Measuring has started but has not posted a count yet. */
+  it('shows Analyzing without numbers before the job posts a count', () => {
+    mockHeader('Idle', { active: true, targetId: 'M 31', measured: 0, total: null });
+    render(<StatusHeader />);
+    const suffix = screen.getByTestId('frame-copy');
+    expect(suffix.textContent).toContain('· Analyzing');
+    expect(suffix.textContent).not.toMatch(/\d\/\d/);
+    expect(suffix.getAttribute('title')).toBe('Measuring the new M 31 frames');
+  });
+
+  /** A single frame still shows its count. */
+  it('shows Analyzing 0/1 for a single new frame', () => {
+    mockHeader('Idle', { active: true, targetId: 'M 31', measured: 0, total: 1 });
+    render(<StatusHeader />);
+    const suffix = screen.getByTestId('frame-copy');
+    expect(suffix.textContent).toContain('· Analyzing 0/1');
+    expect(suffix.getAttribute('title')).toBe('Measuring the new M 31 frames: 0 of 1 done');
   });
 
   /** The countdown stays while frames copy. */
@@ -65,7 +84,7 @@ describe('StatusHeader frame copy text', () => {
     mockHeader('Exposing (42s)', { active: true, targetId: 'M 31', measured: 24, total: 40 });
     render(<StatusHeader />);
     expect(document.body.textContent).toMatch(/Exposing \(\d+s\)/);
-    expect(screen.getByTestId('frame-copy')).toBeTruthy();
+    expect(screen.getByTestId('frame-copy').textContent).toContain('· Analyzing 24/40');
   });
 
   /** No copy, no text. */

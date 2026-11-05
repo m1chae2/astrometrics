@@ -66,6 +66,18 @@ def test_running_quality_job_gives_counts() -> None:
     job_service.get_jobs_for_target.assert_called_once_with("M 31", job_type="quality", limit=3)
 
 
+def test_running_quality_job_without_a_count_reports_zero_measured() -> None:
+    """A measuring job that has not posted a count yet still means "analyzing".
+
+    The job posts "Measured X of Y" only after a frame is done, so during a
+    single-frame measurement the message is empty.
+    """
+    running = SimpleNamespace(status="running", message=None)
+    service, _sync, _jobs = _service(True, [running])
+    status = service.get_status()["frameCopy"]
+    assert (status["active"], status["measured"], status["total"]) == (True, 0, None)
+
+
 def test_finished_quality_job_is_ignored() -> None:
     """An old finished job does not give counts."""
     done = SimpleNamespace(status="completed", message="Measured 40 of 40 frames")

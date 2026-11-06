@@ -16,10 +16,11 @@
  * fast pan or wheel-zoom sends one request instead of one per intermediate view.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { callBackend } from '../../common/services/backendApi';
 import { PlanetariumSource } from '../../common/types/planetariumTypes';
 import { findCachedCatalogSources, storeCatalogSources } from '../utils/catalogSourceCache';
+import { isCoveredByFetched, sameSources, SourceQueryShape } from '../utils/sourceRequestRule';
 
 /**
  * How long the view must stay unchanged, in milliseconds, before an uncached
@@ -39,9 +40,11 @@ export const CATALOG_QUERY_DEBOUNCE_MS = 300;
  * A local lookup takes tens of milliseconds (about 50 ms for a busy view on a synthetic
  * 10 million star catalog), so it does not need the 300 ms a remote query does. A short
  * wait still skips the intermediate views of one wheel-zoom or drag, which would
- * otherwise each cost a lookup and a large response. Chosen by judgement, not measured.
+ * otherwise each cost a lookup and a large response. It is longer than the 200 ms rhythm at
+ * which a zoom gesture reports its field of view (FOV_NOTIFY_INTERVAL_MS), so no lookup starts
+ * mid-gesture. Chosen by judgement, not measured.
  */
-export const LOCAL_CATALOG_QUERY_DEBOUNCE_MS = 100;
+export const LOCAL_CATALOG_QUERY_DEBOUNCE_MS = 250;
 
 /**
  * Optional settings for useOnlineCatalogSources.
@@ -65,7 +68,8 @@ export interface UseOnlineCatalogSourcesOptions {
  * Fetches online catalog sources for enabled drivers within a sky region.
  *
  * Re-fetches whenever the center position, radius, or enabled driver list changes,
- * unless a cached prior query already covers the new region. Returns an empty
+ * unless the sources on screen or a cached prior query already cover the new region.
+ * A zoom-in that stays inside the sources on screen changes nothing. Returns an empty
  * result set immediately when no drivers are enabled, without issuing a backend
  * request.
  *
@@ -94,16 +98,29 @@ export const useOnlineCatalogSources = (
   // Use a stable string key for the driver list to avoid identity-change re-fetches
   const enabledDriversKey = enabledDrivers.join(',');
 
+  // The query whose sources are on screen. A smaller, shallower query inside it (zooming in)
+  // needs no request and no new array: the renderer already drops what is out of view.
+  const appliedQueryRef = useRef<(SourceQueryShape & { driversKey: string }) | null>(null);
+
   useEffect(() => {
     if (!enabled || enabledDrivers.length === 0) {
-      setOnlineSources([]);
+      appliedQueryRef.current = null;
+      setOnlineSources(previous => (previous.length === 0 ? previous : []));
+      setLoading(false);
+      return;
+    }
+
+    const wantedQuery: SourceQueryShape = { ra, dec, radius, limitingMagnitude };
+    const applied = appliedQueryRef.current;
+    if (applied && applied.driversKey === enabledDriversKey && isCoveredByFetched(applied, wantedQuery)) {
       setLoading(false);
       return;
     }
 
     const cached = findCachedCatalogSources(ra, dec, radius, enabledDriversKey, limitingMagnitude);
     if (cached) {
-      setOnlineSources(cached);
+      appliedQueryRef.current = { ...wantedQuery, driversKey: enabledDriversKey };
+      setOnlineSources(previous => (sameSources(previous, cached) ? previous : cached));
       setError(null);
       setLoading(false);
       return;
@@ -126,7 +143,8 @@ export const useOnlineCatalogSources = (
           { signal: abortController.signal },
         );
         if (active) {
-          setOnlineSources(data);
+          appliedQueryRef.current = { ...wantedQuery, driversKey: enabledDriversKey };
+          setOnlineSources(previous => (sameSources(previous, data) ? previous : data));
           setError(null);
           storeCatalogSources(ra, dec, radius, enabledDriversKey, data, limitingMagnitude);
         }
@@ -136,6 +154,7 @@ export const useOnlineCatalogSources = (
         if (active && !wasCancelled) {
           const message = error instanceof Error ? error.message : 'Failed to fetch online catalog sources';
           setError(message);
+          appliedQueryRef.current = null;
           setOnlineSources([]);
         }
       } finally {

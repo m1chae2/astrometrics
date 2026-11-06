@@ -5,7 +5,7 @@
  * keeps the picture so the viewer's center panel can show it in place of the target image.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { fetchImageByPath } from '../../common/services/imaging/imageService';
 import { dataUrlToBlob } from '../../common/utils/dataUrl';
 
@@ -34,16 +34,17 @@ export function useOpenedFrame(): {
   closeFrame: () => void;
 } {
   const [openedFrame, setOpenedFrame] = useState<OpenedFrame | null>(null);
-  const objectUrl = openedFrame?.imageUrl ?? null;
-
-  // Release the picture's object URL when it is replaced or the viewer goes away.
-  useEffect(() => {
-    return () => {
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [objectUrl]);
+  // The object URL is freed when the picture is replaced or closed, not in an
+  // effect cleanup: a hidden (paused) Image Viewer runs its cleanups, and that
+  // would break the picture when the viewer is shown again.
+  const objectUrlRef = useRef<string | null>(null);
+  const releaseObjectUrl = useCallback(() => {
+    if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+    objectUrlRef.current = null;
+  }, []);
 
   const openFrame = useCallback((path: string) => {
+    releaseObjectUrl();
     setOpenedFrame({ path, imageUrl: null, imageBlob: null, loading: true, error: null });
     void fetchImageByPath(path).then((rendered) => {
       if (!rendered?.imageData) {
@@ -59,11 +60,15 @@ export function useOpenedFrame(): {
           URL.revokeObjectURL(url);
           return current;
         }
+        objectUrlRef.current = url;
         return { path, imageUrl: url, imageBlob: blob, loading: false, error: null };
       });
     });
-  }, []);
+  }, [releaseObjectUrl]);
 
-  const closeFrame = useCallback(() => setOpenedFrame(null), []);
+  const closeFrame = useCallback(() => {
+    releaseObjectUrl();
+    setOpenedFrame(null);
+  }, [releaseObjectUrl]);
   return { openedFrame, openFrame, closeFrame };
 }

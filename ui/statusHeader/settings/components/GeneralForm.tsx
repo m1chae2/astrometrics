@@ -87,6 +87,7 @@ export const GeneralForm: React.FC<GeneralFormProps> = ({
                     <h4 className="settings__subgroup-title">Maintenance</h4>
                     <div className="settings__action-row">
                         <Button
+                            fit
                             onClick={onReindex}
                             disabled={isReindexing}
                         >

@@ -1,5 +1,6 @@
 import { Checkbox } from '../../../common/components/Checkbox';
 import { TextInput } from '../../../common/components/TextInput';
+import { ObservatorySourceControl } from './ObservatorySourceControl';
 import { ConfigData } from '../utils/configUtils';
 
 interface ObservatoryFormProps {
@@ -9,6 +10,8 @@ interface ObservatoryFormProps {
     controllerModeEnabled: boolean;
     isChangingControlMode: boolean;
     onSetControlMode: (enterController: boolean) => void;
+    /** True while the form has changes that are not saved. */
+    hasUnsavedChanges?: boolean;
 }
 
 const TELESCOPE_SECTION = 'Observatory.Telescope';
@@ -22,10 +25,13 @@ export const ObservatoryForm: React.FC<ObservatoryFormProps> = ({
     controllerModeEnabled,
     isChangingControlMode,
     onSetControlMode,
+    hasUnsavedChanges = false,
 }) => {
     return (
         <div className="settings__form">
             <h3>Observatory</h3>
+
+            <ObservatorySourceControl hasUnsavedChanges={hasUnsavedChanges} />
 
             <h4>Telescope Connection</h4>
             <label className="settings__field">

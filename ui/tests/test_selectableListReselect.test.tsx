@@ -16,14 +16,6 @@ const items = [
 ];
 
 describe('SelectableList picks', () => {
-  beforeAll(() => {
-    // jsdom has no ResizeObserver, which the list uses to measure its height.
-    vi.stubGlobal('ResizeObserver', class {
-      observe(): void {}
-      disconnect(): void {}
-    });
-  });
-
   it('reports a pick on a row that is not yet selected', () => {
     const onSelect = vi.fn();
     render(<SelectableList items={items} selectedId="a" pendingId="a" onSelect={onSelect} />);

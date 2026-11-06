@@ -72,3 +72,9 @@
 .badge--dotted {
     border-style: dotted;
 }
+
+/* A status chip stays one line and does not stretch in a flex row. */
+.status-chip {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}

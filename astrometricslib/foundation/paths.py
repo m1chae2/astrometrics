@@ -13,6 +13,19 @@ Description: Two groups of paths live here.
 """
 
 import os
+import tomllib
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
+
+#: Names of the variables in which a simulated observatory's launch keeps the
+#: user's real folders, after it has moved the ``XDG_*`` variables away.
+REAL_CONFIG_HOME_VARIABLE = "ASTROMETRICS_REAL_CONFIG_HOME"
+REAL_DATA_HOME_VARIABLE = "ASTROMETRICS_REAL_DATA_HOME"
+REAL_CONFIG_PATH_VARIABLE = "ASTROMETRICS_REAL_CONFIG_PATH"
+#: Name of the folder that holds a simulated observatory's whole world,
+#: beside the real data folder. Backups and library scans skip it.
+SIMULATOR_FOLDER_NAME = "astrometrics-simulator"
 
 
 def _cache_root() -> str:
@@ -147,28 +160,20 @@ def catalog_cache_directory() -> str:
     return catalog_path
 
 
-# The folder on the backup remote, below the remote's name, that holds one
-# subfolder per database snapshot.
-REMOTE_BACKUP_FOLDER = "Library/_backup"
+def backup_directory() -> str:
+    """Give the local folder that holds the database snapshots.
 
-
-def remote_snapshot_path(remote: str, snapshot_name: str = "") -> str:
-    """Build the rclone path of a database snapshot folder on the backup.
-
-    Parameters
-    ----------
-    remote : `str`
-        Remote name including the colon, for example ``drive:``.
-    snapshot_name : `str`, optional
-        Snapshot folder name. Empty gives the folder that holds all snapshots.
+    This is ``backup`` inside the scratch folder. It is not uploaded
+    anywhere.
 
     Returns
     -------
-    remote_path : `str`
-        The rclone path.
+    backup_path : `str`
+        The absolute path of the folder, which exists when this returns.
     """
-    suffix = f"/{snapshot_name}" if snapshot_name else ""
-    return f"{remote}{REMOTE_BACKUP_FOLDER}{suffix}"
+    backup_path = os.path.join(scratch_directory(), "backup")
+    os.makedirs(backup_path, exist_ok=True)
+    return backup_path
 
 
 def mount_path_variants(path: str) -> set[str]:
@@ -242,3 +247,142 @@ def is_path_inside(root: str, path: str) -> bool:
             except ValueError:
                 continue
     return False
+
+
+@dataclass(frozen=True)
+class RealFolders:
+    """The user's real settings file and library folders.
+
+    Attributes
+    ----------
+    config_home, data_home : `pathlib.Path`
+        The folders that hold ``astrometrics/`` for settings and for data.
+    config_file : `pathlib.Path`
+        The real settings file.
+    library, frames, stacks, wayfinding : `pathlib.Path`
+        The image library, its frames, the folder for stacks and other
+        derived files, and the wayfinding library, as the real settings file
+        names them (or their defaults).
+    """
+
+    config_home: Path
+    data_home: Path
+    config_file: Path
+    library: Path
+    frames: Path
+    stacks: Path
+    wayfinding: Path
+
+    def protected_paths(self) -> tuple[Path, ...]:
+        """Give the folders that a simulator must never use or write in.
+
+        Returns
+        -------
+        paths : `tuple` [`pathlib.Path`]
+            The library, frames, stacks and wayfinding folders, and the
+            real ``astrometrics`` data and settings folders, each resolved.
+        """
+        found = (
+            self.library,
+            self.frames,
+            self.stacks,
+            self.wayfinding,
+            self.data_home / "astrometrics",
+            self.config_home / "astrometrics",
+        )
+        return tuple(dict.fromkeys(path.resolve() for path in found))
+
+
+def _setting_path(settings: Mapping, section: str, key: str) -> Path | None:
+    """Read one folder setting from a parsed settings file.
+
+    Parameters
+    ----------
+    settings : `~collections.abc.Mapping`
+        The parsed settings.
+    section, key : `str`
+        Where the folder is named.
+
+    Returns
+    -------
+    path : `pathlib.Path` or `None`
+        The folder, made absolute against the project root when it is
+        relative, or `None` when the setting is missing or empty.
+    """
+    value = settings.get(section, {})
+    text = str(value.get(key, "")).strip() if isinstance(value, Mapping) else ""
+    if not text:
+        return None
+    path = Path(text).expanduser()
+    return path if path.is_absolute() else Path(__file__).resolve().parents[2] / path
+
+
+def real_folders(environ: Mapping[str, str] | None = None) -> RealFolders:
+    """Find the user's real settings file and library folders.
+
+    A simulator source moves the ``XDG_*`` variables and the settings path to
+    its own folder, and keeps the real ones in ``ASTROMETRICS_REAL_*``
+    variables. This function honours those first, so it names the real
+    folders both before and after the move. It reads the real settings file
+    (read only) and creates nothing.
+
+    Parameters
+    ----------
+    environ : `~collections.abc.Mapping` [`str`, `str`], optional
+        The environment. Default: the process environment.
+
+    Returns
+    -------
+    folders : `RealFolders`
+        The real folders. A missing or damaged settings file gives the
+        defaults.
+    """
+    environment = os.environ if environ is None else environ
+    home = Path.home()
+    config_home = Path(
+        environment.get(REAL_CONFIG_HOME_VARIABLE) or environment.get("XDG_CONFIG_HOME") or home / ".config"
+    )
+    data_home = Path(
+        environment.get(REAL_DATA_HOME_VARIABLE)
+        or environment.get("XDG_DATA_HOME")
+        or home / ".local" / "share"
+    )
+    named_file = (
+        environment.get(REAL_CONFIG_PATH_VARIABLE)
+        or environment.get("ASTROMETRICS_CONFIG_PATH")
+        or environment.get("ASTROMETRICS_CONFIG")
+    )
+    config_file = (
+        Path(named_file) if named_file else config_home / "astrometrics" / "astrometrics.config.toml"
+    )
+    try:
+        settings = tomllib.loads(config_file.read_text(encoding="utf-8"))
+    except OSError, ValueError:
+        settings = {}
+    library = _setting_path(settings, "Image Library", "path") or data_home / "astrometrics"
+    frames = _setting_path(settings, "Image Library", "frames_path") or library / "frames"
+    stacks = _setting_path(settings, "Image Library", "stacks_path") or frames
+    wayfinding = (
+        _setting_path(settings, "Wayfinding Library", "path") or data_home / "astrometrics" / "wayfinding"
+    )
+    return RealFolders(config_home, data_home, config_file, library, frames, stacks, wayfinding)
+
+
+def is_in_simulator_world(path: str | os.PathLike) -> bool:
+    """Say whether a path is inside a simulated observatory's folder.
+
+    Backups and library scans use this to leave the simulator's temporary
+    copies alone.
+
+    Parameters
+    ----------
+    path : `str` or `os.PathLike`
+        Any path.
+
+    Returns
+    -------
+    inside : `bool`
+        `True` if a folder named `SIMULATOR_FOLDER_NAME` is the path or one
+        of its parents.
+    """
+    return SIMULATOR_FOLDER_NAME in Path(os.path.abspath(path)).parts

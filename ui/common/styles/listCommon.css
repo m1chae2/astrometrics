@@ -31,7 +31,7 @@
   font-family: inherit;
   padding: 6px 12px;
   margin: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   min-height: 32px;
@@ -43,18 +43,18 @@
 }
 
 .selectable-list__item:hover:not(.selectable-list__item--selected) {
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--white) 5%, transparent);
 }
 
 .selectable-list__item--selected {
-  background: rgba(36, 74, 112, 0.45);
-  border-left: 3px solid var(--adwaita-blue-light, #3584e4);
-  color: #ffffff;
+  background: color-mix(in srgb, var(--adwaita-blue) 45%, transparent);
+  border-left: 3px solid var(--adwaita-blue-light, var(--adwaita-blue-light));
+  color: var(--white);
 }
 
 .selectable-list__item--selected .selectable-list__label-text {
   font-weight: 600;
-  color: #ffffff;
+  color: var(--white);
 }
 
 .selectable-list__item--two-line {
@@ -98,8 +98,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   min-height: 1.25em;
-  font-size: 11px;
-  color: var(--text-dim, #9aa5b5);
+  font-size: var(--small-font-size);
+  color: var(--text-dim, var(--text-dim));
 }
 
 .selectable-list__badge,
@@ -120,8 +120,8 @@
 .selectable-list__badge {
   margin-left: 6px;
   padding: 0 4px;
-  border-radius: 4px;
-  font-size: 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--tiny-font-size);
   font-weight: 600;
   color: var(--white);
   display: inline-block;
@@ -141,7 +141,7 @@
 
 .selectable-list__indicator--unprocessed {
   margin-left: 8px;
-  font-size: 14px;
+  font-size: var(--control-font-size);
   color: var(--text-dim);
   opacity: 0.3;
   font-weight: normal;
@@ -151,12 +151,12 @@
 
 .selectable-list__no-processed-badge {
   margin-left: 6px;
-  font-size: 10px;
-  color: var(--text-dim, #888);
+  font-size: var(--tiny-font-size);
+  color: var(--text-dim, var(--text-muted));
   opacity: 0.5;
   font-weight: normal;
   padding: 1px 4px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
+  border: 1px solid color-mix(in srgb, var(--white) 10%, transparent);
+  border-radius: var(--radius-sm);
   text-transform: lowercase;
 }

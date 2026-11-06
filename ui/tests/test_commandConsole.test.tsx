@@ -4,9 +4,11 @@
  * rendering, sidebar tab switching, and REPL execution.
  */
 
-import React from 'react';
+import React, { Activity } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { postHandoff } from '../common/utils/displayHandoffStore';
+import { COMMAND_CONSOLE_EVENT_KIND } from '../common/utils/commandConsoleEvents';
 import { CommandConsole } from '../commandConsole/CommandConsole';
 import * as backendApi from '../common/services/backendApi';
 
@@ -160,5 +162,40 @@ describe('CommandConsole Component', () => {
 
     // Verify REPL output display
     expect(await screen.findByText('42')).toBeInTheDocument();
+  });
+
+  /**
+   * Terminal output an AI agent produces while the console is hidden and paused
+   * waits in the hand-off store and shows, in order, once the console is shown.
+   */
+  it('shows agent terminal output that arrived while the console was paused', async () => {
+    vi.spyOn(backendApi, 'callBackend').mockResolvedValue([] as never);
+    const { rerender } = render(
+      <Activity mode="hidden">
+        <CommandConsole />
+      </Activity>
+    );
+    act(() => {
+      postHandoff(
+        'Command Console',
+        COMMAND_CONSOLE_EVENT_KIND,
+        { action: 'terminal:agent_exec', payload: { code: 'print("first agent line")' } },
+        { queue: true }
+      );
+      postHandoff(
+        'Command Console',
+        COMMAND_CONSOLE_EVENT_KIND,
+        { action: 'terminal:agent_exec', payload: { code: 'print("second agent line")' } },
+        { queue: true }
+      );
+    });
+    rerender(
+      <Activity mode="visible">
+        <CommandConsole />
+      </Activity>
+    );
+    const first = await screen.findByText('print("first agent line")');
+    const second = await screen.findByText('print("second agent line")');
+    expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

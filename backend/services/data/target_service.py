@@ -22,6 +22,25 @@ PICTURE_SUFFIXES = (".jpg", ".jpeg")
 """File endings of a picture that can be sent as it is."""
 
 
+def _without_frames(target: Target) -> Target:
+    """Copy a target with an empty frame list, leaving the original alone.
+
+    The copy is shallow: every other field is shared with the original, so
+    the copy is for reading and sending only, never for saving.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target to copy.
+
+    Returns
+    -------
+    summary : `Target`
+        The copy, with ``frames`` empty.
+    """
+    return target.model_copy(update={"frames": []})
+
+
 class TargetService:
     """Thin service layer orchestrating Target CRUD and catalog queries.
 
@@ -95,19 +114,40 @@ class TargetService:
         """
         return self.astrometrics.targets.reindex_frames(prune_missing=prune_missing, on_progress=on_progress)
 
-    def get_targets(self, target_id: str | None = None) -> Any:
+    def get_targets(self, target_id: str | None = None, detail: str = "full") -> Any:
         """Unified targets getter.
 
         Delegates directly to the high-level interface.
+
+        Parameters
+        ----------
+        target_id : `str`, optional
+            The target to return. All targets when omitted.
+        detail : `str`, optional
+            ``"full"`` (default) returns each target with all its frame
+            records. ``"summary"`` returns each target with an empty frame
+            list: everything else (id, name, object type, positions, stack
+            image paths, exposure totals) is the same. A list that shows
+            targets by name and picture needs only the summary, which is
+            about a fifth of the size on a library of thousands of frames.
 
         Returns
         -------
         result : `Any`
             Target(s) matching ``target_id``, or all targets if `None`.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If ``detail`` is neither ``"full"`` nor ``"summary"``.
         """
+        if detail not in ("full", "summary"):
+            raise InvalidArgumentError('detail must be "full" or "summary".', details={"detail": detail})
         if target_id:
-            return self.astrometrics.targets.get(target_id)
-        return self.astrometrics.targets.list()
+            found = self.astrometrics.targets.get(target_id)
+            return _without_frames(found) if detail == "summary" and found is not None else found
+        everything = self.astrometrics.targets.list()
+        return [_without_frames(target) for target in everything] if detail == "summary" else everything
 
     def get_camera_index(self) -> dict[str, Any]:
         """Summarize which camera took each target's frames, and when.

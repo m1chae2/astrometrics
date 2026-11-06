@@ -204,6 +204,8 @@ export const GuidingTrendsPlot: React.FC<GuidingStatusProps> = ({ history }) => 
         <SectionPanel
             title={showLastNight ? `Last night with guiding: ${lastGuidedNight.nightDate}` : 'Guiding Trends'}
             className="observatory-guiding-trends"
+            loading={isLive && noLiveSamples && nightsQuery.isLoading}
+            skeleton={{ variant: 'chart', label: 'Loading guiding trends' }}
             headerContent={headerControls}
         >
             {!isLive && nightId !== null ? (

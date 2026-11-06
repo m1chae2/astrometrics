@@ -5,6 +5,7 @@ import { useGuidingRms } from './hooks/useGuidingRms';
 import { useSettingsModal } from './hooks/useSettingsModal';
 import { describeFrameCopy } from './hooks/useFrameCopyNotice';
 import { SettingsPanel } from './SettingsPanel';
+import { ObservatorySourceChip } from './ObservatorySourceChip';
 import { useAstrometrics } from '../common/context/AstrometricsContext';
 import { useOptionalTargetContext } from '../common/context/TargetContext';
 import { getEnabledDisplayModes } from '../common/constants/displayFlags';
@@ -265,6 +266,8 @@ export const StatusHeader: React.FC = () => {
                   document.body
                 )}
               </div>
+              {/* Simulation chip: right after the display button, so it never moves that button. */}
+              <ObservatorySourceChip />
             </div>
           </div>
 
@@ -331,8 +334,7 @@ export const StatusHeader: React.FC = () => {
                   )}
                   {cameraTemperature && cameraTemperature !== '-' && (
                     <span
-                      className="header__telemetry-value"
-                      style={{ color: 'rgba(255, 255, 255, 0.6)', marginLeft: '2px' }}
+                      className="header__telemetry-value header__telemetry-value--temperature"
                     >
                       ({cameraTemperature})
                     </span>

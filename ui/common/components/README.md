@@ -25,14 +25,19 @@ Every button, text field, checkbox and badge in the app comes from one of these 
 | An icon, a close mark or a row that is a button | `Button` with `variant="ghost"`. Its rules have no weight, so the row's own class decides the look. |
 | A small status or tag | `Badge.tsx` with a `tone`: ok, warning, error, info, neutral, accent or purple. With `onClick` it is a button. `StatusChip` adds an icon and a word. |
 | One choice from a list | `PopoverSelect.tsx` (no native select anywhere). |
-| Text, password or search | `TextInput.tsx` (`width="short"` or `"fill"`, `centered`). |
+| Text, password or search | `TextInput.tsx` (`width="short"` or `"fill"`, `centered`, `size="small"` for a panel header or toolbar). |
 | A number | `NumberInput.tsx`. It takes the same props, plus `min`, `max` and `step`. |
 | A yes or no | `Checkbox.tsx`. Pass `label`, or `aria-label` for a box with no text. |
 | A range | `Slider.tsx`. |
 | A file picker | `FileInput.tsx`. Hide it and open it from a `Button`. |
 | Two or more views | `Tabs.tsx`. |
 
-The `btn` class family lives in `Button.css`: 36px tall, 14px text and 6px corners; the small size is 24px tall with 11px text. Text fields use `.entry` (`TextInput.css`): 38px tall with 6px corners. Badge rules live in `Badge.css`. Checkboxes, radio buttons and sliders take the theme accent color.
+The `btn` class family lives in `Button.css`: 36px tall, 14px text and 6px corners; the small size is 24px tall with 11px text. Text fields use `.entry` (`TextInput.css`): 38px tall with 6px corners; `size="small"` makes it 24px tall with 11px text (`.entry--small`), the same height as a small button and a compact `PopoverSelect`. Badge rules live in `Badge.css`. Checkboxes, radio buttons and sliders take the theme accent color.
+
+### Lint rules
+
+- ESLint (`eslint.config.js`) fails a raw `<button>`, `<input>`, `<select>` or `<textarea>` in any `.tsx` file outside this folder and the tests. It also fails a `className` that holds the word `btn` or a `btn--` modifier (use `<Button variant size>`), and an inline `style` color (`color`, `background`, `backgroundColor`, `borderColor`, `fill` or `stroke`) that starts with `#`, `rgb` or `hsl`. Use a CSS class with theme tokens from `ui/common/styles/theme.css` instead.
+- Stylelint (`build/stylelint/selector-ownership.mjs`) gives each control's classes to one stylesheet: `.btn*` and `.btn-ghost*` to `Button.css`, `.tabs*` to `sharedComponents.css`, `.badge*` and `.status-chip*` to `Badge.css`, `.popover-select*` to `popoverSelect.css`, `.entry*` to `TextInput.css` and `.checkbox*` to `Checkbox.css`. Any other stylesheet that names them, even in a descendant selector such as `.panel .btn`, fails, and so does a legacy one. To change a control for one screen, use a prop (`fit`, `truncate` and `fullWidth` on `Button`, `fill` on `PopoverSelect`, `width` on `TextInput`) or add a prop here. Give a layout `className` to the component and style that class instead.
 
 ### Allowed raw elements
 
@@ -42,6 +47,16 @@ These are the only raw controls. All of them are inside `ui/common/components/`,
 - `Tabs.tsx` (a tab is a native button with `role="tab"` and its own arrow-key handling), `PopoverSelect.tsx` (its trigger and menu entries) and `InfoButton.tsx` (its trigger, which owns focus and the hover text): their look is a tab, a menu row or an info mark, not a regular button.
 - `SelectableList.tsx` draws one radio input per row. A list can hold thousands of rows, so each row is kept as light as possible.
 
+## Loading
+
+Every panel on every display loads the same way, with `Skeleton.tsx`: grey placeholder shapes in the layout of the coming content, with a slow, faint pulse between two close greys (no moving highlight). Nothing jumps when the data arrives. With `prefers-reduced-motion` the pulse stops and the shapes stay a static grey. Its colors, sizes and timing are tokens in `ui/common/styles/theme.css` (`--skeleton-*`).
+
+- `Skeleton` has a `variant`: `rows` (table rows, with `columns` and `count`), `list` (two-line items such as the target list, with `count` and `lines`), `keyValue` (label and value lines), `chart` (a plot area with an axis line), `block` (an image or canvas area: no shapes, the area stays empty and only the thin moving bar runs along its top edge) and `line` (one bar, for a table cell). The `label` prop is required. It is hidden text for screen readers, for example "Loading guiding for this night". The skeleton is a `role="status"` region with `aria-busy`.
+- `PanelBody` is the one panel pattern. Pass `loading` (no data yet), `refreshing` (data is shown and is being read again) and the `skeleton` props. While `loading` the skeleton shows. While `refreshing` the content stays and an `UpdatingBar` shows. `SectionPanel` takes the same three props (`loading`, `skeleton`, `refreshing`) and draws the bar along its top edge.
+- `UpdatingBar` is a thin moving bar. It is also used with `inline` under a status line for a job that is running (stacking, making a picture).
+- Use a skeleton only when there is no data yet. Refreshing data that is already shown must never blank the panel. "Loaded, nothing here" is `EmptyState`; loading and empty stay distinct.
+- ESLint fails "Loading..." or "Loading…" text in JSX outside this folder. Stylelint gives `.skeleton*`, `.panel-body*` and `.updating-bar*` to `Skeleton.css`.
+
 ## Other components
 
 - `SectionPanel.tsx`, `GenericDisplayLayout.tsx` and `TabView.tsx` lay out the displays.
@@ -49,7 +64,7 @@ These are the only raw controls. All of them are inside `ui/common/components/`,
 - `SelectableList.tsx`, `ListActions.tsx` and `Popover.tsx` are controls.
 - `PopoverSelect.tsx` is the shared single-choice picker. It takes a label, a list of `{id, label, detail?}` and the picked id. Pass `emptyLabel` to add a first "nothing picked" choice that reports `null`. It is our own menu, so it follows the dark theme, unlike a native select. Use it instead of a native select: no screen in the app uses one now. `disabled` dims it, `size="compact"` makes a small toolbar-size button, and `placement="above"` opens the menu upward for a picker at the bottom of a panel. `SessionPicker.tsx` is `PopoverSelect` with a "Live" first choice. The Planetarium toolbar and the Observatory Manager use it.
 
-- `EmptyState.tsx`, `LoadingSpinner.tsx` and `ErrorBoundary.tsx` show the empty, loading and failed states.
+- `EmptyState.tsx` and `ErrorBoundary.tsx` show the empty and failed states. `EmptyState variant="loading"` shows the list `Skeleton`. See "Loading" below.
 - `quality/` holds the statement components: `StatementList.tsx`, `StatementItem.tsx`, `ConfidenceChip.tsx`, `QualityChip.tsx` (the star Quality card) and the words they use (`statementLabels.ts`). A statement shows its plain message, a kind word and a confidence word. The Result kind marks a finding such as a star class.
 - `plotting/` holds the shared chart components.
 

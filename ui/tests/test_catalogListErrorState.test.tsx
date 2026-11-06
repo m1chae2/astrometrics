@@ -17,11 +17,6 @@ vi.mock('../common/queries/catalogQueryPolicy', () => ({
     catalogQueryPolicy: (enabled: boolean) => ({ enabled, retry: false, staleTime: 0 }),
 }));
 
-vi.stubGlobal('ResizeObserver', class {
-    observe() {}
-    disconnect() {}
-    unobserve() {}
-});
 
 const item = { id: 'a', value: 'a', label: 'Vega' };
 

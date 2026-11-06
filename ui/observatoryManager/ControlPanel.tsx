@@ -1,11 +1,8 @@
 import React from 'react';
-import { DirectionalControl } from './panels/DirectionalControl';
 import { TelescopeControlPanel } from './panels/TelescopeControlPanel';
 import { GuidingTrendsPlot } from './panels/GuidingStatusPanel';
 import { AlignmentGuidingTabs } from './panels/AlignmentGuidingTabs';
 import { GuidingSample, AlignmentAttempt } from '../common/types/backendTypes';
-import { SectionPanel } from '../common/components/SectionPanel';
-import { CommandGate, WhyUnavailableButton } from './CommandGate';
 import { CalibrationLibraryPanel } from './calibration/CalibrationLibraryPanel';
 import { CameraProfilesPanel } from './equipment/CameraProfilesPanel';
 import type { CameraProfile } from '../common/hooks/useEquipmentConfiguration';
@@ -38,8 +35,6 @@ export interface ControlPanelProps {
     guidingGain?: number;
     onGuidingExposureChange?: (value: number) => void;
     onGuidingGainChange?: (value: number) => void;
-    onGuideStart?: (exposure: number, gain: number) => void;
-    onGuideStop?: () => void;
 
     // Alignment control
     onStartAlignment?: () => void;
@@ -88,8 +83,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     guidingGain,
     onGuidingExposureChange,
     onGuidingGainChange,
-    onGuideStart,
-    onGuideStop,
     onStartAlignment,
     onStopAlignment,
     isAligningActive = false,
@@ -102,8 +95,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
 }) => {
     return (
         <div className="panel-group">
-            {/* Top block, a grid: Telescope Control | Manual Guide (a square) over Camera Profiles, with the
-                Calibration Library on the right spanning both rows. */}
+            {/* Top block, a grid: Telescope Control (with the manual-slew pad on its Manual tab) over Camera
+                Profiles, with the Calibration Library on the right spanning both rows. */}
             <div className="observatory-top-block">
                 <TelescopeControlPanel
                     isTracking={isTracking}
@@ -114,6 +107,10 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                     onStartAlignment={onStartAlignment}
                     onStopAlignment={onStopAlignment}
                     isAligningActive={isAligningActive}
+                    onStartMove={onStartMove}
+                    onStopMove={onStopMove}
+                    onSetSlewRate={onSetSlewRate}
+                    onStop={onStop}
                     accuracy={accuracy}
                     settleTime={settleTime}
                     onAccuracyChange={onAccuracyChange}
@@ -122,26 +119,11 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                     guidingGain={guidingGain}
                     onGuidingExposureChange={onGuidingExposureChange}
                     onGuidingGainChange={onGuidingGainChange}
-                    onGuideStart={onGuideStart}
-                    onGuideStop={onGuideStop}
                     commandsDisabled={commandsDisabled}
                     commandsDisabledReason={commandsDisabledReason}
                 />
 
-                {/* Manual Guide */}
-                <SectionPanel title="Manual Guide" className="observatory-manual-guide" headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}>
-                    <CommandGate disabled={commandsDisabled} reason={commandsDisabledReason}>
-                        <DirectionalControl
-                            disabled={commandsDisabled}
-                            onStartMove={onStartMove}
-                            onStopMove={onStopMove}
-                            onSetSlewRate={onSetSlewRate}
-                            onStop={onStop}
-                        />
-                    </CommandGate>
-                </SectionPanel>
-
-                {/* Camera Profiles sits under Telescope Control and Manual Guide. It scrolls inside itself. */}
+                {/* Camera Profiles sits under Telescope Control. It scrolls inside itself. */}
                 <div className="observatory-camera-profiles">
                     <CameraProfilesPanel
                         cameras={cameras}

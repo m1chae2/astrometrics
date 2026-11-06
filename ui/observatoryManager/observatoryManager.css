@@ -67,9 +67,6 @@
 /* Calibration library (moved from the Observation Manager) */
 .calibration-controls { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-2); margin-bottom: var(--space-2); }
 .calibration-camera-select { display: flex; align-items: center; gap: 6px; flex: 0 1 360px; min-width: 0; font-size: var(--compact-font-size); color: var(--text-muted); }
-.calibration-camera-select .popover-select { flex: 1; min-width: 0; }
-.calibration-camera-select .popover-select__popover-container { flex: 1; min-width: 0; }
-.calibration-camera-select .popover-select__button { width: 100%; min-width: 0; }
 .calibration-section { display: flex; flex-direction: column; gap: 8px; }
 .calibration-table-container { max-height: 100px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--surface-inset); }
 .calibration-table { width: 100%; border-collapse: collapse; font-size: var(--compact-font-size); }
@@ -119,24 +116,21 @@
 /*
  * Row budget. The page never scrolls: the panel group has a fixed height and each panel scrolls inside itself.
  * The group is about 900px tall at 1870x1040 and about 560px at 1024x700.
- *   Top block (a grid of two rows): Telescope Control and Manual Guide share row 1, Camera Profiles is row 2
- *     under both, and the Calibration Library spans both rows on the right. Row 1 is as tall as Manual Guide
- *     is wide (--manual-guide-size, which follows the window height), so Manual Guide is a square. Row 2 is
- *     90 to 160px. The block is about 410px tall at 1040px window height.
+ *   Top block (a grid of two rows): Telescope Control (one panel with three tabs) is row 1, Camera Profiles is row 2 under it, and the Calibration Library spans both rows
+ *     on the right. Row 1 spans the old Telescope Control and Manual Guide columns (clamp(240px, 24%, 300px) plus 190 to 260px), so the Calibration Library keeps its original width, and is --telescope-row-height tall, which follows the window height. Row 2 is 90 to 160px.
  *   Guiding row (Guiding Trends, Alignment and Guiding): takes all that is left and never goes below 150px.
  * At 1870x1040: 900 - 250 - 160 - 2 gaps of 8px = about 475px for the guiding row.
  * At 1024x700 the block shrinks first (it shrinks three times faster than the guiding row) and clips, never overlaps.
  */
 .observatory-top-block {
-    --manual-guide-size: clamp(190px, 24vh, 260px);
+    --telescope-row-height: clamp(260px, 32vh, 350px);
     display: grid; flex: 0 3 auto; min-height: 0; overflow: hidden; gap: 12px;
-    grid-template-columns: clamp(240px, 24%, 300px) var(--manual-guide-size) minmax(240px, 1fr);
-    grid-template-rows: var(--manual-guide-size) minmax(90px, 160px);
-    grid-template-areas: "telescope manual library" "cameras cameras library";
+    grid-template-columns: clamp(240px, 24%, 300px) clamp(190px, 24vh, 260px) minmax(240px, 1fr);
+    grid-template-rows: var(--telescope-row-height) minmax(90px, 160px);
+    grid-template-areas: "telescope telescope library" "cameras cameras library";
 }
 .observatory-top-block > * { min-width: 0; min-height: 0; overflow: hidden; }
 .observatory-top-block > .observatory-top-row__fit { grid-area: telescope; }
-.observatory-top-block > .observatory-manual-guide { grid-area: manual; aspect-ratio: 1 / 1; }
 .observatory-top-block > .observatory-camera-profiles { grid-area: cameras; display: flex; }
 .observatory-camera-profiles > .panel { flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; }
 .observatory-top-block > .calibration-panel { grid-area: library; }
@@ -169,34 +163,41 @@
 .guiding-trends__history { margin-left: 0; }
 .guiding-trends__controls :is(input[type='checkbox'], input[type='range']):focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
 
-/* Calibration controls: two lines (camera and refresh; the counts), then the Darks table, which is always shown. Normal-size buttons (the shared .btn is full width) and a small square refresh button. */
+/* Calibration controls: two lines (camera and refresh; the counts), then the Darks table, which is always shown. A small square refresh button. */
 .calibration-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-width: 0; }
 .calibration-line .calibration-camera-select { flex: 1 1 0; }
 .calibration-kind-tabs { flex: 1 1 auto; }
-.calibration-controls .btn { width: auto; flex: 0 0 auto; }
 
 /* Telescope Control tabs: the Alignment and Guiding settings use shorter labels. The panel body scrolls inside itself. */
 .tracking-settings__hint { margin: 0; color: var(--text-muted); font-size: var(--control-font-size); }
 .tracking-settings { --parameter-label-width: 88px; display: flex; flex-direction: column; gap: var(--space-2); }
 
-/* Manual Guide: the pad fills the panel height; the slew-speed slider sits beside it (below it on a narrow panel). */
-.command-gate:has(> .navigator--side) { height: 100%; }
-.navigator--side { height: 100%; container-type: size; flex-direction: row; flex-wrap: wrap; align-items: center; align-content: center; justify-content: center; gap: var(--space-2) var(--space-3); }
+/* Telescope Control: the Manual tab's pad fills the panel body, which is a block of definite height. */
+.telescope-control-panel > .panel__content { display: flex; flex-direction: column; }
+.telescope-control-panel > .panel__content > [role='tabpanel'] { flex: 1 1 0; min-height: 0; }
+/* Manual-slew pad (the Manual tab): it fills the tab; the slew-speed slider sits beside it (below it when the box is narrow). */
+.command-gate:has(> .manual-tab) { height: 100%; }
+/* Two compact, top-aligned columns: the pad with its slew-speed row under it, and the Focuser group. */
+.manual-tab { display: grid; grid-template-columns: max-content minmax(0, 240px); gap: var(--space-2) var(--space-5); align-items: start; align-content: start; justify-content: start; }
+.manual-tab__section { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; min-height: 0; }
+/* Focuser section: the position, then In / step size / Out on one row, all at the small control height. */
+.focuser-control { display: flex; flex-direction: column; gap: var(--space-2); }
+.focuser-control__position { display: flex; justify-content: flex-start; align-items: baseline; gap: var(--space-2); font-size: var(--control-font-size); }
+.focuser-control__value { font-variant-numeric: tabular-nums; }
+.focuser-control__moves { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-2); align-items: center; }
+.navigator--side { --pad-size: 144px; width: var(--pad-size); gap: var(--space-2); }
 .navigator--side .navigator__grid {
-    --pad-size: min(100cqh, 64cqw, 260px);
-    flex: 0 0 auto; width: var(--pad-size); height: var(--pad-size);
+    width: var(--pad-size); height: var(--pad-size);
     grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: var(--space-1);
 }
-.navigator--side .navigator__btn, .navigator--side .navigator__stop { width: 100%; height: 100%; min-width: 0; font-size: var(--control-font-size); }
+.navigator--side .navigator__btn, .navigator--side .navigator__stop { width: 100%; height: 100%; min-width: 0; min-height: 32px; font-size: var(--control-font-size); }
 .navigator--side .navigator__stop { font-size: var(--compact-font-size); }
-.navigator--side .slew-rate { flex: 1 1 90px; min-width: 0; margin-top: 0; padding-top: 0; border-top: none; justify-content: center; }
+.navigator--side .slew-rate { margin-top: 0; padding-top: 0; border-top: none; gap: var(--space-1); }
+.navigator--side .slew-rate__title { font-size: var(--control-font-size); white-space: nowrap; }
+.navigator--side .slew-rate__track { display: flex; align-items: center; gap: var(--space-2); }
+.navigator--side .slew-rate__slider { flex: 1 1 auto; min-width: 0; width: auto; }
+.navigator--side .slew-rate__end { font-size: var(--compact-font-size); color: var(--text-muted); white-space: nowrap; }
 .navigator--side :is(button, input):focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
-/* A container query cannot restyle the container itself, so on a narrow panel the slider takes the
-   full width and wraps onto its own line below the pad. */
-@container (max-width: 260px) {
-    .navigator--side .navigator__grid { --pad-size: min(72cqh, 100cqw, 260px); }
-    .navigator--side .slew-rate { flex: 0 0 auto; width: 100%; }
-}
 
 /* Safety Limits: FormRow rows share one label column, with room around the tabs and checkboxes. */
 .limit-settings { --parameter-label-width: 150px; gap: var(--space-2); }
@@ -204,7 +205,6 @@
 .limit-settings__rows { display: flex; flex-direction: column; gap: var(--space-2); padding-top: var(--space-1); }
 .limit-settings__checkbox { display: flex; align-items: center; gap: var(--space-2); min-height: 24px; font-size: var(--compact-font-size); }
 .limit-settings__fields { display: flex; flex-direction: column; gap: var(--space-2); padding-left: var(--space-1); }
-.limit-settings__fields .entry--short { flex-basis: 90px; min-width: 90px; width: 90px; }
 .limit-settings__telescope { margin: 0; font-size: var(--compact-font-size); color: var(--text-muted); }
 .limit-settings__hint { margin: 0; font-size: var(--compact-font-size); color: var(--text-muted); }
 .limit-settings__refusal {
@@ -212,12 +212,26 @@
     padding: var(--space-2); border: 1px solid var(--border-color); border-radius: var(--radius-sm);
     font-size: var(--compact-font-size);
 }
-.limit-settings__refusal .btn, .limit-settings__footer .btn { width: auto; white-space: nowrap; }
-.limit-settings__footer { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
-.limit-settings__apply { width: auto; white-space: nowrap; }
-.limit-settings__apply:focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
+.limit-settings__footer { display: flex; align-items: center; gap: var(--space-3); flex-wrap: nowrap; min-width: 0; }
+/* Limits tab: a 2 by 2 grid (Alignment and Guiding on top, Altitude and Hour angle below) with one Apply button at the bottom right.
+ * Height budget at 1920 by 1080 (panel row 345px, minus about 36 header, 42 tab row and 16 padding = about 250px for the tab):
+ * top row 14 heading + 2 x 24 rows + gaps = about 74; bottom row 14 + 3 x 24 + gaps = about 102; Apply row 24; two 8px gaps. Total about 215px. */
+.limits-tab { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; gap: var(--space-2) var(--space-4); overflow: hidden; }
+.limits-tab__section { min-width: 0; }
+.limits-tab__section--wide { grid-column: 1 / -1; }
+.limits-tab__heading, .limit-settings__heading { margin: 0; font-size: var(--section-label-size); font-weight: 600; line-height: 1.2; color: var(--text-muted); text-transform: uppercase; }
+.limits-tab .tracking-settings { --parameter-label-width: 90px; gap: 0; }
+.limits-tab .controls__column { gap: 2px; }
+.limit-settings--all { --parameter-label-width: 118px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-1) var(--space-4); }
+.limit-settings--all > .limit-settings__refusal, .limit-settings--all > .limit-settings__hint, .limit-settings--all > .limit-settings__footer { grid-column: 1 / -1; }
+.limit-settings--all .limit-settings__rows { padding-top: 0; gap: 2px; min-width: 0; }
+.limit-settings--all .limit-settings__fields { padding-left: 0; gap: 2px; }
+.limit-settings--all .limit-settings__checkbox { min-height: 24px; }
+.limit-settings--all .form-row__line { min-height: 24px; }
+.limit-settings__footer .limit-settings__telescope { margin-right: auto; }
+.limit-settings__apply { margin-left: auto; }
 /* Room between the tab row and the content, on every tab. */
-.telescope-control-panel .tabs { margin-bottom: var(--space-3); flex-wrap: wrap; align-content: flex-start; }
+.telescope-control-tabs { margin-bottom: var(--space-2); flex-wrap: wrap; align-content: flex-start; }
 /* A narrow panel wraps the whole tab row; a tab never wraps its label. */
 
 /* Camera Profiles: a compact noise table that fits the panel; the measure button sits in the header. */
@@ -236,15 +250,12 @@
 .observatory-session-panel { flex: 0 0 auto; overflow: visible; }
 /* The Session panel is as tall as its content and never scrolls, so the picker menu can open over the panels below. */
 .observatory-session-panel > .panel__content { flex: 0 0 auto; overflow: visible; }
-.observatory-session-panel .popover-select__button { width: 100%; min-width: 0; }
-.observatory-session-panel .popover-select__popover-container { width: 100%; }
-.observatory-session-panel .popover-select__menu { min-width: 0; width: 100%; box-sizing: border-box; }
 .observatory-night-banner { font-size: var(--compact-font-size); color: var(--status-cyan); }
 .observatory-night-banner:empty { display: none; }
 .observatory-targets-panel > .panel__content { display: flex; flex-direction: column; gap: var(--space-2); overflow: hidden; }
 /* The tab that is showing fills the rest of the panel, so the list takes the full remaining height. */
 .observatory-targets-panel > .panel__content > [role='tabpanel'] { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: var(--space-2); }
-.observatory-targets-panel .tabs { margin-bottom: 0; flex: 0 0 auto; }
+.observatory-targets-tabs { margin-bottom: 0; flex: 0 0 auto; }
 .observatory-targets-panel__active-filter { font-size: var(--small-font-size); color: var(--text-muted); }
 /* The Filter tab scrolls inside itself if its choices are taller than the panel. */
 .observatory-targets-panel .target-list-filter-panel { overflow-y: auto; min-height: 0; }

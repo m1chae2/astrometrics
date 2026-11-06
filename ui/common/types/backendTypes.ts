@@ -5702,6 +5702,7 @@ export enum DelegationState {
  */
 export const RPC_METHODS = [
   "system:health",
+  "system:static_mounts",
   "system:frontend_log",
   "system:completions",
   "system:get_config",
@@ -5771,6 +5772,8 @@ export const RPC_METHODS = [
   "observatory:set_active_camera",
   "observatory:get_active_telescope",
   "observatory:set_active_telescope",
+  "observatory:get_source",
+  "observatory:set_source",
   "observatory:enter_monitoring_mode",
   "observatory:enter_controller_mode",
   "ingestion:start",

@@ -1,10 +1,9 @@
 /**
  * @file TrackingSettings.tsx
- * @description The body of the Alignment tab and the Guiding tab of the
+ * @description The Alignment and Guiding sections of the Limits tab of the
  * Telescope Control panel: the alignment settings (accuracy, settle time) or
- * the guiding camera settings (exposure, gain) with the Start Guiding and Stop
- * Guiding buttons. The panel picks which one to show. The values live in the
- * parent, so they survive a tab switch. There is no alignment exposure field,
+ * the guiding camera settings (exposure, gain). The panel picks which one to
+ * show. The values live in the parent, so they survive a tab switch. There is no alignment exposure field,
  * because the alignment start call takes only the target.
  */
 
@@ -14,7 +13,6 @@ import {
     ControlColumn,
     ParameterRow
 } from '../../common/components/ControlLayoutComponents';
-import { Button } from '../../common/components/Button';
 
 /** Which group of settings to show. */
 export type TrackingSettingsSection = 'alignment' | 'guiding';
@@ -61,8 +59,6 @@ export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
     guidingGain = 100,
     onGuidingExposureChange,
     onGuidingGainChange,
-    onGuideStart,
-    onGuideStop,
     disabled = false,
     disabledReasonId,
 }) => {
@@ -71,9 +67,6 @@ export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
         'aria-disabled': disabled || undefined,
         'aria-describedby': disabled ? disabledReasonId : undefined,
     };
-    // A cleared field reads as NaN. Guiding does not start on a missing or non-positive value.
-    const guidingValuesValid = Number.isFinite(guidingExposure) && guidingExposure > 0
-        && Number.isFinite(guidingGain) && guidingGain >= 0;
     return (
         <div className="tracking-settings">
             {section === 'alignment' && (
@@ -86,6 +79,7 @@ export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
                         value={accuracy}
                         onChange={(e) => !disabled && onAccuracyChange?.(parseInt(e.target.value, 10))}
                         width="short"
+                        size="small"
                         centered
                         aria-label="Alignment Accuracy"
                     />
@@ -98,6 +92,7 @@ export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
                         value={settleTime}
                         onChange={(e) => !disabled && onSettleTimeChange?.(parseInt(e.target.value, 10))}
                         width="short"
+                        size="small"
                         centered
                         aria-label="Settle Time"
                     />
@@ -114,6 +109,7 @@ export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
                         step="0.1"
                         min="0.1"
                         width="short"
+                        size="small"
                         centered
                         value={guidingExposure}
                         onChange={(e) => !disabled && onGuidingExposureChange?.(parseFloat(e.target.value))}
@@ -129,37 +125,13 @@ export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
                         min="0"
                         max="1000"
                         width="short"
+                        size="small"
                         centered
                         value={guidingGain}
                         onChange={(e) => !disabled && onGuidingGainChange?.(parseInt(e.target.value, 10))}
                         aria-label="Guiding Gain"
                     />
                 </ParameterRow>
-                <div className="telescope-control__row">
-                    <Button
-                        variant="primary"
-                        control
-                        id="btn-start-guiding"
-                        onClick={() => !disabled && guidingValuesValid && onGuideStart?.(guidingExposure, guidingGain)}
-                        disabled={disabled || !guidingValuesValid}
-                        aria-disabled={disabled || !guidingValuesValid}
-                    >
-                        Start Guiding
-                    </Button>
-                    <Button
-                        variant="danger"
-                        control
-                        id="btn-stop-guiding"
-                        onClick={() => !disabled && onGuideStop?.()}
-                        disabled={disabled}
-                        aria-disabled={disabled}
-                    >
-                        Stop Guiding
-                    </Button>
-                </div>
-                {!guidingValuesValid && (
-                    <p className="tracking-settings__hint">Enter an exposure above 0 and a gain of 0 or more.</p>
-                )}
             </ControlColumn>
             )}
         </div>

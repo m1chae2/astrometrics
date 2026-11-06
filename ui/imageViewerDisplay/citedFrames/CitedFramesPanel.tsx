@@ -13,6 +13,7 @@ import { useCitedFramesQuery, useCitedFramesRequest } from './useCitedFrames';
 import { Button } from '../../common/components/Button';
 import './citedFrames.css';
 
+import { Skeleton } from '../../common/components/Skeleton';
 /**
  * Formats a measured value for display, with its unit when known.
  *
@@ -92,7 +93,7 @@ export const CitedFramesPanel: React.FC<CitedFramesPanelProps> = ({ onOpenFrame,
       {total === 0 ? (
         <p className="cited-frames__message">This statement cites no stored rows.</p>
       ) : query.isLoading ? (
-        <p className="cited-frames__message" aria-busy="true">Loading…</p>
+        <Skeleton variant="rows" columns={4} count={4} label="Loading the cited frames" />
       ) : query.isError ? (
         <div className="cited-frames__message" role="alert">
           <span>Could not load the cited frames.</span>{' '}

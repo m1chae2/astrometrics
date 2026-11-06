@@ -99,9 +99,18 @@
     border-bottom-color: var(--accent-blue);
 }
 
+.tabs__tab:focus:not(:focus-visible) {
+    outline: none;
+}
+
 .tabs__tab:focus-visible {
     outline: var(--focus-outline);
     outline-offset: -2px;
+}
+
+/* A mouse click on a tab shows no focus ring; the next key press brings it back (see Tabs). */
+.tabs[data-pointer] .tabs__tab:focus-visible {
+    outline: none;
 }
 
 .tabs__count {
@@ -136,6 +145,10 @@
 .info-button__trigger[aria-expanded='true'] {
     border-color: var(--white);
     color: var(--white);
+}
+
+.info-button__trigger:focus:not(:focus-visible) {
+    outline: none;
 }
 
 .info-button__trigger:focus-visible {

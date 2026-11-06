@@ -28,6 +28,7 @@ from typing import Literal
 RPC_METHODS: tuple[str, ...] = (
     # System, settings and notifications
     "system:health",
+    "system:static_mounts",
     "system:frontend_log",
     "system:completions",
     "system:get_config",
@@ -104,6 +105,8 @@ RPC_METHODS: tuple[str, ...] = (
     "observatory:set_active_camera",
     "observatory:get_active_telescope",
     "observatory:set_active_telescope",
+    "observatory:get_source",
+    "observatory:set_source",
     "observatory:enter_monitoring_mode",
     "observatory:enter_controller_mode",
     # Ingestion of new frames

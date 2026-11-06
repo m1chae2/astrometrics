@@ -7,11 +7,6 @@ import { render, screen } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { RadioListManager } from '../../common/radioList/RadioListManager';
 
-vi.stubGlobal('ResizeObserver', class {
-  observe() {}
-  disconnect() {}
-  unobserve() {}
-});
 
 describe('Star list for a target with no stars', () => {
   /** The list says there are no stars instead of staying blank. */

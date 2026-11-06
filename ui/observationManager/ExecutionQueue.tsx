@@ -180,7 +180,7 @@ export const ExecutionQueue: React.FC<Props> = ({
             className="execution-queue-panel execution-queue-strip"
             headerContent={
                 <span className="queue-header">
-                    {isSessionLoading && <span className="queue-header__status" aria-busy="true">Loading progress…</span>}
+                    {isSessionLoading && <span className="queue-header__status" role="status" aria-busy="true">Reading progress</span>}
                     {!isSessionLoading && sessionError && (
                         <span className="queue-header__error" role="alert">
                             Could not load progress.
@@ -240,7 +240,7 @@ export const ExecutionQueue: React.FC<Props> = ({
             <ConfirmDialog
                 open={isStopConfirmOpen}
                 title="Stop Session"
-                message="Stop the imaging session? The packages not yet imaged are skipped and the session is closed. The package being imaged now stops after its current cycle. This does not stop the mount or the guider; use Stop in Manual Guide or Ekos for that."
+                message="Stop the imaging session? The packages not yet imaged are skipped and the session is closed. The package being imaged now stops after its current cycle. This does not stop the mount or the guider; use STOP on the Manual tab of Telescope Control or Ekos for that."
                 confirmLabel="Yes, Stop"
                 cancelLabel="Keep Imaging"
                 onConfirm={handleStopSession}

@@ -1,9 +1,11 @@
-r"""List or download library database backups made by the backup script.
+r"""List local library database snapshots, or copy one out and check it.
 
-``--list`` shows the snapshots on the remote. ``--snapshot NAME --destination
-DIR`` downloads one into DIR and checks each database with SQLite's integrity
-check. The script never writes to the live library. It prints the commands to
-put the files in place yourself, which you should do with the backend stopped.
+The snapshots are made by ``backup_library_databases.py`` and live in
+``~/.cache/astrometrics/backup/``. ``--list`` shows them. ``--snapshot NAME
+--destination DIR`` copies one into DIR and checks each database with SQLite's
+integrity check. The script never writes to the live library. It prints the
+commands to put the files in place yourself, which you should do with the
+backend stopped.
 
 Run::
 
@@ -15,14 +17,17 @@ Run::
 
 import argparse
 import logging
+import re
+import shutil
 import sqlite3
-import subprocess
 import sys
 from pathlib import Path
 
-from astrometricslib.foundation.paths import remote_snapshot_path
+from astrometricslib.foundation.paths import backup_directory
 
 logger = logging.getLogger(__name__)
+
+SNAPSHOT_NAME_PATTERN = re.compile(r"^\d{8}_\d{6}$")
 
 
 def check_database_integrity(database_path: Path) -> bool:
@@ -59,16 +64,20 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         The parser.
     """
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--list", action="store_true", help="List snapshots on the remote.")
-    parser.add_argument("--snapshot", help="Snapshot name to download, for example 20261011_151519.")
-    parser.add_argument("--destination", type=Path, help="Empty or new folder to download into.")
-    parser.add_argument("--rclone", default="rclone", help="The rclone executable. Default: rclone.")
-    parser.add_argument("--remote", default="drive:", help="The rclone remote, with colon. Default: drive:.")
+    parser.add_argument("--list", action="store_true", help="List the local snapshots.")
+    parser.add_argument("--snapshot", help="Snapshot name to copy out, for example 20261011_151519.")
+    parser.add_argument("--destination", type=Path, help="Empty or new folder to copy into.")
+    parser.add_argument(
+        "--backup-root",
+        type=Path,
+        default=None,
+        help="Folder that holds the snapshots. Default: ~/.cache/astrometrics/backup.",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    """List snapshots, or download and check one.
+    """List snapshots, or copy one out and check it.
 
     Parameters
     ----------
@@ -82,19 +91,20 @@ def main(argv: list[str] | None = None) -> int:
     """
     parser = _build_argument_parser()
     arguments = parser.parse_args(argv)
+    backup_root = arguments.backup_root or Path(backup_directory())
 
     if arguments.list:
-        listing = subprocess.run(
-            [arguments.rclone, "lsf", "--dirs-only", remote_snapshot_path(arguments.remote) + "/"],
-            capture_output=True,
-            text=True,
-            check=False,
+        names = (
+            sorted(
+                folder.name
+                for folder in backup_root.iterdir()
+                if folder.is_dir() and SNAPSHOT_NAME_PATTERN.match(folder.name)
+            )
+            if backup_root.is_dir()
+            else []
         )
-        if listing.returncode != 0:
-            print(listing.stderr.strip(), file=sys.stderr)
-            return 1
-        for line in sorted(listing.stdout.split()):
-            print(line.rstrip("/"))
+        for name in names:
+            print(name)
         return 0
 
     if not arguments.snapshot or arguments.destination is None:
@@ -102,24 +112,15 @@ def main(argv: list[str] | None = None) -> int:
         print("Give --list, or both --snapshot and --destination.", file=sys.stderr)
         return 2
 
+    source = backup_root / arguments.snapshot
+    if not SNAPSHOT_NAME_PATTERN.match(arguments.snapshot) or not source.is_dir():
+        print(f"No snapshot named {arguments.snapshot} in {backup_root}.", file=sys.stderr)
+        return 1
     destination = arguments.destination.expanduser()
     if destination.exists() and any(destination.iterdir()):
         print(f"{destination} is not empty; choose a new folder.", file=sys.stderr)
         return 2
-    download = subprocess.run(
-        [
-            arguments.rclone,
-            "copy",
-            remote_snapshot_path(arguments.remote, arguments.snapshot) + "/",
-            str(destination),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if download.returncode != 0:
-        print(download.stderr.strip(), file=sys.stderr)
-        return 1
+    shutil.copytree(source, destination, dirs_exist_ok=True)
 
     exit_code = 0
     for database_path in sorted(destination.glob("*.db")):
@@ -127,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{database_path.name}: integrity {'ok' if ok else 'FAILED'}")
         if not ok:
             exit_code = 1
-    print(f"\nDownloaded to {destination}. Nothing in the live library was changed.")
+    print(f"\nCopied to {destination}. Nothing in the live library was changed.")
     print("To put the databases in place, stop the backend, then for each database copy it into the")
     print("library folder and remove the old -wal and -shm files next to it, for example:")
     print(f"  cp {destination}/astrometrics.db <library>/astrometrics.db")

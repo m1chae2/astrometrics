@@ -39,6 +39,7 @@ export const NewPackageSearch: React.FC<NewPackageSearchProps> = ({ onPick, onCl
                 <TextInput
                     type="search"
                     width="fill"
+                    size="small"
                     aria-label="Search library targets"
                     placeholder="Search library targets"
                     value={filterText}
@@ -48,7 +49,7 @@ export const NewPackageSearch: React.FC<NewPackageSearchProps> = ({ onPick, onCl
                 />
                 <Button size="small" onClick={onClose}>Cancel</Button>
             </div>
-            {isLoading && <EmptyState variant="loading" message="Loading targets…" />}
+            {isLoading && <EmptyState variant="loading" message="Loading targets" />}
             {!isLoading && isError && (
                 <div className="package-library__error" role="alert">
                     <span>Could not load the target list.</span>

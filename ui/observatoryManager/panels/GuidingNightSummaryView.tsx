@@ -14,6 +14,7 @@ import { useGuidingUpdatedRefresh } from './useGuidingUpdatedRefresh';
 import { EmptyState } from '../../common/components/EmptyState';
 import type { GuidingRunPerformance } from '../../common/types/backendTypes';
 
+import { Skeleton } from '../../common/components/Skeleton';
 export interface GuidingNightSummaryViewProps {
     /** The night to show, such as "2026-09-24". */
     nightId: string;
@@ -72,7 +73,7 @@ export const GuidingNightSummaryView: React.FC<GuidingNightSummaryViewProps> = (
     useGuidingUpdatedRefresh([qualityQueryKeys.nightQuality(nightId)]);
 
     if (nightQuery.isLoading) {
-        return <EmptyState variant="loading" message="Loading guiding for this night..." />;
+        return <Skeleton variant="keyValue" count={4} label="Loading guiding for this night" />;
     }
     if (nightQuery.isError || !nightQuery.data) {
         return <EmptyState variant="error" message="Could not load the guiding for this night." />;

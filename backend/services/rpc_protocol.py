@@ -113,31 +113,6 @@ def serialize_rpc_result(obj: Any) -> Any:
         return str(obj)
 
 
-def make_rpc_success_response(result: Any, request_id: int | str | None) -> JSONResponse:
-    """Construct a standard successful JSON-RPC response in a success envelope.
-
-    Parameters
-    ----------
-    result : `~typing.Any`
-        The raw result value to serialize into the response body.
-    request_id : `int` or `str` or `None`
-        The JSON-RPC request identifier to echo back to the caller.
-
-    Returns
-    -------
-    response : `~fastapi.responses.JSONResponse`
-        A 200 JSON-RPC response envelope containing the serialized
-        result under ``"result"`` and the standard CORS headers.
-    """
-    serialized_result = serialize_rpc_result(result)
-    response_body = {
-        "jsonrpc": "2.0",
-        "result": {"status": "success", "data": serialized_result},
-        "id": request_id,
-    }
-    return JSONResponse(content=response_body, status_code=200, headers=get_cors_headers())
-
-
 def make_rpc_error_response(
     code: int,
     message: str,

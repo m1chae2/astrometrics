@@ -24,14 +24,6 @@ function makeContainer(size: { w: number; h: number }): HTMLDivElement {
 }
 
 describe('useCanvasInteraction zoomToFit', () => {
-    beforeEach(() => {
-        // jsdom has no ResizeObserver; the hook only needs it to exist.
-        vi.stubGlobal('ResizeObserver', class {
-            observe(): void {}
-            disconnect(): void {}
-        });
-    });
-
     afterEach(() => {
         vi.unstubAllGlobals();
     });
@@ -77,5 +69,43 @@ describe('useCanvasInteraction zoomToFit', () => {
         act(() => result.current.zoomToFit());
 
         expect(result.current.zoom).toBeCloseTo((400 / 2000) * 0.95, 6);
+    });
+});
+
+describe('useCanvasInteraction preview swap', () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    /**
+     * When a small preview is replaced by the same picture at a larger size, the
+     * picture keeps covering the same area of the screen.
+     */
+    it('keeps the on-screen size when the drawn size changes with the swap flag set', () => {
+        const containerRef = { current: makeContainer({ w: 1000, h: 1000 }) };
+        const keepViewRef = { current: false };
+        const { result, rerender } = renderHook(
+            ({ size }) => useCanvasInteraction(containerRef, size, undefined, keepViewRef),
+            { initialProps: { size: { w: 500, h: 500 } } },
+        );
+        const coveredBefore = 500 * result.current.zoom;
+
+        keepViewRef.current = true;
+        rerender({ size: { w: 2000, h: 2000 } });
+
+        expect(2000 * result.current.zoom).toBeCloseTo(coveredBefore, 3);
+        expect(keepViewRef.current).toBe(false);
+    });
+
+    /** Without the flag, a size change fits the new picture again, as before. */
+    it('fits again when the flag is not set', () => {
+        const containerRef = { current: makeContainer({ w: 1000, h: 1000 }) };
+        const keepViewRef = { current: false };
+        const { result, rerender } = renderHook(
+            ({ size }) => useCanvasInteraction(containerRef, size, undefined, keepViewRef),
+            { initialProps: { size: { w: 500, h: 500 } } },
+        );
+        rerender({ size: { w: 2000, h: 2000 } });
+        expect(result.current.zoom).toBeCloseTo(0.475, 3);
     });
 });

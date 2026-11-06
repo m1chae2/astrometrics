@@ -43,6 +43,8 @@ export interface PopoverSelectProps {
     size?: 'regular' | 'compact';
     /** Where the menu opens: "below" (the default) or "above" the button, for pickers at the bottom of a panel. */
     placement?: 'below' | 'above';
+    /** Makes the button and menu fill the width of the container. */
+    fill?: boolean;
 }
 
 /**
@@ -64,13 +66,14 @@ export const PopoverSelect: React.FC<PopoverSelectProps> = ({
     disabled = false,
     size = 'regular',
     placement = 'below',
+    fill = false,
 }) => {
     const triggerRef = useRef<HTMLButtonElement>(null);
     const selectedOption = selectedId === null ? undefined : options.find((option) => option.id === selectedId);
     const selectedText = selectedOption ? selectedOption.label : (emptyLabel ?? placeholder);
 
     return (
-        <div className={`popover-select${size === 'compact' ? ' popover-select--compact' : ''}${placement === 'above' ? ' popover-select--above' : ''} ${className}`.trim()}>
+        <div className={`popover-select${size === 'compact' ? ' popover-select--compact' : ''}${placement === 'above' ? ' popover-select--above' : ''}${fill ? ' popover-select--fill' : ''} ${className}`.trim()}>
             <Popover
                 className="popover-select__popover-container"
                 trigger={({ isOpen, toggle }) => (

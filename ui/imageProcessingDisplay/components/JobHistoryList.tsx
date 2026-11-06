@@ -8,7 +8,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ProcessingJob } from '../../common/types/backendTypes';
 import { Button } from '../../common/components/Button';
-import { LoadingSpinner } from '../../common/components/LoadingSpinner';
+import { Skeleton } from '../../common/components/Skeleton';
+import { useOnValueChange } from '../hooks/useOnValueChange';
 import { fetchJobs } from '../../common/services/imaging/processingService';
 import {
     getNightStart, groupJobsByNight, isFromCurrentNight, toLocalIsoTime,
@@ -114,11 +115,11 @@ export const JobHistoryList: React.FC<JobHistoryListProps> = ({
     const [hasMoreEarlier, setHasMoreEarlier] = useState<boolean>(true);
 
     // Forget earlier nights when the user switches target.
-    useEffect(() => {
+    useOnValueChange(targetId, () => {
         setEarlierJobs([]);
         setEarlierOpen(false);
         setHasMoreEarlier(true);
-    }, [targetId]);
+    });
 
     const currentTime = now ?? new Date();
     const tonightRows = useMemo(() => {
@@ -164,7 +165,7 @@ export const JobHistoryList: React.FC<JobHistoryListProps> = ({
     };
 
     if (loading && jobs.length === 0 && pinnedJobs.length === 0) {
-        return <div className="job-history-list__loading"><LoadingSpinner /> Loading job history...</div>;
+        return <Skeleton variant="list" count={4} label="Loading job history" />;
     }
 
     const renderRows = (rows: ProcessingJob[]): React.ReactNode =>
@@ -202,7 +203,7 @@ export const JobHistoryList: React.FC<JobHistoryListProps> = ({
                             onClick={() => { void loadEarlier(); }}
                         >
                             {loadingEarlier
-                                ? 'Loading...'
+                                ? 'Loading earlier nights'
                                 : earlierOpen ? 'Show more earlier nights' : 'Earlier nights ▸'}
                         </Button>
                     )}

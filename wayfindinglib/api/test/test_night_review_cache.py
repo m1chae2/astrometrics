@@ -8,14 +8,16 @@ change must. `invalidate_night` forgets a night. The guiding baselines that
 the envelope uses are built once and shared by every night.
 """
 
+import sqlite3
 import threading
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from astrometricslib.drivers import VersionedCache
+from astrometricslib.foundation.storage.data_versions import bump_data_version
 from wayfindinglib import ObservatoryControl
-from wayfindinglib.analytics.review_cache import ReviewCache
 from wayfindinglib.analytics.test.night_quality_helpers import (
     REVIEWED,
     STAR,
@@ -76,17 +78,16 @@ def builds(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
 
 @pytest.fixture
 def review(control: ObservatoryControl) -> ObservationReview:
-    """Give a review over a made-up library whose science database file exists.
+    """Give a review over a made-up library with no science database yet.
 
     Returns
     -------
     review : `ObservationReview`
-        The review. The file ``astrometrics.db`` exists in the library folder,
-        so a data version can be worked out.
+        The review. The library's write counters read as all zero, so a data
+        version can be worked out.
     """
     target = make_target(STAR, 5)
     control._context._astrometrics = FakeLibrary([target], make_rows(target, REVIEWED))
-    (Path(str(control._context.config.get_library_path())) / "astrometrics.db").write_bytes(b"x" * 100)
     return ObservationReview(control)
 
 
@@ -138,10 +139,12 @@ def test_a_new_guiding_sample_builds_again(review: ObservationReview, builds: di
 def test_a_write_to_the_science_database_builds_again(
     review: ObservationReview, builds: dict[str, int]
 ) -> None:
-    """A new frame or measurement grows the science database file."""
+    """A new frame or measurement counts a write in the science database."""
     _ask(review)
-    with _science_database(review).open("ab") as database:
-        database.write(b"new frame")
+    connection = sqlite3.connect(_science_database(review))
+    bump_data_version(connection, "quality")
+    connection.commit()
+    connection.close()
     _ask(review)
 
     assert builds["night_quality"] == 2
@@ -179,9 +182,7 @@ def test_a_change_of_active_equipment_builds_again(
 ) -> None:
     """New active equipment is new data, because the review judges for it."""
     _ask(review)
-    monkeypatch.setattr(
-        "wayfindinglib.tasks.control_tasks.review_versions._equipment_signs", lambda config: ("other",)
-    )
+    monkeypatch.setattr("wayfindinglib.analytics.data_versions.equipment_signs", lambda config: ("other",))
     _ask(review)
 
     assert builds["night_quality"] == 2
@@ -297,7 +298,7 @@ def test_the_guiding_baselines_are_built_once_for_every_night(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Judging two different nights reads the earlier nights' guiding once."""
-    cache = ReviewCache()
+    cache = VersionedCache()
     context = type("Context", (), {"review_cache": cache, "records": object()})()
     calls: list[str] = []
     monkeypatch.setattr(night_analysis, "review_data_version", lambda context: "v1")

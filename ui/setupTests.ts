@@ -6,7 +6,8 @@
  */
 
 import '@testing-library/jest-dom';
-import { expect } from 'vitest';
+import { afterEach, expect } from 'vitest';
+import { resetHandoffsForTests } from './common/utils/displayHandoffStore';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import type { TestingLibraryMatchers } from '@testing-library/jest-dom/matchers';
 
@@ -34,6 +35,23 @@ if (typeof window !== 'undefined') {
   window.Element.prototype.scrollIntoView = vi.fn();
 }
 
+/**
+ * Stand-in for the browser's ResizeObserver, which jsdom does not have.
+ * It never reports a size change; tests that need sizes mock the element sizes.
+ * It is installed once here, as a plain global (not a `vi.stubGlobal`), so
+ * `vi.unstubAllGlobals()` in a test file cannot remove it.
+ */
+class ResizeObserverStub {
+    /** Starts watching an element; does nothing. */
+    observe(): void { /* no-op */ }
+    /** Stops watching an element; does nothing. */
+    unobserve(): void { /* no-op */ }
+    /** Stops watching everything; does nothing. */
+    disconnect(): void { /* no-op */ }
+}
+if (typeof globalThis.ResizeObserver === 'undefined') {
+    globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+}
 
 // We can add custom matchers here later if needed
 // expect.extend({
@@ -229,3 +247,8 @@ if (typeof WebSocket !== 'undefined') {
     }
     global.WebSocket = GuardedWebSocket as typeof WebSocket;
 }
+
+// A hand-off nobody picked up in one test must not reach the next test.
+afterEach(() => {
+  resetHandoffsForTests();
+});

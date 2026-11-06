@@ -22,7 +22,8 @@ export async function emergencyParkMount(): Promise<boolean> {
         emitToast(
             'Emergency park failed. Check the mount and park it manually.',
             'error',
-            'EmergencyPark'
+            'EmergencyPark',
+            { notify: true }
         );
     }
     return parked;

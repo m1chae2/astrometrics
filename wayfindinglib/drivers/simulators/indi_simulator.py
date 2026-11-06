@@ -424,10 +424,7 @@ class SimulatorIndiInterface(IndiInterface):
             "FILTER": "Unknown",
         }
 
-        import threading
-
-        self._external_pulses_lock = threading.Lock()
-        self._external_pulses = []
+        self._init_runtime_state()
 
         logging.getLogger(__name__).info("SimulatorIndiInterface initialized.")
 

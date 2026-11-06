@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { fetchTargetFiles } from '../../common/services/targetService';
 import { deleteFiles } from '../../common/services/imaging/imageService';
 import { emitToast } from '../../common/utils/emitToast';
+import { useOnValueChange } from './useOnValueChange';
 import { matchesQuery } from '../../common/utils/searchLogic';
 import { FileItem } from '../fileBrowser/FileBrowser';
 
@@ -71,9 +72,14 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
     }, []);
 
 
-    useEffect(() => {
+    // Forget the stacked image only when the target really changes. When the display is
+    // shown again the files are read again below, and the old values stay until they arrive.
+    useOnValueChange(selectedTarget, () => {
         setStackedImage(null);
         setStackedSpectralTarget(null);
+    });
+
+    useEffect(() => {
         if (!selectedTarget || !shouldFetch) {
             setAllFiles([]);
             return;
@@ -110,9 +116,9 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
 
     // Ticked frames belong to one target. Switching targets clears them, so a
     // stack, analysis or delete never acts on frames picked for another target.
-    useEffect(() => {
+    useOnValueChange(selectedTarget, () => {
         setCheckedFiles(new Set());
-    }, [selectedTarget]);
+    });
 
     const toggleFile = useCallback((path: string | null) => {
         if (!path) return;

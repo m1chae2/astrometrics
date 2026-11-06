@@ -5,7 +5,7 @@
 
 .indi-property__label {
     font-weight: bold;
-    font-size: 14px;
+    font-size: var(--control-font-size);
     margin-bottom: 4px;
 }
 
@@ -14,7 +14,7 @@
 }
 
 .indi-property__value {
-    font-size: 12px;
+    font-size: var(--section-label-size);
     color: var(--text-dim);
 }
 

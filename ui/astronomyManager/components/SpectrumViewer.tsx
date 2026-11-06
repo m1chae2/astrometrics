@@ -22,6 +22,7 @@ import {
 } from '../../common/utils/starDisplayFormat';
 import { Button } from '../../common/components/Button';
 
+import { Skeleton } from '../../common/components/Skeleton';
 interface Props {
     astronomyData: (Spectrum & { wavelength: number[]; spectrumFlux: number[] }) | null;
     loading: boolean;
@@ -281,7 +282,7 @@ export const SpectrumViewer: React.FC<Props> = ({
         return base;
     }, [selections, markedSpectralFeatures, showFeatures, astronomyData]);
 
-    if (loading) return <div className="astronomy-viewer-loading">Loading spectrum...</div>;
+    if (loading) return <Skeleton variant="chart" label="Loading the spectrum" />;
     if (error) return <div className="astronomy-viewer-error">{error}</div>;
 
     const hasData = astronomyData && astronomyData.wavelength?.length > 0 && astronomyData.spectrumFlux?.length > 0;

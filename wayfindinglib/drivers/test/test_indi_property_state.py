@@ -10,6 +10,8 @@ camera status and the property listing.
 import threading
 import time
 
+import pytest
+
 from wayfindinglib.drivers.indi.property_state import get_property_state, property_state_name
 from wayfindinglib.drivers.indi.pyindi_compatibility import PyIndi
 from wayfindinglib.drivers.indi_interface import IndiInterface
@@ -235,3 +237,59 @@ def test_disconnect_reset_reports_camera_status_unknown_not_idle() -> None:
     interface._reset_status()
 
     assert interface.status["CAMERA_STATUS"] == "Unknown"
+
+
+def test_a_whole_interface_has_its_device_discovery_from_the_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The device finder exists before the rest of the constructor runs."""
+    from unittest.mock import MagicMock
+
+    seen: list[bool] = []
+    monkeypatch.setattr(
+        IndiInterface, "sync_configuration", lambda self: seen.append(hasattr(self, "device_discovery"))
+    )
+    monkeypatch.setattr(IndiInterface, "_reset_status", lambda self: None)
+    interface = IndiInterface(config=MagicMock())
+    assert seen == [True]
+    assert interface._can_handle_callbacks()
+
+
+def test_updates_arriving_before_or_after_the_object_is_whole_are_ignored(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A property update on a torn-down or closed interface logs nothing."""
+    from unittest.mock import MagicMock
+
+    class _Property:
+        """A fake property with one name."""
+
+        def getName(self) -> str:
+            """Return the property name.
+
+            Returns
+            -------
+            name : `str`
+                Always "CCD_EXPOSURE".
+            """
+            return "CCD_EXPOSURE"
+
+        def __len__(self) -> int:
+            """Return the number of elements.
+
+            Returns
+            -------
+            count : `int`
+                Always 1.
+            """
+            return 1
+
+    partly_built = IndiInterface.__new__(IndiInterface)
+    closed = _make_interface(None)
+    closed.device_discovery = MagicMock()
+    closed.close_callbacks()
+    with caplog.at_level("DEBUG"):
+        assert partly_built._find_main_camera_device() is None
+        for interface in (closed,):
+            interface.newNumber(_Property())
+            interface.newSwitch(_Property())
+            interface.newText(_Property())
+    assert not [record for record in caplog.records if record.levelname == "ERROR"]

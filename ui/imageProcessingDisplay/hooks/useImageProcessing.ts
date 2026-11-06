@@ -37,12 +37,14 @@ export interface UseImageProcessingResult {
  * Orchestrates stacking and analysis jobs.
  * @param selectedTarget The ID of the currently selected target.
  * @param shouldFetch Whether to fetch data from the server.
+ * @param historyWanted Whether the job history is on screen; it is only read once it is.
  */
 export function useImageProcessing(
     selectedTarget: string,
-    shouldFetch: boolean = true
+    shouldFetch: boolean = true,
+    historyWanted: boolean = true
 ): UseImageProcessingResult {
-    const stacking = useStackingJob(selectedTarget, shouldFetch);
+    const stacking = useStackingJob(selectedTarget, shouldFetch, historyWanted);
     const analysis = useAnalysisJob(
         selectedTarget,
         shouldFetch,

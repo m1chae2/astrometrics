@@ -26,7 +26,7 @@
     background-color: var(--term-bg-dark);
     color: var(--term-fg);
     font-family: var(--font-family-mono);
-    font-size: 14px;
+    font-size: var(--control-font-size);
     padding: 10px;
     border-left: 1px solid var(--term-border);
     box-sizing: border-box;
@@ -79,7 +79,7 @@
     background: var(--term-bg-medium);
     border-right: 1px solid var(--term-border);
     color: var(--text-dark);
-    font-size: 13px;
+    font-size: var(--compact-font-size);
     font-family: var(--font-family-mono);
     box-sizing: border-box;
 }
@@ -103,15 +103,15 @@
 .script-inspector__object-header {
     cursor: pointer;
     padding: 4px 6px;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 4px;
+    background: color-mix(in srgb, var(--white) 5%, transparent);
+    border-radius: var(--radius-sm);
     display: flex;
     align-items: center;
     gap: 6px;
 }
 
 .script-inspector__expand-icon {
-    font-size: 10px;
+    font-size: var(--tiny-font-size);
     color: var(--text-muted);
 }
 
@@ -122,7 +122,7 @@
 
 .script-inspector__object-type {
     color: var(--text-dimmest);
-    font-size: 11px;
+    font-size: var(--small-font-size);
     margin-left: auto;
 }
 
@@ -134,7 +134,7 @@
 }
 
 .script-inspector__doc {
-    font-size: 11px;
+    font-size: var(--small-font-size);
     color: var(--text-muted);
     padding: 4px;
     margin-bottom: 4px;
@@ -151,7 +151,7 @@
 }
 
 .script-inspector__method:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: color-mix(in srgb, var(--white) 5%, transparent);
 }
 
 .script-inspector__arg {

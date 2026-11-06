@@ -4,6 +4,7 @@
  * library" listener.
  */
 
+import { postHandoff } from '../../common/utils/displayHandoffStore';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -125,7 +126,7 @@ describe('CameraProfilesPanel', () => {
     it('shows loading, error and empty states', async () => {
         const retry = vi.fn();
         const { rerender } = render(<CameraProfilesPanel cameras={[]} loading error={null} onRetry={retry} />);
-        expect(screen.getByText('Loading…').getAttribute('aria-busy')).toBe('true');
+        expect(screen.getByText('Loading the camera profiles').closest('[role="status"]')).not.toBeNull();
         rerender(<CameraProfilesPanel cameras={[]} loading={false} error="boom" onRetry={retry} />);
         await userEvent.click(screen.getByText('Try again'));
         expect(retry).toHaveBeenCalled();
@@ -288,9 +289,7 @@ describe('CalibrationLibraryPanel', () => {
         renderWithQuery(<CalibrationLibraryPanel />);
         await screen.findByRole('tab', { name: /^Darks/ });
         act(() => {
-            window.dispatchEvent(new CustomEvent('astrometrics:showCalibrationRow', {
-                detail: { calibrationKey: 'bias', captureSetting: { camera: 'ZWO ASI533MM Pro' }, rule: 'r' },
-            }));
+            postHandoff('Observatory Manager', 'showCalibrationRow', { calibrationKey: 'bias', captureSetting: { camera: 'ZWO ASI533MM Pro' }, rule: 'r' });
         });
         await waitFor(() => expect(document.querySelectorAll('[data-highlighted="true"]').length).toBe(1));
         expect(screen.getByRole('tab', { name: /^Biases/ }).getAttribute('aria-selected')).toBe('true');
@@ -298,11 +297,35 @@ describe('CalibrationLibraryPanel', () => {
         expect(document.querySelector('[data-highlighted="true"]')?.textContent).toContain('30');
     });
 
+    /** The 10 second background read does not sweep the updating bar across the panel. */
+    it('shows no updating bar during the quiet background poll', async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        try {
+            let reads = 0;
+            callBackendMock.mockImplementation(async (method: string, params: { detail?: string }) => {
+                if (method === 'calibration:query' && params?.detail === 'counts') {
+                    reads += 1;
+                    // The second counts read (the poll) is slow, so the bar would show if it were tied to fetching.
+                    if (reads > 1) await new Promise((resolve) => setTimeout(resolve, 5000));
+                    return libraryReply;
+                }
+                return { detail: 'match', matched_row_keys: [], camera_totals: [] };
+            });
+            renderWithQuery(<CalibrationLibraryPanel />);
+            await screen.findByRole('tab', { name: /^Darks/ });
+            await act(async () => { await vi.advanceTimersByTimeAsync(10500); });
+            expect(reads).toBeGreaterThan(1);
+            expect(screen.queryByRole('progressbar', { name: /./ })).toBeNull();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     /** The loading state shows while the first read is pending. */
     it('shows the loading state', () => {
         callBackendMock.mockReturnValue(new Promise(() => undefined));
         renderWithQuery(<CalibrationLibraryPanel />);
-        expect(screen.getByText('Loading…').getAttribute('aria-busy')).toBe('true');
+        expect(screen.getByText('Loading the calibration library').closest('[role="status"]')).not.toBeNull();
     });
 
     /** An empty library says what to do. */
@@ -325,9 +348,7 @@ describe('CalibrationLibraryPanel', () => {
         renderWithQuery(<CalibrationLibraryPanel />);
         await screen.findByRole('tab', { name: /^Darks/ });
         act(() => {
-            window.dispatchEvent(new CustomEvent('astrometrics:showCalibrationRow', {
-                detail: { calibrationKey: 'dark', captureSetting: { camera: 'ZWO ASI533MM Pro', gainSetting: 100, offset: 10, binning: 1 }, rule: 'r' },
-            }));
+            postHandoff('Observatory Manager', 'showCalibrationRow', { calibrationKey: 'dark', captureSetting: { camera: 'ZWO ASI533MM Pro', gainSetting: 100, offset: 10, binning: 1 }, rule: 'r' });
         });
         await waitFor(() => expect(document.querySelectorAll('[data-highlighted="true"]').length).toBe(1));
         expect(document.querySelector('[data-highlighted="true"]')?.textContent).toContain('20');
@@ -342,9 +363,7 @@ describe('CalibrationLibraryPanel', () => {
         renderWithQuery(<CalibrationLibraryPanel />);
         await screen.findByRole('tab', { name: /^Darks/ });
         act(() => {
-            window.dispatchEvent(new CustomEvent('astrometrics:showCalibrationRow', {
-                detail: { calibrationKey: 'flat', captureSetting: { camera: 'ZWO ASI533MM Pro', gainSetting: 100 }, rule: 'r' },
-            }));
+            postHandoff('Observatory Manager', 'showCalibrationRow', { calibrationKey: 'flat', captureSetting: { camera: 'ZWO ASI533MM Pro', gainSetting: 100 }, rule: 'r' });
         });
         expect(await screen.findByText('No calibration row matches')).toBeTruthy();
     });

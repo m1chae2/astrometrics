@@ -5,7 +5,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.7);
+    background: color-mix(in srgb, var(--black) 70%, transparent);
     backdrop-filter: blur(4px);
     display: flex;
     justify-content: center;
@@ -19,7 +19,7 @@
     max-width: 95%;
     background: var(--grey-dark);
     border: 1px solid var(--grey-medium-dark);
-    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+    box-shadow: 0 24px 64px color-mix(in srgb, var(--black) 60%, transparent);
     padding: 28px;
     transform: translateY(0);
     animation: modal-slide-up 0.4s cubic-bezier(0.16, 1, 0.3, 1);
@@ -35,14 +35,14 @@
 .modal-header h3 {
     margin: 0;
     color: var(--white);
-    font-size: 1.4rem;
+    font-size: var(--heading-font-size);
 }
 
 .close-btn {
     background: none;
     border: none;
     color: var(--text-muted);
-    font-size: 1.8rem;
+    font-size: var(--display-font-size);
     cursor: pointer;
     line-height: 1;
     padding: 0;
@@ -61,7 +61,7 @@
 }
 
 .form-group label {
-    font-size: 0.9rem;
+    font-size: var(--control-font-size);
     color: var(--text-muted);
     font-weight: 500;
     white-space: nowrap;
@@ -86,7 +86,7 @@
 }
 
 .cancel-btn:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: color-mix(in srgb, var(--white) 5%, transparent);
 }
 
 @keyframes modal-fade-in {

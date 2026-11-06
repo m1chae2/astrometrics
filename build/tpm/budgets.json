@@ -1,0 +1,35 @@
+[
+  {
+    "path": "/*",
+    "timings": [
+      {
+        "metric": "total-blocking-time",
+        "budget": 300
+      },
+      {
+        "metric": "cumulative-layout-shift",
+        "budget": 0.1
+      }
+    ],
+    "resourceSizes": [
+      {
+        "resourceType": "script",
+        "budget": 4000
+      },
+      {
+        "resourceType": "total",
+        "budget": 9000
+      }
+    ],
+    "resourceCounts": [
+      {
+        "resourceType": "script",
+        "budget": 40
+      },
+      {
+        "resourceType": "total",
+        "budget": 120
+      }
+    ]
+  }
+]

@@ -5,6 +5,7 @@
  * follow. This hook polls that job until it completes or fails, and hands the result back.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useOnValueChange } from './useOnValueChange';
 import { fetchJob } from '../../common/services/imaging/stackReviewService';
 import { fetchJobs } from '../../common/services/imaging/processingService';
 import type { ProcessingJob, StackReviewStart } from '../../common/types/backendTypes';
@@ -50,10 +51,10 @@ export function useReviewJob<T>(options: ReviewJobOptions<T>) {
     });
 
     // Forget the last check when another target is selected.
-    useEffect(() => {
+    useOnValueChange(options.targetId, () => {
         setState(IDLE);
         setWatch(null);
-    }, [options.targetId]);
+    });
 
     // Poll a running job until it ends.
     useEffect(() => {

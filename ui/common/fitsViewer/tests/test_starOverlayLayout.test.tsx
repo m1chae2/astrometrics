@@ -15,15 +15,28 @@ import {
 } from '../utils/starOverlayLayout';
 import { estimateBadgeWidth } from '../FitsRenderer';
 
+// A fixed decoded picture, so the renderer treats the full image as ready.
+const FAKE_BITMAP = { width: 800, height: 1000 } as unknown as ImageBitmap;
 vi.mock('../hooks/useFitsLoader', () => ({
-  useFitsLoader: () => ({ parsedData: null, bitmap: null, workerRef: { current: null } })
+  useFitsLoader: () => ({
+    parsedData: null, bitmap: FAKE_BITMAP, workerRef: { current: null },
+    phase: 'ready', errorMessage: null, loadedKey: 'fake.fits'
+  })
 }));
 vi.mock('../hooks/useCanvasDrawer', () => ({
   /**
    * Stand-in drawer that reports an 800 by 1000 drawn image once.
    */
-  useCanvasDrawer: (_canvas: unknown, _worker: unknown, _data: unknown, _bitmap: unknown, setDrawnSize: (size: { w: number; h: number }) => void) => {
-    React.useEffect(() => { setDrawnSize({ w: 800, h: 1000 }); }, [setDrawnSize]);
+  useCanvasDrawer: (
+    _canvas: unknown, _worker: unknown, _data: unknown, bitmap: ImageBitmap | null,
+    setDrawnSize: (size: { w: number; h: number }) => void,
+    _stretch?: boolean, _range?: unknown, _parameters?: unknown,
+    onDrawn?: (drawn: ImageBitmap) => void
+  ) => {
+    React.useEffect(() => {
+      setDrawnSize({ w: 800, h: 1000 });
+      if (bitmap) onDrawn?.(bitmap);
+    }, [setDrawnSize, bitmap, onDrawn]);
   }
 }));
 
@@ -116,14 +129,6 @@ describe('FitsRenderer star overlay', () => {
     const { FitsRenderer } = await import('../FitsRenderer');
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(800);
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(1000);
-    vi.stubGlobal('ResizeObserver', class {
-      /** Does nothing; sizes are mocked. */
-      observe() { /* no-op */ }
-      /** Does nothing. */
-      unobserve() { /* no-op */ }
-      /** Does nothing. */
-      disconnect() { /* no-op */ }
-    });
     // jsdom has no PointerEvent; a mouse event carries the same coordinates.
     vi.stubGlobal('PointerEvent', MouseEvent);
     // jsdom also lacks pointer capture, which the pan code uses.
@@ -136,7 +141,7 @@ describe('FitsRenderer star overlay', () => {
     })) as unknown as typeof HTMLCanvasElement.prototype.getContext;
     const result = render(
       <FitsRenderer
-        imageUrl={null} imageBlob={null} frameInfo={null} loading={false} error={null}
+        imageUrl="fake.fits" imageBlob={null} frameInfo={null} loading={false} error={null}
         selectedTarget="M 31" autoPanTrigger={0} overlayStars={stars} showOverlay onStarClick={onStarClick}
       />
     );

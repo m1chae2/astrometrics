@@ -164,37 +164,32 @@ def test_catalog_access_put_does_not_keep_the_list_it_was_given(mocker: MockerFi
     assert result is not updated
 
 
-def test_dataset_version_increments_on_put_merge_and_delete(mocker: MockerFixture) -> None:
-    """Verify each write to a dataset bumps its version.
+def test_dataset_version_increments_on_put_merge_and_delete(tmp_path: Path) -> None:
+    """Verify each write to a dataset bumps its version, in the database.
 
     A cache can compare this number to the one it saw last time to tell
     whether a dataset has changed, instead of re-reading the whole thing
-    or guessing from a timer.
+    or guessing from a timer. A second `CatalogAccess` on the same library
+    (standing for another program) sees the same count.
     """
-    mock_config = MagicMock()
-    catalog_access = CatalogAccess(config=mock_config)
-    mocker.patch.object(catalog_access._generic, "put_all")
-    mocker.patch.object(catalog_access._generic, "put")
-    mocker.patch.object(catalog_access._generic, "merge_and_record")
-    mocker.patch.object(catalog_access._generic, "delete_by_ids")
-
-    assert catalog_access.get_dataset_version("stellar_catalog") == 0
+    catalog_access = _build_catalog_access_with_stars(tmp_path, [])
+    other_program = CatalogAccess(config=catalog_access.config)
+    starting_version = catalog_access.get_dataset_version("stellar_catalog")
 
     catalog_access.put([StellarObject(id="Star1")], "stellar_catalog", {})
-    assert catalog_access.get_dataset_version("stellar_catalog") == 1
+    assert catalog_access.get_dataset_version("stellar_catalog") == starting_version + 1
 
-    catalog_access.merge_and_record("stellar_catalog", [], lambda _old, new: new)
-    assert catalog_access.get_dataset_version("stellar_catalog") == 2
+    catalog_access.merge_and_record("stellar_catalog", [StellarObject(id="Star2")], lambda _old, new: new)
+    assert other_program.get_dataset_version("stellar_catalog") == starting_version + 2
 
     catalog_access.delete_by_ids("stellar_catalog", ["Star1"])
-    assert catalog_access.get_dataset_version("stellar_catalog") == 3
+    assert catalog_access.get_dataset_version("stellar_catalog") == starting_version + 3
 
-    # A different dataset's version is tracked independently, and a
-    # "target_record" write (a single target) counts toward the same
-    # version as a "target_catalog" write (the whole table).
-    catalog_access.put({}, "target_record", {})
+    # A different dataset is counted on its own.
+    assert catalog_access.get_dataset_version("target_catalog") == 0
+    catalog_access.put([], "target_catalog", {})
     assert catalog_access.get_dataset_version("target_catalog") == 1
-    assert catalog_access.get_dataset_version("stellar_catalog") == 3
+    assert catalog_access.get_dataset_version("stellar_catalog") == starting_version + 3
 
 
 def _build_catalog_access_with_stars(tmp_path: Path, stars) -> CatalogAccess:  # ruff: ignore[missing-type-function-argument]
@@ -590,3 +585,15 @@ def test_list_stars_in_region_can_keep_only_stars_in_a_magnitude_range(tmp_path:
 
     assert sorted(star.id for star in kept) == ["HighEdge", "LowEdge", "Middle"]
     assert len(everything) == 6
+
+
+def test_dataset_version_is_none_when_the_counters_cannot_be_read(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    """An unreadable database gives `None`, never 0; no answer is kept."""
+    catalog_access = _build_catalog_access_with_stars(tmp_path, [])
+    mocker.patch("astrometricslib._internal.drivers.catalog_access.read_data_versions", return_value=None)
+
+    assert catalog_access.get_dataset_version("stellar_catalog") is None
+    # A dataset with no counter at all differs from an unreadable file.
+    assert catalog_access.get_dataset_version("no_such_dataset") == 0

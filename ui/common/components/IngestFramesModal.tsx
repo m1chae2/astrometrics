@@ -9,6 +9,7 @@ import { TextInput } from './TextInput';
 import { Checkbox } from './Checkbox';
 import { BaseModal } from './BaseModal';
 import { SectionPanel } from './SectionPanel';
+import { Skeleton } from './Skeleton';
 import { IngestionState } from '../hooks/useIngestionManager';
 import '../styles/layout.css';
 import '../styles/ingestFramesModal.css';
@@ -82,6 +83,7 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
         status,
         jobId,
         progress,
+        jobTargetName,
         logs,
         scanningRemote,
         startIngestionJob,
@@ -126,22 +128,24 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
     // run reports once. An empty string stands for "no job id known".
     const completedRunRef = React.useRef<string | null>(null);
 
-    // Report completion once per run. This runs even while the dialog is
-    // closed (the component stays mounted), so the frame list still refreshes
-    // when the person closes the dialog before the job finishes.
+    // Close the dialog once per run, and report completion to `onIngestComplete`
+    // when a caller gave one. The app-wide `IngestionJobsContext` finishes the
+    // download itself (target record, lists), so this does not depend on the
+    // display being awake.
     useEffect(() => {
         if (status !== 'completed') {
             completedRunRef.current = null;
             return undefined;
         }
         const runKey = jobId ?? '';
-        if (completedRunRef.current === runKey || !onIngestCompleteRef.current) {
+        if (completedRunRef.current === runKey) {
             return undefined;
         }
-        completedRunRef.current = runKey;
         // Short pause so the person sees the "completed" status before the
-        // dialog closes.
+        // dialog closes. The run counts as reported only when the timer fires: if
+        // the display is paused first, the timer is cleared and starts again on resume.
         const timer = setTimeout(() => {
+            completedRunRef.current = runKey;
             onIngestCompleteRef.current?.(targetNameRef.current);
             // Close the modal after completion to allow further interaction
             onCloseRef.current();
@@ -225,7 +229,7 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
                 <div className="modal-column ingest-modal__column--file-selection">
                     <SectionPanel title="File Selection" className="panel--flex-grow">
                         {isLoadingStats ? (
-                            <div className="text-muted ingest-modal__text-padded">Loading files...</div>
+                            <Skeleton variant="list" lines={1} count={6} label="Loading files" />
                         ) : remoteFiles.length > 0 ? (
                             <div className="ingest-modal__file-selection-container">
                                 <div className="ingest-modal__file-selection-header">
@@ -314,7 +318,11 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
                                 <span className="status-label">Status: </span>
                                 <span className={`status-value ${status === 'running' ? 'text-warning' : 'text-success'}`}>{status || 'Idle'}</span>
                             </div>
-                            {progress && <div className="ingest-progress">{progress}</div>}
+                            {progress && (
+                                <div className="ingest-progress">
+                                    {jobTargetName ? `${jobTargetName}: ` : ''}{progress}
+                                </div>
+                            )}
                             <div className="logs modal-log-container">
                                 {logs.length === 0 ? (
                                     <div className="ingest-modal__logs-message">No logs available.</div>

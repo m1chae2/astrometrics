@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 
 /**
  * @fileoverview Tracks each top-level mode's "initial data loaded" signal so
@@ -26,6 +26,48 @@ const APP_MODE_NAMES = [
 
 const pendingModes = new Set<string>(APP_MODE_NAMES);
 let reported = false;
+/** Functions to call when a mode becomes ready, so `useIsModeReady` can update. */
+const readyListeners = new Set<() => void>();
+
+/** Lets React watch the ready flags. Returns the function that stops watching. */
+function subscribeToReadiness(listener: () => void): () => void {
+    readyListeners.add(listener);
+    return () => {
+        readyListeners.delete(listener);
+    };
+}
+
+/**
+ * Tells whether a mode has reported that its first data is loaded.
+ *
+ * @param mode The mode's name.
+ * @return True once the mode reported (or once the whole app is ready).
+ */
+export function isModeReady(mode: string): boolean {
+    return reported || !pendingModes.has(mode);
+}
+
+/**
+ * Tells whether every mode has reported that its first data is loaded, that is,
+ * whether start-up is over. Toasts and desktop notifications about changing
+ * status wait for this, so the first readings after launch are not shown as news.
+ *
+ * @return True once the whole app has reported ready.
+ */
+export function isAppReady(): boolean {
+    return reported;
+}
+
+/**
+ * Hook form of `isModeReady`: re-renders when the mode becomes ready.
+ * App.tsx uses it to keep a display awake until it has loaded once.
+ *
+ * @param mode The mode's name.
+ * @return True once the mode has reported ready.
+ */
+export function useIsModeReady(mode: string): boolean {
+    return useSyncExternalStore(subscribeToReadiness, () => isModeReady(mode));
+}
 
 /**
  * Called by a mode's top-level component once its initial/critical data has
@@ -36,7 +78,8 @@ let reported = false;
  */
 export function reportModeReady(mode: string): void {
     if (reported) return;
-    pendingModes.delete(mode);
+    const wasPending = pendingModes.delete(mode);
+    if (wasPending) readyListeners.forEach((listener) => listener());
     if (pendingModes.size === 0) {
         reported = true;
         window.astrometrics?.app?.reportAppFullyLoaded?.();

@@ -14,6 +14,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from backend import startup
+from backend.container import container
 from backend.services.infrastructure import session_auth
 
 router = APIRouter()
@@ -93,7 +94,9 @@ async def readiness() -> JSONResponse:
 
     This differs from the ``/`` route: the backend answers requests as soon
     as it is listening, but the first Planetarium load stays slow until the
-    star catalog is in memory.
+    star catalog is in memory. With a simulated observatory it also waits
+    until the simulated telescope is up (or has failed), so the app never
+    opens on a half-built world.
 
     Returns
     -------
@@ -101,7 +104,9 @@ async def readiness() -> JSONResponse:
         Status 200 with ``{"ready": true}`` once warm-up has finished,
         otherwise status 503 with ``{"ready": false}``.
     """
-    if startup.sky_catalog_warmup_finished.is_set():
+    source_service = container.observatory_source_service
+    source_settled = source_service is None or source_service.is_settled()
+    if startup.sky_catalog_warmup_finished.is_set() and source_settled:
         return JSONResponse(status_code=200, content={"ready": True})
     return JSONResponse(status_code=503, content={"ready": False})
 

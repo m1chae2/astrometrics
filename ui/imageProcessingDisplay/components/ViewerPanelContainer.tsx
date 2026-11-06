@@ -79,11 +79,11 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
               disabled={isLoadingOverlay}
               title={
                 isLoadingOverlay
-                  ? "Loading astrometry results..."
+                  ? "Getting astrometry results"
                   : (showAstrometryOverlay ? "Hide Astrometry Overlay" : "Show Astrometry Overlay")
               }
             >
-              {isLoadingOverlay ? "Loading..." : "Astrometry"}
+              {isLoadingOverlay ? "Getting stars" : "Astrometry"}
             </Button>
             {showAstrometryOverlay && overlayReason && !isLoadingOverlay && (
               <span

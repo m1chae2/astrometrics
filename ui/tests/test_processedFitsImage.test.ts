@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('../common/services/backendApi', () => ({
   callBackend: vi.fn(),
+  loadStaticMounts: async () => undefined,
   resolveImageSrc: (path: string) => `http://backend/static/frames${path}`,
   fetchImageFile: (url: string, signal?: AbortSignal) => fetch(url, { method: 'GET', signal }),
 }));

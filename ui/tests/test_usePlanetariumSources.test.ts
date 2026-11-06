@@ -132,7 +132,7 @@ describe('usePlanetariumSources', () => {
     });
     await flushPromises();
 
-    rerender({ radius: 4 });
+    rerender({ radius: 8 });
     await act(async () => {
       vi.advanceTimersByTime(LOCAL_CATALOG_QUERY_DEBOUNCE_MS);
     });
@@ -193,5 +193,89 @@ describe('usePlanetariumSources', () => {
     expect(result.current.sources.map(s => s.id)).toEqual(['initial']);
     expect(result.current.error).toBe('Request timed out for planetarium:get_sources');
     expect(result.current.loading).toBe(false);
+  });
+
+  it('sends no request when zooming in on sky the last request already covered', async () => {
+    mockedCallBackend.mockResolvedValue([star('wide')] as never);
+    const { result, rerender } = renderHook(({ radius }) => usePlanetariumSources(10, 10, radius, 12, true), {
+      initialProps: { radius: 20 },
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(LOCAL_CATALOG_QUERY_DEBOUNCE_MS);
+    });
+    await flushPromises();
+    expect(mockedCallBackend).toHaveBeenCalledTimes(1);
+    const sourcesBefore = result.current.sources;
+
+    rerender({ radius: 10 });
+    await act(async () => {
+      vi.advanceTimersByTime(LOCAL_CATALOG_QUERY_DEBOUNCE_MS * 4);
+    });
+    await flushPromises();
+
+    expect(mockedCallBackend).toHaveBeenCalledTimes(1);
+    expect(result.current.sources).toBe(sourcesBefore);
+    expect(result.current.loading).toBe(false);
+  });
+
+  it('requests again after zooming out, but only once the view has settled', async () => {
+    mockedCallBackend.mockResolvedValue([star('wide')] as never);
+    const { rerender } = renderHook(({ radius }) => usePlanetariumSources(10, 10, radius, 12, true), {
+      initialProps: { radius: 10 },
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(LOCAL_CATALOG_QUERY_DEBOUNCE_MS);
+    });
+    await flushPromises();
+
+    rerender({ radius: 20 });
+    expect(mockedCallBackend).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      vi.advanceTimersByTime(LOCAL_CATALOG_QUERY_DEBOUNCE_MS);
+    });
+    await flushPromises();
+
+    expect(mockedCallBackend).toHaveBeenCalledTimes(2);
+  });
+
+  it('requests again when the zoom-in needs a deeper magnitude limit', async () => {
+    mockedCallBackend.mockResolvedValue([star('a')] as never);
+    const { rerender } = renderHook(
+      ({ radius, magnitude }) => usePlanetariumSources(10, 10, radius, magnitude, true),
+      { initialProps: { radius: 20, magnitude: 8 } },
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(LOCAL_CATALOG_QUERY_DEBOUNCE_MS);
+    });
+    await flushPromises();
+
+    rerender({ radius: 10, magnitude: 9 });
+    await act(async () => {
+      vi.advanceTimersByTime(LOCAL_CATALOG_QUERY_DEBOUNCE_MS);
+    });
+    await flushPromises();
+
+    expect(mockedCallBackend).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the same array when a new request returns the same stars', async () => {
+    mockedCallBackend.mockImplementation((async () => [star('same')]) as never);
+    const { result, rerender } = renderHook(({ radius }) => usePlanetariumSources(10, 10, radius, 12, true), {
+      initialProps: { radius: 5 },
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(LOCAL_CATALOG_QUERY_DEBOUNCE_MS);
+    });
+    await flushPromises();
+    const sourcesBefore = result.current.sources;
+
+    rerender({ radius: 9 });
+    await act(async () => {
+      vi.advanceTimersByTime(LOCAL_CATALOG_QUERY_DEBOUNCE_MS);
+    });
+    await flushPromises();
+
+    expect(mockedCallBackend).toHaveBeenCalledTimes(2);
+    expect(result.current.sources).toBe(sourcesBefore);
   });
 });

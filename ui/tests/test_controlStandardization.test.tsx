@@ -15,8 +15,6 @@ import { ConsoleSidebar } from '../commandConsole/ConsoleSidebar';
 vi.mock('../common/components/plotting/BasePlot', () => ({ BasePlot: () => <div data-testid="plot" /> }));
 vi.mock('../common/services/backendApi', () => ({ callBackend: vi.fn().mockResolvedValue([]) }));
 
-// The target list measures its height with a ResizeObserver, which jsdom does not have.
-vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 
 const frame = (camera: string) => ({
     path: `/lib/${camera}.fits`, name: `${camera}.fits`, camera, iso: '', exposure: '60.0', filter: 'L', date: '2026-11-04',

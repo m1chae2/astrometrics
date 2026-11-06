@@ -153,6 +153,8 @@
   --icon-font-size: 18px;         /* the glyph in a square icon button */
   --success-green: #26a269;
   --warning-amber: #f6d32d;
+  --warning-orange: #ff9800;      /* caution, one step worse than amber */
+  --accent-sky: #4fc1ff;          /* light blue for sky-map overlays, links and selections */
   --danger-red: #e01b24;
 
   /* ------------------------------------------------------------------
@@ -178,6 +180,7 @@
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
+  --radius-xl: 12px;
   --radius-pill: 999px;
 
   /* Small text. Notes, footers and coordinates use 11px; table text and the
@@ -186,6 +189,11 @@
   --small-font-size: 11px;
   --tiny-font-size: 10px;   /* the smallest buttons */
   --compact-font-size: 13px;
+  --base-font-size: 16px;      /* body text */
+  --large-font-size: 18px;     /* section titles */
+  --heading-font-size: 22px;   /* dialog and page headings */
+  --title-font-size: 24px;     /* view titles */
+  --display-font-size: 28px;   /* the largest numbers and titles */
 
   /* Named translucent surfaces (white or black over the panel color). */
   --surface-subtle: rgba(255, 255, 255, 0.04);    /* card header at rest */
@@ -197,9 +205,20 @@
   --surface-overlay: rgba(0, 0, 0, 0.4);          /* image area, dimming layer */
   --shadow-card: 0 4px 6px rgba(0, 0, 0, 0.3);    /* panel and card shadow */
   --shadow-card-lifted: 0 8px 16px rgba(0, 0, 0, 0.5); /* a card being dragged */
-  --surface-floating: rgba(10, 14, 22, 0.95);     /* panel floating over the sky map */
+  --surface-floating: rgba(10, 14, 22, 0.95);     /* panel floating over the sky map (not for menus) */
+  --surface-menu: var(--grey-medium);             /* dropdown, popover and context menu: neutral grey, a step above the panels */
   --surface-control: rgba(255, 255, 255, 0.08);   /* button on a floating panel */
   --border-subtle: rgba(255, 255, 255, 0.08);     /* edge of a floating panel */
   --border-control: rgba(255, 255, 255, 0.12);    /* edge of an input on a floating panel */
   --focus-outline: 2px solid var(--accent-blue);  /* keyboard focus ring */
+
+  /* Loading placeholders (Skeleton) and the "updating" bar. White-based, so they read on any panel color. */
+  --skeleton-base: rgba(255, 255, 255, 0.045);     /* placeholder shape, resting shade */
+  --skeleton-lift: rgba(255, 255, 255, 0.085);     /* placeholder shape, lighter shade of the slow pulse */
+  --skeleton-pulse-duration: 1.8s;                 /* one fade from the resting to the lighter shade */
+  --skeleton-row-height: 16px;                     /* one table row or text line */
+  --skeleton-chart-height: 180px;                  /* plot area */
+  --updating-bar-height: 2px;                      /* thin bar at a panel's top edge */
+  --updating-bar-opacity: 0.55;                    /* understated accent segment of the bar */
+  --updating-bar-duration: 2.4s;                   /* one slow slide of the segment */
 }

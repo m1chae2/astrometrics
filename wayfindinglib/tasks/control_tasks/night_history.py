@@ -26,10 +26,10 @@ from typing import TYPE_CHECKING, Any
 
 from astrometricslib.exceptions import ConfigurationError, ConflictError, InvalidArgumentError, NotFoundError
 from wayfindinglib.analytics import capture_history
+from wayfindinglib.analytics.data_versions import review_data_version
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
 from wayfindinglib.models.session.night_list import NightListEntry
 from wayfindinglib.tasks.control_tasks import night_analysis
-from wayfindinglib.tasks.control_tasks.review_versions import review_data_version
 
 if TYPE_CHECKING:
     from wayfindinglib.api.control.context import ControlContext

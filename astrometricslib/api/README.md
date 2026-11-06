@@ -42,7 +42,7 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
 
 `TargetCatalog` creates, reads, saves and deletes targets.
 
-- `get` returns a `Target` for code to work with.
+- `get` returns a `Target` for code to work with. With `refresh=True` it first brings that one target up to date with storage (see `pipelines/shared/target_records.py`): nothing is read when the library write counter has not moved, one row is read when it has, and every target is read only when this catalog does not hold the target yet. `list` skips its read the same way. Unsaved edits to a held target are kept. A lock keeps threads from refreshing at the same time.
 - `query` returns short records for people and AI clients. `detail="cameras"` adds the cameras used. `detail="camera_index"` adds each target's frames per configured camera, built by `pipelines/shared/target_camera_index.py`.
 - `get_stars(target)` returns every star the library holds for a target, as full `StellarObject` records in id order. It is the short form of `stars.query(target_id=..., detail="objects", limit=None)`; use `stars.query` for a filter, an order or a smaller answer.
 - `get_header` returns a target's file header as text cards. `read_frame_header` reads the first header of any FITS file by path and returns it with typed values. It reads no pixels. The backend and wayfindinglib use it instead of opening FITS files themselves.
@@ -66,7 +66,7 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
   - A filter on "real catalog magnitude" keeps stars whose magnitude came from a published catalog. A zero, a missing value, or an instrumental magnitude (one measured by this library's photometry, on its own uncalibrated scale) does not count.
   - `order` sorts by id, by usefulness (stars with spectra first, then named stars, then stars with photometry, then brightest first), or by spectrum match (stars whose own spectrum best matches a reference spectrum first).
 - Single-frame detections are hidden unless `include_unresolved=True`. Photometry (brightness measurement) saves each point source it finds in one frame under an id ending in `:Star_<n>`. These are working records, not catalog stars, so a normal query leaves them out.
-- `dataset_version` counts the star catalog writes this process has made. A cache of a whole-catalog answer compares it to the number it saw last, to know whether to rebuild.
+- `dataset_version` counts the star catalog writes made by any program. The count is kept in the library database, so it also sees a write by a maintenance script and survives a restart. A cache of a whole-catalog answer compares it to the number it saw last, to know whether to rebuild. `astrometricslib.drivers.get_library_data_version` gives the counters of every kind of data (targets, quality, stars) for a cache that depends on more than the stars.
 - Every other method on `StellarCatalog` changes star records.
 
 ### `processing.py`

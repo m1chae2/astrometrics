@@ -16,11 +16,11 @@ from typing import Any
 import pytest
 
 from astrometricslib import AppConfiguration, FrameRecord
+from astrometricslib.drivers import VersionedCache
 from astrometricslib.exceptions import NotFoundError
 from wayfindinglib.analytics.result_quality.efficiency import STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC
 from wayfindinglib.analytics.result_quality.judge_results import needs_attention
 from wayfindinglib.analytics.result_quality.science_goal import science_goal_for_setting
-from wayfindinglib.analytics.review_cache import ReviewCache
 from wayfindinglib.analytics.test.night_quality_helpers import (
     FIRST_NIGHT,
     OTHER,
@@ -71,7 +71,7 @@ def _context(library: FakeLibrary, stored: dict[str, list[Any]] | None = None) -
     return SimpleNamespace(
         astrometrics=library,
         config=_CONFIG["config"],
-        review_cache=ReviewCache(),
+        review_cache=VersionedCache(),
         active_telescope=lambda: None,
         butler=SimpleNamespace(get_all=lambda kind: records.get(kind, []), get=lambda kind, key=None: None),
     )

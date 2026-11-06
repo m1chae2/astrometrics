@@ -43,6 +43,16 @@ export class ParsedFitsCache<Entry> {
   }
 
   /**
+   * Tells whether an entry is cached, without marking it as recently used.
+   *
+   * @param key - The image's URL or `Blob`.
+   * @returns True when the cache holds the key.
+   */
+  has(key: string | Blob): boolean {
+    return this.entries.has(key);
+  }
+
+  /**
    * Stores an entry as the most recently used, dropping the oldest ones if the cache is over its limit.
    *
    * @param key - The image's URL or `Blob`.

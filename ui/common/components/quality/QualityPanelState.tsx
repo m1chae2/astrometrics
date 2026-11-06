@@ -4,6 +4,7 @@
 
 import React from 'react';
 import { Button } from '../Button';
+import { Skeleton, SkeletonVariant } from '../Skeleton';
 
 export interface QualityPanelStateProps {
     /** Which state to show. */
@@ -14,6 +15,8 @@ export interface QualityPanelStateProps {
     onRetry?: () => void;
     /** The name of the thing that failed, such as "quality report". */
     subject?: string;
+    /** Shape of the loading placeholder. Default is key/value lines. */
+    loadingShape?: SkeletonVariant;
 }
 
 /**
@@ -26,12 +29,11 @@ export const QualityPanelState: React.FC<QualityPanelStateProps> = ({
     emptyMessage = 'No frames yet. Sync to fetch new frames.',
     onRetry,
     subject = 'quality report',
+    loadingShape = 'keyValue',
 }) => {
     if (state === 'loading') {
         return (
-            <div className="quality-state" aria-busy="true">
-                Loading…
-            </div>
+            <Skeleton variant={loadingShape} count={3} label={`Loading the ${subject}`} />
         );
     }
     if (state === 'noTarget') return <div className="quality-state">Choose a target</div>;

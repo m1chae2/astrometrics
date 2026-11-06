@@ -8,8 +8,7 @@ arguments, the answer comes back with the app's camelCase keys, and a repeat
 request is answered from memory until the database changes.
 """
 
-import os
-from collections import OrderedDict
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -17,7 +16,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from astrometricslib._internal.catalog import OverlayStar, StarQueryResult
+from astrometricslib.drivers import VersionedCache
 from astrometricslib.exceptions import InvalidArgumentError
+from astrometricslib.foundation.storage.data_versions import bump_data_version
 from backend.services.data.stellar_service import StellarService
 
 
@@ -85,7 +86,7 @@ def _service_with_counting_overlay(library_path: Path) -> tuple[StellarService, 
     """
     service = StellarService.__new__(StellarService)
     service.config = SimpleNamespace(get_library_path=lambda: library_path)
-    service._overlay_cache = OrderedDict()
+    service._overlay_cache = VersionedCache()
     service.astrometrics = SimpleNamespace(
         targets=SimpleNamespace(
             get=lambda target_id: SimpleNamespace(
@@ -113,7 +114,6 @@ def _service_with_counting_overlay(library_path: Path) -> tuple[StellarService, 
 def test_the_overlay_is_reused_until_the_database_changes(tmp_path: Path) -> None:
     """A repeat request is answered from memory until a write."""
     database = tmp_path / "astrometrics.db"
-    database.write_text("a")
     service, calls = _service_with_counting_overlay(tmp_path)
 
     first = service.get_astrometry_overlay_stars("M 51")["stars"]
@@ -124,14 +124,18 @@ def test_the_overlay_is_reused_until_the_database_changes(tmp_path: Path) -> Non
     second[0]["x"] = 99.0
     assert service.get_astrometry_overlay_stars("M 51")["stars"][0]["x"] == pytest.approx(1.0)
 
-    os.utime(database, ns=(1, 1))
+    # A write by any program counts itself in the database, and that
+    # makes the next request compute again.
+    connection = sqlite3.connect(database)
+    bump_data_version(connection, "stars")
+    connection.commit()
+    connection.close()
     service.get_astrometry_overlay_stars("M 51")
     assert calls == ["M 51|None", "M 51|None"]
 
 
 def test_the_image_path_is_part_of_the_cache_key(tmp_path: Path) -> None:
     """The same target with two different images is computed twice."""
-    (tmp_path / "astrometrics.db").write_text("a")
     first_image = tmp_path / "first.fits"
     second_image = tmp_path / "second.fits"
     first_image.write_text("x")

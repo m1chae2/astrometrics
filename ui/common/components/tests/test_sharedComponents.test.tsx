@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
 import userEvent from '@testing-library/user-event';
 import { Card } from '../Card';
 import { Tabs, TabPanel } from '../Tabs';
@@ -125,6 +126,21 @@ describe('Tabs', () => {
     it('keeps only the selected tab in the Tab key order', () => {
         render(<TabsHost />);
         expect(screen.getByRole('tab', { name: 'Notes' })).toHaveAttribute('tabindex', '-1');
+    });
+});
+
+describe('Shared control focus styles', () => {
+    /** A mouse click must not leave a focus ring: rings and focus tints belong to :focus-visible only. jsdom has no layout, so this reads the rules. */
+    it('draws focus rings and tints for keyboard focus only', () => {
+        const read = (name: string) => readFileSync(`ui/common/components/${name}`, 'utf8');
+        const tabs = read('sharedComponents.css');
+        expect(tabs).toMatch(/\.tabs__tab:focus:not\(:focus-visible\) \{\s*outline: none;/);
+        expect(tabs).toMatch(/\.tabs__tab:focus-visible \{\s*outline: var\(--focus-outline\)/);
+        expect(tabs).toMatch(/\.info-button__trigger:focus:not\(:focus-visible\)/);
+        const button = read('Button.css');
+        expect(button).not.toMatch(/\.btn:focus[ ,{]/);
+        expect(button).toMatch(/\.btn:focus-visible/);
+        expect(read('popoverSelect.css')).toMatch(/\.popover-select__button:focus:not\(:focus-visible\)/);
     });
 });
 

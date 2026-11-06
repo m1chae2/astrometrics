@@ -58,6 +58,7 @@ class Container:
         self.notification_service = None
         self.handoff_service = None
         self.settings_service = None
+        self.observatory_source_service = None
         self.equipment_service = None
         self.scripting_service = None
         self.ingestion_service = None
@@ -96,6 +97,27 @@ class Container:
             self.__init__()
             raise
 
+    def _running_work(self) -> list[str]:
+        """List the jobs, stacks and downloads that are running now.
+
+        Returns
+        -------
+        work : `list` [`str`]
+            One short text per kind of running work; empty when idle.
+        """
+        work = []
+        try:
+            jobs = self.job_service.get_active_jobs() if self.job_service is not None else []
+        except Exception:  # a failed look must not block the answer; report no jobs
+            logger.exception("Could not list the running jobs")
+            jobs = []
+        if jobs:
+            work.append(f"{len(jobs)} job(s) running (for example stacking)")
+        syncs = self.sync_service.get_all_active_syncs() if self.sync_service else []
+        if syncs:
+            work.append(f"{len(syncs)} frame download(s) running")
+        return work
+
     def shutdown_resources(self) -> None:
         """Stop the background threads and processes the container started.
 
@@ -107,6 +129,8 @@ class Container:
         Safe to call more than once, and safe on a container that was never
         initialized or only partly built.
         """
+        if self.observatory_source_service is not None:
+            self.observatory_source_service.stop()
         if self.maintenance_service is not None:
             self.maintenance_service.stop()
         if self.auto_download_service is not None:
@@ -118,6 +142,10 @@ class Container:
                 logger.exception("Could not stop the stacking programs at shutdown")
         if self.wayfinder is not None:
             self.wayfinder.control.close()
+        # Last: the databases of a simulator's library copy are deleted here,
+        # so nothing may still be writing to them.
+        if self.observatory_source_service is not None:
+            self.observatory_source_service.remove_library_copy()
         self.initialized = False
 
     def _build_resources(self) -> None:
@@ -127,11 +155,20 @@ class Container:
 
         self.config_service = get_configuration()
 
+        # The observatory source: with a simulator source this starts the
+        # stand-in INDI server, PHD2 and driver; with the real telescope it
+        # does nothing.
+        from backend.observatory_source import active_observatory
+        from backend.services.observatory.observatory_source_service import ObservatorySourceService
+
+        self.observatory_source_service = ObservatorySourceService(active_observatory())
+
         # 2. Initialize Data Services & Calibration
         from astrometricslib import Astrometrics
         from wayfindinglib import Wayfinder
 
         self.astrometrics = Astrometrics(self.config_service)
+        self.observatory_source_service.start(self.astrometrics)
         # The real INDI client runs in its own OS process, not here:
         # pyindi-client does not release the GIL during its blocking calls,
         # so running it in this process would freeze the whole backend
@@ -170,7 +207,9 @@ class Container:
         from backend.services.infrastructure.settings_service import SettingsService
 
         self.settings_service = SettingsService(
-            self.config_service, equipment=self.wayfinder.control.equipment
+            self.config_service,
+            equipment=self.wayfinder.control.equipment,
+            guard=self.observatory_source_service.check_settings_update,
         )
 
         # 4. Initialize Infrastructure Services
@@ -262,6 +301,12 @@ class Container:
 
         # The telescope status reports a running copy of new frames.
         self.telescope_service.set_frame_copy_sources(self.sync_service, self.job_service)
+
+        # A change of observatory source restarts the backend in place. It
+        # waits for running work, and stops every service first (see
+        # `shutdown_resources`).
+        self.observatory_source_service.set_busy_probe(self._running_work)
+        self.observatory_source_service.set_shutdown_hook(self.shutdown_resources)
 
         # Copy each finished camera frame into the library. Off in tests, which
         # have no observatory computer to copy from.

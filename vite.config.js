@@ -1,9 +1,7 @@
 /**
  * @fileoverview Vite configuration for building and serving the React application.
  *
- * Supports multi-page build: the main app (index.html) and the system tray
- * popover (tray_popover.html) are built as separate Rollup entry points while
- * sharing the same vendor chunk split.
+ * The build has one page, the main app (index.html), with a vendor chunk split.
  *
  * CSP injection is handled by the inline `injectCspPlugin`, which replaces the
  * <!-- csp --> placeholder (a plain HTML comment, so the raw files stay valid HTML) in every HTML file during both dev and build. No
@@ -26,7 +24,7 @@ export default defineConfig(({ mode }) => {
   /**
    * Inline Vite plugin that replaces the <!-- csp --> comment placeholder in any
    * HTML file with the resolved CSP meta tag. Applied to all HTML files so
-   * both index.html and tray_popover.html receive the tag.
+   * index.html receives the tag.
    */
   const injectCspPlugin = {
     name: 'inject-csp',
@@ -72,7 +70,6 @@ export default defineConfig(({ mode }) => {
       rolldownOptions: {
         input: {
           main: path.resolve(import.meta.dirname, 'ui/index.html'),
-          tray_popover: path.resolve(import.meta.dirname, 'ui/tray_popover.html'),
         },
         output: {
           codeSplitting: {

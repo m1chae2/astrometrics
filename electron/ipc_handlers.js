@@ -1,7 +1,7 @@
-import { ipcMain, dialog, Notification, autoUpdater, app, powerSaveBlocker, BrowserWindow } from 'electron';
+import { ipcMain, dialog, Notification, autoUpdater, app, powerSaveBlocker, powerMonitor, BrowserWindow } from 'electron';
 import path from 'path';
 import { getPlatform } from './platforms/index.js';
-import { emergencyPark } from './emergency_park.js';
+import { startPresenceTracker } from './presence.js';
 
 let powerSaveBlockerId = null;
 
@@ -11,7 +11,6 @@ let powerSaveBlockerId = null;
  * @param {Function} createSecondaryWindow - Function to create the secondary window.
  * @param {BackendManager} [backendManager] - Owner of the backend session token.
  * @param {Function} [onUpdateTray] - Callback to update the tray menu.
- * @param {Function} [getTrayPopoverWindow] - Getter returning the live tray popover BrowserWindow.
  * @param {Object} [windowCoordinator] - Window coordinator holding multi-window helpers and mode map.
  * @param {BasePlatform} [platform] - Host OS platform adapter.
  * @param {PythonTerminalManager} [pythonTerminalManager] - Supervised Python terminal manager.
@@ -21,7 +20,6 @@ export function registerIpcHandlers(
   createSecondaryWindow,
   backendManager,
   onUpdateTray,
-  getTrayPopoverWindow,
   windowCoordinator = {},
   platform = getPlatform(),
   pythonTerminalManager = null
@@ -281,6 +279,31 @@ export function registerIpcHandlers(
   const NOTIFICATION_COOLDOWN_MS = 3000;
   const NOTIFICATION_AUTO_CLOSE_MS = 5000;
 
+  // Presence: is the user looking at the app? Only notifications use it. The page asks for the
+  // answer and hears about changes. When the user comes back, the alerts sent while they were
+  // away are closed, because the in-app toasts are now in front of them.
+  const presenceTracker = startPresenceTracker({
+    window: mainWindow,
+    powerMonitor,
+    onChange: (state) => {
+      if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+        mainWindow.webContents.send('presence-changed', state);
+      }
+      if (state === 'present') {
+        for (const [tag, entry] of activeNotifications.entries()) {
+          try {
+            entry.notification.close();
+            if (entry.timer) clearTimeout(entry.timer);
+          } catch {
+            // The notification may already be closed.
+          }
+          activeNotifications.delete(tag);
+        }
+      }
+    },
+  });
+  ipcMain.handle('presence-get', () => presenceTracker.getState());
+
   ipcMain.on('show-notification', (_event, rawOptions) => {
     try {
       if (!Notification.isSupported()) return;
@@ -414,66 +437,6 @@ export function registerIpcHandlers(
       if (typeof windowCoordinator.onAppFullyLoaded === 'function') {
         windowCoordinator.onAppFullyLoaded();
       }
-    }
-  });
-
-  // Tray Popover Actions — routed from the TrayPopover React component
-  // Emergency Park intentionally keeps the popover open so the user can
-  // confirm mount state after triggering the park command.
-  ipcMain.on('tray-popover-action', async (_event, { action, payload }) => {
-    switch (action) {
-      case 'park': {
-        // Fire park request; the popover stays open for the user to confirm
-        const result = await emergencyPark();
-        if (!result.ok) {
-          console.error('[TrayPopover] Emergency park failed:', result.error);
-          new Notification({
-            title: 'Emergency park failed',
-            body: `The mount was not parked: ${result.error}. Park it manually.`,
-          }).show();
-        }
-        break;
-      }
-
-      case 'navigate': {
-        const mode = payload?.mode;
-        if (!mode) break;
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          if (mainWindow.isMinimized()) mainWindow.restore();
-          mainWindow.show();
-          mainWindow.focus();
-          mainWindow.webContents.send('navigate-mode', mode);
-        }
-        // Dismiss the popover after switching workspace
-        const popoverNav = typeof getTrayPopoverWindow === 'function' ? getTrayPopoverWindow() : null;
-        if (popoverNav && !popoverNav.isDestroyed()) popoverNav.hide();
-        break;
-      }
-
-      case 'open-app': {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          if (mainWindow.isMinimized()) mainWindow.restore();
-          mainWindow.show();
-          mainWindow.focus();
-        }
-        // Dismiss the popover after revealing the main window
-        const popoverOpen = typeof getTrayPopoverWindow === 'function' ? getTrayPopoverWindow() : null;
-        if (popoverOpen && !popoverOpen.isDestroyed()) popoverOpen.hide();
-        break;
-      }
-
-      case 'quit':
-        app.quit();
-        break;
-
-      case 'hide-popover': {
-        const popoverHide = typeof getTrayPopoverWindow === 'function' ? getTrayPopoverWindow() : null;
-        if (popoverHide && !popoverHide.isDestroyed()) popoverHide.hide();
-        break;
-      }
-
-      default:
-        console.warn('[TrayPopover] Unknown action received:', action);
     }
   });
 

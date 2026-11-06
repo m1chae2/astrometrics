@@ -1,30 +1,20 @@
 /**
  * @file test_trackingGuiding.test.tsx
- * @description Tests of the Guiding tab of the Telescope Control panel: Start Guiding sends the exposure and
- * gain that were typed, Stop Guiding calls the stop handler, bad numbers keep Start greyed, a
- * greyed panel sends nothing, and the Alignment tab has no exposure field. Also tests that the
- * guiding handlers show a toast when the backend call fails.
+ * @description Tests of the Alignment and Guiding sections of the Limits tab: the exposure and gain
+ * fields take typed values, a greyed panel greys them, there are no Start or Stop Guiding buttons,
+ * and the Alignment section has no exposure field.
  */
 import React, { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { renderHook, act, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TrackingSettings } from '../panels/TrackingSettings';
-
-const guiding = vi.hoisted(() => ({ startGuiding: vi.fn(), stopGuiding: vi.fn(), captureGuideFrame: vi.fn() }));
-vi.mock('../../common/services/telescope/guidingService', () => guiding);
-const toast = vi.hoisted(() => ({ emitToast: vi.fn() }));
-vi.mock('../../common/utils/emitToast', () => toast);
-
-import { useObservatoryControl } from '../hooks/useObservatoryControl';
 
 /** Holds the exposure and gain in state, as the Observatory Manager does. */
 const Harness: React.FC<{
     section?: 'alignment' | 'guiding';
-    onGuideStart: (exposure: number, gain: number) => void;
-    onGuideStop: () => void;
     disabled?: boolean;
-}> = ({ section = 'guiding', onGuideStart, onGuideStop, disabled = false }) => {
+}> = ({ section = 'guiding', disabled = false }) => {
     const [exposure, setExposure] = useState(1.0);
     const [gain, setGain] = useState(100);
     return (
@@ -34,8 +24,6 @@ const Harness: React.FC<{
             guidingGain={gain}
             onGuidingExposureChange={setExposure}
             onGuidingGainChange={setGain}
-            onGuideStart={onGuideStart}
-            onGuideStop={onGuideStop}
             disabled={disabled}
         />
     );
@@ -44,68 +32,33 @@ const Harness: React.FC<{
 describe('Telescope Control guiding controls', () => {
     beforeEach(() => vi.clearAllMocks());
 
-    it('sends the typed exposure and gain when Start Guiding is clicked', async () => {
-        const onGuideStart = vi.fn();
-        render(<Harness onGuideStart={onGuideStart} onGuideStop={vi.fn()} />);
-        const exposure = screen.getByLabelText('Guiding Exposure Seconds');
-        const gain = screen.getByLabelText('Guiding Gain');
+    it('takes the typed exposure and gain', async () => {
+        render(<Harness />);
+        const exposure = screen.getByLabelText('Guiding Exposure Seconds') as HTMLInputElement;
+        const gain = screen.getByLabelText('Guiding Gain') as HTMLInputElement;
         await userEvent.clear(exposure);
         await userEvent.type(exposure, '2.5');
         await userEvent.clear(gain);
         await userEvent.type(gain, '150');
-        await userEvent.click(screen.getByRole('button', { name: 'Start Guiding' }));
-        expect(onGuideStart).toHaveBeenCalledWith(2.5, 150);
+        expect(exposure.value).toBe('2.5');
+        expect(gain.value).toBe('150');
     });
 
-    it('calls the stop handler when Stop Guiding is clicked', async () => {
-        const onGuideStop = vi.fn();
-        render(<Harness onGuideStart={vi.fn()} onGuideStop={onGuideStop} />);
-        await userEvent.click(screen.getByRole('button', { name: 'Stop Guiding' }));
-        expect(onGuideStop).toHaveBeenCalledTimes(1);
+    it('has no Start Guiding or Stop Guiding button', () => {
+        render(<Harness />);
+        expect(screen.queryByRole('button', { name: 'Start Guiding' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Stop Guiding' })).not.toBeInTheDocument();
     });
 
-    it('keeps Start Guiding greyed while the exposure is empty', async () => {
-        const onGuideStart = vi.fn();
-        render(<Harness onGuideStart={onGuideStart} onGuideStop={vi.fn()} />);
-        await userEvent.clear(screen.getByLabelText('Guiding Exposure Seconds'));
-        const start = screen.getByRole('button', { name: 'Start Guiding' });
-        expect(start).toBeDisabled();
-        expect(screen.getByText(/Enter an exposure above 0/)).toBeInTheDocument();
-        await userEvent.click(start);
-        expect(onGuideStart).not.toHaveBeenCalled();
-    });
-
-    it('greys both buttons when commands are off', async () => {
-        render(<Harness onGuideStart={vi.fn()} onGuideStop={vi.fn()} disabled />);
-        expect(screen.getByRole('button', { name: 'Start Guiding' })).toBeDisabled();
-        expect(screen.getByRole('button', { name: 'Stop Guiding' })).toBeDisabled();
+    it('greys the fields when commands are off', () => {
+        render(<Harness disabled />);
+        expect(screen.getByLabelText('Guiding Exposure Seconds')).toBeDisabled();
+        expect(screen.getByLabelText('Guiding Gain')).toBeDisabled();
     });
 
     it('has no alignment exposure field, because alignment start takes only the target', () => {
-        render(<Harness section="alignment" onGuideStart={vi.fn()} onGuideStop={vi.fn()} />);
+        render(<Harness section="alignment" />);
         expect(screen.queryByLabelText('Alignment Exposure Seconds')).not.toBeInTheDocument();
         expect(screen.getByLabelText('Alignment Accuracy')).toBeInTheDocument();
-    });
-});
-
-describe('guiding handlers', () => {
-    beforeEach(() => vi.clearAllMocks());
-
-    it('pass the exposure and gain to the backend call', async () => {
-        guiding.startGuiding.mockResolvedValue(true);
-        const { result } = renderHook(() => useObservatoryControl(() => undefined));
-        await act(async () => { await result.current.handlers.onGuideStart(2.5, 150); });
-        expect(guiding.startGuiding).toHaveBeenCalledWith(2.5, 150);
-        expect(toast.emitToast).not.toHaveBeenCalledWith(expect.any(String), 'error');
-    });
-
-    it('show an error toast when guiding does not start or stop', async () => {
-        guiding.startGuiding.mockResolvedValue(false);
-        guiding.stopGuiding.mockResolvedValue(false);
-        const { result } = renderHook(() => useObservatoryControl(() => undefined));
-        await act(async () => { await result.current.handlers.onGuideStart(1, 100); });
-        expect(toast.emitToast).toHaveBeenCalledWith(expect.stringContaining('did not start'), 'error');
-        await act(async () => { await result.current.handlers.onGuideStop(); });
-        expect(toast.emitToast).toHaveBeenCalledWith(expect.stringContaining('did not stop'), 'error');
     });
 });

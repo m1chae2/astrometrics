@@ -14,13 +14,17 @@ import logging
 import os
 import threading
 import time
-from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeVar
 
 from astrometricslib import Astrometrics, StellarObject
-from astrometricslib.drivers import is_path_inside, resolve_mounted_path
+from astrometricslib.drivers import (
+    VersionedCache,
+    get_library_data_version,
+    is_path_inside,
+    resolve_mounted_path,
+)
 from astrometricslib.exceptions import AstrometricsError, ConflictError, InvalidArgumentError
 from backend.services.data.deletion_archive import archive_record_before_delete
 from backend.services.infrastructure.heavy_read_limiter import DEFAULT_SHARED_WAIT_SECONDS, HeavyReadLimiter
@@ -44,10 +48,10 @@ _MAXIMUM_CONCURRENT_PERIOD_SEARCHES = 2
 # The whole-catalog answers (per-target counts, class counts, a class's
 # stars) each read every star's summary, which takes seconds on a large
 # library. They are kept until `StellarCatalog.dataset_version`
-# says a write has happened, not on a timer. This is only the fallback: how
-# long an answer may be served for a version already confirmed current, in
-# case a program outside this process (such as a maintenance script) wrote
-# to the library without the version counter seeing it.
+# says a write has happened, not on a timer. The counter lives in the
+# database, so it sees a write by another program too. This is only the
+# fallback: how long an answer may be served for a version already confirmed
+# current, in case a write was made by raw SQL that did not count itself.
 _CATALOG_ANSWER_CACHE_FALLBACK_MAX_AGE_SECONDS = 300.0
 
 # How many overlay answers are remembered (see
@@ -99,7 +103,7 @@ class StellarService:
             The planning library. Built on first use when omitted.
         """
         self.config = config
-        self._overlay_cache: OrderedDict[tuple, tuple[list[dict], str | None]] = OrderedDict()
+        self._overlay_cache = VersionedCache(maximum_entries=_OVERLAY_CACHE_SIZE)
         self.astrometrics = astrometrics or Astrometrics(config)
         self._wayfinder = wayfinder
         self._period_search_slots = threading.BoundedSemaphore(_MAXIMUM_CONCURRENT_PERIOD_SEARCHES)
@@ -246,25 +250,6 @@ class StellarService:
             or []
         )
 
-    def _catalog_version(self) -> tuple[int, ...]:
-        """Say whether the star database may have changed since last asked.
-
-        Returns
-        -------
-        version : `tuple` [`int`, ...]
-            The modification times of the database file and its write-ahead
-            log. Any write to the library changes it, whichever code made
-            the write.
-        """
-        library = Path(self.config.get_library_path())
-        times = []
-        for name in ("astrometrics.db", "astrometrics.db-wal"):
-            try:
-                times.append((library / name).stat().st_mtime_ns)
-            except OSError:
-                times.append(0)
-        return tuple(times)
-
     def _allowed_image_roots(self) -> list[str]:
         """List the folders an overlay image may be in.
 
@@ -308,8 +293,9 @@ class StellarService:
 
         Working out the overlay for a target with tens of thousands of
         stars takes seconds. The answer only changes when the library
-        database or the image changes, so it is kept (the 64 most recent)
-        and reused until one of them does.
+        data (see `astrometricslib.drivers.get_library_data_version`) or the
+        image changes, so it is kept in a `VersionedCache` (the 64 most
+        recent) and reused until one of them does.
 
         Parameters
         ----------
@@ -339,20 +325,18 @@ class StellarService:
             target = self.astrometrics.targets.get(target_id)
             reference_path = checked_path or _overlay_reference_image_path(target)
             image_time = Path(reference_path).stat().st_mtime_ns if reference_path else 0
-            key = (target_id, limit, str(reference_path), image_time, self._catalog_version())
+            key = (target_id, limit, str(reference_path), image_time)
         except AstrometricsError, OSError:
             return self._compute_overlay(target_id, limit, checked_path)
 
-        cache = self._overlay_cache
-        if key in cache:
-            cache.move_to_end(key)
-            stars, reason = cache[key]
-            return {"stars": [dict(star) for star in stars], "reason": reason}
-        result = self._compute_overlay(target_id, limit, checked_path)
-        cache[key] = ([dict(star) for star in result["stars"]], result["reason"])
-        while len(cache) > _OVERLAY_CACHE_SIZE:
-            cache.popitem(last=False)
-        return result
+        # The version is the library's write counters, which see a write by
+        # any program, so the answer is rebuilt after any change to the stars,
+        # the targets or the quality rows.
+        return self._overlay_cache.get_or_build(
+            key,
+            lambda: get_library_data_version(self.config),
+            lambda: self._compute_overlay(target_id, limit, checked_path),
+        )
 
     def _compute_overlay(self, target_id: str, limit: int, image_path: str | None = None) -> dict[str, Any]:
         """Ask the library to place a target's stars on an image.

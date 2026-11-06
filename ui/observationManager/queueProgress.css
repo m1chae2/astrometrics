@@ -157,11 +157,6 @@
     gap: var(--space-1) var(--space-2);
 }
 
-.execution-queue-strip .imaging-card .card-progress .status-chip {
-    flex: 0 0 auto;
-    white-space: nowrap;
-}
-
 .execution-queue-strip .imaging-card .card-progress .progress-bar {
     flex: 1 1 0;
     min-width: 0;

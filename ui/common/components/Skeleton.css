@@ -1,0 +1,167 @@
+/* Skeleton: grey placeholder shapes shown while a panel has no data yet. */
+.skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    width: 100%;
+    box-sizing: border-box;
+    padding: var(--space-2) 0;
+}
+
+.skeleton__bar {
+    display: block;
+    height: var(--skeleton-row-height);
+    border-radius: var(--radius-sm);
+    background-color: var(--skeleton-base);
+    animation: skeleton-pulse var(--skeleton-pulse-duration) ease-in-out infinite alternate;
+}
+
+.skeleton__row {
+    display: flex;
+    gap: var(--space-3);
+    align-items: center;
+}
+
+.skeleton__row > .skeleton__bar {
+    flex: 1;
+}
+
+.skeleton__item {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-1) 0;
+}
+
+.skeleton__pair {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-4);
+}
+
+.skeleton__pair > .skeleton__bar:first-child {
+    flex: 0 0 35%;
+}
+
+.skeleton__pair > .skeleton__bar:last-child {
+    flex: 0 0 25%;
+}
+
+.skeleton__bar--wide {
+    width: 80%;
+}
+
+.skeleton__bar--narrow {
+    width: 45%;
+    height: calc(var(--skeleton-row-height) * 0.75);
+}
+
+.skeleton__bar--header {
+    opacity: 0.6;
+}
+
+.skeleton__bar--chart {
+    height: var(--skeleton-chart-height);
+}
+
+.skeleton__bar--axis {
+    height: calc(var(--skeleton-row-height) * 0.6);
+    width: 100%;
+    opacity: 0.6;
+}
+
+/* Picture or canvas area: nothing but the thin moving bar along the top edge. */
+.skeleton--block {
+    position: relative;
+    flex: 1;
+    align-self: stretch;
+    min-height: 0;
+    padding: 0;
+}
+
+.skeleton__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
+
+@keyframes skeleton-pulse {
+    from {
+        background-color: var(--skeleton-base);
+    }
+
+    to {
+        background-color: var(--skeleton-lift);
+    }
+}
+
+/* Reduced motion: no pulse, just a static grey. */
+@media (prefers-reduced-motion: reduce) {
+    .skeleton__bar {
+        animation: none;
+    }
+}
+
+/* PanelBody and the updating bar --------------------------------------- */
+.panel-body {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+}
+
+.updating-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--updating-bar-height);
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.updating-bar::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 25%;
+    background-color: var(--accent-blue);
+    opacity: var(--updating-bar-opacity);
+    animation: updating-bar-sweep var(--updating-bar-duration) ease-in-out infinite;
+}
+
+/* A busy bar under a status line, in the normal flow. */
+.updating-bar--inline {
+    position: relative;
+    margin: var(--space-1) 0;
+    border-radius: var(--radius-sm);
+}
+
+@keyframes updating-bar-sweep {
+    from {
+        left: -25%;
+    }
+
+    to {
+        left: 100%;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .updating-bar::after {
+        animation: none;
+        left: 0;
+        width: 100%;
+        opacity: 0.3;
+    }
+}

@@ -21,8 +21,7 @@ import { useEquipmentConfiguration } from '../common/hooks/useEquipmentConfigura
 import { CommandGate, WhyUnavailableButton } from './CommandGate';
 import { IngestFramesModal } from '../common/components/IngestFramesModal';
 import { useIngestionManager } from '../common/hooks/useIngestionManager';
-import { createTarget, fetchTargetObject } from '../common/services/targetService';
-import { emit as emitEvent } from '../common/utils/eventBus';
+import { OBSERVATORY_INGESTION_CHANNEL } from '../common/context/IngestionJobsContext';
 import { SessionPicker } from '../common/components/SessionPicker';
 import { callBackend } from '../common/services/backendApi';
 import { qualityQueryKeys } from '../common/queries/qualityQueryKeys';
@@ -131,31 +130,12 @@ export const ObservatoryManager: React.FC = () => {
 
     // The "Download Frames" window copies frames from the telescope to the library.
     // It starts on the target the user has picked in the list.
-    const ingestion = useIngestionManager(selectedTarget);
+    const ingestion = useIngestionManager(selectedTarget, OBSERVATORY_INGESTION_CHANNEL);
     const { openIngestModal, closeIngestModal, isIngestModalOpen, isActive: isDownloading } = ingestion;
 
-    /**
-     * Runs when a download finishes. Makes sure the target has a record,
-     * then refreshes the lists and selects the target.
-     *
-     * @param targetName The target whose frames were just downloaded.
-     */
-    const handleIngestComplete = React.useCallback(async (targetName: string) => {
-        try {
-            const existing = await fetchTargetObject(targetName);
-            if (!existing) await createTarget(targetName);
-        } catch {
-            try {
-                await createTarget(targetName);
-            } catch (error) {
-                emitEvent('terminal:log', `[Ingest] Failed to ensure target exists: ${error}`);
-            }
-        }
-        forceReload();
-        emitEvent('targetsUpdated');
-        setSelectedTarget(targetName);
-        setPendingTarget(targetName);
-    }, [forceReload, setSelectedTarget, setPendingTarget]);
+    // The download keeps running and finishes in `IngestionJobsContext` (which
+    // is always running), so nothing here has to stay awake while this display
+    // is hidden: it only shows the state.
 
     const downloadFramesTitle = isDownloading
         ? 'Frames are being downloaded from the telescope.'
@@ -206,6 +186,7 @@ export const ObservatoryManager: React.FC = () => {
                         options={nightPicker.options}
                         selectedId={nightPicker.selectedId}
                         onSelect={nightPicker.select}
+                        fill
                     />
                     {/* A status region that is always present, so a screen reader announces the text when it appears. */}
                     <div role="status" className="observatory-night-banner" data-testid="night-banner">
@@ -222,6 +203,7 @@ export const ObservatoryManager: React.FC = () => {
                     ariaLabel="Targets views"
                     idPrefix={TARGET_PANEL_TABS_ID_PREFIX}
                     size="compact"
+                    className="observatory-targets-tabs"
                 />
                 <TabPanel idPrefix={TARGET_PANEL_TABS_ID_PREFIX} tabId="list" selected={targetsTab === 'list'}>
                     {isLive && (
@@ -243,7 +225,7 @@ export const ObservatoryManager: React.FC = () => {
                         pendingId={pendingTarget}
                         onSelect={setPendingTarget}
                         isLoading={isLoading}
-                        loadingMessage="Loading targets…"
+                        loadingMessage="Loading targets"
                         emptyMessage={isLive ? 'No targets in the catalog.' : `No targets were imaged on the night of ${nightDate}.`}
                     />
                 </TabPanel>
@@ -252,7 +234,11 @@ export const ObservatoryManager: React.FC = () => {
                 </TabPanel>
             </SectionPanel>
 
-            <SectionPanel title="Controls" className="flex-auto manager__actions-panel">
+            <SectionPanel
+                title="Controls"
+                className="flex-auto manager__actions-panel"
+                headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}
+            >
                 <div className="manager__actions">
                     <ListActions>
                         <Button
@@ -282,7 +268,6 @@ export const ObservatoryManager: React.FC = () => {
                                 Slew to Target
                             </Button>
                         </CommandGate>
-                        <WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />
                     </ListActions>
                 </div>
             </SectionPanel>
@@ -305,8 +290,6 @@ export const ObservatoryManager: React.FC = () => {
             guidingGain={guidingGain}
             onGuidingExposureChange={setGuidingExposure}
             onGuidingGainChange={setGuidingGain}
-            onGuideStart={handlers.onGuideStart}
-            onGuideStop={handlers.onGuideStop}
             alignmentAttempts={telemetry.alignmentAttempts || []}
             onStartAlignment={() => handlers.onStartAlignment(raShared, decShared)}
             onStopAlignment={handlers.onStopAlignment}
@@ -335,7 +318,6 @@ export const ObservatoryManager: React.FC = () => {
                 isOpen={isIngestModalOpen}
                 onClose={closeIngestModal}
                 ingestionState={ingestion}
-                onIngestComplete={handleIngestComplete}
             />
             <GenericDisplayLayout
                 className="observatory-display-container"

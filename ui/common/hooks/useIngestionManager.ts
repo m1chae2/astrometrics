@@ -1,21 +1,19 @@
 /**
  * @file useIngestionManager.ts
  * @description Hook for managing the ingestion of images from telescope or remote folders.
- * Orchestrates job creation, status polling, and log management.
+ * Holds the form state and starts jobs. The running job itself (status
+ * polling, logs and the finish step) lives in `IngestionJobsContext`, which is
+ * always running, so a download keeps going and finishes while the display
+ * that started it is hidden.
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
     startIngestion,
-    fetchIngestStatus,
-    scanRemoteTargets,
     fetchRemoteFolderStats,
     fetchRemoteFiles,
-    IngestStatusResponse
 } from '../services/imaging/ingestionService';
 import { useRemoteStatusContext } from '../context/RemoteStatusContext';
-import { IngestionJobStatus } from '../services/ingestionService';
-import { ProcessingJob } from '../types/backendTypes';
-import { emit as emitEvent } from '../utils/eventBus';
+import { IDLE_INGESTION_JOB, OBSERVATORY_INGESTION_CHANNEL, useIngestionJobs } from '../context/IngestionJobsContext';
 
 export interface IngestionState {
     targetName: string;
@@ -32,6 +30,8 @@ export interface IngestionState {
     setSelectedFiles: (files: Set<string>) => void;
     isLoadingStats: boolean;
     jobId: string | null;
+    /** The target the running (or last) download is for. It can differ from the form's target. */
+    jobTargetName?: string;
     status: string;
     progress: string;
     logs: string[];
@@ -49,9 +49,17 @@ export interface IngestionState {
 
 /**
  * Hook to manage ingestion state and operations for a target.
- * Handles form state, job status polling, and log persistence.
+ * Handles the form state and starting a job. The job's status, progress and
+ * logs come from `IngestionJobsContext`, which keeps following the job while
+ * this display is hidden.
+ *
+ * @param initialTargetName The target the form starts on (it resets when this changes).
+ * @param channel The name of the download this form owns (see `IngestionJobsContext`).
  */
-export const useIngestionManager = (initialTargetName: string = ''): IngestionState => {
+export const useIngestionManager = (
+    initialTargetName: string = '',
+    channel: string = OBSERVATORY_INGESTION_CHANNEL
+): IngestionState => {
     // Form State
     const [targetName, setTargetName] = useState(initialTargetName);
     const [telescope, setTelescope] = useState('Apertura 75Q');
@@ -65,21 +73,29 @@ export const useIngestionManager = (initialTargetName: string = ''): IngestionSt
     // Modal State
     const [isIngestModalOpen, setIsIngestModalOpen] = useState(false);
 
-    // Process State
-    const [jobId, setJobId] = useState<string | null>(null);
-    const [status, setStatus] = useState<string>('idle');
-    const [progress, setProgress] = useState<string>('');
-    const [logs, setLogs] = useState<string[]>([]);
+    // Process State (kept by the app-wide provider)
+    const { jobs, trackJob, resetJob, appendLog } = useIngestionJobs();
+    const { jobId, status, progress, logs, targetName: jobTargetName } = jobs[channel] ?? IDLE_INGESTION_JOB;
     const [scanningRemote, setScanningRemote] = useState(false);
+
+    // A download that is still running is never dropped, so the provider can
+    // finish it even if the user picks another target meanwhile.
+    const isJobActive = status === 'running' || status === 'queued';
+    const isJobActiveRef = useRef(isJobActive);
+    useEffect(() => {
+        isJobActiveRef.current = isJobActive;
+    });
+    // The last target the form was reset for. A paused display runs its effects
+    // again when it is shown; that must not reset a download that is on screen.
+    const lastResetTargetRef = useRef<string | null>(null);
 
     // Reset state when target changes to prevent stale completion triggers and stale logs
     useEffect(() => {
         if (initialTargetName) {
+            if (lastResetTargetRef.current === initialTargetName) return;
+            lastResetTargetRef.current = initialTargetName;
             setTargetName(initialTargetName);
-            setStatus('idle');
-            setJobId(null);
-            setProgress('');
-            setLogs([]);
+            if (!isJobActiveRef.current) resetJob(channel);
             setFileCount(null);
             setRemoteFolder('');
             setRemoteFiles([]);
@@ -90,13 +106,12 @@ export const useIngestionManager = (initialTargetName: string = ''): IngestionSt
                 fetchJobs(initialTargetName, 'ingestion').then(jobs => {
                     const activeJob = jobs.find(j => j.status === 'started');
                     if (activeJob) {
-                        setJobId(activeJob.id);
-                        setStatus('running');
+                        trackJob(channel, activeJob.id, initialTargetName);
                     }
                 });
             });
         }
-    }, [initialTargetName]);
+    }, [initialTargetName, channel, resetJob, trackJob]);
 
 
     /**
@@ -161,45 +176,21 @@ export const useIngestionManager = (initialTargetName: string = ''): IngestionSt
      */
     const startIngestionJob = async () => {
         if (!targetName) {
-            setLogs(prev => [...prev, "Target Name is required."]);
+            appendLog(channel, "Target Name is required.");
             return;
         }
 
         try {
             const source = remoteFolder || targetName;
             const result = await startIngestion('remote', source, targetName, telescope, Array.from(selectedFiles));
-            setJobId(result.jobId);
-            setStatus('running');
-            setLogs([]);
+            trackJob(channel, result.jobId, targetName);
         } catch (e) {
-            setLogs(prev => [...prev, `Failed to start: ${e}`]);
+            appendLog(channel, `Failed to start: ${e}`);
         }
     };
 
-    // Poll status
-    useEffect(() => {
-        if (!jobId || status === 'completed' || status === 'failed') return;
-
-        const interval = setInterval(async () => {
-            try {
-                const statusResponse = await fetchIngestStatus(jobId);
-                if (statusResponse) {
-                    setStatus(statusResponse.status);
-                    setProgress(statusResponse.progress);
-                    setLogs(statusResponse.logs || []);
-                }
-            } catch (e) {
-                console.error("Polling failed", e);
-            }
-        }, 1000);
-        return () => clearInterval(interval);
-    }, [jobId, status]);
-
     const resetState = () => {
-        setJobId(null);
-        setStatus('idle');
-        setLogs([]);
-        setProgress('');
+        resetJob(channel);
         setFileCount(null);
         setRemoteFiles([]);
         setSelectedFiles(new Set());
@@ -220,7 +211,7 @@ export const useIngestionManager = (initialTargetName: string = ''): IngestionSt
         selectedFiles,
         setSelectedFiles,
         isLoadingStats,
-        jobId, status, progress, logs,
+        jobId, jobTargetName, status, progress, logs,
         scanningRemote,
         isIngestModalOpen,
         setIsIngestModalOpen,

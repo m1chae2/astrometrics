@@ -29,16 +29,13 @@ import { PopoverSelect } from '../../common/components/PopoverSelect';
 import { Tabs } from '../../common/components/Tabs';
 import { QualityPanelState } from '../../common/components/quality/QualityPanelState';
 import { useIngestionManager } from '../../common/hooks/useIngestionManager';
+import { CALIBRATION_INGESTION_CHANNEL } from '../../common/context/IngestionJobsContext';
 import { callBackend } from '../../common/services/backendApi';
 import { socketClient } from '../../common/utils/socketClient';
+import type { CaptureSetting } from '../../common/types/backendTypes';
 import { useObservatoryNight } from '../ObservatoryNightContext';
 import { HealthChip, HealthDetail, healthByRowKey } from './calibrationHealth';
-import {
-    clearCalibrationRowRequest,
-    getCalibrationRowRequest,
-    subscribeToCalibrationRows,
-    type ShowCalibrationRowPayload,
-} from './calibrationRowRequestStore';
+import { consumeHandoff, usePendingHandoff } from '../../common/utils/displayHandoffStore';
 import '../../common/components/quality/quality.css';
 import '../observatoryManager.css';
 import { Button } from '../../common/components/Button';
@@ -84,6 +81,16 @@ export function formatExposure(seconds: number | null | undefined): string {
     return `${Number((seconds * 1000).toPrecision(3))} ms`;
 }
 
+/** What the `showCalibrationRow` hand-off carries (see `useStatementActions`). */
+interface ShowCalibrationRowPayload {
+    /** The frame type the statement's proposed action names, or null. */
+    calibrationKey: string | null;
+    /** The capture setting the statement is about, or null. */
+    captureSetting: CaptureSetting | null;
+    /** The rule that produced the statement. */
+    rule: string;
+}
+
 /**
  * Shows the calibration library as one table and answers "Show in calibration library".
  * @return The panel.
@@ -98,8 +105,11 @@ export const CalibrationLibraryPanel: React.FC = () => {
     const [activeKind, setActiveKind] = useState<CalibrationKind>('dark');
     const [expandedKey, setExpandedKey] = useState<string | null>(null);
     const rowElements = useRef<Map<string, HTMLTableRowElement>>(new Map());
-    const ingestionState = useIngestionManager('Calibration');
+    const ingestionState = useIngestionManager('Calibration', CALIBRATION_INGESTION_CHANNEL);
     const queryClient = useQueryClient();
+    // True while a read that the user (or an event such as a finished download) asked for runs.
+    // The 10 second poll is not one of these, so its quiet reads draw no moving bar.
+    const [requestedRefresh, setRequestedRefresh] = useState(false);
 
     const query = useQuery({
         queryKey: ['calibrationLibrary'],
@@ -134,11 +144,19 @@ export const CalibrationLibraryPanel: React.FC = () => {
 
     // The backend measures new dark and bias frames after an ingest or a sync;
     // when that ends, read the health (and the counts) again.
+    // A display paused while hidden hears no events, so the same reads also run
+    // each time this effect starts again after a pause.
+    const hasListenedRef = useRef(false);
     useEffect(() => {
-        const onAction = (action: string) => {
-            if (action !== 'calibration:measured') return;
+        const refreshCalibration = () => {
             void queryClient.invalidateQueries({ queryKey: ['calibrationHealth'] });
             void queryClient.invalidateQueries({ queryKey: ['calibrationLibrary'] });
+        };
+        if (hasListenedRef.current) refreshCalibration();
+        hasListenedRef.current = true;
+        const onAction = (action: string) => {
+            if (action !== 'calibration:measured') return;
+            refreshCalibration();
         };
         socketClient.on('action', onAction);
         return () => {
@@ -195,30 +213,19 @@ export const CalibrationLibraryPanel: React.FC = () => {
         if (first && typeof first.scrollIntoView === 'function') first.scrollIntoView({ block: 'center' });
     }, [highlightedKeys, selectedCamera]);
 
-    // Handle a request that arrived before this panel mounted or before the rows loaded.
+    // Handle a request that arrived while this panel was hidden, paused or not
+    // yet mounted, or before the rows loaded. The hand-off store keeps it.
+    const waitingRow = usePendingHandoff<ShowCalibrationRowPayload>('Observatory Manager', 'showCalibrationRow');
     useEffect(() => {
-        if (!query.isSuccess) return;
-        const waiting = getCalibrationRowRequest();
-        if (waiting) {
-            void showRequest(waiting);
-            clearCalibrationRowRequest();
-        }
-        return subscribeToCalibrationRows((request) => {
-            if (!request) return;
-            void showRequest(request);
-            clearCalibrationRowRequest();
-        });
-    }, [query.isSuccess, showRequest]);
-
-    const handleIngestComplete = () => {
-        setIsIngestModalOpen(false);
-        void query.refetch();
-        void queryClient.invalidateQueries({ queryKey: ['calibrationHealth'] });
-    };
+        if (!query.isSuccess || !waitingRow) return;
+        consumeHandoff(waitingRow);
+        if (waitingRow.payload) void showRequest(waitingRow.payload);
+    }, [query.isSuccess, waitingRow, showRequest]);
 
     /** Reads the counts and the health again. */
     const refreshAll = () => {
-        void query.refetch();
+        setRequestedRefresh(true);
+        void query.refetch().finally(() => setRequestedRefresh(false));
         void queryClient.invalidateQueries({ queryKey: ['calibrationHealth'] });
     };
 
@@ -261,7 +268,7 @@ export const CalibrationLibraryPanel: React.FC = () => {
 
     let body: React.ReactNode;
     if (query.isPending) {
-        body = <QualityPanelState state="loading" />;
+        body = <QualityPanelState state="loading" loadingShape="rows" subject="calibration library" />;
     } else if (query.isError) {
         body = <QualityPanelState state="error" subject="calibration library" onRetry={() => void query.refetch()} />;
     } else if (cameras.length === 0) {
@@ -350,6 +357,7 @@ export const CalibrationLibraryPanel: React.FC = () => {
     return (
         <SectionPanel
             title="Calibration Library"
+            refreshing={(requestedRefresh || healthQuery.isFetching) && !query.isPending}
             className="calibration-panel"
             id="calibrationLibrary"
             headerContent={
@@ -375,11 +383,13 @@ export const CalibrationLibraryPanel: React.FC = () => {
                             onSelect={(id) => setChosenCamera(id ?? '')}
                             disabled={cameras.length === 0}
                             placeholder="No cameras"
+                            fill
                         />
                     </div>
                     <Button
                         variant="primary"
                         size="square"
+                        fit
                         onClick={refreshAll}
                         aria-label="Refresh calibration library"
                         title="Refresh calibration library"
@@ -411,7 +421,7 @@ export const CalibrationLibraryPanel: React.FC = () => {
             {noMatchMessage && (
                 <div className="calibration-no-match" role="alert">
                     <span>{noMatchMessage}</span>
-                    <Button size="small" onClick={() => setNoMatchMessage(null)}>
+                    <Button size="small" fit onClick={() => setNoMatchMessage(null)}>
                         Dismiss
                     </Button>
                 </div>
@@ -420,7 +430,6 @@ export const CalibrationLibraryPanel: React.FC = () => {
             <IngestFramesModal
                 isOpen={isIngestModalOpen}
                 onClose={() => setIsIngestModalOpen(false)}
-                onIngestComplete={handleIngestComplete}
                 ingestionState={ingestionState}
             />
         </SectionPanel>

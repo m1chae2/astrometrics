@@ -232,3 +232,6 @@ library/targets/TEST_TARGET.json
 .import_linter_cache/
 
 .venv-win/
+
+# Technical performance measure runs (build/tpm/run_tpm.sh)
+build/tpm/results/

@@ -22,6 +22,8 @@ export interface SessionPickerProps {
     onSelect: (id: string | null) => void;
     /** The text of the live choice. Defaults to "Live". */
     liveLabel?: string;
+    /** Makes the picker fill the width of its container. */
+    fill?: boolean;
     /** Extra class names for the outer element, for layout. */
     className?: string;
 }

@@ -18,6 +18,7 @@ import { CitedFramesPanel } from '../citedFrames/CitedFramesPanel';
 import { useOpenedFrame } from '../citedFrames/useOpenedFrame';
 import { clearCitedFramesRequest } from '../citedFrames/citedFramesStore';
 import { showFrames } from '../../common/utils/displayCoordinator';
+import { postHandoff } from '../../common/utils/displayHandoffStore';
 
 const mockedCallBackend = vi.mocked(callBackend) as unknown as ReturnType<typeof vi.fn>;
 
@@ -48,14 +49,10 @@ function renderPanel() {
   );
 }
 
-/** Sends the local showFrames action the way the display coordinator does. */
+/** Posts the showFrames hand-off the way the display coordinator does. */
 async function sendShowFrames(rowIds: number[], statementText = 'Stars are wide') {
   await act(async () => {
-    window.dispatchEvent(
-      new CustomEvent('astrometrics:showFrames', {
-        detail: { rowIds, targetId: 'M 81', statementText },
-      }),
-    );
+    postHandoff('Image Viewer', 'showFrames', { rowIds, targetId: 'M 81', statementText });
   });
 }
 
@@ -90,7 +87,7 @@ describe('CitedFramesPanel', () => {
   it('shows the banner and the cited rows', async () => {
     renderPanel();
     await sendShowFrames([1, 2]);
-    expect(screen.getByRole('status')).toHaveTextContent('Showing 2 frames cited by Stars are wide');
+    expect(screen.getByText(/Showing 2 frames/)).toHaveTextContent('Showing 2 frames cited by Stars are wide');
     await screen.findByText('1.5 arcsec');
     expect(mockedCallBackend).toHaveBeenCalledWith('quality:query', { row_ids: [1, 2] });
     expect(screen.getByText('not measured: no stars')).toBeInTheDocument();

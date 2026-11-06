@@ -13,6 +13,7 @@ import { FitsRendererHandle } from '../common/fitsViewer/FitsViewerManager';
 import { ViewerPanelContainer } from './components/ViewerPanelContainer';
 import { FrameAnalysisPanel } from './components/FrameAnalysisPanel';
 import { addTargetData, createTarget, fetchTargetObject } from '../common/services/targetService';
+import { useQuery } from '@tanstack/react-query';
 import { fetchAstrometryOverlayStars, AstrometryOverlayStar } from '../common/services/astronomyService';
 import { emit as emitEvent } from '../common/utils/eventBus';
 import { emitToast } from '../common/utils/emitToast';
@@ -20,6 +21,7 @@ import { reportError } from '../common/utils/reportError';
 import { navigateToElement } from '../common/utils/displayCoordinator';
 import { useReportModeReady } from '../common/utils/appBootReadiness';
 import { Button } from '../common/components/Button';
+import { useHandoffConsumer } from '../common/utils/displayHandoffStore';
 
 /**
  * Main component for the image processing view.
@@ -120,7 +122,6 @@ const ImageProcessingDisplayInner: React.FC = () => {
 
   const fitsRendererRef = React.useRef<FitsRendererHandle>(null);
 
-  const [overlayStars, setOverlayStars] = useState<AstrometryOverlayStar[]>([]);
   const [showAstrometryOverlay, setShowAstrometryOverlay] = useState<boolean>(() => {
     try {
       return localStorage.getItem('astrometrics:enableAstrometryOverlay') === 'true';
@@ -128,9 +129,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
       return false;
     }
   });
-  const [isLoadingOverlay, setIsLoadingOverlay] = useState(false);
   const overlayTargetRef = useRef<string | null>(null);
-  const [overlayReason, setOverlayReason] = useState<string | null>(null);
 
   const [selectedStarId, setSelectedStarId] = useState<string | null>(() => {
     try {
@@ -142,10 +141,13 @@ const ImageProcessingDisplayInner: React.FC = () => {
 
   const pendingEnableAstrometryRef = useRef<boolean>(false);
 
-  // Clear target search filter and pick up incoming star / overlay settings when navigated to a specific target
-  useEffect(() => {
-    const handleTargetSelected = (event: Event) => {
-      const raw = (event as CustomEvent).detail;
+  // Clear target search filter and pick up incoming star / overlay settings when
+  // navigated to a specific target. The request waits in the hand-off store, so
+  // it also arrives when this display was hidden or paused when it was sent.
+  useHandoffConsumer<string | { targetId?: string; enableAstrometry?: boolean; starId?: string }>(
+    'Image Processing',
+    'targetSelected',
+    (raw) => {
       const targetId = typeof raw === 'string' ? raw : raw?.targetId;
       if (targetId) {
         setFilterText('');
@@ -159,10 +161,8 @@ const ImageProcessingDisplayInner: React.FC = () => {
           setSelectedStarId(raw.starId);
         }
       }
-    };
-    window.addEventListener('astrometrics:targetSelected', handleTargetSelected);
-    return () => window.removeEventListener('astrometrics:targetSelected', handleTargetSelected);
-  }, [setFilterText, setShowAstrometryOverlay, setSelectedStarId]);
+    }
+  );
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -178,7 +178,6 @@ const ImageProcessingDisplayInner: React.FC = () => {
   const { saveTarget, confirmDeleteTarget, handleCreateTarget } = useTargetActions();
 
   useEffect(() => {
-    let active = true;
     // The overlay switch is reset only when the target changes. Showing a
     // different file of the same target keeps it as it is.
     const targetChanged = overlayTargetRef.current !== selectedTarget;
@@ -199,73 +198,61 @@ const ImageProcessingDisplayInner: React.FC = () => {
     } else if (targetChanged) {
       setShowAstrometryOverlay(false);
     }
-
-    if (!selectedTarget) {
-      setOverlayStars([]);
-      setOverlayReason(null);
-      return;
-    }
-    setIsLoadingOverlay(true);
-    fetchAstrometryOverlayStars(selectedTarget, 0, selectedFile)
-      .then(({ stars, reason }) => {
-        if (active) {
-          setOverlayStars(stars);
-          setOverlayReason(reason);
-          if (shouldEnable && stars.length > 0) {
-            setShowAstrometryOverlay(true);
-          }
-        }
-      })
-      .catch((err: unknown) => {
-        if (active) {
-          reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setIsLoadingOverlay(false);
-        }
-      });
-    return () => {
-      active = false;
-    };
   }, [selectedTarget, selectedFile]);
 
-  const handleToggleAstrometryOverlay = React.useCallback(async () => {
+  // The overlay stars are only read while the Astrometry switch is on, because
+  // nothing shows them otherwise. The key holds the target and the file, so two
+  // asks for the same image share one request, and a new file asks again.
+  const overlayQuery = useQuery({
+    queryKey: ['astrometryOverlayStars', selectedTarget, selectedFile ?? null],
+    queryFn: () => fetchAstrometryOverlayStars(selectedTarget as string, 0, selectedFile),
+    enabled: Boolean(selectedTarget) && showAstrometryOverlay,
+    staleTime: 30_000,
+  });
+  const overlayStars: AstrometryOverlayStar[] = useMemo(
+    () => (showAstrometryOverlay && selectedTarget ? overlayQuery.data?.stars ?? [] : []),
+    [showAstrometryOverlay, selectedTarget, overlayQuery.data]
+  );
+  const overlayReason: string | null = overlayQuery.data?.reason ?? null;
+  const isLoadingOverlay = overlayQuery.isFetching && showAstrometryOverlay;
+
+  // Report a failed read, once per failure.
+  useEffect(() => {
+    if (overlayQuery.error) {
+      const error = overlayQuery.error;
+      reportError(error instanceof Error ? error : new Error(String(error)), 'backend');
+    }
+  }, [overlayQuery.error]);
+
+  // When the user turned the switch on and the library has nothing to show and no
+  // reason to give, say so and switch it back off.
+  const askedForOverlayRef = useRef(false);
+  useEffect(() => {
+    if (!askedForOverlayRef.current || !overlayQuery.isSuccess || overlayQuery.isFetching) return;
+    askedForOverlayRef.current = false;
+    const { stars, reason } = overlayQuery.data;
+    if (stars.length === 0 && !reason) {
+      setShowAstrometryOverlay(false);
+      emitToast(
+        `No astrometry stars identified for ${selectedTarget}. Run astrometry plate solving first.`,
+        'info',
+        'Astrometry'
+      );
+    }
+  }, [overlayQuery.isSuccess, overlayQuery.isFetching, overlayQuery.data, selectedTarget]);
+
+  const handleToggleAstrometryOverlay = React.useCallback(() => {
     if (showAstrometryOverlay) {
       setShowAstrometryOverlay(false);
       return;
     }
-
-    if (overlayStars.length > 0) {
-      setShowAstrometryOverlay(true);
-      return;
-    }
-
     if (!selectedTarget) {
       emitToast('No target selected.', 'warning', 'Astrometry');
       return;
     }
-
-    setIsLoadingOverlay(true);
-    try {
-      const { stars, reason } = await fetchAstrometryOverlayStars(selectedTarget, 0, selectedFile);
-      setOverlayStars(stars);
-      setOverlayReason(reason);
-      if (stars.length > 0) {
-        setShowAstrometryOverlay(true);
-      } else if (reason) {
-        setShowAstrometryOverlay(true);
-      } else {
-        emitToast(`No astrometry stars identified for ${selectedTarget}. Run astrometry plate solving first.`, 'info', 'Astrometry');
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      emitToast(`Failed to load astrometry overlay: ${message}`, 'error', 'Astrometry');
-    } finally {
-      setIsLoadingOverlay(false);
-    }
-  }, [showAstrometryOverlay, overlayStars, selectedTarget, selectedFile, setShowAstrometryOverlay]);
+    askedForOverlayRef.current = true;
+    setShowAstrometryOverlay(true);
+  }, [showAstrometryOverlay, selectedTarget, setShowAstrometryOverlay]);
 
   /**
    * Handles clicking an astrometry star reticle or badge in the FITS viewer.
@@ -426,7 +413,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
       onFilterTextChange={setFilterText}
       highlightedIds={remoteTargets}
       isLoading={isTargetListLoading}
-      loadingMessage="Loading targets…"
+      loadingMessage="Loading targets"
       emptyMessage="No targets in the catalog."
       // REQ: IMG-1.4 - Target management actions enclosed in a consistent panel
       actions={

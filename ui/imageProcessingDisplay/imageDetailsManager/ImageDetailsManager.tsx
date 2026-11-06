@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import '../imageProcessingDisplay.css';
-import { LoadingSpinner } from '../../common/components/LoadingSpinner';
 import { Button } from '../../common/components/Button';
 
 /**

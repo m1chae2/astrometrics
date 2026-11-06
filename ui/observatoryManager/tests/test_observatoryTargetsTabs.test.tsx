@@ -96,13 +96,6 @@ function renderDisplay() {
  */
 const targetTabs = () => within(screen.getByRole('tablist', { name: 'Targets views' }));
 
-beforeEach(() => {
-    vi.stubGlobal('ResizeObserver', class {
-        observe(): void {}
-        disconnect(): void {}
-    });
-});
-
 describe('Observatory Manager Targets tabs', () => {
     /** The List tab is selected at the start and shows the search box and the list, not the filter. */
     it('starts on the List tab with the search box and the list', () => {

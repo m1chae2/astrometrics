@@ -52,3 +52,10 @@
 .entry--centered {
   text-align: center;
 }
+
+/* The small field: as tall as a small button, with the small button's text size and padding. */
+.entry--small {
+  height: var(--button-height-small);
+  padding: 0 var(--space-2);
+  font-size: var(--button-font-size-small);
+}

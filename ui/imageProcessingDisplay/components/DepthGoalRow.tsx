@@ -14,6 +14,7 @@ import { qualityQueryKeys } from '../../common/queries/qualityQueryKeys';
 import { DepthGoalState, DepthKind } from '../../common/types/backendTypes';
 import type { DepthGoalStatus } from '../../common/types/backendTypes';
 
+import { Skeleton } from '../../common/components/Skeleton';
 type DepthLevelChoice = 'quick_look' | 'good' | 'deep';
 
 interface DepthGoalRowProps {
@@ -71,7 +72,7 @@ export const DepthGoalRow: React.FC<DepthGoalRowProps> = ({ targetId, refreshKey
 
     if (!targetId || !isLibraryTarget) return null;
     if (isLoading) {
-        return <div className="depth-goal-row depth-goal-row--muted">Loading depth goal...</div>;
+        return <Skeleton variant="line" label="Loading the depth goal" />;
     }
     if (isError || !status) {
         return <div className="depth-goal-row depth-goal-row--error" role="alert">Could not load the depth goal.</div>;

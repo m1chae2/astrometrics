@@ -4,11 +4,13 @@
  * Manages rendering worker delegation, zoom/pan transforms, and auto-stretch display.
  */
 import React, { useState, useRef, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
-import { useFitsLoader } from './hooks/useFitsLoader';
+import { useFitsLoader, ParsedFitsData } from './hooks/useFitsLoader';
 import { useCanvasInteraction } from './hooks/useCanvasInteraction';
 import { useCanvasDrawer } from './hooks/useCanvasDrawer';
+import { usePreviewBitmap } from './hooks/usePreviewBitmap';
 import { AstrometryOverlayStar } from '../services/astronomyService';
 import { formatStarListLabel } from '../utils/starDisplayFormat';
+import { Skeleton, UpdatingBar } from '../components/Skeleton';
 import { StretchParameters } from '../types/backendTypes';
 import {
   StarScreenTransform,
@@ -132,6 +134,14 @@ export interface FitsRendererProps {
   showOverlay?: boolean;
   onStarClick?: (star: AstrometryOverlayStar) => void;
   selectedStarId?: string | null;
+  /**
+   * A small stretched picture (JPEG) of the same image. It is drawn at once while the
+   * full FITS image is read and decoded, then replaced by it without moving the view.
+   * Overlays that need FITS pixel positions wait for the full image.
+   */
+  previewBlob?: Blob | null;
+  /** When true, this viewer keeps pictures decoded ahead of time (see `prefetchDecode`). */
+  acceptPrefetch?: boolean;
 }
 
 export interface FitsRendererHandle {
@@ -159,11 +169,12 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     overlayStars,
     showOverlay,
     onStarClick,
-    selectedStarId
+    selectedStarId,
+    previewBlob = null,
+    acceptPrefetch = false
   } = props;
 
   // Local State
-  const [status, setStatus] = useState<string | null>(null);
   const [hoveredStarId, setHoveredStarId] = useState<string | null>(null);
   const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number } | null>(null);
   // Where the pointer went down, to tell a click from a pan drag.
@@ -180,13 +191,46 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   }, []);
 
   // Hooks
-  const { parsedData, bitmap, workerRef } = useFitsLoader(imageUrl, imageBlob, setStatus);
+  const { parsedData, bitmap, workerRef, phase, errorMessage, loadedKey } = useFitsLoader(
+    imageUrl, imageBlob, undefined, acceptPrefetch
+  );
+  const previewBitmap = usePreviewBitmap(previewBlob);
+
+  // True while the next change of drawn size is the preview being replaced by the full image.
+  const keepViewOnResizeRef = useRef(false);
 
   const {
     zoom, panX, panY,
     resetView, zoomBy, zoomToFit, zoomToScale,
     onPointerDown, onPointerMove, onPointerUp
-  } = useCanvasInteraction(containerRef, drawnSize);
+  } = useCanvasInteraction(containerRef, drawnSize, undefined, keepViewOnResizeRef);
+
+  // What is on the canvas, as reported by the drawer after each draw.
+  const [drawnObject, setDrawnObject] = useState<ParsedFitsData | ImageBitmap | null>(null);
+  const currentKey = imageBlob ?? imageUrl;
+  // The full image is ready to draw only when it was made from the file now asked for.
+  const mainReady = loadedKey !== null && loadedKey === currentKey && Boolean(parsedData || bitmap);
+  const mainObject = mainReady ? (parsedData ?? bitmap) : null;
+  const mainDrawn = mainObject !== null && drawnObject === mainObject;
+  // The preview is drawn only until the full image is ready.
+  const previewObject = !mainReady ? previewBitmap : null;
+  const previewDrawn = previewObject !== null && drawnObject === previewObject;
+  const firstFrameDrawn = mainDrawn || previewDrawn;
+
+  const previewShownRef = useRef(false);
+  previewShownRef.current = previewDrawn;
+  const previewBitmapRef = useRef<ImageBitmap | null>(null);
+  previewBitmapRef.current = previewBitmap;
+  const handleDrawn = useCallback((drawn: ParsedFitsData | ImageBitmap) => {
+    // Replacing the preview with the full image: keep the zoom and position.
+    if (drawn !== previewBitmapRef.current && previewShownRef.current) keepViewOnResizeRef.current = true;
+    setDrawnObject(drawn);
+  }, []);
+
+  // A different image starts from a fresh fit.
+  useEffect(() => {
+    keepViewOnResizeRef.current = false;
+  }, [currentKey]);
 
   // REQ: IMG-3.6: Disable automatic stretching for stacked images.
   const isStacked = disableStretch ?? (
@@ -198,7 +242,8 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
 
   // Automatically draw with AutoStretch (handled in worker for FITS)
   useCanvasDrawer(
-    canvasRef, workerRef, parsedData, bitmap, handleSetDrawnSize, effectiveStretch, displayRange, stretchParameters
+    canvasRef, workerRef, mainReady ? parsedData : null, mainReady ? bitmap : previewBitmap,
+    handleSetDrawnSize, effectiveStretch, displayRange, stretchParameters, handleDrawn
   );
 
   // Expose methods via REF
@@ -226,7 +271,8 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   const screenTransform: StarScreenTransform = {
     scaleX, scaleY, panX, panY, viewWidth: containerW, viewHeight: containerH
   };
-  const overlayVisible = Boolean(showOverlay && overlayStars && overlayStars.length > 0 && drawnSize.w > 0 && drawnSize.h > 0);
+  // Star positions are FITS pixel positions, so the overlay waits for the full image and is not drawn on the preview.
+  const overlayVisible = Boolean(showOverlay && mainDrawn && overlayStars && overlayStars.length > 0 && drawnSize.w > 0 && drawnSize.h > 0);
 
   // A fixed label budget is spent on the stars in view, so zooming in shows more labels per area.
   const labeledIds = React.useMemo(
@@ -310,8 +356,10 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
 
   const hoveredStar = hoveredStarId && overlayStars ? overlayStars.find((star) => star.id === hoveredStarId) : undefined;
 
-  const effectiveLoading = parentLoading || status?.startsWith('Loading');
-  const effectiveError = parentError || (status?.startsWith('Error') ? status : null);
+  // An explicit error wins; otherwise the spinner stays until the first real draw
+  // (the preview or the full image), whatever the loader is doing.
+  const effectiveError = parentError || (phase === 'error' ? errorMessage : null);
+  const effectiveLoading = !effectiveError && (!firstFrameDrawn || (parentLoading && !previewDrawn));
 
   return (
     <div className="fits-renderer">
@@ -326,7 +374,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
       >
         <canvas
           ref={canvasRef}
-          className={`fits-renderer__canvas ${effectiveLoading ? 'fits-renderer__canvas--loading' : ''}`}
+          className={`fits-renderer__canvas ${firstFrameDrawn ? '' : 'fits-renderer__canvas--hidden'}`}
         />
         {overlayVisible && (
           <canvas
@@ -461,16 +509,13 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
 
       {effectiveLoading && (
         <div className="fits-renderer__loading-overlay">
-          <div className="fits-renderer__spinner" />
-          <div className="fits-renderer__loading-text">Loading Image...</div>
+          <Skeleton variant="block" label="Loading the image" />
         </div>
       )}
 
-      {status && !effectiveLoading && (
-        <div className="fits-renderer__status">
-          {status}
-        </div>
-      )}
+      {/* The small preview is on screen while the full FITS image is still being made. */}
+      {!effectiveError && previewDrawn && !mainDrawn && <UpdatingBar label="Loading the full image" />}
+
       {effectiveError && (
         <div className="fits-renderer__status error">
           {effectiveError}
@@ -496,6 +541,8 @@ export const FitsRenderer = React.memo(FitsRendererInternal, (prevProps, nextPro
     prevProps.stretchParameters === nextProps.stretchParameters &&
     prevProps.showOverlay === nextProps.showOverlay &&
     prevProps.overlayStars === nextProps.overlayStars &&
-    prevProps.selectedStarId === nextProps.selectedStarId
+    prevProps.selectedStarId === nextProps.selectedStarId &&
+    prevProps.previewBlob === nextProps.previewBlob &&
+    prevProps.acceptPrefetch === nextProps.acceptPrefetch
   );
 });

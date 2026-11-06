@@ -60,6 +60,7 @@ export const Tabs: React.FC<TabsProps> = ({
     tabs, selectedId, onChange, ariaLabel, idPrefix, size = 'regular', className = '',
 }) => {
     const buttonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+    const tabListRef = useRef<HTMLDivElement | null>(null);
 
     /**
      * Moves selection and focus with the arrow keys, Home and End.
@@ -67,6 +68,8 @@ export const Tabs: React.FC<TabsProps> = ({
      * @param index Index of the tab that has focus.
      */
     const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+        // A key press brings the focus ring back after a mouse click hid it.
+        tabListRef.current?.removeAttribute('data-pointer');
         let nextIndex: number;
         if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length;
         else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length;
@@ -80,7 +83,7 @@ export const Tabs: React.FC<TabsProps> = ({
     };
 
     return (
-        <div className={`tabs${size === 'compact' ? ' tabs--compact' : ''}${className ? ` ${className}` : ''}`} role="tablist" aria-label={ariaLabel}>
+        <div ref={tabListRef} onPointerDown={() => tabListRef.current?.setAttribute('data-pointer', 'true')} className={`tabs${size !== 'regular' ? ` tabs--${size}` : ''}${className ? ` ${className}` : ''}`} role="tablist" aria-label={ariaLabel}>
             {tabs.map((tab, index) => {
                 const isSelected = tab.id === selectedId;
                 return (

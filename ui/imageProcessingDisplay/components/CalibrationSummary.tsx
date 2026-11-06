@@ -2,6 +2,7 @@ import React from 'react';
 import { SectionPanel } from '../../common/components/SectionPanel';
 import { CalibrationStats, CalibrationEntry } from '../../common/types/backendTypes';
 
+import { Skeleton } from '../../common/components/Skeleton';
 interface CalibrationSummaryProps {
     selectedCamera?: string;
     stats: CalibrationStats | null;
@@ -14,7 +15,7 @@ interface CalibrationSummaryProps {
  */
 export const CalibrationSummary: React.FC<CalibrationSummaryProps> = ({ selectedCamera, stats, loading }) => {
 
-    if (loading) return <div className="p-2 text-muted">Loading library stats...</div>;
+    if (loading) return <Skeleton variant="keyValue" count={3} label="Loading the library statistics" />;
     if (!stats) return null;
 
     // Filter stats by camera if one is selected

@@ -66,6 +66,7 @@ class TelescopeService:
         self._auto_download_service = auto_download_service
         self._sync_service: Any = None
         self._job_service: Any = None
+        self._status_unavailable_logged = False
 
     def set_auto_download_service(self, auto_download_service: Any) -> None:
         """Attach the service that copies finished frames into the library.
@@ -169,8 +170,15 @@ class TelescopeService:
                 "focuserPosition": imaging.focuser_position,
                 "cameraTemperature": imaging.camera_temperature,
             })
+            if self._status_unavailable_logged:
+                self._status_unavailable_logged = False
+                logger.info("The telescope status is available again.")
         except (AstrometricsError, OSError, RuntimeError) as e:
-            logger.warning("Failed to query telescope status (telescope may be offline): %s", e)
+            # An offline telescope is a status, not an error: say so once per
+            # change, not on every two-second poll.
+            if not self._status_unavailable_logged:
+                self._status_unavailable_logged = True
+                logger.info("The telescope status is unavailable (telescope may be offline): %s", e)
             data = {
                 "ra": "00 00 00",
                 "dec": "+00 00 00",

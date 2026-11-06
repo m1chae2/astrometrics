@@ -1,5 +1,5 @@
 /**
- * @fileoverview Tests of the Altitude limits and Hour angle limits tabs and the "Why unavailable?"
+ * @fileoverview Tests of the Limits tab (alignment, guiding, altitude and hour angle) and the "Why unavailable?"
  * buttons: the real limits are read and shown, the form resets when a new read
  * arrives, Apply is enabled only after a change and sends the right payload,
  * refusals stay visible until dismissed, success warns about Ekos's copy,
@@ -214,6 +214,10 @@ function renderMergedPanel(disabled = false) {
                 onSetTracking={vi.fn()}
                 onPark={vi.fn()}
                 onUnpark={vi.fn()}
+                onStartMove={vi.fn()}
+                onStopMove={vi.fn()}
+                onSetSlewRate={vi.fn()}
+                onStop={vi.fn()}
                 commandsDisabled={disabled}
                 commandsDisabledReason={disabled ? 'Night mode.' : ''}
             />
@@ -222,43 +226,34 @@ function renderMergedPanel(disabled = false) {
 }
 
 describe('Telescope Control panel tabs', () => {
-    /** The five tabs are in the agreed order and Controls is first. */
-    it('has Controls, Alignment, Guiding, Altitude and Hour angle tabs in order', () => {
+    /** The three tabs are in the agreed order and Mount is first. */
+    it('has Mount, Manual and Limits tabs in order', () => {
         renderMergedPanel();
         const names = screen.getAllByRole('tab').map((tab) => tab.textContent);
-        expect(names).toEqual(['Controls', 'Alignment', 'Guiding', 'Altitude', 'Hour angle']);
-        expect(screen.getByRole('tab', { name: 'Controls' }).getAttribute('aria-selected')).toBe('true');
+        expect(names).toEqual(['Mount', 'Manual', 'Limits']);
+        expect(screen.getByRole('tab', { name: 'Mount' }).getAttribute('aria-selected')).toBe('true');
         expect(screen.getByRole('button', { name: 'PARK' })).toBeTruthy();
     });
 
-    /** Each tab shows its own controls, and both limit tabs show the telescope and Apply. */
-    it('shows the controls of each tab', async () => {
+    /** The Limits tab shows all four sections, the telescope and one Apply button. */
+    it('shows alignment, guiding, altitude and hour angle on the Limits tab', async () => {
         renderMergedPanel();
-        fireEvent.click(screen.getByRole('tab', { name: 'Alignment' }));
+        fireEvent.click(screen.getByRole('tab', { name: 'Limits' }));
         expect(screen.getByLabelText('Alignment Accuracy')).toBeTruthy();
-        fireEvent.click(screen.getByRole('tab', { name: 'Guiding' }));
-        expect(screen.getByRole('button', { name: 'Start Guiding' })).toBeTruthy();
-        fireEvent.click(screen.getByRole('tab', { name: 'Altitude' }));
         expect(await screen.findByLabelText('Minimum altitude')).toBeTruthy();
-        expect(screen.queryByLabelText('Maximum hour angle')).toBeNull();
-        expect(screen.getByText('Telescope: Refractor')).toBeTruthy();
-        expect(screen.getByRole('button', { name: 'Apply safety limits' })).toBeTruthy();
-        fireEvent.click(screen.getByRole('tab', { name: 'Hour angle' }));
         expect(screen.getByLabelText('Maximum hour angle')).toBeTruthy();
-        expect(screen.queryByLabelText('Minimum altitude')).toBeNull();
         expect(screen.getByText('Telescope: Refractor')).toBeTruthy();
-        expect(screen.getByRole('button', { name: 'Apply safety limits' })).toBeTruthy();
+        expect(screen.getAllByRole('button', { name: 'Apply safety limits' })).toHaveLength(1);
     });
 
-    /** One edit on each tab is kept across tab switches and sent by one Apply. */
-    it('shares one form and one Apply between the two limit tabs', async () => {
+    /** Edits to both limit sections are kept across tab switches and sent by one Apply. */
+    it('shares one form and one Apply between the limit sections', async () => {
         renderMergedPanel();
-        fireEvent.click(screen.getByRole('tab', { name: 'Altitude' }));
+        fireEvent.click(screen.getByRole('tab', { name: 'Limits' }));
         fireEvent.change(await screen.findByLabelText('Minimum altitude'), { target: { value: '30' } });
-        fireEvent.click(screen.getByRole('tab', { name: 'Hour angle' }));
         fireEvent.change(screen.getByLabelText('Meridian flip after transit'), { target: { value: '9' } });
-        fireEvent.click(screen.getByRole('tab', { name: 'Controls' }));
-        fireEvent.click(screen.getByRole('tab', { name: 'Altitude' }));
+        fireEvent.click(screen.getByRole('tab', { name: 'Mount' }));
+        fireEvent.click(screen.getByRole('tab', { name: 'Limits' }));
         expect((screen.getByLabelText('Minimum altitude') as HTMLInputElement).value).toBe('30');
         fireEvent.click(screen.getByRole('button', { name: 'Apply safety limits' }));
         await waitFor(() => expect(callBackendMock).toHaveBeenCalledWith('observatory:set_active_telescope', {
@@ -267,8 +262,8 @@ describe('Telescope Control panel tabs', () => {
         }));
     });
 
-    /** The Controls tab no longer shows a limits summary line. */
-    it('shows no limits summary on the Controls tab', async () => {
+    /** The Mount tab no longer shows a limits summary line. */
+    it('shows no limits summary on the Mount tab', async () => {
         renderMergedPanel();
         await screen.findByRole('button', { name: 'PARK' });
         expect(screen.queryByText(/^Limits:/)).toBeNull();
@@ -279,15 +274,24 @@ describe('Telescope Control panel tabs', () => {
         renderMergedPanel(true);
         expect(screen.getAllByRole('button', { name: 'Why unavailable?' })).toHaveLength(1);
         expect((screen.getByRole('button', { name: 'PARK' }) as HTMLButtonElement).disabled).toBe(true);
-        fireEvent.click(screen.getByRole('tab', { name: 'Alignment' }));
+        fireEvent.click(screen.getByRole('tab', { name: 'Limits' }));
         expect((screen.getByLabelText('Alignment Accuracy') as HTMLInputElement).disabled).toBe(true);
-        fireEvent.click(screen.getByRole('tab', { name: 'Guiding' }));
-        expect((screen.getByRole('button', { name: 'Start Guiding' }) as HTMLButtonElement).disabled).toBe(true);
-        fireEvent.click(screen.getByRole('tab', { name: 'Altitude' }));
         expect(((await screen.findByRole('button', { name: 'Apply safety limits' })) as HTMLButtonElement).disabled).toBe(true);
         expect((screen.getByLabelText('Enable altitude limits') as HTMLInputElement).disabled).toBe(true);
-        fireEvent.click(screen.getByRole('tab', { name: 'Hour angle' }));
         expect((screen.getByLabelText('Enable hour angle limit') as HTMLInputElement).disabled).toBe(true);
-        expect((screen.getByRole('button', { name: 'Apply safety limits' }) as HTMLButtonElement).disabled).toBe(true);
+    });
+});
+
+describe('Telescope Control slew speed', () => {
+    /** The chosen slew speed survives closing and opening the Manual tab. */
+    it('keeps the slew speed when the Manual tab is closed and opened again', () => {
+        renderMergedPanel();
+        fireEvent.click(screen.getByRole('tab', { name: 'Manual' }));
+        const slider = screen.getByRole('slider') as HTMLInputElement;
+        expect(slider.value).toBe('2');
+        fireEvent.change(slider, { target: { value: '0' } });
+        fireEvent.click(screen.getByRole('tab', { name: 'Mount' }));
+        fireEvent.click(screen.getByRole('tab', { name: 'Manual' }));
+        expect((screen.getByRole('slider') as HTMLInputElement).value).toBe('0');
     });
 });

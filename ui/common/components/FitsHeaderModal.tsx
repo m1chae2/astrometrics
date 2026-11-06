@@ -3,6 +3,7 @@ import { TextInput } from './TextInput';
 import { BaseModal } from './BaseModal';
 import { SectionPanel } from './SectionPanel';
 import { EmptyState } from './EmptyState';
+import { Skeleton } from './Skeleton';
 import { fetchTargetFrameHeader } from '../services/targetService';
 import { FitsHeaderEntry } from '../types/backendTypes';
 import { useToast } from '../hooks/useToast';
@@ -92,7 +93,7 @@ export const FitsHeaderModal: React.FC<FitsHeaderModalProps> = ({
                     }
                 >
                     {loading ? (
-                        <div className="loading-container">Loading header data...</div>
+                        <Skeleton variant="rows" columns={3} count={8} label="Loading header data" />
                     ) : error ? (
                         <EmptyState variant="error" message={error} />
                     ) : (

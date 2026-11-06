@@ -11,17 +11,17 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: 0.8rem;
+  font-size: var(--compact-font-size);
 }
 
 .timeline-summary__range {
   font-weight: 500;
-  color: var(--text-primary, #fff);
+  color: var(--text-primary, var(--white));
 }
 
 .timeline-summary__count {
-  font-size: 0.75rem;
-  color: var(--text-muted, #888);
+  font-size: var(--section-label-size);
+  color: var(--text-muted, var(--text-muted));
 }
 
 /* Two range inputs stacked on one track, one handle for each end. */
@@ -36,16 +36,16 @@
   right: 0;
   top: 8px;
   height: 4px;
-  border-radius: 2px;
-  background-color: var(--border-color, #444);
+  border-radius: var(--radius-xs);
+  background-color: var(--border-color, var(--grey-light));
 }
 
 .timeline-range__fill {
   position: absolute;
   top: 0;
   bottom: 0;
-  border-radius: 2px;
-  background-color: var(--highlight-color, #4db8ff);
+  border-radius: var(--radius-xs);
+  background-color: var(--highlight-color, var(--accent-sky));
 }
 
 .timeline-range input[type="range"] {
@@ -75,8 +75,8 @@
   height: var(--timeline-thumb-size);
   margin-top: 3px;
   border-radius: 50%;
-  border: 2px solid var(--grey-dark, #1e1e1e);
-  background-color: var(--highlight-color, #4db8ff);
+  border: 2px solid var(--grey-dark, var(--term-bg-medium));
+  background-color: var(--highlight-color, var(--accent-sky));
   cursor: pointer;
 }
 
@@ -89,12 +89,12 @@
   width: var(--timeline-thumb-size);
   height: var(--timeline-thumb-size);
   border-radius: 50%;
-  border: 2px solid var(--grey-dark, #1e1e1e);
-  background-color: var(--highlight-color, #4db8ff);
+  border: 2px solid var(--grey-dark, var(--term-bg-medium));
+  background-color: var(--highlight-color, var(--accent-sky));
   cursor: pointer;
 }
 
 .timeline-range input[type="range"]:focus-visible::-webkit-slider-thumb {
-  outline: 2px solid var(--highlight-color, #4db8ff);
+  outline: 2px solid var(--highlight-color, var(--accent-sky));
   outline-offset: 2px;
 }

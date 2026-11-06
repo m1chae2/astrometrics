@@ -25,7 +25,7 @@ import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
-from wayfindinglib.analytics.review_cache import ReviewCache
+from astrometricslib.drivers import VersionedCache
 from wayfindinglib.data_access.delegation_policy_reader import get_delegation_policy
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
 from wayfindinglib.drivers.butler import DiskButler
@@ -151,7 +151,7 @@ class ControlContext:
         # Builds the guiding driver once, even when callers on several
         # threads ask for it at the same moment.
         self._guiding_driver_lock = threading.Lock()
-        self.review_cache = ReviewCache()
+        self.review_cache = VersionedCache()
         """Results of the slow night reviews, kept until their data changes."""
         self._indi_diagnostics: IndiDiagnostics | None = None
         self.motion_stop = threading.Event()
@@ -589,7 +589,8 @@ class ControlContext:
         the context was built with ``open_port_forwards``. Without it the
         client uses ``localhost:4400`` (it warns once, and guiding falls
         back to the mount's guide pulses). When PHD2 runs here, the client
-        always uses ``localhost:4400``.
+        uses ``localhost`` and the configured ``phd2_port`` (4400 unless the
+        setting says otherwise), so a stand-in PHD2 can listen on another port.
 
         Returns
         -------
@@ -599,7 +600,7 @@ class ControlContext:
         from wayfindinglib.drivers.phd2.phd2_client import PHD2Client
 
         if self.config.get_phd2_location() != "observatory":
-            return PHD2Client()
+            return PHD2Client(port=self.config.get_phd2_remote_port())
         if not self._open_port_forwards:
             logger.info("PHD2 is on the observatory computer; the SSH tunnel is left to the backend")
             return PHD2Client()

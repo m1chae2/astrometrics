@@ -202,4 +202,38 @@ describe('IngestFramesModal Component', () => {
       expect(onIngestComplete).toHaveBeenCalledTimes(2);
     });
   });
+
+  describe('completion after a pause', () => {
+    beforeEach(() => { vi.useFakeTimers(); });
+    afterEach(() => { vi.useRealTimers(); });
+
+    /** A display paused before the timer fires must still close the dialog after it resumes. */
+    it('closes after the effects are cleaned up and run again before the timer fires', () => {
+      const onClose = vi.fn();
+      const complete = { ...mockIngestionState, status: 'completed', jobId: 'job-9' };
+      const { unmount } = render(
+        <IngestFramesModal isOpen={true} onClose={onClose} ingestionState={complete} />
+      );
+      // A pause cleans the effects up before the timer fires.
+      unmount();
+      act(() => { vi.advanceTimersByTime(1000); });
+      expect(onClose).not.toHaveBeenCalled();
+      // Showing the display again runs the effects again.
+      render(<IngestFramesModal isOpen={true} onClose={onClose} ingestionState={complete} />);
+      act(() => { vi.advanceTimersByTime(1000); });
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    /** The dialog names the target of the running download. */
+    it('shows the running job\'s own target in the progress line', () => {
+      render(
+        <IngestFramesModal
+          isOpen={true}
+          onClose={vi.fn()}
+          ingestionState={{ ...mockIngestionState, status: 'running', jobId: 'job-1', progress: '2/9', jobTargetName: 'M 13' }}
+        />
+      );
+      expect(screen.getByText('M 13: 2/9')).toBeInTheDocument();
+    });
+  });
 });

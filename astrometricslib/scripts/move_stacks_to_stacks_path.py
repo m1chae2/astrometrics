@@ -50,6 +50,7 @@ from pathlib import Path
 
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.foundation.storage.data_versions import TARGETS_KIND, bump_data_version
 
 # The files that make up a stack at the top of a target folder.
 _STACK_FAMILY = re.compile(
@@ -224,6 +225,9 @@ def rewrite_database(db_path: str, table: str, column: str, moves: dict[str, str
             if rewritten != value:
                 connection.execute(update, (rewritten, rowid))
                 changed += 1
+        if changed and table == "targets":
+            # A running app sees the change through the write counter.
+            bump_data_version(connection, TARGETS_KIND)
         connection.commit()
     finally:
         connection.close()

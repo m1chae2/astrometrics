@@ -10,6 +10,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
+  setBackendRestarting,
   callBackend,
   DEFAULT_RPC_TIMEOUT_MS,
   EXTENDED_RPC_TIMEOUT_MS,
@@ -120,5 +121,61 @@ describe('backendApi resilience and deduplication', () => {
     const result = await callBackend('planetarium:get_constellation_lines', {}, { silent: true });
     expect(result).toEqual([{ name: 'Navi' }]);
     expect(callCount).toBe(2);
+  });
+
+  /** Collects the toasts the client sends while `body` runs. */
+  async function collectToasts(body: () => Promise<void>): Promise<string[]> {
+    const texts: string[] = [];
+    const listener = (event: Event) => texts.push(String((event as CustomEvent).detail?.text));
+    window.addEventListener('astrometrics:toast', listener);
+    try {
+      await body();
+    } finally {
+      window.removeEventListener('astrometrics:toast', listener);
+    }
+    return texts;
+  }
+
+  /** A background read that cannot connect is a status, so no raw "Failed to fetch" toast. */
+  it('shows no toast when an idempotent read cannot connect', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    const toasts = await collectToasts(async () => {
+      await expect(callBackend('telescope:list_alignment_sessions', {}, { maxRetries: 0 })).rejects.toBeDefined();
+    });
+    expect(toasts).toEqual([]);
+  });
+
+  /** A timed-out background read is also quiet. */
+  it('shows no toast when an idempotent read times out', async () => {
+    global.fetch = vi.fn().mockImplementation((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+    }));
+    const toasts = await collectToasts(async () => {
+      await expect(callBackend('telescope:list_alignment_sessions', {}, { maxRetries: 0, timeoutMs: 20 })).rejects.toBeDefined();
+    });
+    expect(toasts).toEqual([]);
+  });
+
+  /** While the backend restarts on purpose, even a failed command is quiet. */
+  it('shows no toast for any failure while the backend is restarting', async () => {
+    setBackendRestarting(true);
+    try {
+      global.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+      const toasts = await collectToasts(async () => {
+        await expect(callBackend('telescope:park', {} as never)).rejects.toBeDefined();
+      });
+      expect(toasts).toEqual([]);
+    } finally {
+      setBackendRestarting(false);
+    }
+  });
+
+  /** A command the user asked for still reports a network failure. */
+  it('still shows a toast when a user command cannot connect', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    const toasts = await collectToasts(async () => {
+      await expect(callBackend('telescope:park', {} as never)).rejects.toBeDefined();
+    });
+    expect(toasts.length).toBeGreaterThan(0);
   });
 });

@@ -18,6 +18,7 @@ import { EmptyState } from '../../common/components/EmptyState';
 import { useObservatoryNight } from '../ObservatoryNightContext';
 import { useNightAlignmentAttempts } from '../hooks/useNightAlignmentAttempts';
 
+import { Skeleton } from '../../common/components/Skeleton';
 /** The two tabs of the panel. */
 const TABS: TabDefinition[] = [
     { id: 'alignment', label: 'Alignment' },
@@ -47,7 +48,7 @@ export const AlignmentGuidingTabs: React.FC<AlignmentGuidingTabsProps> = ({ alig
     if (isLive) {
         alignmentTab = <AlignmentStatus alignmentAttempts={alignmentAttempts} />;
     } else if (nightAlignment.isLoading) {
-        alignmentTab = <EmptyState variant="loading" message="Loading alignment for this night..." />;
+        alignmentTab = <Skeleton variant="rows" columns={4} count={4} label="Loading alignment for this night" />;
     } else if (nightAlignment.isError) {
         alignmentTab = <EmptyState variant="error" message="Could not load the alignment for this night." />;
     } else {

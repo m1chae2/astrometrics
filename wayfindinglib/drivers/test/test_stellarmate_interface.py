@@ -10,7 +10,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Never
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -585,3 +585,115 @@ def test_rsync_ssh_is_non_interactive_with_a_connect_timeout() -> None:
     remote_shell = rsync_cmd[rsync_cmd.index("-e") + 1]
     assert "BatchMode=yes" in remote_shell
     assert "ConnectTimeout=10" in remote_shell
+
+
+def test_unreachable_host_lists_nothing_and_logs_no_error(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An unreachable host gives an empty list and no ERROR record."""
+    import logging
+
+    def fail(cmd_list: list[str], **_kwargs: Any) -> Never:
+        """Pretend ssh could not reach the host.
+
+        Raises
+        ------
+        subprocess.CalledProcessError
+            Always.
+        """
+        raise subprocess.CalledProcessError(255, cmd_list, stderr="ssh: Network is unreachable")
+
+    monkeypatch.setattr(subprocess, "run", fail)
+    driver = StellarMateInterface(host_alias="test-host")
+    with caplog.at_level(logging.DEBUG):
+        assert driver.list_remote_targets() == []
+        assert driver.list_remote_targets() == []
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+    assert driver._last_connection_status is False
+
+
+def test_missing_ssh_program_counts_as_offline(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A machine without ssh reports the host as offline, not an error."""
+    import logging
+
+    def missing(cmd_list: list[str], **_kwargs: Any) -> Never:
+        """Pretend the ssh program is not installed.
+
+        Raises
+        ------
+        FileNotFoundError
+            Always.
+        """
+        raise FileNotFoundError("ssh")
+
+    monkeypatch.setattr(subprocess, "run", missing)
+    driver = StellarMateInterface(host_alias="test-host")
+    with caplog.at_level(logging.DEBUG):
+        assert driver.list_remote_targets() == []
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "ssh: connect to host localhost port 22: Connection refused",
+        "kex_exchange_identification: read: Connection reset by peer",
+        "ssh: connect to host 10.0.0.9 port 22: No route to host",
+        "ssh: Could not resolve hostname stellarmate: Name or service not known",
+    ],
+)
+def test_expected_ssh_failures_give_no_error_record(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, stderr: str
+) -> None:
+    """Each unusable-computer ssh text gives no ERROR and sets offline."""
+    import logging
+
+    def fail(cmd_list: list[str], **_kwargs: Any) -> Never:
+        """Pretend ssh printed the given text and failed.
+
+        Raises
+        ------
+        subprocess.CalledProcessError
+            Always.
+        """
+        raise subprocess.CalledProcessError(255, cmd_list, stderr=stderr)
+
+    monkeypatch.setattr(subprocess, "run", fail)
+    driver = StellarMateInterface(host_alias="localhost")
+    with caplog.at_level(logging.DEBUG):
+        assert driver.list_remote_targets() == []
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+    assert driver._last_connection_status is False
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "user@host: Permission denied (publickey).",
+        "Bad owner or permissions on /etc/ssh/ssh_config.d/20-systemd-ssh-proxy.conf",
+    ],
+)
+def test_refused_login_is_still_logged_as_an_error(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, stderr: str
+) -> None:
+    """A refused key or broken ssh setup stays an ERROR, not offline."""
+    import logging
+
+    def fail(cmd_list: list[str], **_kwargs: Any) -> Never:
+        """Pretend the computer answered and refused the login.
+
+        Raises
+        ------
+        subprocess.CalledProcessError
+            Always.
+        """
+        raise subprocess.CalledProcessError(255, cmd_list, stderr=stderr)
+
+    monkeypatch.setattr(subprocess, "run", fail)
+    driver = StellarMateInterface(host_alias="localhost")
+    with caplog.at_level(logging.DEBUG):
+        driver.list_remote_targets()
+    assert [record for record in caplog.records if record.levelno >= logging.ERROR]
+    assert driver._last_connection_status is True

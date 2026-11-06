@@ -109,14 +109,6 @@ async function chooseNight(user: ReturnType<typeof userEvent.setup>, entryText: 
     await user.click(within(menu).getByText(entryText).closest('button') as HTMLButtonElement);
 }
 
-beforeAll(() => {
-    // jsdom has no ResizeObserver, which the Target List uses to measure its height.
-    vi.stubGlobal('ResizeObserver', class {
-        observe(): void {}
-        disconnect(): void {}
-    });
-});
-
 beforeEach(() => {
     callBackendMock.mockReset();
     callBackendMock.mockImplementation(async (method: string, params?: { detail?: string; session_id?: string }) => {
@@ -198,13 +190,10 @@ describe('Observatory Manager night mode', () => {
         }
         // The other Telescope Control tabs are greyed with the same reason.
         const telescopeTabs = within(screen.getByRole('tablist', { name: 'Telescope control groups' }));
-        await user.click(telescopeTabs.getByRole('tab', { name: 'Alignment' }));
+        await user.click(telescopeTabs.getByRole('tab', { name: 'Limits' }));
         expect((screen.getByLabelText('Alignment Accuracy') as HTMLInputElement).disabled).toBe(true);
-        await user.click(telescopeTabs.getByRole('tab', { name: 'Guiding' }));
-        expect((screen.getByRole('button', { name: 'Start Guiding' }) as HTMLButtonElement).disabled).toBe(true);
-        await user.click(telescopeTabs.getByRole('tab', { name: 'Altitude' }));
         expect(((await screen.findByRole('button', { name: 'Apply safety limits' })) as HTMLButtonElement).disabled).toBe(true);
-        await user.click(telescopeTabs.getByRole('tab', { name: 'Controls' }));
+        await user.click(telescopeTabs.getByRole('tab', { name: 'Mount' }));
         expect(screen.getByRole('button', { name: 'Add Target' }).getAttribute('title')).toBe(NIGHT_REASON);
         expect(screen.getByRole('button', { name: 'Ingest frames' }).getAttribute('title')).toBe(NIGHT_REASON);
         expect(screen.getByRole('button', { name: 'Measure noise' }).getAttribute('title')).toBe(NIGHT_REASON);

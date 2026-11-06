@@ -222,22 +222,18 @@ class IndiClient(PyIndi.BaseClient):
 class IndiInterface(IndiClient):
     """Connect wayfindinglib to an INDI server."""
 
-    def __init__(self, config: AppConfiguration) -> None:
-        """Initialize the interface to an INDI server.
+    _server_unreachable_logged = False
+    """Whether the current run of failed connections was already logged."""
 
-        Parameters
-        ----------
-        config
-            Configuration object providing telescope hostname and
-            INDI host/port, injected by the caller.
+    def _init_runtime_state(self) -> None:
+        """Create the plain in-memory state shared by every interface.
 
+        Holds the external pulse and sync queues, polar alignment
+        tracking, the exposure countdown and the reconnect flags. It
+        opens no connection, so the built-in simulator calls it too.
+        Add any new state of this kind here so the two ``__init__``
+        methods cannot drift apart.
         """
-        super().__init__()
-        self.config = config
-        self.sync_configuration()
-        self.device_map = {}
-        self._has_initialized_defaults = False
-
         # Thread-safe external pulse event queue
         self._external_pulses_lock = threading.Lock()
         self._external_pulses = []
@@ -276,6 +272,33 @@ class IndiInterface(IndiClient):
         # Clock used for the countdown. Tests replace it with a fake clock.
         self._monotonic_clock = time.monotonic
 
+        # Fresh-client recovery (see `_reconnect`). The worker sets
+        # `supports_rebuild` when it can swap in a new client object.
+        self.supports_rebuild: bool = False
+        self.stale_client: bool = False
+        self._connection_loss_reported: bool = False
+        self._expected_disconnect: bool = False
+        self._has_initialized_defaults = False
+
+    def __init__(self, config: AppConfiguration) -> None:
+        """Initialize the interface to an INDI server.
+
+        Parameters
+        ----------
+        config
+            Configuration object providing telescope hostname and
+            INDI host/port, injected by the caller.
+
+        """
+        super().__init__()
+        self.config = config
+        # Created first: the client library can call back from its own
+        # thread as soon as the object exists, and the callbacks use it.
+        self.device_discovery = DeviceDiscovery(self)
+        self.sync_configuration()
+        self.device_map = {}
+        self._init_runtime_state()
+
         # Modular Controllers
         self.mount_controller = MountController(self)
         self.focuser_controller = FocuserController(self)
@@ -285,14 +308,6 @@ class IndiInterface(IndiClient):
         self.switch_controller = SwitchController(self)
         self.weather_controller = WeatherController()
         self.connection_manager = ConnectionManager(config.get_indi_host(), config.get_indi_port())
-        self.device_discovery = DeviceDiscovery(self)
-
-        # Fresh-client recovery (see `_reconnect`). The worker sets
-        # `supports_rebuild` when it can swap in a new client object.
-        self.supports_rebuild: bool = False
-        self.stale_client: bool = False
-        self._connection_loss_reported: bool = False
-        self._expected_disconnect: bool = False
 
         self._reset_status()
         # self._ensure_connection() is removed to prevent blocking startup.
@@ -337,13 +352,14 @@ class IndiInterface(IndiClient):
                 logger.debug("Failed to query device name on removeDevice: %s", e)
 
     def sync_configuration(self) -> None:
-        """Read the telescope hostname from the configuration again.
+        """Read the telescope host and INDI port from the configuration again.
 
-        Points the INDI client at that host. It does not reconnect; see
-        `reload_connection` for that.
+        Points the INDI client at that host and port (``indi_port`` in
+        ``[Observatory.Telescope]``, 7624 unless the settings say otherwise).
+        It does not reconnect; see `reload_connection` for that.
         """
         self.hostname = self.config.get_telescope_hostname()
-        self.setServer(self.hostname, 7624)
+        self.setServer(self.hostname, self.config.get_indi_port())
         if hasattr(self, "connection_manager"):
             self.connection_manager.hostname = self.hostname
 
@@ -398,7 +414,7 @@ class IndiInterface(IndiClient):
         if not self.connection_manager.is_host_resolvable(self.getHost(), self.getPort()):
             # Skips the client's own connect call, which would wait about five
             # seconds on the name lookup while holding the INDI worker.
-            logger.warning("No indiserver running on %s:%s", self.getHost(), self.getPort())
+            self._note_server_unreachable()
             self._reset_status()
             return None
 
@@ -408,10 +424,13 @@ class IndiInterface(IndiClient):
             self.setServer(connect_address, self.getPort())
 
         if not self.connectServer():
-            # Only print if we haven't already logged this recently
-            logger.warning("No indiserver running on %s:%s", self.getHost(), self.getPort())
+            self._note_server_unreachable()
             self._reset_status()
             return None
+
+        if self._server_unreachable_logged:
+            self._server_unreachable_logged = False
+            logger.info("The indiserver on %s:%s is reachable again.", self.getHost(), self.getPort())
 
         # Waiting for devices to be discovered
         # Loop for up to 2 seconds to allow devices to show up
@@ -547,6 +566,17 @@ class IndiInterface(IndiClient):
         else:
             logger.debug("INDI Server disconnected again (code %s)", code)
         self._reset_status()
+
+    def _note_server_unreachable(self) -> None:
+        """Log once, at info level, that the indiserver cannot be reached.
+
+        An offline telescope is a status, not an error, and the connection is
+        tried again on every poll, so only the first failure after a working
+        connection is logged.
+        """
+        if not self._server_unreachable_logged:
+            self._server_unreachable_logged = True
+            logger.info("No indiserver running on %s:%s", self.getHost(), self.getPort())
 
     def _reset_status(self) -> None:
         """Reset the status dictionary to default/disconnected state."""
@@ -1409,6 +1439,27 @@ class IndiInterface(IndiClient):
             "timestamp": data.get("timestamp"),
         }
 
+    def _can_handle_callbacks(self) -> bool:
+        """Tell whether this interface still takes property updates.
+
+        The client library calls back from its own thread, so an update can
+        arrive after the interface was closed (see `close_callbacks`).
+
+        Returns
+        -------
+        ready : `bool`
+            `False` once the interface has been closed.
+        """
+        return not vars(self).get("_callbacks_closed", False)
+
+    def close_callbacks(self) -> None:
+        """Ignore every property update from now on.
+
+        Call this before dropping the interface, so updates still in flight
+        from the client library's thread do no work.
+        """
+        self._callbacks_closed = True
+
     def newSwitch(self, switch_vector: Any) -> None:
         """Handle a switch property update from the INDI server.
 
@@ -1420,6 +1471,8 @@ class IndiInterface(IndiClient):
         switch_vector : `Any`
             Updated INDI switch property from the server.
         """
+        if not self._can_handle_callbacks():
+            return
         try:
             property_name = switch_vector.getName()
             if property_name == "ON_COORD_SET":
@@ -1453,6 +1506,8 @@ class IndiInterface(IndiClient):
         number_vector : `Any`
             Updated INDI number property from the server.
         """
+        if not self._can_handle_callbacks():
+            return
         try:
             property_name = number_vector.getName()
             if property_name in ("TELESCOPE_TIMED_GUIDE_NS", "TELESCOPE_TIMED_GUIDE_WE"):
@@ -1685,6 +1740,8 @@ class IndiInterface(IndiClient):
         text_vector : `Any`
             Updated INDI text property from the server.
         """
+        if not self._can_handle_callbacks():
+            return
         try:
             property_name = text_vector.getName()
             if property_name in ("FITS_HEADER", "OBJECT_INFO", "TARGET_NAME", "OBJECT_NAME"):
@@ -2049,7 +2106,9 @@ class IndiInterface(IndiClient):
         device : `PyIndi.BaseDevice` or `None`
             The main camera device, or `None` if none is found.
         """
-        return self.device_discovery.find_main_camera()
+        # Absent only while the object is being built or torn down.
+        discovery = vars(self).get("device_discovery")
+        return discovery.find_main_camera() if discovery is not None else None
 
     def capture_image(self, exposure_seconds: float) -> bool:
         """Take an exposure with the main camera.

@@ -37,6 +37,7 @@ import traceback
 import uuid
 from concurrent.futures import Future
 from multiprocessing import Queue
+from multiprocessing.connection import Connection
 from multiprocessing.process import BaseProcess
 from typing import Any
 
@@ -57,7 +58,13 @@ _STOP_SENTINEL = None
 """Placed on the command queue to tell the worker loop to exit cleanly."""
 
 
-def _worker_main(testing: bool, command_queue: Queue, result_queue: Queue, parent_pid: int) -> None:
+def _worker_main(
+    testing: bool,
+    command_queue: Queue,
+    result_queue: Queue,
+    parent_pid: int,
+    lifeline: Connection | None = None,
+) -> None:
     """Build the real INDI session and serve requests for it, in-process.
 
     Runs entirely inside the spawned worker process. Builds one session
@@ -86,6 +93,9 @@ def _worker_main(testing: bool, command_queue: Queue, result_queue: Queue, paren
         periodically so an orphaned worker (parent killed without a chance
         to signal shutdown) exits on its own instead of holding a telescope
         connection open forever.
+    lifeline : `multiprocessing.connection.Connection`, optional
+        The read end of a pipe whose write end only the backend holds. See
+        `serve_requests`.
     """
     session = None
     try:
@@ -106,7 +116,7 @@ def _worker_main(testing: bool, command_queue: Queue, result_queue: Queue, paren
         # every request gets back a clear "no session" error.
         logger.exception("INDI worker failed to build its session")
 
-    serve_requests(session, command_queue, result_queue, parent_pid)
+    serve_requests(session, command_queue, result_queue, parent_pid, lifeline)
 
 
 class RebuildingSession:
@@ -155,6 +165,7 @@ class RebuildingSession:
             return
         try:
             old._expected_disconnect = True
+            old.close_callbacks()
             old.disconnectServer()
         except INDI_ERRORS as close_error:
             # The old client is being dropped anyway, so closing it is best
@@ -200,7 +211,33 @@ class RebuildingSession:
         return _call
 
 
-def serve_requests(session: Any, command_queue: Queue, result_queue: Queue, parent_pid: int) -> None:
+def _lifeline_is_cut(lifeline: Connection) -> bool:
+    """Say whether the backend let go of the worker's lifeline.
+
+    Parameters
+    ----------
+    lifeline : `multiprocessing.connection.Connection`
+        The read end of the lifeline pipe.
+
+    Returns
+    -------
+    cut : `bool`
+        `True` when the other end was closed (end of file) or the pipe
+        failed. The backend never writes to it.
+    """
+    try:
+        return lifeline.poll(0)
+    except OSError, EOFError, ValueError:
+        return True
+
+
+def serve_requests(
+    session: Any,
+    command_queue: Queue,
+    result_queue: Queue,
+    parent_pid: int,
+    lifeline: Connection | None = None,
+) -> None:
     """Read requests and call them on `session` until told to stop.
 
     Separated from `_worker_main` so the request-serving loop itself --
@@ -217,9 +254,18 @@ def serve_requests(session: Any, command_queue: Queue, result_queue: Queue, pare
         As in `_worker_main`.
     parent_pid : `int`
         As in `_worker_main`.
+    lifeline : `multiprocessing.connection.Connection`, optional
+        The read end of a pipe whose only write end is held by the backend.
+        The loop ends as soon as the pipe reports anything: the backend
+        closed it (it stopped this worker), or the backend's process image
+        was replaced by an in-place restart (``os.execve`` closes the write
+        end but keeps the process id, so the parent id check cannot see it).
     """
     last_liveness_check = time.monotonic()
     while True:
+        if lifeline is not None and _lifeline_is_cut(lifeline):
+            logger.warning("INDI worker's lifeline to the backend was cut; exiting.")
+            return
         now = time.monotonic()
         if now - last_liveness_check >= _PARENT_LIVENESS_CHECK_SECONDS:
             last_liveness_check = now
@@ -287,7 +333,8 @@ class IndiWorkerClient:
             Overrides the worker process's entry point. Must be a
             module-level function (picklable by name, since the worker is
             spawned fresh) taking `(testing, command_queue, result_queue,
-            parent_pid)`, the same signature as the default, `_worker_main`.
+            parent_pid, lifeline)`, the same signature as the default,
+            `_worker_main`.
             Exists so tests can run the real IPC plumbing against a trivial
             stand-in session instead of real INDI hardware.
         """
@@ -300,6 +347,7 @@ class IndiWorkerClient:
         self._pending_lock = threading.Lock()
         self._restart_lock = threading.Lock()
         self._process: BaseProcess | None = None
+        self._lifeline_writer: Connection | None = None
         self._dispatch_thread: threading.Thread | None = None
         self._stopped = False
 
@@ -332,13 +380,21 @@ class IndiWorkerClient:
         )
         self._dispatch_thread.start()
 
+        # The lifeline: the worker gets the read end; only this process holds
+        # the write end, and it is not inherited by programs this process
+        # runs, so it closes when the backend stops the worker or replaces its
+        # own process image (an in-place restart).
+        if self._lifeline_writer is not None:
+            self._lifeline_writer.close()
+        lifeline_reader, self._lifeline_writer = self._context.Pipe(duplex=False)
         self._process = self._context.Process(
             target=self._worker_target,
-            args=(self._testing, self._command_queue, result_queue, os.getpid()),
+            args=(self._testing, self._command_queue, result_queue, os.getpid(), lifeline_reader),
             name="IndiWorker",
             daemon=True,
         )
         self._process.start()
+        lifeline_reader.close()
 
     def _dispatch_results(self, result_queue: Queue) -> None:
         """Resolve pending futures as responses arrive on `result_queue`.
@@ -488,6 +544,11 @@ class IndiWorkerClient:
                 if not future.done():
                     future.set_exception(HardwareError("INDI worker stopped.", retryable=False))
             self._pending.clear()
+        if self._lifeline_writer is not None:
+            # Closing it also tells a worker that missed the stop sentinel
+            # to exit.
+            self._lifeline_writer.close()
+            self._lifeline_writer = None
         if self._process is not None and not self._process.is_alive():
             self._process.close()
         self._process = None

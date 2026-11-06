@@ -32,6 +32,32 @@ from wayfindinglib.drivers.interfaces.remote_transfer_driver import RemoteTransf
 
 logger = logging.getLogger(__name__)
 
+_UNREACHABLE_MARKERS = (
+    "could not resolve hostname",
+    "timed out",
+    "connection refused",
+    "no route to host",
+    "name or service not known",
+    "temporary failure in name resolution",
+    "network is unreachable",
+    "host is down",
+    "connection timed out",
+    "connection closed by",
+    "connection reset by",
+    "kex_exchange_identification",
+)
+"""Parts of ssh error text that mean the telescope computer is unusable now.
+
+These are an expected state (the computer is off, the network is down, or ssh
+cannot run on this computer), so they set the offline status and are logged
+once at info level. ``kex_exchange_identification`` is what ssh prints when a
+connection opens and is dropped at once, for example in a sealed network.
+``permission denied (publickey)`` and ``bad owner or permissions`` are
+deliberately not listed: both are configuration errors (the login was refused,
+or ssh rejects the user's own config files), so they stay errors the user must
+see and fix.
+"""
+
 _RSYNC_BASE_OPTIONS = ("-avz", "--no-p", "--no-g", "--no-o", "-s")
 """Options every rsync transfer from the telescope computer uses."""
 
@@ -378,14 +404,13 @@ class StellarMateInterface(RemoteTransferDriver):
             self._update_connection_status(False, reason)
             raise ExternalServiceError(f"SSH/Command Failed: {reason}") from e
 
+        except FileNotFoundError as e:
+            self._update_connection_status(False, f"the ssh program was not found ({e})")
+            raise ExternalServiceError(f"SSH/Command Failed: {e}") from e
+
         except subprocess.CalledProcessError as e:
             err_msg = e.stderr.lower() if e.stderr else ""
-            is_conn_error = (
-                "could not resolve hostname" in err_msg
-                or "timed out" in err_msg
-                or "connection refused" in err_msg
-                or "no route to host" in err_msg
-            )
+            is_conn_error = any(marker in err_msg for marker in _UNREACHABLE_MARKERS)
 
             if is_conn_error:
                 self._update_connection_status(False, (e.stderr or "").strip())

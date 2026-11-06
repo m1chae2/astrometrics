@@ -12,6 +12,8 @@ vi.mock('../hooks/useStatusData', () => ({ useStatusData: vi.fn() }));
 vi.mock('../hooks/useSettingsModal', () => ({
   useSettingsModal: vi.fn(() => ({ open: false, closing: false, handleOpen: vi.fn(), handleClose: vi.fn() })),
 }));
+vi.mock('../ObservatorySourceChip', () => ({ ObservatorySourceChip: () => null }));
+
 vi.mock('../SettingsPanel', () => ({ SettingsPanel: () => <div /> }));
 vi.mock('../../common/context/AstrometricsContext', () => ({ useAstrometrics: vi.fn() }));
 

@@ -27,6 +27,7 @@ import {
 } from '../../common/services/imaging/stackReviewService';
 import { describeStackWarningTitle, describeWarningNumbers } from '../utils/stackWarnings';
 
+import { Skeleton } from '../../common/components/Skeleton';
 /** Which stack to summarize. */
 export type StackSummaryKind = 'imaging' | 'spectral';
 
@@ -118,7 +119,7 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
 
     if (!targetId) return null;
     if (isLoading) {
-        return <div className="stack-summary stack-summary--muted">Loading {label.toLowerCase()} summary...</div>;
+        return <Skeleton variant="keyValue" count={3} label={`Loading the ${label.toLowerCase()} summary`} />;
     }
     if (isError) {
         return (

@@ -4,12 +4,3 @@
     gap: 8px;
     margin-bottom: 12px;
 }
-
-/* A device button is a regular btn; a long device name is cut short with an ellipsis. */
-.indi-devices .btn {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    line-height: var(--button-height);
-}

@@ -28,7 +28,7 @@ export const IndiDevicePanel: React.FC<IndiDevicePanelProps> = ({
             <div id="indi-device-list" className="indi-devices">
                 <EmptyState
                     variant={isLoading ? 'loading' : 'empty'}
-                    message={isLoading ? 'Loading devices…' : 'No INDI devices connected.'}
+                    message={isLoading ? 'Loading devices' : 'No INDI devices connected.'}
                 />
             </div>
         );
@@ -41,6 +41,7 @@ export const IndiDevicePanel: React.FC<IndiDevicePanelProps> = ({
                     key={device}
                     id={`btn-indi-device-${device.replace(/\s+/g, '-')}`}
                     variant="secondary"
+                    truncate
                     pressed={selectedDevice === device}
                     onClick={() => onSelectDevice(device)}
                 >

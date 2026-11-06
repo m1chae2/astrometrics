@@ -18,6 +18,7 @@ import { useTargetPackage } from '../hooks/useTargetPackage';
 import { Button } from '../../common/components/Button';
 import { NumberInput } from '../../common/components/NumberInput';
 
+import { Skeleton } from '../../common/components/Skeleton';
 /** Props of the framing panel. */
 interface FramingPanelProps {
   /** The chosen target's name, or null when none is chosen. */
@@ -160,7 +161,7 @@ export const FramingPanel: React.FC<FramingPanelProps> = ({ targetName, center, 
 
       {center === null && <p className="framing-panel__state">Choose a target</p>}
       {center !== null && preview.isLoading && (
-        <p className="framing-panel__state" aria-busy="true">Loading…</p>
+        <Skeleton variant="keyValue" count={3} label="Loading the framing" />
       )}
       {center !== null && preview.isError && (
         <div className="framing-panel__state" role="alert">

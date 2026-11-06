@@ -1671,6 +1671,9 @@ class AppConfiguration:
     def get_phd2_remote_port(self) -> int:
         """Return the port PHD2's event server listens on, default 4400.
 
+        The port is on the observatory computer for ``"observatory"`` and on
+        this computer for ``"local"``.
+
         Returns
         -------
         port : `int`

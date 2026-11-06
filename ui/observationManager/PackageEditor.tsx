@@ -17,6 +17,7 @@ import { SectionPanel } from '../common/components/SectionPanel';
 import { ConfirmDialog } from '../common/components/ConfirmDialog';
 import { TabPanel, Tabs, type TabDefinition } from '../common/components/Tabs';
 import { EmptyState } from '../common/components/EmptyState';
+import { InfoButton } from '../common/components/InfoButton';
 import { useCommandAvailability } from '../common/hooks/useCommandAvailability';
 import { captureTestFrame } from '../common/services/imaging/captureService';
 import { emitToast } from '../common/utils/emitToast';
@@ -185,7 +186,11 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
             )}
             <div className="target-planner__top-row">
                 <div className="target-planner__left-column">
-                    <SectionPanel title="Image Planner" className="target-planner__planner">
+                    <SectionPanel
+                        title="Image Planner"
+                        className="target-planner__planner"
+                        headerContent={!availability.canCommand ? <InfoButton label="Why unavailable?" text={availability.reason} /> : undefined}
+                    >
                         {editedPackage ? (
                             <>
                                 <Tabs
@@ -234,12 +239,13 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
                             <span className="target-planner__header-actions">
                                 {isEditingQueueEntry ? (
                                     <>
-                                        <Button size="small" onClick={onCancelEdit}>
+                                        <Button size="small" fit onClick={onCancelEdit}>
                                             Cancel
                                         </Button>
                                         <Button
                                             variant="primary"
                                             size="small"
+                                            fit
                                             disabled={!canAdd}
                                             onClick={() => editedPackage && onAddToSequence(editedPackage)}
                                         >
@@ -250,6 +256,7 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
                                     <Button
                                         variant="primary"
                                         size="small"
+                                            fit
                                         disabled={!canAdd}
                                         onClick={() => editedPackage && onAddToSequence(editedPackage)}
                                     >
@@ -260,6 +267,7 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
                                     <Button
                                         variant="danger"
                                         size="small"
+                                            fit
                                         ref={deleteButtonRef}
                                         onClick={() => setIsConfirmingDelete(true)}
                                     >

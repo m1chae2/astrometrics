@@ -26,6 +26,10 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
     pressed?: boolean;
     /** Makes the button fill the width of its container. */
     fullWidth?: boolean;
+    /** Sizes the button to its text instead of the container width, and keeps the text on one line. */
+    fit?: boolean;
+    /** Cuts a long label short with an ellipsis. */
+    truncate?: boolean;
     /** Marks a hardware command button (telescope, guiding, INDI): sized to share a row. */
     control?: boolean;
     /** Shows that a command was sent and has not finished. Sets `aria-busy`. */
@@ -39,8 +43,8 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
  */
 export function buttonClassName({
     variant = 'default', size = 'regular', active = false, fullWidth = false, control = false,
-    pending = false, className = '',
-}: Pick<ButtonProps, 'variant' | 'size' | 'active' | 'fullWidth' | 'control' | 'pending' | 'className'>): string {
+    pending = false, fit = false, truncate = false, className = '',
+}: Pick<ButtonProps, 'variant' | 'size' | 'active' | 'fullWidth' | 'control' | 'pending' | 'fit' | 'truncate' | 'className'>): string {
     const classes: string[] = [];
     if (variant === 'ghost') {
         classes.push('btn-ghost');
@@ -55,6 +59,8 @@ export function buttonClassName({
         if (active) classes.push('btn--active');
         if (fullWidth) classes.push('btn--full-width');
         if (pending) classes.push('btn--pending');
+        if (fit) classes.push('btn--fit');
+        if (truncate) classes.push('btn--truncate');
     }
     if (className) classes.push(className);
     return classes.join(' ');
@@ -67,14 +73,14 @@ export function buttonClassName({
  * @return The button element.
  */
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(({
-    variant, size, active, pressed, fullWidth, control, pending, className, type = 'button', ...nativeProps
+    variant, size, active, pressed, fullWidth, control, pending, fit, truncate, className, type = 'button', ...nativeProps
 }, ref) => (
     <button
         {...nativeProps}
         ref={ref}
         type={type}
         className={buttonClassName({
-            variant, size, active: active || pressed === true, fullWidth, control, pending, className,
+            variant, size, active: active || pressed === true, fullWidth, control, pending, fit, truncate, className,
         })}
         aria-pressed={pressed === undefined ? nativeProps['aria-pressed'] : pressed}
         aria-busy={pending ? true : nativeProps['aria-busy']}

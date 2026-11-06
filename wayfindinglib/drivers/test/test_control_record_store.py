@@ -487,7 +487,7 @@ def test_data_versions_change_when_a_guiding_sample_is_added(store: ControlRecor
     assert before is not None
     assert after is not None
     assert after["guiding_samples"] != before["guiding_samples"]
-    assert after["guiding_runs"] == before["guiding_runs"] == (0, 0)
+    assert after["guiding_runs"] == before["guiding_runs"] == 0
 
 
 def test_data_versions_refuse_a_name_that_is_not_a_table_name(store: ControlRecordStore) -> None:

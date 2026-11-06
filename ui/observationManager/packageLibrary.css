@@ -91,14 +91,8 @@
 }
 
 /* The panel title stays on one line beside its two header buttons. */
-.package-library > .panel__header > span:first-child,
-.package-library__actions .btn {
+.package-library > .panel__header > span:first-child {
     white-space: nowrap;
-}
-
-.package-library__actions .btn {
-    padding-left: var(--space-1);
-    padding-right: var(--space-1);
 }
 
 /* Refresh suggestions sits at the top of the Suggested tab, above the cards it refreshes. */

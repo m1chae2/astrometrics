@@ -127,11 +127,12 @@ export const PackageLibraryPanel: React.FC<PackageLibraryPanelProps> = ({
             className="package-library"
             headerContent={
                 <span className="package-library__actions">
-                    <Button variant="primary" size="small" ref={newPackageButtonRef} onClick={() => setIsSearchOpen(true)}>
+                    <Button variant="primary" size="small" fit ref={newPackageButtonRef} onClick={() => setIsSearchOpen(true)}>
                         New package
                     </Button>
                     <Button
                         size="small"
+                        fit
                         onClick={onAddTarget}
                         title="Add a target that is not in the library yet, by name and coordinates. New package picks from targets already there."
                     >
@@ -174,7 +175,7 @@ export const PackageLibraryPanel: React.FC<PackageLibraryPanelProps> = ({
                             </div>
                         )}
                         <div className="package-library__list" ref={selectedTab === definition.id ? listRegionRef : undefined}>
-                            {isLoading && <EmptyState variant="loading" message="Loading…" />}
+                            {isLoading && <EmptyState variant="loading" message="Loading packages" />}
                             {!isLoading && error && (
                                 <div className="package-library__error" role="alert">
                                     <span>Could not load the package library.</span>

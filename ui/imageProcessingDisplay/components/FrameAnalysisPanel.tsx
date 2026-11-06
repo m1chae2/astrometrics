@@ -57,11 +57,15 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
       analysisResults, isProcessing, logLines, cancelProcessingJob, clearLogs,
       startProcessing, isAnalyzing, startAnalysis,
       jobHistory, loadingHistory, onSelectJob, targetActiveJobs, activeJobId,
-      openSiril
+      openSiril, requestJobHistory
     } = useImageProcessingContext();
 
   const { stats: calStats, loading: calLoading } = useCalibrationStats(reloadKey);
   const [activeAnalysisTab, setActiveAnalysisTab] = useState('data');
+  // The job history only shows on the Analysis tab, so it is read when that tab is first opened.
+  useEffect(() => {
+    if (activeAnalysisTab === 'analysis') requestJobHistory?.();
+  }, [activeAnalysisTab, requestJobHistory]);
   const [dataTabCamera, setDataTabCamera] = useState('All');
   const [lightStats, setLightStats] = useState<GroupedFrameStat[]>([]);
 

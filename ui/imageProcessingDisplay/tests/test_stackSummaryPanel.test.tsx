@@ -267,7 +267,7 @@ describe('StackSummaryPanel', () => {
     it('shows loading, then an error for other failures', async () => {
         answerWith({ 'processing:stack_summary': new Error('down') });
         renderPanel();
-        expect(screen.getByText(/Loading imaging stack summary/)).toBeTruthy();
+        expect(screen.getByText('Loading the imaging stack summary')).toBeTruthy();
         const alert = await screen.findByRole('alert');
         expect(alert.textContent).toContain('Could not load');
     });

@@ -193,7 +193,7 @@ export const CameraProfilesPanel: React.FC<CameraProfilesPanelProps> = ({ camera
 
     let profiles: React.ReactNode;
     if (loading) {
-        profiles = <QualityPanelState state="loading" />;
+        profiles = <QualityPanelState state="loading" loadingShape="rows" subject="camera profiles" />;
     } else if (error) {
         profiles = <QualityPanelState state="error" subject="camera profiles" onRetry={onRetry} />;
     } else if (cameras.length === 0) {

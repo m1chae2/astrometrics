@@ -131,7 +131,7 @@ You can also slew from the Planetarium. Right-click an object on the sky map and
 2. Wait until the status header reads Parked.
 3. To unpark later, click UNPARK.
 4. To halt a move at once, click STOP in the Manual Guide panel.
-5. If the main window is not in front, click the Astrometrics icon in the system tray and click Park in the panel that opens.
+5. If the main window is not in front, click the Astrometrics icon in the system tray and click Park in the menu that opens.
 
 **Result.** The mount stops or parks. If the tray Park fails, an error message tells you to park the mount by hand. Do that at once.
 

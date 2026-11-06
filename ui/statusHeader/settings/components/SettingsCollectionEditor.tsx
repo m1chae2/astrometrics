@@ -138,6 +138,7 @@ export const SettingsCollectionEditor: React.FC<SettingsCollectionEditorProps> =
                 />
                 <Button
                     variant="secondary"
+                    fit
                     onClick={handleAdd}
                     disabled={loadingConfig || !newName.trim()}
                 >

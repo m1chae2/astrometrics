@@ -55,6 +55,12 @@ def test_the_lifespan_starts_the_services_and_stops_them(monkeypatch: pytest.Mon
     monkeypatch.setattr(startup, "periodic_telemetry_loop", idle_loop)
     monkeypatch.setattr(startup, "warm_start_up_caches", lambda: calls.append("warm"))
     monkeypatch.setattr(startup, "warm_night_reviews", lambda: calls.append("warm_nights"))
+    # The lifespan also touches the shared settings, the job database and the
+    # storage mount. Those depend on what earlier tests left behind (settings
+    # paths, locked or removed folders), so they are stood in for here.
+    monkeypatch.setattr(main_backend, "close_interrupted_jobs", lambda configuration: calls.append("jobs"))
+    monkeypatch.setattr(main_backend, "require_mounted_storage", lambda *arguments: calls.append("storage"))
+    monkeypatch.setattr(main_backend.app_configuration, "watch_for_changes", lambda: calls.append("watch"))
 
     with TestClient(main_backend.app):
         assert calls[:2] == ["init", "attach"]

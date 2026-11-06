@@ -194,6 +194,63 @@ export default [
     },
   },
   {
+    // Style drift: every control comes from ui/common/components/, and colors
+    // come from CSS theme tokens. These rules apply to the app's .tsx files.
+    // The component folder itself is where the native elements are allowed
+    // (see ui/common/components/README.md, "Controls"). Tests and the ui/mcp
+    // tool server are not part of the app.
+    files: ['ui/**/*.tsx'],
+    ignores: [
+      'ui/common/components/**',
+      'ui/**/*.test.tsx',
+      'ui/**/tests/**',
+      'ui/mcp/**',
+    ],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "JSXOpeningElement[name.name=/^(button|input|select|textarea)$/]",
+          message:
+            'Do not write a raw <button>, <input>, <select> or <textarea>. Use Button, TextInput, NumberInput, Checkbox, Slider, FileInput or PopoverSelect from ui/common/components.',
+        },
+        {
+          selector: "JSXAttribute[name.name='className'] Literal[value=/(^|\\s)btn(-|\\s|$)/]",
+          message: 'Do not build a button class by hand. Use <Button variant size> from ui/common/components.',
+        },
+        {
+          selector: "JSXAttribute[name.name='className'] TemplateElement[value.raw=/(^|\\s)btn(-|\\s|$)/]",
+          message: 'Do not build a button class by hand. Use <Button variant size> from ui/common/components.',
+        },
+        {
+          selector: "JSXText[value=/Loading[^\\n]*(\\.\\.\\.|…)/]",
+          message:
+            'Do not write "Loading..." text. Show <Skeleton> (or PanelBody / EmptyState variant="loading") from ui/common/components so every panel loads the same way.',
+        },
+        {
+          selector: "JSXAttribute > Literal[value=/^Loading[^\\n]*(\\.\\.\\.|…)/]",
+          message:
+            'Do not write "Loading..." text. Show <Skeleton> (or PanelBody / EmptyState variant="loading") from ui/common/components so every panel loads the same way.',
+        },
+        {
+          selector: "JSXExpressionContainer Literal[value=/^Loading[^\\n]*(\\.\\.\\.|…)/]",
+          message:
+            'Do not write "Loading..." text. Show <Skeleton> (or PanelBody / EmptyState variant="loading") from ui/common/components so every panel loads the same way.',
+        },
+        {
+          selector:
+            "JSXAttribute[name.name='style'] Property[key.name=/^(color|background|backgroundColor|borderColor|fill|stroke)$/] > Literal[value=/^(#|rgb|hsl)/]",
+          message: 'No inline colors. Use a CSS class that takes its color from a theme token (ui/common/styles/theme.css).',
+        },
+        {
+          selector:
+            "JSXAttribute[name.name='style'] Property[key.name=/^(color|background|backgroundColor|borderColor|fill|stroke)$/] > TemplateLiteral > TemplateElement:first-child[value.raw=/^(#|rgb|hsl)/]",
+          message: 'No inline colors. Use a CSS class that takes its color from a theme token (ui/common/styles/theme.css).',
+        },
+      ],
+    },
+  },
+  {
     // The Electron shell runs in Node.js. Its files are ES modules (package.json
     // sets "type": "module"), except preload.js, which Electron loads as a
     // CommonJS script and which uses `require`.

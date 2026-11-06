@@ -45,7 +45,7 @@ The shell is the *main process*: the one Node.js program that owns the app. Its 
 | `ipc_handlers.js` | Answers those calls in the main process |
 | `figure_target.js` | Decides what a plot window may open |
 | `python_terminal_manager.js` | Runs the Python terminal, and pauses it when the screen locks |
-| `tray_window.js`, `window_state.js` | The tray popover, and saved window size and position |
+| `tray_menu.js`, `window_state.js` | The tray icon menu, and saved window size and position |
 | `platforms/` | The differences between Linux, macOS and Windows |
 
 ### Start-up
@@ -64,7 +64,7 @@ The backend listens on port 5000 unless `ASTROMETRICS_PORT` names another port.
 - **Main window.** Holds the whole app. Every view is mounted at start-up.
 - **Display windows.** Each view can open in its own window, for a second monitor. The URL carries `?mode=<view>&windowId=<number>`, and the window shows only that view.
 - **Figure windows.** Hold a Matplotlib plot from the Python terminal. `figure_target.js` lets a figure window open only the backend's own `/figure/<number>` page or a PNG file in the backend's scratch folder. The backend sends each figure's size in pixels, and the window opens big enough for the figure and its toolbar, but no bigger than the screen.
-- **Tray popover.** A small window beside the tray icon. It is a second page of the same build, `ui/tray_popover.html`, with its code in `ui/trayPopover/`.
+- **Tray menu.** The tray icon opens a native menu that the desktop draws under the icon. `tray_menu.js` fills it with the mount status, the workspace list and Park, Open App and Quit, and refreshes the status every five seconds through `backend_client.js`.
 
 ### The bridge between a window and the shell
 
@@ -86,7 +86,7 @@ Each view lives in its own folder.
 | Observatory Manager | `ui/observatoryManager/` |
 | Observation Manager | `ui/observationManager/` |
 
-Other folders hold the title bar (`ui/titleBar/`), the status header with the settings panel (`ui/statusHeader/`) and the tray popover (`ui/trayPopover/`). The list of views and the setting that turns each on or off live in `ui/common/constants/displayFlags.ts`.
+Other folders hold the title bar (`ui/titleBar/`) and the status header with the settings panel (`ui/statusHeader/`). The list of views and the setting that turns each on or off live in `ui/common/constants/displayFlags.ts`.
 
 `ui/common/` holds everything shared: components, hooks, services, queries, contexts and types. The shared components in `ui/common/components/` are described in [its README](https://github.com/m1chae2/astrometrics/blob/main/ui/common/components/README.md). Its files must not import from any other top-level `ui/` folder. ESLint enforces this, so a shared file never depends on one view.
 

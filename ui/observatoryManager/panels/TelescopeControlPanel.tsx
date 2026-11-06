@@ -2,10 +2,10 @@
  * @file TelescopeControlPanel.tsx
  * @description The Telescope Control panel. It holds everything that starts
  * alignment, tracking, guiding or parking, together with the limits that can
- * stop them, on five tabs: "Controls" (the alignment, tracking and park
- * buttons), "Alignment" (its
- * settings), "Guiding" (its settings and the Start and Stop buttons),
- * "Altitude" and "Hour angle" (the limits, one shared form and Apply button). One "Why unavailable?"
+ * stop them, on three tabs: "Mount" (the alignment, tracking and park
+ * buttons), "Manual" (the Telescope direction pad and slew speed, and the Focuser) and "Limits" (four
+ * short sections: Alignment and Guiding settings, then the Altitude and Hour
+ * angle limits with one shared form and Apply button). One "Why unavailable?"
  * button in the header explains why the controls are greyed, and every tab
  * greys its live controls the same way. The tabs follow the WAI-ARIA tab
  * pattern. The settings values live in the parent, so they survive a tab switch.
@@ -16,16 +16,16 @@ import { SectionPanel } from '../../common/components/SectionPanel';
 import { TabPanel, Tabs, type TabDefinition } from '../../common/components/Tabs';
 import { CommandGate, WhyUnavailableButton } from '../CommandGate';
 import { TelescopeControl } from './TelescopeControl';
+import { DirectionalControl, DEFAULT_SLEW_RATE } from './DirectionalControl';
+import { FocuserControl } from './FocuserControl';
 import { TrackingSettings } from './TrackingSettings';
 import { LimitSettings, useSafetyLimitsForm } from './LimitSettings';
 
-/** The five tabs of the panel, in order. */
+/** The three tabs of the panel, in order. */
 const TELESCOPE_CONTROL_TABS: TabDefinition[] = [
-    { id: 'controls', label: 'Controls' },
-    { id: 'alignment', label: 'Alignment' },
-    { id: 'guiding', label: 'Guiding' },
-    { id: 'altitude', label: 'Altitude' },
-    { id: 'hour-angle', label: 'Hour angle' },
+    { id: 'controls', label: 'Mount' },
+    { id: 'manual', label: 'Manual' },
+    { id: 'limits', label: 'Limits' },
 ];
 
 /** Prefix that keeps the tab element ids unique on the page. */
@@ -41,6 +41,12 @@ export interface TelescopeControlPanelProps {
     onStopAlignment?: () => void;
     isAligningActive?: boolean;
 
+    // Manual slew (the direction pad on the Manual tab)
+    onStartMove: (direction: string) => void;
+    onStopMove: (direction: string) => void;
+    onSetSlewRate: (rate: number) => void;
+    onStop: () => void;
+
     // Alignment settings
     accuracy?: number;
     settleTime?: number;
@@ -52,8 +58,6 @@ export interface TelescopeControlPanelProps {
     guidingGain?: number;
     onGuidingExposureChange?: (value: number) => void;
     onGuidingGainChange?: (value: number) => void;
-    onGuideStart?: (exposure: number, gain: number) => void;
-    onGuideStop?: () => void;
 
     /** True when the app may not command the equipment. The live controls are then greyed out. */
     commandsDisabled?: boolean;
@@ -62,7 +66,7 @@ export interface TelescopeControlPanelProps {
 }
 
 /**
- * The Telescope Control panel with its five tabs.
+ * The Telescope Control panel with its three tabs.
  * @param props See {@link TelescopeControlPanelProps}.
  * @return The panel.
  */
@@ -75,6 +79,10 @@ export const TelescopeControlPanel: React.FC<TelescopeControlPanelProps> = ({
     onStartAlignment,
     onStopAlignment,
     isAligningActive = false,
+    onStartMove,
+    onStopMove,
+    onSetSlewRate,
+    onStop,
     accuracy,
     settleTime,
     onAccuracyChange,
@@ -83,13 +91,18 @@ export const TelescopeControlPanel: React.FC<TelescopeControlPanelProps> = ({
     guidingGain,
     onGuidingExposureChange,
     onGuidingGainChange,
-    onGuideStart,
-    onGuideStop,
     commandsDisabled = false,
     commandsDisabledReason = '',
 }) => {
     const [selectedTab, setSelectedTab] = useState('controls');
-    // One form for both limit tabs, so an unsaved edit survives a tab switch.
+    // The slew rate lives here, so the slider keeps it when the Manual tab is closed and opened.
+    const [slewRate, setSlewRate] = useState<number>(DEFAULT_SLEW_RATE);
+    /** Remembers the chosen rate and passes it on to the mount. */
+    const handleSlewRateChange = (rate: number): void => {
+        setSlewRate(rate);
+        onSetSlewRate(rate);
+    };
+    // One form for both limit sections, so an unsaved edit survives a tab switch.
     const limitsForm = useSafetyLimitsForm(commandsDisabled);
 
     /**
@@ -114,8 +127,6 @@ export const TelescopeControlPanel: React.FC<TelescopeControlPanelProps> = ({
                     guidingGain={guidingGain}
                     onGuidingExposureChange={onGuidingExposureChange}
                     onGuidingGainChange={onGuidingGainChange}
-                    onGuideStart={onGuideStart}
-                    onGuideStop={onGuideStop}
                 />
             )}
         />
@@ -133,7 +144,7 @@ export const TelescopeControlPanel: React.FC<TelescopeControlPanelProps> = ({
                 onChange={setSelectedTab}
                 ariaLabel="Telescope control groups"
                 idPrefix={TELESCOPE_CONTROL_TABS_ID_PREFIX}
-                size="compact"
+                className="telescope-control-tabs"
             />
             <TabPanel idPrefix={TELESCOPE_CONTROL_TABS_ID_PREFIX} tabId="controls" selected={selectedTab === 'controls'}>
                 <CommandGate disabled={commandsDisabled} reason={commandsDisabledReason}>
@@ -150,17 +161,41 @@ export const TelescopeControlPanel: React.FC<TelescopeControlPanelProps> = ({
                     />
                 </CommandGate>
             </TabPanel>
-            <TabPanel idPrefix={TELESCOPE_CONTROL_TABS_ID_PREFIX} tabId="alignment" selected={selectedTab === 'alignment'}>
-                {renderSettings('alignment')}
+            <TabPanel idPrefix={TELESCOPE_CONTROL_TABS_ID_PREFIX} tabId="manual" selected={selectedTab === 'manual'}>
+                <CommandGate disabled={commandsDisabled} reason={commandsDisabledReason}>
+                    <div className="manual-tab">
+                        <section className="manual-tab__section" aria-labelledby="manual-telescope-heading">
+                            <h4 id="manual-telescope-heading" className="limits-tab__heading">Telescope</h4>
+                            <DirectionalControl
+                                disabled={commandsDisabled}
+                                onStartMove={onStartMove}
+                                onStopMove={onStopMove}
+                                slewRate={slewRate}
+                                onSetSlewRate={handleSlewRateChange}
+                                onStop={onStop}
+                            />
+                        </section>
+                        <section className="manual-tab__section" aria-labelledby="manual-focuser-heading">
+                            <h4 id="manual-focuser-heading" className="limits-tab__heading">Focuser</h4>
+                            <FocuserControl active={selectedTab === 'manual'} disabled={commandsDisabled} />
+                        </section>
+                    </div>
+                </CommandGate>
             </TabPanel>
-            <TabPanel idPrefix={TELESCOPE_CONTROL_TABS_ID_PREFIX} tabId="guiding" selected={selectedTab === 'guiding'}>
-                {renderSettings('guiding')}
-            </TabPanel>
-            <TabPanel idPrefix={TELESCOPE_CONTROL_TABS_ID_PREFIX} tabId="altitude" selected={selectedTab === 'altitude'}>
-                <LimitSettings form={limitsForm} group="altitude" disabled={commandsDisabled} reason={commandsDisabledReason} />
-            </TabPanel>
-            <TabPanel idPrefix={TELESCOPE_CONTROL_TABS_ID_PREFIX} tabId="hour-angle" selected={selectedTab === 'hour-angle'}>
-                <LimitSettings form={limitsForm} group="hour-angle" disabled={commandsDisabled} reason={commandsDisabledReason} />
+            <TabPanel idPrefix={TELESCOPE_CONTROL_TABS_ID_PREFIX} tabId="limits" selected={selectedTab === 'limits'}>
+                <div className="limits-tab">
+                    <section className="limits-tab__section" aria-labelledby="limits-alignment-heading">
+                        <h4 id="limits-alignment-heading" className="limits-tab__heading">Alignment</h4>
+                        {renderSettings('alignment')}
+                    </section>
+                    <section className="limits-tab__section" aria-labelledby="limits-guiding-heading">
+                        <h4 id="limits-guiding-heading" className="limits-tab__heading">Guiding</h4>
+                        {renderSettings('guiding')}
+                    </section>
+                    <section className="limits-tab__section limits-tab__section--wide">
+                        <LimitSettings form={limitsForm} group="all" disabled={commandsDisabled} reason={commandsDisabledReason} />
+                    </section>
+                </div>
             </TabPanel>
         </SectionPanel>
     );

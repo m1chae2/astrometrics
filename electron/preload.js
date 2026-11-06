@@ -100,6 +100,25 @@ const api = {
 		},
 
 		/**
+		 * Ask whether the user is looking at the app.
+		 * @returns {Promise<'present' | 'away'>}
+		 */
+		getPresence() {
+			return ipcRenderer.invoke('presence-get');
+		},
+
+		/**
+		 * Subscribe to changes of the presence answer.
+		 * @param {function('present' | 'away'): void} callback
+		 * @returns {function(): void} Call to unsubscribe.
+		 */
+		onPresenceChange(callback) {
+			const handler = (_event, state) => callback(state);
+			ipcRenderer.on('presence-changed', handler);
+			return () => ipcRenderer.removeListener('presence-changed', handler);
+		},
+
+		/**
 		 * Show a native notification.
 		 * @param {string} title
 		 * @param {string} body
@@ -321,29 +340,6 @@ const api = {
 			return ipcRenderer.invoke('open-figure-window', target);
 		}
 	},
-	tray: {
-		/**
-		 * Send a quick action from the tray popover to the main process.
-		 * Supported actions: 'park', 'navigate', 'open-app', 'quit'.
-		 * @param {string} action Action identifier.
-		 * @param {Object} [payload] Optional action-specific payload (e.g. { mode: 'Planetarium' }).
-		 */
-		sendAction(action, payload) {
-			ipcRenderer.send('tray-popover-action', { action, payload });
-		},
-
-		/**
-		 * Subscribe to visibility changes of the tray popover window.
-		 * Used to pause background animations and timers when hidden.
-		 * @param {Function} callback (isVisible: boolean) => void
-		 * @returns {Function} Unsubscribe function
-		 */
-		onVisibilityChange(callback) {
-			const handler = (_event, isVisible) => callback(isVisible);
-			ipcRenderer.on('tray-visibility-changed', handler);
-			return () => ipcRenderer.removeListener('tray-visibility-changed', handler);
-		}
-	},
 	terminal: {
 		/**
 		 * Execute Python script in supervised terminal environment.
@@ -412,7 +408,6 @@ Object.freeze(api);
 Object.freeze(api.app);
 Object.freeze(api.window);
 Object.freeze(api.dialog);
-Object.freeze(api.tray);
 Object.freeze(api.terminal);
 
 contextBridge.exposeInMainWorld('astrometrics', api);

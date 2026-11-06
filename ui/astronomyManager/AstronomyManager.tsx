@@ -20,6 +20,7 @@ import { Tabs } from '../common/components/Tabs';
 import { Button } from '../common/components/Button';
 
 /** localStorage key under which Planetarium (and the image viewer) hand a star to this panel. */
+import { useHandoffConsumer } from '../common/utils/displayHandoffStore';
 const HANDED_OFF_STAR_KEY = 'planetariumSelectedStar';
 
 /**
@@ -128,18 +129,12 @@ export const AstronomyManager: React.FC = () => {
   }, []);
 
   // Picks up a star handed off from Planetarium's "Open in Astronomy Manager"
-  // action while this panel is already mounted. The `?star=`/localStorage
-  // read above only runs once, on this component's first mount, so a panel
-  // that was visited earlier in the session needs this live event to react
-  // to a later hand-off instead of missing it.
-  useEffect(() => {
-    const handleSelectStar = (event: Event) => {
-      const starId = (event as CustomEvent<string>).detail;
-      if (starId) setPendingId(starId);
-    };
-    window.addEventListener('astrometrics:astronomySelectStar', handleSelectStar);
-    return () => window.removeEventListener('astrometrics:astronomySelectStar', handleSelectStar);
-  }, []);
+  // action. The request waits in the hand-off store, so it also arrives when
+  // this display was hidden or paused at the moment it was sent. (The
+  // `?star=`/localStorage read above only runs once, on first mount.)
+  useHandoffConsumer<string>('Astronomy Manager', 'astronomySelectStar', (starId) => {
+    if (starId) setPendingId(starId);
+  });
 
   /** Callback triggered when a new spectrum is successfully loaded into the viewer. */
   const handleLoaded = useCallback((id: string) => {
@@ -211,7 +206,13 @@ export const AstronomyManager: React.FC = () => {
   // timestamps in place after switching to a star with entirely
   // different ones, so every point got filtered out of both plots even
   // though the new star had real data.
+  // Reset the time range when the star's timestamps change. It does not reset when
+  // a paused (hidden) display starts again with the same timestamps, so the range
+  // the user chose stays.
+  const rangeResetForTimestampsRef = React.useRef<typeof availableTimestamps | null>(null);
   useEffect(() => {
+    if (rangeResetForTimestampsRef.current === availableTimestamps) return;
+    rangeResetForTimestampsRef.current = availableTimestamps;
     setStartIdx(0);
     setEndIdx(Math.max(0, availableTimestamps.length - 1));
     setSelectedTimestamps(new Set(availableTimestamps));
@@ -255,7 +256,7 @@ export const AstronomyManager: React.FC = () => {
           onFilterTextChange={targetBrowser.setFilterText}
           filterPlaceholder="Search targets..."
           isLoading={targetBrowser.isLoading}
-          loadingMessage="Loading targets…"
+          loadingMessage="Loading targets"
           emptyMessage="No targets found."
           isError={targetBrowser.isError}
           errorMessage="Could not load the targets."
@@ -301,7 +302,7 @@ export const AstronomyManager: React.FC = () => {
           </>
         }
         isLoading={starList.isLoading}
-        loadingMessage="Loading stars…"
+        loadingMessage="Loading stars"
         emptyMessage="No stars found for this selection."
         isError={starList.isError}
         errorMessage="Could not load the stars."

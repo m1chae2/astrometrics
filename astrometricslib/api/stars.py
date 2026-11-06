@@ -60,9 +60,9 @@ class StellarCatalog:
 
         Returns
         -------
-        version : `int`
-            The number of star catalog writes this process has made. It is
-            0 before the first write.
+        version : `int` or `None`
+            The number of star catalog writes counted. It is 0 before the
+            first write. `None` when the count cannot be read at the moment.
         """
         return self._catalog_access.get_dataset_version("stellar_catalog")
 

@@ -5,8 +5,8 @@
   flex-direction: column;
   height: 100%;
   width: 100%;
-  background-color: var(--cmd-bg-darkest, #141414);
-  color: var(--text-primary, #eaeaea);
+  background-color: var(--cmd-bg-darkest, var(--cmd-bg-darkest));
+  color: var(--text-primary, var(--text-primary));
   overflow: hidden;
   box-sizing: border-box;
   font-family: var(--font-family-base);
@@ -22,7 +22,7 @@
 
 /* Resizable panel dividers */
 .console-resize-handle {
-  background-color: var(--term-border, #2e2e2e);
+  background-color: var(--term-border, var(--term-border));
   transition: background-color 0.15s ease;
   position: relative;
   z-index: 10;
@@ -30,7 +30,7 @@
 
 .console-resize-handle:hover,
 .console-resize-handle[data-resize-handle-state="drag"] {
-  background-color: var(--adwaita-blue-light, #3584e4);
+  background-color: var(--adwaita-blue-light, var(--adwaita-blue-light));
 }
 
 .console-resize-handle--vertical {
@@ -49,7 +49,7 @@
   flex-direction: column;
   height: 100%;
   width: 100%;
-  background-color: var(--cmd-bg-dark, #181818);
+  background-color: var(--cmd-bg-dark, var(--term-bg-dark));
   overflow: hidden;
   box-sizing: border-box;
 }
@@ -59,8 +59,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 6px 12px;
-  background-color: var(--cmd-bg-medium, #1e1e1e);
-  border-bottom: 1px solid var(--term-border, #2e2e2e);
+  background-color: var(--cmd-bg-medium, var(--term-bg-medium));
+  border-bottom: 1px solid var(--term-border, var(--term-border));
   font-size: var(--panel-header-size, 13px);
   font-weight: 600;
   user-select: none;
@@ -71,7 +71,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--text-light, #eee);
+  color: var(--text-light, var(--text-light));
 }
 
 .console-panel__actions {
@@ -92,12 +92,12 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  border-right: 1px solid var(--term-border, #2e2e2e);
+  border-right: 1px solid var(--term-border, var(--term-border));
 }
 
 /* The tab strip sits on a darker bar and keeps the shared underline-tab look. */
 .console-sidebar__tabs {
-  background-color: var(--cmd-bg-medium, #1e1e1e);
+  background-color: var(--cmd-bg-medium, var(--term-bg-medium));
 }
 
 /* In the right-hand panel header the header's own border is the line under the tabs. */
@@ -117,35 +117,35 @@
   display: flex;
   flex-direction: column;
   padding: 8px 10px;
-  border-radius: 4px;
-  background-color: var(--cmd-bg-medium, #1e1e1e);
+  border-radius: var(--radius-sm);
+  background-color: var(--cmd-bg-medium, var(--term-bg-medium));
   border: 1px solid transparent;
   cursor: pointer;
   transition: background-color 0.15s, border-color 0.15s;
 }
 
 .console-sidebar__item:hover {
-  background-color: var(--cmd-bg-light, #252526);
-  border-color: var(--term-border, #2e2e2e);
+  background-color: var(--cmd-bg-light, var(--term-bg-light));
+  border-color: var(--term-border, var(--term-border));
 }
 
 .console-sidebar__item--active {
-  background-color: rgba(53, 132, 228, 0.15);
-  border-color: var(--adwaita-blue-light, #3584e4);
+  background-color: color-mix(in srgb, var(--adwaita-blue-light) 15%, transparent);
+  border-color: var(--adwaita-blue-light, var(--adwaita-blue-light));
 }
 
 .console-sidebar__item-title {
-  font-size: 13px;
+  font-size: var(--compact-font-size);
   font-weight: 500;
-  color: var(--text-primary, #eaeaea);
+  color: var(--text-primary, var(--text-primary));
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
 .console-sidebar__item-sub {
-  font-size: 11px;
-  color: var(--text-dim, #aaa);
+  font-size: var(--small-font-size);
+  color: var(--text-dim, var(--text-dim));
   margin-top: 3px;
   white-space: nowrap;
   overflow: hidden;
@@ -163,26 +163,26 @@
 .workspace-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--section-label-size);
   font-family: var(--font-family-mono);
 }
 
 .workspace-table th {
   position: sticky;
   top: 0;
-  background-color: var(--cmd-bg-medium, #1e1e1e);
-  color: var(--text-dim, #aaa);
+  background-color: var(--cmd-bg-medium, var(--term-bg-medium));
+  color: var(--text-dim, var(--text-dim));
   text-align: left;
   padding: 6px 8px;
   font-weight: 600;
-  border-bottom: 1px solid var(--term-border, #2e2e2e);
+  border-bottom: 1px solid var(--term-border, var(--term-border));
   z-index: 2;
 }
 
 .workspace-table td {
   padding: 5px 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  color: var(--text-primary, #eaeaea);
+  border-bottom: 1px solid color-mix(in srgb, var(--white) 5%, transparent);
+  color: var(--text-primary, var(--text-primary));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -190,11 +190,11 @@
 }
 
 .workspace-table tr:hover td {
-  background-color: var(--cmd-bg-light, #252526);
+  background-color: var(--cmd-bg-light, var(--term-bg-light));
 }
 
 .workspace-table tr.pinned td {
-  color: var(--term-cyan, #33c7de);
+  color: var(--term-cyan, var(--ubuntu-cyan));
 }
 
 /* Code Editor */
@@ -202,7 +202,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background-color: var(--term-bg-dark, #181818);
+  background-color: var(--term-bg-dark, var(--term-bg-dark));
 }
 
 .code-editor-toolbar {
@@ -210,8 +210,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 6px 12px;
-  background-color: var(--cmd-bg-medium, #1e1e1e);
-  border-bottom: 1px solid var(--term-border, #2e2e2e);
+  background-color: var(--cmd-bg-medium, var(--term-bg-medium));
+  border-bottom: 1px solid var(--term-border, var(--term-border));
 }
 
 /* REPL Terminal */
@@ -219,24 +219,24 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background-color: #0d1117;
+  background-color: var(--cmd-bg-darkest);
   font-family: var(--font-family-mono);
-  font-size: 13px;
-  color: var(--term-fg, #cccccc);
+  font-size: var(--compact-font-size);
+  color: var(--term-fg, var(--text-dark));
 }
 
 .terminal-banner {
   padding: 12px 14px;
-  background-color: rgba(36, 74, 112, 0.25);
-  border-bottom: 1px solid rgba(53, 132, 228, 0.3);
-  font-size: 12px;
+  background-color: color-mix(in srgb, var(--adwaita-blue) 25%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--adwaita-blue-light) 30%, transparent);
+  font-size: var(--section-label-size);
   line-height: 1.5;
-  color: var(--term-fg-bright, #ffffff);
+  color: var(--term-fg-bright, var(--white));
 }
 
 .terminal-banner__title {
   font-weight: 700;
-  color: var(--term-cyan, #33c7de);
+  color: var(--term-cyan, var(--ubuntu-cyan));
   margin-bottom: 4px;
 }
 
@@ -245,7 +245,7 @@
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 4px;
   margin-top: 6px;
-  font-size: 11px;
+  font-size: var(--small-font-size);
 }
 
 .terminal-toolbar {
@@ -253,7 +253,7 @@
   justify-content: flex-end;
   gap: 8px;
   padding: 6px 14px;
-  border-bottom: 1px solid var(--term-border, #2e2e2e);
+  border-bottom: 1px solid var(--term-border, var(--term-border));
 }
 
 .terminal-history {
@@ -276,36 +276,36 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  color: var(--term-yellow, #f6d32d);
+  color: var(--term-yellow, var(--status-yellow));
 }
 
 .terminal-entry__prompt {
   user-select: none;
-  color: var(--adwaita-blue-light, #3584e4);
+  color: var(--adwaita-blue-light, var(--adwaita-blue-light));
 }
 
 .terminal-entry__badge {
   display: inline-block;
-  background-color: rgba(51, 199, 222, 0.2);
-  color: var(--term-cyan, #33c7de);
-  border: 1px solid var(--term-cyan, #33c7de);
-  font-size: 10px;
+  background-color: color-mix(in srgb, var(--ubuntu-cyan) 20%, transparent);
+  color: var(--term-cyan, var(--ubuntu-cyan));
+  border: 1px solid var(--term-cyan, var(--ubuntu-cyan));
+  font-size: var(--tiny-font-size);
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   margin-right: 4px;
 }
 
 .terminal-entry__stdout {
   white-space: pre-wrap;
   word-break: break-all;
-  color: var(--term-fg, #cccccc);
+  color: var(--term-fg, var(--text-dark));
   padding-left: 18px;
 }
 
 .terminal-entry__stderr {
   white-space: pre-wrap;
   word-break: break-all;
-  color: #ff6b6b;
+  color: var(--btn-red-pending);
   padding-left: 18px;
 }
 
@@ -314,23 +314,23 @@
   flex-wrap: wrap;
   gap: 6px;
   padding: 6px 14px;
-  background-color: var(--cmd-bg-medium, #1e1e1e);
-  border-top: 1px solid var(--term-border, #2e2e2e);
+  background-color: var(--cmd-bg-medium, var(--term-bg-medium));
+  border-top: 1px solid var(--term-border, var(--term-border));
 }
 
 .terminal-completions__item {
   font-family: var(--font-family-mono);
-  font-size: 12px;
-  color: var(--term-cyan, #4ec9b0);
-  background-color: var(--cmd-bg-dark, #181818);
-  border: 1px solid var(--term-border, #2e2e2e);
-  border-radius: 3px;
+  font-size: var(--section-label-size);
+  color: var(--term-cyan, var(--success-green));
+  background-color: var(--cmd-bg-dark, var(--term-bg-dark));
+  border: 1px solid var(--term-border, var(--term-border));
+  border-radius: var(--radius-sm);
   padding: 2px 6px;
   cursor: pointer;
 }
 
 .terminal-completions__item:hover {
-  background-color: var(--cmd-bg-light, #2a2a2a);
+  background-color: var(--cmd-bg-light, var(--background-secondary));
 }
 
 .terminal-input-bar {
@@ -338,12 +338,12 @@
   align-items: center;
   gap: 8px;
   padding: 8px 14px;
-  background-color: var(--cmd-bg-medium, #1e1e1e);
-  border-top: 1px solid var(--term-border, #2e2e2e);
+  background-color: var(--cmd-bg-medium, var(--term-bg-medium));
+  border-top: 1px solid var(--term-border, var(--term-border));
 }
 
 .terminal-input-bar__prompt {
-  color: var(--adwaita-blue-light, #3584e4);
+  color: var(--adwaita-blue-light, var(--adwaita-blue-light));
   font-weight: 700;
   user-select: none;
 }
@@ -358,8 +358,8 @@
   border: none;
   box-shadow: none;
   font-family: var(--font-family-mono);
-  font-size: 13px;
-  color: var(--term-fg-bright, #ffffff);
+  font-size: var(--compact-font-size);
+  color: var(--term-fg-bright, var(--white));
 }
 
 /* Documentation Viewer */
@@ -368,7 +368,7 @@
   height: 100%;
   width: 100%;
   overflow-y: auto;
-  background-color: var(--cmd-bg-dark, #181818);
+  background-color: var(--cmd-bg-dark, var(--term-bg-dark));
 }
 
 .doc-viewer {
@@ -377,32 +377,32 @@
   margin: 0 auto;
   padding: 24px 32px;
   line-height: 1.7;
-  color: var(--text-lighter, #ddd);
-  font-size: 14px;
+  color: var(--text-lighter, var(--text-lighter));
+  font-size: var(--control-font-size);
   box-sizing: border-box;
 }
 
 .doc-viewer h1 {
-  font-size: 24px;
-  color: var(--text-primary, #ffffff);
-  border-bottom: 1px solid var(--term-border, #2e2e2e);
+  font-size: var(--title-font-size);
+  color: var(--text-primary, var(--white));
+  border-bottom: 1px solid var(--term-border, var(--term-border));
   padding-bottom: 8px;
   margin-top: 12px;
   margin-bottom: 16px;
 }
 
 .doc-viewer h2 {
-  font-size: 18px;
-  color: var(--text-primary, #eaeaea);
-  border-bottom: 1px solid var(--term-border, #2e2e2e);
+  font-size: var(--large-font-size);
+  color: var(--text-primary, var(--text-primary));
+  border-bottom: 1px solid var(--term-border, var(--term-border));
   padding-bottom: 6px;
   margin-top: 24px;
   margin-bottom: 12px;
 }
 
 .doc-viewer h3 {
-  font-size: 15px;
-  color: var(--text-primary, #eaeaea);
+  font-size: var(--panel-header-size);
+  color: var(--text-primary, var(--text-primary));
   margin-top: 20px;
   margin-bottom: 8px;
 }
@@ -412,35 +412,35 @@
 }
 
 .doc-viewer a {
-  color: var(--adwaita-blue-light, #3584e4);
+  color: var(--adwaita-blue-light, var(--adwaita-blue-light));
   text-decoration: none;
   cursor: pointer;
-  border-bottom: 1px dotted rgba(53, 132, 228, 0.4);
+  border-bottom: 1px dotted color-mix(in srgb, var(--adwaita-blue-light) 40%, transparent);
   transition: all 0.15s ease;
 }
 
 .doc-viewer a:hover {
-  color: #62a0ea;
-  border-bottom-color: #62a0ea;
+  color: var(--term-blue);
+  border-bottom-color: var(--term-blue);
   text-decoration: underline;
 }
 
 .doc-viewer code {
-  background-color: var(--cmd-bg-medium, #1e1e1e);
+  background-color: var(--cmd-bg-medium, var(--term-bg-medium));
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-family: var(--font-family-mono);
-  font-size: 12px;
-  color: var(--term-cyan, #33c7de);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: var(--section-label-size);
+  color: var(--term-cyan, var(--ubuntu-cyan));
+  border: 1px solid color-mix(in srgb, var(--white) 8%, transparent);
 }
 
 .doc-viewer pre {
-  background-color: var(--cmd-bg-darkest, #121212);
+  background-color: var(--cmd-bg-darkest, var(--cmd-bg-darkest));
   padding: 14px 16px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   overflow-x: auto;
-  border: 1px solid var(--term-border, #2e2e2e);
+  border: 1px solid var(--term-border, var(--term-border));
   margin: 14px 0;
 }
 
@@ -448,7 +448,7 @@
   background-color: transparent;
   padding: 0;
   border: none;
-  color: var(--text-light, #f0f0f0);
+  color: var(--text-light, var(--text-light));
 }
 
 .doc-viewer ul,
@@ -462,25 +462,25 @@
 }
 
 .doc-viewer blockquote {
-  border-left: 4px solid var(--adwaita-blue, #1c71d8);
+  border-left: 4px solid var(--adwaita-blue, var(--accent-blue));
   margin: 16px 0;
   padding: 8px 16px;
-  background-color: rgba(28, 113, 216, 0.08);
-  border-radius: 0 4px 4px 0;
+  background-color: color-mix(in srgb, var(--accent-blue) 8%, transparent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
 
 .doc-admonition {
-  border-left: 4px solid var(--adwaita-blue-light, #3584e4);
-  background-color: rgba(53, 132, 228, 0.08);
-  border-radius: 0 6px 6px 0;
+  border-left: 4px solid var(--adwaita-blue-light, var(--adwaita-blue-light));
+  background-color: color-mix(in srgb, var(--adwaita-blue-light) 8%, transparent);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
   padding: 12px 16px;
   margin: 16px 0;
 }
 
 .doc-admonition__title {
   font-weight: 600;
-  font-size: 13px;
-  color: var(--adwaita-blue-light, #3584e4);
+  font-size: var(--compact-font-size);
+  color: var(--adwaita-blue-light, var(--adwaita-blue-light));
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 6px;
@@ -490,33 +490,33 @@
   width: 100%;
   border-collapse: collapse;
   margin: 16px 0;
-  font-size: 13px;
+  font-size: var(--compact-font-size);
 }
 
 .doc-viewer th,
 .doc-viewer td {
   padding: 8px 12px;
-  border: 1px solid var(--term-border, #2e2e2e);
+  border: 1px solid var(--term-border, var(--term-border));
   text-align: left;
 }
 
 .doc-viewer th {
-  background-color: var(--cmd-bg-medium, #1e1e1e);
-  color: var(--text-primary, #ffffff);
+  background-color: var(--cmd-bg-medium, var(--term-bg-medium));
+  color: var(--text-primary, var(--white));
   font-weight: 600;
 }
 
 .doc-viewer tr:nth-child(even) td {
-  background-color: rgba(255, 255, 255, 0.02);
+  background-color: color-mix(in srgb, var(--white) 2%, transparent);
 }
 
 /* The documentation filter box in the console sidebar: a dark, compact entry field. */
 .console-sidebar__list .console-sidebar__filter {
   height: auto;
   padding: 5px 8px;
-  font-size: 11px;
-  background: var(--cmd-bg-dark, #181818);
-  border: 1px solid var(--term-border, #333);
-  border-radius: 3px;
-  color: var(--text-primary, #fff);
+  font-size: var(--small-font-size);
+  background: var(--cmd-bg-dark, var(--term-bg-dark));
+  border: 1px solid var(--term-border, var(--text-darkest));
+  border-radius: var(--radius-sm);
+  color: var(--text-primary, var(--white));
 }

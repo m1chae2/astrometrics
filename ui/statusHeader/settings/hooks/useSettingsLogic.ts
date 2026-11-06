@@ -228,6 +228,7 @@ export const useSettingsLogic = (open: boolean, closing: boolean, onClose: () =>
         controllerModeEnabled, isChangingControlMode, handleSetControlMode,
         configData, loadingConfig,
         handleConfigChange,
+        hasUnsavedChanges: Object.keys(configPatch).length > 0,
         handleSaveBackend,
         handleRevertBackend,
         isReindexing, reindexingStatus, reindexingProgress, handleReindex,

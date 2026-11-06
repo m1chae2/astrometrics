@@ -19,6 +19,8 @@ interface Window {
       toggleSecondaryWindow: (enable: boolean) => void;
       onSecondaryWindowClosed: (callback: (event: any, ...args: any[]) => void) => () => void;
       showNotification: (title: string, body: string, options?: { urgency?: 'normal' | 'critical'; tag?: string; silent?: boolean; timeoutType?: 'default' | 'never'; actions?: string[] }) => void;
+      getPresence?: () => Promise<'present' | 'away'>;
+      onPresenceChange?: (callback: (state: 'present' | 'away') => void) => () => void;
       updateTrayStatus: (status: { mountStatus?: string; activeTarget?: string; activeMode?: string }) => void;
       setPowerSaveBlocker: (enable: boolean) => void;
       onNavigateMode: (callback: (mode: string) => void) => () => void;
@@ -59,14 +61,6 @@ interface Window {
       onOutput: (callback: (chunk: { stdout?: string; stderr?: string }) => void) => () => void;
       onFigure: (callback: (plotPath: string) => void) => () => void;
       onWorkspaceUpdated: (callback: (workspace: any[]) => void) => () => void;
-    };
-    tray: {
-      /**
-       * Dispatch a quick action from the tray popover to the Electron main process.
-       * @param action - 'park' | 'navigate' | 'open-app' | 'quit'
-       * @param payload - Optional action-specific payload, e.g. { mode: 'Planetarium' }
-       */
-      sendAction: (action: string, payload?: Record<string, string>) => void;
     };
   };
 }

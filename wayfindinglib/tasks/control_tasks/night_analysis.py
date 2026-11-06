@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from wayfindinglib.analytics import capture_history
+from wayfindinglib.analytics.data_versions import review_data_version
 from wayfindinglib.analytics.envelope_assembly import (
     NightGuidingBaseline,
     assemble_performance_envelope,
@@ -25,7 +26,6 @@ from wayfindinglib.analytics.envelope_assembly import (
     read_capture_frames,
 )
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
-from wayfindinglib.tasks.control_tasks.review_versions import review_data_version
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence

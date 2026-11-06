@@ -91,6 +91,26 @@ describe('callBackend error handling', () => {
 });
 
 describe('presentBackendError', () => {
+  /** A missing frame shows only its file name; the full path goes to the console. */
+  it('shortens a not-found file path to the file name', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const error = new BackendError({
+      code: 'not_found',
+      message: 'Frame not found: /home/michael/.local/share/lib/M 13/Apertura 75Q/M_13_Light_028.fits',
+    });
+    expect(presentBackendError(error).text).toBe("Couldn't open M_13_Light_028.fits");
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  /** Another message with a path keeps its words and loses the folders. */
+  it('cuts other file paths down to the file name', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const error = new BackendError({ code: 'storage', message: 'Cannot write /var/data/my stacks/out.fits today.' });
+    expect(presentBackendError(error).text).toBe('Cannot write out.fits today.');
+    warn.mockRestore();
+  });
+
   /** An internal error shows the backend's sentence, which holds the request id. */
   it('shows the message of an internal error unchanged', () => {
     const error = new BackendError({ code: 'internal', message: 'An internal error occurred. Reference: r1.' });
@@ -98,5 +118,25 @@ describe('presentBackendError', () => {
       text: 'An internal error occurred. Reference: r1.',
       kind: 'error',
     });
+  });
+
+  /** A background read that fails because a device is unreachable shows no toast; the status chip shows it. */
+  it('shows no toast when a background read finds a service unreachable', async () => {
+    const toast = vi.spyOn(toastModule, 'emitToast').mockImplementation(() => {});
+    global.fetch = errorReply({ code: 'external_service', message: 'Observatory computer unreachable.' });
+
+    await callBackend('plan:current_session' as any, {} as any).catch(() => {});
+
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  /** An action the user asked for still shows its error when a service is unreachable. */
+  it('still shows a toast when a user action finds a service unreachable', async () => {
+    const toast = vi.spyOn(toastModule, 'emitToast').mockImplementation(() => {});
+    global.fetch = errorReply({ code: 'external_service', message: 'Observatory computer unreachable.' });
+
+    await callBackend('telescope:park' as any, {} as any).catch(() => {});
+
+    expect(toast).toHaveBeenCalledTimes(1);
   });
 });

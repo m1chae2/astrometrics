@@ -7,7 +7,7 @@
  * measured says so and gives the reason. A target with no previous stack says that instead.
  */
 import React from 'react';
-import { LoadingSpinner } from '../../common/components/LoadingSpinner';
+import { UpdatingBar } from '../../common/components/Skeleton';
 import {
     stackComparisonReportOf,
     startStackComparison,
@@ -17,6 +17,7 @@ import {
 import { useReviewJob } from '../hooks/useReviewJob';
 import { Button } from '../../common/components/Button';
 
+import { Skeleton } from '../../common/components/Skeleton';
 interface StackComparisonControlProps {
     /** The target whose stack to compare. */
     targetId: string;
@@ -73,8 +74,9 @@ export const StackComparisonControl: React.FC<StackComparisonControlProps> = ({ 
             <div className="stack-comparison__status" role="status" aria-live="polite">
                 {busy && (
                     <span>
-                        <LoadingSpinner size={12} /> Measuring both stacks. If a stack must be plate solved,
+                        Measuring both stacks. If a stack must be plate solved,
                         this can take about ten minutes.
+                        <UpdatingBar label="Measuring both stacks" inline />
                     </span>
                 )}
                 {report && !report.comparison && (

@@ -54,15 +54,14 @@ The status header stays on screen in every view. It shows the state of the mount
 
 A window narrower than 820 pixels hides CAM, ALT, AZ, temperature and humidity.
 
-### Tray panel
+### Tray menu
 
-The Astrometrics icon in the system tray opens a small panel. Click the icon again to close it.
+The Astrometrics icon in the system tray opens a menu under the icon. The first lines show the observatory, the mount status, the target and where the mount points. They update about every five seconds.
 
 | Item | What it does |
 | --- | --- |
-| Mount | Shows the tracking status, or Disconnected |
-| RA / Dec and Alt / Az | Show where the mount points |
-| Workspaces buttons | Switch the main window to Image Viewer, Astronomy Manager, Planetarium, Image Processing, Observatory or Observation Mgr |
+| Status lines | Show the observatory, the mount (or Disconnected), the target, RA/Dec and Alt/Az. They cannot be clicked |
+| Workspace items | Switch the main window to Image Viewer, Astronomy Manager, Planetarium, Image Processing, Observatory or Observation Mgr |
 | Park | Sends the park command to the mount at once. If it fails, an error message tells you to park the mount by hand |
 | Open App | Brings the main window forward |
 | Quit | Quits Astrometrics |

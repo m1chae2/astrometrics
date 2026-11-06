@@ -74,14 +74,6 @@
     align-items: center;
 }
 
-.target-planner__header-actions .btn {
-    white-space: nowrap;
-}
-
-.btn--full-width {
-    width: 100%;
-}
-
 .image-planner__action-fill {
     flex: 1;
 }
@@ -115,7 +107,7 @@
     text-align: center;
     padding: 20px;
     font-style: italic;
-    font-size: 13px;
+    font-size: var(--compact-font-size);
 }
 
 /* Target Details Grid */
@@ -146,12 +138,12 @@
 }
 
 .planner-list__coords {
-    font-size: 11px;
+    font-size: var(--small-font-size);
     color: var(--text-muted);
 }
 
 .planner-list__desc {
-    font-size: 11px;
+    font-size: var(--small-font-size);
     color: var(--text-muted);
 }
 
@@ -164,9 +156,9 @@
     background: none;
     border: none;
     cursor: pointer;
-    font-size: 16px;
+    font-size: var(--base-font-size);
     padding: 4px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     transition: all 0.2s;
     display: flex;
     align-items: center;
@@ -178,7 +170,7 @@
 }
 
 .planner-list__btn--edit:hover {
-    background: rgba(59, 130, 246, 0.1);
+    background: color-mix(in srgb, var(--accent-blue) 10%, transparent);
 }
 
 .planner-list__btn--remove {
@@ -186,7 +178,7 @@
 }
 
 .planner-list__btn--remove:hover {
-    background: rgba(239, 68, 68, 0.1);
+    background: color-mix(in srgb, var(--danger-red) 10%, transparent);
 }
 
 /* Image Planner Sidebar Section */
@@ -321,11 +313,11 @@
 .calibration-camera-select select {
     flex: 1;
     height: 32px;
-    font-size: 13px;
+    font-size: var(--compact-font-size);
 }
 
 .calibration-camera-select label {
-    font-size: 13px;
+    font-size: var(--compact-font-size);
     color: var(--text-muted);
 }
 
@@ -343,7 +335,7 @@
 .calibration-header {
     font-weight: 600;
     color: var(--text-bright);
-    font-size: 13px;
+    font-size: var(--compact-font-size);
     border-bottom: 1px solid var(--border-color);
     padding-bottom: 4px;
     margin-bottom: 4px;
@@ -353,14 +345,14 @@
     max-height: 120px;
     overflow-y: auto;
     border: 1px solid var(--border-color);
-    border-radius: 4px;
-    background: rgba(0, 0, 0, 0.1);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--black) 10%, transparent);
 }
 
 .calibration-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 12px;
+    font-size: var(--section-label-size);
 }
 
 .calibration-table th {
@@ -373,7 +365,7 @@
 
 .calibration-table td {
     padding: 2px 4px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid color-mix(in srgb, var(--white) 5%, transparent);
     color: var(--text-bright);
 }
 
@@ -386,8 +378,8 @@
     display: flex;
     justify-content: space-between;
     padding: 4px 8px;
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 4px;
+    background: color-mix(in srgb, var(--black) 20%, transparent);
+    border-radius: var(--radius-sm);
 }
 
 .calibration-summary-item {
@@ -398,13 +390,13 @@
 
 .calibration-label {
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: var(--compact-font-size);
 }
 
 .calibration-value {
     color: var(--text-bright);
     font-weight: 600;
-    font-size: 13px;
+    font-size: var(--compact-font-size);
 }
 
 .no-data {
@@ -412,7 +404,7 @@
     font-style: italic;
     text-align: center;
     padding: 12px;
-    font-size: 13px;
+    font-size: var(--compact-font-size);
 }
 
 .last-image-viewer {
@@ -430,9 +422,9 @@
 
 .last-image-viewer__container {
     width: 100%;
-    background: rgba(0, 0, 0, 0.4);
+    background: color-mix(in srgb, var(--black) 40%, transparent);
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -462,11 +454,11 @@
 .last-image-viewer__status {
     color: var(--text-muted);
     font-style: italic;
-    font-size: 13px;
+    font-size: var(--compact-font-size);
 }
 
 .last-image-viewer__footer {
-    font-size: 11px;
+    font-size: var(--small-font-size);
     color: var(--text-muted);
     text-align: center;
     padding-top: 2px;

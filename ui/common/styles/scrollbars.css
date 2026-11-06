@@ -1,7 +1,7 @@
 /* GNOME Adwaita Overlay Scrollbars */
 :root {
-  --scroll-thumb: rgba(255, 255, 255, 0.2);
-  --scroll-thumb-hover: rgba(255, 255, 255, 0.4);
+  --scroll-thumb: color-mix(in srgb, var(--white) 20%, transparent);
+  --scroll-thumb-hover: color-mix(in srgb, var(--white) 40%, transparent);
   --scroll-track: transparent;
   --scroll-width: 8px;
 }
@@ -39,7 +39,7 @@
 
 *::-webkit-scrollbar-thumb {
   background-color: var(--scroll-thumb);
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   border: 2px solid transparent;
   background-clip: content-box;
   transition: background-color 0.25s ease;

@@ -10,7 +10,8 @@
  * equipment. The inputs stay readable when greyed.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Skeleton } from '../../common/components/Skeleton';
 import { Checkbox } from '../../common/components/Checkbox';
 import { NumberInput } from '../../common/components/NumberInput';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -73,7 +74,8 @@ function limitsFromFormValues(values: LimitFormValues): Record<string, number | 
 /** The id of the hidden text that says why Apply is greyed. */
 const APPLY_REASON_ID = 'limit-settings-apply-reason';
 
-export type LimitGroup = 'altitude' | 'hour-angle';
+/** Which limits a body shows: one group, or `all` for the Limits tab (altitude, then hour angle). */
+export type LimitGroup = 'altitude' | 'hour-angle' | 'all';
 
 /** Everything the two limit tabs share: the read, the form, the save and its messages. */
 export interface SafetyLimitsForm {
@@ -110,8 +112,12 @@ export function useSafetyLimitsForm(disabled: boolean): SafetyLimitsForm {
     const [showEkosCopyNote, setShowEkosCopyNote] = useState(false);
 
     // Reset the form whenever a new read arrives.
+    // Fill the form when the telescope's data changes. It is not refilled when a
+    // paused (hidden) display starts again with the same data, so unsaved edits stay.
+    const filledFromTelescopeRef = useRef<typeof telescope | null>(null);
     useEffect(() => {
-        if (telescope) {
+        if (telescope && filledFromTelescopeRef.current !== telescope) {
+            filledFromTelescopeRef.current = telescope;
             setValues(formValuesFromTelescope(telescope));
         }
     }, [telescope]);
@@ -170,8 +176,8 @@ export interface LimitSettingsProps {
 }
 
 /**
- * The body of the Altitude limits tab or the Hour angle limits tab. Both show
- * the telescope name and the same Apply button, which saves the whole form.
+ * The altitude and hour angle limits of the Limits tab (or one of them alone).
+ * It shows the telescope name and one Apply button, which saves the whole form.
  * @param props See {@link LimitSettingsProps}.
  * @return The tab body.
  */
@@ -179,7 +185,7 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({ form, group, disab
     const { telescopeQuery, telescope, values, refusal, showEkosCopyNote, hasChanged, numbersValid, applyDisabled, update, handleApply } = form;
 
     if (telescopeQuery.isPending) {
-        return <p aria-busy="true">Loading…</p>;
+        return <Skeleton variant="keyValue" count={3} label="Loading the safety limits" />;
     }
     if (telescopeQuery.isError) {
         return (
@@ -195,8 +201,18 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({ form, group, disab
 
     const applyButton = (
         <div className="limit-settings__footer">
+            {group === 'all' && <span className="limit-settings__telescope">Telescope: {telescope.name}</span>}
+            {(hasChanged || !numbersValid) && (
+                <p className="limit-settings__hint">
+                    {hasChanged && <span>Unsaved changes</span>}
+                    {hasChanged && !numbersValid && ' '}
+                    {!numbersValid && <span>Enter a number in every field.</span>}
+                </p>
+            )}
+            {disabled && <span id={APPLY_REASON_ID} className="command-gate__reason">{reason}</span>}
             <Button
                 size="small"
+                fit
                 className="limit-settings__apply"
                 onClick={handleApply}
                 disabled={applyDisabled}
@@ -206,14 +222,6 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({ form, group, disab
             >
                 Apply safety limits
             </Button>
-            {(hasChanged || !numbersValid) && (
-                <p className="limit-settings__hint">
-                    {hasChanged && <span>Unsaved changes</span>}
-                    {hasChanged && !numbersValid && ' '}
-                    {!numbersValid && <span>Enter a number in every field.</span>}
-                </p>
-            )}
-            {disabled && <span id={APPLY_REASON_ID} className="command-gate__reason">{reason}</span>}
         </div>
     );
 
@@ -224,10 +232,11 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({ form, group, disab
             renderChildren={(reasonId) => {
                 const unavailable = { 'aria-describedby': disabled ? reasonId : undefined };
                 return (
-                    <div id="safety-limits-group" className="controls__group limit-settings">
-                        <p className="limit-settings__telescope">Telescope: {telescope.name}</p>
-                        {group === 'altitude' && (
+                    <div id="safety-limits-group" className={`controls__group limit-settings${group === 'all' ? ' limit-settings--all' : ''}`}>
+                        {group !== 'all' && <p className="limit-settings__telescope">Telescope: {telescope.name}</p>}
+                        {(group === 'altitude' || group === 'all') && (
                     <div className="limit-settings__rows">
+                        {group === 'all' && <h4 className="limit-settings__heading">Altitude</h4>}
                         <Checkbox
                             className="limit-settings__checkbox"
                             id="checkbox-enable-alt-limits"
@@ -243,6 +252,7 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({ form, group, disab
                                     id="input-limit-min-alt"
                                     step="0.01"
                                     width="short"
+                                    size="small"
                                     centered
                                     value={values.minimumAltitude}
                                     onChange={(event) => update({ minimumAltitude: event.target.value })}
@@ -255,6 +265,7 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({ form, group, disab
                                     id="input-limit-max-alt"
                                     step="0.01"
                                     width="short"
+                                    size="small"
                                     centered
                                     value={values.maximumAltitude}
                                     onChange={(event) => update({ maximumAltitude: event.target.value })}
@@ -265,8 +276,9 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({ form, group, disab
                         </div>
                     </div>
                         )}
-                        {group === 'hour-angle' && (
+                        {(group === 'hour-angle' || group === 'all') && (
                     <div className="limit-settings__rows">
+                        {group === 'all' && <h4 className="limit-settings__heading">Hour angle</h4>}
                         <Checkbox
                             className="limit-settings__checkbox"
                             id="checkbox-enable-ha-limits"
@@ -282,6 +294,7 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({ form, group, disab
                                     id="input-limit-max-ha"
                                     step="0.01"
                                     width="short"
+                                    size="small"
                                     centered
                                     value={values.maximumHourAngle}
                                     onChange={(event) => update({ maximumHourAngle: event.target.value })}
@@ -294,6 +307,7 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({ form, group, disab
                                     id="input-meridian-flip-ha"
                                     step="0.01"
                                     width="short"
+                                    size="small"
                                     centered
                                     value={values.flipHourAngle}
                                     onChange={(event) => update({ flipHourAngle: event.target.value })}
@@ -307,7 +321,7 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({ form, group, disab
                         {refusal && (
                             <div role="alert" id="limit-settings-refusal" className="limit-settings__refusal">
                                 <span>{refusal}</span>
-                                <Button onClick={form.clearRefusal}>Dismiss</Button>
+                                <Button fit onClick={form.clearRefusal}>Dismiss</Button>
                             </div>
                         )}
                         {showEkosCopyNote && <p id="limit-settings-ekos-note" className="limit-settings__hint">{EKOS_COPY_WARNING}</p>}

@@ -89,7 +89,7 @@ describe('DepthGoalRow', () => {
     it('shows loading, then an error', async () => {
         answerBackend(() => new Promise((_, reject) => setTimeout(() => reject(new Error('down')), 30)));
         renderRow();
-        expect(await screen.findByText(/Loading depth goal/)).toBeTruthy();
+        expect(await screen.findByText('Loading the depth goal')).toBeTruthy();
         const alert = await screen.findByRole('alert');
         expect(alert.textContent).toContain('Could not load');
     });
@@ -97,7 +97,7 @@ describe('DepthGoalRow', () => {
     it('reads no depth goal and shows nothing for a star that is not in the library', async () => {
         answerBackend(() => baseStatus);
         const { container } = renderRow('HIP 48113');
-        await vi.waitFor(() => expect(callBackendMock).toHaveBeenCalledWith('target:get_targets', {}));
+        await vi.waitFor(() => expect(callBackendMock).toHaveBeenCalledWith('target:get_targets', { detail: 'summary' }));
         // Give the row a chance to react to the loaded list before checking.
         await new Promise((resolve) => setTimeout(resolve, 50));
         expect(callBackendMock.mock.calls.some(([action]) => String(action).startsWith('advisory:'))).toBe(false);

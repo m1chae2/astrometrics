@@ -66,46 +66,60 @@ export type PlotNodeLike = {
   removeEventListener?: (ev: string, cb: (e: unknown) => void) => void;
 };
 
-export async function loadPlotly(): Promise<PlotlyStatic> {
-  // Plotly is loaded via <script> tag in index.html to avoid massive build times
-  // with Vite/Rollup transforming the minified bundle.
-  // We wait for it to be available on window.
-  // public/js/plotly.min.js is a copy of node_modules/plotly.js-dist-min/plotly.min.js.
-  // When you upgrade the npm package, copy the new file over too
-  // (test_plotlyAttributes checks that the two versions match).
+/** Where the app's own copy of Plotly is served from (a copy of the npm package's file). */
+export const PLOTLY_SCRIPT_URL = 'js/plotly.min.js';
 
+/** The one load of Plotly in progress or finished, so every chart shares it. */
+let plotlyLoadPromise: Promise<PlotlyStatic> | null = null;
+
+/**
+ * Loads Plotly the first time a chart needs it, and reuses it after that.
+ *
+ * Plotly is a 4.8 MB file, so it is not in index.html, where it would block the
+ * app from starting. We add one `<script>` tag when the first chart asks. The
+ * file is not bundled with Vite because that made builds very slow.
+ * `public/js/plotly.min.js` is a copy of
+ * `node_modules/plotly.js-dist-min/plotly.min.js`. When you upgrade the npm
+ * package, copy the new file over too (test_plotlyAttributes checks that the
+ * two versions match).
+ *
+ * @return The Plotly library.
+ * @throws Error if the script file cannot be loaded.
+ */
+export function loadPlotly(): Promise<PlotlyStatic> {
   if (typeof window === 'undefined') {
-    throw new Error('loadPlotly can only be run in a browser environment');
+    return Promise.reject(new Error('loadPlotly can only be run in a browser environment'));
   }
 
+  // Already there, for example set by a test or by an earlier load.
   if ((window as any).Plotly) {
-    console.info('Plotly loaded from global window object (cached).');
-    return (window as any).Plotly;
+    return Promise.resolve((window as any).Plotly);
   }
 
-  // Poll for it just in case it's racing (unlikely with header script)
-  console.info('Waiting for Plotly to be available on window object...');
-  return new Promise((resolve, reject) => {
-    let retries = 0;
-    const interval = setInterval(() => {
-      if (typeof window === 'undefined') {
-        clearInterval(interval);
-        reject(new Error('Window environment torn down before Plotly loaded.'));
-        return;
-      }
+  if (plotlyLoadPromise) return plotlyLoadPromise;
+
+  plotlyLoadPromise = new Promise<PlotlyStatic>((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = PLOTLY_SCRIPT_URL;
+    script.async = true;
+    script.onload = () => {
       if ((window as any).Plotly) {
-        clearInterval(interval);
-        console.info(`Plotly loaded successfully after ${retries * 100}ms.`);
         resolve((window as any).Plotly);
+      } else {
+        plotlyLoadPromise = null;
+        script.remove();
+        reject(new Error('Plotly loaded but did not define window.Plotly.'));
       }
-      retries++;
-      if (retries > 50) { // 5 seconds
-        clearInterval(interval);
-        console.error('Plotly failed to load from global window object after 5 seconds.');
-        reject(new Error('Plotly failed to load from global window object.'));
-      }
-    }, 100);
+    };
+    script.onerror = () => {
+      // Forget the failure so a later chart can try again.
+      plotlyLoadPromise = null;
+      script.remove();
+      reject(new Error(`Could not load the charting library from ${PLOTLY_SCRIPT_URL}.`));
+    };
+    document.head.appendChild(script);
   });
+  return plotlyLoadPromise;
 }
 
 export const getVar = (name: string, fallback: string) => {

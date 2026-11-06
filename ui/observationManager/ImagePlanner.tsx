@@ -11,7 +11,6 @@ import { PlanItem } from './context/PlanningContext';
 import { filterLabel } from './packageModel';
 import { FilterType } from '../common/types/backendTypes';
 import { PopoverSelect } from '../common/components/PopoverSelect';
-import { InfoButton } from '../common/components/InfoButton';
 import { ControlColumn, ParameterRow } from '../common/components/ControlLayoutComponents';
 import '../common/styles/panels.css';
 import { Button } from '../common/components/Button';
@@ -35,7 +34,7 @@ interface ImagePlannerProps {
     // Controlled props
     values?: ImageConfig;
     onChange?: (values: ImageConfig) => void;
-    /** Why Test image is unavailable (shown beside the button), or null when it may run. Omit for always available. */
+    /** Why Test image is unavailable (shown as the button's hover text; the panel header explains it), or null when it may run. Omit for always available. */
     testImageUnavailableReason?: string | null;
     /**
      * The observatory's filters as the library names them (`system:filters`), such as "Luminance" or
@@ -233,9 +232,6 @@ export const ImagePlanner: React.FC<ImagePlannerProps> = ({
                 >
                     Test Image
                 </Button>
-                {testImageUnavailableReason && (
-                    <InfoButton label="Why unavailable?" text={testImageUnavailableReason} />
-                )}
             </div>
         </div >
     );

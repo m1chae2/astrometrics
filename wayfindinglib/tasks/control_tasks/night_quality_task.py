@@ -15,7 +15,8 @@ the science library, the recorded guiding runs and Ekos sessions, and the
 configuration. It asks the mount for nothing, starts no job and copies no log.
 Nothing is written to disk. The finished review is kept in memory, in the
 context's review cache, until the data behind it change (see
-`review_versions`), so opening the same night again is fast.
+`wayfindinglib.analytics.data_versions`), so opening the same night again
+is fast.
 
 The inputs (site, references, sky models, frame observations) come from the
 shared builder, ``library_inputs``, the same one the target report and
@@ -53,6 +54,7 @@ from astrometricslib.reports import (
     QualityMeasurement,
     SubjectLevel,
 )
+from wayfindinglib.analytics.data_versions import review_data_version
 from wayfindinglib.analytics.result_quality.aggregates import DataSummary, SetAsideInput, night_summary
 from wayfindinglib.analytics.result_quality.allowed_capture_values import filter_names_match
 from wayfindinglib.analytics.result_quality.efficiency import (
@@ -99,7 +101,6 @@ from wayfindinglib.models.session.night_quality import (
     NightTargetQuality,
 )
 from wayfindinglib.tasks.control_tasks import night_analysis
-from wayfindinglib.tasks.control_tasks.review_versions import review_data_version
 
 if TYPE_CHECKING:
     from wayfindinglib.api.control.context import ControlContext

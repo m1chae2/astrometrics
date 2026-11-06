@@ -20,6 +20,8 @@ interface Props {
   imageUrl?: string | null;
   /** Optional Blob of the image data (a stretched FITS file or a picture). */
   imageBlob?: Blob | null;
+  /** Small preview picture shown while the full FITS image loads. */
+  previewBlob?: Blob | null;
   /** Whether the image is currently loading. */
   loading?: boolean;
   /** Error message if image loading failed. */
@@ -39,6 +41,7 @@ interface Props {
 export const TargetViewerManager: React.FC<Props> = ({
   imageUrl,
   imageBlob,
+  previewBlob,
   loading,
   error,
   selectedTarget,
@@ -64,6 +67,8 @@ export const TargetViewerManager: React.FC<Props> = ({
           ref={rendererRef}
           imageUrl={imageUrl}
           imageBlob={imageBlob}
+          previewBlob={previewBlob}
+          acceptPrefetch
           loading={loading}
           error={error}
           selectedTarget={selectedTarget}

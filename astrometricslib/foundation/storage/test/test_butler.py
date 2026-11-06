@@ -457,3 +457,117 @@ def test_count_grouped_rejects_unknown_columns(tmp_path: Path) -> None:
 
     with pytest.raises(InvalidArgumentError, match="unknown column"):
         butler.count_grouped("widget", ["data_json"])
+
+
+def test_table_setup_runs_once_per_database_and_table(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Many reads and writes set the table up only once in this process."""
+    from astrometricslib.foundation.storage.butler import reset_ensured_tables
+
+    reset_ensured_tables()
+    butler = _make_butler(tmp_path)
+    calls: list[str] = []
+    real = Butler._create_or_update_table
+
+    def counting(self: Butler, cursor: object, spec: DatasetSpec) -> None:
+        """Count one set-up and do it."""
+        calls.append(spec.table_name)
+        real(self, cursor, spec)
+
+    monkeypatch.setattr(Butler, "_create_or_update_table", counting)
+    butler.put(_Widget(id="w1"), "widget")
+    for _ in range(5):
+        butler.get_all("widget")
+    butler.put(_Widget(id="w2"), "widget")
+
+    assert calls == ["widgets"]
+
+
+def test_a_replaced_database_file_is_set_up_again(tmp_path: Path) -> None:
+    """A database deleted and replaced by an empty file gets its table back."""
+    import sqlite3
+
+    from astrometricslib.foundation.storage.butler import reset_ensured_tables
+
+    reset_ensured_tables()
+    butler = _make_butler(tmp_path)
+    butler.put(_Widget(id="w1"), "widget")
+    database = tmp_path / "test.db"
+    database.unlink()
+    for suffix in ("-wal", "-shm"):
+        (tmp_path / f"test.db{suffix}").unlink(missing_ok=True)
+    sqlite3.connect(database).close()  # an empty replacement file
+
+    assert butler.get_all("widget") == []
+    butler.put(_Widget(id="w2"), "widget")
+    assert [widget.id for widget in butler.get_all("widget")] == ["w2"]
+
+
+def test_reset_makes_the_next_call_check_the_table_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`reset_ensured_tables` forgets what was set up."""
+    from astrometricslib.foundation.storage.butler import reset_ensured_tables
+
+    reset_ensured_tables()
+    butler = _make_butler(tmp_path)
+    butler.put(_Widget(id="w1"), "widget")
+    calls: list[int] = []
+    real = Butler._create_or_update_table
+    monkeypatch.setattr(
+        Butler,
+        "_create_or_update_table",
+        lambda self, cursor, spec: (calls.append(1), real(self, cursor, spec)),
+    )
+    butler.get_all("widget")
+    assert calls == []
+    reset_ensured_tables()
+    butler.get_all("widget")
+    assert calls == [1]
+
+
+def test_a_table_swapped_in_place_for_an_older_one_is_set_up_again(tmp_path: Path) -> None:
+    """A restore that keeps the file's inode but loses a column is repaired.
+
+    The note "this table is set up" is keyed on the file's inode, which an
+    in-place restore keeps. The butler must forget the note after "no such
+    column" and add the column again.
+    """
+    import sqlite3
+
+    from astrometricslib.foundation.storage.butler import reset_ensured_tables
+
+    reset_ensured_tables()
+    butler = _make_butler(tmp_path, extra_columns=True)
+    butler.put(_Widget(id="a", label="Alpha"), "widget")
+    database = tmp_path / "test.db"
+    inode = database.stat().st_ino
+    # Rebuild the table with the older layout (no label column), same file.
+    connection = sqlite3.connect(database)
+    connection.execute("DROP TABLE widgets")
+    connection.execute("CREATE TABLE widgets (id TEXT PRIMARY KEY, data_json TEXT)")
+    connection.commit()
+    connection.close()
+    assert database.stat().st_ino == inode
+
+    butler.put(_Widget(id="b", label="Beta"), "widget")
+
+    assert [widget.id for widget in butler.get_all("widget")] == ["b"]
+
+
+def test_specs_with_different_columns_are_not_confused(tmp_path: Path) -> None:
+    """The remembered setup is keyed on the columns, not on a Python id.
+
+    Two specs for one table that declare different columns each get their
+    own set-up, even when one spec is deleted and its memory address is
+    reused by the other.
+    """
+    from astrometricslib.foundation.storage.butler import _spec_fingerprint
+
+    plain = DatasetSpec(table_name="widgets", model_class=_Widget)
+    labelled = DatasetSpec(table_name="widgets", model_class=_Widget, extra_column_types={"label": "TEXT"})
+    same_as_plain = DatasetSpec(table_name="widgets", model_class=_Widget)
+
+    assert _spec_fingerprint(plain) != _spec_fingerprint(labelled)
+    assert _spec_fingerprint(plain) == _spec_fingerprint(same_as_plain)

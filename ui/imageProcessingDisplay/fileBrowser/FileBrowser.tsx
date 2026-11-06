@@ -97,6 +97,7 @@ export const FileBrowserToolbar: React.FC<{
                         />
                     )}
                     <TextInput
+                        size="small"
                         className="file-browser__search-input"
                         placeholder="Search files... (e.g. iso>800)"
                         value={searchTerm}

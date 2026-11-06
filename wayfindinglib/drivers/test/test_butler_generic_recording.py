@@ -214,3 +214,30 @@ def test_get_all_returns_every_persisted_observation_session(isolated_butler: Di
     )
     all_sessions = isolated_butler.get_all("observation_session")
     assert {s.id for s in all_sessions} == {"session1", "session2"}
+
+
+def test_every_write_adds_one_to_the_table_counter(isolated_butler: DiskButler) -> None:
+    """A put, an update in place and a delete of a record each count once.
+
+    The counters are what a cache reads to learn that a record changed. Row
+    counts miss an update in place and a row number used again.
+    """
+    records = isolated_butler.control_records
+    profile = SiteProfile(id="site1", name="Backyard", latitude_deg=39.7, longitude_deg=-104.9)
+    isolated_butler.put(profile, "site_profile", {"id": "site1"})
+    assert records.data_versions(["site_profiles"]) == {"site_profiles": 1}
+
+    profile.name = "Renamed"
+    isolated_butler.put(profile, "site_profile", {"id": "site1"})
+    assert records.data_versions(["site_profiles"]) == {"site_profiles": 2}
+
+    session = ObservationSession(
+        id="s1", night_date=date(2026, 10, 3), site_profile_id="site1", telescope_id="t", camera_id="c"
+    )
+    isolated_butler.put(session, "observation_session", {"session_id": "s1"})
+    before = records.data_versions(["wayfinding_observation_sessions"])
+    assert isolated_butler.put_session_if_revision(session, expected_revision=0)
+    after = records.data_versions(["wayfinding_observation_sessions"])
+    assert before is not None
+    assert after is not None
+    assert after["wayfinding_observation_sessions"] == before["wayfinding_observation_sessions"] + 1

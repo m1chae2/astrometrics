@@ -7,6 +7,7 @@ import { AdvancedForm } from './components/AdvancedForm';
 import { useSettingsLogic } from './hooks/useSettingsLogic';
 import { Button } from '../../common/components/Button';
 
+import { Skeleton } from '../../common/components/Skeleton';
 type LogicResult = ReturnType<typeof useSettingsLogic>;
 
 const SETTINGS_TABS = ['General', 'Observatory', 'Equipment', 'Processing', 'Advanced'] as const;
@@ -23,6 +24,7 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({
     controllerModeEnabled, isChangingControlMode, handleSetControlMode,
     configData, loadingConfig,
     handleConfigChange,
+    hasUnsavedChanges,
     handleSaveBackend,
     handleRevertBackend,
     isReindexing, reindexingStatus, reindexingProgress, handleReindex,
@@ -94,7 +96,7 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({
                         className="settings__content"
                     >
                     {loadingConfig ? (
-                        <div className="settings__loading">Loading configuration...</div>
+                        <Skeleton variant="keyValue" count={8} label="Loading the configuration" />
                     ) : (
                         <>
                             {activeConfigTab === 'General' && (
@@ -118,6 +120,7 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({
                                     controllerModeEnabled={controllerModeEnabled}
                                     isChangingControlMode={isChangingControlMode}
                                     onSetControlMode={handleSetControlMode}
+                                    hasUnsavedChanges={hasUnsavedChanges}
                                 />
                             )}
                             {activeConfigTab === 'Equipment' && (
@@ -146,12 +149,14 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({
 
                         <div className="settings__footer">
                             <Button
+                                fit
                                 onClick={handleRevertBackend}
                             >
                                 Revert
                             </Button>
                             <Button
                                 variant="primary"
+                                fit
                                 onClick={handleSaveBackend}
                             >
                                 Save

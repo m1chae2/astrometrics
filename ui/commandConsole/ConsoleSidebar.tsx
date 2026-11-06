@@ -8,6 +8,7 @@ import { Tabs } from '../common/components/Tabs';
 import { Button } from '../common/components/Button';
 import { TextInput } from '../common/components/TextInput';
 
+import { Skeleton } from '../common/components/Skeleton';
 export interface ScriptRecipeItem {
   id: string;
   name: string;
@@ -44,6 +45,8 @@ interface ConsoleSidebarProps {
   onSelectUserScript: (script: UserScriptItem) => void;
   onSelectDocTopic?: (topicId: string) => void;
   onNewScript: () => void;
+  /** True until the first read of recipes, scripts and topics finishes: skeletons show instead of the lists. */
+  isLoading?: boolean;
 }
 
 export const ConsoleSidebar: React.FC<ConsoleSidebarProps> = ({
@@ -57,6 +60,7 @@ export const ConsoleSidebar: React.FC<ConsoleSidebarProps> = ({
   onSelectUserScript,
   onSelectDocTopic,
   onNewScript,
+  isLoading = false,
 }) => {
   const [internalTab, setInternalTab] = useState<'scripts' | 'docs'>('scripts');
   const [docFilter, setDocFilter] = useState('');
@@ -186,7 +190,9 @@ export const ConsoleSidebar: React.FC<ConsoleSidebarProps> = ({
                 + New
               </Button>
             </div>
-            {userScripts.length === 0 ? (
+            {isLoading ? (
+              <Skeleton variant="list" lines={1} count={4} label="Loading scripts" />
+            ) : userScripts.length === 0 ? (
               <div style={{ padding: '8px', fontSize: '12px', color: 'var(--text-dim)' }}>
                 No saved scripts yet.
               </div>
@@ -237,7 +243,9 @@ export const ConsoleSidebar: React.FC<ConsoleSidebarProps> = ({
                 onChange={(e) => setDocFilter(e.target.value)}
               />
             </div>
-            {docFilter.trim() && docSearchResults === null ? (
+            {isLoading ? (
+              <Skeleton variant="list" lines={1} count={6} label="Loading documentation topics" />
+            ) : docFilter.trim() && docSearchResults === null ? (
               <div style={{ padding: '12px', fontSize: '12px', color: 'var(--text-dim)' }}>
                 Searching documentation...
               </div>

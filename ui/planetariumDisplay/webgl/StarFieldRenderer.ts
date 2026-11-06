@@ -28,6 +28,7 @@ import {
 } from '../layers/StarOverlay';
 import { viewportDipsBelowHorizon } from '../layers/overlayShared';
 import { compileShader, linkProgram, createBuffer, resizeCanvasToDisplaySize } from '../../common/webgl/glUtils';
+import { perfEnd, perfStart } from '../utils/perfMarks';
 
 const VERTEX_SHADER_SOURCE = `#version 300 es
 layout(location = 0) in vec2 aScreenPosition;
@@ -144,15 +145,22 @@ export class StarFieldRenderer {
     // could possibly show anything.
     if (!projectionContext.showStars && !projectionContext.showCatalog) return;
 
+    const projectStartedAt = perfStart();
     this.rebuildStarInstanceData(projectionContext);
-    if (this.starInstanceCount === 0) return;
+    if (this.starInstanceCount === 0) {
+      perfEnd('planetarium:star_project_upload', projectStartedAt);
+      return;
+    }
 
     gl.useProgram(this.program);
     gl.uniform2f(this.canvasSizeUniformLocation, canvas.width, canvas.height);
 
     gl.bindVertexArray(this.vertexArrayObject);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, this.starInstanceData, gl.DYNAMIC_DRAW);
+    // Upload only the floats in use, not the whole (larger) persistent array.
+    const usedInstanceData = this.starInstanceData.subarray(0, this.starInstanceCount * FLOATS_PER_STAR);
+    gl.bufferData(gl.ARRAY_BUFFER, usedInstanceData, gl.DYNAMIC_DRAW);
+    perfEnd('planetarium:star_project_upload', projectStartedAt);
     gl.drawArrays(gl.POINTS, 0, this.starInstanceCount);
     gl.bindVertexArray(null);
   }
@@ -175,8 +183,10 @@ export class StarFieldRenderer {
       viewportDipsBelowHorizon(projectionContext.centerAlt, projectionContext.fov);
 
     const requiredFloats = sources.length * FLOATS_PER_STAR;
+    // Grows with 25 percent headroom and never shrinks, so a source swap that adds a few
+    // stars does not allocate again.
     if (this.starInstanceData.length < requiredFloats) {
-      this.starInstanceData = new Float32Array(requiredFloats);
+      this.starInstanceData = new Float32Array(Math.ceil(requiredFloats * 1.25));
     }
 
     const limitingMagnitude = computeLimitingMagnitude(projectionContext.fov);

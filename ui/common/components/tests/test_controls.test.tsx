@@ -89,6 +89,13 @@ describe('Badge', () => {
 });
 
 describe('TextInput and NumberInput', () => {
+    it('adds the small modifier for size="small" and passes it through NumberInput', () => {
+        render(<><TextInput aria-label="Small" size="small" /><NumberInput aria-label="Count" size="small" /><TextInput aria-label="Regular" /></>);
+        expect(screen.getByLabelText('Small')).toHaveClass('entry', 'entry--small');
+        expect(screen.getByLabelText('Count')).toHaveClass('entry--small');
+        expect(screen.getByLabelText('Regular')).not.toHaveClass('entry--small');
+    });
+
     it('uses the entry class and its modifiers', () => {
         render(<TextInput aria-label="Name" width="short" centered />);
         expect(screen.getByLabelText('Name')).toHaveClass('entry', 'entry--short', 'entry--centered');

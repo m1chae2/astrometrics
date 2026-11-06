@@ -1,18 +1,11 @@
 
-/* Buttons in a modal fit their text, with a sane minimum width. The two-class selector
-   beats the one-class `.btn` rule, so no !important is needed. Small and full-width buttons keep their own size. */
-.modal .btn:not(.btn--tiny):not(.btn--full-width):not(.btn--square) {
-    width: auto;
-    min-width: 120px;
-}
-
 .modal-overlay {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.85);
+    background: color-mix(in srgb, var(--black) 85%, transparent);
     /* Darker overlay */
     backdrop-filter: blur(4px);
     display: flex;
@@ -26,9 +19,9 @@
     background: var(--modal-bg);
     /* Explicit dark grey, fully opaque */
     border: 1px solid var(--term-border);
-    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.8);
+    box-shadow: 0 24px 64px color-mix(in srgb, var(--black) 80%, transparent);
     padding: 32px;
-    border-radius: 8px;
+    border-radius: var(--radius-lg);
     display: flex;
     flex-direction: column;
     /* Default small width */
@@ -63,7 +56,7 @@
 .modal__header h2 {
     margin: 0;
     color: var(--white);
-    font-size: 1.5rem;
+    font-size: var(--title-font-size);
     font-weight: 600;
 }
 
@@ -71,7 +64,7 @@
     background: none;
     border: none;
     color: var(--text-muted);
-    font-size: 1.8rem;
+    font-size: var(--display-font-size);
     cursor: pointer;
     line-height: 1;
     padding: 4px;
@@ -98,7 +91,7 @@
 }
 
 .form-group label {
-    font-size: 0.9rem;
+    font-size: var(--control-font-size);
     color: var(--text-muted);
     font-weight: 500;
     margin-bottom: 8px;
@@ -172,7 +165,7 @@
     border: none;
     color: var(--primary-blue);
     cursor: pointer;
-    font-size: 0.85rem;
+    font-size: var(--control-font-size);
     padding: 0;
     text-decoration: underline;
 }
@@ -195,9 +188,9 @@
 .modal-list-item {
     padding: 6px 10px;
     cursor: pointer;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     margin-bottom: 2px;
-    font-size: 0.9rem;
+    font-size: var(--control-font-size);
     color: var(--text-muted);
     transition: background-color 0.1s, color 0.1s;
 }
@@ -242,10 +235,10 @@
     padding: 8px;
     flex: 1;
     overflow-y: auto;
-    font-size: 12px;
+    font-size: var(--section-label-size);
     font-family: monospace;
     border: 1px solid var(--grey-light);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     min-height: 0;
 }
 
@@ -334,7 +327,7 @@
   width: 200px;
   margin: 0;
   height: 24px;
-  font-size: 12px;
+  font-size: var(--section-label-size);
 }
 .fits-header-key {
   width: 120px;

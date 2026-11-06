@@ -153,7 +153,7 @@ export interface ActionRegistry {
     // Targets
     "target:list": { payload: Record<string, never>; response: TargetObject[] };
     "target:get": { payload: { target_id: string }; response: TargetObject | null };
-    "target:get_targets": { payload: { target_id?: string }; response: TargetObject[] | TargetObject | null };
+    "target:get_targets": { payload: { target_id?: string; detail?: "full" | "summary" }; response: TargetObject[] | TargetObject | null };
     "target:create": { payload: { target_id: string; ra?: string; dec?: string }; response: TargetObject | null };
     "target:update": { payload: { target_id: string; updates: Partial<TargetObject> }; response: TargetObject | null };
     "target:delete": { payload: { target_id: string }; response: boolean };
@@ -200,6 +200,11 @@ export interface ActionRegistry {
         payload: { capability: string; new_state: string; evidence_note?: string };
         response: Record<string, any>;
     };
+    "observatory:get_source": { payload: Record<string, never>; response: import('./observatoryService').ObservatorySourceState };
+    "observatory:set_source": {
+        payload: { source: string };
+        response: { restarting: boolean; source: string };
+    };
     "observatory:enter_monitoring_mode": {
         payload: { evidence_note?: string };
         response: BulkDelegationOutcome;
@@ -212,6 +217,7 @@ export interface ActionRegistry {
     // System
     "system:save": { payload: Record<string, never>; response: void };
     "system:health": { payload: Record<string, never>; response: SystemHealth };
+    "system:static_mounts": { payload: Record<string, never>; response: StaticMount[] };
     "system:completions": { payload: { text: string }; response: string[] };
     "system:get_config": { payload: Record<string, never>; response: Record<string, Record<string, any>> };
     "system:save_config": { payload: { config: Record<string, Record<string, any>> }; response: boolean };
@@ -287,7 +293,7 @@ export interface ActionRegistry {
     // Ingestion
     "ingestion:start": { payload: { type: 'local' | 'remote'; sourcePath: string; targetName?: string; telescope?: string; selectedFiles?: string[] }; response: { jobId: string } };
     "ingestion:status": { payload: { job_id: string }; response: { status: string; progress: string; logs: string[] } };
-    "ingestion:scan": { payload: Record<string, never>; response: { folders: string[] } };
+    "ingestion:scan": { payload: Record<string, never>; response: { folders: string[]; reachable?: boolean } };
     "ingestion:stats": { payload: { folder: string }; response: { fileCount: number; resolvedFolder?: string } };
     "ingestion:list_files": { payload: { folder: string }; response: { files: string[]; resolvedFolder?: string } };
     "ingestion:reindex": { payload: Record<string, never>; response: string };
@@ -703,6 +709,19 @@ async function executeRpcAttempt<A extends keyof ActionRegistry>(
     }
 }
 
+/** True while the backend is restarting on purpose (an observatory source switch). */
+let backendRestarting = false;
+
+/**
+ * Tells the client the backend is restarting on purpose, so failed calls show no toasts.
+ * It stays set until the page reloads, or until a caller clears it after a failed restart.
+ *
+ * @param {boolean} restarting - True when a restart starts, false to clear it.
+ */
+export function setBackendRestarting(restarting: boolean): void {
+    backendRestarting = restarting;
+}
+
 /**
  * Handles retries with backoff for idempotent RPC calls.
  *
@@ -736,9 +755,15 @@ async function callBackendInternal<A extends keyof ActionRegistry>(
                 continue;
             }
 
+            // While the backend restarts on purpose, every failed call is expected. A background
+            // read that times out or cannot connect is a status (the connection chip shows it),
+            // not an error. Only the throw below tells the caller.
+            const isNetworkFailure = error?.name === 'TypeError' || /failed to fetch|networkerror|network request failed/i.test(String(error?.message ?? ''));
+            const quiet = options?.silent || backendRestarting || (isIdempotent && (error?.didTimeout || isNetworkFailure));
+
             if (error?.didTimeout) {
                 const msg = `Request timed out for ${action}`;
-                if (!options?.silent) {
+                if (!quiet) {
                     emitToast(msg, 'error', `API:${action}`);
                 }
                 throw new Error(msg, { cause: error });
@@ -749,7 +774,10 @@ async function callBackendInternal<A extends keyof ActionRegistry>(
             }
 
             if (error instanceof BackendError) {
-                if (!options?.silent) {
+                // A background read that fails because a device or remote computer is
+                // unreachable is a status (the status chips show it), not an error.
+                const isUnavailableRead = isIdempotent && error.code === 'external_service';
+                if (!quiet && !isUnavailableRead) {
                     const presentation = presentBackendError(error);
                     emitToast(presentation.text, presentation.kind, `API:${action}`);
                 }
@@ -757,7 +785,7 @@ async function callBackendInternal<A extends keyof ActionRegistry>(
             }
 
             const msg = error?.message || String(error);
-            if (!options?.silent) {
+            if (!quiet) {
                 emitToast(msg, 'error', `API:${action}`);
             }
             throw error;
@@ -929,10 +957,58 @@ export async function withSessionToken(wsUrl: string): Promise<string> {
     return `${wsUrl}${separator}token=${encodeURIComponent(token)}`;
 }
 
+/** One folder the backend serves and the URL prefix it serves it under. */
+export interface StaticMount {
+    root: string;
+    urlPrefix: string;
+}
+
+let staticMounts: StaticMount[] | null = null;
+let staticMountsRequest: Promise<void> | null = null;
+
 /**
- * Helper to dynamically resolve astronomical stretched images based on the running environment.
- * If running inside Electron (window.astrometricsIPC is defined), resolves to direct local disk 'file://' paths.
- * Otherwise, falls back to the static HTTP assets server path via the network.
+ * Asks the backend once which folders it serves and under which URL prefix.
+ *
+ * `resolveImageSrc` needs this table to turn a file path into a URL when the
+ * app runs in a browser or on a phone. Call it (and wait) before resolving.
+ * A failed request is not an error screen: the table stays empty and the next
+ * call asks again, so a backend that is still starting does no harm.
+ */
+export async function loadStaticMounts(): Promise<void> {
+    if (staticMounts) return;
+    staticMountsRequest ??= callBackend('system:static_mounts', {}, { silent: true })
+        .then((mounts) => {
+            staticMounts = Array.isArray(mounts) ? mounts : null;
+        })
+        .catch(() => {
+            staticMounts = null;
+        })
+        .finally(() => {
+            staticMountsRequest = null;
+        });
+    await staticMountsRequest;
+}
+
+/**
+ * Replaces the served-folder table. Only tests need this.
+ *
+ * @param mounts The table, or null to forget it.
+ */
+export function setStaticMountsForTesting(mounts: StaticMount[] | null): void {
+    staticMounts = mounts;
+}
+
+/**
+ * Turns a file path on the backend's computer into a URL a client can load.
+ *
+ * Inside Electron under `file://` the path is opened directly. Otherwise the
+ * backend's own table of served folders (`loadStaticMounts`) decides the URL:
+ * the longest folder that starts the path is swapped for its URL prefix. The
+ * app never guesses from folder names.
+ *
+ * @param absolutePath Absolute path of the file on the backend's computer.
+ * @return The URL, or an empty string when no served folder holds the file
+ *     (or the table has not been loaded yet).
  */
 export function resolveImageSrc(absolutePath: string | null | undefined): string {
     if (!absolutePath) return '';
@@ -943,40 +1019,22 @@ export function resolveImageSrc(absolutePath: string | null | undefined): string
         return `file://${absolutePath.replace(/\\/g, '/')}`;
     }
 
-    // Remote mobile client (Wi-Fi) fallback:
-    // Resolve to the correct static mount based on content type.
-    const base = getBackendBase();
-
     // If it's already a URL or base64, return it
     if (/^(https?|file|data):/i.test(absolutePath)) {
         return absolutePath;
     }
 
-    const parts = absolutePath.replace(/\\/g, '/').split('/');
-
-    // Frame roots live under the external library (served at /static/frames/).
-    // Library roots live under library (served at /static/).
-    const frameRoots = ['_Astrophotography', 'lights', 'darks', 'biases', 'flats', 'processed', 'spectrum'];
-    const libraryRoots = ['library'];
-    const allRoots = [...frameRoots, ...libraryRoots];
-
-    let relPath = absolutePath.replace(/\\/g, '/');
-    if (relPath.startsWith('/')) {
-        relPath = relPath.substring(1);
-    }
-
-    let isFramePath = false;
-    for (let i = 0; i < parts.length; i++) {
-        if (allRoots.includes(parts[i])) {
-            relPath = parts.slice(i).join('/');
-            isFramePath = frameRoots.includes(parts[i]);
-            break;
+    const path = absolutePath.replace(/\\/g, '/');
+    let best: { root: string; urlPrefix: string } | null = null;
+    for (const mount of staticMounts ?? []) {
+        const root = mount.root.replace(/\\/g, '/').replace(/\/+$/, '');
+        if (path.startsWith(`${root}/`) && (!best || root.length > best.root.length)) {
+            best = { root, urlPrefix: mount.urlPrefix };
         }
     }
-
-    const prefix = `${isFramePath ? BACKEND_ROUTES.staticFrames : BACKEND_ROUTES.staticLibrary}/`;
-    const rawUrl = `${base}${prefix}${relPath}`;
-    return encodeURI(decodeURI(rawUrl));
+    if (!best) return '';
+    const relativePath = path.slice(best.root.length + 1);
+    return encodeURI(decodeURI(`${getBackendBase()}${best.urlPrefix}/${relativePath}`));
 }
 
 /**

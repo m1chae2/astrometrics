@@ -9,7 +9,12 @@ interface Toast {
   id: number;
   msg: string;
   type: ToastType;
+  /** An optional button, such as "Open". */
+  action?: { label: string; run: () => void };
 }
+
+/** How long, in milliseconds, a toast with an action button stays, so there is time to press it. */
+const ACTION_TOAST_TIMEOUT_MS = 15000;
 
 /** Props for the ToastProvider component. */
 interface Props {
@@ -29,16 +34,16 @@ export const ToastProvider: React.FC<Props> = ({ children }) => {
     setToasts((toastItems) => toastItems.filter((item) => item.id !== id));
   }, []);
 
-  /** Shows a new toast notification. */
+  /** Shows a new toast notification. A `timeoutMs` of 0 keeps it until the user closes it. */
   const show = useCallback(
-    (msg: string, type: ToastType = 'success', timeoutMs = 3000) => {
+    (msg: string, type: ToastType = 'success', timeoutMs = 3000, action?: Toast['action']) => {
       const maxLen = 200;
       const displayMsg =
         typeof msg === 'string' && msg.length > maxLen
           ? `${msg.slice(0, maxLen - 3)}...`
           : msg;
       const id = Date.now() + Math.floor(Math.random() * 1000);
-      const toast: Toast = { id, msg: displayMsg, type };
+      const toast: Toast = { id, msg: displayMsg, type, action };
 
       // Log errors to console for persistence.
       if (type === 'error') {
@@ -94,6 +99,13 @@ export const ToastProvider: React.FC<Props> = ({ children }) => {
         const kind: ToastType =
           rawKind === 'error' || rawKind === 'info' || rawKind === 'warning' ? rawKind : 'success';
 
+        const sticky = typeof p === 'object' && p !== null && p['sticky'] === true;
+        const rawAction = typeof p === 'object' && p !== null ? p['action'] : undefined;
+        const action =
+          rawAction && typeof (rawAction as Toast['action'])?.run === 'function'
+            ? (rawAction as Toast['action'])
+            : undefined;
+
         const key = `${source}:${text}`;
         const recent = recentKeysRef.current;
         if (recent.has(key)) return;
@@ -108,7 +120,8 @@ export const ToastProvider: React.FC<Props> = ({ children }) => {
         }, 4000);
 
         if (text) {
-          show(text, kind);
+          // A toast the user must act on stays until it is dismissed.
+          show(text, kind, sticky ? 0 : action ? ACTION_TOAST_TIMEOUT_MS : undefined, action);
         }
       } catch {
         // Ignore failures from external emitters.
@@ -147,6 +160,13 @@ export const ToastProvider: React.FC<Props> = ({ children }) => {
         const kind: ToastType =
           rawKind === 'error' || rawKind === 'info' || rawKind === 'warning' ? rawKind : 'success';
 
+        const sticky = typeof p === 'object' && p !== null && p['sticky'] === true;
+        const rawAction = typeof p === 'object' && p !== null ? p['action'] : undefined;
+        const action =
+          rawAction && typeof (rawAction as Toast['action'])?.run === 'function'
+            ? (rawAction as Toast['action'])
+            : undefined;
+
         const key = `${source}:${text}`;
         const recent = recentKeysRef.current;
         if (recent.has(key)) return;
@@ -161,7 +181,8 @@ export const ToastProvider: React.FC<Props> = ({ children }) => {
         }, 4000);
 
         if (text) {
-          show(text, kind);
+          // A toast the user must act on stays until it is dismissed.
+          show(text, kind, sticky ? 0 : action ? ACTION_TOAST_TIMEOUT_MS : undefined, action);
         }
       } catch {
         // Ignore listener failures.
@@ -181,6 +202,20 @@ export const ToastProvider: React.FC<Props> = ({ children }) => {
             className={`toast toast-${t.type}`}
           >
             <span className="toast__message">{t.msg}</span>
+            {t.action && (
+              <Button
+                variant="secondary"
+                size="small"
+                fit
+                className="toast__action"
+                onClick={() => {
+                  t.action?.run();
+                  remove(t.id);
+                }}
+              >
+                {t.action.label}
+              </Button>
+            )}
             <Button
               variant="ghost"
               className="toast__dismiss"

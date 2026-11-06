@@ -26,11 +26,14 @@
   transition: filter 0.2s, outline 0.2s, background-color 0.2s;
 }
 
-.btn:hover,
-.btn:focus {
+.btn:hover {
   outline: none;
   background-color: var(--adwaita-blue-hover);
   filter: brightness(1.08);
+}
+
+.btn:focus:not(:focus-visible) {
+  outline: none;
 }
 
 .btn:active {
@@ -39,7 +42,8 @@
 }
 
 .btn:focus-visible {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-blue) 40%, transparent);
+  outline: var(--focus-outline);
+  outline-offset: 2px;
 }
 
 .btn:disabled,
@@ -228,4 +232,26 @@
   height: var(--button-height-small);
   font-size: var(--control-font-size);
   line-height: 1;
+}
+
+/* fit: the button is as wide as its text, never wraps, and does not stretch in a flex row. */
+.btn--fit {
+  width: auto;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* truncate: a long label is cut short with an ellipsis. */
+.btn--truncate {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: var(--button-height);
+}
+
+/* Buttons in a modal fit their text, with a sane minimum width. Small, square and full-width buttons keep their own size. */
+.modal .btn:not(.btn--tiny):not(.btn--full-width):not(.btn--square) {
+  width: auto;
+  min-width: 120px;
 }

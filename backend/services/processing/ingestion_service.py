@@ -96,9 +96,14 @@ class IngestionService(BaseBackgroundService):
         Returns
         -------
         result : `dict`
-            A dict with a ``"folders"`` key containing the folder list.
+            A dict with a ``"folders"`` key containing the folder list and a
+            ``"reachable"`` key. When the list is empty, ``reachable`` says
+            whether the observatory computer answered: an offline computer is
+            a status, not an error.
         """
-        return {"folders": self.scan_remote_targets()}
+        folders = self.scan_remote_targets()
+        reachable = True if folders else bool(self._wayfinder.control.remote.check_connection())
+        return {"folders": folders, "reachable": reachable}
 
     def _list_calibration_files(self) -> dict[str, list[str]]:
         """List remote FITS files for each Dark/Bias/Flat folder found.
@@ -129,20 +134,27 @@ class IngestionService(BaseBackgroundService):
         Returns
         -------
         stats : `dict`
-            A dict with ``"fileCount"`` and ``"resolvedFolder"`` keys.
+            A dict with ``"fileCount"``, ``"resolvedFolder"`` and
+        ``"reachable"`` keys. When the observatory computer cannot be
+        reached, ``reachable`` is `False` and ``fileCount`` is 0: that
+        is a status, not an error.
         """
-        if folder and folder.lower() == "calibration":
-            total_count = sum(len(files) for files in self._list_calibration_files().values())
-            # Use "Calibration" as the resolved folder name so
-            # frontend keeps it
-            return {"fileCount": total_count, "resolvedFolder": "Calibration"}
+        try:
+            if folder and folder.lower() == "calibration":
+                total_count = sum(len(files) for files in self._list_calibration_files().values())
+                # Use "Calibration" as the resolved folder name so
+                # frontend keeps it
+                return {"fileCount": total_count, "resolvedFolder": "Calibration", "reachable": True}
 
-        folder_name = self._resolve_remote_folder(folder)
-        if not folder_name:
-            folder_name = folder
+            folder_name = self._resolve_remote_folder(folder)
+            if not folder_name:
+                folder_name = folder
 
-        count = len(self._wayfinder.control.remote.list("files", folder_name=folder_name))
-        return {"fileCount": count, "resolvedFolder": folder_name}
+            count = len(self._wayfinder.control.remote.list("files", folder_name=folder_name))
+        except ExternalServiceError as error:
+            logger.debug("Remote folder stats unavailable: %s", error)
+            return {"fileCount": 0, "resolvedFolder": folder, "reachable": False}
+        return {"fileCount": count, "resolvedFolder": folder_name, "reachable": True}
 
     def list_remote_files(self, folder: str) -> dict:
         """List individual FITS filenames in a remote target folder.
@@ -150,7 +162,25 @@ class IngestionService(BaseBackgroundService):
         Returns
         -------
         result : `dict`
-            A dict with ``"files"`` and ``"resolvedFolder"`` keys.
+            A dict with ``"files"``, ``"resolvedFolder"`` and ``"reachable"``
+        keys. When the observatory computer cannot be reached,
+        ``reachable`` is `False` and ``files`` is empty: that is a status,
+        not an error.
+        """
+        try:
+            return self._list_remote_files(folder)
+        except ExternalServiceError as error:
+            logger.debug("Remote file list unavailable: %s", error)
+            return {"files": [], "resolvedFolder": folder, "reachable": False}
+
+    def _list_remote_files(self, folder: str) -> dict:
+        """List the remote files, raising if the computer cannot be reached.
+
+        Returns
+        -------
+        result : `dict`
+            A dict with ``"files"``, ``"resolvedFolder"`` and
+            ``"reachable"`` keys.
         """
         if folder and folder.lower() == "calibration":
             # Prefix each file with its calibration folder ("Dark/foo.fits")
@@ -162,13 +192,13 @@ class IngestionService(BaseBackgroundService):
                 for folder_name, folder_files in self._list_calibration_files().items()
                 for file_path in folder_files
             ]
-            return {"files": files, "resolvedFolder": "Calibration"}
+            return {"files": files, "resolvedFolder": "Calibration", "reachable": True}
 
         folder_name = self._resolve_remote_folder(folder)
         if not folder_name:
             folder_name = folder
         files = self._wayfinder.control.remote.list("files", folder_name=folder_name)
-        return {"files": files, "resolvedFolder": folder_name}
+        return {"files": files, "resolvedFolder": folder_name, "reachable": True}
 
     def get_ingestion_status(self, job_id: str) -> dict:
         """Return ingestion job status, progress, and tail of log lines.

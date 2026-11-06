@@ -39,6 +39,8 @@ vi.mock('../../common/context/TargetContext', () => ({
   useOptionalTargetContext: () => ({ setSelectedTarget, setPendingTarget }),
 }));
 
+vi.mock('../ObservatorySourceChip', () => ({ ObservatorySourceChip: () => null }));
+
 vi.mock('../SettingsPanel', () => ({
   SettingsPanel: () => <div data-testid="settings-panel" />,
 }));

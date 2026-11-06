@@ -11,7 +11,7 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     // Only include the unit tests folder pattern. Exclude Playwright specs.
-    include: ['tests/unit/**/*.test.{ts,tsx,js}', 'tests/test_*.{ts,tsx}', 'ui/**/tests/test_*.{ts,tsx}'],
+    include: ['build/stylelint/*.test.mjs', 'tests/unit/**/*.test.{ts,tsx,js}', 'ui/**/tests/test_*.{ts,tsx}'],
     exclude: ['**/node_modules/**', '**/dist/**', '**/*.spec.{ts,tsx}', '**/.venv/**'],
     globalSetup: ['./ui/globalSetup.ts'],
     setupFiles: ['./ui/setupTests.ts'],

@@ -4,10 +4,11 @@
  * or error message in its place. FitsViewerManager uses it when the image is a
  * normal picture file rather than raw FITS data.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useLayoutEffect, useState } from 'react';
 import { ImageContainer } from './ImageContainer';
 import './imageViewer.css';
 
+import { Skeleton } from '../../components/Skeleton';
 /** Props for the ImageViewer component. */
 interface Props {
   /** URL of the image to display. */
@@ -28,7 +29,9 @@ interface Props {
 export const ImageViewer: React.FC<Props> = ({ imageUrl, imageBlob, loading, error, selectedTarget }) => {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
 
-  useEffect(() => {
+  // A layout effect, so that when a paused (hidden) display is shown again the
+  // picture gets its new URL before the screen is drawn, not one frame later.
+  useLayoutEffect(() => {
     if (imageBlob) {
       const url = URL.createObjectURL(imageBlob);
       setBlobUrl(url);
@@ -45,8 +48,7 @@ export const ImageViewer: React.FC<Props> = ({ imageUrl, imageBlob, loading, err
     <div className="image-viewer-frame" id="image-viewer">
       {loading && (
         <div className="image-viewer__loading">
-          <div className="loading-spinner" style={{ width: 40, height: 40, borderWidth: 4 }} />
-          <p>Loading...</p>
+          <Skeleton variant="block" label="Loading the image" />
         </div>
       )}
       {error && !loading && <em className="image-viewer__error">{error}</em>}

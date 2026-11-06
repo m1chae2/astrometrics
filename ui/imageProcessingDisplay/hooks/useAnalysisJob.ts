@@ -7,6 +7,7 @@ import { useState, useEffect, useRef } from 'react';
 import { analyzeTarget, fetchAnalysisResults, streamJobLog } from '../../common/services/imaging/processingService';
 import { reportError } from '../../common/utils/reportError';
 import { AnalysisResult } from '../../common/types/backendTypes';
+import { useOnValueChange } from './useOnValueChange';
 import { useAstrometrics } from '../../common/context/AstrometricsContext';
 
 export interface AnalysisJobResult {
@@ -66,12 +67,15 @@ export function useAnalysisJob(
     // an analysis already completed before this hook mounted (e.g. switching
     // back to a previously-analyzed target). An in-flight job for the new
     // target, if any, is picked up by the activeJobs-driven effect below.
-    useEffect(() => {
+    // The clearing runs only when the target really changes, so a result survives
+    // hiding and showing the display. The read below runs again on show, to refresh it.
+    useOnValueChange(selectedTarget, () => {
         setAnalysisResults(null);
         setAnalyzingTargetId(null);
         setActiveAnalysisJobId(null);
         confirmedActiveJobIdRef.current = null;
-
+    });
+    useEffect(() => {
         if (!selectedTarget || !shouldFetch) return;
         let cancelled = false;
         fetchAnalysisResults(selectedTarget).then((results) => {

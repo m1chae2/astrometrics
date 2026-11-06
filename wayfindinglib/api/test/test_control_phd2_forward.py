@@ -88,6 +88,17 @@ def test_local_location_uses_localhost_and_starts_no_forward() -> None:
     assert instances == []
 
 
+def test_local_location_uses_the_configured_port() -> None:
+    """PHD2 on this computer is reached on the port the settings name."""
+    context = _context("local")
+    context.config.get_phd2_remote_port.return_value = 45099
+
+    client = context._build_phd2_client()
+
+    assert (client.host, client.port) == ("localhost", 45099)
+    assert instances == []
+
+
 def test_forwards_not_allowed_leaves_the_tunnel_to_the_backend() -> None:
     """Without the option, PHD2 on the observatory computer starts no ssh."""
     context = _context("observatory", open_port_forwards=False)

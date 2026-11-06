@@ -7,7 +7,7 @@
  * the backend saved beside the stack, and the image viewer shows it.
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { LoadingSpinner } from '../../common/components/LoadingSpinner';
+import { UpdatingBar } from '../../common/components/Skeleton';
 import { NumberInput } from '../../common/components/NumberInput';
 import { PopoverSelect } from '../../common/components/PopoverSelect';
 import { emit as emitEvent } from '../../common/utils/eventBus';
@@ -22,6 +22,7 @@ import type { PreviewRemakeResult, PreviewSettingsRecord } from '../../common/ty
 import { useReviewJob } from '../hooks/useReviewJob';
 import { Button } from '../../common/components/Button';
 
+import { Skeleton } from '../../common/components/Skeleton';
 /** A choice for one setting: use the app setting, or force it on or off for this run. */
 export type RunChoice = 'app' | 'on' | 'off';
 
@@ -189,7 +190,8 @@ export const PreviewRemakeControl: React.FC<PreviewRemakeControlProps> = ({ targ
             <div className="preview-remake__status" role="status" aria-live="polite">
                 {busy && (
                     <span>
-                        <LoadingSpinner size={12} /> Making the picture. This can take a minute.
+                        Making the picture. This can take a minute.
+                        <UpdatingBar label="Making the picture" inline />
                     </span>
                 )}
                 {result && (

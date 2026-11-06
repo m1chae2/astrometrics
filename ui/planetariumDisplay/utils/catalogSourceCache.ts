@@ -34,7 +34,7 @@ const cache: CacheEntry[] = [];
 /**
  * Great-circle separation between two RA/Dec points, in degrees (haversine).
  */
-function angularSeparationDeg(ra1: number, dec1: number, ra2: number, dec2: number): number {
+export function angularSeparationDeg(ra1: number, dec1: number, ra2: number, dec2: number): number {
   const ra1Rad = (ra1 * Math.PI) / 180.0;
   const dec1Rad = (dec1 * Math.PI) / 180.0;
   const ra2Rad = (ra2 * Math.PI) / 180.0;

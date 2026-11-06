@@ -52,6 +52,11 @@ def test_normal_countdown_stale_and_unknown_do_not_end() -> None:
     assert _ends(["Idle", "Idle", "Unknown", "Idle"]) == [False] * 4
 
 
+def test_link_drop_mid_exposure_is_not_a_frame_end() -> None:
+    """An outage mid-exposure ends no frame, even after the link returns."""
+    assert _ends(["Exposing (30s)", "Unknown", "Idle", "Exposing (60s)"]) == [False] * 4
+
+
 def test_autofocus_burst_counts_each_frame() -> None:
     """Short frames in a row each end; the service interval merges them."""
     sequence = ["Exposing (2s)", "Downloading", "Exposing (2s)", "Downloading", "Exposing (2s)", "Idle"]
@@ -89,6 +94,23 @@ class FakeSyncService:
         """Start with nothing running."""
         self.running: set[str] = set()
         self.started: list[tuple[str, Callable[[str, Any], None] | None]] = []
+        self.log_syncs = 0
+        self.log_reply: dict = {"started": True}
+        self.log_error: Exception | None = None
+
+    def start_log_sync(self) -> dict:
+        """Count the log sync start, or fail or say busy as a test asks.
+
+        Returns
+        -------
+        reply : `dict`
+            The reply the test set.
+        """
+        if self.log_error is not None:
+            raise self.log_error
+        if self.log_reply.get("started"):
+            self.log_syncs += 1
+        return self.log_reply
 
     def is_syncing(self, object_id: str) -> bool:
         """Return whether `object_id` is marked running.
@@ -108,6 +130,8 @@ class FakeSyncService:
         reply : `dict`
             A started reply.
         """
+        if object_id in self.running:
+            return {"started": False, "target_id": object_id, "reason": "already running"}
         self.started.append((object_id, on_finished))
         self.running.add(object_id)
         return {"started": True}
@@ -121,6 +145,7 @@ class Rig:
         self.enabled = enabled
         self.now = 1000.0
         self.timers: list[FakeTimer] = []
+        self.idle_timers: list[FakeTimer] = []
         self.sync = FakeSyncService()
         self.service = AutoDownloadService(
             sync_service=self.sync,
@@ -138,7 +163,10 @@ class Rig:
             The new timer.
         """
         timer = FakeTimer(interval, function)
-        self.timers.append(timer)
+        if interval == module.IDLE_FINAL_LOG_SYNC_SECONDS:
+            self.idle_timers.append(timer)
+        else:
+            self.timers.append(timer)
         return timer
 
     def frame(self, target: str | None = "M 31") -> None:
@@ -239,3 +267,95 @@ def test_stop_cancels_timers_and_refuses_new_ones() -> None:
     assert len(rig.timers) == 1
     rig.timers[0].fire()
     assert rig.sync.started == []
+
+
+def _finish_frame_sync(rig: Rig, target: str = "M 31") -> None:
+    """Fire the frame timer and finish the sync it started."""
+    rig.timers[-1].fire()
+    on_finished = rig.sync.started[-1][1]
+    assert on_finished is not None
+    rig.sync.running.clear()
+    on_finished(target, SimpleNamespace(transferred=1))
+
+
+def test_log_sync_follows_a_frame_sync_only_after_five_minutes() -> None:
+    """The first frame sync starts a log sync; one soon after does not."""
+    rig = Rig()
+    rig.frame()
+    _finish_frame_sync(rig)
+    assert rig.sync.log_syncs == 1
+    rig.now += 100.0
+    rig.frame()
+    _finish_frame_sync(rig)
+    assert rig.sync.log_syncs == 1
+    rig.now += module.GUIDE_LOG_MINIMUM_INTERVAL_SECONDS
+    rig.frame()
+    _finish_frame_sync(rig)
+    assert rig.sync.log_syncs == 2
+
+
+def test_final_log_sync_runs_after_imaging_stops() -> None:
+    """Each frame end keeps one idle timer; firing it while Idle syncs logs."""
+    rig = Rig()
+    rig.frame()
+    rig.frame()
+    assert len(rig.idle_timers) == 2
+    assert rig.idle_timers[0].cancelled
+    rig.now += module.IDLE_FINAL_LOG_SYNC_SECONDS
+    rig.idle_timers[-1].fire()
+    assert rig.sync.log_syncs == 1
+
+
+def test_final_log_sync_waits_while_a_frame_is_exposing() -> None:
+    """A camera that is exposing again is not the end of imaging."""
+    rig = Rig()
+    rig.frame()
+    rig.service.on_camera_status("Exposing (500s)", "M 31")
+    rig.idle_timers[-1].fire()
+    assert rig.sync.log_syncs == 0
+
+
+def test_setting_off_means_no_log_sync() -> None:
+    """With the setting off neither the follow-up nor the final sync runs."""
+    rig = Rig()
+    rig.frame()
+    rig.timers[0].fire()
+    rig.enabled = False
+    on_finished = rig.sync.started[0][1]
+    assert on_finished is not None
+    on_finished("M 31", None)
+    rig.idle_timers[-1].fire()
+    assert rig.sync.log_syncs == 0
+
+
+def test_busy_log_sync_is_skipped_quietly() -> None:
+    """A busy answer starts nothing, logs nothing and keeps no start time."""
+    rig = Rig()
+    rig.sync.log_reply = {"started": False, "reason": "already running"}
+    rig.frame()
+    _finish_frame_sync(rig)
+    rig.sync.log_reply = {"started": True}
+    rig.frame()
+    _finish_frame_sync(rig)
+    assert rig.sync.log_syncs == 1
+
+
+def test_failing_log_sync_warns_and_frames_continue(caplog: pytest.LogCaptureFixture) -> None:
+    """A failed log start logs one warning; the next frame still downloads."""
+    rig = Rig()
+    rig.sync.log_error = RuntimeError("no network")
+    rig.frame()
+    _finish_frame_sync(rig)
+    assert [record.levelname for record in caplog.records if "guide log" in record.message] == ["WARNING"]
+    rig.now += 60.0
+    rig.frame()
+    rig.timers[-1].fire()
+    assert len(rig.sync.started) == 2
+
+
+def test_stop_cancels_the_idle_timer() -> None:
+    """Shutdown cancels the last log sync timer too."""
+    rig = Rig()
+    rig.frame()
+    rig.service.stop()
+    assert rig.idle_timers[0].cancelled

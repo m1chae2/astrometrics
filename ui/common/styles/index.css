@@ -62,6 +62,13 @@ input[type=number] {
   /* Firefox support */
 }
 
+/* Checkboxes, radio buttons and sliders use the theme accent. */
+input[type=checkbox],
+input[type=radio],
+input[type=range] {
+  accent-color: var(--accent-blue);
+}
+
 input:focus {
   border-color: var(--primary-blue) !important;
 }

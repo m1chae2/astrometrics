@@ -8,6 +8,7 @@ import { SettingsPanel } from './SettingsPanel';
 import { useAstrometrics } from '../common/context/AstrometricsContext';
 import { useOptionalTargetContext } from '../common/context/TargetContext';
 import { getEnabledDisplayModes } from '../common/constants/displayFlags';
+import { Button } from '../common/components/Button';
 import './statusHeader.css';
 
 /** If the server's time left is lower than ours by more than this (ms), snap down to it. */
@@ -168,6 +169,12 @@ export const StatusHeader: React.FC = () => {
   // "disconnected" rather than falsely implying the mount specifically.
   const connModifier = connected === null ? 'unknown' : (connected && telescopeConnection ? 'connected' : 'disconnected');
   const connTxt = connected === null ? 'Checking…' : (connected && telescopeConnection ? 'Connected' : 'Disconnected');
+  // With the telescope offline the camera's last state is stale, so show a
+  // dash like the other readings instead of "Idle".
+  const telescopeOnline = Boolean(connected && telescopeConnection);
+  const cameraKnown = telescopeOnline && Boolean(cameraStatus) && !/^unknown$/i.test(cameraStatus ?? '');
+  const cameraText = cameraKnown ? shownCameraStatus : '—';
+  const cameraExposing = cameraKnown && /expos/i.test(displayCameraStatus);
   const trackVal = trackingStatus || 'Not Tracking';
   const isParked = /park/i.test(String(trackVal));
   const notTrackingRegex = /not track|not-tracking|not tracking/i;
@@ -199,28 +206,29 @@ export const StatusHeader: React.FC = () => {
         <div className="header__widgets">
           <div className="header__left">
             <div className="header__settings">
-              <button
+              <Button
+                variant="ghost"
+                size="square"
                 className="header__settings-button"
                 aria-label="Open settings"
                 title="Open settings"
                 onClick={handleOpenSettings}
-                type="button"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                   <rect x="3" y="6" width="18" height="2" rx="1" />
                   <rect x="3" y="11" width="18" height="2" rx="1" />
                   <rect x="3" y="16" width="18" height="2" rx="1" />
                 </svg>
-              </button>
+              </Button>
               <div className="mode-selector">
-                <button
+                <Button
                   ref={modeButtonRef}
+                  variant="ghost"
                   className={`mode-selector__button ${modeOpen ? 'mode-selector__button--active' : ''}`}
                   onClick={() => setModeOpen((v) => !v)}
-                  type="button"
                 >
                   {selectedMode}
-                </button>
+                </Button>
                 {modeOpen && menuPosition && createPortal(
                   <div
                     ref={modeMenuRef}
@@ -229,27 +237,27 @@ export const StatusHeader: React.FC = () => {
                   >
                     {availableModes.map((m) => (
                       <div className="mode-selector__row" key={m}>
-                        <button
+                        <Button
+                          variant="ghost"
                           className={`mode-selector__item ${selectedMode === m ? 'mode-selector__item--selected' : ''}`}
                           onClick={() => handleModeSelect(m)}
-                          type="button"
                         >
                           {m}
-                        </button>
+                        </Button>
                         {window.astrometrics?.app?.openDisplayWindow && (
-                          <button
+                          <Button
+                            variant="ghost"
                             className="mode-selector__popout"
                             onClick={(e) => handleOpenInNewWindow(m, e)}
                             title={`Open ${m} in new window`}
                             aria-label={`Open ${m} in new window`}
-                            type="button"
                           >
                             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
                               <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
                               <polyline points="15 3 21 3 21 9" />
                               <line x1="10" y1="14" x2="21" y2="3" />
                             </svg>
-                          </button>
+                          </Button>
                         )}
                       </div>
                     ))}
@@ -267,14 +275,14 @@ export const StatusHeader: React.FC = () => {
               Enter on it sends a click that bubbles up to the strip. */}
           <div
             className={`header__right${inObservatory ? '' : ' header__right--clickable'}`}
+            title={inObservatory ? undefined : stripLabel}
             onClick={inObservatory ? undefined : () => chooseMode(OBSERVATORY_MODE)}
           >
             {!inObservatory && (
-              <button
-                type="button"
+              <Button
+                variant="ghost"
                 className="header__strip-button"
                 aria-label={stripLabel}
-                title={stripLabel}
               />
             )}
             <div className="header__telemetry-item" title={`Mount: ${connTxt}, ${trackVal}`}>
@@ -289,8 +297,8 @@ export const StatusHeader: React.FC = () => {
                 <span className="header__divider" aria-hidden="true" />
                 <div className="header__telemetry-item" title="Identified Target Pointing">
                   {inObservatory && (
-                    <button
-                      type="button"
+                    <Button
+                      variant="ghost"
                       className="header__target-button"
                       aria-label={targetLabel}
                       title={targetLabel}
@@ -298,7 +306,7 @@ export const StatusHeader: React.FC = () => {
                     />
                   )}
                   <span className="header__telemetry-label">TARGET</span>
-                  <span className="header__telemetry-value header__telemetry-value--coord" style={{ color: '#00ffff', fontWeight: 600 }}>
+                  <span className="header__telemetry-value header__telemetry-value--coord" style={{ color: 'var(--status-cyan-bright)', fontWeight: 600 }}>
                     {targetName}
                   </span>
                 </div>
@@ -311,19 +319,12 @@ export const StatusHeader: React.FC = () => {
                 <div className="header__telemetry-item hide-mobile" title="Camera Telemetry">
                   <span className="header__telemetry-label">CAM</span>
                   <span
-                    className={`header__telemetry-value ${
-                      displayCameraStatus && /expos/i.test(displayCameraStatus)
-                        ? 'header__telemetry-value--exposing'
-                        : ''
-                    }`}
-                    style={{
-                      color: displayCameraStatus && /expos/i.test(displayCameraStatus) ? '#38bdf8' : '#e2e8f0',
-                    }}
+                    className={`header__telemetry-value ${cameraExposing ? 'header__telemetry-value--exposing' : ''}`}
                   >
-                    {shownCameraStatus || 'Idle'}
+                    {cameraText}
                   </span>
                   {frameCopy && (
-                    <span className="header__frame-copy" title={frameCopy.description} data-testid="frame-copy">
+                    <span className="header__frame-copy" title={frameCopy.description} data-testid="frame-copy" aria-live="polite">
                       <span aria-hidden="true">· {frameCopy.text}</span>
                       <span className="header__visually-hidden">{frameCopy.description}</span>
                     </span>

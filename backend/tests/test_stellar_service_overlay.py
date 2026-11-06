@@ -156,3 +156,18 @@ def test_an_image_outside_the_library_is_refused(tmp_path: Path) -> None:
     with pytest.raises(InvalidArgumentError, match="library"):
         service.get_astrometry_overlay_stars("M 31", image_path=str(outside))
     assert calls == []
+
+
+def test_a_link_out_of_the_library_is_refused(tmp_path: Path) -> None:
+    """A link in the library that points outside it is refused."""
+    library = tmp_path / "library"
+    library.mkdir()
+    outside = tmp_path / "outside.fits"
+    outside.write_text("x")
+    link = library / "link.fits"
+    link.symlink_to(outside)
+    service, calls = _service_with_counting_overlay(library)
+
+    with pytest.raises(InvalidArgumentError, match="library"):
+        service.get_astrometry_overlay_stars("M 31", image_path=str(link))
+    assert calls == []

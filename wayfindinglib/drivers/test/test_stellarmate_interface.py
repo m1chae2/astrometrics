@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from astrometricslib.exceptions import ExternalServiceError
+from astrometricslib.exceptions import ConfigurationError, ExternalServiceError
 from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
 
 
@@ -147,7 +147,7 @@ def test_guide_log_listing_searches_both_the_phd2_and_the_kstars_folders() -> No
     with patch.object(driver, "_run_command", return_value=_REMOTE_LISTING) as mock_run:
         files = driver.list_remote_guide_logs()
 
-    find_command = mock_run.call_args[0][0][2]
+    find_command = mock_run.call_args[0][0][-1]
     assert ".local/share/kstars/guidelogs" in find_command
     assert "PHD2_GuideLog_*.txt" in find_command
     assert "guide_log*.txt" in find_command
@@ -164,7 +164,7 @@ def test_ekos_analyze_log_listing_reads_the_kstars_analyze_folder() -> None:
     with patch.object(driver, "_run_command", return_value=listing) as mock_run:
         files = driver.list_remote_ekos_analyze_logs()
 
-    assert ".local/share/kstars/analyze" in mock_run.call_args[0][0][2]
+    assert ".local/share/kstars/analyze" in mock_run.call_args[0][0][-1]
     assert files == ["/home/stellarmate/.local/share/kstars/analyze/ekos-2026-09-23T20-31-48.analyze"]
 
 
@@ -332,9 +332,9 @@ def test_listing_commands_tolerate_missing_folders() -> None:
     driver = _make_driver()
     with patch.object(driver, "_run_command", return_value="") as mock_run:
         driver.list_remote_guide_logs()
-        guide_command = mock_run.call_args[0][0][2]
+        guide_command = mock_run.call_args[0][0][-1]
         driver.list_remote_ekos_analyze_logs()
-        analyze_command = mock_run.call_args[0][0][2]
+        analyze_command = mock_run.call_args[0][0][-1]
 
     assert guide_command.rstrip().endswith("|| true")
     assert analyze_command.rstrip().endswith("|| true")
@@ -547,3 +547,41 @@ def test_ssh_commands_do_not_read_stdin_and_have_a_hard_timeout() -> None:
 
     assert mock_run.call_args.kwargs["stdin"] == subprocess.DEVNULL
     assert mock_run.call_args.kwargs["timeout"] > 0
+
+
+@pytest.mark.parametrize(
+    "bad_alias", ["-oProxyCommand=evil", "host name", "host;rm", "", "a'b", "$(id)", "-L"]
+)
+def test_unsafe_host_alias_is_refused_before_any_command(bad_alias: str) -> None:
+    """An unsafe host alias never reaches a command line."""
+    driver = StellarMateInterface(host_alias=bad_alias)
+    with patch("subprocess.run") as mock_run, patch("subprocess.Popen") as mock_popen:
+        with pytest.raises(ConfigurationError):
+            driver._execute_command(["ssh", "--", bad_alias, "echo", "hi"])
+        with pytest.raises(ConfigurationError):
+            driver.port_forward_command(5555, 4400)
+        with pytest.raises(ConfigurationError):
+            driver._run_rsync("/remote/", "/local", [], "x")
+    mock_run.assert_not_called()
+    mock_popen.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "good_alias", ["stellarmate", "stellarmate.local", "my_host-1", "192.168.1.20", "fe80::1"]
+)
+def test_plain_host_names_and_addresses_are_accepted(good_alias: str) -> None:
+    """Names, aliases and IP addresses pass the check."""
+    assert StellarMateInterface(host_alias=good_alias)._checked_host_alias() == good_alias
+
+
+def test_rsync_ssh_is_non_interactive_with_a_connect_timeout() -> None:
+    """The ssh that rsync starts never waits for a password and times out."""
+    driver = StellarMateInterface(host_alias="test-host")
+    with patch("subprocess.Popen") as mock_popen:
+        mock_popen.return_value.stdout = None
+        mock_popen.return_value.wait.return_value = 0
+        driver._run_rsync("/remote/", "/local", [], "x")
+    rsync_cmd = mock_popen.call_args.args[0]
+    remote_shell = rsync_cmd[rsync_cmd.index("-e") + 1]
+    assert "BatchMode=yes" in remote_shell
+    assert "ConnectTimeout=10" in remote_shell

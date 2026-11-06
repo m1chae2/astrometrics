@@ -441,6 +441,9 @@ DECISIONS = {
     "review_get_performance_envelope": ToolDecision(
         "keep", "Slow: reads every session and target twice.", "observe"
     ),
+    "review_invalidate_night": ToolDecision(
+        "drop", "Forgets the app's kept night reviews. Housekeeping for the backend, not a question."
+    ),
     "observatory_remote_check_connection": ToolDecision("keep", "A small network probe.", "observe"),
     # ---- Status reads of the control children ----
     "observatory_mount_status": ToolDecision(

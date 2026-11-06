@@ -108,6 +108,12 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
     // Multi-selection state for batch operations (delete, process, analyze)
     const [checkedFiles, setCheckedFiles] = useState<Set<string>>(new Set());
 
+    // Ticked frames belong to one target. Switching targets clears them, so a
+    // stack, analysis or delete never acts on frames picked for another target.
+    useEffect(() => {
+        setCheckedFiles(new Set());
+    }, [selectedTarget]);
+
     const toggleFile = useCallback((path: string | null) => {
         if (!path) return;
         const newSet = new Set(checkedFiles);

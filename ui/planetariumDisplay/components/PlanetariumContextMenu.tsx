@@ -15,6 +15,7 @@ import { emitToast } from '../../common/utils/emitToast';
 import { navigateToElement } from '../../common/utils/displayCoordinator';
 import { InfoButton } from '../../common/components/InfoButton';
 import { useCommandAvailability } from '../../common/hooks/useCommandAvailability';
+import { Button } from '../../common/components/Button';
 
 /**
  * Props for PlanetariumContextMenu.
@@ -145,24 +146,26 @@ export const PlanetariumContextMenu: React.FC<Props> = ({ source, x, y, telescop
       </div>
 
       {hasAnyData && (
-        <button
+        <Button
+          size="small"
           className="planetarium-context-menu__action"
           onClick={handleOpenInAstronomyManager}
         >
           Open in Astronomy Manager
-        </button>
+        </Button>
       )}
 
       {telescopeConnected && (
         <>
-          <button
+          <Button
+            size="small"
             className="planetarium-context-menu__action"
             onClick={handleSlewToPosition}
             disabled={slewDisabled}
             aria-disabled={slewDisabled}
           >
             Slew Telescope Here
-          </button>
+          </Button>
           {slewDisabled && <InfoButton label="Why unavailable?" text={availability.reason} />}
         </>
       )}

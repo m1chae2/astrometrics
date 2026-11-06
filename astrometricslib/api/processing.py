@@ -67,6 +67,7 @@ from astrometricslib.pipelines.shared.api_arguments import (
 from astrometricslib.pipelines.shared.camera_passes import resolve_processing_frames
 from astrometricslib.pipelines.shared.quality.metrics import CALIBRATION_FRAME_METRICS, FRAME_METRICS
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
+from astrometricslib.pipelines.shared.target_records import save_quality_stamps
 from astrometricslib.pipelines.stacking.calibration_ingest import (
     assess_flat_group,
     build_ingest_report,
@@ -1254,7 +1255,11 @@ class ProcessingPipelines:
             save_targets=self._targets.save,
             drivers=self._drivers,
             measured_at=datetime.now(UTC),
-            quality_recording=FrameQualityRecording(self._config, self.calibration._calibration_library),
+            quality_recording=FrameQualityRecording(
+                self._config,
+                self.calibration._calibration_library,
+                save_target=lambda: save_quality_stamps(self._targets, resolved),
+            ),
         )
 
     @background_job("stacking", grace_period_seconds=8.0)

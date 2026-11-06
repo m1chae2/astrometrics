@@ -28,7 +28,7 @@ export interface UseImageProcessingResult {
     loadingHistory: boolean;
     activeJobId: string | null;
     onSelectJob: (job: ProcessingJob) => void;
-    onDismissJob: (jobId: string) => Promise<void>;
+    targetActiveJobs: ProcessingJob[];
     openSiril: () => Promise<void>;
 }
 
@@ -67,7 +67,7 @@ export function useImageProcessing(
         loadingHistory: stacking.loadingHistory,
         activeJobId: stacking.activeJobId,
         onSelectJob: stacking.onSelectJob,
-        onDismissJob: stacking.onDismissJob,
+        targetActiveJobs: stacking.targetActiveJobs,
         openSiril: stacking.openSiril
     };
 }

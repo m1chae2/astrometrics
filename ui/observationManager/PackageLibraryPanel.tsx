@@ -21,6 +21,7 @@ import { PackageLibraryLists } from './hooks/usePackageLibrary';
 import { NewPackageSearch } from './NewPackageSearch';
 import { confidenceLabel } from './packageModel';
 import './packageLibrary.css';
+import { Button } from '../common/components/Button';
 
 /** The three tabs, in display order, with the words shown when a tab has no packages. */
 const TAB_DEFINITIONS = [
@@ -126,17 +127,16 @@ export const PackageLibraryPanel: React.FC<PackageLibraryPanelProps> = ({
             className="package-library"
             headerContent={
                 <span className="package-library__actions">
-                    <button type="button" ref={newPackageButtonRef} className="btn btn--tiny btn--primary" onClick={() => setIsSearchOpen(true)}>
+                    <Button variant="primary" size="small" ref={newPackageButtonRef} onClick={() => setIsSearchOpen(true)}>
                         New package
-                    </button>
-                    <button
-                        type="button"
-                        className="btn btn--tiny"
+                    </Button>
+                    <Button
+                        size="small"
                         onClick={onAddTarget}
                         title="Add a target that is not in the library yet, by name and coordinates. New package picks from targets already there."
                     >
                         Add Target
-                    </button>
+                    </Button>
                 </span>
             }
         >
@@ -144,14 +144,14 @@ export const PackageLibraryPanel: React.FC<PackageLibraryPanelProps> = ({
                 {actionError && (
                     <div className="package-library__error" role="alert">
                         <span>{actionError}</span>
-                        <button type="button" className="btn btn--tiny" onClick={onDismissActionError}>Dismiss</button>
+                        <Button size="small" onClick={onDismissActionError}>Dismiss</Button>
                     </div>
                 )}
                 {undoNotice && (
                     <div className="package-library__undo">
                         <span>{undoNotice.text}</span>
-                        <button type="button" className="btn btn--tiny" onClick={undoNotice.onUndo}>Undo</button>
-                        <button type="button" className="btn btn--tiny" onClick={undoNotice.onClose} aria-label="Close notice">Close</button>
+                        <Button size="small" onClick={undoNotice.onUndo}>Undo</Button>
+                        <Button size="small" onClick={undoNotice.onClose} aria-label="Close notice">Close</Button>
                     </div>
                 )}
                 {refreshStartedText && <div className="package-library__status">{refreshStartedText}</div>}
@@ -168,9 +168,9 @@ export const PackageLibraryPanel: React.FC<PackageLibraryPanelProps> = ({
                     <TabPanel key={definition.id} idPrefix={ID_PREFIX} tabId={definition.id} selected={selectedTab === definition.id}>
                         {definition.id === 'suggested' && (
                             <div className="package-library__tab-actions">
-                                <button type="button" className="btn btn--tiny" onClick={onRefreshSuggestions}>
+                                <Button size="small" onClick={onRefreshSuggestions}>
                                     Refresh suggestions
-                                </button>
+                                </Button>
                             </div>
                         )}
                         <div className="package-library__list" ref={selectedTab === definition.id ? listRegionRef : undefined}>
@@ -178,7 +178,7 @@ export const PackageLibraryPanel: React.FC<PackageLibraryPanelProps> = ({
                             {!isLoading && error && (
                                 <div className="package-library__error" role="alert">
                                     <span>Could not load the package library.</span>
-                                    <button type="button" className="btn btn--tiny" onClick={onRetry}>Try again</button>
+                                    <Button size="small" onClick={onRetry}>Try again</Button>
                                 </div>
                             )}
                             {!isLoading && !error && lists[definition.id].length === 0 && (
@@ -250,24 +250,22 @@ const PackageRow: React.FC<PackageRowProps> = ({
                 className="package-row"
             />
             {statusWord === 'suggested' && onDismiss && (
-                <button
-                    type="button"
-                    className="btn btn--tiny"
+                <Button
+                    size="small"
                     aria-label={`Dismiss ${observationPackage.target_id}`}
                     onClick={onDismiss}
                 >
                     Dismiss
-                </button>
+                </Button>
             )}
             {statusWord === 'complete' && onReopen && (
-                <button
-                    type="button"
-                    className="btn btn--tiny"
+                <Button
+                    size="small"
                     aria-label={`Reopen ${observationPackage.target_id}`}
                     onClick={onReopen}
                 >
                     Reopen
-                </button>
+                </Button>
             )}
         </div>
     );

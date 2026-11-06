@@ -57,14 +57,16 @@ When none of those gives a solution (the raw frames carry none, which is the
 case for a target imaged without a plate-solving mount or camera program), the
 last source is the stack itself. The stack is plate-solved in memory by the
 solving part of the code the astrometry step uses (`_plate_solve_stack_wcs`),
-without its Gaia refit or star naming. The stack's
-header is not changed: the astrometry step writes its own solution later, and
-a header changed here could make the stack look new to the checks that compare
-a stack against its earlier record. The solved grid is the stack's own, so no
+without star naming and without any online query. Its Gaia refit runs only
+when a complete cached Gaia download covers the field. This step does not
+change the stack's header. The stacking stage saves a plate solution in it
+afterwards (`stage._save_stack_plate_solution`), before the preview copies the
+header. The solved grid is the stack's own, so no
 trim offset or shift applies and no frame has to line up with it. A solve that
 fails (no match, no index files, a time limit) gives the usual "no result",
 with a reason that says the solve was tried. The source is recorded as
-`PLATE_SOLVE_WCS_SOURCE`.
+`PLATE_SOLVE_REFIT_WCS_SOURCE` or `PLATE_SOLVE_UNREFINED_WCS_SOURCE`, so a set
+chosen from a refit solution can be told from one that was not refit.
 
 Even a stack's own header is checked. A frame's own "solution" is often only a
 first guess: the camera software (Ekos) writes the position the mount was told
@@ -148,11 +150,13 @@ from astrometricslib.pipelines.stacking.post_processing.aperture_storage import 
     store_apertures_once,
 )
 from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
-    PLATE_SOLVE_WCS_SOURCE,
+    PLATE_SOLVE_REFIT_WCS_SOURCE,
+    PLATE_SOLVE_UNREFINED_WCS_SOURCE,
     REPLACEMENT_DEPTH_FACTOR,
     ApertureSet,
     StackDepth,
     is_much_deeper,
+    is_plate_solve_wcs_source,
     setup_key,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
@@ -643,7 +647,7 @@ def _frame_lines_up(frame_path: str, stack_plane: np.ndarray, crop_offset: tuple
     return enough_stars and matches >= WCS_CHECK_MINIMUM_MATCHES
 
 
-def _plate_solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> tuple[WCS | None, str]:
+def _plate_solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> tuple[WCS | None, str, str]:
     """Plate-solve the stack itself, in memory, as the last source.
 
     This runs only the solving part of the astrometry step
@@ -651,25 +655,24 @@ def _plate_solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> t
     with the same configuration, index lookup, scale and position hints from
     the stack's header, and the same time limit (`solve_timeout` of 300 s for
     each of the hinted and the blind try, set in
-    `StarIdentifier.process_image`). It does not refit the solution to Gaia,
-    name stars or seed the Gaia cache, so it asks no online catalog; those
-    steps waited on network time-outs for minutes and the noise needs none of
-    them. A solve with a good star list normally takes tens of seconds; a
-    failed one can use the whole limit.
+    `StarIdentifier.process_image`). It asks no online catalog and names no
+    stars: those steps waited on network time-outs for minutes and the noise
+    needs none of them. A solve with a good star list normally takes tens of
+    seconds; a failed one can use the whole limit.
 
-    The solution is the solver's own, without the small shift a Gaia refit
-    would add (see the astrometry README). That is acceptable here. The
+    The solution is refit to Gaia only when a complete cached Gaia download
+    covers the field. The refit reads the cache and never sends a query. With
+    no such download, the solver's own solution is kept as it is, and the
+    returned source says so (`PLATE_SOLVE_UNREFINED_WCS_SOURCE`). A refit can
+    move a solution by more than a pixel (up to 1.4 px on one field; see
+    AST-02 in the astrometry validation register), so sets chosen from the
+    two kinds of solution can be told apart by the stored source. The
     apertures are picked on the stack's own pixels, at least
     `FAINT_SOURCE_CLEARANCE_PX` from every detected source, so the choice does
     not depend on the solution. The solution only gives each aperture its sky
-    position, for carrying the set to other stacks. A refit moves a solution
-    by about a pixel or less, under the depth zero point's 3 arcsec match
-    radius (`STAR_MATCH_RADIUS_ARCSEC`). Sets chosen with the unrefined
-    solution have not been measured against Gaia (the measurement in
-    `PLATE_SOLVE_WCS_SOURCE` was made with the refit). The stack file
-    is only read: the solution is not written to its header (see the module
-    description), and the astrometry step later solves the stack again for
-    itself.
+    position, for carrying the set to other stacks. The stack file
+    is only read here: the stacking stage saves a solution in the header
+    afterwards (see the module description).
 
     Parameters
     ----------
@@ -685,6 +688,9 @@ def _plate_solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> t
         The solution on the stack's own pixel grid, or `None`.
     reason : `str`
         Why there is none, saying the solve was tried. Empty when there is one.
+    wcs_source : `str`
+        `PLATE_SOLVE_REFIT_WCS_SOURCE` or `PLATE_SOLVE_UNREFINED_WCS_SOURCE`,
+        saying whether the solution was refit to cached Gaia stars.
     """
     # Imported here: the astrometry package is large, and a stack that has a
     # solution never needs it.
@@ -693,7 +699,8 @@ def _plate_solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> t
     logger.info("Solving the stack for its sky coordinates...")
     started = time.monotonic()
     try:
-        solved_wcs = AstrometryPipeline(drivers=drivers).solve_wcs(stack_path)
+        pipeline = AstrometryPipeline(drivers=drivers)
+        solved_wcs = pipeline.solve_wcs(stack_path, refit_from_cache=True)
     except (
         PlateSolveFailedError,
         RuntimeError,
@@ -708,17 +715,34 @@ def _plate_solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> t
         logger.warning(
             "Could not solve the stack %s after %.1f s: %s", stack_path, time.monotonic() - started, error
         )
-        return None, f"plate-solving the stack itself was tried and failed ({type(error).__name__}: {error})"
+        return (
+            None,
+            f"plate-solving the stack itself was tried and failed ({type(error).__name__}: {error})",
+            PLATE_SOLVE_UNREFINED_WCS_SOURCE,
+        )
     elapsed = time.monotonic() - started
     if solved_wcs is None:
         logger.warning("Could not solve the stack for its sky coordinates (after %.1f s).", elapsed)
-        return None, "plate-solving the stack itself was tried and found no solution"
+        return (
+            None,
+            "plate-solving the stack itself was tried and found no solution",
+            PLATE_SOLVE_UNREFINED_WCS_SOURCE,
+        )
     celestial = solved_wcs.celestial if solved_wcs.has_celestial else None
     if celestial is None:
         logger.warning("Could not solve the stack for its sky coordinates (after %.1f s).", elapsed)
-        return None, "plate-solving the stack itself was tried and gave no sky solution"
-    logger.info("Solved in %.1f s.", elapsed)
-    return celestial, ""
+        return (
+            None,
+            "plate-solving the stack itself was tried and gave no sky solution",
+            PLATE_SOLVE_UNREFINED_WCS_SOURCE,
+        )
+    was_refit = bool(getattr(pipeline, "last_solve_was_refit", False))
+    logger.info(
+        "Solved in %.1f s (%s).",
+        elapsed,
+        "refit to cached Gaia stars" if was_refit else "not refit: no complete cached Gaia download",
+    )
+    return celestial, "", PLATE_SOLVE_REFIT_WCS_SOURCE if was_refit else PLATE_SOLVE_UNREFINED_WCS_SOURCE
 
 
 def _reference_frame_wcs(
@@ -1384,7 +1408,22 @@ class _StackPlateSolve:
         """
         self._stack_path = stack_path
         self._drivers = drivers
-        self._answer: tuple[WCS | None, str] | None = None
+        self._answer: tuple[WCS | None, str, str] | None = None
+
+    @property
+    def source(self) -> str:
+        """Say how the solution was made, for the stored `wcs_source`.
+
+        Returns
+        -------
+        source : `str`
+            `PLATE_SOLVE_REFIT_WCS_SOURCE` when the solution was refit to
+            cached Gaia stars, else `PLATE_SOLVE_UNREFINED_WCS_SOURCE`. Read it
+            after `solve` has given a solution.
+        """
+        if self._answer is None:
+            return PLATE_SOLVE_UNREFINED_WCS_SOURCE
+        return self._answer[2]
 
     def solve(self) -> tuple[WCS | None, str]:
         """Plate-solve the stack, or give the earlier answer.
@@ -1398,7 +1437,7 @@ class _StackPlateSolve:
         """
         if self._answer is None:
             self._answer = _plate_solve_stack_wcs(self._stack_path, self._drivers)
-        return self._answer
+        return self._answer[0], self._answer[1]
 
 
 @dataclass(frozen=True)
@@ -1510,7 +1549,7 @@ def _choose_wcs(
             if wcs is None:
                 failure = StackNoiseOutcome(None, f"{reason}; {solve_reason}")
                 return _WcsChoice(None, wcs_source, check_frame_path, check_offset, failure)
-            wcs_source = PLATE_SOLVE_WCS_SOURCE
+            wcs_source = plate_solve.source
             check_offset = crop_offset
             # The reference frame still gives the saturation limit, but only
             # when it shares the stack's pixel grid. Its solution was not
@@ -1599,7 +1638,7 @@ def _resolve_apertures(
         chosen, choice_reason = choose_apertures_with_reason(
             plane,
             solved_wcs if solved_wcs is not None else wcs,
-            PLATE_SOLVE_WCS_SOURCE if trusted else wcs_source,
+            plate_solve.source if trusted else wcs_source,
             os.path.basename(stack_path),
             stack_setup_key,
             saturation,
@@ -1613,7 +1652,7 @@ def _resolve_apertures(
         aperture_set = store_apertures_once(apertures_path, chosen)
         created = aperture_set is chosen
         if created and solved_wcs is not None:
-            wcs, wcs_source = solved_wcs, PLATE_SOLVE_WCS_SOURCE
+            wcs, wcs_source = solved_wcs, plate_solve.source
     elif may_choose_apertures and (
         not aperture_set.sky_positions_from_plate_solve or is_much_deeper(depth, aperture_set)
     ):
@@ -1631,7 +1670,7 @@ def _resolve_apertures(
             chosen, choice_reason = choose_apertures_with_reason(
                 plane,
                 solved_wcs,
-                PLATE_SOLVE_WCS_SOURCE,
+                plate_solve.source,
                 os.path.basename(stack_path),
                 stack_setup_key,
                 saturation,
@@ -1652,7 +1691,7 @@ def _resolve_apertures(
             aperture_set = store_apertures_once(apertures_path, chosen, replace_identity=replaced.identity)
             created = aperture_set is chosen
             if created:
-                wcs, wcs_source = solved_wcs, PLATE_SOLVE_WCS_SOURCE
+                wcs, wcs_source = solved_wcs, plate_solve.source
                 logger.info(
                     "Replaced the noise apertures %s of %s by %s: %s.",
                     replaced.identity,
@@ -1713,7 +1752,7 @@ def _align_to_stored_apertures(
         The outcome to return when the solution could not be moved.
     """
     wcs, reason, alignment = _move_guess_onto_reference_stars(plane, wcs, aperture_set.reference_sky)
-    if wcs is None and wcs_source != PLATE_SOLVE_WCS_SOURCE:
+    if wcs is None and not is_plate_solve_wcs_source(wcs_source):
         # A frame's own solution can be off (a pointing solve written by
         # the capture program, or a frame that does not share the stack's
         # grid). Before giving up, solve the stack itself and try again.
@@ -1728,13 +1767,13 @@ def _align_to_stored_apertures(
                 None, f"{reason}; with the plate solve of the stack itself: {retry_reason}"
             )
             return None, wcs_source, "", failure
-        wcs_source = PLATE_SOLVE_WCS_SOURCE
+        wcs_source = plate_solve.source
     if wcs is None:
         return None, wcs_source, "", StackNoiseOutcome(None, reason)
     position_note = alignment.describe() if alignment is not None else ""
     if (
         aperture_set.sky_positions_from_plate_solve
-        and wcs_source != PLATE_SOLVE_WCS_SOURCE
+        and not is_plate_solve_wcs_source(wcs_source)
         and alignment is not None
         and alignment.rms_px > POOR_ALIGNMENT_RMS_PX
     ):
@@ -1804,7 +1843,7 @@ def _retry_poor_fit_with_plate_solve(
                     f"{second_note} The fit to the stored stars stayed poor "
                     f"({alignment.rms_px:.2f} px rms) even with the plate solve."
                 ).strip()
-            return wcs, PLATE_SOLVE_WCS_SOURCE, second_note
+            return wcs, plate_solve.source, second_note
         why_not_improved = f"the plate solve of the stack could not be moved onto the stars: {retry_reason}"
     poor_fit_note = (
         f"The fit to the stored stars was poor ({first_rms_px:.2f} px rms), "

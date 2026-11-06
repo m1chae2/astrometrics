@@ -6,6 +6,7 @@ import { FrameFilterGroup, TargetDetails } from './targetDetails/TargetDetails';
 import { SectionPanel } from '../../common/components/SectionPanel';
 import { ListActions } from '../../common/components/ListActions';
 import '../../common/styles/panels.css';
+import { Button } from '../../common/components/Button';
 
 /**
  * Props for the TargetDetailsManager component.
@@ -245,9 +246,9 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
 
       <SectionPanel title="Target Controls" className="flex-auto">
         <ListActions>
-          <button className="btn" onClick={handleSendToPhone} disabled={!selectedTarget}>Send to Phone</button>
-          <button className="btn" onClick={onSaveTarget}>Save Target</button>
-          <button className="btn" onClick={onDeleteTarget}>Delete Target</button>
+          <Button onClick={handleSendToPhone} disabled={!selectedTarget}>Send to Phone</Button>
+          <Button onClick={onSaveTarget}>Save Target</Button>
+          <Button onClick={onDeleteTarget}>Delete Target</Button>
         </ListActions>
       </SectionPanel>
 

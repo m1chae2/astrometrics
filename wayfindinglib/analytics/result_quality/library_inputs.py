@@ -517,7 +517,9 @@ class LibraryInputs:
             rows.
         """
         try:
-            listed = self.astrometrics.quality.set_aside_frames(target_id)
+            # A target already listed spares the library another listing.
+            known = self._targets.get(target_id) if self._targets else None
+            listed = self.astrometrics.quality.set_aside_frames(known or target_id)
         except (AstrometricsError, OSError, sqlite3.Error) as error:
             self.notes.append(f"The set-aside frames of {target_id} could not be listed: {error}")
             listed = []

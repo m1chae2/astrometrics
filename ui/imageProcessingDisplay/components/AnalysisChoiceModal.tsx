@@ -1,5 +1,6 @@
 import React from 'react';
 import { BaseModal } from '../../common/components/BaseModal';
+import { Button } from '../../common/components/Button';
 
 interface Props {
   isOpen: boolean;
@@ -21,24 +22,25 @@ export const AnalysisChoiceModal: React.FC<Props> = ({
       <div className="analysis-modal-content">
         <p>This target has both a Final Stack and a Spectral Stack available. Which one would you like to analyze?</p>
         <div className="analysis-modal-actions">
-          <button
-            className="btn analysis-modal-btn"
+          <Button
+            className="analysis-modal-btn"
             onClick={() => {
               onSelectFinalStack();
               onClose();
             }}
           >
             Final Stack
-          </button>
-          <button
-            className="btn btn--primary analysis-modal-btn"
+          </Button>
+          <Button
+            variant="primary"
+            className="analysis-modal-btn"
             onClick={() => {
               onSelectSpectralStack();
               onClose();
             }}
           >
             Spectral Stack
-          </button>
+          </Button>
         </div>
       </div>
     </BaseModal>

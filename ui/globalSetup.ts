@@ -21,7 +21,7 @@ import net from 'net';
 import os from 'os';
 import path from 'path';
 import type { TestProject } from 'vitest/node';
-import { TEST_BACKEND_MARKER } from './testBackendMarker';
+import { TEST_BACKEND_MARKER, LIVE_BACKEND_TESTS_VARIABLE } from './testBackendMarker';
 
 declare module 'vitest' {
     export interface ProvidedContext {
@@ -162,7 +162,10 @@ async function trySpawnBackend(
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ jsonrpc: '2.0', method: 'system:save', params: {}, id: 'probe' }),
             });
-            if (response.ok) {
+            // Only our own child counts. If it already exited (for example because
+            // the port was taken by another backend), this answer came from
+            // somebody else's server and must not be used.
+            if (response.ok && !exitInfo && backend.exitCode === null && backend.signalCode === null) {
                 ready = true;
                 break;
             }
@@ -194,8 +197,11 @@ async function trySpawnBackend(
  * @return {Promise<() => void>} Teardown that stops the backend and removes its sandbox.
  */
 export default async function setup(project: TestProject): Promise<() => void> {
+    // Opt-in only. Without this variable no backend is started and the tests that
+    // need one are skipped, so a plain `vitest run` can never reach a backend.
+    const optedIn = process.env[LIVE_BACKEND_TESTS_VARIABLE] === '1';
     const needsBackend = findTestFiles().some((file) => fs.readFileSync(file, 'utf8').includes(TEST_BACKEND_MARKER));
-    if (!needsBackend || process.env.NO_TEST_BACKEND) {
+    if (!optedIn || !needsBackend || process.env.NO_TEST_BACKEND) {
         project.provide('testBackendOrigin', '');
         return () => {};
     }

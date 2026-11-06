@@ -226,6 +226,7 @@ class Container:
             notification_service=self.notification_service,
             job_service=self.job_service,
             astrometrics_service=self.astrometrics_service,
+            socket_manager=self.socket_manager,
         )
 
         self.analysis_orchestrator = AnalysisOrchestrator(
@@ -256,6 +257,7 @@ class Container:
             measurement_announcer=self.quality_measurement_service,
             suggestion_trigger=self.suggestion_refresh_worker.request,
             socket_manager=self.socket_manager,
+            calibration_trigger=self.image_processing_service.measure_new_calibration_frames,
         )
 
         # The telescope status reports a running copy of new frames.

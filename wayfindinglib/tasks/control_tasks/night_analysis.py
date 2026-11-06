@@ -18,10 +18,19 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from wayfindinglib.analytics import capture_history
-from wayfindinglib.analytics.envelope_assembly import assemble_performance_envelope, read_capture_frames
+from wayfindinglib.analytics.envelope_assembly import (
+    NightGuidingBaseline,
+    assemble_performance_envelope,
+    collect_night_baselines,
+    read_capture_frames,
+)
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
+from wayfindinglib.tasks.control_tasks.review_versions import review_data_version
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
+    from astrometricslib import Target
     from wayfindinglib.api.control.context import ControlContext
     from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
     from wayfindinglib.models.session.capture_frame import CaptureFrame
@@ -37,7 +46,11 @@ LibraryCache = dict[tuple[str, str, str], Any]
 
 
 def capture_library(
-    context: ControlContext, telescope_name: str, camera_name: str, library_cache: LibraryCache
+    context: ControlContext,
+    telescope_name: str,
+    camera_name: str,
+    library_cache: LibraryCache,
+    targets: Sequence[Target] | None = None,
 ) -> list[CaptureFrame]:
     """Read the equipment's light frames once.
 
@@ -51,6 +64,9 @@ def capture_library(
         Name of the imaging camera.
     library_cache : `dict`
         Holds earlier reads, so many nights share one read.
+    targets : `Sequence` [`Target`], optional
+        The library's targets, when the caller has just listed them, so the
+        library is not asked again.
 
     Returns
     -------
@@ -60,7 +76,7 @@ def capture_library(
     """
     key = ("library", telescope_name, camera_name)
     if key not in library_cache:
-        library_cache[key] = read_capture_frames(context.astrometrics, telescope_name, camera_name)
+        library_cache[key] = read_capture_frames(context.astrometrics, telescope_name, camera_name, targets)
     return library_cache[key]
 
 
@@ -89,6 +105,7 @@ def performance_envelope(
     contexts: list[EkosSessionContext],
     runs: list[GuidingRunSummary],
     library_cache: LibraryCache,
+    targets: Sequence[Target] | None = None,
 ) -> PerformanceEnvelope | None:
     """Work out the performance limits of the active equipment.
 
@@ -112,11 +129,19 @@ def performance_envelope(
         Every guiding run.
     library_cache : `dict`
         Shares frame reads between calls.
+    targets : `Sequence` [`Target`], optional
+        The library's targets, when the caller has just listed them.
 
     Returns
     -------
     envelope : `PerformanceEnvelope` or `None`
         The limits, or `None` if no telescope and camera are active.
+
+    Notes
+    -----
+    Each earlier night's guiding is reduced to a few numbers once and kept in
+    the context's review cache until the records change, so judging a night
+    does not read every earlier night's samples again.
     """
     catalog = get_equipment_catalog(context.config)
     telescope, camera = catalog.active_telescope(), catalog.active_camera()
@@ -130,9 +155,41 @@ def performance_envelope(
         before_night=before_night,
         contexts=contexts,
         runs=runs,
-        capture_frames=capture_library(context, telescope.name, camera.name, library_cache),
+        capture_frames=capture_library(context, telescope.name, camera.name, library_cache, targets),
         records=context.records,
+        baseline_provider=_night_baseline_provider(context, contexts, runs),
     )
+
+
+def _night_baseline_provider(
+    context: ControlContext, contexts: list[EkosSessionContext], runs: list[GuidingRunSummary]
+) -> Callable[[str], Sequence[NightGuidingBaseline]]:
+    """Make the function that gives the guiding baselines, kept in the cache.
+
+    Returns
+    -------
+    provide : `Callable`
+        Takes the equipment fingerprint and gives one `NightGuidingBaseline`
+        for each earlier night that used the equipment. The baselines are
+        read-only; the cache hands every caller the same list.
+    """
+
+    def provide(fingerprint: str) -> Sequence[NightGuidingBaseline]:
+        """Give the baselines for one equipment fingerprint.
+
+        Returns
+        -------
+        baselines : `Sequence` [`NightGuidingBaseline`]
+            The kept baselines, or new ones when the records changed.
+        """
+        return context.review_cache.get_or_build(
+            ("night_baselines", fingerprint),
+            review_data_version(context),
+            lambda: collect_night_baselines(context.records, contexts, fingerprint, runs),
+            copy_result=False,
+        )
+
+    return provide
 
 
 def _exposure_lengths_in_use(
@@ -161,6 +218,7 @@ def guiding_night_analysis(
     contexts: list[EkosSessionContext] | None = None,
     runs: list[GuidingRunSummary] | None = None,
     library_cache: LibraryCache | None = None,
+    targets: Sequence[Target] | None = None,
 ) -> GuidingSessionAnalysis | None:
     """Analyse one night's guiding in three stages.
 
@@ -180,6 +238,8 @@ def guiding_night_analysis(
         Already-read records. Read here when omitted.
     library_cache : `dict`, optional
         Shares frame reads between nights.
+    targets : `Sequence` [`Target`], optional
+        The library's targets, when the caller has just listed them.
 
     Returns
     -------
@@ -201,7 +261,7 @@ def guiding_night_analysis(
     samples = tasks.measured_night_samples(context.records, session_id)
     if not (night_contexts or night_runs or samples):
         return None
-    envelope = performance_envelope(context, None, session_id, contexts, runs, library_cache)
+    envelope = performance_envelope(context, None, session_id, contexts, runs, library_cache, targets)
     exposure_lengths = _exposure_lengths_in_use(context, envelope, library_cache)
     fingerprints = [c.equipment.equipment_fingerprint for c in night_contexts if c.equipment is not None]
     match = tasks.equipment_match_level(

@@ -6,7 +6,7 @@
  * sharing the same vendor chunk split.
  *
  * CSP injection is handled by the inline `injectCspPlugin`, which replaces the
- * <%- csp %> placeholder in every HTML file during both dev and build. No
+ * <!-- csp --> placeholder (a plain HTML comment, so the raw files stay valid HTML) in every HTML file during both dev and build. No
  * third-party HTML plugin is needed.
  */
 
@@ -24,14 +24,14 @@ export default defineConfig(({ mode }) => {
     : "<!-- Dev CSP --> <meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'self'; connect-src 'self' http: ws: data:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; worker-src 'self' blob:; child-src 'self' blob:; img-src 'self' data: blob: http:; style-src 'self' 'unsafe-inline';\">";
 
   /**
-   * Inline Vite plugin that replaces the <%- csp %> EJS placeholder in any
+   * Inline Vite plugin that replaces the <!-- csp --> comment placeholder in any
    * HTML file with the resolved CSP meta tag. Applied to all HTML files so
    * both index.html and tray_popover.html receive the tag.
    */
   const injectCspPlugin = {
     name: 'inject-csp',
     transformIndexHtml(html) {
-      return html.replace(/<%- csp %>/g, cspContent);
+      return html.replace(/<!-- csp -->/g, cspContent);
     },
   };
 

@@ -5,13 +5,25 @@
  * rolling RMS, and pulse corrections. The Guiding Trends panel keeps its trace
  * checkboxes and its History slider in the panel header, so the plot gets the whole body.
  * With no samples yet it shows a short message instead of an empty plot.
+ * While the view shows a past night (chosen at the top of the Observatory Manager), the
+ * panel shows that night's guiding summary in place of the live plot and its controls.
+ * When Live has no samples (the mount is not guiding), the panel shows the summary of the
+ * most recent night that has guiding data, titled with its date, and switches back to the
+ * live plot as soon as samples arrive.
  */
 
 import React, { useState, useMemo } from 'react';
+import { Checkbox } from '../../common/components/Checkbox';
+import { Slider } from '../../common/components/Slider';
+import { useQuery } from '@tanstack/react-query';
+import { callBackend } from '../../common/services/backendApi';
+import { qualityQueryKeys } from '../../common/queries/qualityQueryKeys';
 import { SectionPanel } from '../../common/components/SectionPanel';
 import { GuidingSample } from '../../common/types/backendTypes';
 import { TimeSeriesPlot } from '../../common/components/plotting/TimeSeriesPlot';
 import { ScatterPlot } from '../../common/components/plotting/ScatterPlot';
+import { GuidingNightSummaryView } from './GuidingNightSummaryView';
+import { useObservatoryNight } from '../ObservatoryNightContext';
 // Styles handled by panels.css
 
 export interface GuidingStatusProps {
@@ -33,6 +45,22 @@ export const GuidingTrendsPlot: React.FC<GuidingStatusProps> = ({ history }) => 
     const [showRMS, setShowRMS] = useState<boolean>(true);
     const [showCorr, setShowCorr] = useState<boolean>(true);
     const [maxSamples, setMaxSamples] = useState<number>(50);
+    const { isLive, nightId } = useObservatoryNight();
+
+    // With no live samples, fall back to the newest night that has guiding data.
+    const noLiveSamples = history.length === 0;
+    const nightsQuery = useQuery({
+        queryKey: qualityQueryKeys.nights(),
+        queryFn: () => callBackend('history:nights', {}),
+        enabled: isLive && noLiveSamples,
+        retry: false,
+    });
+    const lastGuidedNight = useMemo(() => {
+        const withGuiding = (nightsQuery.data ?? []).filter((night) => night.hasGuidingData);
+        // Newest first by date, so the answer does not depend on the order the backend lists them.
+        return [...withGuiding].sort((first, second) => second.nightDate.localeCompare(first.nightDate))[0] ?? null;
+    }, [nightsQuery.data]);
+    const showLastNight = isLive && noLiveSamples && lastGuidedNight !== null;
 
     // Limit guiding history to the user-selected window size
     const slicedHistory = useMemo(() => {
@@ -125,55 +153,40 @@ export const GuidingTrendsPlot: React.FC<GuidingStatusProps> = ({ history }) => 
 
     const headerControls = (
         <span className="guiding-trends__controls">
-            <label className="guiding-controls__label guiding-controls__label--ra">
-                <input
-                    type="checkbox"
-                    className="guiding-controls__checkbox"
-                    checked={showRA}
-                    onChange={(e) => setShowRA(e.target.checked)}
-                />
-                dRA
-            </label>
-            <label className="guiding-controls__label guiding-controls__label--dec">
-                <input
-                    type="checkbox"
-                    className="guiding-controls__checkbox"
-                    checked={showDEC}
-                    onChange={(e) => setShowDEC(e.target.checked)}
-                />
-                dDEC
-            </label>
-            <label className="guiding-controls__label guiding-controls__label--snr">
-                <input
-                    type="checkbox"
-                    className="guiding-controls__checkbox"
-                    checked={showSNR}
-                    onChange={(e) => setShowSNR(e.target.checked)}
-                />
-                SNR
-            </label>
-            <label className="guiding-controls__label guiding-controls__label--rms">
-                <input
-                    type="checkbox"
-                    className="guiding-controls__checkbox"
-                    checked={showRMS}
-                    onChange={(e) => setShowRMS(e.target.checked)}
-                />
-                RMS
-            </label>
-            <label className="guiding-controls__label guiding-controls__label--corr">
-                <input
-                    type="checkbox"
-                    className="guiding-controls__checkbox"
-                    checked={showCorr}
-                    onChange={(e) => setShowCorr(e.target.checked)}
-                />
-                Pulses
-            </label>
+            {isLive && !showLastNight && (<>
+            <Checkbox
+                className="guiding-controls__label guiding-controls__label--ra"
+                label="dRA"
+                checked={showRA}
+                onChange={(e) => setShowRA(e.target.checked)}
+            />
+            <Checkbox
+                className="guiding-controls__label guiding-controls__label--dec"
+                label="dDEC"
+                checked={showDEC}
+                onChange={(e) => setShowDEC(e.target.checked)}
+            />
+            <Checkbox
+                className="guiding-controls__label guiding-controls__label--snr"
+                label="SNR"
+                checked={showSNR}
+                onChange={(e) => setShowSNR(e.target.checked)}
+            />
+            <Checkbox
+                className="guiding-controls__label guiding-controls__label--rms"
+                label="RMS"
+                checked={showRMS}
+                onChange={(e) => setShowRMS(e.target.checked)}
+            />
+            <Checkbox
+                className="guiding-controls__label guiding-controls__label--corr"
+                label="Pulses"
+                checked={showCorr}
+                onChange={(e) => setShowCorr(e.target.checked)}
+            />
             <label className="guiding-controls__slider-container guiding-trends__history">
                 <span>History:</span>
-                <input
-                    type="range"
+                <Slider
                     className="guiding-controls__slider"
                     min="10"
                     max="100"
@@ -183,11 +196,21 @@ export const GuidingTrendsPlot: React.FC<GuidingStatusProps> = ({ history }) => 
                 />
                 <span className="guiding-controls__slider-val">{maxSamples} pts</span>
             </label>
+            </>)}
         </span>
     );
 
     return (
-        <SectionPanel title="Guiding Trends" className="observatory-guiding-trends" headerContent={headerControls}>
+        <SectionPanel
+            title={showLastNight ? `Last night with guiding: ${lastGuidedNight.nightDate}` : 'Guiding Trends'}
+            className="observatory-guiding-trends"
+            headerContent={headerControls}
+        >
+            {!isLive && nightId !== null ? (
+                <GuidingNightSummaryView nightId={nightId} />
+            ) : showLastNight ? (
+                <GuidingNightSummaryView nightId={lastGuidedNight.nightId} />
+            ) : (
             <div id="guiding-trends-plot" className="guiding-status__plot guiding-status__plot--trends">
                 {slicedHistory.length === 0 ? (
                     // With no samples the time axis would only read 00:00:00, so say so in words instead.
@@ -198,6 +221,7 @@ export const GuidingTrendsPlot: React.FC<GuidingStatusProps> = ({ history }) => 
                     </div>
                 )}
             </div>
+            )}
         </SectionPanel>
     );
 };

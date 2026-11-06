@@ -19,6 +19,7 @@ import { emitToast } from '../common/utils/emitToast';
 import { reportError } from '../common/utils/reportError';
 import { navigateToElement } from '../common/utils/displayCoordinator';
 import { useReportModeReady } from '../common/utils/appBootReadiness';
+import { Button } from '../common/components/Button';
 
 /**
  * Main component for the image processing view.
@@ -60,6 +61,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
     pendingTarget, setPendingTarget,
     reloadKey, forceReload
   } = useTargetContext();
+  const { remoteTargets } = useRemoteStatusContext();
 
   const {
     items, isLoading: isTargetListLoading, filterPanel,
@@ -68,8 +70,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
     lightFrames, isLoadingFrames, isProcessing, startProcessing, cancelProcessingJob,
     refreshFrames, isAnalyzing, analysisResults, startAnalysis,
     logLines, clearLogs,
-    files,
-    ingestion
+    files
   } = useImageProcessingContext();
 
   const {
@@ -79,11 +80,6 @@ const ImageProcessingDisplayInner: React.FC = () => {
     checkedFiles, setCheckedFiles, toggleFile, toggleAllFiles,
     stackedImage, stackedSpectralTarget, totalExposure
   } = files;
-
-  const {
-    isIngestModalOpen, openIngestModal, closeIngestModal,
-    remoteTargets, setIsIngestModalOpen
-  } = ingestion;
 
   const {
     imageUrl, imageBlob, imageFrameInfo, autoPanTrigger, disableStretch,
@@ -435,8 +431,8 @@ const ImageProcessingDisplayInner: React.FC = () => {
       // REQ: IMG-1.4 - Target management actions enclosed in a consistent panel
       actions={
         <ListActions>
-          <button className="btn" onClick={saveTarget}>Save Target</button>
-          <button className="btn" onClick={() => selectedTarget && setShowDeleteConfirm(true)}>Delete Target</button>
+          <Button onClick={saveTarget}>Save Target</Button>
+          <Button onClick={() => selectedTarget && setShowDeleteConfirm(true)}>Delete Target</Button>
         </ListActions>
       }
     />
@@ -490,41 +486,10 @@ const ImageProcessingDisplayInner: React.FC = () => {
       handleSelectFile={setSelectedFile}
       handleAddImages={handleAddImages}
       setIsAddModalOpen={setIsAddModalOpen}
-      openIngestModal={openIngestModal}
-      remoteTargets={remoteTargets}
       selectedFile={selectedFile}
       onShowHeader={handleOpenHeaderModal}
     />
   );
-
-  const handleIngestComplete = React.useCallback(async (targetName: string) => {
-    // Robustness: Ensure target exists before selecting
-    const exists = items.some(i => i.value === targetName);
-    if (!exists) {
-      try {
-        const t = await fetchTargetObject(targetName);
-        if (!t) {
-          await createTarget(targetName);
-          emitEvent('terminal:log', `[Ingest] Automatically created target record for ${targetName}`);
-        }
-      } catch (e) {
-        // Attempt create as fallback
-        try {
-          await createTarget(targetName);
-          emitEvent('terminal:log', `[Ingest] Created target record for ${targetName} (fallback)`);
-        } catch (err) {
-          emitEvent('terminal:log', `[Ingest] Failed to ensure target exists: ${err}`);
-        }
-      }
-    }
-
-    forceReload();
-    emitEvent('targetsUpdated');
-
-    setSelectedTarget(targetName);
-    setPendingTarget(targetName);
-    refreshFrames();
-  }, [items, forceReload, setSelectedTarget, setPendingTarget, refreshFrames]);
 
   return (
     <ImageProcessingLayout
@@ -542,10 +507,6 @@ const ImageProcessingDisplayInner: React.FC = () => {
       fileDeleteCount={filesToDelete.length}
       onConfirmFileDelete={confirmDeleteFiles}
       onCancelFileDelete={() => setShowFileDeleteConfirm(false)}
-      isIngestModalOpen={isIngestModalOpen}
-      onCloseIngestModal={closeIngestModal}
-      onIngestComplete={handleIngestComplete}
-      ingestionState={ingestion}
       isHeaderModalOpen={isHeaderModalOpen}
       onCloseHeaderModal={() => setIsHeaderModalOpen(false)}
       targetId={selectedTarget}

@@ -188,7 +188,6 @@ FLAG_GAIA_PROPER_MOTION_UNKNOWN = "gaia_proper_motion_unknown"
 FLAG_GAIA_EPOCH_UNKNOWN = "gaia_epoch_unknown"
 FLAG_SCALE_HINT_BINNING_MISMATCH = "scale_hint_binning_mismatch"
 FLAG_GAIA_DEPTH_REDUCED = "gaia_depth_reduced"
-FLAG_GAIA_PARTIAL_CACHE = "gaia_partial_cache"
 FLAG_WCS_REFINED = "wcs_refined_against_gaia"
 FLAG_WCS_REFINEMENT_SKIPPED = "wcs_refinement_skipped"
 
@@ -1201,12 +1200,14 @@ class StarIdentifier:
         maximum_identified_stars: int | None = None,
         target_name: str | None = None,
         solve_only: bool = False,
+        refit_from_cache: bool = False,
     ) -> tuple[list[StellarObject], WCS | None]:
         """Run the full process: find the stars, map the image, and name them.
 
         With `solve_only`, the process stops as soon as the solver has
-        answered: no Gaia refit, no SIMBAD or Gaia naming, and no online
-        query of any kind.
+        answered: no SIMBAD or Gaia naming and no online query of any kind.
+        The Gaia refit is skipped too, unless `refit_from_cache` asks for a
+        refit against the local cache alone.
 
         Parameters
         ----------
@@ -1226,6 +1227,12 @@ class StarIdentifier:
         solve_only : `bool`, optional
             If True, return the solver's solution as it is and skip every
             step that asks an online catalog. The stars come back unnamed.
+        refit_from_cache : `bool`, optional
+            Used only with `solve_only`. If True, refit the solution to the
+            Gaia stars of a complete cached download that covers the field. The
+            cache is the only source: nothing is sent to a remote service. With
+            no such download the refit is skipped and the flag
+            ``wcs_refinement_skipped`` is recorded.
 
         Returns
         -------
@@ -1359,6 +1366,10 @@ class StarIdentifier:
                         warnings.simplefilter("ignore", FITSFixedWarning)
                         wcs = WCS(solved_header, naxis=2)
                     if solve_only:
+                        if refit_from_cache:
+                            wcs = self._refine_wcs_against_gaia(
+                                wcs, all_detected_sources, h, w, cache_only=True
+                            )
                         return self.stellar_objects, wcs
                     wcs = self._refine_wcs_against_gaia(wcs, all_detected_sources, h, w)
                     self._identify_stars_with_simbad(wcs, center_ra, center_dec, w, h)
@@ -1375,7 +1386,9 @@ class StarIdentifier:
 
         return self.stellar_objects, wcs
 
-    def _refine_wcs_against_gaia(self, wcs: WCS, sources: list[dict], height: int, width: int) -> WCS:
+    def _refine_wcs_against_gaia(
+        self, wcs: WCS, sources: list[dict], height: int, width: int, *, cache_only: bool = False
+    ) -> WCS:
         """Refit the plate solution to the field's Gaia stars.
 
         The solver fits only the few stars of its own index files, and can sit
@@ -1394,6 +1407,9 @@ class StarIdentifier:
             The detected stars, each with a centroid in pixels.
         height, width : `int`
             The image's size in pixels.
+        cache_only : `bool`, optional
+            If True, use only a complete cached download and never ask a
+            remote service. Without one, the solver's solution is kept.
 
         Returns
         -------
@@ -1416,9 +1432,21 @@ class StarIdentifier:
             logger.exception("Could not place the solved image on the sky; the Gaia refit is skipped.")
             self._add_flag(FLAG_WCS_REFINEMENT_SKIPPED)
             return wcs
-        gaia_table, gaia_coords = self._query_gaia_region(
-            float(centre.ra.deg), float(centre.dec.deg), radius_deg, GAIA_DEFAULT_MAGNITUDE_LIMIT
-        )
+        if cache_only:
+            from astrometricslib.foundation.config import get_configuration
+
+            cached = self._query_gaia_region_from_cache(
+                get_configuration(),
+                float(centre.ra.deg),
+                float(centre.dec.deg),
+                radius_deg,
+                GAIA_DEFAULT_MAGNITUDE_LIMIT,
+            )
+            gaia_table, gaia_coords = cached if cached is not None else (None, None)
+        else:
+            gaia_table, gaia_coords = self._query_gaia_region(
+                float(centre.ra.deg), float(centre.dec.deg), radius_deg, GAIA_DEFAULT_MAGNITUDE_LIMIT
+            )
         if gaia_table is None or gaia_coords is None:
             logger.warning("No Gaia stars for the refit of the solution; the solver's solution is kept.")
             self._add_flag(FLAG_WCS_REFINEMENT_SKIPPED)
@@ -1716,9 +1744,9 @@ class StarIdentifier:
         download covers this area, is at least as deep as `max_magnitude` and
         was not cut short by the row limit. Otherwise we download from the
         internet and save it, with a record of how it was fetched, for next
-        time. If every remote service fails, the stars the cache holds in the
-        search box are returned instead (``meta["partial_cache"]`` is True),
-        since some stars beat none.
+        time. If every remote service fails, the search returns nothing. A
+        cache that holds only some of the stars is never used: a missing star
+        could let a neighbor take its identity for good.
 
         Parameters
         ----------
@@ -1768,14 +1796,6 @@ class StarIdentifier:
 
         result_table = StarIdentifier._download_gaia_region(ra_center, dec_center, radius_deg, max_magnitude)
 
-        if result_table is None:
-            # Every service failed. Stars already in the cache are real Gaia
-            # stars, so a partial answer beats none.
-            partial = StarIdentifier._query_gaia_region_from_cache(
-                config, ra_center, dec_center, radius_deg, max_magnitude, allow_partial=True
-            )
-            if partial is not None:
-                return partial
         if result_table is None or len(result_table) == 0:
             logger.info("No Gaia results for this region.")
             return None, None
@@ -1831,8 +1851,6 @@ class StarIdentifier:
         dec_center: float,
         radius_deg: float,
         max_magnitude: float = GAIA_DEFAULT_MAGNITUDE_LIMIT,
-        *,
-        allow_partial: bool = False,
     ) -> tuple[Any, SkyCoord] | None:
         """Look for cached Gaia DR3 sources covering this region.
 
@@ -1846,11 +1864,6 @@ class StarIdentifier:
             Cached stars fainter than this Gaia G magnitude are left out. A
             star stored without a magnitude (stored as 0) is kept. The cache
             is also used only if a recorded download is at least this deep.
-        allow_partial : `bool`, optional
-            If `True`, skip the completeness check and return whatever stars
-            the cache holds in the search box, marked
-            ``meta["partial_cache"] = True``. Used only when every remote
-            service has failed, so some stars may be missing.
 
         Returns
         -------
@@ -1874,7 +1887,7 @@ class StarIdentifier:
             # A star count says nothing about completeness: a region cut off
             # by the old 10,000-row limit, or downloaded to a brighter limit,
             # holds plenty of rows. Only a recorded download counts.
-            if not allow_partial and not catalog_store.is_gaia_region_complete(
+            if not catalog_store.is_gaia_region_complete(
                 config, ra_center, dec_center, radius_deg, max_magnitude
             ):
                 logger.debug(
@@ -1904,10 +1917,9 @@ class StarIdentifier:
 
             if cached_rows:
                 logger.info(
-                    "Loaded %s Gaia DR3 sources from local SQLite cache (%s)%s.",
+                    "Loaded %s Gaia DR3 sources from local SQLite cache (%s).",
                     len(cached_rows),
                     cache_db_path,
-                    " (partial: no complete download covers this field)" if allow_partial else "",
                 )
                 source_ids = [r[0] for r in cached_rows]
                 ras = [r[1] for r in cached_rows]
@@ -1924,8 +1936,6 @@ class StarIdentifier:
                 result_table.meta["proper_motion_known"] = StarIdentifier._table_has_proper_motion(
                     result_table
                 )
-                if allow_partial:
-                    result_table.meta["partial_cache"] = True
                 gaia_coords = SkyCoord(ra=np.array(ras) * u.deg, dec=np.array(decs) * u.deg)
                 return result_table, gaia_coords
         except (*DATA_ERRORS, sqlite3.Error, OSError) as e:
@@ -2375,8 +2385,6 @@ class StarIdentifier:
                 self._add_flag(FLAG_GAIA_ROW_LIMIT_REACHED)
             if gaia_table.meta.get("depth_reduced"):
                 self._add_flag(FLAG_GAIA_DEPTH_REDUCED)
-            if gaia_table.meta.get("partial_cache"):
-                self._add_flag(FLAG_GAIA_PARTIAL_CACHE)
             gaia_coords = self._move_gaia_coords_to_observation_epoch(gaia_table, gaia_coords)
 
         still_unmatched: list[StellarObject] = []

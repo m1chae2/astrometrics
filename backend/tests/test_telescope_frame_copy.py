@@ -58,8 +58,8 @@ def test_copy_without_a_measuring_job_has_no_counts() -> None:
 
 
 def test_running_quality_job_gives_counts() -> None:
-    """The counts come from the message of the running quality job."""
-    running = SimpleNamespace(status="running", message="Measured 24 of 40 frames")
+    """The counts come from the progress fields of the running quality job."""
+    running = SimpleNamespace(status="running", message="free text", progress_current=24, progress_total=40)
     service, _sync, job_service = _service(True, [running])
     status = service.get_status()["frameCopy"]
     assert (status["active"], status["measured"], status["total"]) == (True, 24, 40)
@@ -69,10 +69,10 @@ def test_running_quality_job_gives_counts() -> None:
 def test_running_quality_job_without_a_count_reports_zero_measured() -> None:
     """A measuring job that has not posted a count yet still means "analyzing".
 
-    The job posts "Measured X of Y" only after a frame is done, so during a
-    single-frame measurement the message is empty.
+    The job stores its counts only after a frame is done, so until then its
+    progress is 0 and its total is the placeholder 100.
     """
-    running = SimpleNamespace(status="running", message=None)
+    running = SimpleNamespace(status="running", message=None, progress_current=0, progress_total=100)
     service, _sync, _jobs = _service(True, [running])
     status = service.get_status()["frameCopy"]
     assert (status["active"], status["measured"], status["total"]) == (True, 0, None)
@@ -80,7 +80,7 @@ def test_running_quality_job_without_a_count_reports_zero_measured() -> None:
 
 def test_finished_quality_job_is_ignored() -> None:
     """An old finished job does not give counts."""
-    done = SimpleNamespace(status="completed", message="Measured 40 of 40 frames")
+    done = SimpleNamespace(status="completed", message="x", progress_current=40, progress_total=40)
     service, _sync, _jobs = _service(True, [done])
     assert service.get_status()["frameCopy"]["measured"] is None
 

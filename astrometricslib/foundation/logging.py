@@ -112,6 +112,35 @@ def log_context(**fields: Any) -> Generator[None]:
             _job_ids.reset(job_token)
 
 
+@contextmanager
+def background_log_context(name: str, **fields: str | None) -> Generator[None]:
+    """Mark the log lines written inside the block as background work.
+
+    A line with no job id and no request id might come from job work that
+    lost its context, so the job log router copies it into every running
+    job's log. Background work (a status poll, a download loop, a port
+    forward) is not job work. This gives it a request-style id, which the
+    router reads as "this belongs to something else; do not copy it into a
+    job". A job started inside the block still writes to its own log,
+    because its job id takes priority over this marker.
+
+    Parameters
+    ----------
+    name : `str`
+        What the work is, such as ``sync`` or ``telemetry``. It appears in
+        the log line's ``request_id``.
+    **fields : `str` or `None`
+        More context fields, such as ``target_id``.
+
+    Yields
+    ------
+    None
+        The block runs with the marker.
+    """
+    with log_context(request_id=f"background:{name}:{uuid.uuid4().hex[:6]}", **fields):
+        yield
+
+
 def active_job_ids() -> tuple[str, ...]:
     """Give the ids of the jobs the calling work runs inside.
 

@@ -554,7 +554,8 @@ forbidden_modules = [
 #               api.review (it reads the same records as control),
 #               and the hardware drivers (drivers.indi, drivers.indi_interface,
 #               drivers.indi_worker, drivers.interfaces, drivers.phd2, drivers.simulators,
-#               drivers.ekos, drivers.stellarmate_interface, drivers.ssh_port_forward)
+#               drivers.ekos, drivers.stellarmate_interface, drivers.ssh_port_forward,
+#               drivers.host_resolver)
 #   Planning    tasks.planning_tasks, api.planning
 #   Execution   tasks.execution_tasks, api.execution
 #   Root        wayfindinglib (package __init__), wayfindinglib.api (__init__)
@@ -590,6 +591,7 @@ forbidden_modules = [
     "wayfindinglib.drivers.ekos",
     "wayfindinglib.drivers.stellarmate_interface",
     "wayfindinglib.drivers.ssh_port_forward",
+    "wayfindinglib.drivers.host_resolver",
     # Planning
     "wayfindinglib.tasks.planning_tasks",
     "wayfindinglib.api.planning",
@@ -619,6 +621,7 @@ source_modules = [
     "wayfindinglib.drivers.ekos",
     "wayfindinglib.drivers.stellarmate_interface",
     "wayfindinglib.drivers.ssh_port_forward",
+    "wayfindinglib.drivers.host_resolver",
 ]
 forbidden_modules = [
     "wayfindinglib.tasks.planning_tasks",
@@ -663,6 +666,7 @@ forbidden_modules = [
     "wayfindinglib.drivers.ekos",
     "wayfindinglib.drivers.stellarmate_interface",
     "wayfindinglib.drivers.ssh_port_forward",
+    "wayfindinglib.drivers.host_resolver",
 ]
 # Indirect imports are counted (the default): a chain such as
 # Planning -> Foundation reader -> driver registry is a violation too.

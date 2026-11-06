@@ -54,9 +54,46 @@ def test_the_lifespan_starts_the_services_and_stops_them(monkeypatch: pytest.Mon
     monkeypatch.setattr(main_backend, "detach_log_handlers", lambda: calls.append("detach"))
     monkeypatch.setattr(startup, "periodic_telemetry_loop", idle_loop)
     monkeypatch.setattr(startup, "warm_start_up_caches", lambda: calls.append("warm"))
+    monkeypatch.setattr(startup, "warm_night_reviews", lambda: calls.append("warm_nights"))
 
     with TestClient(main_backend.app):
         assert calls[:2] == ["init", "attach"]
         assert "shutdown" not in calls
 
     assert calls[-2:] == ["detach", "shutdown"]
+
+
+def test_night_review_warm_up_builds_the_newest_nights_and_survives_a_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The newest nights are reviewed, newest first, despite one failure."""
+    asked: list[str] = []
+
+    def query(kind: str, session_id: str | None = None, **_: object) -> MagicMock:
+        """Answer the nights list, or record a night review (one night fails).
+
+        Returns
+        -------
+        answer : `MagicMock`
+            Stands in for a `ReviewQueryResult`.
+
+        Raises
+        ------
+        RuntimeError
+            For the night ``"2026-10-02"``.
+        """
+        if kind == "nights":
+            nights = [MagicMock(night_id=night) for night in ("2026-10-01", "2026-10-02", "2026-10-03")]
+            return MagicMock(night_list=nights)
+        asked.append(session_id or "")
+        if session_id == "2026-10-02":
+            raise RuntimeError("no data")
+        return MagicMock()
+
+    fake_container = MagicMock()
+    fake_container.wayfinder.review.query.side_effect = query
+    monkeypatch.setattr(startup, "container", fake_container)
+
+    startup.warm_night_reviews(night_count=3)
+
+    assert asked == ["2026-10-03", "2026-10-02", "2026-10-01"]

@@ -12,6 +12,7 @@ import { SectionPanel } from '../common/components/SectionPanel';
 
 import './packageLibrary.css';
 import { useTargetVisibility } from './hooks/useTargetVisibility';
+import { Button } from '../common/components/Button';
 
 /**
  * Shortens a setting time to hours and minutes ("09:35:47" becomes "09:35"). Words such as
@@ -41,7 +42,7 @@ export const TargetListStatus: React.FC<TargetListStatusProps> = ({ onNewPackage
                 {error && !loading && (
                     <div className="package-library__error" role="alert">
                         <span>Could not load the visible targets.</span>
-                        <button type="button" className="btn btn--tiny" onClick={retry}>Try again</button>
+                        <Button size="small" onClick={retry}>Try again</Button>
                     </div>
                 )}
                 <table className="data-table visible-targets__table">

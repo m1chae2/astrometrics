@@ -1,5 +1,5 @@
 /*
- * Styles of the shared building blocks: Card, Tabs, InfoButton, StatusChip,
+ * Styles of the shared building blocks: Card, Tabs, InfoButton,
  * ProgressBar and FormRow. Only tokens from theme.css are used, so the blocks
  * look like the Observation Manager panels they were taken from.
  */
@@ -59,34 +59,44 @@
     background-color: var(--surface-inset);
 }
 
-/* Tabs ------------------------------------------------------------------ */
-.tabs {
+/* Tabs ------------------------------------------------------------------
+   The one tab look: muted text, and a 3px accent underline on the selected tab.
+   TabView and the two-way switches use these rules through Tabs. */
+.tabs,
+.tab-view__header {
     display: flex;
     gap: var(--space-1);
     border-bottom: 1px solid var(--grey-light);
+    flex-shrink: 0;
 }
 
 .tabs__tab {
-    background: none;
-    border: 1px solid transparent;
-    border-bottom: none;
-    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-    padding: var(--space-1) var(--space-3);
+    background: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    border-radius: 0;
+    margin-bottom: -1px;
+    padding: var(--space-2) var(--space-3);
     color: var(--text-muted);
-    font-size: var(--compact-font-size);
+    font-family: var(--font-family-base);
+    font-size: var(--section-label-size);
+    font-weight: 600;
+    white-space: nowrap;
     cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.tabs--compact .tabs__tab {
+    padding-inline: var(--space-2);
 }
 
 .tabs__tab:hover {
-    background-color: var(--surface-hover);
     color: var(--white);
 }
 
 .tabs__tab[aria-selected='true'] {
-    background-color: var(--grey-medium);
-    border-color: var(--grey-light);
     color: var(--white);
-    font-weight: 600;
+    border-bottom-color: var(--accent-blue);
 }
 
 .tabs__tab:focus-visible {
@@ -149,54 +159,6 @@
     font-weight: normal;
     text-align: left;
     user-select: text;
-}
-
-/* StatusChip ------------------------------------------------------------ */
-.status-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
-    padding: 0 var(--space-2);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-pill);
-    font-size: var(--section-label-size);
-    color: var(--text-primary);
-}
-
-.status-chip__icon {
-    flex-shrink: 0;
-}
-
-.status-chip--ok {
-    border-color: var(--success-green);
-}
-
-.status-chip--ok .status-chip__icon {
-    color: var(--success-green);
-}
-
-.status-chip--warning {
-    border-color: var(--warning-amber);
-}
-
-.status-chip--warning .status-chip__icon {
-    color: var(--warning-amber);
-}
-
-.status-chip--error {
-    border-color: var(--danger-red);
-}
-
-.status-chip--error .status-chip__icon {
-    color: var(--danger-red);
-}
-
-.status-chip--info {
-    border-color: var(--accent-blue);
-}
-
-.status-chip--info .status-chip__icon {
-    color: var(--accent-blue);
 }
 
 /* ProgressBar ----------------------------------------------------------- */

@@ -12,6 +12,7 @@
  */
 
 import React, { useCallback } from 'react';
+import { Button } from '../common/components/Button';
 import { useAstrometrics } from '../common/context/AstrometricsContext';
 import './trayPopover.css';
 
@@ -139,45 +140,45 @@ export const TrayPopover: React.FC = () => {
         <span className="tray-popover__workspace-label">Workspaces</span>
         <nav className="tray-popover__workspace-grid" aria-label="Switch workspace">
           {WORKSPACES.map(({ label, mode }) => (
-            <button
+            <Button
+              variant="ghost"
               key={mode}
               className="tray-popover__workspace-btn"
               onClick={() => onWorkspaceClick(mode)}
               title={`Switch to ${label}`}
-              type="button"
             >
               {label}
-            </button>
+            </Button>
           ))}
         </nav>
       </section>
 
       {/* ── Action toolbar ── */}
       <footer className="tray-popover__toolbar" role="toolbar" aria-label="Quick actions">
-        <button
+        <Button
+          variant="ghost"
           className="tray-popover__toolbar-btn tray-popover__toolbar-btn--park"
           onClick={() => sendAction('park')}
           title="Emergency park telescope (popover stays open to confirm state)"
-          type="button"
         >
           ⏹ Park
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="ghost"
           className="tray-popover__toolbar-btn"
           onClick={() => sendAction('open-app')}
           title="Open Astrometrics main window"
-          type="button"
         >
           Open App
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="ghost"
           className="tray-popover__toolbar-btn"
           onClick={() => sendAction('quit')}
           title="Quit Astrometrics"
-          type="button"
         >
           Quit
-        </button>
+        </Button>
       </footer>
 
     </div>

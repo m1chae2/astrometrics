@@ -140,12 +140,20 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
     const madeAt = new Date(summary.made_at);
     const madeAtText = Number.isNaN(madeAt.getTime()) ? summary.made_at : madeAt.toLocaleString();
 
+    // Warnings stay readable while the block is closed: the count goes on the closed line.
+    const warningCount = warnings?.length ?? 0;
+
     return (
         <details className="stack-summary">
             <summary className="stack-summary__title">
                 <span className="stacked-image-panel__label">
                     {`${label} summary: ${summary.frames_stacked} of ${summary.frames_submitted} frames`}
                 </span>
+                {warningCount > 0 && (
+                    <span className="stack-summary__flag" data-testid="stack-warning-count">
+                        {` · ${warningCount} ${warningCount === 1 ? 'warning' : 'warnings'}`}
+                    </span>
+                )}
             </summary>
 
             <dl className="stack-summary__list">

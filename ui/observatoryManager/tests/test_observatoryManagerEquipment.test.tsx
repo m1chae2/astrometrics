@@ -220,9 +220,8 @@ describe('CalibrationLibraryPanel', () => {
     it('shows the camera picker, the Darks table and the totals', async () => {
         callBackendMock.mockResolvedValue(libraryReply);
         renderWithQuery(<CalibrationLibraryPanel />);
-        await screen.findByText('Darks:');
-        const picker = screen.getByLabelText('Camera:') as HTMLSelectElement;
-        expect(picker.value).toBe('ZWO ASI533MM Pro');
+        await screen.findByRole('tab', { name: /^Darks/ });
+        expect(screen.getByRole('button', { name: 'Camera: ZWO ASI533MM Pro' })).toBeTruthy();
         // The Darks table is always shown; there is no Show darks toggle.
         expect(screen.queryByRole('button', { name: 'Show darks' })).toBeNull();
         const table = screen.getByRole('table', { name: 'Darks' });
@@ -230,9 +229,9 @@ describe('CalibrationLibraryPanel', () => {
         expect(headers).toEqual(['Exposure', 'Offset', 'Temp', 'Count', 'Health']);
         expect(within(table).getAllByRole('row')).toHaveLength(3);
         expect(within(table).getAllByText('60 s')).toHaveLength(2);
-        expect(screen.getByText('Darks:').nextSibling?.textContent).toBe('25');
-        expect(screen.getByText('Biases:').nextSibling?.textContent).toBe('30');
-        expect(screen.getByText('Flats:').nextSibling?.textContent).toBe('0');
+        // The three kinds are underline tabs that carry their counts, such as "Darks (25)".
+        expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Darks (25)', 'Biases (30)', 'Flats (0)']);
+        expect(screen.getByRole('tab', { name: 'Darks (25)' }).getAttribute('aria-selected')).toBe('true');
     });
 
     /** Choosing another camera shows only that camera's rows. */
@@ -247,20 +246,20 @@ describe('CalibrationLibraryPanel', () => {
             ],
         });
         renderWithQuery(<CalibrationLibraryPanel />);
-        await screen.findByText('Darks:');
-        await userEvent.selectOptions(screen.getByLabelText('Camera:'), 'Nikon D5300');
+        await screen.findByRole('tab', { name: /^Darks/ });
+        await userEvent.click(screen.getByRole('button', { name: 'Camera: ZWO ASI533MM Pro' }));
+        await userEvent.click(screen.getByRole('button', { name: 'Nikon D5300' }));
         const table = screen.getByRole('table', { name: 'Darks' });
         expect(within(table).getAllByRole('row')).toHaveLength(2);
         expect(within(table).getByText('30 s')).toBeTruthy();
-        expect(screen.getByText('Flats:').nextSibling?.textContent).toBe('4');
-        expect(screen.getByText('Biases:').nextSibling?.textContent).toBe('0');
+        expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Darks (7)', 'Biases (0)', 'Flats (4)']);
     });
 
     /** Refresh reads the library again. */
     it('refreshes the library from the refresh button', async () => {
         callBackendMock.mockResolvedValue(libraryReply);
         renderWithQuery(<CalibrationLibraryPanel />);
-        await screen.findByText('Darks:');
+        await screen.findByRole('tab', { name: /^Darks/ });
         const before = callBackendMock.mock.calls.length;
         await userEvent.click(screen.getByRole('button', { name: 'Refresh calibration library' }));
         await waitFor(() => expect(callBackendMock.mock.calls.length).toBeGreaterThan(before));
@@ -277,7 +276,7 @@ describe('CalibrationLibraryPanel', () => {
             ],
         });
         renderWithQuery(<CalibrationLibraryPanel />);
-        await screen.findByText('Darks:');
+        await screen.findByRole('tab', { name: /^Darks/ });
         const keyWarnings = errorSpy.mock.calls.filter((call) => String(call[0]).includes('same key'));
         errorSpy.mockRestore();
         expect(keyWarnings).toHaveLength(0);
@@ -287,14 +286,14 @@ describe('CalibrationLibraryPanel', () => {
     it('shows the Biases table and highlights its row for a bias request', async () => {
         callBackendMock.mockImplementation(answerCalibration(['bias-a']));
         renderWithQuery(<CalibrationLibraryPanel />);
-        await screen.findByText('Darks:');
+        await screen.findByRole('tab', { name: /^Darks/ });
         act(() => {
             window.dispatchEvent(new CustomEvent('astrometrics:showCalibrationRow', {
                 detail: { calibrationKey: 'bias', captureSetting: { camera: 'ZWO ASI533MM Pro' }, rule: 'r' },
             }));
         });
         await waitFor(() => expect(document.querySelectorAll('[data-highlighted="true"]').length).toBe(1));
-        expect(screen.getByRole('tab', { name: /Biases:/ }).getAttribute('aria-selected')).toBe('true');
+        expect(screen.getByRole('tab', { name: /^Biases/ }).getAttribute('aria-selected')).toBe('true');
         expect(within(screen.getByRole('table', { name: 'Biases' })).getByText('30')).toBeTruthy();
         expect(document.querySelector('[data-highlighted="true"]')?.textContent).toContain('30');
     });
@@ -324,7 +323,7 @@ describe('CalibrationLibraryPanel', () => {
     it('highlights the rows a request matches', async () => {
         callBackendMock.mockImplementation(answerCalibration(['dark-a']));
         renderWithQuery(<CalibrationLibraryPanel />);
-        await screen.findByText('Darks:');
+        await screen.findByRole('tab', { name: /^Darks/ });
         act(() => {
             window.dispatchEvent(new CustomEvent('astrometrics:showCalibrationRow', {
                 detail: { calibrationKey: 'dark', captureSetting: { camera: 'ZWO ASI533MM Pro', gainSetting: 100, offset: 10, binning: 1 }, rule: 'r' },
@@ -341,7 +340,7 @@ describe('CalibrationLibraryPanel', () => {
     it('says "No calibration row matches" when nothing matches', async () => {
         callBackendMock.mockImplementation(answerCalibration([]));
         renderWithQuery(<CalibrationLibraryPanel />);
-        await screen.findByText('Darks:');
+        await screen.findByRole('tab', { name: /^Darks/ });
         act(() => {
             window.dispatchEvent(new CustomEvent('astrometrics:showCalibrationRow', {
                 detail: { calibrationKey: 'flat', captureSetting: { camera: 'ZWO ASI533MM Pro', gainSetting: 100 }, rule: 'r' },

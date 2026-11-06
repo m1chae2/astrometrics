@@ -95,35 +95,15 @@
   border-right: 1px solid var(--term-border, #2e2e2e);
 }
 
+/* The tab strip sits on a darker bar and keeps the shared underline-tab look. */
 .console-sidebar__tabs {
-  display: flex;
   background-color: var(--cmd-bg-medium, #1e1e1e);
-  border-bottom: 1px solid var(--term-border, #2e2e2e);
 }
 
-.console-sidebar__tab {
-  flex: 1;
-  padding: 8px 10px;
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--text-dim, #aaa);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  text-align: center;
-  transition: all 0.15s ease;
-}
-
-.console-sidebar__tab:hover {
-  color: var(--text-primary, #eaeaea);
-  background-color: var(--cmd-bg-light, #252526);
-}
-
-.console-sidebar__tab--active {
-  color: var(--text-primary, #eaeaea);
-  border-bottom-color: var(--adwaita-blue-light, #3584e4);
-  font-weight: 600;
+/* In the right-hand panel header the header's own border is the line under the tabs. */
+.console-panel__header .console-sidebar__tabs {
+  width: 100%;
+  border-bottom: none;
 }
 
 .console-sidebar__list {
@@ -232,35 +212,6 @@
   padding: 6px 12px;
   background-color: var(--cmd-bg-medium, #1e1e1e);
   border-bottom: 1px solid var(--term-border, #2e2e2e);
-}
-
-.editor-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  background-color: var(--cmd-bg-light, #252526);
-  border: 1px solid var(--term-border, #2e2e2e);
-  color: var(--text-primary, #eaeaea);
-  padding: 5px 10px;
-  border-radius: 4px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.editor-btn:hover {
-  background-color: var(--cmd-bg-lighter, #2d2d2d);
-  border-color: var(--text-dimmest, #666);
-}
-
-.editor-btn--primary {
-  background-color: var(--adwaita-blue, #244a70);
-  border-color: var(--adwaita-blue-light, #3584e4);
-  color: #fff;
-}
-
-.editor-btn--primary:hover {
-  background-color: var(--adwaita-blue-hover, #2b5984);
 }
 
 /* REPL Terminal */
@@ -397,11 +348,15 @@
   user-select: none;
 }
 
-.terminal-input-bar__input {
+.terminal-input-bar .terminal-input-bar__input {
   flex: 1;
+  min-width: 0;
+  width: auto;
+  height: auto;
+  padding: 0;
   background: transparent;
   border: none;
-  outline: none;
+  box-shadow: none;
   font-family: var(--font-family-mono);
   font-size: 13px;
   color: var(--term-fg-bright, #ffffff);
@@ -553,4 +508,15 @@
 
 .doc-viewer tr:nth-child(even) td {
   background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* The documentation filter box in the console sidebar: a dark, compact entry field. */
+.console-sidebar__list .console-sidebar__filter {
+  height: auto;
+  padding: 5px 8px;
+  font-size: 11px;
+  background: var(--cmd-bg-dark, #181818);
+  border: 1px solid var(--term-border, #333);
+  border-radius: 3px;
+  color: var(--text-primary, #fff);
 }

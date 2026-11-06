@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { Button } from './Button';
 import '../styles/modal.css';
 
 interface BaseModalProps {
@@ -54,7 +55,7 @@ export const BaseModal: React.FC<BaseModalProps> = ({
             <div className={`modal ${className}`} ref={modalRef} role="dialog" aria-modal="true">
                 <div className="modal__header">
                     <h2>{title}</h2>
-                    <button className="modal__close" onClick={onClose} aria-label="Close">&times;</button>
+                    <Button variant="ghost" className="modal__close" onClick={onClose} aria-label="Close">&times;</Button>
                 </div>
                 <div className="modal__content">
                     {children}

@@ -22,6 +22,7 @@ from pytest_mock import MockerFixture
 from astrometricslib import Astrometrics, Target
 from astrometricslib._internal.drivers import local_database
 from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.models.target import FrameRecord
 
 
 def _make_isolated_config(tmp_path: Path) -> AppConfiguration:
@@ -378,6 +379,66 @@ def test_a_listing_refreshes_an_unedited_target_with_what_another_process_saved(
 
     assert listed[0] is held
     assert held.common_name == "changed by other process"
+
+
+def _save_target_with_frames(config: AppConfiguration, paths: list[str]) -> None:
+    """Store a target named "Framed Target" that holds one frame per path.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The configuration that locates the test library.
+    paths : `list` [`str`]
+        The frame file paths to store, in order.
+    """
+    local_database.save_target(
+        app_config=config, target=Target(id="Framed Target", frames=[FrameRecord(path=p) for p in paths])
+    )
+
+
+def test_a_listing_keeps_the_frame_objects_a_job_holds(tmp_path: Path) -> None:
+    """A stamp put on a held frame after a listing still reaches storage.
+
+    A stacking job holds frame objects and stamps them as it measures. If a
+    listing swapped in new frame objects, the stamps would land on detached
+    frames and the save would write nothing new.
+    """
+    config = _make_isolated_config(tmp_path)
+    _save_target_with_frames(config, ["/frames/a.fits", "/frames/b.fits"])
+    astrometrics = Astrometrics(config=config)
+    held_frame = astrometrics.targets.get("Framed Target").frames[0]
+
+    astrometrics.targets.list()
+
+    assert astrometrics.targets.get("Framed Target").frames[0] is held_frame
+    held_frame.quality_measured_file_size = 123
+    astrometrics.targets.save()
+    stored = Astrometrics(config=config).targets.get("Framed Target")
+    assert stored.frames[0].quality_measured_file_size == 123
+
+
+def test_a_listing_refreshes_held_frames_adds_new_ones_and_drops_gone_ones(tmp_path: Path) -> None:
+    """Frames follow the stored list, keeping held objects."""
+    config = _make_isolated_config(tmp_path)
+    _save_target_with_frames(config, ["/frames/a.fits", "/frames/b.fits"])
+    astrometrics = Astrometrics(config=config)
+    held_a, held_b = astrometrics.targets.get("Framed Target").frames
+
+    other = Target(
+        id="Framed Target",
+        frames=[
+            FrameRecord(path="/frames/c.fits"),
+            FrameRecord(path="/frames/b.fits", camera="Changed Camera"),
+        ],
+    )
+    local_database.save_target(app_config=config, target=other)
+    astrometrics.targets.list()
+
+    frames = astrometrics.targets.get("Framed Target").frames
+    assert [frame.path for frame in frames] == ["/frames/c.fits", "/frames/b.fits"]
+    assert frames[1] is held_b
+    assert held_b.camera == "Changed Camera"
+    assert held_a not in frames
 
 
 def test_a_listing_keeps_a_target_that_has_unsaved_edits(tmp_path: Path) -> None:

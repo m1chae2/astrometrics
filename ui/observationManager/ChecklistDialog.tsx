@@ -7,8 +7,10 @@
  * the button that opened it.
  */
 import React, { useEffect, useRef } from 'react';
+import { Checkbox } from '../common/components/Checkbox';
 import { ChecklistItem } from '../common/types/backendTypes';
 import './queueProgress.css';
+import { Button } from '../common/components/Button';
 
 export interface ChecklistDialogProps {
     /** The session's checklist, in the order the library returned it. */
@@ -87,28 +89,27 @@ export const ChecklistDialog: React.FC<ChecklistDialogProps> = ({ items, hasSess
                             const isTicked = !!item.tickedAt;
                             return (
                                 <li key={itemId} className="checklist-dialog__item">
-                                    <input
+                                    <Checkbox
                                         id={inputId}
-                                        type="checkbox"
                                         checked={isTicked}
                                         disabled={isTicked}
                                         onChange={() => onTick(itemId)}
-                                    />
-                                    <label htmlFor={inputId}>
+                                        label={<>
                                         {item.label ?? item.note ?? ''}
                                         {isTicked && item.tickedAt && (
                                             <span className="checklist-dialog__ticked-at">
                                                 {' '}(ticked {new Date(item.tickedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })})
                                             </span>
                                         )}
-                                    </label>
+                                    </>}
+                                    />
                                 </li>
                             );
                         })}
                     </ul>
                 )}
                 <div className="checklist-dialog__actions">
-                    <button type="button" className="btn btn--tiny" onClick={onClose}>Close</button>
+                    <Button size="small" onClick={onClose}>Close</Button>
                 </div>
             </div>
         </div>

@@ -413,10 +413,9 @@ A recorder attaches to a session that planning created. At a fixed interval it c
 
 <!-- impl: wayfindinglib.tasks.execution_tasks.session_recorder.ObservationSessionRecorder -->
 
-When a session reaches a terminal status, execution runs two reconciliations that deliberately do not happen mid-run. Captured calibration frames are folded into the calibration inventory, which is recomputed from every finished session each time, so running the step twice never counts a frame twice. The session's science-side link is attached by finding the science-side target sessions of each imaged target for the same night, which is possible only after the night.
+When a session reaches a terminal status, execution runs a reconciliation that deliberately does not happen mid-run. The session's science-side link is attached by finding the science-side target sessions of each imaged target for the same night, which is possible only after the night. The step recomputes the link from the recorded frames each time, so running it twice gives the same result. Execution keeps no calibration inventory of its own: calibration advice reads the science library's calibration index, so there is one record of which calibration frames exist.
 
 <!-- impl: wayfindinglib.tasks.execution_tasks.post_session_reconciliation.reconcile_session -->
-<!-- impl: wayfindinglib.tasks.execution_tasks.post_session_reconciliation.compute_calibration_stats -->
 
 Two related refits run inside control, not execution: the standing mount-mechanical model and the session's pointing model (Section 6.7).
 

@@ -228,3 +228,48 @@ def test_own_disconnect_is_not_reported_as_a_loss(caplog: pytest.LogCaptureFixtu
     with caplog.at_level(logging.DEBUG, logger="wayfindinglib.drivers.indi_interface"):
         client.serverDisconnected(0)
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def test_replacement_keeps_the_remembered_address(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A rebuild during an outage still uses the address learned earlier."""
+    session = RebuildingSession(lambda: _client(["Mount"], server_up=False))
+    first = session._client
+    first.connection_manager.known_address.cached_address = "10.0.0.5"
+
+    def failing_lookup(*args: object, **kwargs: object) -> list:
+        """Fail the way an mDNS lookup fails during an outage.
+
+        Raises
+        ------
+        OSError
+            Always.
+        """
+        raise OSError("name lookup failed")
+
+    monkeypatch.setattr("wayfindinglib.drivers.host_resolver.socket.getaddrinfo", failing_lookup)
+    first._reconnect(100.0)
+    session._replace_client_if_stale()
+
+    second = session._client
+    assert second is not first
+    assert second.connection_manager.known_address.resolve(7624) == "10.0.0.5"
+
+
+def test_failed_swap_does_not_hide_the_calls_result(caplog: pytest.LogCaptureFixture) -> None:
+    """A failed client swap is logged; the call still returns."""
+    session = RebuildingSession(lambda: _client(["Mount"]))
+
+    def broken_swap() -> None:
+        """Fail like a swap that could not build a client.
+
+        Raises
+        ------
+        RuntimeError
+            Always.
+        """
+        raise RuntimeError("swap failed")
+
+    session._replace_client_if_stale = broken_swap  # type: ignore[method-assign]
+    with caplog.at_level(logging.ERROR):
+        assert session.isServerConnected() is False
+    assert any("Replacing the stale INDI client failed" in r.getMessage() for r in caplog.records)

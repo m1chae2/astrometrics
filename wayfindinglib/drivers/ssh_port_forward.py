@@ -11,6 +11,7 @@ restarts, so a client can use one fixed address.
 """
 
 import atexit
+import collections
 import logging
 import shutil
 import socket
@@ -19,7 +20,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-from astrometricslib.jobs import log_context
+from astrometricslib.jobs import background_log_context
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,9 @@ _PROBE_TIMEOUT_SECONDS = 0.2
 
 # How long a stop waits for ssh to exit after a terminate before killing it.
 _TERMINATE_WAIT_SECONDS = 2.0
+
+# How many of ssh's last error lines to keep for the failure message.
+_STDERR_LINES_KEPT = 20
 
 # Linux tool that sets the parent-death signal on a program it starts.
 _PARENT_DEATH_TOOL = "setpriv"
@@ -233,9 +237,9 @@ class SshPortForward:
 
     def _supervise(self) -> None:
         """Run ssh, and start it again after a cooldown whenever it exits."""
-        # Request-style id, so the job log router never copies these lines
+        # Background marker, so the job log router never copies these lines
         # into a job's log. Context variables are per thread, so set it here.
-        with log_context(request_id=f"background:ssh-port-forward:{self.local_port}"):
+        with background_log_context(f"ssh-port-forward:{self.local_port}"):
             self._supervise_loop()
 
     def _supervise_loop(self) -> None:
@@ -252,10 +256,13 @@ class SshPortForward:
                 continue
             with self._lock:
                 self._process = process
+            error_lines, drain_thread = self._drain_stderr(process)
             self._watch(process)
+            if drain_thread is not None:
+                drain_thread.join(timeout=1.0)
             if self._stop_event.is_set():
                 break
-            self._report_failure(self._exit_reason(process))
+            self._report_failure(self._exit_reason(process, error_lines))
             self._stop_event.wait(self._restart_cooldown_seconds)
 
     def _watch(self, process: Any) -> None:
@@ -277,27 +284,62 @@ class SshPortForward:
             self._stop_event.wait(_POLL_SECONDS)
 
     @staticmethod
-    def _exit_reason(process: Any) -> str:
+    def _drain_stderr(process: Any) -> tuple[collections.deque[str], threading.Thread | None]:
+        """Read ssh's error output on a thread while ssh runs.
+
+        ssh writes a line to its error output for every refused channel
+        (for example when PHD2 is stopped). If nobody reads the pipe, it
+        fills up and ssh freezes while its port still answers. The thread
+        keeps the pipe empty and remembers only the last few lines.
+
+        Parameters
+        ----------
+        process : `Any`
+            The running ssh process.
+
+        Returns
+        -------
+        lines : `collections.deque` [`str`]
+            The last `_STDERR_LINES_KEPT` error lines, filled as they arrive.
+        thread : `threading.Thread` or `None`
+            The reader thread, or `None` when the process has no error pipe.
+        """
+        lines: collections.deque[str] = collections.deque(maxlen=_STDERR_LINES_KEPT)
+        stream = getattr(process, "stderr", None)
+        if stream is None:
+            return lines, None
+
+        def read_lines() -> None:
+            """Copy lines from the pipe until it closes."""
+            try:
+                for line in stream:
+                    stripped = str(line).strip()
+                    if stripped:
+                        lines.append(stripped)
+            except OSError, ValueError:
+                pass  # The pipe closed under us; there is nothing more to read.
+
+        thread = threading.Thread(target=read_lines, daemon=True, name="SshPortForwardStderr")
+        thread.start()
+        return lines, thread
+
+    @staticmethod
+    def _exit_reason(process: Any, error_lines: collections.deque[str] | None = None) -> str:
         """Describe why ssh exited, using its error output if there is any.
 
         Parameters
         ----------
         process : `Any`
             The exited ssh process.
+        error_lines : `collections.deque` [`str`], optional
+            The last error lines the drain thread collected.
 
         Returns
         -------
         reason : `str`
             Exit code and the last error line.
         """
-        last_line = ""
-        stream = getattr(process, "stderr", None)
-        if stream is not None:
-            try:
-                lines = (stream.read() or "").strip().splitlines()
-            except OSError, ValueError:
-                lines = []
-            last_line = lines[-1] if lines else ""
+        last_line = error_lines[-1] if error_lines else ""
         reason = f"ssh exited with code {process.poll()}"
         return f"{reason} ({last_line})" if last_line else reason
 

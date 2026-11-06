@@ -1,5 +1,4 @@
 @import "../common/styles/scrollbars.css";
-@import "../common/styles/button.css";
 @import "../common/styles/tables.css";
 @import "../common/styles/animations.css";
 @import "../common/styles/metrics.css";
@@ -119,6 +118,12 @@
 
 .fits-renderer__star-group:hover {
   opacity: 1;
+}
+
+/* Keyboard focus shows a ring around the star's reticle. */
+.fits-renderer__star-group:focus-visible .fits-renderer__reticle-ring {
+  stroke: var(--accent-blue);
+  stroke-width: 3px;
 }
 
 .fits-renderer__reticle-ring {
@@ -332,28 +337,6 @@
   align-items: center;
 }
 
-.fits-header-controls .btn {
-  background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: var(--text-primary, #eee);
-  min-width: 24px;
-  height: 24px;
-  padding: 0 6px;
-  font-weight: bold;
-  font-size: 11px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.fits-header-controls .btn:hover {
-  background: var(--accent-blue, #007bff);
-  border-color: var(--accent-blue);
-  color: white;
-}
-
-
-
 /* -------------------------------------------------------------------------- */
 /* File Browser                                                               */
 /* -------------------------------------------------------------------------- */
@@ -390,12 +373,9 @@
   min-width: 200px;
 }
 
+/* Only the layout; the look comes from TextInput. */
 .file-browser__search-input {
   flex: 1;
-  padding: 0 12px;
-  font-size: 13px;
-  height: 28px;
-  box-sizing: border-box;
 }
 
 .file-browser__list {
@@ -439,8 +419,6 @@
   width: 100%;
   box-sizing: border-box;
   margin: 0;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 .image-details-manager__summary {
@@ -670,34 +648,6 @@
   gap: 8px;
 }
 
-.file-browser__search-input--full {
-  width: 100%;
-}
-
-.file-browser__help-button {
-  min-width: 24px;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border-radius: 50%;
-  font-size: 14px;
-  font-weight: bold;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  background-color: var(--grey-medium, #444);
-  color: var(--text-primary, #eee);
-  border: 1px solid var(--grey-light, #555);
-  transition: background-color 0.2s;
-}
-
-.file-browser__help-button:hover {
-  background-color: var(--accent-blue, #007bff);
-  border-color: var(--accent-blue, #007bff);
-  color: white;
-}
-
 .file-browser__help-popup {
   position: absolute;
   top: 36px;
@@ -736,71 +686,20 @@
   text-align: right;
 }
 
-.file-browser__help-close-btn {
-  font-size: 11px;
-  padding: 2px 8px;
-  height: auto;
-  min-height: auto;
-}
-
 .file-browser__header-btn {
-  width: max-content !important;
-  padding: 0 12px !important;
-  height: 28px !important;
-  font-size: 12px !important;
-  flex: 0 0 auto !important;
+  flex: 0 0 auto;
 }
 
 .file-browser__delete-btn {
-  height: 28px !important;
-  padding: 0 4px !important;
-  min-width: 28px;
-  max-width: 44px;
-  display: flex !important;
-  gap: 3px !important;
+  display: flex;
+  gap: 3px;
   align-items: center;
   justify-content: center;
-  font-size: 11px !important;
-  font-weight: 800 !important;
-  border-radius: 4px !important;
-  transition: all 0.2s ease !important;
   white-space: nowrap;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-}
-
-.file-browser__delete-btn:hover {
-  background-color: var(--danger-red) !important;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(255, 68, 68, 0.3);
 }
 
 .data-tab-filter {
   margin-bottom: 10px;
-}
-
-.file-browser__camera-select {
-  background-color: var(--term-border, #2a2a2a);
-  border: 1px solid var(--grey-light, #444);
-  color: var(--text-light, #f0f0f0);
-  padding: 3px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-family: inherit;
-  height: 24px;
-  max-width: 160px;
-  cursor: pointer;
-  outline: none;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
-
-.file-browser__camera-select:hover,
-.file-browser__camera-select:focus {
-  border-color: var(--primary-blue, #007acc);
-}
-
-.file-browser__camera-select option {
-  background-color: var(--grey-dark, #1e1e1e);
-  color: var(--text-light, #ffffff);
 }
 
 .file-browser__checkbox-cell {
@@ -1086,38 +985,23 @@
   font-size: 14px;
 }
 
-.btn--active {
-  background: var(--accent-blue, #4fc1ff) !important;
-  color: var(--black) !important;
-  border-color: var(--accent-blue, #4fc1ff) !important;
+/* The Analysis/Data tabs sit in the Frame Analysis panel header. The tab strip drops its own rule
+   and sits low so the selected tab's underline meets the header border. */
+.frame-analysis-panel__tabs {
+  border-bottom: none;
+  margin-bottom: -9px;
+  margin-right: var(--space-3);
 }
 
-.btn--tiny {
-  height: 24px !important;
-  padding: 0 8px !important;
-  font-size: 11px !important;
-  width: auto !important;
-  min-width: 32px;
-}
-
-.btn--active {
-  background-color: var(--primary-blue, #4a9eff) !important;
-  color: white !important;
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4);
-}
-
-/* Header-integrated Tab styles */
-.tab-view__header--inline {
-  border-bottom: none !important;
-  padding: 0 !important;
-  margin-bottom: -9px; /* Align active border with panel header border */
-  margin-right: -12px; /* Pull to the right edge if needed */
-}
-
-.tab-view__header--inline .tab-view__tab {
-  padding: 8px 12px;
-  font-size: 12px;
-  border-bottom-width: 3px;
+/* The "Session Frames" heading row with the camera picker on the right. */
+.frame-analysis-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-bottom: var(--space-3);
+  font-weight: bold;
+  font-size: 1.1em;
 }
 
 .image-processing-display__analysis-section .tab-view__content {
@@ -1290,8 +1174,10 @@
   text-transform: capitalize;
 }
 
-.status-pill--started { background: #007bff22; color: var(--pill-blue); border: 1px solid #007bff44; }
-.status-pill--completed { background: #28a74522; color: var(--pill-green); border: 1px solid #28a74544; }
+.status-pill--started,
+.status-pill--running { background: #007bff22; color: var(--pill-blue); border: 1px solid #007bff44; }
+/* Finished jobs are the normal case, so "completed" is quiet plain text. */
+.status-pill--completed { background: transparent; color: var(--text-muted, #888); border: 1px solid transparent; font-weight: normal; }
 .status-pill--failed { background: #dc354522; color: var(--pill-red); border: 1px solid #dc354544; }
 .status-pill--cancelled { background: #6c757d22; color: var(--pill-grey); border: 1px solid #6c757d44; }
 
@@ -1308,26 +1194,6 @@
   gap: 8px;
 }
 
-.job-history-item__dismiss {
-  background: transparent;
-  border: none;
-  color: var(--text-muted, #666);
-  font-size: 18px;
-  cursor: pointer;
-  line-height: 1;
-  padding: 0 4px;
-  border-radius: 4px;
-  transition: all 0.2s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.job-history-item__dismiss:hover {
-  color: var(--danger-red);
-  background: rgba(255, 82, 82, 0.1);
-}
-
 .job-history-item__meta {
   font-size: 11px;
   color: var(--text-muted, #888);
@@ -1338,6 +1204,37 @@
   margin-top: 6px;
   color: var(--text-secondary, #ccc);
   font-style: italic;
+}
+
+.job-history-night__heading {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted, #888);
+  margin: 8px 0 4px;
+}
+
+.job-history-night__items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.job-history-list__controls {
+  display: flex;
+  gap: 16px;
+}
+
+/* A text-style link button (Button ghost); only the color and position are set here. */
+.job-history-list__more {
+  color: var(--text-muted);
+  padding: var(--space-2) 0 0;
+  text-align: left;
+}
+
+.job-history-list__more:hover:not(:disabled),
+.job-history-list__more:focus-visible {
+  color: var(--text-primary, #fff);
+  text-decoration: underline;
 }
 
 .job-history-list__loading,
@@ -1388,11 +1285,6 @@
   flex: 1;
 }
 
-.file-browser__select {
-  width: auto;
-  height: 28px;
-  white-space: nowrap;
-}
 .file-browser__icon--small {
   width: 14px;
   height: 14px;

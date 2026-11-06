@@ -117,13 +117,25 @@ describe('StackSummaryPanel', () => {
         answerWith({ 'processing:stack_summary': summary, 'jobs:query': { detail: 'warnings', warnings: [jobWarning] } });
         const { container } = renderPanel();
         await screen.findByText('Imaging stack summary: 36 of 40 frames');
+        await screen.findByTestId('stack-warning-count');
         const disclosure = container.querySelector('details.stack-summary') as HTMLDetailsElement;
         expect(disclosure.open).toBe(false);
         const line = disclosure.querySelector(':scope > summary') as HTMLElement;
-        expect(line.textContent).toBe('Imaging stack summary: 36 of 40 frames');
+        expect(line.textContent).toBe('Imaging stack summary: 36 of 40 frames · 1 warning');
         const firstLabel = disclosure.querySelector('dl > dt') as HTMLElement;
         expect(firstLabel.textContent).toBe('Stack date');
         expect((firstLabel.nextElementSibling as HTMLElement).textContent).not.toBe('');
+    });
+
+    it('adds the warning count to the closed line only when there are warnings', async () => {
+        answerWith({ 'processing:stack_summary': summary, 'jobs:query': { detail: 'warnings', warnings: [jobWarning, jobWarning] } });
+        const first = renderPanel();
+        expect((await screen.findByTestId('stack-warning-count')).textContent).toBe(' · 2 warnings');
+        first.unmount();
+        answerWith({ 'processing:stack_summary': summary });
+        renderPanel();
+        await screen.findByText('Imaging stack summary: 36 of 40 frames');
+        expect(screen.queryByTestId('stack-warning-count')).toBeNull();
     });
 
     it('keeps the summary content reachable by keyboard through the summary element', async () => {

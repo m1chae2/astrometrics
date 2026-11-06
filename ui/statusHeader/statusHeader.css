@@ -1,7 +1,6 @@
 @import '../common/styles/theme.css';
 @import '../common/styles/scrollbars.css';
 @import '../common/styles/animations.css';
-@import '../common/styles/button.css';
 
 /* Core Status Header Block */
 .header {
@@ -31,7 +30,6 @@
 /* Ensure interactive controls inside the header remain clickable */
 .header button,
 .header input,
-.header select,
 .header a {
   -webkit-app-region: no-drag;
 }
@@ -117,26 +115,6 @@
   align-items: center;
   gap: 10px;
   position: relative;
-}
-
-.header__settings-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  color: var(--white);
-  cursor: pointer;
-  padding: 0;
-  transition: background 0.2s, border-color 0.2s;
-}
-
-.header__settings-button:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.1);
 }
 
 .header__settings-button svg {
@@ -371,7 +349,7 @@
 }
 
 .header__telemetry-value--exposing {
-  color: #38bdf8;
+  color: var(--status-cyan);
 }
 
 /* Small muted text after the camera state while new frames are being copied. */
@@ -577,24 +555,6 @@
   letter-spacing: -0.02em;
 }
 
-.settings__close-button {
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-}
-
-.settings__close-button:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--white);
-}
-
 /* Body: left sidebar of section tabs + scrollable content panel, so the
    tab list never needs to scroll horizontally regardless of tab count. */
 .settings__body {
@@ -735,65 +695,6 @@
   margin-bottom: 6px;
   font-size: 12px;
   color: rgba(255, 255, 255, 0.75);
-}
-
-.settings__input {
-  padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.02);
-  color: var(--white);
-  outline: none;
-}
-
-.settings__input:focus {
-  box-shadow: 0 0 0 3px rgba(53, 132, 228, 0.12);
-  border-color: rgba(53, 132, 228, 0.4);
-}
-
-.settings__checkbox {
-  appearance: none;
-  -webkit-appearance: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  flex-shrink: 0;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  background: rgba(255, 255, 255, 0.03);
-  cursor: pointer;
-  transition: background-color 0.15s ease, border-color 0.15s ease;
-}
-
-.settings__checkbox:hover {
-  border-color: rgba(53, 132, 228, 0.5);
-}
-
-.settings__checkbox:checked {
-  background-color: var(--adwaita-blue-light, #3584e4);
-  border-color: var(--adwaita-blue-light, #3584e4);
-}
-
-.settings__checkbox:checked::after {
-  content: '';
-  width: 5px;
-  height: 9px;
-  border: solid white;
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg) translate(-1px, -1px);
-}
-
-.settings__checkbox:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.settings__checkbox:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px rgba(53, 132, 228, 0.4);
 }
 
 .settings__help {
@@ -992,10 +893,6 @@
   align-items: center;
   gap: 20px;
   width: 100%;
-}
-.settings__action-label {
-  flex: 0 0 auto;
-  width: 200px;
 }
 .settings__progress-info {
   flex: 1 1 auto;

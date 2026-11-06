@@ -77,12 +77,13 @@ class NotificationService:
         data : `list` [`dict`]
             The stored notifications.
         """
-        with open(self.storage_path) as handle:
-            text = handle.read()
+        with open(self.storage_path, "rb") as handle:
+            raw = handle.read()
         problem = ""
         data: Any = None
         try:
-            data = json.loads(text)
+            # Bad UTF-8 raises UnicodeDecodeError, a ValueError.
+            data = json.loads(raw.decode("utf-8"))
         except ValueError as exc:
             problem = str(exc)
         else:

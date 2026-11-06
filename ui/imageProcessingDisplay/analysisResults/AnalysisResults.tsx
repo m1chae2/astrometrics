@@ -75,7 +75,7 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ results }) => 
                     <div className="metric-value">{total}</div>
                 </div>
                 <div className="metric-box">
-                    <div className="metric-label">Rejected</div>
+                    <div className="metric-label">Unusual brightness</div>
                     <div className="metric-value error">{rejected}</div>
                 </div>
                 <div className="metric-box">

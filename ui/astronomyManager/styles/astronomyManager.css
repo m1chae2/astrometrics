@@ -104,97 +104,41 @@
     color: var(--text-title, #ffffff);
 }
 
-.star-summary-card__badge {
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 0.75rem;
-    font-weight: 600;
-}
-
+/* Badges use the shared .badge look (sharedComponents.css). Each kind only picks its color. */
 .spectral-badge {
-    background: rgba(33, 150, 243, 0.2);
-    color: #64b5f6;
-    border: 1px solid rgba(33, 150, 243, 0.4);
+    --badge-color: var(--accent-blue);
 }
 
 /* A type measured from this star's own spectrum, as opposed to a catalog lookup. */
 .spectral-badge--measured {
-    background: rgba(76, 175, 80, 0.2);
-    color: #81c784;
-    border-color: rgba(76, 175, 80, 0.4);
+    --badge-color: var(--success-green);
 }
 
 /* A poor template match, or one far from the catalog type: shown in amber so it
    is not read as a measurement. Must come after the measured style above: both
    have the same weight, so the later one wins. */
 .spectral-badge--caution {
-    background: rgba(255, 152, 0, 0.2);
-    color: #ffb74d;
-    border-color: rgba(255, 152, 0, 0.4);
+    --badge-color: var(--warning-amber);
 }
 
 /* A type that is not known, in grey so it reads as an absence, not a finding. */
 .spectral-badge--neutral {
-    background: rgba(158, 158, 158, 0.15);
-    color: #bdbdbd;
-    border-color: rgba(158, 158, 158, 0.35);
+    --badge-color: var(--text-dim);
 }
 
 /* A repeating brightness pattern the searches found. */
 .variability-badge {
-    background: rgba(255, 152, 0, 0.2);
-    color: #ffb74d;
-    border: 1px solid rgba(255, 152, 0, 0.4);
+    --badge-color: var(--warning-amber);
 }
 
+/* A target tag is a badge that is also a button: it opens the target. */
 .target-tag-badge {
-    background: rgba(156, 39, 176, 0.2);
-    color: #ce93d8;
-    border: 1px solid rgba(156, 39, 176, 0.4);
-    padding: 1px 7px;
-    border-radius: 4px;
-    font-size: 0.75rem;
-    font-family: inherit;
-    line-height: 1.4;
-    margin-right: 4px;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    outline: none;
-    transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
-    user-select: none;
+    margin-right: var(--space-1);
 }
 
-.target-tag-badge:hover,
-.target-tag-badge:focus-visible {
-    background: rgba(156, 39, 176, 0.45);
-    color: #ffffff;
-    border-color: rgba(206, 147, 216, 0.85);
-    transform: translateY(-1px);
-    box-shadow: 0 2px 6px rgba(156, 39, 176, 0.4);
-}
-
-.target-tag-badge:active {
-    transform: translateY(0);
-}
-
+/* Layout only: the button is a btn--tiny and sits at the right end of the row. */
 .star-summary-card__locate-btn {
     margin-left: auto;
-    background: transparent;
-    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.2));
-    color: var(--text-secondary, #a0a0a0);
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 0.75rem;
-    cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
-}
-
-.star-summary-card__locate-btn:hover {
-    background: var(--accent-color, #2196f3);
-    border-color: var(--accent-color, #2196f3);
-    color: #ffffff;
 }
 
 .star-summary-card__details {
@@ -305,27 +249,9 @@
     color: #ef9a9a;
 }
 
+/* Layout only: the button is a small secondary Button at the left of its row. */
 .stellar-analysis-details__run-btn {
     align-self: flex-start;
-    background: transparent;
-    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.2));
-    color: var(--text-secondary, #a0a0a0);
-    padding: 3px 10px;
-    border-radius: 4px;
-    font-size: 0.78rem;
-    cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
-}
-
-.stellar-analysis-details__run-btn:hover:not(:disabled) {
-    background: var(--accent-color, #2196f3);
-    border-color: var(--accent-color, #2196f3);
-    color: #ffffff;
-}
-
-.stellar-analysis-details__run-btn:disabled {
-    opacity: 0.6;
-    cursor: default;
 }
 
 .stellar-analysis-details__section {
@@ -383,17 +309,6 @@
     gap: 8px;
     padding: 2px 4px;
 }
-
-.astronomy-viewer__segmented-control {
-    display: inline-flex;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 6px;
-    padding: 2px;
-}
-
-/* .segmented-btn itself is defined in the shared segmentedToggle.css
-   (imported at the top of this file) since Planetarium's mode toggle reuses it too. */
 
 /* Absorption feature results table */
 /* The wrapper scrolls sideways rather than clipping if a narrow window makes the table too wide. */

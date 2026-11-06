@@ -8,6 +8,7 @@ connection, keeps its log lines out of job logs, and stops cleanly. A fake
 process and a fake port probe stand in for ssh and the network.
 """
 
+import io
 import logging
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import time
@@ -144,9 +145,10 @@ def test_port_forward_command_uses_alias_forward_spec_and_options() -> None:
     command = StellarMateInterface(host_alias="stellarmate.local").port_forward_command(5555, 4400)
 
     assert command[:2] == ["ssh", "-N"]
-    assert command[-3:] == ["-L", "127.0.0.1:5555:localhost:4400", "stellarmate.local"]
+    assert command[-4:] == ["-L", "127.0.0.1:5555:localhost:4400", "--", "stellarmate.local"]
     options = {command[i + 1] for i, flag in enumerate(command) if flag == "-o"}
     assert options == {
+        "LogLevel=ERROR",
         "ConnectTimeout=2",
         "ExitOnForwardFailure=yes",
         "BatchMode=yes",
@@ -359,3 +361,35 @@ def test_supervisor_records_carry_a_background_request_id() -> None:
             f"background:ssh-port-forward:{forward.local_port}"
         )
         assert "job_id" not in context
+
+
+def test_stderr_is_drained_while_ssh_runs_and_the_last_line_is_reported(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Error lines are read while ssh runs, so a full pipe cannot freeze it."""
+    noisy = FakeProcess()
+    noisy.stderr = io.StringIO("".join(f"channel {n}: open failed\n" for n in range(100)) + "last error\n")
+    launcher = FakeLauncher([noisy, FakeProcess()])
+    forward = _forward(launcher)
+
+    with caplog.at_level(logging.WARNING, logger="wayfindinglib.drivers.ssh_port_forward"):
+        forward.start()
+        assert _wait_until(lambda: noisy.stderr.tell() > 0)  # the drain thread read the pipe
+        noisy.exit_code = 255
+        assert _wait_until(lambda: len(launcher.commands) >= 2)
+        forward.stop()
+
+    assert any("last error" in record.getMessage() for record in caplog.records)
+
+
+def test_drain_keeps_only_the_last_lines() -> None:
+    """The error buffer is bounded."""
+    process = FakeProcess(exit_code=1)
+    process.stderr = io.StringIO("".join(f"line {n}\n" for n in range(500)))
+
+    lines, thread = SshPortForward._drain_stderr(process)
+    assert thread is not None
+    thread.join(timeout=2.0)
+
+    assert len(lines) == 20
+    assert lines[-1] == "line 499"

@@ -16,6 +16,8 @@ import { analyzeStarPeriodicity } from '../common/services/astronomyService';
 import { selectLightCurveSeries } from '../common/utils/starDisplayFormat';
 import { useReportModeReady } from '../common/utils/appBootReadiness';
 import './styles/astronomyManager.css';
+import { Tabs } from '../common/components/Tabs';
+import { Button } from '../common/components/Button';
 
 /** localStorage key under which Planetarium (and the image viewer) hand a star to this panel. */
 const HANDED_OFF_STAR_KEY = 'planetariumSelectedStar';
@@ -228,20 +230,16 @@ export const AstronomyManager: React.FC = () => {
   const leftPanel = (
     <div className="astronomy-display__browser">
       <div className="astronomy-display__mode-toggle">
-        <button
-          type="button"
-          className={`segmented-btn ${navigationMode === 'target' ? 'active' : ''}`}
-          onClick={() => setNavigationMode('target')}
-        >
-          By target
-        </button>
-        <button
-          type="button"
-          className={`segmented-btn ${navigationMode === 'spectralClass' ? 'active' : ''}`}
-          onClick={() => setNavigationMode('spectralClass')}
-        >
-          By spectral class
-        </button>
+        <Tabs
+          idPrefix="navigation-mode"
+          ariaLabel="Browse by"
+          selectedId={navigationMode}
+          onChange={(modeId) => setNavigationMode(modeId as typeof navigationMode)}
+          tabs={[
+            { id: 'target', label: 'By target' },
+            { id: 'spectralClass', label: 'By spectral class' },
+          ]}
+        />
       </div>
 
       {navigationMode === 'target' ? (
@@ -291,7 +289,7 @@ export const AstronomyManager: React.FC = () => {
         items={starList.items}
         selectedId={selectedSpectrum}
         pendingId={pendingId}
-        onSelect={setPendingId}
+        onSelect={isSpectralClassScoped ? setPendingId : starsByTarget.selectStar}
         onFilterOptionChange={() => {}}
         // REQ: AST-1.2: The display SHALL allow filtering of the data list by text search.
         filterText={starList.filterText}
@@ -351,15 +349,15 @@ export const AstronomyManager: React.FC = () => {
           title="Spectrum"
           headerContent={
             hasFeatures ? (
-              <div className="astronomy-viewer__segmented-control">
-                <button
-                  type="button"
-                  className={`segmented-btn ${!showFeatures ? 'active' : ''}`}
-                  onClick={() => setShowFeatures((v) => !v)}
-                >
-                  Hide Feature Lines
-                </button>
-              </div>
+              <Button
+                variant="secondary"
+                size="small"
+                active={!showFeatures}
+                aria-pressed={!showFeatures}
+                onClick={() => setShowFeatures((v) => !v)}
+              >
+                Hide Feature Lines
+              </Button>
             ) : null
           }
         >

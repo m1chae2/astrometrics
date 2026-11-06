@@ -24,7 +24,7 @@ from wayfindinglib.tasks.control_tasks import night_analysis
 @pytest.fixture(autouse=True)
 def _no_guiding(monkeypatch: pytest.MonkeyPatch) -> None:
     """Replace the guiding analysis, which has its own tests, by no data."""
-    monkeypatch.setattr(night_analysis, "guiding_night_analysis", lambda context, night_id: None)
+    monkeypatch.setattr(night_analysis, "guiding_night_analysis", lambda context, night_id, **_: None)
 
 
 def test_the_history_query_serves_the_night_review(control: ObservatoryControl) -> None:

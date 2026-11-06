@@ -30,7 +30,6 @@ vi.mock('../common/services/imaging/processingService', () => ({
     fetchJobs: vi.fn().mockResolvedValue([]),
     fetchJobLogTail: vi.fn().mockResolvedValue([]),
     streamJobLog: vi.fn(),
-    dismissJob: vi.fn(),
     openSiril: vi.fn(),
 }));
 

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { Button } from './Button';
 import { EmptyState } from './EmptyState';
 import '../../common/styles/listCommon.css';
 
@@ -146,9 +147,9 @@ export const SelectableList: React.FC<SelectableListProps> = ({
                             <>
                                 {errorMessage}
                                 {onRetry && (
-                                    <button type="button" className="manager__retry-btn" onClick={onRetry}>
+                                    <Button variant="secondary" size="small" className="manager__retry-btn" onClick={onRetry}>
                                         Try again
-                                    </button>
+                                    </Button>
                                 )}
                             </>
                         }

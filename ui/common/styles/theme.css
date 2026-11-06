@@ -6,7 +6,10 @@
 
   /* Global Sizing */
   --control-font-size: 14px;
-  --control-btn-height: 38px;
+  --control-btn-height: 38px;   /* inputs (.entry) */
+  --button-height: 36px;        /* regular buttons */
+  --button-height-small: 24px;  /* small (btn--tiny) buttons */
+  --button-font-size-small: 11px;
   --table-font-size: 14px;
   --panel-header-size: 15px;
   --label-font-size: 14px;
@@ -143,6 +146,11 @@
   --btn-red-pending: #ff5252;
   --btn-red-active: #b71c1c;
 
+  --accent-purple: #9141ac;
+  --slate-blue: #1f4868;          /* primary button fill */
+  --slate-blue-light: #4b8ec8;    /* primary button edge */
+  --slate-blue-hover: #295d86;    /* primary button on hover */
+  --icon-font-size: 18px;         /* the glyph in a square icon button */
   --success-green: #26a269;
   --warning-amber: #f6d32d;
   --danger-red: #e01b24;
@@ -165,7 +173,7 @@
   --space-5: 24px;
   --space-6: 32px;
 
-  /* Corner radii. Panels use 8px, cards 6px, buttons/inputs/tables 4px. */
+  /* Corner radii. Panels use 8px, cards 6px, buttons and inputs 6px (--radius-md), badges and tables 4px. */
   --radius-xs: 2px;
   --radius-sm: 4px;
   --radius-md: 6px;

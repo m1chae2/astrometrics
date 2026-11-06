@@ -5,9 +5,11 @@
  * other displays.
  */
 import React from 'react';
+import { TextInput } from '../common/components/TextInput';
 import { useTargetListLogic } from '../common/hooks/useTargetListLogic';
 import { EmptyState } from '../common/components/EmptyState';
 import './packageLibrary.css';
+import { Button } from '../common/components/Button';
 
 /** The most matching targets shown at once; the rest appear as the user types more. */
 const MAX_SEARCH_RESULTS = 50;
@@ -34,9 +36,9 @@ export const NewPackageSearch: React.FC<NewPackageSearchProps> = ({ onPick, onCl
     return (
         <div className="package-search" role="search" aria-busy={isLoading}>
             <div className="package-search__bar">
-                <input
+                <TextInput
                     type="search"
-                    className="entry entry--fill"
+                    width="fill"
                     aria-label="Search library targets"
                     placeholder="Search library targets"
                     value={filterText}
@@ -44,13 +46,13 @@ export const NewPackageSearch: React.FC<NewPackageSearchProps> = ({ onPick, onCl
                     onChange={(event) => setFilterText(event.target.value)}
                     onKeyDown={(event) => { if (event.key === 'Escape') onClose(); }}
                 />
-                <button type="button" className="btn btn--tiny" onClick={onClose}>Cancel</button>
+                <Button size="small" onClick={onClose}>Cancel</Button>
             </div>
             {isLoading && <EmptyState variant="loading" message="Loading targets…" />}
             {!isLoading && isError && (
                 <div className="package-library__error" role="alert">
                     <span>Could not load the target list.</span>
-                    <button type="button" className="btn btn--tiny" onClick={refetchTargets}>Try again</button>
+                    <Button size="small" onClick={refetchTargets}>Try again</Button>
                 </div>
             )}
             {!isLoading && !isError && shown.length === 0 && (
@@ -59,9 +61,9 @@ export const NewPackageSearch: React.FC<NewPackageSearchProps> = ({ onPick, onCl
             <ul className="package-search__results">
                 {shown.map((item) => (
                     <li key={item.id}>
-                        <button type="button" className="package-search__result" onClick={() => onPick(item.id)}>
+                        <Button variant="ghost" className="package-search__result" onClick={() => onPick(item.id)}>
                             {item.label}
-                        </button>
+                        </Button>
                     </li>
                 ))}
             </ul>

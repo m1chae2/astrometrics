@@ -3,6 +3,7 @@
  */
 
 import React from 'react';
+import { Button } from '../Button';
 
 export interface QualityPanelStateProps {
     /** Which state to show. */
@@ -38,9 +39,9 @@ export const QualityPanelState: React.FC<QualityPanelStateProps> = ({
         return (
             <div className="quality-state quality-state--error" role="alert">
                 <span>Could not load the {subject}</span>
-                <button type="button" className="btn btn--tiny quality-button" onClick={onRetry}>
+                <Button size="small" onClick={onRetry}>
                     Try again
-                </button>
+                </Button>
             </div>
         );
     }

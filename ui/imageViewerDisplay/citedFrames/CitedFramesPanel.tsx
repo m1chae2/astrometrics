@@ -10,6 +10,7 @@
 import React, { useRef } from 'react';
 import { goBackToPreviousMode } from './citedFramesStore';
 import { useCitedFramesQuery, useCitedFramesRequest } from './useCitedFrames';
+import { Button } from '../../common/components/Button';
 import './citedFrames.css';
 
 /**
@@ -78,13 +79,13 @@ export const CitedFramesPanel: React.FC<CitedFramesPanelProps> = ({ onOpenFrame,
         </p>
         <div className="cited-frames__banner-actions">
           {request.previousMode ? (
-            <button type="button" className="cited-frames__button" onClick={goBackToPreviousMode}>
+            <Button variant="secondary" size="small" onClick={goBackToPreviousMode}>
               Back to {request.previousMode}
-            </button>
+            </Button>
           ) : null}
-          <button type="button" className="cited-frames__button" onClick={handleClear}>
+          <Button variant="secondary" size="small" onClick={handleClear}>
             Clear
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -95,9 +96,9 @@ export const CitedFramesPanel: React.FC<CitedFramesPanelProps> = ({ onOpenFrame,
       ) : query.isError ? (
         <div className="cited-frames__message" role="alert">
           <span>Could not load the cited frames.</span>{' '}
-          <button type="button" className="cited-frames__button" onClick={() => void query.refetch()}>
+          <Button variant="secondary" size="small" onClick={() => void query.refetch()}>
             Try again
-          </button>
+          </Button>
         </div>
       ) : (
         <>
@@ -124,13 +125,13 @@ export const CitedFramesPanel: React.FC<CitedFramesPanelProps> = ({ onOpenFrame,
                       : formatValue(row.value, row.unit ?? undefined)}
                   </span>
                   {file?.path ? (
-                    <button
-                      type="button"
-                      className="cited-frames__button"
+                    <Button
+                      variant="secondary"
+                      size="small"
                       onClick={() => onOpenFrame?.(file.path as string)}
                     >
                       Open image
-                    </button>
+                    </Button>
                   ) : (
                     <span className="cited-frames__reason" id={reasonId}>
                       {file?.reason || 'No picture for this row.'}

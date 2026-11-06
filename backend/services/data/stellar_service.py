@@ -11,6 +11,7 @@ arguments.
 """
 
 import logging
+import os
 import threading
 import time
 from collections import OrderedDict
@@ -19,6 +20,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from astrometricslib import Astrometrics, StellarObject
+from astrometricslib.drivers import is_path_inside, resolve_mounted_path
 from astrometricslib.exceptions import AstrometricsError, ConflictError, InvalidArgumentError
 from backend.services.data.deletion_archive import archive_record_before_delete
 from backend.services.infrastructure.heavy_read_limiter import DEFAULT_SHARED_WAIT_SECONDS, HeavyReadLimiter
@@ -263,21 +265,21 @@ class StellarService:
                 times.append(0)
         return tuple(times)
 
-    def _allowed_image_roots(self) -> list[Path]:
+    def _allowed_image_roots(self) -> list[str]:
         """List the folders an overlay image may be in.
 
         Returns
         -------
-        roots : `list` [`Path`]
-            The library folder, plus the frames and stacks folders when the
-            configuration names them.
+        roots : `list` [`str`]
+            The real paths of the library folder, plus the frames and
+            stacks folders when the configuration names them.
         """
         roots = [Path(self.config.get_library_path())]
         for getter in ("get_frames_path", "get_stacks_path"):
             method = getattr(self.config, getter, None)
             if callable(method):
                 roots.append(Path(method()))
-        return [root.resolve() for root in roots]
+        return [os.path.realpath(root) for root in roots]
 
     def _checked_image_path(self, image_path: str) -> str:
         """Refuse an image path that is outside the library folders.
@@ -292,10 +294,12 @@ class StellarService:
         InvalidArgumentError
             If the path is not inside the library, frames or stacks folder.
         """
-        resolved = Path(image_path).resolve()
-        if not any(resolved.is_relative_to(root) for root in self._allowed_image_roots()):
+        # The same check the AI tools make (`_check_path_sandbox` in
+        # mcp_servers/common/tool_registry.py), so both refuse the same paths.
+        resolved = os.path.realpath(resolve_mounted_path(image_path))
+        if not any(is_path_inside(root, resolved) for root in self._allowed_image_roots()):
             raise InvalidArgumentError("The image must be inside the library folders.")
-        return str(resolved)
+        return resolved
 
     def get_astrometry_overlay_stars(
         self, target_id: str, limit: int = 35, image_path: str | None = None

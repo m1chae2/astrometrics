@@ -10,10 +10,9 @@ import { useTargetContext } from '../../common/context/TargetContext';
 import { SelectableItem } from '../../common/components/SelectableList';
 import type { TargetListFilterPanelProps } from '../../common/radioList/TargetListFilterPanel';
 import { useTargetFilesLogic } from '../hooks/useTargetFilesLogic';
-import { useIngestionManager, IngestionState } from '../../common/hooks/useIngestionManager';
 
 /**
- * Extended context value including target list, processing state, files, and ingestion.
+ * Extended context value including target list, processing state, and files.
  */
 export interface ImageProcessingContextValue extends UseImageProcessingResult {
     isLocalTarget: boolean;
@@ -24,8 +23,6 @@ export interface ImageProcessingContextValue extends UseImageProcessingResult {
     setFilterText: (text: string) => void;
     // Files Logic
     files: ReturnType<typeof useTargetFilesLogic>;
-    // Ingestion Logic
-    ingestion: IngestionState;
 }
 
 const ImageProcessingContext = createContext<ImageProcessingContextValue | undefined>(undefined);
@@ -56,7 +53,6 @@ export const ImageProcessingProvider: React.FC<ImageProcessingProviderProps> = (
     const { selectedTarget, reloadKey, framesReloadKey } = useTargetContext();
     const processingResult = useImageProcessing(selectedTarget, isLocalTarget);
     const files = useTargetFilesLogic(selectedTarget, reloadKey + framesReloadKey, isLocalTarget);
-    const ingestion = useIngestionManager(selectedTarget);
 
     const value: ImageProcessingContextValue = {
         ...processingResult,
@@ -66,8 +62,7 @@ export const ImageProcessingProvider: React.FC<ImageProcessingProviderProps> = (
         filterPanel,
         filterText,
         setFilterText,
-        files,
-        ingestion
+        files
     };
 
     return (

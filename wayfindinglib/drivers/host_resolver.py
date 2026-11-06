@@ -18,7 +18,20 @@ import threading
 logger = logging.getLogger(__name__)
 
 _LOOKUP_THREAD = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="HostLookup")
-"""One helper thread for name lookups; slow lookups cannot pile up."""
+"""One helper thread for name lookups, so lookups run one at a time."""
+
+_MAX_PENDING_LOOKUPS = 4
+"""Most lookups that may be running or waiting for the helper thread.
+
+Design estimate. The helper thread runs one lookup at a time, and one stuck
+``.local`` lookup can take about 5 s. The app asks many times a minute, so
+without a cap the waiting lookups would pile up behind it. With the cap, a
+request made while 4 are already pending is treated as a failed lookup and
+returns the saved address, if there is one.
+"""
+
+_PENDING_LOOKUPS = threading.BoundedSemaphore(_MAX_PENDING_LOOKUPS)
+"""Counts the pending lookups; a slot is freed when a lookup finishes."""
 
 
 def is_address_literal(host: str) -> bool:
@@ -102,14 +115,23 @@ class KnownHostAddress:
         if is_address_literal(hostname):
             return hostname
 
-        lookup = _LOOKUP_THREAD.submit(socket.getaddrinfo, hostname, port, type=socket.SOCK_STREAM)
-        try:
-            results = lookup.result(timeout=timeout)
-            name_resolves = True
-            resolved = _pick_address(results)
-        except concurrent.futures.TimeoutError, OSError:
-            name_resolves = False
-            resolved = None
+        name_resolves = False
+        resolved = None
+        if _PENDING_LOOKUPS.acquire(blocking=False):
+            try:
+                lookup = _LOOKUP_THREAD.submit(socket.getaddrinfo, hostname, port, type=socket.SOCK_STREAM)
+            except BaseException:
+                _PENDING_LOOKUPS.release()
+                raise
+            lookup.add_done_callback(lambda _finished: _PENDING_LOOKUPS.release())
+            try:
+                results = lookup.result(timeout=timeout)
+                name_resolves = True
+                resolved = _pick_address(results)
+            except concurrent.futures.TimeoutError, OSError:
+                pass  # Counts as a failed lookup; the saved address is used below.
+        else:
+            logger.debug("Too many name lookups are pending; treating '%s' as not resolved now.", hostname)
 
         with self._lock:
             if hostname != self.hostname:

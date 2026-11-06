@@ -1,0 +1,74 @@
+/*
+ * Styles of Badge, the small tinted label. The tint, the edge and the text of each tone come from
+ * one color token, so a badge looks the same everywhere. A badge with an icon or a word of its own
+ * keeps a status from being told by color alone.
+ */
+
+.badge {
+    --badge-color: var(--text-dim);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 1px 7px;
+    border: 1px solid color-mix(in srgb, var(--badge-color) 40%, transparent);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--badge-color) 20%, transparent);
+    color: color-mix(in srgb, var(--badge-color) 65%, var(--white));
+    font-size: var(--section-label-size);
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.badge--ok {
+    --badge-color: var(--success-green);
+}
+
+.badge--warning {
+    --badge-color: var(--warning-amber);
+}
+
+.badge--error {
+    --badge-color: var(--danger-red);
+}
+
+.badge--info,
+.badge--accent {
+    --badge-color: var(--accent-blue);
+}
+
+.badge--purple {
+    --badge-color: var(--accent-purple);
+}
+
+.badge--neutral {
+    --badge-color: var(--text-dim);
+}
+
+.badge__icon {
+    flex-shrink: 0;
+    color: var(--badge-color);
+}
+
+/* A badge that opens something: it is a button, so it shows the pointer and a stronger tint. */
+.badge--clickable {
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.badge--clickable:hover,
+.badge--clickable:focus-visible {
+    background: color-mix(in srgb, var(--badge-color) 45%, transparent);
+    border-color: color-mix(in srgb, var(--badge-color) 85%, var(--white));
+    color: var(--white);
+    outline: none;
+}
+
+/* The border style repeats what the word says, for readers who cannot tell the tints apart. */
+.badge--dashed {
+    border-style: dashed;
+}
+
+.badge--dotted {
+    border-style: dotted;
+}

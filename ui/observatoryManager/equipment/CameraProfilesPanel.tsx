@@ -8,12 +8,15 @@
  * in one short line. The
  * measurement form opens from a "Measure noise" button in the panel header
  * and closes again; focus moves into the form on open and back to the button
- * on close. A measurement is shown first; saving it to the calibration
+ * on close. While the view shows a past night, "Measure noise" is greyed with the reason and
+ * the form is closed, because a measurement reads and writes the live library. A measurement is shown first; saving it to the calibration
  * library is a local write, so the panel asks before it saves.
  */
 
 import React, { useEffect, useRef, useState } from 'react';
+import { TextInput } from '../../common/components/TextInput';
 import { SectionPanel } from '../../common/components/SectionPanel';
+import { PopoverSelect } from '../../common/components/PopoverSelect';
 import { StatusChip, type StatusChipStatus } from '../../common/components/StatusChip';
 import { QualityPanelState } from '../../common/components/quality/QualityPanelState';
 import { callBackend } from '../../common/services/backendApi';
@@ -25,8 +28,10 @@ import {
     type CameraNoiseValue,
     type SensorNoiseMeasurement,
 } from '../../common/types/backendTypes';
+import { useObservatoryNight } from '../ObservatoryNightContext';
 import '../../common/components/quality/quality.css';
 import '../observatoryManager.css';
+import { Button } from '../../common/components/Button';
 
 /** Properties of {@link CameraProfilesPanel}. */
 export interface CameraProfilesPanelProps {
@@ -97,6 +102,7 @@ function settingText(setting: CameraNoiseSetting): string {
  * @return The panel.
  */
 export const CameraProfilesPanel: React.FC<CameraProfilesPanelProps> = ({ cameras, loading, error, onRetry }) => {
+    const { isLive, liveOnlyReason } = useObservatoryNight();
     const [cameraId, setCameraId] = useState('');
     const [gain, setGain] = useState('');
     const [offset, setOffset] = useState('');
@@ -108,7 +114,7 @@ export const CameraProfilesPanel: React.FC<CameraProfilesPanelProps> = ({ camera
 
     const [isFormOpen, setIsFormOpen] = useState(false);
     const openButtonRef = useRef<HTMLButtonElement>(null);
-    const cameraSelectRef = useRef<HTMLSelectElement>(null);
+    const cameraFieldRef = useRef<HTMLSpanElement>(null);
     const saveButtonRef = useRef<HTMLButtonElement>(null);
     const measurementRef = useRef<HTMLDivElement>(null);
     // Where focus goes after the confirm step closes: back to the save button, or to the result.
@@ -116,7 +122,7 @@ export const CameraProfilesPanel: React.FC<CameraProfilesPanelProps> = ({ camera
 
     // Focus moves into the form once it is drawn.
     useEffect(() => {
-        if (isFormOpen) cameraSelectRef.current?.focus();
+        if (isFormOpen) cameraFieldRef.current?.querySelector('button')?.focus();
     }, [isFormOpen]);
 
     useEffect(() => {
@@ -198,16 +204,18 @@ export const CameraProfilesPanel: React.FC<CameraProfilesPanelProps> = ({ camera
 
     const canShowForm = !loading && !error && cameras.length > 0;
     const measureButton = canShowForm ? (
-        <button
+        <Button
+            size="small"
+            className="camera-profiles__measure-button"
             ref={openButtonRef}
-            type="button"
-            className="btn btn--tiny quality-button camera-profiles__measure-button"
-            aria-expanded={isFormOpen}
+            aria-expanded={isFormOpen && isLive}
             aria-controls="camera-measure-form"
+            disabled={!isLive}
+            title={isLive ? undefined : liveOnlyReason}
             onClick={() => (isFormOpen ? closeForm() : openForm())}
         >
             Measure noise
-        </button>
+        </Button>
     ) : null;
 
     return (
@@ -248,7 +256,7 @@ export const CameraProfilesPanel: React.FC<CameraProfilesPanelProps> = ({ camera
                     </div>
                 )}
 
-                {isFormOpen && canShowForm && (
+                {isFormOpen && canShowForm && isLive && (
                     <div id="camera-measure-form">
                 <form
                     className="equipment-block__form"
@@ -258,24 +266,27 @@ export const CameraProfilesPanel: React.FC<CameraProfilesPanelProps> = ({ camera
                         if (canMeasure) void measure();
                     }}
                 >
-                    <label>
+                    <span ref={cameraFieldRef} className="equipment-block__picker">
                         Camera{' '}
-                        <select ref={cameraSelectRef} className="dropdown" value={chosenCamera} onChange={(event) => setCameraId(event.target.value)}>
-                            {cameras.map((camera) => <option key={camera.name} value={camera.name}>{camera.name}</option>)}
-                        </select>
-                    </label>
+                        <PopoverSelect
+                            label="Camera"
+                            options={cameras.map((camera) => ({ id: camera.name, label: camera.name }))}
+                            selectedId={chosenCamera || null}
+                            onSelect={(id) => setCameraId(id ?? '')}
+                        />
+                    </span>
                     <label>
                         Gain{' '}
-                        <input className="input input--short" value={gain} onChange={(event) => setGain(event.target.value)} />
+                        <TextInput width="short" centered value={gain} onChange={(event) => setGain(event.target.value)} />
                     </label>
                     <label>
                         Offset{' '}
-                        <input className="input input--short" value={offset} onChange={(event) => setOffset(event.target.value)} />
+                        <TextInput width="short" centered value={offset} onChange={(event) => setOffset(event.target.value)} />
                     </label>
-                    <button type="submit" className="btn quality-button" disabled={!canMeasure} aria-disabled={!canMeasure} aria-describedby="measure-reason">
+                    <Button type="submit" disabled={!canMeasure} aria-disabled={!canMeasure} aria-describedby="measure-reason">
                         {isMeasuring ? 'Measuring…' : 'Measure'}
-                    </button>
-                    <button type="button" className="btn quality-button" onClick={closeForm}>Close</button>
+                    </Button>
+                    <Button onClick={closeForm}>Close</Button>
                 </form>
                 <p id="measure-reason" className="equipment-block__reason">
                     {canMeasure || isMeasuring
@@ -298,19 +309,19 @@ export const CameraProfilesPanel: React.FC<CameraProfilesPanelProps> = ({ camera
                             Gain {formatNumber(measurement.gainEPerAdu, 3)} e⁻/ADU, read noise {formatNumber(measurement.readNoiseE, 2)} e⁻
                         </p>
                         {measurement.status === MeasurementStatus.MEASURED && !measurement.saved && !isConfirmingSave && (
-                            <button ref={saveButtonRef} type="button" className="btn quality-button" onClick={() => setIsConfirmingSave(true)}>
+                            <Button ref={saveButtonRef} onClick={() => setIsConfirmingSave(true)}>
                                 Save measurement
-                            </button>
+                            </Button>
                         )}
                         {isConfirmingSave && (
                             <div className="equipment-block__confirm" role="group" aria-label="Confirm save">
                                 <span>Save this measurement to the calibration library?</span>
-                                <button type="button" className="btn btn--primary quality-button" onClick={() => void save()}>
+                                <Button variant="primary" onClick={() => void save()}>
                                     Yes, save
-                                </button>
-                                <button type="button" className="btn quality-button" onClick={() => { setIsConfirmingSave(false); setFocusAfterConfirm('saveButton'); }}>
+                                </Button>
+                                <Button onClick={() => { setIsConfirmingSave(false); setFocusAfterConfirm('saveButton'); }}>
                                     Cancel
-                                </button>
+                                </Button>
                             </div>
                         )}
                         {saveResult && <p>{saveResult}</p>}

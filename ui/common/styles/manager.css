@@ -8,12 +8,6 @@
   box-sizing: border-box;
 }
 
-/* Force larger buttons in left column manager frames */
-.manager .btn {
-  font-size: var(--target-list-font-size);
-  height: 48px;
-}
-
 .manager__filter {
   display: flex;
   flex-direction: column;
@@ -86,47 +80,6 @@
   flex: 0 0 auto;
   box-sizing: border-box;
   width: 100%;
-}
-
-.manager__pagination-btn {
-  height: 28px;
-  font-size: 12px;
-  font-weight: 500;
-  font-family: var(--font-family-base);
-  padding: 0 10px;
-  min-width: 60px;
-  border-radius: 6px;
-  background-color: rgba(255, 255, 255, 0.06);
-  color: var(--text-light, #eee);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  outline: none;
-  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-  box-sizing: border-box;
-  user-select: none;
-}
-
-.manager__pagination-btn:hover:not(:disabled) {
-  background-color: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.2);
-  color: #fff;
-}
-
-.manager__pagination-btn:active:not(:disabled) {
-  background-color: var(--adwaita-blue, #244a70);
-  border-color: var(--adwaita-blue-light, #3584e4);
-  color: #fff;
-}
-
-.manager__pagination-btn:disabled {
-  background-color: transparent;
-  border-color: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.25);
-  cursor: not-allowed;
-  opacity: 0.5;
 }
 
 .manager__pagination-label {

@@ -325,3 +325,57 @@ def test_rsync_uses_remote_shell_option_with_saved_address() -> None:
     assert "HostName=192.168.1.50" in remote_shell
     assert "HostKeyAlias=scope.local" in remote_shell
     assert "scope.local:/remote/" in command
+
+
+def _wait_for_free_lookup_slots(host_resolver: Any) -> None:
+    """Wait until every pending lookup has finished and freed its slot."""
+    import time
+
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        taken = 0
+        while host_resolver._PENDING_LOOKUPS.acquire(blocking=False):
+            taken += 1
+        for _ in range(taken):
+            host_resolver._PENDING_LOOKUPS.release()
+        if taken == host_resolver._MAX_PENDING_LOOKUPS:
+            return
+        time.sleep(0.01)
+
+
+def test_lookups_waiting_for_the_helper_thread_are_capped(caplog: pytest.LogCaptureFixture) -> None:
+    """With the helper thread stuck, extra lookups are skipped, not queued."""
+    import threading
+
+    from wayfindinglib.drivers import host_resolver
+
+    release = threading.Event()
+
+    def stuck_lookup(*args: object, **kwargs: object) -> list:
+        """Block like a ``.local`` lookup that nothing answers.
+
+        Returns
+        -------
+        results : `list`
+            The canned good lookup result, after the event is set.
+        """
+        release.wait(timeout=10.0)
+        return _GOOD
+
+    known = KnownHostAddress("scope.local")
+    known.cached_address = "192.168.1.50"
+    with (
+        patch("socket.getaddrinfo", stuck_lookup),
+        caplog.at_level(logging.DEBUG, logger="wayfindinglib.drivers.host_resolver"),
+    ):
+        try:
+            answers = [
+                known.resolve(7624, timeout=0.01) for _ in range(host_resolver._MAX_PENDING_LOOKUPS + 3)
+            ]
+            skipped = [r for r in caplog.records if "Too many name lookups" in r.getMessage()]
+        finally:
+            release.set()
+            _wait_for_free_lookup_slots(host_resolver)
+
+    assert len(skipped) == 3
+    assert set(answers) == {"192.168.1.50"}

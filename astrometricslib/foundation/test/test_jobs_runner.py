@@ -500,3 +500,74 @@ def test_report_started_jobs_gives_the_caller_the_handle() -> None:
         runner._job_started_listener.get()(SimpleNamespace(job_id="job-1"))
     assert seen == ["job-1"]
     assert runner._job_started_listener.get() is None
+
+
+def test_report_count_stores_the_counts_and_keeps_a_finished_status(isolated_logs: str) -> None:
+    """Verify report_count stores the counts and keeps a finished status."""
+    from astrometricslib.foundation.jobs.store import JobStore
+
+    with registered_job(enabled=True, job_type="quality", target_id="Vega") as job:
+        job.report_count(24, 40, "Measured 24 of 40 frames")
+        stored = JobStore(isolated_logs).get_job(job.job_id)
+        assert (stored.status, stored.progress_current, stored.progress_total) == ("running", 24, 40)
+        assert stored.message == "Measured 24 of 40 frames"
+        job.mark("failed", 100)
+        job.report_count(30, 40, "Too late")
+        assert JobStore(isolated_logs).get_job(job.job_id).status == "failed"
+
+
+def test_a_log_file_that_cannot_be_opened_still_frees_its_key(
+    isolated_logs: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a failed log file open still frees the file key."""
+    from astrometricslib.foundation.jobs import runner
+
+    log_path = str(tmp_path / "sub" / "job.log")
+
+    def fail(*_args: object, **_kwargs: object) -> None:
+        """Stand in for a disk that refuses the new folder.
+
+        Raises
+        ------
+        OSError
+            Always.
+        """
+        raise OSError("disk full")
+
+    monkeypatch.setattr(runner.os, "makedirs", fail)
+    with (
+        pytest.raises(OSError, match="disk full"),
+        runner.capture_job_logs(job_id="job-x", log_file_path=log_path),
+    ):
+        pass
+    assert not [key for key in runner._open_log_files if key[0] == "job-x"]
+
+
+def test_running_as_job_makes_an_existing_row_current_and_reports_progress(isolated_logs: str) -> None:
+    """Verify progress reaches an existing row, which is not ended."""
+    from astrometricslib.foundation.jobs.models import ProcessingJob
+    from astrometricslib.foundation.jobs.runner import get_current_job, running_as_job
+    from astrometricslib.foundation.jobs.store import JobStore
+
+    store = JobStore(isolated_logs)
+    store.upsert_job(
+        ProcessingJob(
+            id="owner-1",
+            job_type="stacking",
+            target_id="Vega",
+            status="running",
+            progress_current=0,
+            progress_total=100,
+        )
+    )
+    assert get_current_job() is None
+
+    with running_as_job("owner-1", store, job_type="stacking", target_id="Vega") as handle:
+        assert get_current_job() is handle
+        handle.stage(30, "Stage 2 of 7")
+
+    assert get_current_job() is None
+    stored = store.get_job("owner-1")
+    assert (stored.status, stored.progress_current) == ("running", 30)
+    assert len(store.get_jobs_by_target("Vega")) == 1
+    assert not handle.reached_terminal_status

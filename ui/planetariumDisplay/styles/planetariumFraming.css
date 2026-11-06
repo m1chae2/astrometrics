@@ -53,36 +53,6 @@
   color: var(--text-dim);
 }
 
-.framing-panel input,
-.framing-panel select {
-  background: var(--grey-dark);
-  border: 1px solid var(--border-control);
-  color: var(--text-primary);
-  padding: 3px 6px;
-  border-radius: var(--radius-sm);
-}
-
-.framing-panel button {
-  background: var(--surface-control);
-  border: 1px solid var(--border-control);
-  color: var(--text-primary);
-  border-radius: var(--radius-sm);
-  padding: 4px 10px;
-  cursor: pointer;
-}
-
-.framing-panel button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.framing-panel button:focus-visible,
-.framing-panel input:focus-visible,
-.framing-panel select:focus-visible {
-  outline: 2px solid var(--status-cyan);
-  outline-offset: 2px;
-}
-
 .framing-panel__table {
   border-collapse: collapse;
   width: 100%;

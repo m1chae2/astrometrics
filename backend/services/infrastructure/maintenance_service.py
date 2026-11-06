@@ -3,6 +3,7 @@
 REQ: SYS-1.0: Periodic maintenance and cleanup.
 """
 
+import asyncio
 import logging
 import threading
 from typing import TYPE_CHECKING
@@ -104,12 +105,14 @@ class MaintenanceService:
         # 1. Resource usage
         resources = {"system_ram_usage_percent": 0.0, "vram_status": "Unknown"}
         if self.system_status_service:
-            resources = self.system_status_service.get_resource_usage()
+            resources = await asyncio.to_thread(self.system_status_service.get_resource_usage)
 
         # 2. INDI status
         indi_status = {"status": "Disconnected", "devices": []}
         if self.telescope_service:
-            status = self.telescope_service.get_status()
+            # The status read blocks, and the guiding part starts its own event
+            # loop. Run it in a worker thread so it does not clash with ours.
+            status = await asyncio.to_thread(self.telescope_service.get_status)
             if hasattr(status, "model_dump"):
                 status_dict = status.model_dump(by_alias=True)
             elif hasattr(status, "dict"):

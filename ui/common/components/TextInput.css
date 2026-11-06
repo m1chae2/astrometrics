@@ -1,0 +1,54 @@
+/* Common entry style for all text and number entry fields */
+
+/**
+ * Base Entry Component
+ * Used for all text, number, and generic input fields.
+ * Matches the sleek Observatory Manager theme.
+ */
+.entry {
+  height: var(--control-btn-height);
+  width: 100%;
+  padding: 0 var(--space-3);
+  font-size: var(--control-font-size);
+  font-family: var(--font-family-base);
+  background-color: var(--surface-subtle);
+  color: var(--white);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-sizing: border-box;
+  outline: none;
+  font-weight: 400;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.entry:focus {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-blue) 30%, transparent);
+}
+
+.entry:hover:not(:focus) {
+  border-color: var(--border-control);
+}
+
+.entry:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: var(--grey-dark);
+}
+
+/* Modifiers */
+.entry--fill {
+  flex: 1;
+  min-width: 0;
+}
+
+.entry--short {
+  flex: 0 0 80px;
+  min-width: 80px;
+  width: 80px;
+}
+
+/* Centres the text of a short numeric field. */
+.entry--centered {
+  text-align: center;
+}

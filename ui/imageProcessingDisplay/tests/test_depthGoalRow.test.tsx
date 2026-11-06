@@ -57,9 +57,10 @@ describe('DepthGoalRow', () => {
         answerBackend(() => baseStatus);
         renderRow();
         expect(await screen.findByText(baseStatus.message)).toBeTruthy();
-        expect(screen.getByRole('option', { name: 'Quick look' })).toBeTruthy();
-        expect(screen.getByRole('option', { name: 'Deep' })).toBeTruthy();
-        expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('good');
+        const picker = screen.getByRole('button', { name: 'Integration Goal: Standard' });
+        fireEvent.click(picker);
+        expect(screen.getByRole('button', { name: 'Quick look' })).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'Deep' })).toBeTruthy();
         expect(backend.callBackend).toHaveBeenCalledWith('advisory:depth_goal', { target: 'M 31' });
     });
 
@@ -71,7 +72,8 @@ describe('DepthGoalRow', () => {
         ));
         renderRow();
         await screen.findByText(baseStatus.message);
-        fireEvent.change(screen.getByRole('combobox'), { target: { value: 'deep' } });
+        fireEvent.click(screen.getByRole('button', { name: /^Integration Goal:/ }));
+        fireEvent.click(screen.getByRole('button', { name: 'Deep' }));
         expect(await screen.findByText('Integration goal reached.')).toBeTruthy();
         expect(backend.callBackend).toHaveBeenCalledWith('advisory:set_depth_goal', { target: 'M 31', level: 'deep' });
     });
@@ -81,7 +83,7 @@ describe('DepthGoalRow', () => {
         renderRow();
         const note = await screen.findByText('No depth goal for this kind of object.');
         expect(note.getAttribute('title')).toBe('Planets move.');
-        expect(screen.queryByRole('combobox')).toBeNull();
+        expect(screen.queryByRole('button', { name: /^Integration Goal:/ })).toBeNull();
     });
 
     it('shows loading, then an error', async () => {

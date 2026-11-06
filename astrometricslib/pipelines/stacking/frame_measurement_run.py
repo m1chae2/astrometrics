@@ -282,10 +282,15 @@ class FrameQualityRecording:
         The configuration that locates the quality database.
     calibration_library : `CalibrationLibrary`
         The shared calibration library, for the bias levels.
+    save_target : `Callable` or `None`
+        Saves the frames' measurement stamps while the measurement runs, so a
+        long stack keeps them even if the target object is refreshed. `None`
+        leaves saving to the stage's own save of the whole target.
     """
 
     configuration: AppConfiguration
     calibration_library: CalibrationLibrary
+    save_target: Callable[[], None] | None = None
 
 
 def _stat_or_none(path: str) -> os.stat_result | None:
@@ -1202,9 +1207,8 @@ def _measure_target_frames(
                     failure_notes.append(f"{os.path.basename(frame.path)}: {failure}")
                     logger.warning("Could not measure %s: %s", frame.path, failure)
                 if progress_job is not None:
-                    progress_job.stage(
-                        int(100 * done_count / len(pending)),
-                        f"Measured {done_count} of {len(pending)} frames",
+                    progress_job.report_count(
+                        done_count, len(pending), f"Measured {done_count} of {len(pending)} frames"
                     )
                 if nested_progress is not None:
                     nested_progress.tick()
@@ -1275,8 +1279,8 @@ def record_stage_frame_quality(
         When the stack started, with a time zone, supplied by the caller.
     save_target : `Callable`, optional
         Saves the frames' stamps (see `record_frame_measurements_for_target`).
-        The stage saves the whole target itself later when no function is
-        given.
+        When it is not given, `recording.save_target` is used. The stage saves
+        the whole target itself later when neither is given.
     actions_by_path : `Mapping` [`str`, `str`], optional
         For each frame the quarantine step moved (by its original path), the
         ``action_taken`` text stored with its quarantine rows
@@ -1336,7 +1340,7 @@ def record_stage_frame_quality(
             session,
             frames=needing,
             limit=STACKING_STAGE_MEASUREMENT_LIMIT,
-            save_target=save_target,
+            save_target=save_target if save_target is not None else recording.save_target,
             wait_for_turn=False,
         )
         full_summary.rows_written += summary.rows_written

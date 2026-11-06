@@ -20,9 +20,12 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib import Astrometrics
+from astrometricslib._internal.drivers import local_database
 from astrometricslib._internal.drivers.calibration_library import CalibrationSelection
 from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.api.quality import QualityRecords
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, StorageError
 from astrometricslib.models.camera_profile import (
     CameraProfile,
@@ -47,6 +50,7 @@ from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_SKY_RATE_E_PER_S_PER_PX,
     FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX,
 )
+from astrometricslib.pipelines.shared.target_records import save_quality_stamps
 from astrometricslib.pipelines.stacking import frame_measurement_run
 from astrometricslib.pipelines.stacking.frame_measurement_run import (
     BIAS_FRAMES_FOR_LEVEL,
@@ -748,6 +752,7 @@ def test_a_run_nested_in_a_parent_job_keeps_its_own_run_id_and_the_parents_progr
     assert session.run_id.startswith("frame-measurement-")
     assert session.job_id == "stacking-job-1"
     parent.stage.assert_not_called()
+    parent.report_count.assert_not_called()
     rows = store.query(target_id="M 99", latest_only=False)
     assert {row.run_id for row in rows} == {session.run_id}
 
@@ -769,7 +774,11 @@ def test_a_run_with_its_own_job_reports_progress_and_uses_the_job_id_as_run_id(
     record_frame_measurements_for_target(target, session)
 
     assert session.run_id == "quality-job-7"
-    assert own_job.stage.call_count == 3
+    assert own_job.report_count.call_count == 3
+    own_job.stage.assert_not_called()
+    last_call = own_job.report_count.call_args_list[-1].args
+    assert last_call[:2] == (3, 3)
+    assert last_call[2] == "Measured 3 of 3 frames"
 
 
 def test_an_uncooled_camera_gets_an_assumed_sky(
@@ -1042,3 +1051,80 @@ def test_a_frame_without_a_profile_gap_row_is_never_selected(
         store, "M 99", target.frames[:3], lambda frame: _profile()
     )
     assert closed == set()
+
+
+def test_the_stage_uses_the_saver_the_recording_carries(
+    target: Target, tmp_path: Path, biases: list[str]
+) -> None:
+    """With no saver passed in, the stage uses the recording's saver."""
+    saved = MagicMock()
+    config = SimpleNamespace(get_library_path=lambda: tmp_path)
+    recording = FrameQualityRecording(
+        configuration=config, calibration_library=_Library(biases), save_target=saved
+    )
+    lights = target.frames[:3]
+
+    measured_at = datetime(2026, 10, 22, 6, 0, tzinfo=UTC)
+    record_stage_frame_quality(target, lights, [], lights, recording, measured_at)
+
+    assert saved.call_count >= 1
+
+
+def test_stamps_reach_storage_when_the_targets_are_listed_during_measurement(
+    tmp_path: Path, biases: list[str]
+) -> None:
+    """Listing the targets mid-measurement does not lose the stamps."""
+    library_path = tmp_path / "library"
+    (library_path / "targets").mkdir(parents=True)
+    config = AppConfiguration()
+    config.update_config({"Image Library": {"path": str(library_path)}})
+    folder = tmp_path / "stored_lights"
+    folder.mkdir()
+    frames = []
+    for index in range(2):
+        path = folder / f"light_{index}.fits"
+        _write_fits(path, seed=index)
+        frames.append(
+            FrameRecord(
+                path=str(path),
+                camera="Test Camera",
+                telescope="Scope",
+                iso=GAIN_SETTING,
+                offset="0",
+                binning=1,
+                exposure="10.0",
+                timestamp=1_792_000_000.0 + 60.0 * index,
+                pixelScaleArcsec=2.0,
+                sensorTemperatureC=-10.0,
+            )
+        )
+    local_database.save_target(app_config=config, target=Target(id="M 98", frames=frames))
+    astrometrics = Astrometrics(config=config)
+    held = astrometrics.targets.get("M 98")
+    held_frames = list(held.frames)
+
+    class _ListingLibrary(_Library):
+        """A library that lists the targets, as the backend does."""
+
+        def select_bias_frames(self, camera: str, **settings: object) -> CalibrationSelection:
+            """List the targets, then give the biases.
+
+            Returns
+            -------
+            selection : `CalibrationSelection`
+                The bias frames.
+            """
+            astrometrics.targets.list()
+            return super().select_bias_frames(camera, **settings)
+
+    recording = FrameQualityRecording(
+        configuration=config,
+        calibration_library=_ListingLibrary(biases),
+        save_target=lambda: save_quality_stamps(astrometrics.targets, held),
+    )
+    record_stage_frame_quality(
+        held, held_frames, [], held_frames, recording, datetime(2026, 10, 22, 6, 0, tzinfo=UTC)
+    )
+
+    stored = Astrometrics(config=config).targets.get("M 98")
+    assert all(frame.quality_measured_file_size is not None for frame in stored.frames)

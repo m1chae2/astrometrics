@@ -6,6 +6,7 @@
  */
 import React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { PopoverSelect } from '../../common/components/PopoverSelect';
 import { callBackend } from '../../common/services/backendApi';
 import { useTargetListQuery } from '../../common/queries/useTargetListQuery';
 import { targetListId } from '../../common/hooks/targetListFiltering';
@@ -93,17 +94,14 @@ export const DepthGoalRow: React.FC<DepthGoalRowProps> = ({ targetId, refreshKey
                 {detail && (
                     <span className="depth-goal-row__info" title={detail} aria-label={detail} role="img">ⓘ</span>
                 )}
-                <select
-                    className="file-browser__camera-select"
-                    aria-label="Integration Goal"
-                    value={shown.level}
+                <PopoverSelect
+                    label="Integration Goal"
+                    options={(shown.options ?? []).map((option) => ({ id: option.level, label: option.label }))}
+                    selectedId={shown.level}
                     disabled={setLevel.isPending}
-                    onChange={(event) => setLevel.mutate(event.target.value as DepthLevelChoice)}
-                >
-                    {(shown.options ?? []).map((option) => (
-                        <option key={option.level} value={option.level}>{option.label}</option>
-                    ))}
-                </select>
+                    onSelect={(id) => { if (id) setLevel.mutate(id as DepthLevelChoice); }}
+                    size="compact"
+                />
             </div>
             <div className="depth-goal-row__message" title={shown.reason || undefined}>{shown.message}</div>
             {setLevel.isError && (

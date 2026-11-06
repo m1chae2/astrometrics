@@ -1,8 +1,6 @@
 import React, { ReactNode } from 'react';
 import { GenericDisplayLayout } from '../common/components/GenericDisplayLayout';
 import { ConfirmDialog } from '../common/components/ConfirmDialog';
-import { IngestFramesModal } from "../common/components/IngestFramesModal";
-import { IngestionState } from '../common/hooks/useIngestionManager';
 import { AddTargetModal } from '../common/components/AddTargetModal';
 import { FitsHeaderModal } from '../common/components/FitsHeaderModal';
 import './imageProcessingDisplay.css';
@@ -23,16 +21,11 @@ interface ImageProcessingLayoutProps {
     targetToDelete: string; // The specific target name for the message
     onConfirmDelete: () => void;
     onCancelDelete: () => void;
-    onIngestComplete: (targetName: string) => void;
 
     showFileDeleteConfirm: boolean;
     fileDeleteCount: number;
     onConfirmFileDelete: () => void;
     onCancelFileDelete: () => void;
-
-    isIngestModalOpen: boolean;
-    onCloseIngestModal: () => void;
-    ingestionState: IngestionState;
 
     isHeaderModalOpen: boolean;
     onCloseHeaderModal: () => void;
@@ -59,10 +52,6 @@ export const ImageProcessingLayout: React.FC<ImageProcessingLayoutProps> = ({
     fileDeleteCount,
     onConfirmFileDelete,
     onCancelFileDelete,
-    isIngestModalOpen,
-    onCloseIngestModal,
-    onIngestComplete,
-    ingestionState,
     isHeaderModalOpen,
     onCloseHeaderModal,
     targetId,
@@ -94,12 +83,6 @@ export const ImageProcessingLayout: React.FC<ImageProcessingLayoutProps> = ({
                 message={`Are you sure you want to delete ${fileDeleteCount} files? This cannot be undone.`}
                 onConfirm={onConfirmFileDelete}
                 onCancel={onCancelFileDelete}
-            />
-            <IngestFramesModal
-                isOpen={isIngestModalOpen}
-                onClose={onCloseIngestModal}
-                ingestionState={ingestionState}
-                onIngestComplete={onIngestComplete}
             />
             <FitsHeaderModal
                 isOpen={isHeaderModalOpen}

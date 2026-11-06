@@ -6,12 +6,18 @@
  * parent can grey it (with a visible reason) while Ekos controls the equipment.
  */
 import React, { useState, useEffect } from 'react';
+import { NumberInput } from '../common/components/NumberInput';
 import { PlanItem } from './context/PlanningContext';
 import { filterLabel } from './packageModel';
 import { FilterType } from '../common/types/backendTypes';
+import { PopoverSelect } from '../common/components/PopoverSelect';
 import { InfoButton } from '../common/components/InfoButton';
 import { ControlColumn, ParameterRow } from '../common/components/ControlLayoutComponents';
 import '../common/styles/panels.css';
+import { Button } from '../common/components/Button';
+
+/** The frame types the planner can add. */
+const FRAME_TYPE_OPTIONS = ['Light', 'Dark', 'Flat', 'Bias'].map((frameType) => ({ id: frameType, label: frameType }));
 
 export interface ImageConfig {
     type: string;
@@ -140,23 +146,18 @@ export const ImagePlanner: React.FC<ImagePlannerProps> = ({
         <div className="image-planner">
             <ControlColumn>
                 <ParameterRow label="Type">
-                    <select
-                        className="dropdown"
-                        value={type}
-                        onChange={(e) => update({ type: e.target.value })}
-                    >
-                        <option value="Light">Light</option>
-                        <option value="Dark">Dark</option>
-                        <option value="Flat">Flat</option>
-                        <option value="Bias">Bias</option>
-                    </select>
+                    <PopoverSelect
+                        label="Type"
+                        options={FRAME_TYPE_OPTIONS}
+                        selectedId={type}
+                        onSelect={(id) => update({ type: id ?? 'Light' })}
+                    />
                 </ParameterRow>
 
                 <div className="image-planner__grid">
                     <ParameterRow label="Count">
-                        <input
-                            className="entry entry--short"
-                            type="number"
+                        <NumberInput
+                            width="short"
                             min="1"
                             value={count}
                             onChange={(e) => update({ count: parseInt(e.target.value) || 0 })}
@@ -164,22 +165,17 @@ export const ImagePlanner: React.FC<ImagePlannerProps> = ({
                     </ParameterRow>
 
                     <ParameterRow label="Filter">
-                        <select
-                            className="dropdown"
-                            value={filter}
-                            aria-label="Filter"
-                            onChange={(e) => update({ filter: e.target.value })}
-                        >
-                            {shownFilters.map((value) => (
-                                <option key={value} value={value}>{filterLabel(value)}</option>
-                            ))}
-                        </select>
+                        <PopoverSelect
+                            label="Filter"
+                            options={shownFilters.map((value) => ({ id: value, label: filterLabel(value) }))}
+                            selectedId={filter}
+                            onSelect={(id) => update({ filter: id ?? filter })}
+                        />
                     </ParameterRow>
 
                     <ParameterRow label="Exposure">
-                        <input
-                            className="entry entry--short"
-                            type="number"
+                        <NumberInput
+                            width="short"
                             min="0.0"
                             step="0.1"
                             value={exposure}
@@ -188,9 +184,8 @@ export const ImagePlanner: React.FC<ImagePlannerProps> = ({
                     </ParameterRow>
 
                     <ParameterRow label="Delay">
-                        <input
-                            className="entry entry--short"
-                            type="number"
+                        <NumberInput
+                            width="short"
                             min="0"
                             value={delay}
                             onChange={(e) => update({ delay: parseInt(e.target.value) || 0 })}
@@ -205,41 +200,39 @@ export const ImagePlanner: React.FC<ImagePlannerProps> = ({
             <div className="image-planner__actions">
                 {isEditing ? (
                     <>
-                        <button
-                            className="btn btn--flex-1"
+                        <Button
+                            className="image-planner__action-fill"
                             onClick={handleAdd}
-                            type="button"
                         >
                             Update
-                        </button>
-                        <button
-                            className="btn btn--danger btn--flex-1"
+                        </Button>
+                        <Button
+                            variant="danger"
+                            className="image-planner__action-fill"
                             onClick={onCancel}
-                            type="button"
                         >
                             Cancel
-                        </button>
+                        </Button>
                     </>
                 ) : (
-                    <button
-                        className="btn btn--full-width"
+                    <Button
+                        fullWidth
                         onClick={handleAdd}
-                        type="button"
                     >
                         Add to List
-                    </button>
+                    </Button>
                 )}
 
-                <button
-                    className="btn btn--secondary btn--full-width"
+                <Button
+                    variant="secondary"
+                    fullWidth
                     onClick={handleTest}
-                    type="button"
                     disabled={!!testImageUnavailableReason}
                     aria-disabled={!!testImageUnavailableReason}
                     title={testImageUnavailableReason ?? undefined}
                 >
                     Test Image
-                </button>
+                </Button>
                 {testImageUnavailableReason && (
                     <InfoButton label="Why unavailable?" text={testImageUnavailableReason} />
                 )}

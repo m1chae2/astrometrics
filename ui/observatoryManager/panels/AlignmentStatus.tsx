@@ -14,6 +14,8 @@ import { AlignmentAttempt } from '../../common/types/backendTypes';
 
 export interface AlignmentStatusProps {
     alignmentAttempts?: AlignmentAttempt[];
+    /** The text shown when there are no attempts. Defaults to "No alignment attempts". */
+    emptyMessage?: string;
 }
 
 /**
@@ -24,7 +26,8 @@ export interface AlignmentStatusProps {
  * coordinate deltas (dRA, dDEC) for each attempt.
  */
 export const AlignmentStatus: React.FC<AlignmentStatusProps> = ({
-    alignmentAttempts = []
+    alignmentAttempts = [],
+    emptyMessage = 'No alignment attempts',
 }) => {
     const getStatusSymbol = (status: AlignmentAttempt['status']) => {
         switch (status) {
@@ -88,7 +91,7 @@ export const AlignmentStatus: React.FC<AlignmentStatusProps> = ({
                     {alignmentAttempts.length === 0 ? (
                         <tr>
                             <td colSpan={5} className="alignment__cell alignment__cell--empty">
-                                No alignment attempts
+                                {emptyMessage}
                             </td>
                         </tr>
                     ) : (

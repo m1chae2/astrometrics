@@ -226,6 +226,9 @@ def _stack_frames_guarded(
         _prepare_stack(run)  # run.engine, stack_weight, expected_path, inputs_record
         if _stack_is_unchanged(run):
             skip_remaining_stages("the stack is already up to date")
+            # An up-to-date stack made before the solution was saved still
+            # needs one for the viewer's star names.
+            _save_stack_plate_solution(run, run.stacked_path)
             finish_stages()
             return run.stacked_path
         begin_stage(
@@ -635,10 +638,88 @@ def _finish_made_stack(run: StackRun, stacked_path: str, summary: StackQualitySu
         "measuring the stack's quality (reads up to 16 flat, 24 light and 5 bias frames again)",
     )
     _store_stack_quality(run, stacked_path, summary)
+    # Before the preview, so the new stretched FITS the preview writes copies
+    # the solution from the stack's header.
+    _save_stack_plate_solution(run, stacked_path)
     begin_stage(PREVIEW_STAGE, "making the preview picture (GraXpert, Cosmic Clarity, star toning)")
     _make_preview(run, stacked_path)  # run.preview_path
     _save_stack_inputs(run, stacked_path)
     _log_finished_stack(run)
+
+
+def _save_stack_plate_solution(run: StackRun, stacked_path: str | None) -> None:
+    """Save the stack's plate solution in its header and its viewer copy.
+
+    The image viewer draws star names only on a plate-solved image, and no
+    later step of the app writes a solution into the stack. A new stack's
+    header holds at most the pointing the camera software was told to use,
+    which can be tens of pixels off. So a stack with no plate solution is
+    solved here, with the same no-network solve the noise step uses
+    (`_plate_solve_stack_wcs`: refit to Gaia only from a complete cached
+    download), and the solution is written with `write_wcs_to_fits_header`,
+    which marks it as plate-solved. A stack that already carries a plate
+    solution is not solved again.
+
+    The viewer shows the stack's stretched FITS (`processed_fits_path_for`),
+    which has the same pixel grid, so the solution is written there too when
+    that file exists, has the same size and has no solution yet.
+
+    This runs for a stack that was just made and for one that was up to date
+    and skipped, so an older stack gets its solution on the next run. A
+    failed solve is logged as a warning and never fails the stack. Spectral
+    stacks are skipped: they have no star field to solve.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run.
+    stacked_path : `str` or `None`
+        The stack, made or kept. Nothing happens without one.
+    """
+    if run.has_spectral or not stacked_path:
+        return
+    from astropy.wcs import WCS
+
+    from astrometricslib._internal.drivers.fits_access import read_header
+    from astrometricslib.pipelines.shared.session_identification import (
+        header_is_plate_solved,
+        write_wcs_to_fits_header,
+    )
+    from astrometricslib.pipelines.stacking.post_processing.stack_noise import _plate_solve_stack_wcs
+    from astrometricslib.utilities.stack_preview_path import processed_fits_path_for
+
+    try:
+        stack_header = read_header(stacked_path)
+    except (OSError, *DATA_ERRORS) as error:
+        logger.warning("Could not read the header of %s to check its plate solution: %s", stacked_path, error)
+        return
+    if header_is_plate_solved(stack_header):
+        wcs = WCS(stack_header).celestial
+    else:
+        wcs, reason, source = _plate_solve_stack_wcs(stacked_path, run.drivers)
+        if wcs is None:
+            logger.warning(
+                "The stack has no plate solution saved, so the viewer cannot name its stars: %s.", reason
+            )
+            return
+        write_wcs_to_fits_header(stacked_path, wcs)
+        logger.info("Saved the stack's plate solution in its header (%s).", source)
+
+    processed_path = processed_fits_path_for(stacked_path)
+    if not os.path.exists(processed_path):
+        return
+    try:
+        processed_header = read_header(processed_path)
+    except (OSError, *DATA_ERRORS) as error:
+        logger.warning("Could not read %s to add the plate solution: %s", processed_path, error)
+        return
+    same_grid = (processed_header.get("NAXIS1"), processed_header.get("NAXIS2")) == (
+        stack_header.get("NAXIS1"),
+        stack_header.get("NAXIS2"),
+    )
+    if same_grid and not header_is_plate_solved(processed_header):
+        write_wcs_to_fits_header(processed_path, wcs)
+        logger.info("Saved the plate solution in the viewer's copy %s.", os.path.basename(processed_path))
 
 
 def _point_target_at_stack(run: StackRun, stacked_path: str) -> None:

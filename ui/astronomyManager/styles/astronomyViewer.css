@@ -115,12 +115,7 @@
   position: absolute;
   right: 6px;
   top: 4px;
-  background: transparent;
-  border: none;
   color: var(--astro-red-light);
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
 }
 
 .astronomy-tooltip-close:hover {
@@ -170,35 +165,4 @@
   align-items: center;
   gap: 8px;
   padding: 2px 4px;
-}
-
-.astronomy-viewer__segmented-control {
-  display: inline-flex;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
-  padding: 2px;
-}
-
-.segmented-btn {
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--text-dim, #9aa5b5);
-  padding: 3px 10px;
-  font-size: 0.75rem;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-}
-
-.segmented-btn:hover {
-  color: var(--text-primary, #ffffff);
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.segmented-btn.active {
-  background: rgba(36, 74, 112, 0.45);
-  border-color: rgba(53, 132, 228, 0.35);
-  color: #ffffff;
-  font-weight: 500;
 }

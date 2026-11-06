@@ -1,5 +1,7 @@
 # imageViewerDisplay
 
+The selected target is shared by the Image Viewer, Image Processing and Observatory Manager through `TargetContext` and is kept in `localStorage`. `useTargetListLogic` (in `ui/common/hooks/`) picks the default when there is none, or when the kept one is no longer in the library: the most recently imaged target that has a processed image (`pickDefaultTargetId`).
+
 This folder implements the "Image Viewer" / Target Manager UI. It follows a
 three-column layout:
 

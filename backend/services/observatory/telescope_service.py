@@ -6,7 +6,6 @@ state logic directly to the wayfindinglib domain high-level interface.
 """
 
 import logging
-import re
 import sqlite3
 from typing import Any
 
@@ -14,10 +13,6 @@ from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError
 from backend.services.coordinate_text import parse_coordinate_text
 
 logger = logging.getLogger(__name__)
-
-# The frame measurement job reports its progress as text, for example
-# "Measured 24 of 40 frames". Its percent field cannot give the counts.
-_MEASURED_PATTERN = re.compile(r"Measured\s+(\d+)\s+of\s+(\d+)")
 
 # Job states that mean the job is still running.
 _RUNNING_JOB_STATES = ("started", "running")
@@ -137,11 +132,12 @@ class TelescopeService:
                 if job.status not in _RUNNING_JOB_STATES:
                     continue
                 # A running measuring job means the copy is done. The job
-                # posts "Measured X of Y" only after a frame finishes, so a
-                # single frame shows no count until it is done: report 0 then.
-                match = _MEASURED_PATTERN.search(job.message or "")
-                status["measured"] = int(match.group(1)) if match else 0
-                status["total"] = int(match.group(2)) if match else None
+                # stores its frame counts as progress only after a frame
+                # finishes. Until then its progress is 0 (its total is still
+                # the placeholder 100), so report 0 and no total.
+                reported = (job.progress_current or 0) > 0
+                status["measured"] = int(job.progress_current) if reported else 0
+                status["total"] = int(job.progress_total) if reported else None
                 break
         except Exception:  # a status detail must never break the telescope poll
             logger.debug("Could not read the frame copy status of %s", target_name, exc_info=True)

@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { Button } from './Button';
 import { ToastContext, ToastType } from '../../common/hooks/useToast';
 import { on as onEvent } from '../utils/eventBus';
 import '../styles/toast.css';
@@ -180,14 +181,14 @@ export const ToastProvider: React.FC<Props> = ({ children }) => {
             className={`toast toast-${t.type}`}
           >
             <span className="toast__message">{t.msg}</span>
-            <button
-              type="button"
+            <Button
+              variant="ghost"
               className="toast__dismiss"
               aria-label="Dismiss notification"
               onClick={() => remove(t.id)}
             >
               &times;
-            </button>
+            </Button>
           </div>
         ))}
       </div>

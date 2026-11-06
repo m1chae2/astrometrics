@@ -1,0 +1,231 @@
+/*
+ * Styles of Button, the one button of the app. A regular button is 36px tall with 14px text. A
+ * small button is 24px tall with 11px text. A square button is as wide as a regular one is tall.
+ * The variants only change the fill: default (blue), primary (slate), secondary (grey), danger
+ * (red). A ghost button has no fill; its rules use :where() so a layout class on it always wins.
+ */
+
+.btn {
+  width: 100%;
+  margin: 0;
+  padding: 0 var(--space-4);
+  height: var(--button-height);
+  font-size: var(--control-font-size);
+  font-weight: 500;
+  font-family: var(--font-family-base);
+  background-color: var(--primary-blue);
+  color: var(--white);
+  border: 1px solid color-mix(in srgb, var(--accent-blue) 25%, transparent);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: manipulation;
+  transition: filter 0.2s, outline 0.2s, background-color 0.2s;
+}
+
+.btn:hover,
+.btn:focus {
+  outline: none;
+  background-color: var(--adwaita-blue-hover);
+  filter: brightness(1.08);
+}
+
+.btn:active {
+  outline: none;
+  background-color: var(--adwaita-blue);
+}
+
+.btn:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-blue) 40%, transparent);
+}
+
+.btn:disabled,
+.btn:disabled:hover {
+  background-color: var(--grey-medium);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  filter: none;
+  opacity: 0.6;
+}
+
+/* Variants ---------------------------------------------------------------- */
+.btn--primary {
+  background-color: var(--slate-blue);
+  border: 1px solid var(--slate-blue-light);
+}
+
+.btn--primary:hover {
+  background-color: var(--slate-blue-hover);
+}
+
+.btn--secondary {
+  background-color: var(--grey-dark);
+  border: 1px solid var(--grey-light);
+}
+
+.btn--secondary:hover {
+  background-color: var(--grey-medium);
+  filter: none;
+}
+
+.btn--danger {
+  background-color: var(--accent-red);
+}
+
+.btn--danger:hover {
+  filter: brightness(1.2);
+}
+
+/* A button that is switched on, or that stands for the view now shown. */
+.btn--active {
+  outline: none;
+  background-color: var(--btn-blue-active);
+  box-shadow: inset 0 2px 4px color-mix(in srgb, var(--black) 30%, transparent);
+}
+
+/* A command that was sent and has not finished. */
+.btn--pending {
+  animation: btn-pulse 1.5s infinite;
+  opacity: 0.8;
+}
+
+@keyframes btn-pulse {
+  0% {
+    opacity: 0.6;
+  }
+
+  50% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0.6;
+  }
+}
+
+/* Sizes ------------------------------------------------------------------- */
+
+/* The small button: 24px tall, 11px text, same corner radius as every other button. */
+.btn--tiny {
+  padding: 0 var(--space-2);
+  font-size: var(--button-font-size-small);
+  height: var(--button-height-small);
+  line-height: 1;
+  width: auto;
+  min-width: 32px;
+}
+
+/* A square icon button, as tall as a regular button. */
+.btn--square {
+  width: var(--button-height);
+  min-width: var(--button-height);
+  padding: 0;
+  font-size: var(--icon-font-size);
+  line-height: 1;
+}
+
+/* A button that fills the width of its container. */
+.btn--full-width {
+  width: 100%;
+}
+
+/* A hardware command button (telescope, guiding, INDI). It shares a row with its neighbors. */
+.btn.btn--control {
+  height: var(--button-height);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  min-width: 80px;
+  flex: 1;
+  font-weight: normal;
+  color: var(--white);
+  background-color: var(--grey-light);
+  border: 1px solid var(--grey-lighter);
+  transition: all 0.2s ease;
+}
+
+.btn--control.btn--active {
+  background-color: var(--btn-blue-active);
+  border: 1px solid var(--btn-blue-active);
+  color: var(--white);
+  font-weight: bold;
+}
+
+.btn--control.btn--pending {
+  background-color: var(--btn-blue-pending);
+  border: 1px solid var(--btn-blue-pending);
+  color: var(--white);
+  font-weight: bold;
+  cursor: wait;
+}
+
+/* A hardware command (start, on, unpark) in the primary variant. */
+.btn--control.btn--primary.btn--active {
+  background-color: var(--slate-blue);
+  border: 1px solid var(--slate-blue-light);
+}
+
+.btn--control.btn--primary.btn--pending {
+  background-color: var(--slate-blue-light);
+  border: 1px solid var(--slate-blue-light);
+}
+
+/* A hardware command that stops or aborts. */
+.btn--control.btn--danger.btn--active {
+  background-color: var(--btn-red-active);
+  border: 1px solid var(--btn-red-active);
+}
+
+.btn--control.btn--danger.btn--pending {
+  background-color: var(--btn-red-pending);
+  border: 1px solid var(--btn-red-pending);
+}
+
+/* Ghost -------------------------------------------------------------------
+   No fill and no edge. Used for icon buttons, close buttons and rows that are
+   buttons. Every rule is :where(), which has no weight, so a layout class on the
+   button (a menu row, a list row) can set any property it needs. */
+:where(.btn-ghost) {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+:where(.btn-ghost:hover) {
+  background: var(--surface-hover);
+}
+
+:where(.btn-ghost:focus-visible) {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
+}
+
+:where(.btn-ghost:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+:where(.btn-ghost--active) {
+  background: var(--surface-highlight);
+}
+
+/* A small square ghost button, for a close or an icon action. */
+:where(.btn-ghost--square) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--button-height-small);
+  height: var(--button-height-small);
+  font-size: var(--control-font-size);
+  line-height: 1;
+}

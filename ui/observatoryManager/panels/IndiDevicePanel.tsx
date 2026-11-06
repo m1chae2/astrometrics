@@ -1,4 +1,5 @@
 import React from 'react';
+import { Button } from '../../common/components/Button';
 import { EmptyState } from '../../common/components/EmptyState';
 import './IndiDevicePanel.css';
 import '../../common/styles/theme.css';
@@ -36,15 +37,15 @@ export const IndiDevicePanel: React.FC<IndiDevicePanelProps> = ({
     return (
         <div id="indi-device-list" className="indi-devices">
             {devices.map((device) => (
-                <button
+                <Button
                     key={device}
                     id={`btn-indi-device-${device.replace(/\s+/g, '-')}`}
-                    className={`indi-devices__btn ${selectedDevice === device ? 'indi-devices__btn--active' : ''}`}
+                    variant="secondary"
+                    pressed={selectedDevice === device}
                     onClick={() => onSelectDevice(device)}
-                    type="button"
                 >
                     {device}
-                </button>
+                </Button>
             ))}
         </div>
     );

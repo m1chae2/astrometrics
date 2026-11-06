@@ -281,8 +281,20 @@ UI_EVENTS: tuple[UiEvent, ...] = (
     ),
     UiEvent(
         "library:frames_updated",
-        "An automatic download of a finished camera frame added frames to the library. The payload is "
+        "A frame sync (the Download Frames button, an automatic download or an AI tool) copied new frames "
+        "into the library, before they are measured. The payload is "
         "{targetId, framesAdded}.",
+    ),
+    UiEvent(
+        "calibration:measured",
+        "The background measuring of new dark and bias frames (it starts after an ingest or a calibration "
+        "folder sync) has ended. The payload is empty. The calibration library reads the set health again.",
+    ),
+    UiEvent(
+        "library:guiding_updated",
+        "A guide log sync (the sync button or the automatic download) stored guiding samples. The "
+        "payload is {nightIds, samplesStored}, where nightIds lists the observing nights the samples "
+        "belong to. Past-night guiding views read again.",
     ),
     UiEvent(
         "plan:changed",

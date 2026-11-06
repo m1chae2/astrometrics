@@ -3,6 +3,7 @@
  * @description Provides a live preview of the last image captured by the camera.
  */
 import React, { useState, useEffect, useCallback } from 'react';
+import { Button } from '../common/components/Button';
 import { SectionPanel } from '../common/components/SectionPanel';
 import { FitsRenderer } from '../common/fitsViewer/FitsRenderer';
 import { fetchLastImage } from '../common/services/imaging/imageService';
@@ -56,13 +57,14 @@ export const LastImageViewer: React.FC = () => {
             title="Last Image"
             className="last-image-viewer"
             headerContent={
-                <button
-                    className={`btn btn--tiny ${isStretched ? 'btn--primary' : 'btn--secondary'}`}
+                <Button
+                    size="small"
+                    variant={isStretched ? 'primary' : 'secondary'}
                     onClick={toggleStretch}
                     title={isStretched ? 'Switch to Linear View' : 'Switch to Auto-Stretched View'}
                 >
                     {isStretched ? 'Stretch' : 'Linear'}
-                </button>
+                </Button>
             }
         >
             <div className="last-image-viewer__container">

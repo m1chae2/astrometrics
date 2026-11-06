@@ -1,30 +1,28 @@
 /**
  * @file TrackingSettings.tsx
- * @description The Tracking Settings panel body: the alignment settings
- * (accuracy, settle time) and the guiding camera settings (exposure, gain)
- * with the Start Guiding and Stop Guiding buttons, on two tabs, "Alignment"
- * and "Guiding". The tabs follow the WAI-ARIA tab pattern. The values live in
- * the parent, so they survive a tab switch. There is no alignment exposure
- * field, because the alignment start call takes only the target.
+ * @description The body of the Alignment tab and the Guiding tab of the
+ * Telescope Control panel: the alignment settings (accuracy, settle time) or
+ * the guiding camera settings (exposure, gain) with the Start Guiding and Stop
+ * Guiding buttons. The panel picks which one to show. The values live in the
+ * parent, so they survive a tab switch. There is no alignment exposure field,
+ * because the alignment start call takes only the target.
  */
 
-import React, { useState } from 'react';
-import { TabPanel, Tabs, type TabDefinition } from '../../common/components/Tabs';
+import React from 'react';
+import { NumberInput } from '../../common/components/NumberInput';
 import {
     ControlColumn,
     ParameterRow
 } from '../../common/components/ControlLayoutComponents';
+import { Button } from '../../common/components/Button';
 
-/** The two tabs of the panel. */
-const TRACKING_TABS: TabDefinition[] = [
-    { id: 'alignment', label: 'Alignment' },
-    { id: 'guiding', label: 'Guiding' },
-];
-
-/** Prefix that keeps the tab element ids unique on the page. */
-const TRACKING_TABS_ID_PREFIX = 'tracking-settings';
+/** Which group of settings to show. */
+export type TrackingSettingsSection = 'alignment' | 'guiding';
 
 export interface TrackingSettingsProps {
+    /** Which settings to show: the alignment ones or the guiding ones. */
+    section: TrackingSettingsSection;
+
     // Alignment settings
     accuracy?: number;
     settleTime?: number;
@@ -50,10 +48,11 @@ export interface TrackingSettingsProps {
 /**
  * TrackingSettings Component
  *
- * Displays and allows editing of telescope tracking configurations: the
- * alignment parameters on one tab and the guiding camera settings on the other.
+ * Displays and allows editing of one group of telescope settings: the
+ * alignment parameters or the guiding camera settings.
  */
 export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
+    section,
     accuracy = 30,
     settleTime = 1500,
     onAccuracyChange,
@@ -72,105 +71,97 @@ export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
         'aria-disabled': disabled || undefined,
         'aria-describedby': disabled ? disabledReasonId : undefined,
     };
-    const [selectedTab, setSelectedTab] = useState('alignment');
     // A cleared field reads as NaN. Guiding does not start on a missing or non-positive value.
     const guidingValuesValid = Number.isFinite(guidingExposure) && guidingExposure > 0
         && Number.isFinite(guidingGain) && guidingGain >= 0;
     return (
         <div className="tracking-settings">
-            <Tabs
-                tabs={TRACKING_TABS}
-                selectedId={selectedTab}
-                onChange={setSelectedTab}
-                ariaLabel="Tracking setting groups"
-                idPrefix={TRACKING_TABS_ID_PREFIX}
-            />
-            <TabPanel idPrefix={TRACKING_TABS_ID_PREFIX} tabId="alignment" selected={selectedTab === 'alignment'}>
+            {section === 'alignment' && (
             <ControlColumn>
                 <ParameterRow label="Accuracy:">
-                    <input
+                    <NumberInput
                         {...unavailable}
                         id="input-tracking-accuracy"
                         name="accuracy"
-                        type="number"
                         value={accuracy}
                         onChange={(e) => !disabled && onAccuracyChange?.(parseInt(e.target.value, 10))}
-                        className="input input--short"
+                        width="short"
+                        centered
                         aria-label="Alignment Accuracy"
                     />
                 </ParameterRow>
                 <ParameterRow label="Settle:">
-                    <input
+                    <NumberInput
                         {...unavailable}
                         id="input-tracking-settle"
                         name="settleTime"
-                        type="number"
                         value={settleTime}
                         onChange={(e) => !disabled && onSettleTimeChange?.(parseInt(e.target.value, 10))}
-                        className="input input--short"
+                        width="short"
+                        centered
                         aria-label="Settle Time"
                     />
                 </ParameterRow>
             </ControlColumn>
-            </TabPanel>
-            <TabPanel idPrefix={TRACKING_TABS_ID_PREFIX} tabId="guiding" selected={selectedTab === 'guiding'}>
+            )}
+            {section === 'guiding' && (
             <ControlColumn>
                 <ParameterRow label="Exposure (s):">
-                    <input
+                    <NumberInput
                         {...unavailable}
                         id="input-guiding-expose"
                         name="guidingExposure"
-                        type="number"
                         step="0.1"
                         min="0.1"
-                        className="input input--short"
+                        width="short"
+                        centered
                         value={guidingExposure}
                         onChange={(e) => !disabled && onGuidingExposureChange?.(parseFloat(e.target.value))}
                         aria-label="Guiding Exposure Seconds"
                     />
                 </ParameterRow>
                 <ParameterRow label="Gain:">
-                    <input
+                    <NumberInput
                         {...unavailable}
                         id="input-guiding-gain"
                         name="guidingGain"
-                        type="number"
                         step="1"
                         min="0"
                         max="1000"
-                        className="input input--short"
+                        width="short"
+                        centered
                         value={guidingGain}
                         onChange={(e) => !disabled && onGuidingGainChange?.(parseInt(e.target.value, 10))}
                         aria-label="Guiding Gain"
                     />
                 </ParameterRow>
                 <div className="telescope-control__row">
-                    <button
+                    <Button
+                        variant="primary"
+                        control
                         id="btn-start-guiding"
-                        type="button"
-                        className="btn btn--control btn--success"
                         onClick={() => !disabled && guidingValuesValid && onGuideStart?.(guidingExposure, guidingGain)}
                         disabled={disabled || !guidingValuesValid}
                         aria-disabled={disabled || !guidingValuesValid}
                     >
                         Start Guiding
-                    </button>
-                    <button
+                    </Button>
+                    <Button
+                        variant="danger"
+                        control
                         id="btn-stop-guiding"
-                        type="button"
-                        className="btn btn--control btn--danger"
                         onClick={() => !disabled && onGuideStop?.()}
                         disabled={disabled}
                         aria-disabled={disabled}
                     >
                         Stop Guiding
-                    </button>
+                    </Button>
                 </div>
                 {!guidingValuesValid && (
                     <p className="tracking-settings__hint">Enter an exposure above 0 and a gain of 0 or more.</p>
                 )}
             </ControlColumn>
-            </TabPanel>
+            )}
         </div>
     );
 };

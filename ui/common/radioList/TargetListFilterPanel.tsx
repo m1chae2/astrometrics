@@ -7,6 +7,7 @@ import {
     SORT_NEWEST,
     SortChoice,
 } from '../hooks/targetListFiltering';
+import { Tabs } from '../components/Tabs';
 import '../styles/targetListFilterPanel.css';
 
 export interface TargetListFilterPanelProps {
@@ -63,25 +64,17 @@ export const TargetListFilterPanel: React.FC<TargetListFilterPanelProps> = ({
 
     return (
         <div className="target-list-filter-panel">
-            <div className="astronomy-display__mode-toggle" role="tablist">
-                <button
-                    type="button"
-                    role="tab"
-                    aria-selected={activeTab === 'catalog'}
-                    className={`segmented-btn ${activeTab === 'catalog' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('catalog')}
-                >
-                    By catalog
-                </button>
-                <button
-                    type="button"
-                    role="tab"
-                    aria-selected={activeTab === 'camera'}
-                    className={`segmented-btn ${activeTab === 'camera' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('camera')}
-                >
-                    By camera
-                </button>
+            <div className="astronomy-display__mode-toggle">
+                <Tabs
+                    idPrefix="target-list-filter"
+                    ariaLabel="Filter targets"
+                    selectedId={activeTab}
+                    onChange={(tabId) => setActiveTab(tabId as typeof activeTab)}
+                    tabs={[
+                        { id: 'catalog', label: 'By catalog' },
+                        { id: 'camera', label: 'By camera' },
+                    ]}
+                />
             </div>
 
             <SelectableList
@@ -93,18 +86,15 @@ export const TargetListFilterPanel: React.FC<TargetListFilterPanelProps> = ({
             />
 
             <div className="target-list-filter-panel__summary">
-                <div className="astronomy-display__mode-toggle" role="group" aria-label="Sort order">
-                    {([SORT_ALPHABETICAL, SORT_NEWEST] as SortChoice[]).map((choice) => (
-                        <button
-                            key={choice}
-                            type="button"
-                            aria-pressed={sort === choice}
-                            className={`segmented-btn ${sort === choice ? 'active' : ''}`}
-                            onClick={() => onSortChange(choice)}
-                        >
-                            {choice}
-                        </button>
-                    ))}
+                <div className="astronomy-display__mode-toggle">
+                    <Tabs
+                        idPrefix="target-list-sort"
+                        ariaLabel="Sort order"
+                        size="compact"
+                        selectedId={sort}
+                        onChange={(tabId) => onSortChange(tabId as SortChoice)}
+                        tabs={[SORT_ALPHABETICAL, SORT_NEWEST].map((choice) => ({ id: choice, label: choice }))}
+                    />
                 </div>
             </div>
         </div>

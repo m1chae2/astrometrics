@@ -4,6 +4,7 @@
  *
  * Renders a row of labelled checkboxes for toggling sky map overlays, a Date and
  * Time button to open the simulation time modal, and a live FOV readout.
+ * The session picker is the shared SessionPicker.
  *
  * REQ: PLN-2.1, REQ: PLN-2.2
  */
@@ -11,6 +12,9 @@
 import React from 'react';
 import { Popover } from '../../common/components/Popover';
 import { PlanningTimeIndicator } from '../../common/components/PlanningTimeIndicator';
+import { SessionPicker, type SessionPickerOption } from '../../common/components/SessionPicker';
+import { Button } from '../../common/components/Button';
+import { Checkbox } from '../../common/components/Checkbox';
 
 /**
  * Props for PlanetariumToolbar.
@@ -89,12 +93,6 @@ export const PlanetariumToolbar: React.FC<Props> = ({
   currentFOV,
   onOpenTimeModal,
 }) => {
-  // A native <select>'s open dropdown is drawn by the OS's own widget toolkit
-  // on Linux (GTK), which follows the system theme rather than this page's
-  // CSS `color-scheme: dark` — the popup keeps coming back light regardless
-  // of what's declared here. Using our own Popover (like the Layers menu
-  // below) keeps the session picker themed consistently everywhere.
-
   /**
    * Builds the display label for a historical session option, e.g.
    * "2026-09-24 (8 targets, 1 sync)".
@@ -111,14 +109,11 @@ export const PlanetariumToolbar: React.FC<Props> = ({
     return `${s.sessionDate} (${counts.join(', ')}${paStr})`;
   };
 
-  const selectedSession = selectedSessionId
-    ? availableSessions.find((s) => s.sessionId === selectedSessionId)
-    : undefined;
-  const selectedSessionLabel = selectedSessionId === null
-    ? 'No Session Selected'
-    : selectedSessionId === 'all'
-      ? 'All Sessions (Cumulative)'
-      : (selectedSession ? getSessionLabel(selectedSession) : 'No Session Selected');
+  // The shared picker offers "All Sessions (Cumulative)" first, but only when there are sessions to add up.
+  const sessionOptions: SessionPickerOption[] = [
+    ...(availableSessions.length > 0 ? [{ id: 'all', label: 'All Sessions (Cumulative)' }] : []),
+    ...availableSessions.map((s) => ({ id: s.sessionId, label: getSessionLabel(s) })),
+  ];
 
   const passiveLayers = [
     { label: 'Stars', checked: showStars, onChange: onToggleStars },
@@ -140,15 +135,17 @@ export const PlanetariumToolbar: React.FC<Props> = ({
       <Popover
         className="planetarium-toolbar__popover-container"
         trigger={({ isOpen, toggle }) => (
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="small"
+            active={isOpen}
             onClick={toggle}
-            className={`planetarium-toolbar__button ${isOpen ? 'planetarium-toolbar__button--active' : ''}`}
+            aria-expanded={isOpen}
             title="Toggle passive sky background and catalog layers"
           >
             <span>Layers</span>
             <span className="planetarium-toolbar__chevron">{isOpen ? '▲' : '▼'}</span>
-          </button>
+          </Button>
         )}
       >
         {() => (
@@ -157,14 +154,13 @@ export const PlanetariumToolbar: React.FC<Props> = ({
               Sky Background
             </div>
             {passiveLayers.map(({ label, checked, onChange }) => (
-              <label key={label} className="planetarium-toolbar__item">
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={(e) => onChange(e.target.checked)}
-                />
-                <span>{label}</span>
-              </label>
+              <Checkbox
+                key={label}
+                className="planetarium-toolbar__item"
+                label={label}
+                checked={checked}
+                onChange={(e) => onChange(e.target.checked)}
+              />
             ))}
           </div>
         )}
@@ -175,79 +171,39 @@ export const PlanetariumToolbar: React.FC<Props> = ({
       {/* Group 2: Observation & Hardware Overlays */}
       <div className="planetarium-toolbar__group">
         {rigOverlays.map(({ label, checked, onChange }) => (
-          <label key={label} className="planetarium-toolbar__item">
-            <input
-              type="checkbox"
-              checked={checked}
-              onChange={(e) => onChange(e.target.checked)}
-            />
-            <span>{label}</span>
-          </label>
+          <Checkbox
+            key={label}
+            className="planetarium-toolbar__item"
+            label={label}
+            checked={checked}
+            onChange={(e) => onChange(e.target.checked)}
+          />
         ))}
       </div>
 
       {/* Group 3: Session Selector — alignment is always active, so this is always shown. */}
       <div className="planetarium-toolbar__divider" />
-      <div className="planetarium-toolbar__session-container">
-        <Popover
-          className="planetarium-toolbar__popover-container"
-          trigger={({ isOpen, toggle }) => (
-            <button
-              type="button"
-              onClick={toggle}
-              className={`planetarium-toolbar__button planetarium-toolbar__select ${isOpen ? 'planetarium-toolbar__button--active' : ''}`}
-            >
-              <span>{selectedSessionLabel}</span>
-              <span className="planetarium-toolbar__chevron">{isOpen ? '▲' : '▼'}</span>
-            </button>
-          )}
-        >
-          {({ close }) => (
-            <div className="planetarium-toolbar__popover-menu planetarium-toolbar__popover-menu--sessions">
-              <button
-                type="button"
-                className={`planetarium-toolbar__session-option ${selectedSessionId === null ? 'planetarium-toolbar__session-option--selected' : ''}`}
-                onClick={() => { onSelectSession?.(null); close(); }}
-              >
-                No Session Selected
-              </button>
-              {availableSessions.length > 0 && (
-                <button
-                  type="button"
-                  className={`planetarium-toolbar__session-option ${selectedSessionId === 'all' ? 'planetarium-toolbar__session-option--selected' : ''}`}
-                  onClick={() => { onSelectSession?.('all'); close(); }}
-                >
-                  All Sessions (Cumulative)
-                </button>
-              )}
-              {availableSessions.map((s) => (
-                <button
-                  type="button"
-                  key={s.sessionId}
-                  className={`planetarium-toolbar__session-option ${selectedSessionId === s.sessionId ? 'planetarium-toolbar__session-option--selected' : ''}`}
-                  onClick={() => { onSelectSession?.(s.sessionId); close(); }}
-                >
-                  {getSessionLabel(s)}
-                </button>
-              ))}
-            </div>
-          )}
-        </Popover>
-      </div>
+      <SessionPicker
+        label="Session"
+        liveLabel="No Session Selected"
+        options={sessionOptions}
+        selectedId={selectedSessionId}
+        onSelect={(sessionId) => onSelectSession?.(sessionId)}
+      />
 
       <div className="planetarium-toolbar__divider" />
 
       {/* Group 4: Time & Readouts */}
       <div className="planetarium-toolbar__group">
         <PlanningTimeIndicator />
-        <button
-          type="button"
-          className="planetarium-toolbar__button"
+        <Button
+          variant="secondary"
+          size="small"
           onClick={onOpenTimeModal}
           title="Configure simulation date and time"
         >
           Date &amp; Time
-        </button>
+        </Button>
 
         <div className="planetarium-toolbar__readout">
           FOV {currentFOV.toFixed(1)}&deg;

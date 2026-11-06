@@ -40,4 +40,34 @@ describe('FileBrowser', () => {
         expect(screen.queryByText('FWHM')).toBeNull();
         expect(screen.getByText('Status')).toBeTruthy();
     });
+
+    /** A frame the variable-star search left out reads "Unusual brightness" and says it is still stacked. */
+    it('labels a left-out frame as unusual brightness, not rejected', () => {
+        const file = {
+            path: '/lib/M_31_Light_Luminance_119.fits',
+            name: 'M_31_Light_Luminance_119.fits',
+            camera: 'ZWO ASI 533MM Pro',
+            iso: '',
+            exposure: '60.0',
+            filter: 'L',
+            date: '2026-11-04 21:09:58',
+        };
+        render(
+            <FileBrowser
+                files={[file]}
+                rejectedFiles={[file.path]}
+                onSelectFile={() => {}}
+                selectedFile={null}
+                searchTerm=""
+                onSearchChange={() => {}}
+                checkedFiles={new Set()}
+                onToggleFile={() => {}}
+                onToggleAll={() => {}}
+                selectedCamera="All"
+            />
+        );
+        const status = screen.getByText('Unusual brightness');
+        expect(status.getAttribute('title')).toMatch(/still in the stack/);
+        expect(screen.queryByText('Rejected')).toBeNull();
+    });
 });

@@ -57,6 +57,15 @@ describe('StatusHeader telemetry navigation', () => {
     expect(chooseMode).toHaveBeenCalledWith('Observatory Manager');
   });
 
+  /** The tooltip sits on the clickable strip, where the mouse can reach it. */
+  it('puts the strip tooltip on the clickable strip, not the hidden button', () => {
+    const { container } = render(<StatusHeader />);
+    const strip = container.querySelector('.header__right--clickable') as HTMLElement;
+    expect(strip.getAttribute('title')).toBe('Open Observatory Manager');
+    const button = screen.getByRole('button', { name: 'Open Observatory Manager' });
+    expect(button.getAttribute('title')).toBeNull();
+  });
+
   /** In Image Processing the Target item is part of the strip, not a separate button. */
   it('has no separate Target button outside the Observatory Manager', () => {
     render(<StatusHeader />);

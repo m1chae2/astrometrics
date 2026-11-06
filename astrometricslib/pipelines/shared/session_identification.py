@@ -111,12 +111,42 @@ MIN_STARS_TO_VERIFY_REUSED_WCS = 20
 # contradict the new one. For example, an old `CD1_1` matrix outranks a new
 # `PC1_1` matrix when astropy reads the header, and an old `A_4_0` term
 # stays next to a new second-order SIP fit.
+# The header card that marks a sky map as written by a plate solve of this
+# library. Camera and capture programs also write position keywords (the
+# place the mount was told to point), which are only a pointing guess, so a
+# reader that needs a true solution looks for this card or for the distortion
+# terms that only a solver fits (see `header_is_plate_solved`).
+PLATE_SOLVED_KEYWORD = "PLTSOLVD"
+
 _STALE_WCS_KEYWORD_PATTERN = re.compile(
     r"^(WCSAXES|CTYPE[12]|CRVAL[12]|CRPIX[12]|CDELT[12]|CUNIT[12]|CROTA[12]"
     r"|PC[12]_[12]|CD[12]_[12]|PV[12]_\d+|PS[12]_\d+"
     r"|LONPOLE|LATPOLE|RADESYS|RADECSYS|EQUINOX"
     r"|(A|B|AP|BP)_ORDER|(A|B|AP|BP)_\d+_\d+|(A|B)_DMAX)$"
 )
+
+
+def header_is_plate_solved(header: fits.Header) -> bool:
+    """Say whether a header's sky map came from a plate solve.
+
+    A header can hold sky-map keywords that are only the position the mount
+    was told to point at. Those are not a solution: a star placed with them
+    can sit tens of pixels from where it really is.
+
+    Parameters
+    ----------
+    header : `astropy.io.fits.Header`
+        The first header of a FITS file.
+
+    Returns
+    -------
+    is_solved : `bool`
+        True when the header carries `PLATE_SOLVED_KEYWORD` as true, or SIP
+        distortion terms (``A_ORDER``), which a solver fits and a pointing
+        guess does not have. The second test recognizes files solved before
+        the card was written.
+    """
+    return bool(header.get(PLATE_SOLVED_KEYWORD, False)) or "A_ORDER" in header
 
 
 def write_wcs_to_fits_header(path: str, wcs: WCS) -> None:
@@ -131,6 +161,9 @@ def write_wcs_to_fits_header(path: str, wcs: WCS) -> None:
     astropy leaves out the SIP distortion terms (``A_*``, ``B_*``,
     ``AP_*``, ``BP_*``) and removes ``-SIP`` from ``CTYPE``. A reader of the
     file would then lose the lens distortion near the image edges.
+
+    It also writes the card `PLATE_SOLVED_KEYWORD`, so a reader can tell this
+    solution from a pointing guess (see `header_is_plate_solved`).
 
     The function logs a warning and returns if the file cannot be updated.
 
@@ -164,6 +197,7 @@ def write_wcs_to_fits_header(path: str, wcs: WCS) -> None:
                 if not card.keyword:
                     continue
                 header[card.keyword] = (card.value, card.comment)
+            header[PLATE_SOLVED_KEYWORD] = (True, "sky map written by a plate solve")
             return True
 
         update_first_header(path, _write_solved_wcs)

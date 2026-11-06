@@ -5,12 +5,14 @@
  */
 
 import React, { useEffect } from 'react';
+import { TextInput } from './TextInput';
+import { Checkbox } from './Checkbox';
 import { BaseModal } from './BaseModal';
 import { SectionPanel } from './SectionPanel';
 import { IngestionState } from '../hooks/useIngestionManager';
-import '../styles/entry.css';
 import '../styles/layout.css';
 import '../styles/ingestFramesModal.css';
+import { Button } from './Button';
 
 interface IngestFramesModalProps {
     isOpen: boolean;
@@ -155,15 +157,15 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
 
     const footerButtons = (
         <>
-            <button className="btn btn--secondary" onClick={onClose}>Close</button>
+            <Button variant="secondary" onClick={onClose}>Close</Button>
             {!isRunning && status !== 'completed' && (
-                <button className="btn btn--primary" onClick={startIngestionJob} disabled={scanningRemote}>
+                <Button variant="primary" onClick={startIngestionJob} disabled={scanningRemote}>
                     Start Ingestion
-                </button>
+                </Button>
             )}
             {/* Optional Reset Button if completed? */}
             {status === 'completed' && (
-                <button className="btn btn--text" onClick={resetState}>Start New</button>
+                <Button variant="secondary" onClick={resetState}>Start New</Button>
             )}
         </>
     );
@@ -185,9 +187,7 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
                     <SectionPanel title="Target Information">
                         <div className="form-group">
                             <label>Target Name</label>
-                            <input
-                                type="text"
-                                className="entry"
+                            <TextInput
                                 value={targetName}
                                 onChange={e => setTargetName(e.target.value)}
                                 disabled={isRunning}
@@ -196,9 +196,7 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
                         </div>
                         <div className="form-group">
                             <label>Telescope</label>
-                            <input
-                                type="text"
-                                className="entry"
+                            <TextInput
                                 value={telescope}
                                 onChange={e => setTelescope(e.target.value)}
                                 disabled={isRunning}
@@ -233,17 +231,18 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
                                 <div className="ingest-modal__file-selection-header">
                                     <label className="ingest-modal__label-zero-margin">Select Files ({selectedFiles.size} / {remoteFiles.length})</label>
                                     <div className="ingest-modal__file-selection-actions">
-                                        <button
-                                            type="button"
-                                            className="ingest-modal__refresh-btn"
+                                        <Button
+                                            variant="secondary"
+                                            size="small"
                                             onClick={() => ingestionState.refreshFiles && ingestionState.refreshFiles()}
                                             disabled={isRunning || isLoadingStats}
                                             title="Refresh file list from telescope"
                                         >
                                             ↻ Refresh
-                                        </button>
-                                        <button
-                                            className="btn-link"
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            className="ingest-modal__link"
                                             onClick={() => {
                                                 if (selectedFiles.size === remoteFiles.length) {
                                                     setSelectedFiles(new Set());
@@ -254,7 +253,7 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
                                             disabled={isRunning}
                                         >
                                             {selectedFiles.size === remoteFiles.length ? 'Deselect All' : 'Select All'}
-                                        </button>
+                                        </Button>
                                     </div>
                                 </div>
                                 {isCalibrationTarget && (
@@ -263,16 +262,16 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
                                             const framesOfType = selectCalibrationFrameType(remoteFiles, frameType);
                                             if (framesOfType.length === 0) return null;
                                             return (
-                                                <button
+                                                <Button
                                                     key={frameType}
-                                                    type="button"
-                                                    className="btn-link"
+                                                    variant="ghost"
+                                                    className="ingest-modal__link"
                                                     onClick={() => setSelectedFiles(new Set(framesOfType))}
                                                     disabled={isRunning}
                                                     title={`Select only the ${framesOfType.length} ${frameType} frame(s)`}
                                                 >
                                                     {frameType} Only
-                                                </button>
+                                                </Button>
                                             );
                                         })}
                                     </div>
@@ -280,8 +279,7 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
                                 <div className="modal-list-container ingest-modal__list-container">
                                     {remoteFiles.map(file => (
                                         <label key={file} className={`ingest-modal__file-row ${isRunning ? 'ingest-modal__file-row--default' : 'ingest-modal__file-row--clickable'}`}>
-                                            <input
-                                                type="checkbox"
+                                            <Checkbox
                                                 checked={selectedFiles.has(file)}
                                                 disabled={isRunning}
                                                 onChange={() => {

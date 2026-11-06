@@ -204,6 +204,42 @@ def find_stored_target(catalog_access: Any, target_id: str) -> Any | None:
     return _find_target(catalog_access.get("target_catalog", {}) or [], target_id)
 
 
+def _refresh_frames_in_place(held_frames: list[Any], stored_frames: list[Any]) -> list[Any]:
+    """Build a frame list in the stored order, keeping held frame objects.
+
+    A stacking job keeps references to the frame objects it was given and
+    stamps them as it measures them. If a refresh replaced those objects, the
+    stamps would land on frames the target no longer holds and be lost. So a
+    frame whose path is still stored keeps its object, and the object's
+    fields are refreshed from the stored record. A stored frame with a new
+    path is added as it is. A held frame whose path is no longer stored is
+    dropped.
+
+    Parameters
+    ----------
+    held_frames : `list`
+        The frames this process holds now.
+    stored_frames : `list`
+        The frames as stored.
+
+    Returns
+    -------
+    frames : `list`
+        The frames in the stored order, reusing held objects where possible.
+    """
+    held_by_path = {frame.path: frame for frame in held_frames}
+    refreshed = []
+    for stored_frame in stored_frames:
+        held_frame = held_by_path.get(stored_frame.path)
+        if held_frame is None or held_frame is stored_frame:
+            refreshed.append(stored_frame)
+            continue
+        held_frame.__dict__.update(stored_frame.__dict__)
+        held_frame.__pydantic_fields_set__ = set(stored_frame.__pydantic_fields_set__)
+        refreshed.append(held_frame)
+    return refreshed
+
+
 def list_targets(api: Any) -> list[Any]:
     """Return all the targets, seeing what other programs have saved.
 
@@ -212,7 +248,9 @@ def list_targets(api: Any) -> list[Any]:
     code that fetched it earlier (a stack that takes minutes to run) is still
     editing the object the catalog holds, so its edits are not lost. If the
     held target has no unsaved edits, the object is refreshed in place with
-    what is stored. If it has, the held object is kept as it is.
+    what is stored. The frame objects are kept too (each is refreshed in
+    place), so a job that stamps frames it holds does not lose its stamps. If
+    the target has unsaved edits, the held object is kept as it is.
 
     Every listed target counts as touched, so scripts that edit the targets
     they list can save them. A save writes only those that changed.
@@ -240,7 +278,9 @@ def list_targets(api: Any) -> list[Any]:
         if not _has_unsaved_changes(api, current):
             # Same object, new contents: assigning fields one by one would
             # check each value again, so the stored values are moved over.
+            frames = _refresh_frames_in_place(list(current.frames), list(stored.frames))
             current.__dict__.update(stored.__dict__)
+            current.frames = frames
             current.__pydantic_fields_set__ = set(stored.__pydantic_fields_set__)
             fingerprints[current.id] = _fingerprint(current)
         merged.append(current)

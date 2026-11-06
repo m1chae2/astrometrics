@@ -1,9 +1,8 @@
-@import './entry.css';
-@import './button.css';
 
-/* Override global button width for modals */
-.modal .btn {
-    width: auto !important;
+/* Buttons in a modal fit their text, with a sane minimum width. The two-class selector
+   beats the one-class `.btn` rule, so no !important is needed. Small and full-width buttons keep their own size. */
+.modal .btn:not(.btn--tiny):not(.btn--full-width):not(.btn--square) {
+    width: auto;
     min-width: 120px;
 }
 
@@ -168,7 +167,7 @@
     flex-shrink: 0;
 }
 
-.btn-link {
+.ingest-modal__link {
     background: transparent;
     border: none;
     color: var(--primary-blue);
@@ -178,7 +177,7 @@
     text-decoration: underline;
 }
 
-.btn-link:disabled {
+.ingest-modal__link:disabled {
     color: var(--text-muted);
     cursor: not-allowed;
     text-decoration: none;

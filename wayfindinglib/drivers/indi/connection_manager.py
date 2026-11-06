@@ -44,6 +44,24 @@ class ConnectionManager:
         """Use a new host name; this also forgets the saved address."""
         self.known_address.set_hostname(hostname)
 
+    def adopt_state_from(self, previous: ConnectionManager) -> None:
+        """Take over the retry timing and saved address of an older manager.
+
+        Used when the INDI client is replaced during an outage. The new
+        client keeps the old one's cooldown, failure count and the last
+        address the host name resolved to, so the swap does not make the
+        app forget where the telescope computer was.
+
+        Parameters
+        ----------
+        previous : `ConnectionManager`
+            The manager of the client being replaced.
+        """
+        self.last_connection_attempt = previous.last_connection_attempt
+        self.connection_cooldown = previous.connection_cooldown
+        self.consecutive_failures = previous.consecutive_failures
+        self.known_address = previous.known_address
+
     def probe_failures_exhausted(self) -> bool:
         """Tell whether enough handshakes failed in a row.
 

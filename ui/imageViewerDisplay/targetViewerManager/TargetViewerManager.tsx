@@ -4,6 +4,7 @@ import type { FitsRendererHandle } from '../../common/fitsViewer/FitsViewerManag
 import { SectionPanel } from '../../common/components/SectionPanel';
 import { SwitchDisplayButton } from '../../common/components/SwitchDisplayButton';
 import '../../common/styles/panels.css';
+import { Button } from '../../common/components/Button';
 
 /**
  * The pixel values of a stretched picture run from 0 (black) to 1 (white).
@@ -51,10 +52,10 @@ export const TargetViewerManager: React.FC<Props> = ({
         className="flex-fill"
         headerContent={
           <div className="fits-header-controls" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <button className="btn btn--tiny" onClick={() => rendererRef.current?.zoomIn()} title="Zoom In">+</button>
-            <button className="btn btn--tiny" onClick={() => rendererRef.current?.zoomOut()} title="Zoom Out">-</button>
-            <button className="btn btn--tiny" onClick={() => rendererRef.current?.zoomToFit()} title="Zoom to Fit">Fit</button>
-            <button className="btn btn--tiny" onClick={() => rendererRef.current?.zoomToScale(1.0)} title="Actual Size">1:1</button>
+            <Button size="small" onClick={() => rendererRef.current?.zoomIn()} title="Zoom In">+</Button>
+            <Button size="small" onClick={() => rendererRef.current?.zoomOut()} title="Zoom Out">-</Button>
+            <Button size="small" onClick={() => rendererRef.current?.zoomToFit()} title="Zoom to Fit">Fit</Button>
+            <Button size="small" onClick={() => rendererRef.current?.zoomToScale(1.0)} title="Actual Size">1:1</Button>
             <SwitchDisplayButton targetDisplay="Image Processing" selectedTarget={selectedTarget} />
           </div>
         }

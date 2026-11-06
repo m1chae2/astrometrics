@@ -162,7 +162,7 @@ export const UnifiedFrameAnalysis: React.FC<UnifiedFrameAnalysisProps> = ({
 
     return (
         <div className="frame-analysis-content">
-            <div className="tab-view__header tab-view__header--inline" style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+            <div className="frame-analysis-heading">
                 <span style={{ fontWeight: 'bold', fontSize: '1.1em' }}>Session Frames</span>
                 {cameraSelector}
             </div>

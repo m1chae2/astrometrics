@@ -5,6 +5,7 @@
  */
 
 import React from 'react';
+import { Button } from './Button';
 import { usePlanningTime } from '../context/PlanningTimeContext';
 import './planningTimeIndicator.css';
 
@@ -34,9 +35,9 @@ export const PlanningTimeIndicator: React.FC = () => {
                 Planning time: {planningTime === null ? 'Now' : `fixed at ${formatPlanningTime(planningTime)}`}
             </span>
             {planningTime !== null && (
-                <button type="button" className="planning-time-indicator__button" onClick={returnToNow}>
+                <Button variant="secondary" size="small" onClick={returnToNow}>
                     Back to Now
-                </button>
+                </Button>
             )}
         </span>
     );

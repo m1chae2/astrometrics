@@ -8,7 +8,9 @@ functions. They:
 * load the star catalog and other slow caches before the first screen
   needs them (`warm_start_up_caches`). The ``/api/ready`` route reports
   `sky_catalog_warmup_finished`, and the desktop shell keeps its splash
-  screen up until it is set.
+  screen up until it is set;
+* build the three most recent night reviews once the screens are ready, so
+  the Observatory Manager opens at once (`warm_night_reviews`).
 """
 
 import asyncio
@@ -107,3 +109,45 @@ def warm_start_up_caches() -> None:
             step_thread.join()
     finally:
         sky_catalog_warmup_finished.set()
+
+
+NIGHT_REVIEW_WARMUP_COUNT = 3
+"""How many of the most recent nights `warm_night_reviews` builds.
+
+Design estimate WAY-D103 (see ``validation/wayfinding.md``):
+the Observatory Manager opens on the latest night, and a user looking back
+usually looks at the night or two before. One build takes about 4 s on the
+real library (the first one more), so three nights keep the background work
+to about ten seconds.
+"""
+
+
+def warm_night_reviews(night_count: int = NIGHT_REVIEW_WARMUP_COUNT) -> None:
+    """Build the most recent night reviews so the first open finds them kept.
+
+    This runs after `warm_start_up_caches` has finished, so it never slows
+    the splash screen. It only reads, starts no job and writes no record. It
+    shares the wayfinder's review cache, so a later `history:night_quality`
+    request for one of these nights is answered from memory. A night that
+    fails is logged and skipped, and the others are still built.
+
+    Parameters
+    ----------
+    night_count : `int`, optional
+        How many of the newest nights to build. Defaults to
+        `NIGHT_REVIEW_WARMUP_COUNT`.
+    """
+    with background_log_context("night-review-warmup"):
+        started_at = time.monotonic()
+        try:
+            review = container.wayfinder.review
+            nights = review.query(kind="nights", limit=night_count, register_job=False).night_list or []
+            for night in reversed(list(nights)[-night_count:]):
+                try:
+                    review.query(kind="night_quality", session_id=night.night_id, register_job=False)
+                except Exception:
+                    # A failed night only means a slower first open.
+                    logger.exception("Night review warm-up failed for %s", night.night_id)
+            logger.info("Night reviews warmed in %.1fs", time.monotonic() - started_at)
+        except Exception:
+            logger.exception("Night review warm-up failed; the first Observatory Manager open will be slow")

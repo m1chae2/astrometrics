@@ -7,9 +7,14 @@
 
 import React from 'react';
 import { readFileSync } from 'node:fs';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
+vi.mock('../../common/services/backendApi', () => ({
+    callBackend: () => Promise.resolve([]),
+}));
+
 import { AlignmentStatus } from '../panels/AlignmentStatus';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GuidingTrendsPlot } from '../panels/GuidingStatusPanel';
 
 describe('AlignmentStatus', () => {
@@ -44,7 +49,7 @@ describe('AlignmentStatus', () => {
 describe('GuidingTrendsPlot', () => {
     /** With no samples the panel says so in words instead of drawing a plot whose time axis reads 00:00:00. */
     it('shows a message before any guiding data', () => {
-        render(<GuidingTrendsPlot history={[]} />);
+        render(<QueryClientProvider client={new QueryClient()}><GuidingTrendsPlot history={[]} /></QueryClientProvider>);
         expect(screen.getByText(/No guiding data yet/)).toBeTruthy();
     });
 });

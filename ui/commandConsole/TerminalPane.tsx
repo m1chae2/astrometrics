@@ -4,6 +4,8 @@
  */
 import React, { useState, useRef, useEffect, KeyboardEvent } from 'react';
 import { callBackend } from '../common/services/backendApi';
+import { Button } from '../common/components/Button';
+import { TextInput } from '../common/components/TextInput';
 
 export interface TerminalEntry {
   id: string;
@@ -139,30 +141,30 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       {(onClear || onReset) && (
         <div className="terminal-toolbar">
           {onClear && (
-            <button
-              className="editor-btn"
+            <Button
+              variant="secondary"
+              size="small"
               onClick={(e) => {
                 e.stopPropagation();
                 onClear();
               }}
-              type="button"
               title="Clear the terminal history shown above (variables are kept)"
             >
               Clear
-            </button>
+            </Button>
           )}
           {onReset && (
-            <button
-              className="editor-btn"
+            <Button
+              variant="secondary"
+              size="small"
               onClick={(e) => {
                 e.stopPropagation();
                 onReset();
               }}
-              type="button"
               title="Discard console-local variables and restore built-in objects (history is kept)"
             >
               Reset Workspace
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -210,9 +212,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
 
       <div className="terminal-input-bar">
         <span className="terminal-input-bar__prompt">&gt;&gt;&gt;</span>
-        <input
+        <TextInput
           ref={inputRef}
-          type="text"
           className="terminal-input-bar__input"
           value={input}
           onChange={(e) => {

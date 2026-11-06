@@ -15,6 +15,7 @@ import {
     type StackKind,
 } from '../../common/services/imaging/stackReviewService';
 import { useReviewJob } from '../hooks/useReviewJob';
+import { Button } from '../../common/components/Button';
 
 interface StackComparisonControlProps {
     /** The target whose stack to compare. */
@@ -61,14 +62,14 @@ export const StackComparisonControl: React.FC<StackComparisonControlProps> = ({ 
                 number the target report uses, measured in the same empty patches of sky. The
                 result does not say which stack is better. That depends on what changed.
             </p>
-            <button
-                type="button"
-                className="btn btn--secondary btn--tiny"
+            <Button
+                variant="secondary"
+                size="small"
                 onClick={() => void run(() => startStackComparison(targetId, kind))}
                 disabled={busy}
             >
                 Compare
-            </button>
+            </Button>
             <div className="stack-comparison__status" role="status" aria-live="polite">
                 {busy && (
                     <span>

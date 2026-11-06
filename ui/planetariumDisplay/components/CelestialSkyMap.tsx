@@ -9,6 +9,7 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { PlanetariumSource, PlanetariumTarget, ObserverLocation, ConstellationLineSegment } from '../../common/types/planetariumTypes';
 import { getAltAz, getRaDec, projectAltAz, pixelsPerDegree } from '../utils/projectionMath';
+import { PopoverSelect } from '../../common/components/PopoverSelect';
 import { safeParse } from '../utils/coordinateUtils';
 import { calculateLST } from '../utils/siderealTime';
 import { findNearestSource } from '../utils/hitTesting';
@@ -32,6 +33,8 @@ import { FramingOverlay, FramingPanelCorners } from '../layers/FramingOverlay';
 import { StarFieldRenderer } from '../webgl/StarFieldRenderer';
 import { useTimeController } from '../hooks/useTimeController';
 import { useSkyMapInput } from '../hooks/useSkyMapInput';
+import { Button } from '../../common/components/Button';
+import { Slider } from '../../common/components/Slider';
 
 /**
  * Props for CelestialSkyMap.
@@ -107,6 +110,9 @@ interface Props {
   /** Framing panels to outline, as corners in RA and Dec degrees. */
   framingPanels?: FramingPanelCorners[];
 }
+
+/** The speeds the time controller offers for the accelerated sky rotation. */
+const TIME_SPEED_OPTIONS = [1, 5, 25, 100, 1000].map((speed) => ({ id: String(speed), label: `${speed}x` }));
 
 // How much Local Sidereal Time must drift since the last drawn frame before
 // that drift alone is worth a redraw, at a wide FOV. 0.001 degrees corresponds
@@ -717,31 +723,29 @@ export const CelestialSkyMap: React.FC<Props> = ({
       <canvas ref={starCanvasRef} style={{ pointerEvents: 'none' }} />
 
       <div className="celestial-time-controller">
-        <button
-          className={`celestial-time-btn ${isTimePlaying ? 'active' : ''}`}
+        <Button
+          variant="secondary"
+          size="small"
+          active={isTimePlaying}
+          aria-pressed={isTimePlaying}
           onClick={() => setIsTimePlaying(!isTimePlaying)}
           title="Play/Pause Sky Sidereal Rotation"
         >
           {isTimePlaying ? '⏸' : '▶'}
-        </button>
+        </Button>
 
         {isTimePlaying && (
-          <select
-            className="celestial-time-select"
-            value={timeSpeed}
-            onChange={(e) => setTimeSpeed(Number(e.target.value))}
-            title="Accelerated Time Speed"
-          >
-            <option value="1">1x</option>
-            <option value="5">5x</option>
-            <option value="25">25x</option>
-            <option value="100">100x</option>
-            <option value="1000">1000x</option>
-          </select>
+          <PopoverSelect
+            label="Accelerated Time Speed"
+            options={TIME_SPEED_OPTIONS}
+            selectedId={String(timeSpeed)}
+            onSelect={(id) => setTimeSpeed(Number(id ?? 1))}
+            size="compact"
+            placement="above"
+          />
         )}
 
-        <input
-          type="range"
+        <Slider
           className="celestial-time-slider"
           min="-720"
           max="720"

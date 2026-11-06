@@ -97,6 +97,20 @@ export const ObservationManager: React.FC = () => {
         setSelectedTarget(observationPackage.target_id);
     };
 
+    // Opening with no package picked: show the first one in the list the panel opens on
+    // (Planned), else the first Suggested, else the first Complete, so the editor is never empty.
+    // This runs once. It does not change the shared target; only the user's own pick does.
+    const defaultPackageChosen = React.useRef(false);
+    React.useEffect(() => {
+        if (defaultPackageChosen.current || library.isLoading) return;
+        const first = library.lists.planned[0] ?? library.lists.suggested[0] ?? library.lists.complete[0];
+        if (!first) return;
+        defaultPackageChosen.current = true;
+        if (selectedPackageId || queueEditId) return;
+        setSelectedPackageId(first.id);
+        setPickedSnapshot(first);
+    }, [library.isLoading, library.lists, selectedPackageId, queueEditId]);
+
     /** The targets whose New package request is still running, so a second click cannot start another. */
     const newPackageInFlight = React.useRef<Set<string>>(new Set());
 

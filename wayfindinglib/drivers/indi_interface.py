@@ -561,7 +561,9 @@ class IndiInterface(IndiClient):
             "HUMIDITY": "-",
             "FILTER": "Unknown",
             "CAMERA_TEMPERATURE": "-",
-            "CAMERA_STATUS": "Idle",
+            # Not "Idle": a network drop in the middle of an exposure would
+            # look like a finished frame to the backend's frame-end detector.
+            "CAMERA_STATUS": "Unknown",
             "TARGET_NAME": None,
             "PIER_SIDE": None,
             "PARKED": None,
@@ -627,51 +629,8 @@ class IndiInterface(IndiClient):
                     connection_status = "Disconnected"
 
                 # Get telescope status
-                telescope_track_state = device_telescope.getSwitch("TELESCOPE_TRACK_STATE")
-                parking_status = device_telescope.getSwitch("TELESCOPE_PARK")
                 self.status.update(self._read_mount_switches(device_telescope))
-
-                if parking_status and parking_status[0].getState() == PyIndi.ISS_ON:
-                    tracking_status = "Parked"
-                elif telescope_track_state and any(
-                    (s.getName() in ("TRACK_ON", "ON") or "ON" in s.getName().upper())
-                    and s.getState() == PyIndi.ISS_ON
-                    for s in telescope_track_state
-                ):
-                    tracking_status = "Tracking"
-                else:
-                    # Check SkyWatcher / Star Adventurer GTi RASTATUS
-                    # light property
-                    ra_status = device_telescope.getLight("RASTATUS")
-                    is_ra_running = False
-                    if ra_status:
-                        for light in ra_status:
-                            light_name = light.getName()
-                            if light_name == "RARunning" and light.getState() in (
-                                PyIndi.IPS_BUSY,
-                                PyIndi.IPS_OK,
-                            ):
-                                is_ra_running = True
-                                break
-
-                    # Also check TELESCOPE_MOTION_RATE or TELESCOPE_TRACK_RATE
-                    # if present
-                    track_rate = device_telescope.getSwitch("TELESCOPE_TRACK_RATE")
-                    rate_active = False
-                    if (
-                        track_rate
-                        and telescope_track_state
-                        and not any(
-                            (s.getName() in ("TRACK_OFF", "OFF", "IDLE")) and s.getState() == PyIndi.ISS_ON
-                            for s in telescope_track_state
-                        )
-                    ):
-                        rate_active = any(s.getState() == PyIndi.ISS_ON for s in track_rate)
-
-                    if is_ra_running or rate_active:
-                        tracking_status = "Tracking"
-                    else:
-                        tracking_status = "Idle"
+                tracking_status = self._read_tracking_status(device_telescope)
             else:
                 connection_status = (
                     "Disconnecting..."
@@ -689,6 +648,57 @@ class IndiInterface(IndiClient):
         self.status["CONNECTION_STATUS"] = connection_status
 
         return device_telescope
+
+    @staticmethod
+    def _read_tracking_status(device_telescope: Any) -> str:
+        """Decide whether the mount is parked, tracking or idle.
+
+        The order of trust is: the park switch, then the track-state
+        switch, then (only when the mount has no track-state switch) the
+        SkyWatcher ``RASTATUS`` lights.
+
+        Parameters
+        ----------
+        device_telescope : `PyIndi.BaseDevice`
+            The mount device.
+
+        Returns
+        -------
+        tracking_status : `str`
+            ``"Parked"``, ``"Tracking"`` or ``"Idle"``.
+        """
+
+        def element_is_on(switch: Any, element_name: str) -> bool:
+            """Tell whether the named element of a switch property is on.
+
+            Returns
+            -------
+            is_on : `bool`
+                `True` when the element exists and is on.
+            """
+            return any(
+                element.getName() == element_name and element.getState() == PyIndi.ISS_ON
+                for element in switch or []
+            )
+
+        if element_is_on(device_telescope.getSwitch("TELESCOPE_PARK"), "PARK"):
+            return "Parked"
+
+        track_state = device_telescope.getSwitch("TELESCOPE_TRACK_STATE")
+        if track_state:
+            # The track-state switch is the driver's own statement, so no
+            # other property may override it.
+            return "Tracking" if element_is_on(track_state, "TRACK_ON") else "Idle"
+
+        # No track-state switch: fall back to the SkyWatcher RASTATUS
+        # lights. The Star Adventurer GTi driver shows Ok for true and Busy
+        # for false on these lights (seen live: a stopped mount reports
+        # RARunning Busy). That convention is not documented in the repo,
+        # so only Ok counts as running.
+        for light in device_telescope.getLight("RASTATUS") or []:
+            if light.getName() == "RARunning" and light.getState() == PyIndi.IPS_OK:
+                return "Tracking"
+        return "Idle"
 
     def _read_mount_switches(self, device_telescope: Any) -> dict[str, Any]:
         """Read the mount's pier side, park switch and tracking rate.
@@ -982,7 +992,8 @@ class IndiInterface(IndiClient):
             val = ccd_exposure[0].value
             state = get_property_state(ccd_exposure)
             if state is None:
-                self.status["CAMERA_STATUS"] = "Unknown"
+                with self._exposure_lock:
+                    self.status["CAMERA_STATUS"] = "Unknown"
             else:
                 fits_exptime = self._extract_exptime_from_camera(camera)
                 self._handle_exposure_update(val, state == PyIndi.IPS_BUSY, fits_exptime)
@@ -1650,7 +1661,8 @@ class IndiInterface(IndiClient):
                     val = number_vector[0].getValue()
                     state = get_property_state(number_vector)
                     if state is None:
-                        self.status["CAMERA_STATUS"] = "Unknown"
+                        with self._exposure_lock:
+                            self.status["CAMERA_STATUS"] = "Unknown"
                     else:
                         camera = self._find_main_camera_device()
                         fits_exptime = self._extract_exptime_from_camera(camera) if camera else None

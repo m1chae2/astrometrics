@@ -8,6 +8,7 @@ SIMBAD identification against every detected star.
 """
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -382,3 +383,31 @@ class TestReusedHeaderWcsVerification:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_a_written_sky_map_is_marked_as_plate_solved(tmp_path: Path) -> None:
+    """Writing a sky map adds the plate-solve card."""
+    from astropy.io import fits
+    from astropy.wcs import WCS
+
+    from astrometricslib.pipelines.shared.session_identification import (
+        header_is_plate_solved,
+        write_wcs_to_fits_header,
+    )
+
+    path = tmp_path / "frame.fits"
+    header = fits.Header()
+    header["CRVAL1"] = 10.0
+    header["CRVAL2"] = 20.0
+    fits.PrimaryHDU(data=np.zeros((10, 10), dtype=np.float32), header=header).writeto(path)
+    assert not header_is_plate_solved(fits.getheader(path))
+
+    solved = WCS(naxis=2)
+    solved.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    solved.wcs.crval = [11.0, 21.0]
+    solved.wcs.crpix = [5.0, 5.0]
+    solved.wcs.cdelt = [-0.001, 0.001]
+    write_wcs_to_fits_header(str(path), solved)
+
+    assert header_is_plate_solved(fits.getheader(path))
+    assert fits.getheader(path)["CRVAL1"] == pytest.approx(11.0)

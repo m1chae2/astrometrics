@@ -209,7 +209,9 @@ class CalibrationIngestReport(BaseModel):
     measures no frame of a dark or bias set: those sets are judged from the
     numbers `CalibrationCatalog.measure_frames` stored, so a new frame
     without numbers gives a set whose checks are ``not_checked`` with the
-    reason. A new set of flats is measured, as it always was.
+    reason. A new set of flats is measured, as it always was. The app
+    starts `CalibrationCatalog.measure_frames` after an ingest or a sync
+    that added darks or biases; a script must call it itself.
     """
 
     model_config = ConfigDict(populate_by_name=True)

@@ -29,6 +29,8 @@ Use the `.venv` interpreter for everything.
 
 Every file starts with a description block, and every class, function, method and test has a docstring. For changes under `ui/`, also run `npm run type-check` and `npm test`.
 
+Frontend unit tests never reach a backend: `ui/setupTests.ts` mocks `fetch` and refuses `fetch`, `XMLHttpRequest` and `WebSocket` calls to the default backend port (5000). A few files need a real backend and carry the marker `@requires-test-backend`. They are skipped unless you set `ASTROMETRICS_LIVE_BACKEND_TESTS=1`. With it set, `ui/globalSetup.ts` starts a throwaway backend of its own (its own library, a random port, the INDI simulator), and the marked tests use only that one. Never point these tests at a backend that is connected to real hardware or the real library, and keep device commands, policy changes, library writes and ingestion starts out of them.
+
 ## Documentation
 
 The rules for writing and placing documentation are in [Documentation conventions](documentation/Documentation_Conventions.md), and [About these docs](documentation/About_These_Docs.md) maps every document.

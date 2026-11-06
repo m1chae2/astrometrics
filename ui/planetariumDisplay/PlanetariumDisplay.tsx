@@ -45,6 +45,7 @@ import { useStarsBySpectralClassList } from '../astronomyManager/hooks/useStarsB
 import { spectralClassLetter } from '../common/utils/starDisplayFormat';
 import { useReportModeReady } from '../common/utils/appBootReadiness';
 import '../common/styles/segmentedToggle.css';
+import { Tabs } from '../common/components/Tabs';
 import './styles/planetariumDisplay.css';
 
 // Field of view, in degrees, the sky map zooms to when a star is picked from
@@ -499,20 +500,16 @@ export const PlanetariumDisplay: React.FC = () => {
   const leftPanel = (
     <div className="astronomy-display__browser">
       <div className="astronomy-display__mode-toggle">
-        <button
-          type="button"
-          className={`segmented-btn ${navigationMode === 'target' ? 'active' : ''}`}
-          onClick={() => setNavigationMode('target')}
-        >
-          By target
-        </button>
-        <button
-          type="button"
-          className={`segmented-btn ${navigationMode === 'spectralClass' ? 'active' : ''}`}
-          onClick={() => setNavigationMode('spectralClass')}
-        >
-          By spectral class
-        </button>
+        <Tabs
+          idPrefix="navigation-mode"
+          ariaLabel="Browse by"
+          selectedId={navigationMode}
+          onChange={(modeId) => setNavigationMode(modeId as typeof navigationMode)}
+          tabs={[
+            { id: 'target', label: 'By target' },
+            { id: 'spectralClass', label: 'By spectral class' },
+          ]}
+        />
       </div>
 
       {navigationMode === 'target' ? (

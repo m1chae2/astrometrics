@@ -91,7 +91,8 @@ describe('PreviewRemakeControl', () => {
         const onShowPicture = vi.fn();
         render(<PreviewRemakeControl targetId="M 81" kind="imaging" onShowPicture={onShowPicture} />);
         fireEvent.click(screen.getByText('Make the picture again'));
-        fireEvent.change(screen.getByLabelText('Noise removal'), { target: { value: 'on' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Noise removal: Use the app setting' }));
+        fireEvent.click(screen.getByRole('button', { name: 'On' }));
         fireEvent.change(screen.getByLabelText('Noise removal strength'), { target: { value: '0.5' } });
         fireEvent.click(screen.getByRole('button', { name: 'Make picture again' }));
 

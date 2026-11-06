@@ -20,6 +20,7 @@ import {
     emissionLineMarks,
     significantFeatures,
 } from '../../common/utils/starDisplayFormat';
+import { Button } from '../../common/components/Button';
 
 interface Props {
     astronomyData: (Spectrum & { wavelength: number[]; spectrumFlux: number[] }) | null;
@@ -311,15 +312,15 @@ export const SpectrumViewer: React.FC<Props> = ({
             {showToolbar && (
                 <div className="astronomy-viewer__toolbar">
                     {hasInternalFeaturesButton && (
-                        <div className="astronomy-viewer__segmented-control">
-                            <button
-                                type="button"
-                                className={`segmented-btn ${!showFeatures ? 'active' : ''}`}
-                                onClick={handleToggleFeatures}
-                            >
-                                Hide Feature Lines
-                            </button>
-                        </div>
+                        <Button
+                            variant="secondary"
+                            size="small"
+                            active={!showFeatures}
+                            aria-pressed={!showFeatures}
+                            onClick={handleToggleFeatures}
+                        >
+                            Hide Feature Lines
+                        </Button>
                     )}
                 </div>
             )}
@@ -352,14 +353,15 @@ export const SpectrumViewer: React.FC<Props> = ({
                     }}
                 >
                     {/* REQ: AST-2.3: The display SHALL show a tooltip with precise Wavelength and Intensity values for selected points. */}
-                    <button
+                    <Button
+                        variant="ghost"
+                        size="square"
                         className="astronomy-tooltip-close"
                         onClick={() => removeSelectionMarker(sel.id)}
                         aria-label="Close"
-                        type="button"
                     >
                         ×
-                    </button>
+                    </Button>
                     <div className="astronomy-selection-line">
                         λ: {sel.x.toFixed(0)} Å
                     </div>

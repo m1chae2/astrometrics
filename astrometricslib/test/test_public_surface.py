@@ -106,6 +106,7 @@ EXPECTED_MODULE_NAMES = {
         "Jobs",
         "ProcessingJob",
         "background_job",
+        "background_log_context",
         "capture_job_logs",
         "close_interrupted_jobs",
         "get_current_job",
@@ -113,6 +114,7 @@ EXPECTED_MODULE_NAMES = {
         "new_request_id",
         "registered_job",
         "run_as_background_job",
+        "running_as_job",
     }),
     "astrometricslib.drivers": frozenset({
         "AbstractButler",

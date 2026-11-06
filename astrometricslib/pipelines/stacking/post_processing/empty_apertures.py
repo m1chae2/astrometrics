@@ -113,6 +113,31 @@ def aperture_identity_from_number(number: float) -> str:
 # the two chosen by plate solve (M 13, M 101) were 0.1 to 0.9 arcsec off.
 PLATE_SOLVE_WCS_SOURCE = "plate solve of the stack"
 
+# The two ways a stack's own plate solve is now recorded. Both start with
+# `PLATE_SOLVE_WCS_SOURCE`, so older files and `is_plate_solve_wcs_source`
+# still recognize them. The refit reads cached Gaia stars only.
+PLATE_SOLVE_REFIT_WCS_SOURCE = f"{PLATE_SOLVE_WCS_SOURCE}, refit to cached Gaia"
+PLATE_SOLVE_UNREFINED_WCS_SOURCE = f"{PLATE_SOLVE_WCS_SOURCE}, not refit"
+
+
+def is_plate_solve_wcs_source(wcs_source: str) -> bool:
+    """Say whether a stored ``wcs_source`` names a plate solve of the stack.
+
+    Parameters
+    ----------
+    wcs_source : `str`
+        The source stored with an aperture set or a noise row.
+
+    Returns
+    -------
+    is_plate_solve : `bool`
+        True for `PLATE_SOLVE_WCS_SOURCE` (written by older code, after a
+        refit to Gaia) and for the refit and not-refit values that begin
+        with it.
+    """
+    return str(wcs_source).startswith(PLATE_SOLVE_WCS_SOURCE)
+
+
 # The version of the file's layout. Version 3 holds one set of apertures for
 # each camera, optic and reference exposure, placed away from faint sources
 # as well as bright
@@ -213,8 +238,10 @@ class ApertureSet:
         star, in degrees, brightest first.
     wcs_source : `str`
         Where the coordinate solution came from when the set was chosen:
-        ``"stack header"``, ``"registration reference frame"`` or
-        `PLATE_SOLVE_WCS_SOURCE`.
+        ``"stack header"``, ``"registration reference frame"``, a member frame
+        or a plate solve of the stack (`PLATE_SOLVE_REFIT_WCS_SOURCE` or
+        `PLATE_SOLVE_UNREFINED_WCS_SOURCE`; older files hold
+        `PLATE_SOLVE_WCS_SOURCE`).
     pixel_scale_arcsec : `float`
         The pixel scale of the stack the set was chosen on.
     created_from : `str`
@@ -256,7 +283,8 @@ class ApertureSet:
         the stack's pixel grid; such a set still works for the noise (each
         later stack fits the stored stars to its own), but its positions must
         not be matched to Gaia. A file written before this field existed is
-        trusted only when its ``wcs_source`` is `PLATE_SOLVE_WCS_SOURCE`.
+        trusted only when its ``wcs_source`` is a plate solve
+        (`is_plate_solve_wcs_source`).
     """
 
     aperture_sky: np.ndarray
@@ -419,7 +447,7 @@ class ApertureSet:
             flagged_fraction=_optional_number(data.get("flagged_fraction"), float),
             excluded_fraction=_optional_number(data.get("excluded_fraction"), float),
             sky_positions_from_plate_solve=bool(
-                data.get("sky_positions_from_plate_solve", str(data["wcs_source"]) == PLATE_SOLVE_WCS_SOURCE)
+                data.get("sky_positions_from_plate_solve", is_plate_solve_wcs_source(str(data["wcs_source"])))
             ),
         )
 
@@ -543,6 +571,8 @@ def is_much_deeper(depth: StackDepth | None, aperture_set: ApertureSet) -> bool:
 
 
 __all__ = [
+    "PLATE_SOLVE_REFIT_WCS_SOURCE",
+    "PLATE_SOLVE_UNREFINED_WCS_SOURCE",
     "PLATE_SOLVE_WCS_SOURCE",
     "ApertureSet",
     "ApertureSetMismatchError",
@@ -551,5 +581,6 @@ __all__ = [
     "aperture_identity_to_number",
     "is_legacy_setup_key",
     "is_much_deeper",
+    "is_plate_solve_wcs_source",
     "setup_key",
 ]

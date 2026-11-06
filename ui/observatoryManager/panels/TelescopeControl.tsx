@@ -1,5 +1,5 @@
 import React from 'react';
-import '../../common/styles/button.css';
+import { Button } from '../../common/components/Button';
 // Styles handled by panels.css
 
 export interface TelescopeControlProps {
@@ -54,86 +54,93 @@ export const TelescopeControl: React.FC<TelescopeControlProps> = ({
         callback();
     };
 
-    // Helper for common button classes
-    const getBtnClass = (isActive: boolean, action: string, color?: 'success' | 'danger') => {
-        return `btn btn--control ${color ? `btn--${color}` : ''} ${isActive ? 'btn--active' : ''} ${pendingAction === action ? 'btn--pending' : ''}`;
-    };
-
     return (
         <div id="telescope-status-controls" className="telescope-control">
             {/* Alignment Control Row */}
             <div className="telescope-control__row">
-                <button
+                <Button
                     id="btn-start-alignment"
-                    className={getBtnClass(isAligningActive, 'align_start', 'success')}
+                    control
+                    variant="primary"
+                    active={isAligningActive}
+                    pending={pendingAction === 'align_start'}
                     onClick={() => handleAction('align_start', () => {
                         onStartAlignment?.();
                     })}
                     disabled={disabled || isAligningActive}
                     aria-disabled={disabled || isAligningActive}
-                    type="button"
                 >
                     Start Alignment
-                </button>
-                <button
+                </Button>
+                <Button
                     id="btn-stop-alignment"
-                    className={getBtnClass(!isAligningActive, 'align_stop', 'danger')}
+                    control
+                    variant="danger"
+                    active={!isAligningActive}
+                    pending={pendingAction === 'align_stop'}
                     onClick={() => handleAction('align_stop', () => onStopAlignment?.())}
                     disabled={disabled || !isAligningActive}
                     aria-disabled={disabled || !isAligningActive}
-                    type="button"
                 >
                     Stop Alignment
-                </button>
+                </Button>
             </div>
 
             {/* Tracking Control Row */}
             <div className="telescope-control__row">
-                <button
+                <Button
                     id="btn-tracking-on"
                     disabled={disabled}
                     aria-disabled={disabled}
-                    className={getBtnClass(isTracking, 'tracking_on', 'success')}
+                    control
+                    variant="primary"
+                    active={isTracking}
+                    pending={pendingAction === 'tracking_on'}
                     onClick={() => handleAction('tracking_on', () => onSetTracking(true))}
-                    type="button"
                 >
                     Tracking ON
-                </button>
-                <button
+                </Button>
+                <Button
                     id="btn-tracking-off"
                     disabled={disabled}
                     aria-disabled={disabled}
-                    className={getBtnClass(!isTracking, 'tracking_off', 'success')}
+                    control
+                    variant="primary"
+                    active={!isTracking}
+                    pending={pendingAction === 'tracking_off'}
                     onClick={() => handleAction('tracking_off', () => onSetTracking(false))}
-                    type="button"
                 >
                     Tracking OFF
-                </button>
+                </Button>
             </div>
 
             {/* Park Control Row */}
             <div className="telescope-control__row">
-                <button
+                <Button
                     id="btn-telescope-park"
                     disabled={disabled}
                     aria-disabled={disabled}
-                    className={getBtnClass(isParked, 'park', 'success')}
+                    control
+                    variant="primary"
+                    active={isParked}
+                    pending={pendingAction === 'park'}
                     onClick={() => handleAction('park', onPark)}
-                    type="button"
                     data-parked={isParked.toString()}
                 >
                     PARK
-                </button>
-                <button
+                </Button>
+                <Button
                     id="btn-telescope-unpark"
                     disabled={disabled}
                     aria-disabled={disabled}
-                    className={getBtnClass(!isParked, 'unpark', 'success')}
+                    control
+                    variant="primary"
+                    active={!isParked}
+                    pending={pendingAction === 'unpark'}
                     onClick={() => handleAction('unpark', onUnpark)}
-                    type="button"
                 >
                     UNPARK
-                </button>
+                </Button>
             </div>
         </div>
     );

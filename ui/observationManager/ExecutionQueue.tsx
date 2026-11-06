@@ -13,6 +13,7 @@ import '../common/styles/panels.css';
 import './executionQueue.css';
 import './observationManagerLayout.css';
 import './queueProgress.css';
+import { Button } from '../common/components/Button';
 
 interface Props {
     queue: SequenceObject[];
@@ -183,45 +184,43 @@ export const ExecutionQueue: React.FC<Props> = ({
                     {!isSessionLoading && sessionError && (
                         <span className="queue-header__error" role="alert">
                             Could not load progress.
-                            <button type="button" className="btn btn--tiny" onClick={onRetrySession}>Try again</button>
+                            <Button size="small" onClick={onRetrySession}>Try again</Button>
                         </span>
                     )}
                     {!isSessionLoading && !sessionError && asOfTime && (
                         <span className="queue-header__status">as of {asOfTime}</span>
                     )}
-                    <button
-                        type="button"
-                        className="btn btn--tiny"
+                    <Button
+                        size="small"
                         ref={checklistButtonRef}
                         onClick={() => setIsChecklistOpen(true)}
                     >
                         Checklist ({checklist.length})
-                    </button>
-                    <button
-                        type="button"
-                        className="btn btn--tiny btn--primary"
+                    </Button>
+                    <Button
+                        variant="primary"
+                        size="small"
                         onClick={handleStartSession}
                         disabled={!canStart}
                         aria-disabled={!canStart}
                         title={availability.canCommand ? undefined : availability.reason}
                     >
                         {isStarting ? 'Starting...' : 'Start Imaging Session'}
-                    </button>
-                    <button
-                        type="button"
-                        className="btn btn--tiny"
+                    </Button>
+                    <Button
+                        size="small"
                         onClick={handlePauseSession}
                         title="Stop after the package now being imaged. The queue is kept; Start Imaging Session continues it."
                     >
                         Pause Session
-                    </button>
-                    <button
-                        type="button"
-                        className="btn btn--tiny btn--danger"
+                    </Button>
+                    <Button
+                        variant="danger"
+                        size="small"
                         onClick={() => setIsStopConfirmOpen(true)}
                     >
                         Stop Session
-                    </button>
+                    </Button>
                     {!availability.canCommand && <InfoButton label="Why unavailable?" text={availability.reason} />}
                 </span>
             }
@@ -229,13 +228,13 @@ export const ExecutionQueue: React.FC<Props> = ({
             {startError && (
                 <div className="queue-header__error" role="alert">
                     <span>{startError}</span>
-                    <button type="button" className="btn btn--tiny" onClick={() => setStartError(null)}>Dismiss</button>
+                    <Button size="small" onClick={() => setStartError(null)}>Dismiss</Button>
                 </div>
             )}
             {stopError && (
                 <div className="queue-header__error" role="alert">
                     <span>{stopError}</span>
-                    <button type="button" className="btn btn--tiny" onClick={() => setStopError(null)}>Dismiss</button>
+                    <Button size="small" onClick={() => setStopError(null)}>Dismiss</Button>
                 </div>
             )}
             <ConfirmDialog

@@ -21,6 +21,7 @@ import {
     lastImagedTime,
     matchesCamera,
     matchesCatalog,
+    pickDefaultTargetId,
     sortTargets,
     targetListId,
 } from './targetListFiltering';
@@ -29,6 +30,16 @@ import type { TargetListFilterPanelProps } from '../radioList/TargetListFilterPa
 interface Target extends TargetListEntry {
     [key: string]: unknown;
 }
+
+/** True once the kept choice has been checked against the library in this page load. */
+let startupSelectionChecked = false;
+
+/**
+ * Forgets that the startup check ran, so tests can start fresh.
+ */
+export const resetStartupSelectionCheck = (): void => {
+    startupSelectionChecked = false;
+};
 
 /**
  * Fetches, filters, sorts, and manages selection state for the target radio list
@@ -39,7 +50,7 @@ interface Target extends TargetListEntry {
  * the shared catalog, camera, sort and text filters. The catalog, camera and sort
  * choices are shared by every screen and saved between sessions. Also computes
  * fuzzy-matched highlighted IDs against remote ingestion folders, and auto-selects
- * the first filtered item when nothing is already selected or pending. A selected
+ * the most recently imaged target that has an image when nothing is selected (or the kept choice no longer exists). A selected
  * target stays selected even when the filters hide it.
  *
  * @param {number | undefined} reloadKey - Changing this value re-triggers the target/star fetch.
@@ -49,7 +60,7 @@ interface Target extends TargetListEntry {
  * @param {(t: string) => void} [setSelectedTarget] - Optional setter invoked to confirm the selected target.
  * @param {Set<string>} [remoteTargets] - Remote ingestion folder names used to compute highlighted IDs.
  * @param {boolean} [filterProcessedOnly] - When true, restricts the list to targets with a processed/stacked image.
- * @param {boolean} [disableAutoSelect] - When true, suppresses auto-selecting the first filtered item.
+ * @param {boolean} [disableAutoSelect] - When true, suppresses the default selection.
  * @returns {object} List items, raw targets/stars, filter panel props, text filter state, highlighted IDs, and isLocalTarget.
  */
 export const useTargetListLogic = (
@@ -153,21 +164,28 @@ export const useTargetListLogic = (
         return sortTargets(matching, sort, camera, cameraIndex);
     }, [targets, catalog, camera, cameraIndex, sort, applyTextFilter, filterProcessedOnly]);
 
-    // Auto-selection Logic
+    // Default selection. When nothing is selected, or the choice kept from the last run
+    // names a target the library no longer has (checked once per page load), every display
+    // starts on the most recently imaged target that has an image. The choice is made from
+    // the whole library, not the filtered list, so a filter or night view never changes it.
+    const cameraIndexReady = !cameraIndexQuery.isLoading;
     useEffect(() => {
-        if (disableAutoSelect) return;
-        if (filteredTargets.length > 0 && !pendingTarget && !selectedTarget) {
-            const first = filteredTargets[0];
-            const firstId = typeof first === 'string'
-                ? first
-                : (first.id || first.name || 'unknown');
-            const newId = String(firstId);
-            setPendingTarget(newId);
-            if (setSelectedTarget) {
-                setSelectedTarget(newId);
-            }
+        if (disableAutoSelect || targets.length === 0 || !cameraIndexReady) return;
+        const normalize = (name: string) => name.replace(/[_\s]/g, '').toLowerCase();
+        const known = (id: string) => targets.some((t) => normalize(typeof t === 'string' ? t : targetListId(t)) === normalize(id))
+            || Array.from(remoteTargets).some((name) => normalize(name) === normalize(id));
+        const isFirstCheck = !startupSelectionChecked;
+        startupSelectionChecked = true;
+        const hasChoice = !!(selectedTarget || pendingTarget);
+        const choiceIsStale = isFirstCheck && !!selectedTarget && !known(selectedTarget);
+        if (hasChoice && !choiceIsStale) return;
+        const defaultId = pickDefaultTargetId(targets, cameraIndex);
+        if (!defaultId) return;
+        setPendingTarget(defaultId);
+        if (setSelectedTarget) {
+            setSelectedTarget(defaultId);
         }
-    }, [filteredTargets, selectedTarget, pendingTarget, setPendingTarget, setSelectedTarget, disableAutoSelect]);
+    }, [targets, cameraIndex, cameraIndexReady, selectedTarget, pendingTarget, setPendingTarget, setSelectedTarget, disableAutoSelect, remoteTargets]);
 
     // Output formatting - Memoized
     const filteredItems: SelectableItem[] = useMemo(() => {

@@ -1,9 +1,9 @@
 /**
- * @fileoverview StatusChip: a small pill with an icon and a word, so a status is never told by color alone.
+ * @fileoverview StatusChip: a Badge with an icon and a word, so a status is never told by color alone.
  */
 
 import React from 'react';
-import './sharedComponents.css';
+import { Badge } from './Badge';
 
 export type StatusChipStatus = 'ok' | 'warning' | 'error' | 'info' | 'neutral';
 
@@ -28,10 +28,16 @@ const STATUS_ICON_PATHS: Record<StatusChipStatus, React.ReactNode> = {
  * @return The chip element.
  */
 export const StatusChip: React.FC<StatusChipProps> = ({ status, label }) => (
-    <span className={`status-chip status-chip--${status}`} data-status={status}>
-        <svg className="status-chip__icon" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-            {STATUS_ICON_PATHS[status]}
-        </svg>
+    <Badge
+        tone={status}
+        className={`status-chip status-chip--${status}`}
+        data-status={status}
+        icon={(
+            <svg className="badge__icon status-chip__icon" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                {STATUS_ICON_PATHS[status]}
+            </svg>
+        )}
+    >
         <span className="status-chip__word">{label}</span>
-    </span>
+    </Badge>
 );

@@ -185,30 +185,6 @@
 
 
 /*
- * Standard Form Elements
- * (Definitions moved to entry.css for global sharing)
- */
-
-.checkbox-container {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 8px;
-    color: var(--text-muted);
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-}
-
-.checkbox {
-    width: 16px;
-    height: 16px;
-    cursor: pointer;
-    accent-color: var(--primary-blue);
-}
-
-
-/*
  * Legacy Panel Consolidations
  * Moved from individual CSS files
  */
@@ -224,60 +200,6 @@
     display: flex;
     gap: 8px;
     padding: 0 10px;
-}
-
-/* Generic Control Buttons (Telescope, etc) */
-.btn.btn--control {
-    height: 36px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    white-space: nowrap;
-    min-width: 80px;
-    flex: 1;
-    font-weight: normal;
-    color: var(--white);
-    background-color: var(--grey-light);
-    border: 1px solid var(--grey-lighter);
-    transition: all 0.2s ease;
-}
-
-/* Default active/pending state: Blue */
-.btn--control.btn--active {
-    background-color: var(--btn-blue-active);
-    border: 1px solid var(--btn-blue-active);
-    color: white;
-    font-weight: bold;
-}
-
-.btn--control.btn--pending {
-    background-color: var(--btn-blue-pending);
-    border: 1px solid var(--btn-blue-pending);
-    color: white;
-    font-weight: bold;
-    cursor: wait;
-}
-
-/* Hardware Command Action state mapped to System Slate-Blue */
-.btn--control.btn--success.btn--active {
-    background-color: var(--slate-blue, #1f4868);
-    border: 1px solid var(--slate-blue-light, #4b8ec8);
-}
-
-.btn--control.btn--success.btn--pending {
-    background-color: var(--slate-blue-light, #4b8ec8);
-    border: 1px solid var(--slate-blue-light, #4b8ec8);
-}
-
-/* Hardware Command Abort/Red state */
-.btn--control.btn--danger.btn--active {
-    background-color: var(--btn-red-active);
-    border: 1px solid var(--btn-red-active);
-}
-
-.btn--control.btn--danger.btn--pending {
-    background-color: var(--btn-red-pending);
-    border: 1px solid var(--btn-red-pending);
 }
 
 /* Alignment Status Block */
@@ -361,14 +283,14 @@
     width: 54px;
     height: 54px;
     min-width: 54px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
     font-size: 22px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background-color: var(--primary-blue);
-    color: white;
+    background-color: var(--accent-blue);
+    color: var(--white);
     border: none;
     padding: 0;
 }
@@ -382,17 +304,17 @@
     width: 54px;
     height: 54px;
     min-width: 54px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     border: none;
     padding: 0;
-    background-color: var(--accent-red);
+    background-color: var(--danger-red);
     font-weight: bold;
     font-size: 14px;
-    color: white;
+    color: var(--white);
 }
 
 .navigator__stop:active,
@@ -420,7 +342,7 @@
 .slew-rate__slider {
     width: 100%;
     cursor: pointer;
-    accent-color: var(--primary-blue);
+    accent-color: var(--accent-blue);
     margin: 0;
 }
 
@@ -525,14 +447,6 @@
     color: var(--white);
 }
 
-.guiding-controls__checkbox {
-    width: 13px;
-    height: 13px;
-    cursor: pointer;
-    accent-color: var(--primary-blue);
-    margin: 0;
-}
-
 /* Trace-specific color tags matching Plotly traces */
 .guiding-controls__label--ra {
     color: rgba(0, 255, 255, 0.85);
@@ -587,7 +501,7 @@
     width: 90px;
     height: 4px;
     cursor: pointer;
-    accent-color: var(--primary-blue);
+    accent-color: var(--accent-blue);
     margin: 0;
 }
 

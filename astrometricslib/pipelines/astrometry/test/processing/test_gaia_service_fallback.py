@@ -351,17 +351,16 @@ def test_a_cached_field_covering_the_cone_makes_no_remote_call(services: dict[st
     assert services["calls"] == []
 
 
-def test_stars_in_an_unrecorded_cache_are_used_when_every_service_fails(
+def test_stars_in_an_unrecorded_cache_are_not_used_when_every_service_fails(
     services: dict[str, Any], config: Any
 ) -> None:
-    """Partial cached stars stand in when the network is down."""
+    """A cache with no complete download never stands in for the network."""
     _record_cached_download(config, radius_deg=0.6, complete=False)
 
     table, coordinates = StarIdentifier._query_gaia_region(CENTRE_RA_DEG, CENTRE_DEC_DEG, RADIUS_DEG, 18.0)
 
     assert services["calls"] == [("vizier", 18.0), ("esa", 18.0)]
-    assert table is not None and coordinates is not None
-    assert table.meta["partial_cache"] is True
+    assert table is None and coordinates is None
 
 
 def test_the_cache_records_the_depth_fetched_not_the_depth_asked(

@@ -34,6 +34,7 @@ HARDWARE_DRIVER_PACKAGES = (
     "wayfindinglib.drivers.simulators",
     "wayfindinglib.drivers.ekos",
     "wayfindinglib.drivers.stellarmate_interface",
+    "wayfindinglib.drivers.ssh_port_forward",
 )
 """The hardware drivers, which belong to the Control layer."""
 

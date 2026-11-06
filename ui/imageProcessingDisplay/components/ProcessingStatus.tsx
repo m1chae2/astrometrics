@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { LoadingSpinner } from '../../common/components/LoadingSpinner';
 import '../imageProcessingDisplay.css';
+import { Button } from '../../common/components/Button';
 
 /**
  * Component for displaying real-time processing logs.
@@ -57,12 +58,13 @@ export const ProcessingStatus: React.FC<ProcessingStatusProps> = ({
                 </div>
                 <div className="processing-status-actions">
                     {isProcessing && onCancel && (
-                        <button
-                            className="btn btn--danger btn--tiny"
+                        <Button
+                            variant="danger"
+                            size="small"
                             onClick={onCancel}
                         >
                             Cancel
-                        </button>
+                        </Button>
                     )}
 
                 </div>

@@ -4,6 +4,7 @@ import { SwitchDisplayButton } from '../../common/components/SwitchDisplayButton
 import { FitsViewerManager, FitsRendererHandle } from '../../common/fitsViewer/FitsViewerManager';
 import { FileBrowser, FileBrowserToolbar } from '../fileBrowser/FileBrowser';
 import { AstrometryOverlayStar } from '../../common/services/astronomyService';
+import { Button } from '../../common/components/Button';
 
 interface ViewerPanelContainerProps {
   // Viewer Props
@@ -63,15 +64,17 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
         className="image-processing-display__viewer-section"
         headerContent={
           <div className="fits-header-controls" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <button
-              className={`btn btn--tiny ${stretch ? 'btn--active' : ''}`}
+            <Button
+              size="small"
+              active={stretch}
               onClick={toggleStretch}
               title={stretch ? "Switch to Linear view" : "Switch to Auto-Stretched view (a stack shows its Siril-stretched JPEG when one exists)"}
             >
               {stretch ? "Stretch" : "Linear"}
-            </button>
-            <button
-              className={`btn btn--tiny ${showAstrometryOverlay ? 'btn--active' : ''}`}
+            </Button>
+            <Button
+              size="small"
+              active={showAstrometryOverlay}
               onClick={onToggleAstrometryOverlay}
               disabled={isLoadingOverlay}
               title={
@@ -81,7 +84,7 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
               }
             >
               {isLoadingOverlay ? "Loading..." : "Astrometry"}
-            </button>
+            </Button>
             {showAstrometryOverlay && overlayReason && !isLoadingOverlay && (
               <span
                 className="fits-header-controls__note"
@@ -91,10 +94,10 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
                 {overlayReason}
               </span>
             )}
-            <button className="btn btn--tiny" onClick={() => fitsRendererRef.current?.zoomIn()} title="Zoom In">+</button>
-            <button className="btn btn--tiny" onClick={() => fitsRendererRef.current?.zoomOut()} title="Zoom Out">-</button>
-            <button className="btn btn--tiny" onClick={() => fitsRendererRef.current?.zoomToFit()} title="Zoom to Fit">Fit</button>
-            <button className="btn btn--tiny" onClick={() => fitsRendererRef.current?.zoomToScale(1.0)} title="Actual Size">1:1</button>
+            <Button size="small" onClick={() => fitsRendererRef.current?.zoomIn()} title="Zoom In">+</Button>
+            <Button size="small" onClick={() => fitsRendererRef.current?.zoomOut()} title="Zoom Out">-</Button>
+            <Button size="small" onClick={() => fitsRendererRef.current?.zoomToFit()} title="Zoom to Fit">Fit</Button>
+            <Button size="small" onClick={() => fitsRendererRef.current?.zoomToScale(1.0)} title="Actual Size">1:1</Button>
             <SwitchDisplayButton targetDisplay="Image Viewer" selectedTarget={selectedTarget} />
           </div>
         }

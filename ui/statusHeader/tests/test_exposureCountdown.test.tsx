@@ -24,13 +24,14 @@ import { useStatusData } from '../hooks/useStatusData';
  * Makes the mocked status data report the given camera status.
  *
  * @param cameraStatus - Text such as "Exposing (57s)".
+ * @param telescopeConnection - Whether the telescope is online.
  */
-function mockCameraStatus(cameraStatus: string): void {
+function mockCameraStatus(cameraStatus: string, telescopeConnection = true): void {
   vi.mocked(useStatusData).mockReturnValue({
     telemetry: { altitude: '-', azimuth: '-', temperature: '-', humidity: '-', ra: '-', dec: '-', cameraStatus },
     connected: true,
     trackingStatus: 'Tracking',
-    telescopeConnection: true,
+    telescopeConnection,
     selectedMode: 'Image Viewer',
     chooseMode: vi.fn(),
   });
@@ -93,5 +94,20 @@ describe('StatusHeader exposure countdown', () => {
     mockCameraStatus('Exposing (50s)');
     view.rerender(<StatusHeader />);
     expect(shownSeconds()).toBe(50);
+  });
+
+  /** An offline telescope shows a dash, not a stale "Idle". */
+  it('shows a dash instead of Idle when the telescope is offline', () => {
+    mockCameraStatus('Idle', false);
+    render(<StatusHeader />);
+    expect(document.body.textContent).not.toMatch(/CAM\s*Idle/);
+    expect(document.body.textContent).toMatch(/CAM\s*—/);
+  });
+
+  /** A camera reported as Unknown also shows a dash. */
+  it('shows a dash when the camera state is Unknown', () => {
+    mockCameraStatus('Unknown');
+    render(<StatusHeader />);
+    expect(document.body.textContent).toMatch(/CAM\s*—/);
   });
 });

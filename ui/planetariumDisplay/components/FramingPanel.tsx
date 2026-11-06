@@ -15,6 +15,8 @@ import React, { useEffect, useId, useMemo, useState, useRef } from 'react';
 import type { FramingPanelCorners } from '../layers/FramingOverlay';
 import { useMosaicPreview } from '../hooks/useMosaicPreview';
 import { useTargetPackage } from '../hooks/useTargetPackage';
+import { Button } from '../../common/components/Button';
+import { NumberInput } from '../../common/components/NumberInput';
 
 /** Props of the framing panel. */
 interface FramingPanelProps {
@@ -109,9 +111,9 @@ export const FramingPanel: React.FC<FramingPanelProps> = ({ targetName, center, 
   if (!isOpen) {
     return (
       <div className="framing-panel framing-panel--closed">
-        <button ref={toggleButtonRef} type="button" className="framing-panel__toggle" aria-expanded={false} onClick={() => toggleOpen(true)}>
+        <Button variant="secondary" size="small" ref={toggleButtonRef} aria-expanded={false} onClick={() => toggleOpen(true)}>
           Framing
-        </button>
+        </Button>
       </div>
     );
   }
@@ -124,30 +126,30 @@ export const FramingPanel: React.FC<FramingPanelProps> = ({ targetName, center, 
     >
       <header className="framing-panel__header">
         <h3 className="framing-panel__title">Framing{targetName ? `: ${targetName}` : ''}</h3>
-        <button ref={toggleButtonRef} type="button" className="framing-panel__toggle" aria-expanded={true} onClick={() => toggleOpen(false)}>
+        <Button variant="secondary" size="small" ref={toggleButtonRef} aria-expanded={true} onClick={() => toggleOpen(false)}>
           Close
-        </button>
+        </Button>
       </header>
 
       <div className="framing-panel__inputs">
         <label>
           Rows
-          <input type="number" min={1} max={10} value={rows}
+          <NumberInput min={1} max={10} value={rows}
             onChange={(event) => setRows(Math.max(1, Math.round(parseNumber(event.target.value, 1))))} />
         </label>
         <label>
           Columns
-          <input type="number" min={1} max={10} value={cols}
+          <NumberInput min={1} max={10} value={cols}
             onChange={(event) => setCols(Math.max(1, Math.round(parseNumber(event.target.value, 1))))} />
         </label>
         <label>
           Overlap (%)
-          <input type="number" min={0} max={80} value={overlap}
+          <NumberInput min={0} max={80} value={overlap}
             onChange={(event) => setOverlap(parseNumber(event.target.value, 0))} />
         </label>
         <label>
           Rotation (degrees)
-          <input type="number" min={-360} max={360} value={rotationDeg}
+          <NumberInput min={-360} max={360} value={rotationDeg}
             aria-describedby={rotationConvention !== null ? `${idPrefix}-convention` : undefined}
             onChange={(event) => setRotationDeg(parseNumber(event.target.value, 0))} />
         </label>
@@ -163,7 +165,7 @@ export const FramingPanel: React.FC<FramingPanelProps> = ({ targetName, center, 
       {center !== null && preview.isError && (
         <div className="framing-panel__state" role="alert">
           Could not load the framing
-          <button type="button" onClick={() => void preview.refetch()}>Try again</button>
+          <Button variant="secondary" size="small" onClick={() => void preview.refetch()}>Try again</Button>
         </div>
       )}
       {center !== null && preview.isSuccess && panels.length === 0 && (
@@ -195,21 +197,22 @@ export const FramingPanel: React.FC<FramingPanelProps> = ({ targetName, center, 
       )}
 
       <div className="framing-panel__send">
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="small"
           onClick={handleSend}
           disabled={sendBlockedReason !== null || isWorking}
           aria-disabled={sendBlockedReason !== null || isWorking}
           aria-describedby={sendBlockedReason !== null ? reasonId : undefined}
         >
           Send framing to package
-        </button>
+        </Button>
         {sendBlockedReason !== null && <p id={reasonId} className="framing-panel__reason">{sendBlockedReason}</p>}
         {isWorking && <p aria-busy="true">Sending…</p>}
         {refusal !== null && (
           <div role="alert" id={refusalId} className="framing-panel__rejection">
             {refusal}
-            <button type="button" onClick={dismissRefusal}>Dismiss</button>
+            <Button variant="secondary" size="small" onClick={dismissRefusal}>Dismiss</Button>
           </div>
         )}
       </div>

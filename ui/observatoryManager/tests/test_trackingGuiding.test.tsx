@@ -1,6 +1,6 @@
 /**
  * @file test_trackingGuiding.test.tsx
- * @description Tests of the Guiding tab in Tracking Settings: Start Guiding sends the exposure and
+ * @description Tests of the Guiding tab of the Telescope Control panel: Start Guiding sends the exposure and
  * gain that were typed, Stop Guiding calls the stop handler, bad numbers keep Start greyed, a
  * greyed panel sends nothing, and the Alignment tab has no exposure field. Also tests that the
  * guiding handlers show a toast when the backend call fails.
@@ -20,14 +20,16 @@ import { useObservatoryControl } from '../hooks/useObservatoryControl';
 
 /** Holds the exposure and gain in state, as the Observatory Manager does. */
 const Harness: React.FC<{
+    section?: 'alignment' | 'guiding';
     onGuideStart: (exposure: number, gain: number) => void;
     onGuideStop: () => void;
     disabled?: boolean;
-}> = ({ onGuideStart, onGuideStop, disabled = false }) => {
+}> = ({ section = 'guiding', onGuideStart, onGuideStop, disabled = false }) => {
     const [exposure, setExposure] = useState(1.0);
     const [gain, setGain] = useState(100);
     return (
         <TrackingSettings
+            section={section}
             guidingExposure={exposure}
             guidingGain={gain}
             onGuidingExposureChange={setExposure}
@@ -39,13 +41,12 @@ const Harness: React.FC<{
     );
 };
 
-describe('Tracking Settings guiding controls', () => {
+describe('Telescope Control guiding controls', () => {
     beforeEach(() => vi.clearAllMocks());
 
     it('sends the typed exposure and gain when Start Guiding is clicked', async () => {
         const onGuideStart = vi.fn();
         render(<Harness onGuideStart={onGuideStart} onGuideStop={vi.fn()} />);
-        await userEvent.click(screen.getByRole('tab', { name: 'Guiding' }));
         const exposure = screen.getByLabelText('Guiding Exposure Seconds');
         const gain = screen.getByLabelText('Guiding Gain');
         await userEvent.clear(exposure);
@@ -59,7 +60,6 @@ describe('Tracking Settings guiding controls', () => {
     it('calls the stop handler when Stop Guiding is clicked', async () => {
         const onGuideStop = vi.fn();
         render(<Harness onGuideStart={vi.fn()} onGuideStop={onGuideStop} />);
-        await userEvent.click(screen.getByRole('tab', { name: 'Guiding' }));
         await userEvent.click(screen.getByRole('button', { name: 'Stop Guiding' }));
         expect(onGuideStop).toHaveBeenCalledTimes(1);
     });
@@ -67,7 +67,6 @@ describe('Tracking Settings guiding controls', () => {
     it('keeps Start Guiding greyed while the exposure is empty', async () => {
         const onGuideStart = vi.fn();
         render(<Harness onGuideStart={onGuideStart} onGuideStop={vi.fn()} />);
-        await userEvent.click(screen.getByRole('tab', { name: 'Guiding' }));
         await userEvent.clear(screen.getByLabelText('Guiding Exposure Seconds'));
         const start = screen.getByRole('button', { name: 'Start Guiding' });
         expect(start).toBeDisabled();
@@ -78,13 +77,12 @@ describe('Tracking Settings guiding controls', () => {
 
     it('greys both buttons when commands are off', async () => {
         render(<Harness onGuideStart={vi.fn()} onGuideStop={vi.fn()} disabled />);
-        await userEvent.click(screen.getByRole('tab', { name: 'Guiding' }));
         expect(screen.getByRole('button', { name: 'Start Guiding' })).toBeDisabled();
         expect(screen.getByRole('button', { name: 'Stop Guiding' })).toBeDisabled();
     });
 
     it('has no alignment exposure field, because alignment start takes only the target', () => {
-        render(<Harness onGuideStart={vi.fn()} onGuideStop={vi.fn()} />);
+        render(<Harness section="alignment" onGuideStart={vi.fn()} onGuideStop={vi.fn()} />);
         expect(screen.queryByLabelText('Alignment Exposure Seconds')).not.toBeInTheDocument();
         expect(screen.getByLabelText('Alignment Accuracy')).toBeInTheDocument();
     });

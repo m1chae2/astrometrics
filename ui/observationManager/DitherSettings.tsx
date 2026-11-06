@@ -5,6 +5,8 @@
  * is off.
  */
 import React, { useState } from 'react';
+import { Checkbox } from '../common/components/Checkbox';
+import { NumberInput } from '../common/components/NumberInput';
 import { ControlColumn, ParameterRow } from '../common/components/ControlLayoutComponents';
 import '../common/styles/panels.css';
 
@@ -50,25 +52,22 @@ export const DitherSettings: React.FC<DitherSettingsProps> = ({
 
     return (
         <div className="dither-settings__container">
-            <label className="dither-settings__toggle">
-                <input
-                    type="checkbox"
-                    checked={enabled}
-                    onChange={(e) => update(e.target.checked, everyN, pixels)}
-                />
-                <span>Dither between frames</span>
-            </label>
+            <Checkbox
+                className="dither-settings__toggle"
+                label="Dither between frames"
+                checked={enabled}
+                onChange={(e) => update(e.target.checked, everyN, pixels)}
+            />
             <ControlColumn>
                 <ParameterRow label="Every">
                     <span className="dither-settings__field">
-                        <input
-                            type="number"
+                        <NumberInput
                             min="1"
                             value={everyN}
                             onChange={(e) => update(enabled, parseInt(e.target.value) || 1, pixels)}
                             disabled={!enabled}
                             aria-label="Dither every this many frames"
-                            className="entry entry--short"
+                            width="short"
                         />
                         <span className="dither-settings__unit">frames</span>
                     </span>
@@ -76,15 +75,14 @@ export const DitherSettings: React.FC<DitherSettingsProps> = ({
 
                 <ParameterRow label="Scale">
                     <span className="dither-settings__field">
-                        <input
-                            type="number"
+                        <NumberInput
                             min="0.1"
                             step="0.1"
                             value={pixels}
                             onChange={(e) => update(enabled, everyN, parseFloat(e.target.value) || 0)}
                             disabled={!enabled}
                             aria-label="Dither scale in pixels"
-                            className="entry entry--short"
+                            width="short"
                         />
                         <span className="dither-settings__unit">pixels</span>
                     </span>

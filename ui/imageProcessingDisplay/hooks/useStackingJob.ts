@@ -4,8 +4,8 @@
  * REQ: IMG-1.2: The display SHALL show a summary of frame counts.
  * REQ: IMG-5.1: The display SHALL provide a "Process Target" command.
  */
-import { useState, useEffect, useRef } from 'react';
-import { processTarget, cancelProcessing, fetchAllProcesses, fetchJobs, fetchJobLogTail, streamJobLog, dismissJob, openSiril } from '../../common/services/imaging/processingService';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { processTarget, cancelProcessing, fetchAllProcesses, fetchJobs, fetchJobLogTail, streamJobLog, openSiril } from '../../common/services/imaging/processingService';
 import {
     GroupedFrameStat,
     ProcessStatus,
@@ -34,7 +34,8 @@ export interface StackingJobResult {
     onSelectJob: (job: ProcessingJob) => void;
     activeJobId: string | null;
     setActiveJobId: (jobId: string | null) => void;
-    onDismissJob: (jobId: string) => Promise<void>;
+    /** Jobs of any type for the selected target that are running right now (from the app-wide active-jobs feed). */
+    targetActiveJobs: ProcessingJob[];
     openSiril: () => Promise<void>;
 }
 
@@ -51,6 +52,8 @@ export function useStackingJob(
     const [jobHistory, setJobHistory] = useState<ProcessingJob[]>([]);
     const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
     const prevIsProcessing = useRef<boolean>(false);
+    /** The running-job ids seen last time, to notice when one starts or finishes. */
+    const previousActiveJobIds = useRef<string>('');
 
     // Clear state when target changes and fetch history
     useEffect(() => {
@@ -59,6 +62,7 @@ export function useStackingJob(
         setLightFrames([]);
         setIsProcessing(false);
         prevIsProcessing.current = false;
+        previousActiveJobIds.current = '';
 
         if (selectedTarget) {
             setLoadingHistory(true);
@@ -159,7 +163,6 @@ export function useStackingJob(
         // of frames and job history (a one-off fetch, not a recurring poll).
         if (prevIsProcessing.current && !currentlyProcessing) {
             invalidate('frames');
-            fetchJobs(selectedTarget).then(setJobHistory).catch(() => { /* Ignore */ });
         }
 
         setIsProcessing(currentlyProcessing);
@@ -170,6 +173,33 @@ export function useStackingJob(
         }
     }, [selectedTarget, invalidate, activeJobs]);
 
+
+    // The app-wide active-jobs feed (AstrometricsContext `activeJobs`) is the
+    // one signal that a job started or finished. Jobs of any type for this
+    // target that are running right now are shown at the top of the list.
+    const targetActiveJobs = useMemo(
+        () => activeJobs.filter((job) => job.targetId === selectedTarget),
+        [activeJobs, selectedTarget]
+    );
+    const targetActiveJobIds = useMemo(
+        () => targetActiveJobs.map((job) => job.id).sort().join(','),
+        [targetActiveJobs]
+    );
+    // Reload the history whenever the set of running jobs changes: a new id
+    // means a job started, a missing id means one finished. The first value
+    // after a target change is skipped because the target-change effect
+    // above already loads the history.
+    useEffect(() => {
+        if (!selectedTarget) return;
+        const previous = previousActiveJobIds.current;
+        previousActiveJobIds.current = targetActiveJobIds;
+        if (previous === targetActiveJobIds) return;
+        let mounted = true;
+        fetchJobs(selectedTarget).then((jobs) => {
+            if (mounted) setJobHistory(jobs);
+        }).catch(() => { /* Ignore */ });
+        return () => { mounted = false; };
+    }, [selectedTarget, targetActiveJobIds]);
 
     // Log Streaming
     useEffect(() => {
@@ -247,16 +277,7 @@ export function useStackingJob(
         },
         activeJobId,
         setActiveJobId,
-        onDismissJob: async (jobId: string) => {
-            const success = await dismissJob(jobId);
-            if (success) {
-                setJobHistory(prev => prev.filter(j => j.id !== jobId));
-                if (activeJobId === jobId) {
-                    setActiveJobId(null);
-                    setLogLines([]);
-                }
-            }
-        },
+        targetActiveJobs,
         openSiril: async () => {
             if (!selectedTarget) return;
             await openSiril(selectedTarget);

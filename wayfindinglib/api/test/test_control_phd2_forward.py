@@ -6,6 +6,7 @@ it runs locally the client uses localhost:4400 and no forward starts. The
 forward is replaced by a fake, so no test runs ssh.
 """
 
+import threading
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -186,3 +187,50 @@ def test_a_changed_host_stops_the_forward_and_guiding_driver() -> None:
     guiding_driver.close.assert_called_once()
     assert context._guiding_driver is None
     assert context._phd2_port_forward is None
+
+
+def test_a_changed_pictures_path_keeps_the_forward_and_guiding_driver() -> None:
+    """Only a new host makes the old forward out of date."""
+    context, config = _host_context()
+    _ = context.remote_transfer_driver
+    guiding_driver = MagicMock()
+    context._guiding_driver = guiding_driver
+    context._build_phd2_client()
+    (forward,) = instances
+
+    config.get_remote_pictures_path.return_value = "/elsewhere"
+    _ = context.remote_transfer_driver
+
+    assert not forward.stopped
+    guiding_driver.close.assert_not_called()
+    assert context._guiding_driver is guiding_driver
+
+
+def test_building_the_guiding_driver_after_a_host_change_does_not_hang(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The guiding driver build holds its lock and must not wait on itself."""
+    context, config = _host_context()
+    _ = context.remote_transfer_driver
+    config.get_telescope_hostname.return_value = "new-host"
+
+    def build_guiding_driver() -> MagicMock:
+        """Build only the PHD2 client, as the real build does for PHD2.
+
+        Returns
+        -------
+        driver : `MagicMock`
+            A stand-in guiding driver.
+        """
+        context._build_phd2_client()
+        return MagicMock()
+
+    monkeypatch.setattr(context, "_build_guiding_driver", build_guiding_driver)
+    results: list[object] = []
+    worker = threading.Thread(target=lambda: results.append(context.guiding_driver), daemon=True)
+    worker.start()
+    worker.join(timeout=5.0)
+
+    assert not worker.is_alive(), "guiding_driver deadlocked on its own lock"
+    assert len(results) == 1
+    assert context.remote_transfer_driver.host_alias == "new-host"

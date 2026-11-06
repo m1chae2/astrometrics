@@ -342,17 +342,16 @@ class IngestionService(BaseBackgroundService):
         self._log(job_id, f"Light frames of {len(report.targets)} target folders indexed and saved.")
 
         # 3. Refresh calibration frames
-        self._log(job_id, "Scanning dark frames...")
-        self._calibration.reindex_frames("dark", prune_missing=True)
-
-        self._log(job_id, "Scanning bias frames...")
-        self._calibration.reindex_frames("bias", prune_missing=True)
-
-        self._log(job_id, "Scanning flat frames...")
-        self._calibration.reindex_frames("flat", prune_missing=True)
+        added_kinds: list[str] = []
+        for kind in ("dark", "bias", "flat"):
+            self._log(job_id, f"Scanning {kind} frames...")
+            report = self._calibration.reindex_frames(kind, prune_missing=True)
+            if report.added_count:
+                added_kinds.append(kind)
 
         self._log(job_id, "Calibration frames indexed. Saving library...")
         self._calibration.save()
+        self._measure_new_calibration_frames(job_id, added_kinds)
 
         # 4. Migrate Stellar Objects to SQLite
         if hasattr(self._target_service, "stellar_service") and self._target_service.stellar_service:
@@ -386,6 +385,33 @@ class IngestionService(BaseBackgroundService):
             logger.exception("Could not start measuring the new frames of %s", target_id)
             return
         self._log(job_id, f"Measuring the new frames of {target_id} in the background.")
+
+    def _measure_new_calibration_frames(self, job_id: str, added_kinds: list[str]) -> None:
+        """Start measuring the dark and bias frames that were just added.
+
+        The library's rescan does not measure darks and biases, so a new set
+        would stay "not checked". This asks the image processing service to
+        measure them in the background. That service runs one measurement at
+        a time and the job reads only new or changed files. Flats are
+        measured by the rescan itself. A failure is logged and never fails
+        the ingestion.
+
+        Parameters
+        ----------
+        job_id : `str`
+            The ingestion job, for the log.
+        added_kinds : `list` [`str`]
+            The kinds of calibration frame the rescan found new files of.
+        """
+        if self._image_processing_service is None or not ({"dark", "bias"} & set(added_kinds)):
+            return
+        try:
+            started = self._image_processing_service.measure_new_calibration_frames(added_kinds)
+        except Exception:  # a trigger must never fail the ingestion: log it
+            logger.exception("Could not start measuring the new calibration frames")
+            return
+        if started:
+            self._log(job_id, "Measuring the new dark and bias frames in the background.")
 
     def _announce_measurements(self, job_id: str, measurement_results: list[dict[str, Any]]) -> None:
         """Announce what the frame sync measured.
@@ -652,9 +678,13 @@ class IngestionService(BaseBackgroundService):
             # 1. Update Calibration Library
             try:
                 if self._calibration:
-                    for kind in ("dark", "bias", "flat"):
-                        self._calibration.reindex_frames(kind)
+                    added_kinds = [
+                        kind
+                        for kind in ("dark", "bias", "flat")
+                        if self._calibration.reindex_frames(kind).added_count
+                    ]
                     self._calibration.save()
+                    self._measure_new_calibration_frames(job_id, added_kinds)
             except (AstrometricsError, *FITS_READ_ERRORS) as e:
                 logger.warning("Failed to refresh calibration library in ingestion job: %s", e)
 

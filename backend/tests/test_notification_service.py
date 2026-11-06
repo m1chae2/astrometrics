@@ -109,3 +109,15 @@ def test_write_leaves_no_temporary_file_and_failure_keeps_old_file(
 
     assert sorted(path.name for path in tmp_path.iterdir()) == ["notifications.json"]
     assert [n["message"] for n in json.loads(storage.read_text())] == ["first"]
+
+
+def test_bytes_that_are_not_text_count_as_a_corrupt_file(tmp_path: Path) -> None:
+    """A file with bytes that are not valid UTF-8 is set aside, not raised."""
+    storage = tmp_path / "notifications.json"
+    storage.write_bytes(b"[\xff\xfe\x00 not text")
+    service = NotificationService(str(storage))
+
+    service.notify("M 31", "Stack finished")
+
+    assert [n["message"] for n in service.get_notifications()] == ["Stack finished"]
+    assert len(list(tmp_path.glob("notifications.json.corrupt-*"))) == 1

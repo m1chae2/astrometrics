@@ -104,6 +104,7 @@ REVIEW_MEMBERS = frozenset({
     "get_live_session_status",
     "frame_guiding",
     "get_performance_envelope",
+    "invalidate_night",
 })
 """The public members of `ObservationReview`."""
 

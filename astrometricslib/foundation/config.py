@@ -1620,7 +1620,7 @@ class AppConfiguration:
         return self.app_config.get("Observatory.RemoteTransfer", "driver", fallback="stellarmate")
 
     def get_auto_download_frames(self) -> bool:
-        """Return whether finished camera frames are copied by themselves.
+        """Return whether finished frames and guide logs copy by themselves.
 
         The key is ``auto_download`` in ``Observatory.RemoteTransfer``. When
         it is not set, the answer is `True` if the remote-transfer driver is
@@ -1631,7 +1631,9 @@ class AppConfiguration:
         Returns
         -------
         enabled : `bool`
-            `True` when a finished frame should start a download.
+            `True` when a finished frame should start a download, and guide
+            logs should download every few minutes while imaging and once
+            after imaging stops.
         """
         default = self.get_remote_transfer_driver_name() == "stellarmate"
         return bool(

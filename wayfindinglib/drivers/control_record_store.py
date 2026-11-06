@@ -47,6 +47,9 @@ __all__ = ["ControlRecordStore"]
 
 logger = logging.getLogger(__name__)
 
+RECORD_VERSION_TABLES = ("guiding_samples", "guiding_runs", "ekos_session_contexts", "site_profiles")
+"""The tables a night review reads, whose versions `data_versions` gives."""
+
 _NIGHT_OF_TIMESTAMP = "strftime('%Y-%m-%d', timestamp - 43200, 'unixepoch', 'localtime')"
 """SQL that names the observing night a row's ``timestamp`` falls in."""
 
@@ -759,6 +762,58 @@ class ControlRecordStore:
             except ValueError:
                 row["paa_points"] = []
         return rows
+
+    # -- Data versions -----------------------------------------------------
+
+    def data_versions(
+        self, tables: Iterable[str] = RECORD_VERSION_TABLES
+    ) -> dict[str, tuple[int, int]] | None:
+        """Give a small value per table that changes whenever the table does.
+
+        The value is the row count and the largest row number. A row that is
+        added, deleted or replaced (the butler replaces a record by writing it
+        again) changes one of them. It costs one small query per table, far
+        less than reading the rows, so a cache can use it to find out whether
+        a stored result is still current.
+
+        Parameters
+        ----------
+        tables : `~collections.abc.Iterable` [`str`], optional
+            Names of tables in ``wayfinding.db``. A table that does not exist
+            yet counts as ``(0, 0)``. Defaults to `RECORD_VERSION_TABLES`.
+
+        Returns
+        -------
+        versions : `dict` [`str`, `tuple` [`int`, `int`]] or `None`
+            The (row count, largest row number) of each table, or `None` if
+            the database could not be read.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If a table name is not a plain identifier.
+        """
+        connection = None
+        versions: dict[str, tuple[int, int]] = {}
+        try:
+            connection = self._connect()
+            for table in tables:
+                if not table.isidentifier():
+                    raise InvalidArgumentError(f"{table!r} is not a table name.")
+                try:
+                    count, largest = connection.execute(
+                        f"SELECT COUNT(*), COALESCE(MAX(rowid), 0) FROM {table}"
+                    ).fetchone()
+                except sqlite3.OperationalError:
+                    count, largest = 0, 0
+                versions[table] = (int(count), int(largest))
+            return versions
+        except sqlite3.Error, StorageError:
+            logger.exception("Could not read the versions of the control records.")
+            return None
+        finally:
+            if connection is not None:
+                connection.close()
 
     # -- Shared ------------------------------------------------------------
 

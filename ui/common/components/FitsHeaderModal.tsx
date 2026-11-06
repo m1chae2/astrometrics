@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { TextInput } from './TextInput';
 import { BaseModal } from './BaseModal';
 import { SectionPanel } from './SectionPanel';
 import { EmptyState } from './EmptyState';
@@ -6,6 +7,7 @@ import { fetchTargetFrameHeader } from '../services/targetService';
 import { FitsHeaderEntry } from '../types/backendTypes';
 import { useToast } from '../hooks/useToast';
 import '../styles/layout.css';
+import { Button } from './Button';
 
 interface FitsHeaderModalProps {
     isOpen: boolean;
@@ -64,7 +66,7 @@ export const FitsHeaderModal: React.FC<FitsHeaderModalProps> = ({
     );
 
     const footerButtons = (
-        <button className="btn btn--secondary" onClick={onClose}>Close</button>
+        <Button variant="secondary" onClick={onClose}>Close</Button>
     );
 
     const filename = filePath ? filePath.split(/[/\\]/).pop() : 'Unknown File';
@@ -81,9 +83,8 @@ export const FitsHeaderModal: React.FC<FitsHeaderModalProps> = ({
                 <SectionPanel
                     title="Header Keywords"
                     headerContent={
-                        <input
-                            type="text"
-                            className="entry fits-header-search"
+                        <TextInput
+                            className="fits-header-search"
                             placeholder="Filter..."
                             value={searchTerm}
                             onChange={e => setSearchTerm(e.target.value)}

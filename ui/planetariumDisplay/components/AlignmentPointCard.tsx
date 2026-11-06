@@ -14,6 +14,7 @@ import { PlanetariumSource, ObserverLocation } from '../../common/types/planetar
 import { safeParse, formatRA, formatDec } from '../utils/coordinateUtils';
 import { formatDuration } from '../utils/durationFormat';
 import { computeChartMaxBound, computeRingStep } from '../utils/chartScale';
+import { Button } from '../../common/components/Button';
 
 interface Props {
   /** The selected alignment source object. */
@@ -193,14 +194,16 @@ export const AlignmentPointCard: React.FC<Props> = ({
             </div>
           </div>
         </div>
-        <button
+        <Button
+          variant="ghost"
+          size="square"
           className="planetarium-info-card__close"
           onClick={onClose}
           aria-label="Close panel"
           title="Close panel"
         >
           &times;
-        </button>
+        </Button>
       </div>
 
       {/* 2D Polar Target Graphics */}

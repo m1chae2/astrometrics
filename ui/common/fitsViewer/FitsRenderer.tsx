@@ -21,8 +21,8 @@ import {
 /**
  * Shortens long catalog identifiers for HUD reticle badges.
  *
- * Compresses verbose coordinate substrings from common surveys (2MASS, GPM, SDSS)
- * while preserving distinct astronomical identifiers, and delegating to standard
+ * Shortens coordinate names from common surveys (2MASS, GPM, SDSS) while
+ * keeping enough digits that two stars in one field never share a label, and delegating to standard
  * catalog label formatters for Gaia and unnamed field detections.
  *
  * @param name Full star name or catalog identifier.
@@ -35,18 +35,20 @@ export function formatStarDisplayName(name: string): string {
   if (clusterMemberMatch) {
     name = clusterMemberMatch[1].trim();
   }
-  // 2MASS coordinate compression: 2MASS J16413289+3626285 -> 2MASS 1641+3626
-  const massMatch = name.match(/2MASS\s*J?([0-9]{4})[0-9]*([+-][0-9]{4})[0-9]*/i);
+  // Survey names encode the star's position. Keep whole seconds of RA and
+  // Dec (a few arcseconds), so two stars in one field never share a label:
+  // 2MASS J16413289+3626285 -> 2MASS 164132+362628.
+  const massMatch = name.match(/2MASS\s*J?([0-9]{6})[0-9]*([+-][0-9]{6})[0-9]*/i);
   if (massMatch) {
     return `2MASS ${massMatch[1]}${massMatch[2]}`;
   }
-  // GPM coordinate compression: GPM 258.328551+36.535702 -> GPM 258+36
-  const gpmMatch = name.match(/GPM\s*([0-9]+)\.[0-9]+([+-][0-9]+)\.[0-9]*/i);
+  // GPM 258.328551+36.535702 -> GPM 258.329+36.536 (degrees to about 4 arcseconds).
+  const gpmMatch = name.match(/GPM\s*([0-9]+\.[0-9]+)([+-][0-9]+\.[0-9]+)/i);
   if (gpmMatch) {
-    return `GPM ${gpmMatch[1]}${gpmMatch[2]}`;
+    return `GPM ${Number(gpmMatch[1]).toFixed(3)}${gpmMatch[2][0]}${Math.abs(Number(gpmMatch[2])).toFixed(3)}`;
   }
-  // SDSS coordinate compression: SDSS J164132.89+362628.5 -> SDSS 1641+3626
-  const sdssMatch = name.match(/SDSS\s*J?([0-9]{4})[0-9.]*([+-][0-9]{4})[0-9.]*/i);
+  // SDSS J164132.89+362628.5 -> SDSS 164132+362628.
+  const sdssMatch = name.match(/SDSS\s*J?([0-9]{6})[0-9.]*([+-][0-9]{6})[0-9.]*/i);
   if (sdssMatch) {
     return `SDSS ${sdssMatch[1]}${sdssMatch[2]}`;
   }
@@ -385,7 +387,11 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
                     onPointerLeave={() => setHoveredStarId(null)}
                     data-star-id={star.id}
                     onKeyDown={(event) => {
-                      if (event.key === 'Enter') onStarClick?.(star);
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        // Space must not scroll the page while it opens the star.
+                        event.preventDefault();
+                        onStarClick?.(star);
+                      }
                     }}
                     role="button"
                     tabIndex={0}

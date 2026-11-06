@@ -6,7 +6,7 @@
  */
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { render, fireEvent } from '@testing-library/react';
+import { render, fireEvent, createEvent } from '@testing-library/react';
 import {
   STAR_LABEL_BUDGET,
   StarScreenTransform,
@@ -205,6 +205,20 @@ describe('FitsRenderer star overlay', () => {
     fireEvent.pointerUp(badge, { clientX: 100, clientY: 100 });
     expect(onStarClick).toHaveBeenCalledTimes(1);
     expect(onStarClick.mock.calls[0][0]).toMatchObject({ id: badge.getAttribute('data-star-id') });
+  });
+
+  /**
+   * Enter and Space on a focused star open it, and Space does not scroll the page.
+   */
+  it('opens a star with Enter or Space', async () => {
+    const onStarClick = vi.fn();
+    const { container } = await renderOverlay(makeGridStars(), onStarClick);
+    const badge = container.querySelector('.fits-renderer__star-group') as HTMLElement;
+    fireEvent.keyDown(badge, { key: 'Enter' });
+    const space = createEvent.keyDown(badge, { key: ' ' });
+    fireEvent(badge, space);
+    expect(onStarClick).toHaveBeenCalledTimes(2);
+    expect(space.defaultPrevented).toBe(true);
   });
 
   /**

@@ -195,13 +195,16 @@ def test_arguments_a_detail_does_not_use_are_refused(catalog: StellarCatalog) ->
         catalog.query(order="brightest")
 
 
-def _write_reference_image(path: Path) -> None:
+def _write_reference_image(path: Path, plate_solved: bool = True) -> None:
     """Write a 200 by 100 pixel FITS image whose WCS centers on M 13's stars.
 
     Parameters
     ----------
     path : `pathlib.Path`
         Where to write the image.
+    plate_solved : `bool`, optional
+        Whether the header carries the plate-solve card. `False` makes a
+        header with a pointing guess only.
     """
     wcs = WCS(naxis=2)
     wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
@@ -209,6 +212,8 @@ def _write_reference_image(path: Path) -> None:
     wcs.wcs.crpix = [100.0, 50.0]
     wcs.wcs.cdelt = [-0.00005, 0.00005]
     header = wcs.to_header()
+    if plate_solved:
+        header["PLTSOLVD"] = (True, "sky map written by a plate solve")
     fits.PrimaryHDU(data=np.zeros((100, 200), dtype=np.float32), header=header).writeto(path)
 
 
@@ -325,6 +330,36 @@ def test_overlay_ignores_saved_centers_from_another_stack(tmp_path: Path) -> Non
 
     assert answer.overlay == []
     assert answer.overlay_reason == "No sky solution for this image yet"
+
+
+def test_overlay_does_not_draw_on_a_header_that_is_only_a_pointing_guess(tmp_path: Path) -> None:
+    """A sky map with no plate-solve mark places no stars and says why."""
+    catalog = _catalog(tmp_path)
+    _put_centered_star(catalog)
+    guess = tmp_path / "guess_stack.fits"
+    _write_reference_image(guess, plate_solved=False)
+    other = tmp_path / "other_stack.fits"
+    _write_plain_image(other, 600, 400)
+    catalog._catalog_access.put([_two_stack_target(other, guess)], "target_catalog", {})
+
+    answer = catalog.query(target_id="M 13", detail="overlay", image_path=str(guess))
+
+    assert answer.overlay == []
+    assert answer.overlay_reason == "Header pointing only, not plate-solved"
+
+
+def test_overlay_reads_fit_and_fts_files_in_any_case(catalog: StellarCatalog, tmp_path: Path) -> None:
+    """The file ending may be .fit, .FTS or .fits."""
+    for name in ("shown.fit", "shown2.FTS", "shown3.FITS"):
+        shown = tmp_path / name
+        _write_reference_image(shown)
+        current = tmp_path / f"current_{name}"
+        _write_plain_image(current, 300, 150)
+        catalog._catalog_access.put([_two_stack_target(current, shown)], "target_catalog", {})
+
+        overlay = catalog.query(target_id="M 13", detail="overlay", image_path=str(shown)).overlay
+
+        assert [star.id for star in overlay] == ["HD 3"], name
 
 
 def test_overlay_uses_saved_centers_for_the_only_stack(tmp_path: Path) -> None:

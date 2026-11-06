@@ -48,6 +48,8 @@ class AstrometryPipeline:
         self.config = app_config
         self.drivers = drivers or Drivers()
         self.star_identifier = StarIdentifier(app_config, drivers=self.drivers)
+        # Whether the last `solve_wcs` refit its solution to cached Gaia stars.
+        self.last_solve_was_refit = False
 
     def prepare_image(
         self,
@@ -159,6 +161,7 @@ class AstrometryPipeline:
         image_or_path: AstrometricsImage | str,
         target_ra: float | None = None,
         target_dec: float | None = None,
+        refit_from_cache: bool = False,
     ) -> Any | None:
         """Find only the image's sky coordinates (its WCS), and nothing else.
 
@@ -166,8 +169,11 @@ class AstrometryPipeline:
         then stops. It skips the refit to Gaia, the naming of stars from
         SIMBAD and Gaia, the extended-source hint and the Gaia cache seeding,
         so it asks no online catalog. It is for callers that need only a
-        place to put apertures. A solve that a Gaia refit would have shifted
-        slightly is returned unrefined (see `process` for the refined one).
+        place to put apertures. By default the solution is returned unrefined
+        (see `process` for the refined one). With `refit_from_cache`, it is
+        refit to Gaia when a complete cached download covers the field, using
+        the cache alone; `last_solve_was_refit` then says whether that
+        happened.
         A field the solver cannot solve raises `PlateSolveFailedError`, as in
         `process`.
 
@@ -178,12 +184,15 @@ class AstrometryPipeline:
         target_ra, target_dec : `float`, optional
             A hint for where the telescope was pointing, in degrees. Left
             out, the image's FITS header supplies one.
+        refit_from_cache : `bool`, optional
+            If True, refit the solution to cached Gaia stars when a complete
+            download covers the field. Never sends a query.
 
         Returns
         -------
         wcs : `astropy.wcs.WCS` or `None`
-            The solver's solution, or `None` when too few stars were found
-            to try a solve.
+            The solver's solution (refit if asked and possible), or `None`
+            when too few stars were found to try a solve.
 
         """
         # `PlateSolveFailedError` from the solver passes through.
@@ -195,7 +204,10 @@ class AstrometryPipeline:
             center_ra=ra_hint,
             center_dec=dec_hint,
             solve_only=True,
+            refit_from_cache=refit_from_cache,
         )
+        refinement = self.star_identifier.wcs_refinement
+        self.last_solve_was_refit = bool(refinement is not None and refinement.applied)
         return wcs
 
     def _load_image(self, image_or_path: AstrometricsImage | str) -> AstrometricsImage:

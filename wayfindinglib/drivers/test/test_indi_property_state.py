@@ -225,3 +225,13 @@ def test_property_listing_reports_real_states() -> None:
         "P_IDLE": "Idle",
         "P_ALERT": "Alert",
     }
+
+
+def test_disconnect_reset_reports_camera_status_unknown_not_idle() -> None:
+    """A dropped link must not look like a finished frame (Idle)."""
+    interface = IndiInterface.__new__(IndiInterface)
+    interface.status = {"CAMERA_STATUS": "Exposing (20s)"}
+
+    interface._reset_status()
+
+    assert interface.status["CAMERA_STATUS"] == "Unknown"

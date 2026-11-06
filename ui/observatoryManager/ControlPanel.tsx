@@ -1,8 +1,6 @@
 import React from 'react';
 import { DirectionalControl } from './panels/DirectionalControl';
-import { TelescopeControl } from './panels/TelescopeControl';
-import { TrackingSettings } from './panels/TrackingSettings';
-import { LimitSettings } from './panels/LimitSettings';
+import { TelescopeControlPanel } from './panels/TelescopeControlPanel';
 import { GuidingTrendsPlot } from './panels/GuidingStatusPanel';
 import { AlignmentGuidingTabs } from './panels/AlignmentGuidingTabs';
 import { GuidingSample, AlignmentAttempt } from '../common/types/backendTypes';
@@ -104,63 +102,34 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
 }) => {
     return (
         <div className="panel-group">
-            {/* Top Row: Telescope Control | Tracking Settings | Calibration Library */}
-            <div className="panel__row flex-auto observatory-top-row">
-                <SectionPanel title="Telescope Control" className="observatory-top-row__fit" headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}>
-                    <CommandGate disabled={commandsDisabled} reason={commandsDisabledReason}>
-                        <TelescopeControl
-                            disabled={commandsDisabled}
-                            isTracking={isTracking}
-                            isParked={isParked}
-                            onSetTracking={onSetTracking}
-                            onPark={onPark}
-                            onUnpark={onUnpark}
-                            onStartAlignment={onStartAlignment}
-                            onStopAlignment={onStopAlignment}
-                            isAligningActive={isAligningActive}
-                        />
-                    </CommandGate>
-                </SectionPanel>
-
-                <SectionPanel title="Tracking Settings" className="observatory-top-row__fit" headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}>
-                    <CommandGate
-                        disabled={commandsDisabled}
-                        reason={commandsDisabledReason}
-                        renderChildren={(reasonId) => (
-                            <TrackingSettings
-                                disabled={commandsDisabled}
-                                disabledReasonId={reasonId}
-                                accuracy={accuracy}
-                                settleTime={settleTime}
-                                onAccuracyChange={onAccuracyChange}
-                                onSettleTimeChange={onSettleTimeChange}
-                                guidingExposure={guidingExposure}
-                                guidingGain={guidingGain}
-                                onGuidingExposureChange={onGuidingExposureChange}
-                                onGuidingGainChange={onGuidingGainChange}
-                                onGuideStart={onGuideStart}
-                                onGuideStop={onGuideStop}
-                            />
-                        )}
-                    />
-                </SectionPanel>
-
-                {/* Calibration Library takes the rest of the row. The Darks table scrolls inside it. */}
-                <CalibrationLibraryPanel />
-            </div>
-
-            {/* Middle Row: Camera Profiles | Manual Guide | Safety Limits */}
-            <div className="panel__row flex-auto observatory-middle-row">
-                {/* Camera Profiles, where Focuser used to be. It scrolls inside itself. */}
-                <CameraProfilesPanel
-                    cameras={cameras}
-                    loading={camerasLoading}
-                    error={camerasError}
-                    onRetry={onRetryCameras}
+            {/* Top block, a grid: Telescope Control | Manual Guide (a square) over Camera Profiles, with the
+                Calibration Library on the right spanning both rows. */}
+            <div className="observatory-top-block">
+                <TelescopeControlPanel
+                    isTracking={isTracking}
+                    isParked={isParked}
+                    onSetTracking={onSetTracking}
+                    onPark={onPark}
+                    onUnpark={onUnpark}
+                    onStartAlignment={onStartAlignment}
+                    onStopAlignment={onStopAlignment}
+                    isAligningActive={isAligningActive}
+                    accuracy={accuracy}
+                    settleTime={settleTime}
+                    onAccuracyChange={onAccuracyChange}
+                    onSettleTimeChange={onSettleTimeChange}
+                    guidingExposure={guidingExposure}
+                    guidingGain={guidingGain}
+                    onGuidingExposureChange={onGuidingExposureChange}
+                    onGuidingGainChange={onGuidingGainChange}
+                    onGuideStart={onGuideStart}
+                    onGuideStop={onGuideStop}
+                    commandsDisabled={commandsDisabled}
+                    commandsDisabledReason={commandsDisabledReason}
                 />
 
                 {/* Manual Guide */}
-                <SectionPanel title="Manual Guide" headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}>
+                <SectionPanel title="Manual Guide" className="observatory-manual-guide" headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}>
                     <CommandGate disabled={commandsDisabled} reason={commandsDisabledReason}>
                         <DirectionalControl
                             disabled={commandsDisabled}
@@ -172,8 +141,18 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                     </CommandGate>
                 </SectionPanel>
 
-                {/* Safety Limits: owns its panel, because Apply sits in the panel header. */}
-                <LimitSettings disabled={commandsDisabled} reason={commandsDisabledReason} />
+                {/* Camera Profiles sits under Telescope Control and Manual Guide. It scrolls inside itself. */}
+                <div className="observatory-camera-profiles">
+                    <CameraProfilesPanel
+                        cameras={cameras}
+                        loading={camerasLoading}
+                        error={camerasError}
+                        onRetry={onRetryCameras}
+                    />
+                </div>
+
+                {/* Calibration Library is tall: it spans both rows. Its table scrolls inside it. */}
+                <CalibrationLibraryPanel />
             </div>
 
             {/* Guiding Row: Trends | Alignment and Guiding (two tabs) */}

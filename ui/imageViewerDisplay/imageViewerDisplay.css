@@ -220,26 +220,9 @@
     white-space: nowrap;
 }
 
-/* Input Styles */
+/* The target text fields use the shared .entry style; this only lets them fill their row. */
 .target-input {
     flex: 1;
-    width: 100%;
-    box-sizing: border-box;
-    padding: 10px 12px;
-    height: 40px;
-    font-size: 14px;
-    font-family: inherit;
-    border-radius: 8px;
-    border: 1px solid var(--grey-dark, #333);
-    background: var(--grey-darkest, #111);
-    color: var(--white);
-    font-style: italic;
-    transition: all 0.2s ease;
-}
-
-.target-input:focus {
-    border-color: var(--primary-blue);
-    outline: none;
 }
 
 /* Responsive Overrides */

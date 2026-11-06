@@ -7,6 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchTargetFrameHeader } from '../../common/services/targetService';
 import { DepthGoalRow } from './DepthGoalRow';
 import { StackSummaryPanel } from './StackSummaryPanel';
+import { Button } from '../../common/components/Button';
 
 interface StackedImagePanelProps {
     path: string;
@@ -103,23 +104,24 @@ export const StackedImagePanel: React.FC<StackedImagePanelProps> = ({
                 </div>
                 <div className="stacked-image-panel__actions">
                     {onShowHeader && (
-                        <button
-                            type="button"
-                            className="btn btn--secondary btn--tiny"
+                        <Button
+                            variant="secondary"
+                            size="small"
                             onClick={() => onShowHeader(imagePath)}
                             title="View FITS Header Info"
                         >
                             Header Info
-                        </button>
+                        </Button>
                     )}
-                    <button
-                        type="button"
-                        className={`btn btn--tiny ${isViewing ? 'btn--active' : 'btn--primary'}`}
+                    <Button
+                        variant="primary"
+                        size="small"
+                        active={isViewing}
                         onClick={() => onView(imagePath)}
                         title={`View ${label.toLowerCase()}`}
                     >
                         {isViewing ? 'Viewing' : 'View'}
-                    </button>
+                    </Button>
                 </div>
             </div>
         );

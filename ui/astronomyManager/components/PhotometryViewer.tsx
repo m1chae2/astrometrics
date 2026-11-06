@@ -10,6 +10,7 @@ import '../styles/astronomyViewer.css';
 
 import { Spectrum } from '../../common/types/backendTypes';
 import { formatPeriod, isSignificantVerdict, selectLightCurveSeries } from '../../common/utils/starDisplayFormat';
+import { Tabs } from '../../common/components/Tabs';
 
 interface Props {
     astronomyData: Spectrum | null;
@@ -128,22 +129,16 @@ export const PhotometryViewer: React.FC<Props> = ({
         <div className="astronomy-viewer-root astronomy-viewer-root--full-height">
             <div className="astronomy-viewer__toolbar">
                 {bestPeriodDays > 0 && (
-                    <div className="astronomy-viewer__segmented-control">
-                        <button
-                            type="button"
-                            className={`segmented-btn ${!isPhaseFolded ? 'active' : ''}`}
-                            onClick={() => setIsPhaseFolded(false)}
-                        >
-                            Time Series
-                        </button>
-                        <button
-                            type="button"
-                            className={`segmented-btn ${isPhaseFolded ? 'active' : ''}`}
-                            onClick={() => setIsPhaseFolded(true)}
-                        >
-                            Phase-Folded ({formatPeriod(bestPeriodDays)})
-                        </button>
-                    </div>
+                    <Tabs
+                        idPrefix="photometry-plot"
+                        ariaLabel="Plot type"
+                        selectedId={isPhaseFolded ? 'phase' : 'time'}
+                        onChange={(plotId) => setIsPhaseFolded(plotId === 'phase')}
+                        tabs={[
+                            { id: 'time', label: 'Time Series' },
+                            { id: 'phase', label: `Phase-Folded (${formatPeriod(bestPeriodDays)})` },
+                        ]}
+                    />
                 )}
             </div>
 

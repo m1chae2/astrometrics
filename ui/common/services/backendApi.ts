@@ -297,7 +297,7 @@ export interface ActionRegistry {
     "processing:siril_open": { payload: { target_id: string }; response: boolean };
     "processing:cancel": { payload: { target_id: string }; response: ProcessStatus | null };
     "processing:status": { payload: { target_id: string }; response: { processing: boolean } };
-    "processing:list_jobs": { payload: { target_id?: string; job_type?: string; limit?: number }; response: ProcessingJob[] };
+    "processing:list_jobs": { payload: { target_id?: string; job_type?: string; limit?: number; before?: string }; response: ProcessingJob[] };
     "processing:get_job": { payload: { job_id: string }; response: ProcessingJob | null };
     "processing:delete_job": { payload: { job_id: string }; response: boolean };
     "processing:jobs_for_target": { payload: { target_id: string }; response: ProcessingJob[] };

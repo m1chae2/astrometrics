@@ -166,7 +166,7 @@ Folder: `tasks/execution_tasks/`. Facade: `ObservationExecution` (`api/execution
 - **Queue advancement (Architecture Table 4).** `session_runner.py`: `advance_session`, `abort_session`, `dispose_action`, `ActionDisposition`, `SessionRunnerDependencies` (hardware steps are callables). `queue_runner.py`: `run_queue`. `SafetyAssessment.permits_observing` gates each advance.
 - **Imaging queue.** `imaging_queue.py`: `imaging_dependencies` supplies only a slew and a capture.
 - **Divergence and recovery.** `divergence_recording.py` (`record_divergence`), `meridian_flip.py` (`execute_meridian_flip`, `MeridianFlipSteps`), `fault_recovery.py` (`attempt_recovery`, `recover_fault`), `guide_star_loss_recovery.py` (`attempt_guide_star_recovery`).
-- **Recording.** `session_recorder.py` (`ObservationSessionRecorder`), `post_session_reconciliation.py` (`compute_calibration_stats`, `attach_target_session_ids`, `reconcile_session`).
+- **Recording.** `session_recorder.py` (`ObservationSessionRecorder`), `post_session_reconciliation.py` (`attach_target_session_ids`, `reconcile_session`).
 
 <!-- impl: wayfindinglib.tasks.execution_tasks.session_runner.SessionRunnerDependencies -->
 <!-- impl: wayfindinglib.tasks.execution_tasks.session_runner.ActionDisposition -->

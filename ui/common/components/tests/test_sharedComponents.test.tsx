@@ -10,7 +10,10 @@ import userEvent from '@testing-library/user-event';
 import { Card } from '../Card';
 import { Tabs, TabPanel } from '../Tabs';
 import { InfoButton } from '../InfoButton';
-import { StatusChip } from '../StatusChip';
+import { StatusChip, StatusChipStatus } from '../StatusChip';
+import { ConfidenceChip } from '../quality/ConfidenceChip';
+import { Confidence } from '../../types/backendTypes';
+import { TabView } from '../TabView';
 import { ProgressBar } from '../ProgressBar';
 import { FormRow, formRowErrorId } from '../FormRow';
 
@@ -93,6 +96,32 @@ describe('Tabs', () => {
         expect(screen.getByRole('tab', { name: 'Frames (3)' })).toHaveFocus();
     });
 
+    it('uses the underline classes and the regular size by default', () => {
+        render(<TabsHost />);
+        expect(screen.getByRole('tablist', { name: 'Views' })).toHaveClass('tabs');
+        expect(screen.getByRole('tablist', { name: 'Views' })).not.toHaveClass('tabs--compact');
+        expect(screen.getByRole('tab', { name: 'Notes' })).toHaveClass('tabs__tab');
+    });
+
+    it('adds the compact class and an extra class name on request', () => {
+        render(
+            <Tabs idPrefix="c" ariaLabel="Small" selectedId="a" onChange={() => undefined} size="compact" className="extra"
+                tabs={[{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }]} />
+        );
+        const list = screen.getByRole('tablist', { name: 'Small' });
+        expect(list).toHaveClass('tabs', 'tabs--compact', 'extra');
+    });
+
+    it('works as a two-way switch and keeps the tab names', async () => {
+        const onChange = vi.fn();
+        render(
+            <Tabs idPrefix="s" ariaLabel="Browse by" selectedId="catalog" onChange={onChange}
+                tabs={[{ id: 'catalog', label: 'By catalog' }, { id: 'camera', label: 'By camera' }]} />
+        );
+        await userEvent.click(screen.getByRole('tab', { name: 'By camera' }));
+        expect(onChange).toHaveBeenCalledWith('camera');
+    });
+
     it('keeps only the selected tab in the Tab key order', () => {
         render(<TabsHost />);
         expect(screen.getByRole('tab', { name: 'Notes' })).toHaveAttribute('tabindex', '-1');
@@ -139,6 +168,34 @@ describe('StatusChip', () => {
         const { container } = render(<StatusChip status="warning" label="Check focus" />);
         expect(screen.getByText('Check focus')).toBeInTheDocument();
         expect(container.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    });
+});
+
+describe('StatusChip tint classes', () => {
+    it.each(['ok', 'warning', 'error', 'info', 'neutral'] as StatusChipStatus[])('marks the %s status', (status) => {
+        const { container } = render(<StatusChip status={status} label={`State ${status}`} />);
+        const chip = container.querySelector('.status-chip');
+        expect(chip).toHaveClass(`status-chip--${status}`);
+        expect(chip).toHaveAttribute('data-status', status);
+        expect(screen.getByText(`State ${status}`)).toBeInTheDocument();
+    });
+});
+
+describe('ConfidenceChip', () => {
+    it.each([Confidence.MEASURED, Confidence.PARTLY_MEASURED, Confidence.DESIGN_ESTIMATE])('renders the %s chip with its word', (confidence) => {
+        const { container } = render(<ConfidenceChip confidence={confidence} />);
+        expect(container.querySelector('.confidence-chip')).toHaveClass(`confidence-chip--${confidence}`);
+        expect(container.textContent?.length).toBeGreaterThan(0);
+    });
+});
+
+describe('TabView', () => {
+    it('renders the shared Tabs strip and shows the selected tab content', async () => {
+        render(<TabView tabs={[{ id: 'a', label: 'One', content: <p>First</p> }, { id: 'b', label: 'Two', content: <p>Second</p> }]} />);
+        expect(screen.getByRole('tablist')).toHaveClass('tabs', 'tab-view__header');
+        expect(screen.getByRole('tabpanel')).toHaveTextContent('First');
+        await userEvent.click(screen.getByRole('tab', { name: 'Two' }));
+        expect(screen.getByRole('tabpanel')).toHaveTextContent('Second');
     });
 });
 

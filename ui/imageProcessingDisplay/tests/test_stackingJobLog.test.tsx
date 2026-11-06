@@ -6,6 +6,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useStackingJob } from '../hooks/useStackingJob';
+import { fetchJobs } from '../../common/services/imaging/processingService';
 
 type LineHandler = (line: string) => void;
 const streams: { jobId: string; push: LineHandler; cancel: ReturnType<typeof vi.fn> }[] = [];
@@ -27,7 +28,6 @@ vi.mock('../../common/services/imaging/processingService', () => ({
         streams.push({ jobId, push: onChunk, cancel });
         return cancel;
     }),
-    dismissJob: vi.fn(),
     openSiril: vi.fn(),
 }));
 vi.mock('../../common/services/targetService', () => ({ fetchFrameStatsGrouped: vi.fn(async () => []) }));
@@ -91,5 +91,16 @@ describe('useStackingJob log', () => {
         act(() => result.current.onSelectJob(olderJob as never));
         await waitFor(() => expect(result.current.logLines).toEqual(['older line']));
         expect(result.current.activeJobId).toBe('older');
+    });
+
+    /** A job appearing in the app-wide active-jobs feed reloads the history and is exposed for pinning. */
+    it('reloads the history when a job starts for the target', async () => {
+        const { result, rerender } = renderHook(() => useStackingJob('M 81'));
+        await waitFor(() => expect(result.current.activeJobId).toBe('old'));
+        const callsBefore = vi.mocked(fetchJobs).mock.calls.length;
+        activeJobsRef.current = [{ id: 'fresh', targetId: 'M 81', jobType: 'analysis' }];
+        rerender();
+        await waitFor(() => expect(vi.mocked(fetchJobs).mock.calls.length).toBeGreaterThan(callsBefore));
+        expect(result.current.targetActiveJobs.map((job) => job.id)).toEqual(['fresh']);
     });
 });

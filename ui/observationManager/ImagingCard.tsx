@@ -6,6 +6,7 @@
  * Dragging also reorders, from the Execution Queue.
  */
 import React, { useState } from 'react';
+import { Button } from '../common/components/Button';
 import { SequenceObject } from './hooks/useExecutionQueue';
 import { ConfirmDialog } from '../common/components/ConfirmDialog';
 import { ProgressBar } from '../common/components/ProgressBar';
@@ -82,45 +83,49 @@ export const ImagingCard: React.FC<Props> = ({ sequence, isSelected = false, onR
                 <div className="card-meta">
                     <span className="card-duration">{totalTimeText}</span>
                     {onMoveEarlier && (
-                        <button
-                            type="button"
+                        <Button
+                            variant="ghost"
+                            size="square"
                             className="card-edit-btn"
                             onClick={(e) => { e.stopPropagation(); onMoveEarlier(); }}
                             aria-label={`Move ${sequence.target_name} earlier`}
                             title="Move earlier"
                         >
                             <span aria-hidden="true">←</span>
-                        </button>
+                        </Button>
                     )}
                     {onMoveLater && (
-                        <button
-                            type="button"
+                        <Button
+                            variant="ghost"
+                            size="square"
                             className="card-edit-btn"
                             onClick={(e) => { e.stopPropagation(); onMoveLater(); }}
                             aria-label={`Move ${sequence.target_name} later`}
                             title="Move later"
                         >
                             <span aria-hidden="true">→</span>
-                        </button>
+                        </Button>
                     )}
-                    <button
-                        type="button"
+                    <Button
+                        variant="ghost"
+                        size="square"
                         className="card-edit-btn"
                         onClick={(e) => { e.stopPropagation(); onEdit(); }}
                         aria-label={`Edit ${sequence.target_name}`}
                         title="Edit Sequence"
                     >
                         <span aria-hidden="true">✎</span>
-                    </button>
-                    <button
-                        type="button"
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="square"
                         className="card-remove-btn"
                         onClick={handleRemoveClick}
                         aria-label={`Remove ${sequence.target_name}`}
                         title="Remove Sequence"
                     >
                         <span aria-hidden="true">✕</span>
-                    </button>
+                    </Button>
                 </div>
             </div>
             {progress && runState && (

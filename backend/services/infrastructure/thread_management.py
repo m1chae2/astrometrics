@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 # Simple module-level registry to track running sync threads.
 _syncing: dict[str, threading.Thread] = {}
 
+# Held while a caller checks the registry and adds a thread, so two callers
+# cannot both start a sync of one target.
+syncing_lock = threading.Lock()
+
 
 def is_syncing(object_id: str) -> bool:
     """Return whether `object_id` has a live sync thread.

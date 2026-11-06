@@ -290,7 +290,12 @@ class JobStore:
             return None
 
     def get_jobs_by_target(
-        self, target_id: str, job_type: str | None = None, status: str | None = None, limit: int = 50
+        self,
+        target_id: str,
+        job_type: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+        before: str | None = None,
     ) -> list[ProcessingJob]:
         """Retrieve all jobs for a specific target, sorted by newest first.
 
@@ -306,6 +311,10 @@ class JobStore:
             Default `None` (no filter).
         limit : `int`, optional
             Maximum number of jobs to return, default 50.
+        before : `str`, optional
+            If given, an ISO time. Only jobs created strictly before it
+            are returned, which lets a caller page back through history.
+            Default `None` (no cutoff).
 
         Returns
         -------
@@ -328,6 +337,10 @@ class JobStore:
             if status:
                 query += " AND status = ?"
                 params.append(status)
+
+            if before:
+                query += " AND created_at < ?"
+                params.append(before)
 
             query += " ORDER BY created_at DESC LIMIT ?"
             params.append(limit)

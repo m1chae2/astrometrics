@@ -1,3 +1,5 @@
+import { Checkbox } from '../../../common/components/Checkbox';
+import { TextInput } from '../../../common/components/TextInput';
 import { ConfigData } from '../utils/configUtils';
 
 interface ObservatoryFormProps {
@@ -28,9 +30,7 @@ export const ObservatoryForm: React.FC<ObservatoryFormProps> = ({
             <h4>Telescope Connection</h4>
             <label className="settings__field">
                 <span className="settings__label">Mount Hostname</span>
-                <input
-                    className="settings__input"
-                    type="text"
+                <TextInput
                     value={String(configData[TELESCOPE_SECTION]?.['hostname'] ?? '')}
                     onChange={(e) => handleConfigChange(TELESCOPE_SECTION, 'hostname', e.target.value)}
                     disabled={loadingConfig}
@@ -38,9 +38,7 @@ export const ObservatoryForm: React.FC<ObservatoryFormProps> = ({
             </label>
             <label className="settings__field">
                 <span className="settings__label">INDI Port</span>
-                <input
-                    className="settings__input"
-                    type="text"
+                <TextInput
                     value={String(configData[TELESCOPE_SECTION]?.['indi_port'] ?? '')}
                     onChange={(e) => handleConfigChange(TELESCOPE_SECTION, 'indi_port', e.target.value)}
                     disabled={loadingConfig}
@@ -48,9 +46,7 @@ export const ObservatoryForm: React.FC<ObservatoryFormProps> = ({
             </label>
             <label className="settings__field">
                 <span className="settings__label">Remote Pictures Path</span>
-                <input
-                    className="settings__input"
-                    type="text"
+                <TextInput
                     value={String(configData[TELESCOPE_SECTION]?.['remote_pictures_path'] ?? '')}
                     onChange={(e) => handleConfigChange(TELESCOPE_SECTION, 'remote_pictures_path', e.target.value)}
                     disabled={loadingConfig}
@@ -61,9 +57,7 @@ export const ObservatoryForm: React.FC<ObservatoryFormProps> = ({
                 <h4>Altitude Constraints</h4>
                 <label className="settings__field">
                     <span className="settings__label">Minimum Altitude (deg)</span>
-                    <input
-                        className="settings__input"
-                        type="text"
+                    <TextInput
                         value={String(configData[CONSTRAINTS_SECTION]?.['min_altitude'] ?? '')}
                         onChange={(e) => handleConfigChange(CONSTRAINTS_SECTION, 'min_altitude', e.target.value)}
                         disabled={loadingConfig}
@@ -71,9 +65,7 @@ export const ObservatoryForm: React.FC<ObservatoryFormProps> = ({
                 </label>
                 <label className="settings__field">
                     <span className="settings__label">Maximum Altitude (deg)</span>
-                    <input
-                        className="settings__input"
-                        type="text"
+                    <TextInput
                         value={String(configData[CONSTRAINTS_SECTION]?.['max_altitude'] ?? '')}
                         onChange={(e) => handleConfigChange(CONSTRAINTS_SECTION, 'max_altitude', e.target.value)}
                         disabled={loadingConfig}
@@ -85,9 +77,7 @@ export const ObservatoryForm: React.FC<ObservatoryFormProps> = ({
                 <h4>Filters</h4>
                 <label className="settings__field">
                     <span className="settings__label">Available Filters</span>
-                    <input
-                        className="settings__input"
-                        type="text"
+                    <TextInput
                         value={String(configData[FILTERS_SECTION]?.['available'] ?? '')}
                         onChange={(e) => handleConfigChange(FILTERS_SECTION, 'available', e.target.value)}
                         disabled={loadingConfig}
@@ -100,16 +90,11 @@ export const ObservatoryForm: React.FC<ObservatoryFormProps> = ({
 
             <div className="settings__divider">
                 <h4>Safety</h4>
-                <label className="settings__field settings__field--row">
-                    <input
-                        type="checkbox"
-                        checked={controllerModeEnabled}
-                        onChange={(e) => onSetControlMode(e.target.checked)}
-                        className="settings__checkbox"
-                        disabled={loadingConfig || isChangingControlMode}
-                    />
-                    <span>Allow Telescope Commands (Disable Safe Mode)</span>
-                </label>
+                <Checkbox
+                    className="settings__field settings__field--row"
+                    label="Allow Telescope Commands (Disable Safe Mode)"
+                    checked={controllerModeEnabled} onChange={(e) => onSetControlMode(e.target.checked)} disabled={loadingConfig || isChangingControlMode}
+                />
                 <div className="settings__help">
                     Enable this to let this system command your telescope directly ("controller mode") instead
                     of only watching and computing alongside your existing control software ("monitoring

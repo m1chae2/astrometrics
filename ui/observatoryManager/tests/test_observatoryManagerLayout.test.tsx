@@ -36,9 +36,7 @@ vi.mock('../../common/context/RemoteStatusContext', () => ({ useRemoteStatusCont
 vi.mock('../../common/hooks/useTargetListLogic', () => ({
     useTargetListLogic: () => ({ items: [], filterPanel: {}, filterText: '', setFilterText: () => undefined, isLoading: false }),
 }));
-vi.mock('../../common/radioList/RadioListManager', () => ({
-    RadioListManager: ({ actions }: { actions: React.ReactNode }) => <div>{actions}</div>,
-}));
+vi.mock('../../common/components/SelectableList', () => ({ SelectableList: () => <div>target list</div> }));
 vi.mock('../../common/radioList/TargetListFilterPanel', () => ({ TargetListFilterPanel: () => null }));
 vi.mock('../../common/components/AddTargetModal', () => ({ AddTargetModal: () => null }));
 vi.mock('../panels/GuidingStatusPanel', () => ({
@@ -84,14 +82,36 @@ beforeEach(() => {
 });
 
 describe('ObservatoryManager layout', () => {
-    /** The Calibration Library is in the top row beside Tracking Settings, with Ingest frames in its header. */
-    it('puts the Calibration Library in the top row with Ingest frames in its header', async () => {
+    /** The top block holds Telescope Control, Manual Guide, Camera Profiles and the tall Calibration Library, in that order. */
+    it('puts the Calibration Library in the top block with Ingest frames in its header', async () => {
         renderDisplay();
         const library = document.getElementById('calibrationLibrary') as HTMLElement;
-        expect(library.parentElement?.classList.contains('observatory-top-row')).toBe(true);
-        expect(library.previousElementSibling?.textContent).toContain('Tracking Settings');
+        const block = library.parentElement as HTMLElement;
+        expect(block.classList.contains('observatory-top-block')).toBe(true);
+        const titles = Array.from(block.children).map((child) => child.querySelector('.panel__header')?.textContent ?? '');
+        expect(titles[0]).toContain('Telescope Control');
+        expect(titles[1]).toContain('Manual Guide');
+        expect(titles[2]).toContain('Camera Profiles');
+        expect(titles[3]).toContain('Calibration Library');
         expect(library.querySelector('.panel__header')?.textContent).toContain('Ingest frames');
-        await screen.findByText('Darks:');
+        await screen.findByRole('tab', { name: /^Darks/ });
+    });
+
+    /** The left column holds Session, Targets and Controls, top to bottom, and no slim bar is left above the columns. */
+    it('has Session, Targets and Controls panels in the left column and no night bar', () => {
+        renderDisplay();
+        const column = document.querySelector('.observatory-left-column') as HTMLElement;
+        const titles = Array.from(column.querySelectorAll(':scope > .panel > .panel__header')).map((header) => header.textContent);
+        expect(titles).toEqual(['Session', 'Targets', 'Controls']);
+        expect(document.querySelector('.observatory-night-bar')).toBeNull();
+        expect(screen.queryByText('Filter Targets')).toBeNull();
+        expect(screen.queryByText('Target List')).toBeNull();
+        const session = column.querySelector(':scope > .panel') as HTMLElement;
+        expect(within(session).getByTestId('night-banner').getAttribute('role')).toBe('status');
+        expect(within(session).getByRole('button', { name: /Night/ })).toBeTruthy();
+        const controls = within(column.querySelectorAll(':scope > .panel')[2] as HTMLElement);
+        expect(controls.getByRole('button', { name: 'Add Target' })).toBeTruthy();
+        expect(controls.getByRole('button', { name: 'Slew to Target' })).toBeTruthy();
     });
 
     /** The Focuser and Filter Wheel panels are removed; the new panels are shown. */
@@ -101,12 +121,13 @@ describe('ObservatoryManager layout', () => {
         expect(screen.queryByText('Filter Wheel')).toBeNull();
         expect(screen.getByText('Telescope Control')).toBeTruthy();
         expect(screen.getByText('Manual Guide')).toBeTruthy();
-        expect(screen.getByText('Safety Limits')).toBeTruthy();
+        expect(screen.queryByText('Safety Limits')).toBeNull();
+        expect(screen.queryByText('Tracking Settings')).toBeNull();
         expect(screen.getByText('Alignment and Guiding')).toBeTruthy();
         expect(screen.getByText('Camera Profiles')).toBeTruthy();
         expect(screen.getByText('Calibration Library')).toBeTruthy();
         expect(screen.queryByTestId('camera-noise-example')).toBeNull();
-        expect(await screen.findByText('Darks:')).toBeTruthy();
+        expect(await screen.findByRole('tab', { name: /^Darks/ })).toBeTruthy();
     });
 
     /**
@@ -119,13 +140,26 @@ describe('ObservatoryManager layout', () => {
         expect(minimumHeight).toBeGreaterThanOrEqual(26 + 4 * 25 + 2);
     });
 
+    /**
+     * The top block is a grid: Telescope Control and a square Manual Guide on row 1, Camera Profiles under both,
+     * and the Calibration Library spanning both rows. jsdom has no layout, so this reads the style rules.
+     */
+    it('lays the top block out as a grid with a square Manual Guide and a tall Calibration Library', () => {
+        const css = readFileSync('ui/observatoryManager/observatoryManager.css', 'utf8');
+        expect(css).toContain('grid-template-areas: "telescope manual library" "cameras cameras library";');
+        expect(css).toMatch(/\.observatory-manual-guide \{[^}]*aspect-ratio: 1 \/ 1/);
+        expect(css).toMatch(/grid-template-columns: [^;]*var\(--manual-guide-size\)/);
+        expect(css).toMatch(/grid-template-rows: var\(--manual-guide-size\)/);
+        expect(css).toMatch(/\.calibration-panel \{ grid-area: library; \}/);
+    });
+
     /** Command controls are disabled; hover reason and aria-describedby carry the reason. */
     it('greys out command controls and gives the reason on hover and to screen readers', async () => {
         renderDisplay();
-        await screen.findByLabelText('Minimum altitude');
+        await screen.findByRole('tab', { name: /^Darks/ });
         const gates = screen.getAllByTestId('command-gate');
-        // Telescope Control, Tracking Settings, Manual Guide, Safety Limits, Slew to Target.
-        expect(gates).toHaveLength(5);
+        // Telescope Control (Controls tab), Manual Guide, Slew to Target.
+        expect(gates).toHaveLength(3);
         gates.forEach((gate) => {
             expect(gate.getAttribute('title')).toBeTruthy();
             const describedBy = gate.getAttribute('aria-describedby') as string;
@@ -137,13 +171,16 @@ describe('ObservatoryManager layout', () => {
         expect(parkButton.closest('[data-testid="command-gate"]')?.getAttribute('title')).toBeTruthy();
         expect((screen.getByRole('button', { name: 'STOP' }) as HTMLButtonElement).disabled).toBe(true);
 
+        await userEvent.click(within(screen.getByRole('tablist', { name: 'Telescope control groups' })).getByRole('tab', { name: 'Alignment' }));
         const accuracy = screen.getByLabelText('Alignment Accuracy') as HTMLInputElement;
         expect(accuracy.disabled).toBe(true);
         expect(document.getElementById(accuracy.getAttribute('aria-describedby') as string)?.textContent).toBeTruthy();
 
+        await userEvent.click(within(screen.getByRole('tablist', { name: 'Telescope control groups' })).getByRole('tab', { name: 'Altitude' }));
+        await screen.findByLabelText('Minimum altitude');
         const minimumAltitude = document.getElementById('input-limit-min-alt') as HTMLInputElement;
         expect(minimumAltitude.disabled).toBe(true);
-        await userEvent.click(screen.getByRole('tab', { name: 'Hour angle' }));
+        await userEvent.click(within(screen.getByRole('tablist', { name: 'Telescope control groups' })).getByRole('tab', { name: 'Hour angle' }));
         const flipInput = document.getElementById('input-meridian-flip-ha') as HTMLInputElement;
         expect(flipInput.disabled).toBe(true);
         expect(flipInput.getAttribute('aria-describedby')).toBeTruthy();
@@ -154,15 +191,18 @@ describe('ObservatoryManager layout', () => {
         expect(within(slew.closest('[data-testid="command-gate"]') as HTMLElement).getByText(/Checking|Equipment commands are off/)).toBeTruthy();
     });
 
-    /** Tracking Settings and the alignment panel use tabs that follow the WAI-ARIA tab pattern. */
+    /** Telescope Control and the alignment panel use tabs that follow the WAI-ARIA tab pattern. */
     it('shows the tracking and alignment tabs with keyboard arrow selection', async () => {
         renderDisplay();
         const user = userEvent.setup();
-        const trackingTabs = within(screen.getByRole('tablist', { name: 'Tracking setting groups' }));
-        const alignmentTab = trackingTabs.getByRole('tab', { name: 'Alignment', selected: true });
+        const trackingTabs = within(screen.getByRole('tablist', { name: 'Telescope control groups' }));
+        const controlsTab = trackingTabs.getByRole('tab', { name: 'Controls', selected: true });
+        expect(screen.queryByLabelText('Alignment Accuracy')).toBeNull();
+        controlsTab.focus();
+        await user.keyboard('{ArrowRight}');
+        trackingTabs.getByRole('tab', { name: 'Alignment', selected: true });
         expect(screen.getByLabelText('Alignment Accuracy')).toBeTruthy();
         expect(screen.queryByLabelText('Guiding Gain')).toBeNull();
-        alignmentTab.focus();
         await user.keyboard('{ArrowRight}');
         const guidingTab = trackingTabs.getByRole('tab', { name: 'Guiding', selected: true });
         expect(document.activeElement).toBe(guidingTab);
@@ -187,7 +227,7 @@ describe('ObservatoryManager layout', () => {
     /** A request that arrives while the display is open highlights its row. */
     it('highlights the requested calibration row', async () => {
         renderDisplay();
-        await screen.findByText('Darks:');
+        await screen.findByRole('tab', { name: /^Darks/ });
         act(() => {
             window.dispatchEvent(new CustomEvent('astrometrics:showCalibrationRow', {
                 detail: { calibrationKey: 'dark', captureSetting: { camera: 'ZWO ASI533MM Pro', gainSetting: 100, offset: 10, binning: 1 }, rule: 'r' },

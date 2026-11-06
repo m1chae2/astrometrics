@@ -134,7 +134,7 @@ class RebuildingSession:
         self._client = self._new_client()
 
     def _new_client(self, previous: Any = None) -> Any:
-        """Build a client and carry the retry timing over from `previous`.
+        """Build a client; copy retry timing and saved address from `previous`.
 
         Returns
         -------
@@ -144,11 +144,7 @@ class RebuildingSession:
         client = self._factory()
         client.supports_rebuild = True
         if previous is not None:
-            old_timing = previous.connection_manager
-            new_timing = client.connection_manager
-            new_timing.last_connection_attempt = old_timing.last_connection_attempt
-            new_timing.connection_cooldown = old_timing.connection_cooldown
-            new_timing.consecutive_failures = old_timing.consecutive_failures
+            client.connection_manager.adopt_state_from(previous.connection_manager)
             client._connection_loss_reported = previous._connection_loss_reported
         return client
 
@@ -183,10 +179,23 @@ class RebuildingSession:
             return attribute
 
         def _call(*args: Any, **kwargs: Any) -> Any:
+            """Run the method, then swap clients if needed.
+
+            A failure during the swap is logged. It must not replace the
+            method's own result or exception.
+
+            Returns
+            -------
+            result : `Any`
+                Whatever the method returned.
+            """
             try:
                 return attribute(*args, **kwargs)
             finally:
-                self._replace_client_if_stale()
+                try:
+                    self._replace_client_if_stale()
+                except Exception:
+                    logger.exception("Replacing the stale INDI client failed")
 
         return _call
 

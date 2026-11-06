@@ -5900,8 +5900,12 @@ export const UI_EVENTS = {
   "catalog:changed": "catalog:changed",
   /** A frame measurement job stored new quality rows. The payload is {targetId, framesMeasured, rowsWritten, observingNightIds}. */
   "quality:measured": "quality:measured",
-  /** An automatic download of a finished camera frame added frames to the library. The payload is {targetId, framesAdded}. */
+  /** A frame sync (the Download Frames button, an automatic download or an AI tool) copied new frames into the library, before they are measured. The payload is {targetId, framesAdded}. */
   "library:frames_updated": "library:frames_updated",
+  /** The background measuring of new dark and bias frames (it starts after an ingest or a calibration folder sync) has ended. The payload is empty. The calibration library reads the set health again. */
+  "calibration:measured": "calibration:measured",
+  /** A guide log sync (the sync button or the automatic download) stored guiding samples. The payload is {nightIds, samplesStored}, where nightIds lists the observing nights the samples belong to. Past-night guiding views read again. */
+  "library:guiding_updated": "library:guiding_updated",
   /** A write changed the night plan. The payload is {sessionId, revision, changed}, where revision is the plan revision now stored and changed lists the kind of each change. */
   "plan:changed": "plan:changed",
   /** A write created, edited, reopened, dismissed, brought back, re-framed, deleted or promoted an observation package, or a suggestion refresh ran. The payload is {packageId, targetId, kind, revision}; kind says which, and a promotion has no revision. After a refresh, kind is "refreshed", packageId and targetId are null, and the payload adds the counts added, updated, deleted, completed, reverted and checklistItemsAdded, and the ids deletedPackageIds (suggestions removed) and completedPackageIds. */

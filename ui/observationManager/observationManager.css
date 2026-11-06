@@ -82,7 +82,7 @@
     width: 100%;
 }
 
-.btn--flex-1 {
+.image-planner__action-fill {
     flex: 1;
 }
 
@@ -216,20 +216,6 @@
     margin-top: 8px;
 }
 
-.btn--secondary {
-    background-color: var(--background-secondary);
-    border: 1px solid var(--grey-lighter);
-    color: var(--white);
-    opacity: 0.85;
-}
-
-.btn--secondary:hover {
-    background-color: var(--grey-light);
-    opacity: 1;
-    border-color: var(--white);
-    color: var(--white);
-}
-
 /* Mosaic Planner Sidebar Section */
 .mosaic-planner {
     display: flex;
@@ -307,33 +293,13 @@
     flex-direction: column;
 }
 
-.image-list__edit-btn {
-    background: none;
-    border: none;
-    color: var(--accent-blue);
-    cursor: pointer;
-    font-size: 16px;
-    margin-right: 8px;
-}
-
+/* The row buttons are shared ghost icon buttons; this rule only keeps them small. */
+.image-list__edit-btn,
 .image-list__remove-btn {
-    background: none;
-    border: none;
-    color: var(--accent-red);
-    cursor: pointer;
-    font-size: 16px;
-}
-
-.btn--square {
-    width: 36px;
-    height: 36px;
-    min-width: 36px;
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
     padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 18px;
-    line-height: 1;
 }
 
 /* Calibration Panel */
@@ -507,14 +473,4 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-}
-
-.btn--tiny {
-    padding: 2px 8px;
-    font-size: 10px;
-    border-radius: 2px;
-    height: 18px;
-    line-height: 1;
-    width: auto;
-    min-width: 0;
 }

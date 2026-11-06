@@ -8,6 +8,7 @@ and that it saves the target and reports the outcome.
 
 import logging
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -268,3 +269,39 @@ def test_worker_writes_job_log_lines_to_the_given_job_repository() -> None:
         )
 
     assert capture.call_args.kwargs["job_store"] is repository
+
+
+def test_worker_stage_progress_reaches_the_backend_job() -> None:
+    """A stack that reports a stage moves the job row the backend made."""
+    from astrometricslib.jobs import get_current_job
+
+    target_service = _target_service(_target_with_frames("M 42", ["/lights/M_42/lum_001.fits"]))
+    stored_job = MagicMock()
+    repository = MagicMock()
+    repository.get_job.return_value = stored_job
+
+    def stack_that_reports_a_stage(*_args: Any, **_kwargs: Any) -> str:
+        """Report a stage through the current job.
+
+        Returns
+        -------
+        stacked_path : `str`
+            A made-up stack path.
+        """
+        current = get_current_job()
+        assert current is not None
+        current.stage(30, "Stage 2 of 7")
+        return "/stacks/M 42/stack.fits"
+
+    with patch(STAGE, side_effect=stack_that_reports_a_stage):
+        start_siril_processing_task(
+            job_id="job-progress",
+            target_id="M 42",
+            image_files=["/lights/M_42/lum_001.fits"],
+            target_service=target_service,
+            job_repository=repository,
+        )
+
+    repository.get_job.assert_any_call("job-progress")
+    assert stored_job.progress_current == 30
+    assert stored_job.status == "running"

@@ -56,7 +56,7 @@ class ReviewCache:
     def get_or_build(
         self,
         key: Hashable,
-        version: Hashable | None,
+        version: Hashable | Callable[[], Hashable | None] | None,
         builder: Callable[[], Any],
         *,
         copy_result: bool = True,
@@ -68,11 +68,15 @@ class ReviewCache:
         key : `~collections.abc.Hashable`
             What the result is about, such as
             ``("night_quality", "2026-10-03")``.
-        version : `~collections.abc.Hashable` or `None`
+        version : `Hashable`, `Callable` or `None`
             The version of the data the result is built from. A remembered
             result is used only when its version equals this one. `None`
             means the version could not be worked out: the result is built
-            and not kept.
+            and not kept. A function that gives the version is called once
+            outside the lock; if that gives `None` it is called once more
+            after the lock for `key` is held, so threads that all hit a
+            passing problem (a busy database) take turns instead of each
+            building the result without keeping it.
         builder : `~collections.abc.Callable`
             Builds the result. An error it raises goes to the caller and
             nothing is kept.
@@ -85,17 +89,24 @@ class ReviewCache:
         result : `Any`
             The remembered or newly built result.
         """
-        if version is None:
-            return builder()
-        found, remembered = self._lookup(key, version)
-        if found:
-            return copy.deepcopy(remembered) if copy_result else remembered
+        resolve = version if callable(version) else (lambda: version)
+        current = resolve()
+        if current is not None:
+            found, remembered = self._lookup(key, current)
+            if found:
+                return copy.deepcopy(remembered) if copy_result else remembered
         with self._lock_for(key):
+            if current is None:
+                # One more try, one thread at a time: a passing problem in
+                # the first try has often cleared by the time the lock is ours.
+                current = resolve()
+            if current is None:
+                return builder()
             # A thread that waited here finds the result the first one built.
-            found, remembered = self._lookup(key, version)
+            found, remembered = self._lookup(key, current)
             if not found:
                 remembered = builder()
-                self._store(key, version, remembered)
+                self._store(key, current, remembered)
         return copy.deepcopy(remembered) if copy_result else remembered
 
     def invalidate(self, predicate: Callable[[Hashable], bool] | None = None) -> int:

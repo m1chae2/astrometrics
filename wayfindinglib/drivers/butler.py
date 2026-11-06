@@ -22,6 +22,7 @@ the same ``wayfinding.db`` file. `DiskButler.control_records` gives the
 import configparser
 import json
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -223,6 +224,7 @@ class DiskButler(AbstractButler):
         self.config = app_config
         self.__generic: _GenericButler | None = None
         self.__control_records: ControlRecordStore | None = None
+        self.__control_records_lock = threading.Lock()
 
     @property
     def library_path(self) -> Path:
@@ -245,9 +247,10 @@ class DiskButler(AbstractButler):
         records : `ControlRecordStore`
             The record store.
         """
-        if self.__control_records is None:
-            self.__control_records = ControlRecordStore(str(self.library_path / "wayfinding.db"))
-        return self.__control_records
+        with self.__control_records_lock:
+            if self.__control_records is None:
+                self.__control_records = ControlRecordStore(str(self.library_path / "wayfinding.db"))
+            return self.__control_records
 
     @property
     def _generic(self) -> _GenericButler:

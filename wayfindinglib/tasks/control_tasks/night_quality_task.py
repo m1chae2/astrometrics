@@ -484,7 +484,7 @@ def build_night_quality(context: ControlContext, night_id: str) -> NightQuality:
     """
     return context.review_cache.get_or_build(
         (NIGHT_QUALITY_CACHE_KEY, night_id),
-        review_data_version(context),
+        lambda: review_data_version(context),
         lambda: review_night_quality(context, night_id),
     )
 

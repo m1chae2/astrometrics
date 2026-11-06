@@ -32,6 +32,7 @@ import json
 import logging
 import math
 import sqlite3
+import threading
 from collections.abc import Iterable
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -49,6 +50,14 @@ logger = logging.getLogger(__name__)
 
 RECORD_VERSION_TABLES = ("guiding_samples", "guiding_runs", "ekos_session_contexts", "site_profiles")
 """The tables a night review reads, whose versions `data_versions` gives."""
+
+_SETUP_LOCK = threading.Lock()
+"""Lets one thread at a time create the tables of a database.
+
+Several threads that open the same new database together would each try to
+switch it to write-ahead logging and create the tables, and SQLite answers
+some of those attempts at once with "database is locked" instead of waiting.
+"""
 
 _NIGHT_OF_TIMESTAMP = "strftime('%Y-%m-%d', timestamp - 43200, 'unixepoch', 'localtime')"
 """SQL that names the observing night a row's ``timestamp`` falls in."""
@@ -165,6 +174,18 @@ class ControlRecordStore:
 
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
+        with _SETUP_LOCK:
+            self._create_tables()
+
+    def _create_tables(self) -> None:
+        """Create the missing tables, indexes and columns.
+
+        Raises
+        ------
+        StorageError
+            Raised if the database cannot be opened or set up.
+        """
+        db_path = self.db_path
         connection = self._connect()
         try:
             for statement in _SCHEMA:

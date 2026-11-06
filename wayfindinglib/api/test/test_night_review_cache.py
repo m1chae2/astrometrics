@@ -239,6 +239,49 @@ def test_threads_asking_for_the_same_night_build_it_once(
     assert len(answers) == 6
 
 
+def test_a_passing_database_lock_still_builds_the_night_once(
+    review: ObservationReview, builds: dict[str, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A version read that fails while the database is busy is tried again."""
+    real_versions = type(review._context.records).data_versions
+    seen = threading.local()
+
+    def busy_then_fine(self: Any, *args: Any, **kwargs: Any) -> Any:
+        """Fail like a locked database on a thread's first read.
+
+        Returns
+        -------
+        versions : `dict` or `None`
+            `None` on a thread's first read, then the real versions.
+        """
+        if not getattr(seen, "failed", False):
+            seen.failed = True
+            return None
+        return real_versions(self, *args, **kwargs)
+
+    monkeypatch.setattr(type(review._context.records), "data_versions", busy_then_fine)
+    answers: list[Any] = []
+    threads = [threading.Thread(target=lambda: answers.append(_ask(review))) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(answers) == 4
+    assert builds["night_quality"] == 1
+
+
+def test_a_version_that_stays_unknown_is_not_kept(
+    review: ObservationReview, builds: dict[str, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A genuine failure still builds each time and keeps nothing."""
+    monkeypatch.setattr(type(review._context.records), "data_versions", lambda self, *a, **k: None)
+    _ask(review)
+    _ask(review)
+
+    assert builds["night_quality"] == 2
+
+
 def test_a_night_with_no_data_is_not_kept(review: ObservationReview, builds: dict[str, int]) -> None:
     """A night that cannot be reviewed raises each time and leaves nothing."""
     from astrometricslib.exceptions import NotFoundError

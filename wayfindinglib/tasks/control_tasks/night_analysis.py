@@ -184,7 +184,7 @@ def _night_baseline_provider(
         """
         return context.review_cache.get_or_build(
             ("night_baselines", fingerprint),
-            review_data_version(context),
+            lambda: review_data_version(context),
             lambda: collect_night_baselines(context.records, contexts, fingerprint, runs),
             copy_result=False,
         )

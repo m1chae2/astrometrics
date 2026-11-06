@@ -403,7 +403,7 @@ def build_night_list(context: ControlContext, limit: int = DEFAULT_LIMIT) -> lis
     """
     limit = clamp_limit(limit)
     return context.review_cache.get_or_build(
-        ("nights", limit), review_data_version(context), lambda: _build_night_list(context, limit)
+        ("nights", limit), lambda: review_data_version(context), lambda: _build_night_list(context, limit)
     )
 
 

@@ -46,7 +46,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from astrometricslib import Target
-from astrometricslib.drivers import VersionedCache, get_library_data_version
+from astrometricslib.drivers import VersionedCache, get_camera_data_versions
 from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.reports import CaptureSetting, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.capture_history import normalize_name
@@ -84,7 +84,17 @@ and a library has a few cameras, so 16 is plenty. Design estimate, register
 row WAY-D106."""
 
 _SKY_MODEL_CACHE = VersionedCache(maximum_entries=SKY_MODEL_CACHE_MAXIMUM_ENTRIES)
-"""The fitted sky models, by library, equipment key and site."""
+"""The fitted sky models, by library, equipment key and site. Each is kept
+until the measurements of its camera change (`get_camera_data_versions`)."""
+
+CAMERA_OBSERVATIONS_CACHE_MAXIMUM_ENTRIES = 8
+"""How many cameras' frame observations the cache keeps. A library has a few
+cameras and one camera's observations are a few thousand small records, so 8
+stay well under a few megabytes. Design estimate, register row WAY-D107."""
+
+_CAMERA_OBSERVATIONS_CACHE = VersionedCache(maximum_entries=CAMERA_OBSERVATIONS_CACHE_MAXIMUM_ENTRIES)
+"""The frame observations of each camera, by library and camera. Each is
+kept until the measurements of its camera change."""
 
 DEFAULT_SITE_PROFILE_ID = "default"
 """The id of the stored default site."""
@@ -439,6 +449,24 @@ class ReferenceChoice:
     physical_reason: str | None
 
 
+class _IncompleteReadError(Exception):
+    """A read of a camera's frames failed in part.
+
+    Raised inside the cache builder so the cache keeps nothing, and caught by
+    `LibraryInputs.camera_observations`, which uses the partial result once.
+
+    Parameters
+    ----------
+    observations : `list` [`FrameObservation`]
+        What could be read.
+    """
+
+    def __init__(self, observations: list[FrameObservation]) -> None:
+        """Hold the partial result."""
+        super().__init__("The frames of a camera could only be read in part.")
+        self.observations = observations
+
+
 @dataclass
 class LibraryInputs:
     """What the whole library knows about the equipment, read once and kept.
@@ -609,18 +637,84 @@ class LibraryInputs:
             targets.
         """
         if camera not in self._observations:
-            rows = self.camera_rows(camera)
-            ids = sorted({row.subject.capture_setting_id for row in rows if row.subject.capture_setting_id})
-            settings = dict(self.astrometrics.quality.capture_settings(ids=ids)) if ids else {}
-            owners = (
-                self.target(target_id)
-                for target_id in sorted({row.subject.target_id for row in rows if row.subject.target_id})
-            )
-            epochs, directions = times_and_directions(owner for owner in owners if owner is not None)
-            self._observations[camera] = frame_observations_from_measurements(
-                rows, settings, start_epoch_by_frame=epochs, direction_by_frame=directions
-            )
+            try:
+                library = str(self.config.get_library_path())
+            except AttributeError, OSError, TypeError, ValueError:
+                library = None
+            if library is None:
+                observations = self._read_camera_observations(camera)
+            else:
+                try:
+                    # The observations are frozen records, so the cache hands
+                    # out the same ones; the list is copied below.
+                    observations = _CAMERA_OBSERVATIONS_CACHE.get_or_build(
+                        ("camera_observations", library, camera),
+                        lambda: self.camera_data_version(camera),
+                        lambda: self._read_camera_observations(camera, keep_only_complete=True),
+                        copy_result=False,
+                    )
+                except _IncompleteReadError as incomplete:
+                    observations = incomplete.observations
+            self._observations[camera] = list(observations)
         return self._observations[camera]
+
+    def camera_data_version(self, camera: str) -> tuple[str | int, ...] | None:
+        """Work out the version of the data an equipment baseline reads.
+
+        Parameters
+        ----------
+        camera : `str`
+            The camera name.
+
+        Returns
+        -------
+        version : `tuple` or `None`
+            Changes when a measurement or calibration record of this camera
+            is written, and not when another camera's is (see
+            `get_camera_data_versions`). `None` when it cannot be read.
+        """
+        versions = get_camera_data_versions(self.config, [camera])
+        return None if versions is None else versions[camera]
+
+    def _read_camera_observations(
+        self, camera: str, *, keep_only_complete: bool = False
+    ) -> list[FrameObservation]:
+        """Read the observations of a camera's frames from the library.
+
+        Parameters
+        ----------
+        camera : `str`
+            The camera name.
+        keep_only_complete : `bool`, optional
+            When true and a read failed (a note was added), raise
+            `_IncompleteReadError` with the partial result, so the cache keeps
+            nothing.
+
+        Returns
+        -------
+        observations : `list` [`FrameObservation`]
+            One for each frame with a width, sky rate or read noise row.
+
+        Raises
+        ------
+        _IncompleteReadError
+            If ``keep_only_complete`` is true and a read failed.
+        """
+        notes_before = len(self.notes)
+        rows = self.camera_rows(camera)
+        ids = sorted({row.subject.capture_setting_id for row in rows if row.subject.capture_setting_id})
+        settings = dict(self.astrometrics.quality.capture_settings(ids=ids)) if ids else {}
+        owners = (
+            self.target(target_id)
+            for target_id in sorted({row.subject.target_id for row in rows if row.subject.target_id})
+        )
+        epochs, directions = times_and_directions(owner for owner in owners if owner is not None)
+        observations = frame_observations_from_measurements(
+            rows, settings, start_epoch_by_frame=epochs, direction_by_frame=directions
+        )
+        if keep_only_complete and len(self.notes) > notes_before:
+            raise _IncompleteReadError(observations)
+        return observations
 
     def reference_choice(
         self, setting: CaptureSetting, exclude_night_id: str | None = None
@@ -811,8 +905,8 @@ class LibraryInputs:
             except AttributeError, OSError, TypeError, ValueError:
                 cache_key = None
             # The fit reads every frame of the camera in the library, so it is
-            # the same for every target and is kept until the library changes.
-            version = None if cache_key is None else (lambda: get_library_data_version(self.config))
+            # the same for every target and is kept until its camera changes.
+            version = None if cache_key is None else (lambda: self.camera_data_version(setting.camera))
             self._models[key] = _SKY_MODEL_CACHE.get_or_build(
                 cache_key, version, lambda: self._fit_sky_model(setting, key)
             )

@@ -55,11 +55,15 @@ def config(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> AppConfiguration:
     Returns
     -------
     config : `AppConfiguration`
-        The configuration.
+        The configuration, whose image library is an empty temporary folder.
     """
     config_path = tmp_path / "astrometrics.config.toml"
     monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: config_path)
-    return AppConfiguration()
+    library = tmp_path / "library"
+    library.mkdir()
+    configuration = AppConfiguration()
+    configuration.update_config({"Image Library": {"path": str(library)}})
+    return configuration
 
 
 def _butler(stored: SiteProfile | None = None) -> Any:
@@ -300,14 +304,49 @@ def test_a_stored_profile_is_used_only_when_the_configuration_has_no_location() 
     assert stored_site(_butler(SITE), _located(None, None)) == SITE
 
 
-def test_the_sky_model_is_fitted_once_for_every_report_until_the_library_changes(
+def _write_camera_row(config: AppConfiguration, camera: str, run_id: str, target_id: str = "T") -> None:
+    """Store one frame measurement taken with a camera.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The configuration whose library gets the row.
+    camera : `str`
+        The camera of the row's capture setting.
+    run_id : `str`
+        The run that wrote it. A new run id makes a new row.
+    target_id : `str`, optional
+        The target the frame belongs to.
+    """
+    from astrometricslib._internal.drivers.quality_store import QualityStore
+    from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject
+    from astrometricslib.reports import MeasurementStatus, QualityMeasurement, SubjectLevel
+
+    store = QualityStore.from_configuration(config)
+    setting_id = store.get_or_create_capture_setting(CaptureSetting(camera=camera))
+    store.write_measurements([
+        QualityMeasurement(
+            metric="frame.sky_rate_e_per_s_per_px",
+            definition_version=1,
+            subject=QualitySubject(
+                level=SubjectLevel.FRAME,
+                subject_id=f"{target_id}/{run_id}.fits",
+                target_id=target_id,
+                capture_setting_id=setting_id,
+            ),
+            status=MeasurementStatus.MEASURED,
+            value=1.0,
+            origin=MeasurementOrigin.MEASURED,
+            run_id=run_id,
+            measured_at=datetime(2026, 10, 1, 3, 0, tzinfo=UTC),
+        )
+    ])
+
+
+def test_the_sky_model_is_fitted_once_for_every_report_until_its_camera_changes(
     config: AppConfiguration, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Two reports share one fit until a library write."""
-    import sqlite3
-
-    from astrometricslib.foundation.storage.data_versions import bump_data_version
-
+    """Two reports share one fit until the same camera gets a frame."""
     monkeypatch.setattr(library_inputs, "_SKY_MODEL_CACHE", library_inputs.VersionedCache())
     fits: list[str] = []
 
@@ -329,9 +368,87 @@ def test_the_sky_model_is_fitted_once_for_every_report_until_the_library_changes
     assert second.sky_model_for(SETTING) == (None, "made up")
     assert len(fits) == 1
 
-    database = sqlite3.connect(str(config.get_library_path()) + "/astrometrics.db")
-    bump_data_version(database, "quality")
-    database.commit()
-    database.close()
+    # A frame of another camera leaves the fit as it is.
+    _write_camera_row(config, "OtherCam", "run-1")
+    LibraryInputs(None, _butler(SITE), config).sky_model_for(SETTING)
+    assert len(fits) == 1
+
+    # A frame of another target taken with the same camera fits it again.
+    _write_camera_row(config, SETTING.camera, "run-2", target_id="Other")
     LibraryInputs(None, _butler(SITE), config).sky_model_for(SETTING)
     assert len(fits) == 2
+
+
+def test_the_camera_observations_are_read_once_until_their_camera_changes(
+    config: AppConfiguration, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A camera's frames are read again only after a write for it."""
+    reads: list[str] = []
+    original = LibraryInputs._read_camera_observations
+
+    def counted(self: LibraryInputs, camera: str, **keywords: Any) -> list[FrameObservation]:
+        """Count the read and do it.
+
+        Returns
+        -------
+        observations : `list` [`FrameObservation`]
+            The observations.
+        """
+        reads.append(camera)
+        return original(self, camera, **keywords)
+
+    monkeypatch.setattr(LibraryInputs, "_read_camera_observations", counted)
+    target = make_target(STAR, 2)
+    library = FakeLibrary([target], make_rows(target, REVIEWED))
+
+    first = LibraryInputs(library, _butler(SITE), config).camera_observations(SETTING.camera)
+    second = LibraryInputs(library, _butler(SITE), config).camera_observations(SETTING.camera)
+    assert reads == [SETTING.camera]
+    assert first and second == first
+
+    # The kept list equals a read made without the cache.
+    assert first == original(LibraryInputs(library, _butler(SITE), config), SETTING.camera)
+
+    _write_camera_row(config, "OtherCam", "run-1")
+    LibraryInputs(library, _butler(SITE), config).camera_observations(SETTING.camera)
+    assert reads == [SETTING.camera]
+
+    _write_camera_row(config, SETTING.camera, "run-2", target_id="Other")
+    LibraryInputs(library, _butler(SITE), config).camera_observations(SETTING.camera)
+    assert reads == [SETTING.camera, SETTING.camera]
+
+
+def test_a_failed_read_of_a_cameras_frames_is_not_kept(
+    config: AppConfiguration, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A read made in part is used once and not kept."""
+    from astrometricslib.exceptions import AstrometricsError
+
+    target = make_target(STAR, 1)
+    library = FakeLibrary([target], make_rows(target, REVIEWED))
+    good_query = library.quality.query
+    state = {"fail": True}
+
+    def flaky(**keywords: Any) -> Any:
+        """Fail on the first round of reads.
+
+        Returns
+        -------
+        answer : `QualityQueryResult`
+            The rows.
+
+        Raises
+        ------
+        AstrometricsError
+            While the test says the library is busy.
+        """
+        if state["fail"]:
+            raise AstrometricsError("busy")
+        return good_query(**keywords)
+
+    library.quality.query = flaky
+    inputs = LibraryInputs(library, _butler(SITE), config)
+    assert inputs.camera_observations(SETTING.camera) == []
+    assert inputs.notes
+    state["fail"] = False
+    assert LibraryInputs(library, _butler(SITE), config).camera_observations(SETTING.camera)

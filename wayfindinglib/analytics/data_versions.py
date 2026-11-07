@@ -26,6 +26,15 @@ the live counter. It watches how many samples exist, rounded down to a
 coarse step, and the counter of bulk replacements (a guide log sync). A few
 new live samples do not change the version. A guide log sync does, and it
 also writes a guiding run, which is counted exactly.
+
+A depth goal (`depth_goal_data_version`) reads the same wayfinding records,
+equipment and configuration as a report. For the library it watches only the
+one target's own data and the data of the cameras that target used, not the
+counters that any target's new frame changes. A frame of M 13 taken with
+another camera does not make the depth goal of M 31 build again; a frame of
+M 13 taken with the same camera does, because the forecast compares the
+target with the camera's other frames (the efficiency baseline, the sky
+model and the noise model pooled over targets).
 """
 
 from __future__ import annotations
@@ -35,7 +44,12 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib.drivers import get_library_data_version
+from astrometricslib.drivers import (
+    get_camera_data_versions,
+    get_library_data_version,
+    get_target_camera_names,
+    get_target_data_version,
+)
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
 from wayfindinglib.data_access.site_profile_reader import configured_observer_location
 from wayfindinglib.drivers.control_record_store import BULK_GUIDING_SAMPLES_KIND, RECORD_VERSION_TABLES
@@ -55,6 +69,9 @@ REPORT_EXACT_TABLES = (
 The report reads the Ekos session records, the site and the guiding runs.
 It does not read the observation sessions, so they are not listed.
 """
+
+NIGHT_LIST_TABLES = ("guiding_runs", "ekos_session_contexts")
+"""The ``wayfinding.db`` tables the list of nights reads; all writes count."""
 
 REPORT_COARSE_TABLE = "guiding_samples"
 """The table written every few seconds during a night, counted coarsely."""
@@ -130,6 +147,45 @@ def equipment_signs(config: Any) -> tuple[str, ...]:
     return (*(repr(item) for item in items), repr(configured_observer_location(config)))
 
 
+def report_context_version(config: Any, butler: Any) -> Hashable | None:
+    """Work out the version of a report's inputs that are not library data.
+
+    These are the wayfinding records, the coarse guiding count, the active
+    equipment and site, and the configuration sections (see the module
+    description). `report_data_version` adds the library counters to them.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application settings.
+    butler : `DiskButler`
+        The record store. It gives the wayfinding records.
+
+    Returns
+    -------
+    version : `~collections.abc.Hashable` or `None`
+        A value that is equal for two calls only when none of those inputs
+        has visibly changed between them. `None` when it cannot be worked
+        out, in which case the caller must not keep a result.
+    """
+    try:
+        records = butler.control_records
+        wayfinding = records.data_versions((*REPORT_EXACT_TABLES, BULK_GUIDING_SAMPLES_KIND))
+        sample_count = records.guiding_sample_count()
+        if wayfinding is None or sample_count is None:
+            return None
+        return (
+            tuple(sorted(wayfinding.items())),
+            sample_count // REPORT_COARSE_STEP,
+            equipment_signs(config),
+            config_signs(config),
+        )
+    except Exception:
+        # A version that cannot be worked out only means no result is kept.
+        logger.exception("Could not work out the context version of the target report.")
+        return None
+
+
 def report_data_version(config: Any, butler: Any) -> Hashable | None:
     """Work out the version of every input of a target report.
 
@@ -152,24 +208,89 @@ def report_data_version(config: Any, butler: Any) -> Hashable | None:
         changed between them. `None` when it cannot be worked out, in which
         case the caller must not keep a result.
     """
+    context = report_context_version(config, butler)
+    library = get_library_data_version(config)
+    if context is None or library is None:
+        return None
+    return (context, library)
+
+
+def depth_goal_data_version(config: Any, butler: Any, target_id: str) -> Hashable | None:
+    """Work out the version of the inputs of one target's depth goal.
+
+    The depth goal reads the target's frames, stacks and measurements, the
+    chosen level, and the same context as a target report. Unlike
+    `report_data_version` it does not watch the library counters, which a
+    new frame of any target changes. It watches the one target's own data
+    (`get_target_data_version`). The forecast also reads the frames, stacks
+    and calibration records of the same camera from other targets (the
+    efficiency baseline, the sky model and the noise model), so it watches
+    the data of each camera the target used (`get_camera_data_versions`). A
+    new frame from another camera leaves the version as it is.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application settings.
+    butler : `DiskButler`
+        The record store. It gives the wayfinding records.
+    target_id : `str`
+        The target's id.
+
+    Returns
+    -------
+    version : `~collections.abc.Hashable` or `None`
+        A value that is equal for two calls only when none of those inputs
+        has visibly changed between them. `None` when it cannot be worked
+        out, in which case the caller must not keep a result.
+    """
+    context = report_context_version(config, butler)
+    target = get_target_data_version(config, target_id)
+    cameras = get_target_camera_names(config, target_id)
+    if context is None or target is None or cameras is None:
+        return None
+    camera_versions = get_camera_data_versions(config, cameras)
+    if camera_versions is None:
+        return None
+    return (context, target, tuple(sorted(camera_versions.items())))
+
+
+def nights_data_version(context: Any) -> Hashable | None:
+    """Work out the version of every input of the list of nights.
+
+    The list of nights reads the Ekos sessions, the guiding runs and the
+    frame library. It does not read the guiding samples, which a live night
+    adds to every few seconds. So, unlike `review_data_version`, this
+    version does not watch them, and live guiding does not make the list
+    rebuild on every request.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the configuration (``config``) and the record store
+        (``records``).
+
+    Returns
+    -------
+    version : `~collections.abc.Hashable` or `None`
+        A value that is equal for two calls only when no input of the list
+        has visibly changed between them. `None` when it cannot be worked
+        out, in which case the caller must not keep a result.
+    """
     try:
-        records = butler.control_records
-        wayfinding = records.data_versions((*REPORT_EXACT_TABLES, BULK_GUIDING_SAMPLES_KIND))
-        sample_count = records.guiding_sample_count()
-        library = get_library_data_version(config)
-        if wayfinding is None or sample_count is None or library is None:
+        wayfinding = context.records.data_versions(NIGHT_LIST_TABLES)
+        library = get_library_data_version(context.config)
+        if wayfinding is None or library is None:
             return None
-        coarse = sample_count // REPORT_COARSE_STEP
         return (
             tuple(sorted(wayfinding.items())),
-            coarse,
             library,
-            equipment_signs(config),
-            config_signs(config),
+            equipment_signs(context.config),
+            config_signs(context.config),
         )
     except Exception:
         # A version that cannot be worked out only means no result is kept.
-        logger.exception("Could not work out the data version of the target report.")
+        logger.exception("Could not work out the data version of the list of nights.")
         return None
 
 

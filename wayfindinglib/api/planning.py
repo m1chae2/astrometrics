@@ -2727,12 +2727,13 @@ class ObservationPlanning:
         status : `DepthGoalStatus`
             The status, with a sentence for a novice in ``message``.
         """
-        from wayfindinglib.tasks.planning_tasks.depth_goal_tasks import build_depth_goal_status
+        from wayfindinglib.tasks.planning_tasks.depth_goal_tasks import cached_depth_goal_status
         from wayfindinglib.tasks.planning_tasks.target_report_tasks import build_target_dataset_report
 
         resolved = self._target(target)
-        return build_depth_goal_status(
+        return cached_depth_goal_status(
             resolved.id,
+            config=self._config,
             astrometrics=self._astrometrics,
             butler=self._butler,
             report_for_noise_ratio=lambda ratio: build_target_dataset_report(

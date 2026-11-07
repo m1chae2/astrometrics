@@ -28,6 +28,8 @@ from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, current_job_id, registered_job
+from astrometricslib.foundation.storage.data_versions import QUALITY_KIND, get_library_data_version
+from astrometricslib.foundation.versioned_cache import VersionedCache
 from astrometricslib.models.calibration_ingest import (
     CalibrationIngestReport,
     CalibrationMeasurementReport,
@@ -287,6 +289,7 @@ class CalibrationCatalog:
         self._storage = storage
         self._targets = targets
         self._library: Any = None
+        self._assess_cache = VersionedCache()
 
     @property
     def _calibration_library(self) -> Any:
@@ -735,7 +738,85 @@ class CalibrationCatalog:
                 calibration_set, gain, offset, binning, temperature_c, exposure_seconds
             )
         ]
-        return self._judge_dark_or_bias_sets(kind, wanted, camera_id)
+        key = (
+            "assess",
+            str(self._config.get_library_path()),
+            kind,
+            camera_id,
+            gain,
+            offset,
+            binning,
+            temperature_c,
+            exposure_seconds,
+        )
+        return self._assess_cache.get_or_build(
+            key,
+            lambda: self._assess_version(kind, wanted, camera_id),
+            lambda: self._judge_dark_or_bias_sets(kind, wanted, camera_id),
+        )
+
+    def _assess_version(self, kind: str, wanted: list[Any], camera_id: str | None) -> Any:
+        """Work out a sign for the judgement of dark or bias sets.
+
+        The sign changes whenever the judgement would.
+
+        The judgement reads the sets (their frames and settings), the stored
+        numbers of those frames, the bias sets that serve as reference, the
+        camera profiles and the configured fewest frames. The sign holds a
+        description of each, so a new, moved or removed calibration file, a
+        new measurement, or a changed profile gives a new sign.
+
+        Parameters
+        ----------
+        kind : {"dark", "bias"}
+            The kind of the sets.
+        wanted : `list` [`CalibrationSet`]
+            The sets to judge.
+        camera_id : `str` or `None`
+            Limits the bias sets used as references to this camera.
+
+        Returns
+        -------
+        version : `Any`
+            A hashable sign, or `None` when the stored numbers' counter
+            cannot be read (nothing is then kept).
+        """
+        counter = get_library_data_version(self._config, (QUALITY_KIND,))
+        if counter is None:
+            return None
+        bias_sets = (
+            self._calibration_library.list_calibration_sets("bias", camera=camera_id)
+            if kind == "dark"
+            else []
+        )
+
+        def describe(calibration_set: Any) -> tuple:
+            """Describe one set by its settings and its frame paths.
+
+            Returns
+            -------
+            description : `tuple`
+                The settings and the paths.
+            """
+            return (
+                calibration_set.kind,
+                calibration_set.camera,
+                calibration_set.gain,
+                calibration_set.offset,
+                calibration_set.binning,
+                calibration_set.temperature_c,
+                calibration_set.exposure_seconds,
+                tuple(calibration_set.paths),
+            )
+
+        profiles = sorted({calibration_set.camera for calibration_set in wanted})
+        return (
+            counter,
+            self._config.get_minimum_calibration_frames(),
+            tuple(describe(calibration_set) for calibration_set in wanted),
+            tuple(describe(calibration_set) for calibration_set in bias_sets),
+            tuple(repr(resolve_camera_profile(camera, self._config)) for camera in profiles),
+        )
 
     def _judge_dark_or_bias_sets(
         self, kind: str, wanted: list[Any], camera_id: str | None
@@ -783,11 +864,11 @@ class CalibrationCatalog:
             for calibration_set in wanted
             for path in calibration_set.paths
         })
-        prefixes = {"calibration/bias/", f"calibration/{kind}/"}
+        # Only the frames of these sets are read, not every dark and bias
+        # frame of every camera (about 20 000 rows on a large library).
         rows = [
             row
-            for prefix in sorted(prefixes)
-            for row in store.query(level=SubjectLevel.FRAME, subject_id_prefix=prefix)
+            for row in store.query(level=SubjectLevel.FRAME, subject_ids=sorted(subject_paths))
             if row.definition_version == _CURRENT_VERSIONS.get(row.metric)
         ]
         facts = frame_facts_from_rows(rows, subject_paths)

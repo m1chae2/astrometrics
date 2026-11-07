@@ -225,6 +225,50 @@ def test_the_list_of_nights_is_kept_too(review: ObservationReview, builds: dict[
     assert builds["nights"] == 1
 
 
+def test_live_guiding_samples_do_not_rebuild_the_list_of_nights(
+    review: ObservationReview, builds: dict[str, int]
+) -> None:
+    """Guiding samples are not read by the list of nights, so it is kept."""
+    first = review.query(kind="nights", register_job=False).night_list
+    review._context.records.record_guiding_samples([
+        {"session_id": REVIEWED, "timestamp": 1.0, "dra": 0.1, "ddec": 0.1, "source": "phd2_log"}
+    ])
+    second = review.query(kind="nights", register_job=False).night_list
+
+    assert builds["nights"] == 1
+    assert first == second
+
+
+def test_a_new_guiding_run_rebuilds_the_list_of_nights(
+    review: ObservationReview, builds: dict[str, int]
+) -> None:
+    """A new guiding run is read by the list of nights, so it rebuilds."""
+    review.query(kind="nights", register_job=False)
+    review._context.butler.put(
+        GuidingRunSummary(
+            id="guide_log-new.txt#0",
+            session_id="2026-01-01",
+            source_file_name="guide_log-new.txt",
+            written_by_ekos=True,
+            started_at=1.0,
+            ended_at=2.0,
+            pixel_scale_arcsec_per_px=6.445,
+            focal_length_mm=120.0,
+            ra_rate_arcsec_per_second=5.0,
+            dec_rate_arcsec_per_second=7.5,
+            frames_total=10,
+            frames_lost=0,
+            samples_stored=10,
+        ),
+        "guiding_run",
+        {"id": "guide_log-new.txt#0"},
+    )
+    nights = review.query(kind="nights", register_job=False).night_list
+
+    assert builds["nights"] == 2
+    assert "2026-01-01" in [night.night_id for night in nights]
+
+
 def test_threads_asking_for_the_same_night_build_it_once(
     review: ObservationReview, builds: dict[str, int]
 ) -> None:

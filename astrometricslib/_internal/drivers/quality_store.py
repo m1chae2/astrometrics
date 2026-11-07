@@ -484,6 +484,13 @@ def quality_database_path(app_config: AppConfiguration | None = None) -> str:
     return os.path.join(str(app_config.get_library_path()), "astrometrics.db")
 
 
+MAXIMUM_SUBJECT_IDS_PER_QUERY = 20000
+"""The most subject ids one query may name.
+
+SQLite allows 32766 bound values in one statement; the rest of the
+statement's values stay far below the difference."""
+
+
 class QualityStore:
     """Writes and reads quality measurements in a SQLite database.
 
@@ -1093,6 +1100,7 @@ class QualityStore:
         library_only: bool = False,
         subject_id_prefix: str | None = None,
         job_id: str | None = None,
+        subject_ids: Sequence[str] | None = None,
     ) -> list[QualityMeasurement]:
         """Read stored measurements.
 
@@ -1132,6 +1140,9 @@ class QualityStore:
             Only rows that the job with this id wrote. To read everything a
             job wrote, also pass ``latest_only=False``: a later run can
             replace a row in the latest view.
+        subject_ids : `Sequence` of `str`, optional
+            Only the subjects with one of these ids. An empty sequence
+            matches nothing. At most `MAXIMUM_SUBJECT_IDS_PER_QUERY` ids.
 
         Returns
         -------
@@ -1142,7 +1153,8 @@ class QualityStore:
         Raises
         ------
         InvalidArgumentError
-            If both ``variant`` and ``library_only`` are given.
+            If both ``variant`` and ``library_only`` are given, or more than
+            `MAXIMUM_SUBJECT_IDS_PER_QUERY` subject ids are given.
 
         Notes
         -----
@@ -1154,6 +1166,11 @@ class QualityStore:
         """
         if variant is not None and library_only:
             raise InvalidArgumentError("Ask for a subset label or for library rows only, not both.")
+        if subject_ids is not None and len(subject_ids) > MAXIMUM_SUBJECT_IDS_PER_QUERY:
+            raise InvalidArgumentError(
+                f"Ask for at most {MAXIMUM_SUBJECT_IDS_PER_QUERY} subject ids at once.",
+                details={"count": len(subject_ids)},
+            )
         source = "quality_measurements_latest" if latest_only and row_ids is None else "quality_measurements"
         conditions: list[str] = []
         parameters: list[Any] = []
@@ -1175,6 +1192,9 @@ class QualityStore:
         if row_ids is not None:
             conditions.append(f"m.row_id IN ({', '.join('?' * len(row_ids))})")
             parameters.extend(row_ids)
+        if subject_ids is not None:
+            conditions.append(f"m.subject_id IN ({', '.join('?' * len(subject_ids))})")
+            parameters.extend(subject_ids)
         if subject_id_prefix is not None:
             # `substr` compares the start exactly, so a "%" or "_" in the
             # prefix is not a wildcard.

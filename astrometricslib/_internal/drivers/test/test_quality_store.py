@@ -196,6 +196,10 @@ def test_query_filters(store: QualityStore) -> None:
     ids = [m.row_id for m in store.query(target_id="M31")]
     assert {m.row_id for m in store.query(row_ids=ids)} == set(ids)
     assert store.query(row_ids=[]) == []
+    assert {m.subject.subject_id for m in store.query(subject_ids=["f1", "s1", "unknown"])} == {"f1", "s1"}
+    assert store.query(subject_ids=[]) == []
+    with pytest.raises(InvalidArgumentError):
+        store.query(subject_ids=[str(number) for number in range(20001)])
 
 
 def test_row_ids_return_exact_rows_even_when_superseded(store: QualityStore) -> None:

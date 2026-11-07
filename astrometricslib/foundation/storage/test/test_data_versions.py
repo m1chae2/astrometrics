@@ -24,9 +24,13 @@ from astrometricslib.foundation.storage.data_versions import (
     STARS_KIND,
     TARGETS_KIND,
     bump_data_version,
+    get_camera_data_versions,
     get_library_data_version,
+    get_target_camera_names,
+    get_target_data_version,
     read_data_versions,
 )
+from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.measurement import (
     MeasurementOrigin,
     MeasurementStatus,
@@ -177,3 +181,125 @@ def test_the_quality_store_counts_new_rows_but_not_repeats(config: AppConfigurat
     assert _counters(config)[QUALITY_KIND] == 1
     store.write_measurements([_measurement().model_copy(update={"run_id": "run-2"})])
     assert _counters(config)[QUALITY_KIND] == 2
+
+
+def test_the_target_version_sees_only_that_targets_changes(config: AppConfiguration) -> None:
+    """A write for one target changes its version, not another's."""
+    store = QualityStore.from_configuration(config)
+    save_target(config, Target(id="M 31"))
+    save_target(config, Target(id="M 13"))
+    before = get_target_data_version(config, "M 31")
+    other_before = get_target_data_version(config, "M 13")
+    assert before is not None
+    assert get_target_data_version(config, "M 31") == before
+
+    # A measurement of M 31 changes M 31's version only.
+    measurement = _measurement()
+    measurement = measurement.model_copy(
+        update={"subject": measurement.subject.model_copy(update={"target_id": "M 31"})}
+    )
+    store.write_measurements([measurement])
+    assert get_target_data_version(config, "M 31") != before
+    assert get_target_data_version(config, "M 13") == other_before
+
+    # A changed document (a new frame record) changes that target's version.
+    after_measurement = get_target_data_version(config, "M 31")
+    save_target(config, Target(id="M 31", common_name="Andromeda"))
+    assert get_target_data_version(config, "M 31") != after_measurement
+    assert get_target_data_version(config, "M 13") == other_before
+
+
+def test_the_target_version_of_a_library_that_was_never_written_is_empty(config: AppConfiguration) -> None:
+    """A missing database gives a stable version, not an error."""
+    assert get_target_data_version(config, "M 31") == get_target_data_version(config, "M 31")
+    assert get_target_data_version(config, "M 31") is not None
+
+
+def test_a_file_that_is_not_a_database_gives_an_unknown_target_version(config: AppConfiguration) -> None:
+    """An unreadable database means no version, so nothing is kept."""
+    (Path(str(config.get_library_path())) / "astrometrics.db").write_text("not a database")
+    assert get_target_data_version(config, "M 31") is None
+
+
+def _camera_measurement(store: QualityStore, camera: str, target: str, run_id: str) -> QualityMeasurement:
+    """Build a frame measurement of a target taken with a camera.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        The measurement, whose capture setting names the camera.
+    """
+    setting_id = store.get_or_create_capture_setting(CaptureSetting(camera=camera))
+    measurement = _measurement()
+    return measurement.model_copy(
+        update={
+            "run_id": run_id,
+            "subject": measurement.subject.model_copy(
+                update={
+                    "target_id": target,
+                    "capture_setting_id": setting_id,
+                    "subject_id": f"{target}/{run_id}",
+                }
+            ),
+        }
+    )
+
+
+def test_the_camera_version_sees_only_that_cameras_measurements(config: AppConfiguration) -> None:
+    """One camera's measurement changes only its own version."""
+    store = QualityStore.from_configuration(config)
+    store.write_measurements([_camera_measurement(store, "CamA", "M 31", "run-1")])
+    before = get_camera_data_versions(config, ["CamA", "CamB"])
+    assert before is not None
+    assert get_camera_data_versions(config, ["CamA", "CamB"]) == before
+
+    store.write_measurements([_camera_measurement(store, "CamB", "M 13", "run-2")])
+    after_b = get_camera_data_versions(config, ["CamA", "CamB"])
+    assert after_b is not None
+    assert after_b["CamA"] == before["CamA"]
+    assert after_b["CamB"] != before["CamB"]
+
+    # A frame of another target taken with the same camera changes it too.
+    store.write_measurements([_camera_measurement(store, "CamA", "M 13", "run-3")])
+    after_a = get_camera_data_versions(config, ["CamA", "CamB"])
+    assert after_a is not None
+    assert after_a["CamA"] != after_b["CamA"]
+    assert after_a["CamB"] == after_b["CamB"]
+
+
+def test_the_camera_version_sees_a_calibration_record_of_that_camera(config: AppConfiguration) -> None:
+    """A camera's calibration record changes its version."""
+    store = QualityStore.from_configuration(config)
+    store.write_measurements([_camera_measurement(store, "CamA", "M 31", "run-1")])
+    before = get_camera_data_versions(config, ["CamA", "CamB"])
+    connection = sqlite3.connect(str(config.get_library_path()) + "/astrometrics.db")
+    connection.execute(
+        "INSERT INTO quality_calibration_identity (run_id, subject_id, target_id, camera, recorded_at) "
+        "VALUES ('run-9', 'M 31/stack', 'M 31', 'CamA', '2026-10-02T00:00:00')"
+    )
+    connection.commit()
+    connection.close()
+    after = get_camera_data_versions(config, ["CamA", "CamB"])
+    assert before is not None and after is not None
+    assert after["CamA"] != before["CamA"]
+    assert after["CamB"] == before["CamB"]
+
+
+def test_the_cameras_of_a_target_come_from_its_measurements(config: AppConfiguration) -> None:
+    """A target's cameras are those named by its rows' capture settings."""
+    assert get_target_camera_names(config, "M 31") == ()
+    store = QualityStore.from_configuration(config)
+    store.write_measurements([
+        _camera_measurement(store, "CamB", "M 31", "run-1"),
+        _camera_measurement(store, "CamA", "M 31", "run-2"),
+        _camera_measurement(store, "CamC", "M 13", "run-3"),
+    ])
+    assert get_target_camera_names(config, "M 31") == ("CamA", "CamB")
+    assert get_target_camera_names(config, "Nothing") == ()
+
+
+def test_unreadable_camera_data_gives_no_version(config: AppConfiguration) -> None:
+    """A file that is not a database gives no version and no cameras."""
+    (Path(str(config.get_library_path())) / "astrometrics.db").write_text("not a database")
+    assert get_camera_data_versions(config, ["CamA"]) is None
+    assert get_target_camera_names(config, "M 31") is None

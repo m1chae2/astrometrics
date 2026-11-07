@@ -1,13 +1,15 @@
 """Purpose: Tests that large RPC replies are encoded off the event loop.
 
-Description: The RPC router builds a success reply in a worker thread. These
-tests check that the bytes match a fixed expected JSON, that
-errors keep their shape, and that a slow encoding does not delay a small call
-that runs at the same time.
+Description: The RPC router runs the methods that scan a large library in a
+small heavy lane, so they cannot slow light calls. It builds a success
+reply in a worker thread. These tests check that the bytes match a fixed
+expected JSON, that errors keep their shape, and that a slow encoding or
+a busy heavy call does not delay a small call that runs at the same time.
 """
 
 import asyncio
 import json
+import threading
 import time
 
 import numpy as np
@@ -162,3 +164,60 @@ def test_slow_encoding_does_not_block_small_call(
         return elapsed
 
     assert asyncio.run(scenario()) < 0.25
+
+
+def test_heavy_methods_do_not_delay_a_light_call(
+    registered_methods: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Many busy heavy calls leave a light call fast: few run at once."""
+    monkeypatch.setattr(rpc_router, "HEAVY_METHODS", frozenset({"x:heavy"}))
+    running = {"now": 0, "most": 0}
+    guard = threading.Lock()
+
+    def heavy() -> int:
+        """Burn processor time for 0.2 s and note how many run together.
+
+        Returns
+        -------
+        count : `int`
+            Always 1.
+        """
+        with guard:
+            running["now"] += 1
+            running["most"] = max(running["most"], running["now"])
+        end = time.perf_counter() + 0.2
+        while time.perf_counter() < end:
+            sum(i * i for i in range(200))
+        with guard:
+            running["now"] -= 1
+        return 1
+
+    registered_methods["x:heavy"] = heavy
+    registered_methods["x:light"] = lambda: "light"
+
+    async def scenario() -> float:
+        """Start twelve heavy calls, then time a light one.
+
+        Returns
+        -------
+        elapsed : `float`
+            Seconds the light call took.
+        """
+        heavy_calls = [
+            asyncio.create_task(rpc_router.handle_rpc(RPCRequest(method="x:heavy", params={}, id=i)))
+            for i in range(12)
+        ]
+        await asyncio.sleep(0.05)
+        start = time.perf_counter()
+        await rpc_router.handle_rpc(RPCRequest(method="x:light", params={}, id=99))
+        elapsed = time.perf_counter() - start
+        await asyncio.gather(*heavy_calls)
+        return elapsed
+
+    assert asyncio.run(scenario()) < 0.15
+    assert running["most"] <= rpc_router.HEAVY_LANE_SLOTS
+
+
+def test_declared_heavy_methods_exist() -> None:
+    """Every method named as heavy is a declared RPC method."""
+    assert rpc_router.HEAVY_METHODS <= rpc_router._DECLARED_METHODS

@@ -22,9 +22,11 @@ So is a database file swapped for an older copy. Restore a backup only while
 the app is stopped.
 """
 
+import hashlib
 import logging
 import os
 import sqlite3
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
@@ -140,3 +142,236 @@ def get_library_data_version(
         return None
     wanted = ALL_KINDS if kinds is None else tuple(sorted(kinds))
     return tuple((kind, versions.get(kind, 0)) for kind in wanted)
+
+
+def get_target_data_version(config: AppConfiguration, target_id: str) -> tuple[str | int, ...] | None:
+    """Give a value that changes whenever one target's own data change.
+
+    The library counters (`get_library_data_version`) change when any target
+    is written, so a new frame of one target changes them for every target.
+    This version looks at one target only: its stored document (the frame
+    records and the stack records), its quality measurements and its
+    calibration identities. Two calls give equal values only if none of
+    those changed in between. Data of other targets that a result may also
+    read (for example the frames of the same camera) are not seen.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application settings. They give the library folder, where
+        ``astrometrics.db`` is.
+    target_id : `str`
+        The target's id as the library stores it.
+
+    Returns
+    -------
+    version : `tuple` [`str` or `int`, ...] or `None`
+        The stored document's size and hash, then the count, newest row
+        number and newest time of the target's measurements, then the count
+        and newest time of its calibration identities. `None` when the
+        database could not be read; the caller must not keep an answer then.
+    """
+    try:
+        database_path = os.path.join(str(config.get_library_path()), "astrometrics.db")
+    except Exception:
+        # No library folder means no version, and so no answer is kept.
+        logger.warning("Could not find the library folder for the target data version.", exc_info=True)
+        return None
+    if not os.path.isfile(database_path):
+        return (0, "", 0, 0, "", 0, "")
+    connection = None
+    try:
+        connection = sqlite3.connect(f"file:{quote(database_path)}?mode=ro", uri=True, timeout=5.0)
+        document = _read_or_default(
+            connection, "SELECT data_json FROM targets WHERE id = ?", (target_id,), (None,)
+        )
+        text = document[0] or ""
+        digest = hashlib.blake2b(text.encode("utf-8"), digest_size=16).hexdigest() if text else ""
+        measurements = _read_or_default(
+            connection,
+            "SELECT COUNT(*), COALESCE(MAX(row_id), 0), COALESCE(MAX(measured_at), '') "
+            "FROM quality_measurements WHERE target_id = ?",
+            (target_id,),
+            (0, 0, ""),
+        )
+        identities = _read_or_default(
+            connection,
+            "SELECT COUNT(*), COALESCE(MAX(recorded_at), '') FROM quality_calibration_identity "
+            "WHERE target_id = ?",
+            (target_id,),
+            (0, ""),
+        )
+        return (len(text), digest, *measurements, *identities)
+    except sqlite3.Error, OSError:
+        logger.warning("Could not read the target data version from %s.", database_path, exc_info=True)
+        return None
+    finally:
+        if connection is not None:
+            connection.close()
+
+
+def get_camera_data_versions(
+    config: AppConfiguration, cameras: Sequence[str]
+) -> dict[str, tuple[str | int, ...]] | None:
+    """Give a value for each camera that changes whenever its measurements do.
+
+    A result that compares a target with the rest of the library (an
+    efficiency baseline, a sky model, a noise model pooled over targets) reads
+    the measurements of every target taken with the same camera. The library
+    counters change when anything is written, and the target version
+    (`get_target_data_version`) sees one target only. This version sees one
+    camera: all quality measurements whose capture setting names it, at every
+    level (frame and stack), and the calibration records of its stacks. A
+    measurement or calibration record of another camera does not change it.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application settings. They give the library folder.
+    cameras : `Sequence` [`str`]
+        The camera names, as the capture settings store them.
+
+    Returns
+    -------
+    versions : `dict` [`str`, `tuple`] or `None`
+        For each camera: the count, the newest row number and the newest time
+        of its measurements, then the count and newest time of its
+        calibration records. A camera with no data gets zeros. `None` when
+        the database could not be read; the caller must not keep an answer
+        then.
+    """
+    wanted = sorted(set(cameras))
+    empty: tuple[str | int, ...] = (0, 0, "", 0, "")
+    path = _library_database_path(config)
+    if path is None:
+        return None
+    if not os.path.isfile(path):
+        return dict.fromkeys(wanted, empty)
+    connection = None
+    try:
+        connection = sqlite3.connect(f"file:{quote(path)}?mode=ro", uri=True, timeout=5.0)
+        result: dict[str, tuple[str | int, ...]] = {}
+        for camera in wanted:
+            measurements = _read_or_default(
+                connection,
+                "SELECT COUNT(*), COALESCE(MAX(m.row_id), 0), COALESCE(MAX(m.measured_at), '') "
+                "FROM quality_measurements m JOIN quality_capture_setting s "
+                "ON s.capture_setting_id = m.capture_setting_id WHERE s.camera = ?",
+                (camera,),
+                (0, 0, ""),
+            )
+            identities = _read_or_default(
+                connection,
+                "SELECT COUNT(*), COALESCE(MAX(recorded_at), '') FROM quality_calibration_identity "
+                "WHERE camera = ?",
+                (camera,),
+                (0, ""),
+            )
+            result[camera] = (*measurements, *identities)
+        return result
+    except sqlite3.Error, OSError:
+        logger.warning("Could not read the camera data versions from %s.", path, exc_info=True)
+        return None
+    finally:
+        if connection is not None:
+            connection.close()
+
+
+def get_target_camera_names(config: AppConfiguration, target_id: str) -> tuple[str, ...] | None:
+    """List the cameras that one target's measurements were taken with.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application settings. They give the library folder.
+    target_id : `str`
+        The target's id as the library stores it.
+
+    Returns
+    -------
+    cameras : `tuple` [`str`, ...] or `None`
+        The camera names in the capture settings of the target's
+        measurements, sorted. Empty when it has none. `None` when the
+        database could not be read.
+    """
+    path = _library_database_path(config)
+    if path is None:
+        return None
+    if not os.path.isfile(path):
+        return ()
+    connection = None
+    try:
+        connection = sqlite3.connect(f"file:{quote(path)}?mode=ro", uri=True, timeout=5.0)
+        rows = connection.execute(
+            "SELECT DISTINCT s.camera FROM quality_measurements m JOIN quality_capture_setting s "
+            "ON s.capture_setting_id = m.capture_setting_id WHERE m.target_id = ? ORDER BY s.camera",
+            (target_id,),
+        ).fetchall()
+        return tuple(str(row[0]) for row in rows)
+    except sqlite3.OperationalError as error:
+        if "no such table" in str(error):
+            return ()
+        logger.warning("Could not read the target's cameras from %s.", path, exc_info=True)
+        return None
+    except sqlite3.Error, OSError:
+        logger.warning("Could not read the target's cameras from %s.", path, exc_info=True)
+        return None
+    finally:
+        if connection is not None:
+            connection.close()
+
+
+def _library_database_path(config: AppConfiguration) -> str | None:
+    """Find the library database file.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application settings.
+
+    Returns
+    -------
+    path : `str` or `None`
+        The file's path, or `None` when the configuration names no library.
+    """
+    try:
+        return os.path.join(str(config.get_library_path()), "astrometrics.db")
+    except Exception:
+        # No library folder means no version, and so no answer is kept.
+        logger.warning("Could not find the library folder for a data version.", exc_info=True)
+        return None
+
+
+def _read_or_default(
+    connection: sqlite3.Connection, statement: str, parameters: tuple, default: tuple
+) -> tuple:
+    """Read the one row of a query, or a default for a missing table.
+
+    Parameters
+    ----------
+    connection : `sqlite3.Connection`
+        A read-only connection.
+    statement : `str`
+        A fixed statement that gives one row.
+    parameters : `tuple`
+        The statement's bound values.
+    default : `tuple`
+        The row to give when the table is missing or no row matches.
+
+    Returns
+    -------
+    row : `tuple`
+        The row.
+
+    Raises
+    ------
+    sqlite3.OperationalError
+        If the query fails for a reason other than a missing table.
+    """
+    try:
+        row = connection.execute(statement, parameters).fetchone()
+    except sqlite3.OperationalError as error:
+        if "no such table" in str(error):
+            return default
+        raise
+    return tuple(row) if row is not None else default

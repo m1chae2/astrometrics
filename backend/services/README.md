@@ -37,6 +37,10 @@ Every RPC call runs on one of a fixed set of worker threads. A slow whole-catalo
 
 The star catalog listings and counts use it (`data/stellar_service.py`). The numbers (reads at once, wait times) are constants at the top of the module. They are sized so that most of the workers stay free and so that a wait ends before the client's own time limit.
 
+## Heavy lane for RPC methods
+
+Python lets only one thread run Python code at a time. When a view opens and a dozen calls that scan the whole library run together, every call, even a light one, waits behind them each time it needs a turn. A TPM run measured calls that should take a millisecond waiting more than a second. `backend/routers/rpc_router.py` lists these scanning methods in `HEAVY_METHODS` (for example `history:nights` and `astronomy:list`). Only `HEAVY_LANE_SLOTS` of them run at once, and the rest wait without taking a worker thread. All other methods run freely. Add a method to the list when a trace shows it busy for more than about 100 ms.
+
 For exact behavior, read the code.
 
 ## Measuring new dark and bias frames

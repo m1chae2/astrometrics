@@ -7,12 +7,15 @@ only says which container service method serves it.
 # AGENT-1.1, AGENT-1.3, AGENT-1.5, HDR-6.4
 """
 
+import asyncio
+import functools
 import inspect
 import json
 import logging
 from collections.abc import Callable
 from typing import Any
 
+import anyio
 from fastapi import APIRouter
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
@@ -303,6 +306,77 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "sequencer:modify": ("target_imaging_executor", "modify_queue_item"),
 }
 
+#: Methods that spend seconds of pure Python work on a large library: they
+#: scan every night, target, frame or catalog row. Python lets one thread run
+#: Python code at a time (the global interpreter lock), so every extra busy
+#: thread adds a wait of up to 5 ms each time the event loop or a light call
+#: needs the lock. Thirty such calls at once, as when a view opens, made a
+#: call that takes a millisecond wait more than a second (TPM run
+#: 20261106-205416). These methods therefore share `HEAVY_LANE_SLOTS`
+#: places and the others run freely. Add a method here when a trace shows it
+#: busy for more than about 100 ms of CPU.
+HEAVY_METHODS = frozenset({
+    "history:nights",
+    "history:night_quality",
+    "history:target_changes",
+    "advisory:target_report",
+    "advisory:tonight",
+    "advisory:depth_goal",
+    "astronomy:list",
+    "astronomy:visible",
+    "target:get_targets",
+    "target:get_frames_grouped",
+    "planetarium:get_sources",
+    "planetarium:get_catalog_sources",
+})
+
+#: How many `HEAVY_METHODS` calls may run at once. Two keeps the processor
+#: busy while leaving the lock mostly free for light calls.
+HEAVY_LANE_SLOTS = 2
+
+_heavy_lane_limiters: dict[Any, anyio.CapacityLimiter] = {}
+"""One limiter per running event loop, made on first use."""
+
+
+def _heavy_lane_limiter() -> anyio.CapacityLimiter:
+    """Give the limiter that holds the heavy lane's places for this loop.
+
+    Returns
+    -------
+    limiter : `anyio.CapacityLimiter`
+        Holds `HEAVY_LANE_SLOTS` places. A call waits for a place without
+        using a worker thread.
+    """
+    loop = asyncio.get_running_loop()
+    if loop not in _heavy_lane_limiters:
+        _heavy_lane_limiters.clear()
+        _heavy_lane_limiters[loop] = anyio.CapacityLimiter(HEAVY_LANE_SLOTS)
+    return _heavy_lane_limiters[loop]
+
+
+async def run_in_lane(method: str, function: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Run blocking work in a worker thread, in the lane the method belongs to.
+
+    Parameters
+    ----------
+    method : `str`
+        The RPC method name, which picks the lane.
+    function : callable
+        The blocking function.
+    *args, **kwargs
+        Passed to `function`.
+
+    Returns
+    -------
+    result : `~typing.Any`
+        What `function` returns.
+    """
+    if method in HEAVY_METHODS:
+        return await anyio.to_thread.run_sync(
+            functools.partial(function, *args, **kwargs), limiter=_heavy_lane_limiter()
+        )
+    return await run_in_threadpool(function, *args, **kwargs)
+
 
 class RPCHandlerRegistry:
     """Registry that maps each RPC method name to the code that serves it.
@@ -422,7 +496,7 @@ class RPCHandlerRegistry:
         if inspect.iscoroutinefunction(handler):
             result = await handler(**kwargs)
         else:
-            result = await run_in_threadpool(handler, **kwargs)
+            result = await run_in_lane(method, handler, **kwargs)
 
         return result
 
@@ -536,7 +610,7 @@ async def handle_rpc(request: RPCRequest) -> Response:
     ):
         try:
             result = await rpc_registry.execute(request.method, request.params)
-            body = await run_in_threadpool(_encode_success_body, result, request.id)
+            body = await run_in_lane(request.method, _encode_success_body, result, request.id)
             return Response(
                 content=body, status_code=200, headers=get_cors_headers(), media_type="application/json"
             )

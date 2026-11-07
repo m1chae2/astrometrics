@@ -3,8 +3,10 @@
 Description: Storage and file helpers that the backend, the MCP servers and
 `wayfindinglib` share: the data store (`Butler`, `AbstractButler`,
 `DatasetSpec`, `connect_db`), the library's write counters
-(`get_library_data_version`, `LIBRARY_DATA_KINDS`, and `bump_data_version`
-and `read_data_versions` for a database that keeps its own counters) and the
+(`get_library_data_version`, `get_target_data_version`,
+`get_camera_data_versions`, `get_target_camera_names`, `LIBRARY_DATA_KINDS`,
+and `bump_data_version` and `read_data_versions` for a database that keeps
+its own counters) and the
 cache that uses them (`VersionedCache`), file locks and work folders, the
 checks for a mounted drive, and `stop_process_group`, which ends a program
 and the helpers it started. The private driver code (Siril, catalog
@@ -25,7 +27,10 @@ from astrometricslib.foundation.storage.butler import AbstractButler, Butler, Da
 from astrometricslib.foundation.storage.data_versions import ALL_KINDS as LIBRARY_DATA_KINDS
 from astrometricslib.foundation.storage.data_versions import (
     bump_data_version,
+    get_camera_data_versions,
     get_library_data_version,
+    get_target_camera_names,
+    get_target_data_version,
     read_data_versions,
 )
 from astrometricslib.foundation.storage.local_database import connect_db
@@ -43,7 +48,10 @@ __all__ = [
     "bump_data_version",
     "connect_db",
     "file_lock",
+    "get_camera_data_versions",
     "get_library_data_version",
+    "get_target_camera_names",
+    "get_target_data_version",
     "is_path_inside",
     "locks_directory",
     "read_data_versions",

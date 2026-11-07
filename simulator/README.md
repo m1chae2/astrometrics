@@ -4,7 +4,7 @@ This folder holds a telescope that is "on" without a telescope. The app uses it 
 
 | Module | What it does |
 | --- | --- |
-| `observatory.py` | `SimulatedObservatory` makes the folders and settings, checks them, and starts and stops the stand-ins. It is also a program: `python -m wayfindinglib.simulation.observatory start` or `stop`. `prepare_offline_world` builds a world with no telescope at all. |
+| `observatory.py` | `SimulatedObservatory` makes the folders and settings, checks them, and starts and stops the stand-ins. It is also a program: `python -m simulator.observatory start` or `stop`. `prepare_offline_world` builds a world with no telescope at all. |
 | `library_copy.py` | A temporary, copy-on-write view of your real library for the app: database copies (SQLite online backup) and a `fuse-overlayfs` overlay of the frames and stacks. |
 | `supervisor.py` | Runs one stand-in and ends it, with its children, when the process that started it ends. |
 | `mock_phd2.py` | The stand-in PHD2. It plays PHD2's event stream from a guide log. |

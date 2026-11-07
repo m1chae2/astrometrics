@@ -3,7 +3,7 @@
 Description: ``run_tpm.sh`` measures the app by default on a read-only copy of
 the user's real library plus the simulated observatory, the same world the
 app's SIMULATED button makes. This program does the library part with the
-app's own code (`wayfindinglib.simulation`):
+app's own code (`simulator`):
 
 * ``prepare`` builds the world: the database copies, the copy-on-write
   overlay of the real frames and stacks, the settings file and the safety
@@ -39,9 +39,9 @@ import time
 from pathlib import Path
 
 from astrometricslib.drivers import real_folders
+from simulator import SimulatedObservatory, SimulationKind, library_copy
+from simulator import observatory as observatory_module
 from wayfindinglib.exceptions import SimulationUnavailableError
-from wayfindinglib.simulation import SimulatedObservatory, SimulationKind, library_copy
-from wayfindinglib.simulation import observatory as observatory_module
 
 #: The deep-star catalog's place inside a library folder.
 DEEP_CATALOG_PATH = Path("catalogs") / "deep_star_catalog.db"

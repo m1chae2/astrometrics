@@ -29,8 +29,8 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 from astrometricslib.drivers import real_folders
+from simulator.settings import OFFLINE_PORT
 from wayfindinglib.exceptions import GuardError
-from wayfindinglib.simulation.settings import OFFLINE_PORT
 
 #: Hosts that mean this computer.
 LOOPBACK_NAMES = ("127.0.0.1", "localhost", "::1")

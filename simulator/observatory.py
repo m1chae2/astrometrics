@@ -27,9 +27,9 @@ never leaves the app talking to the real telescope.
 The module is also a program, for the TPM test harness and for anyone who
 wants the stand-ins without the app::
 
-    python -m wayfindinglib.simulation.observatory start --kind simulated \
+    python -m simulator.observatory start --kind simulated \
         --root <folder> --indi-port N --phd2-port N --ports-file <file>
-    python -m wayfindinglib.simulation.observatory stop --root <folder>
+    python -m simulator.observatory stop --root <folder>
 
 ``start`` stays in the foreground until it gets SIGTERM, or the program that
 started it ends. It writes the ports file once the stand-ins listen.
@@ -53,15 +53,15 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from wayfindinglib.exceptions import SimulationUnavailableError
-from wayfindinglib.simulation import library_copy, observatory_guard
-from wayfindinglib.simulation.settings import (
+from simulator import library_copy, observatory_guard
+from simulator.settings import (
     SIMULATED_TELESCOPE_SETTINGS,
     library_settings_text,
     offline_config_text,
     simulator_config_text,
     standin_home,
 )
+from wayfindinglib.exceptions import SimulationUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -601,7 +601,7 @@ class SimulatedObservatory:
         logs = self.root / "logs"
         logs.mkdir(parents=True, exist_ok=True)
         log_file = (logs / (log_name or f"{name}.log")).open("ab")
-        repository = Path(__file__).resolve().parents[2]
+        repository = Path(__file__).resolve().parents[1]
         environment = {
             **os.environ,
             "PYTHONPATH": f"{repository}{os.pathsep}{os.environ.get('PYTHONPATH', '')}",
@@ -669,7 +669,7 @@ class SimulatedObservatory:
                 or SIMULATED_TARGET_NAME
             )
         self._launch("indiserver", ["indiserver", "-p", str(self.indi_port), *INDI_DRIVERS], "indiserver.log")
-        module = "wayfindinglib.simulation"
+        module = "simulator"
         phd2_command = [python, "-m", f"{module}.mock_phd2", "--port", str(self.phd2_port)]
         if self.kind is SimulationKind.REPLAY:
             replay_directory = self.root / "replay"
@@ -725,7 +725,7 @@ class SimulatedObservatory:
         SimulationUnavailableError
             If no night is chosen or the night cannot be planned.
         """
-        from wayfindinglib.simulation import night_replay
+        from simulator import night_replay
 
         replay_directory = self.root / "replay"
         if self.replay_staged:

@@ -7,7 +7,7 @@ keep commands off, because they exist so the app never reaches a telescope.
 
 import tomllib
 
-from wayfindinglib.simulation.settings import OFFLINE_TELESCOPE_SETTINGS, SIMULATED_TELESCOPE_SETTINGS
+from simulator.settings import OFFLINE_TELESCOPE_SETTINGS, SIMULATED_TELESCOPE_SETTINGS
 
 
 def _telescope(settings_text: str) -> dict:

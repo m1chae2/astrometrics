@@ -23,7 +23,7 @@ from typing import Any
 from astrometricslib import Target
 from astrometricslib.exceptions import ConfigurationError, InvalidArgumentError
 from backend import observatory_source
-from wayfindinglib.simulation import (
+from simulator import (
     GuardError,
     SimulatedObservatory,
     check_offline_settings_update,

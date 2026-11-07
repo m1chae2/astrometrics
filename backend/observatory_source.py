@@ -11,7 +11,7 @@ For a simulator source the backend needs a whole second world: its own data,
 cache, state and settings folders, so simulated frames, nights and databases
 never touch the real library. The world holds a copy of the real databases and
 an overlay that shows the real frames and stacks read only (every write goes to
-a temporary folder, see `wayfindinglib.simulation.library_copy`). It is removed
+a temporary folder, see `simulator.library_copy`). It is removed
 when the simulator stops, and a start in real mode removes what a crash
 left. `apply_launch_environment` builds that world by pointing the
 ``XDG_*`` variables and ``ASTROMETRICS_CONFIG`` at a folder named
@@ -48,7 +48,7 @@ from pathlib import Path
 import psutil
 
 from astrometricslib.drivers import SIMULATOR_FOLDER_NAME, real_folders
-from wayfindinglib.simulation import (
+from simulator import (
     SimulatedObservatory,
     SimulationKind,
     choose_free_port,

@@ -13,7 +13,7 @@ from astrometricslib.exceptions import ConfigurationError, InvalidArgumentError
 from backend import observatory_source as source
 from backend.services.infrastructure.settings_service import SettingsService
 from backend.services.observatory.observatory_source_service import ObservatorySourceService
-from wayfindinglib.simulation import observatory as observatory_module
+from simulator import observatory as observatory_module
 
 
 class _PreparedOnly(observatory_module.SimulatedObservatory):

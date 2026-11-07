@@ -14,6 +14,7 @@ import pytest
 
 from astrometricslib import AppConfiguration
 from astrometricslib.exceptions import ConfigurationError, PermissionDeniedError
+from simulator import record_simulated_calibrations
 from wayfindinglib import Wayfinder
 from wayfindinglib.analytics.guide_pulses import GUIDE_RATE_ARCSEC_PER_S
 from wayfindinglib.exceptions import GuardError
@@ -26,7 +27,6 @@ from wayfindinglib.models.policy.delegation import (
     ObservatoryCapability,
 )
 from wayfindinglib.models.session.guiding_run import GuidingRunSummary
-from wayfindinglib.simulation import record_simulated_calibrations
 from wayfindinglib.test import monitor_mode_support as support
 
 

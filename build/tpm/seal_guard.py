@@ -12,7 +12,7 @@ second check on top of that namespace:
 
 The app does not need these checks, so they live with the harness. The
 checks of the simulator's settings are in
-`wayfindinglib.simulation.observatory_guard`.
+`simulator.observatory_guard`.
 
 Usage::
 
@@ -29,8 +29,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from simulator.observatory_guard import is_loopback_address
 from wayfindinglib.exceptions import GuardError
-from wayfindinglib.simulation.observatory_guard import is_loopback_address
 
 
 def descendant_pids(root_pid: int) -> set[int]:

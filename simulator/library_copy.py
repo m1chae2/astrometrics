@@ -25,7 +25,7 @@ real-snapshot mode uses the same functions.
 
 Usage (for the harness)::
 
-    python -m wayfindinglib.simulation.library_copy mount \
+    python -m simulator.library_copy mount \
         --lower DIR [--lower DIR] --upper DIR --work DIR --mountpoint DIR
 """
 

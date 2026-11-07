@@ -30,7 +30,7 @@ stand-in folder and the replay folder it is given.
 
 Usage::
 
-    python -m wayfindinglib.simulation.replay_driver --indi-port N \
+    python -m simulator.replay_driver --indi-port N \
         --standin <sandbox>/standin/home --replay <sandbox>/replay \
         --stats <out.json>
 
@@ -47,8 +47,8 @@ import threading
 import time
 from pathlib import Path
 
-from wayfindinglib.simulation.exposure_driver import ExposureDriver
-from wayfindinglib.simulation.night_replay import CAMERA_LEAD_SECONDS
+from simulator.exposure_driver import ExposureDriver
+from simulator.night_replay import CAMERA_LEAD_SECONDS
 
 
 class ReplayDriver:

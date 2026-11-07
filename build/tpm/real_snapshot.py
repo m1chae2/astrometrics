@@ -51,7 +51,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from write_sandbox_config import OFFLINE_TELESCOPE_SETTINGS
 
 from astrometricslib.drivers import real_folders
-from wayfindinglib.simulation import library_copy
+from simulator import library_copy
 
 #: Do not copy more than this many bytes of databases and caches.
 MAXIMUM_COPY_BYTES = 5 * 1024**3

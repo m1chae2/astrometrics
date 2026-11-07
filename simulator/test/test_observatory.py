@@ -14,15 +14,15 @@ from pathlib import Path
 
 import pytest
 
-from wayfindinglib.simulation import observatory as observatory_module
-from wayfindinglib.simulation import observatory_guard
-from wayfindinglib.simulation.observatory import (
+from simulator import observatory as observatory_module
+from simulator import observatory_guard
+from simulator.observatory import (
     SimulatedObservatory,
     SimulationKind,
     SimulationUnavailableError,
 )
 
-REPOSITORY = Path(__file__).resolve().parents[3]
+REPOSITORY = Path(__file__).resolve().parents[2]
 
 
 def _alive(pid: int) -> bool:
@@ -293,7 +293,7 @@ def test_simulated_frames_are_filed_under_the_name_the_app_downloads(
     "M 13" and the common name "Test Target Name" must make the stand-in
     file its frames under "M 13", so the download finds them.
     """
-    from wayfindinglib.simulation.exposure_driver import ExposureDriver
+    from simulator.exposure_driver import ExposureDriver
 
     _write_library_targets(
         observatory.root,

@@ -232,7 +232,7 @@ def _find_contract_fixture() -> Path:
     """
     root = Path(__file__).resolve().parents[4]
     candidates = [
-        root / "wayfindinglib" / "simulation" / "test" / "fixtures" / "phd2_contract_guide_log.txt",
+        root / "simulator" / "test" / "fixtures" / "phd2_contract_guide_log.txt",
         root / "build" / "tpm" / "fixtures" / "phd2_contract_guide_log.txt",
     ]
     for candidate in candidates:

@@ -23,7 +23,7 @@ Usage::
 import argparse
 from pathlib import Path
 
-from wayfindinglib.simulation.settings import (
+from simulator.settings import (
     OFFLINE_TELESCOPE_SETTINGS,
     OTHER_EQUIPMENT_SETTINGS,
     SIMULATED_TELESCOPE_SETTINGS,

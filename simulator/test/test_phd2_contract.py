@@ -21,7 +21,7 @@ this file. A failure means the stand-in no longer matches real PHD2 (or PHD2
 changed what it sends).
 
 Run with
-``.venv/bin/pytest wayfindinglib/simulation/test/test_phd2_contract.py -q -s``.
+``.venv/bin/pytest simulator/test/test_phd2_contract.py -q -s``.
 """
 
 import json
@@ -36,9 +36,9 @@ from pathlib import Path
 
 import pytest
 
+from simulator import guide_log_replay, mock_phd2
 from wayfindinglib.drivers.phd2.guide_log_parser import parse_guide_log_file
 from wayfindinglib.drivers.phd2.phd2_events import parse_guide_step_event
-from wayfindinglib.simulation import guide_log_replay, mock_phd2
 
 SIMULATION_DIR = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"

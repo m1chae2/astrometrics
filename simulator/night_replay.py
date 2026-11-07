@@ -33,11 +33,11 @@ that is inside the user's real library or state folders.
 
 Usage::
 
-    python -m wayfindinglib.simulation.night_replay stage <sandbox> \
+    python -m simulator.night_replay stage <sandbox> \
         [--night 2026-10-03] [--speed 1] [--window-seconds 300] \
         [--preload-frames 16] [--window-start 2026-10-04T09:19:00]
-    python -m wayfindinglib.simulation.night_replay choose --night 2026-10-03
-    python -m wayfindinglib.simulation.night_replay report <sandbox> \
+    python -m simulator.night_replay choose --night 2026-10-03
+    python -m simulator.night_replay report <sandbox> \
         --ingest <file> \
         --setup-seconds S --out <file>
 """
@@ -54,13 +54,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from astrometricslib.drivers import real_folders
+from simulator.guide_log_replay import timed_lines
+from simulator.observatory_guard import real_protected_paths
 from wayfindinglib.drivers.ekos.analyze_log_parser import (
     UTC_OFFSET_HOURS_BY_ABBREVIATION,
     parse_ekos_analyze_log,
 )
 from wayfindinglib.models.session.ekos_session import EkosCapture
-from wayfindinglib.simulation.guide_log_replay import timed_lines
-from wayfindinglib.simulation.observatory_guard import real_protected_paths
 
 #: The one fixed night (the date its guide log begins, local time).
 DEFAULT_NIGHT = "2026-10-03"

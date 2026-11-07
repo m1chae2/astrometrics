@@ -17,8 +17,8 @@ from pathlib import Path
 import pytest
 
 from astrometricslib.drivers import real_folders
+from simulator import library_copy
 from wayfindinglib.exceptions import SimulationUnavailableError
-from wayfindinglib.simulation import library_copy
 
 
 def _overlay_works(tmp_path: Path) -> bool:

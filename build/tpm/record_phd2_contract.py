@@ -12,9 +12,9 @@ and stop, and keeps two files:
   version, the date and the commit when known.
 - ``phd2_contract_guide_log.txt``: the guide log PHD2 wrote.
 
-Both files go in ``wayfindinglib/simulation/test/fixtures/``. Run it again
+Both files go in ``simulator/test/fixtures/``. Run it again
 after a PHD2 upgrade, then run
-``.venv/bin/pytest wayfindinglib/simulation/test/test_phd2_contract.py``.
+``.venv/bin/pytest simulator/test/test_phd2_contract.py``.
 The run needs `xvfb-run`, `bwrap`, `indiserver` and the INDI simulators.
 
 Safety: the whole run happens in a sealed network (``bwrap --unshare-net``),
@@ -45,7 +45,7 @@ from datetime import datetime
 from pathlib import Path
 
 TPM_DIR = Path(__file__).resolve().parent
-FIXTURES_DIR = TPM_DIR.parents[1] / "wayfindinglib" / "simulation" / "test" / "fixtures"
+FIXTURES_DIR = TPM_DIR.parents[1] / "simulator" / "test" / "fixtures"
 EVENTS_FIXTURE = FIXTURES_DIR / "phd2_contract_events.jsonl"
 GUIDE_LOG_FIXTURE = FIXTURES_DIR / "phd2_contract_guide_log.txt"
 #: PHD2's event server port for instance 1 (4400 + instance - 1).

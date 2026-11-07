@@ -543,7 +543,7 @@ else
     # folder. This runs before the XDG folders point at the throwaway folder, because it reads the real ones.
     echo "== Staging the replay of the night $REPLAY_NIGHT (real files are only read)"
     REPLAY_STAGE_STARTED="$(date +%s.%N)"
-    "$PYTHON" -m wayfindinglib.simulation.night_replay stage "$SANDBOX" --night "$REPLAY_NIGHT" --speed "$REPLAY_SPEED" \
+    "$PYTHON" -m simulator.night_replay stage "$SANDBOX" --night "$REPLAY_NIGHT" --speed "$REPLAY_SPEED" \
       --window-seconds "$REPLAY_WINDOW_SECONDS" --preload-frames "$REPLAY_PRELOAD_FRAMES" || exit 1
     REPLAY_FRAMES_IN_WINDOW="$("$PYTHON" -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["window_frames"]))' "$SANDBOX/replay/plan.json")"
   fi
@@ -599,7 +599,7 @@ elif [ "$REAL_SNAPSHOT" = "1" ]; then
   mkdir -p "$OVERLAY_MOUNT_DIR"
   echo "== Mounting a copy-on-write overlay of $REAL_LIBRARY (reads: real files; writes: $SANDBOX/overlay/upper)"
   # The one overlay code, shared with the app's simulated observatory.
-  "$PYTHON" -m wayfindinglib.simulation.library_copy mount --lower "$REAL_LIBRARY" --upper "$SANDBOX/overlay/upper" \
+  "$PYTHON" -m simulator.library_copy mount --lower "$REAL_LIBRARY" --upper "$SANDBOX/overlay/upper" \
     --work "$SANDBOX/overlay/work" --mountpoint "$OVERLAY_MOUNT_DIR" || { echo "ERROR: the overlay did not mount." >&2; exit 1; }
   OVERLAY_MNT="$OVERLAY_MOUNT_DIR"
   grep -q " $OVERLAY_MNT " /proc/mounts || { echo "ERROR: the overlay did not mount." >&2; exit 1; }
@@ -644,7 +644,7 @@ if [ "$LIVE" = "1" ]; then
     --ports-file "$OBSERVATORY_PORTS_FILE" --exposure-seconds "$SIM_EXPOSURE_SECONDS")
   # The replay was staged above, and it starts when the flow starts (below), not when the stand-ins listen.
   [ "$OBSERVATORY_PROFILE" = "replay" ] && OBSERVATORY_ARGUMENTS+=(--replay-night "$REPLAY_NIGHT" --replay-staged --manual-replay-start)
-  OBSERVATORY_START=("$PYTHON" -m wayfindinglib.simulation.observatory start)
+  OBSERVATORY_START=("$PYTHON" -m simulator.observatory start)
   # In a world that already holds the library copy, only the stand-ins are started (the app's start would prepare the
   # world again and unmount the overlay).
   [ "$LIBRARY" = "simulation" ] && OBSERVATORY_START=("$PYTHON" "$TPM_DIR/simulation_library.py" start)
@@ -664,7 +664,7 @@ if [ "$OBSERVATORY_PROFILE" = "offline" ]; then
   # The offline telescope host never answers. A refusing ssh stand-in comes first on the backend's PATH, so the
   # run never starts the real ssh (which fails inside the sealed network on the system's ssh configuration).
   mkdir -p "$SANDBOX/standin/bin"
-  ln -sf "$ROOT_DIR/wayfindinglib/simulation/standin_ssh.sh" "$SANDBOX/standin/bin/ssh"
+  ln -sf "$ROOT_DIR/simulator/standin_ssh.sh" "$SANDBOX/standin/bin/ssh"
   BACKEND_COMMAND=(env "PATH=$SANDBOX/standin/bin:$PATH" "ASTROMETRICS_STANDIN_SSH_MODE=refuse" "${BACKEND_COMMAND[@]}")
 fi
 
@@ -852,13 +852,13 @@ done
 cp "$SANDBOX/backend.log" "$RESULTS_DIR/backend.log"
 if [ "$LIVE" = "1" ]; then
   # Stop the simulators, so their statistics files are final, then reduce them.
-  "$PYTHON" -m wayfindinglib.simulation.observatory stop --root "$SANDBOX" || true
+  "$PYTHON" -m simulator.observatory stop --root "$SANDBOX" || true
   OBSERVATORY_PID=""
   cp "$SIM_STATS" "$RESULTS_DIR/observatory-sim-stats.json" 2>/dev/null || true
   cp "$PHD2_STATS" "$RESULTS_DIR/observatory-phd2-stats.json" 2>/dev/null || true
   REPLAY_ARGUMENT=()
   if [ "$OBSERVATORY_PROFILE" = "replay" ]; then
-    "$PYTHON" -m wayfindinglib.simulation.night_replay report "$SANDBOX" --ingest "$SANDBOX/replay/ingest.json" \
+    "$PYTHON" -m simulator.night_replay report "$SANDBOX" --ingest "$SANDBOX/replay/ingest.json" \
       --setup-seconds "$REPLAY_SETUP_SECONDS" --out "$RESULTS_DIR/replay-summary.json"
     cp "$SANDBOX/replay/plan.json" "$RESULTS_DIR/replay-plan.json"
     REPLAY_ARGUMENT=(--replay-summary "$RESULTS_DIR/replay-summary.json")

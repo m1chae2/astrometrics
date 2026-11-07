@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from wayfindinglib.simulation import guide_log_replay, mock_phd2, observatory_guard
+from simulator import guide_log_replay, mock_phd2, observatory_guard
 
 TPM_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TPM_DIR))
@@ -29,7 +29,7 @@ sys.path.insert(0, str(TPM_DIR))
 import seal_guard  # ruff: ignore[module-import-not-at-top-of-file]
 import write_sandbox_config  # ruff: ignore[module-import-not-at-top-of-file]
 
-SIMULATION_DIR = Path(__file__).resolve().parents[3] / "wayfindinglib" / "simulation"
+SIMULATION_DIR = Path(__file__).resolve().parents[3] / "simulator"
 FIXTURE = SIMULATION_DIR / "guide_log_sample.txt"
 
 

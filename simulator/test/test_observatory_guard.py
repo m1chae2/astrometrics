@@ -16,16 +16,16 @@ from pathlib import Path
 
 import pytest
 
-from wayfindinglib.exceptions import GuardError, SimulationUnavailableError
-from wayfindinglib.simulation import observatory as observatory_module
-from wayfindinglib.simulation import observatory_guard
-from wayfindinglib.simulation.observatory import (
+from simulator import observatory as observatory_module
+from simulator import observatory_guard
+from simulator.observatory import (
     SimulatedObservatory,
     SimulationKind,
     prepare_offline_world,
     unavailable_reason,
 )
-from wayfindinglib.simulation.settings import simulator_config_text, standin_home
+from simulator.settings import simulator_config_text, standin_home
+from wayfindinglib.exceptions import GuardError, SimulationUnavailableError
 
 
 @pytest.fixture

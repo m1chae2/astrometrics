@@ -22,9 +22,9 @@ and writes only inside the stand-in folder it is given.
 
 Usage::
 
-    python -m wayfindinglib.simulation.exposure_driver --indi-port N \
+    python -m simulator.exposure_driver --indi-port N \
         --standin <folder> --stats <out.json> \
-        --guide-log wayfindinglib/simulation/guide_log_sample.txt \
+        --guide-log simulator/guide_log_sample.txt \
         [--exposure-seconds 60] [--target "M 13"] \
         [--ra-hours 16.695] [--dec-degrees 36.46]
 
@@ -42,7 +42,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from wayfindinglib.simulation.guide_log_replay import ReplayItem, load_replay_items, render_line, replay
+from simulator.guide_log_replay import ReplayItem, load_replay_items, render_line, replay
 
 #: The devices of the INDI simulators and the property that connects each.
 DEVICES = ("Telescope Simulator", "CCD Simulator", "Focuser Simulator", "Filter Simulator", "Guide Simulator")

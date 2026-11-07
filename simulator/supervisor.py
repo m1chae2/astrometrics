@@ -8,7 +8,7 @@ whole group. That leaves no orphan INDI server or simulator behind.
 
 Usage::
 
-    python -m wayfindinglib.simulation.supervisor -- command [arguments]
+    python -m simulator.supervisor -- command [arguments]
 """
 
 import os

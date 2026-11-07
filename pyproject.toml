@@ -136,16 +136,17 @@ astrometrics = "backend.main_backend:main"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["backend", "astrometricslib", "wayfindinglib", "mcp_servers"]
+packages = ["backend", "astrometricslib", "wayfindinglib", "mcp_servers", "simulator"]
 exclude = [
   "backend/tests",
   "astrometricslib/test",
   "wayfindinglib/test",
   "mcp_servers/**/test",
+  "simulator/test",
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["astrometricslib", "wayfindinglib", "backend/tests", "mcp_servers", "build/tpm/test"]
+testpaths = ["astrometricslib", "wayfindinglib", "backend/tests", "mcp_servers", "simulator", "build/tpm/test"]
 pythonpath = ["."]
 addopts = "-v -m 'not trio'"
 markers = [
@@ -214,7 +215,7 @@ convention = "numpy"
 max-doc-length = 79
 
 [tool.ruff.lint.isort]
-known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers"]
+known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers", "simulator"]
 
 # Enforces the astrometricslib public-API boundary documented in
 # astrometricslib/api/__init__.py: everything outside astrometricslib
@@ -263,16 +264,16 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "build/tpm/test/test_cold_start.py" = ["suspicious-subprocess-import"] # runs a stand-in fincore
 "build/tpm/setup_fingerprint.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"] # list-form args only; reads power, display and GPU facts
 "build/tpm/record_phd2_contract.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"] # list-form calls of bwrap, indiserver, xvfb-run, PHD2 and indi_setprop, inside a sealed network
-"wayfindinglib/simulation/test/test_phd2_contract.py" = ["print"] # with `-s` it reports what real PHD2 sends beyond the stand-in
-"wayfindinglib/simulation/exposure_driver.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "print"] # list-form indi_setprop and indi_getprop calls against 127.0.0.1 only; a command-line program
+"simulator/test/test_phd2_contract.py" = ["print"] # with `-s` it reports what real PHD2 sends beyond the stand-in
+"simulator/exposure_driver.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "print"] # list-form indi_setprop and indi_getprop calls against 127.0.0.1 only; a command-line program
 "build/tpm/seal_guard.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"] # list-form call of `ss`, read only
-"wayfindinglib/simulation/observatory.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "print"] # list-form start of the stand-in processes, always through the supervisor; also a command-line program
-"wayfindinglib/simulation/test/test_observatory.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"] # runs the supervisor, `sleep` and `pgrep` in list form
-"wayfindinglib/simulation/library_copy.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path", "print", "hardcoded-sql-expression"] # table names come from the copy itself; list-form fuse-overlayfs and fusermount3; also a command-line program
-"wayfindinglib/simulation/supervisor.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"] # list-form start of one stand-in command
-"wayfindinglib/simulation/mock_phd2.py" = ["print"] # a command-line program
-"wayfindinglib/simulation/night_replay.py" = ["print"] # a command-line program
-"wayfindinglib/simulation/replay_driver.py" = ["print"] # a command-line program
+"simulator/observatory.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "print"] # list-form start of the stand-in processes, always through the supervisor; also a command-line program
+"simulator/test/test_observatory.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"] # runs the supervisor, `sleep` and `pgrep` in list form
+"simulator/library_copy.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path", "print", "hardcoded-sql-expression"] # table names come from the copy itself; list-form fuse-overlayfs and fusermount3; also a command-line program
+"simulator/supervisor.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"] # list-form start of one stand-in command
+"simulator/mock_phd2.py" = ["print"] # a command-line program
+"simulator/night_replay.py" = ["print"] # a command-line program
+"simulator/replay_driver.py" = ["print"] # a command-line program
 "build/tpm/backend_rpc.py" = ["suspicious-url-open-usage"] # one http call to 127.0.0.1 (the throwaway backend), port 5000 refused
 "build/tpm/test/test_processing_run.py" = ["banned-api"] # reads the library's stage keys to check the copy kept in the script
 "build/tpm/test/test_replay.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"] # runs bwrap and the guard in list form
@@ -306,7 +307,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "wayfindinglib/drivers/catalog/local_bright_star_catalog_driver.py" = ["hardcoded-sql-expression"]
 "__init__.py" = ["unused-import"] # re-exports for package public API
 "astrometricslib/__init__.py" = ["non-empty-init-module"] # Astrometrics facade class is intentionally defined here
-"wayfindinglib/simulation/__init__.py" = ["non-empty-init-module"] # loads its public names on first use, so `python -m` can run a module
+"simulator/__init__.py" = ["non-empty-init-module"] # loads its public names on first use, so `python -m` can run a module
 "wayfindinglib/__init__.py" = ["non-empty-init-module"] # Wayfinder facade class is intentionally defined here
 # Each library, its tests and its scripts/ may import that library's own
 # internals. wayfindinglib (scripts/ included) may use only astrometricslib's
@@ -316,6 +317,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "astrometricslib/**" = ["banned-api"]
 "backend/tests/**" = ["banned-api"] # a backend test may import a library's private names to set up a case
 "mcp_servers/**/test/**" = ["banned-api"] # so may an MCP server test
+"simulator/**" = ["banned-api"] # temporary until phase L3 of SIMULATOR_FROM_REAL_DATA_PLAN.md: the simulator still imports library internals
 "conftest.py" = ["banned-api"] # and the root test configuration
 "build/codegen/generate_types.py" = ["banned-api"] # TS codegen introspects the full model surface, not just the public API
 "build/tpm/seed_library.py" = ["banned-api"] # the seeder writes the private guiding stores directly, into a throwaway library
@@ -362,7 +364,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "mcp_servers/inventory/tool_inventory.py" = ["print"]
 
 [tool.importlinter]
-root_packages = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers"]
+root_packages = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers", "simulator"]
 include_external_packages = false
 # Imports used only for type hints (inside `if TYPE_CHECKING:`) are not
 # counted: they never run, so they create no dependency when the code runs.
@@ -460,7 +462,6 @@ ignore_imports = [
     "backend.** -> astrometricslib.drivers",
     "backend.** -> wayfindinglib.exceptions",
     "backend.** -> wayfindinglib.reports",
-    "backend.** -> wayfindinglib.simulation",
 ]
 
 [[tool.importlinter.contracts]]
@@ -581,11 +582,9 @@ forbidden_modules = [
 #   Planning    tasks.planning_tasks, api.planning
 #   Execution   tasks.execution_tasks, api.execution
 #   Root        wayfindinglib (package __init__), wayfindinglib.api (__init__)
-#   Simulation  wayfindinglib.simulation (the simulated observatory: stand-ins,
-#               library copy, replay). It sits beside the layers, uses the
-#               library freely, and is imported only by the backend (its
-#               source setting) and by itself and its tests. No layer imports
-#               it (see "only the backend imports wayfindinglib.simulation").
+#   (The simulated observatory is not a layer of wayfindinglib. It lives in
+#   the top-level `simulator` package, which no part of the core imports; see
+#   "the core never imports the simulator".)
 # Every folder named here must be a regular package (have an __init__.py);
 # import-linter cannot see namespace folders.
 
@@ -736,26 +735,23 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "only the backend and the simulation itself import wayfindinglib.simulation"
+name = "the core never imports the simulator"
 type = "forbidden"
-# The libraries' own layers never reach the simulator; Planning and
-# Foundation least of all. The backend (its observatory source) and the
-# TPM harness in build/ are the users.
+# The simulator is a layer around the app (decision D16 of
+# SIMULATOR_FROM_REAL_DATA_PLAN.md). The libraries, the MCP servers and every
+# layer of wayfindinglib never reach it, Planning and Foundation least of all.
 source_modules = [
-    "wayfindinglib.models",
-    "wayfindinglib.astronomy",
-    "wayfindinglib.data_access",
-    "wayfindinglib.analytics",
-    "wayfindinglib.drivers",
-    "wayfindinglib.tasks",
-    "wayfindinglib.session_analysis",
-    "wayfindinglib.watchdog",
-    "wayfindinglib.api",
-    "wayfindinglib.scripts",
-    "wayfindinglib._internal",
+    "wayfindinglib",
     "astrometricslib",
     "mcp_servers",
+    "backend",
 ]
-forbidden_modules = ["wayfindinglib.simulation"]
+forbidden_modules = ["simulator"]
 allow_indirect_imports = true
 unmatched_ignore_imports_alerting = "none"
+# Temporary until phase L3 of SIMULATOR_FROM_REAL_DATA_PLAN.md: the backend
+# still builds the simulated world itself (its observatory source).
+ignore_imports = [
+    "backend.** -> simulator",
+    "backend.** -> simulator.**",
+]

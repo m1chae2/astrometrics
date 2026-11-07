@@ -24,7 +24,7 @@ from pathlib import Path
 import pytest
 from astropy.io import fits
 
-from wayfindinglib.simulation import guide_log_replay, mock_phd2, night_replay
+from simulator import guide_log_replay, mock_phd2, night_replay
 
 TPM_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TPM_DIR))

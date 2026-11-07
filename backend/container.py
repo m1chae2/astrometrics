@@ -167,7 +167,7 @@ class Container:
         outcome : `BulkDelegationOutcome`
             Which capabilities are on and why the others are not.
         """
-        from wayfindinglib.simulation import record_simulated_calibrations
+        from simulator import record_simulated_calibrations
 
         record_simulated_calibrations(self.wayfinder.control, simulator_root)
         return self.wayfinder.control.safety.enter_controller_mode(

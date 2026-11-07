@@ -10,7 +10,7 @@ computer, and a replay of a past night (`night_replay`, `replay_driver`).
 library. `SimulatedObservatory` starts and stops all of it.
 
 The names below load on first use (PEP 562). The stand-ins are also run as
-programs with ``python -m wayfindinglib.simulation.<module>``, and an eager
+programs with ``python -m simulator.<module>``, and an eager
 import here would load the module before it runs.
 """
 
@@ -18,10 +18,10 @@ import importlib
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from wayfindinglib.simulation.library_copy import read_report as read_library_copy_report
-    from wayfindinglib.simulation.library_copy import teardown as remove_library_copy
-    from wayfindinglib.simulation.night_replay import list_nights
-    from wayfindinglib.simulation.observatory import (
+    from simulator.library_copy import read_report as read_library_copy_report
+    from simulator.library_copy import teardown as remove_library_copy
+    from simulator.night_replay import list_nights
+    from simulator.observatory import (
         SimulatedObservatory,
         SimulationKind,
         SimulationUnavailableError,
@@ -31,12 +31,12 @@ if TYPE_CHECKING:
         prepare_offline_world,
         unavailable_reason,
     )
-    from wayfindinglib.simulation.observatory_guard import (
+    from simulator.observatory_guard import (
         GuardError,
         check_offline_settings_update,
         check_settings_update,
     )
-    from wayfindinglib.simulation.simulated_calibration import record_simulated_calibrations
+    from simulator.simulated_calibration import record_simulated_calibrations
 
 #: Each public name and where it comes from: the module, and the name there.
 _LOCATIONS = {

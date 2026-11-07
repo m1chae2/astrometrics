@@ -37,11 +37,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from simulator.observatory_guard import real_protected_paths
 from wayfindinglib.analytics.guide_pulses import GUIDE_RATE_ARCSEC_PER_S
 from wayfindinglib.exceptions import GuardError
 from wayfindinglib.models.equipment_and_site.focus_model import ApproachDirection, FocusModel
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
-from wayfindinglib.simulation.observatory_guard import real_protected_paths
 
 if TYPE_CHECKING:
     from wayfindinglib.api.control.control import ObservatoryControl

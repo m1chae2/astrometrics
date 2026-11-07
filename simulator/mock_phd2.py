@@ -19,9 +19,9 @@ real PHD2 uses) and port 5000 (the real backend). It never connects out.
 
 Usage::
 
-    python -m wayfindinglib.simulation.mock_phd2 --port 45123 \
-        --log wayfindinglib/simulation/guide_log_sample.txt --stats <out.json>
-    python -m wayfindinglib.simulation.mock_phd2 --port 45123 \
+    python -m simulator.mock_phd2 --port 45123 \
+        --log simulator/guide_log_sample.txt --stats <out.json>
+    python -m simulator.mock_phd2 --port 45123 \
         --plan <sandbox>/replay/plan.json \
         --start-file <sandbox>/replay/start --stats <out.json>
 
@@ -37,7 +37,7 @@ import threading
 import time
 from pathlib import Path
 
-from wayfindinglib.simulation.guide_log_replay import ReplayItem, event_json_line, load_replay_items, replay
+from simulator.guide_log_replay import ReplayItem, event_json_line, load_replay_items, replay
 
 #: Ports the stand-in server refuses: a real PHD2 and the real backend.
 FORBIDDEN_PORTS = (4400, 5000)

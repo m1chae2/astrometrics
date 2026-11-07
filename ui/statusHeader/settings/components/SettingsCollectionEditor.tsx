@@ -1,5 +1,8 @@
+import { TextInput } from '../../../common/components/TextInput';
 import { useState } from 'react';
 import { ConfigData } from '../utils/configUtils';
+import { PopoverSelect } from '../../../common/components/PopoverSelect';
+import { Button } from '../../../common/components/Button';
 
 export interface CollectionFieldSchema {
     key: string;
@@ -88,40 +91,36 @@ export const SettingsCollectionEditor: React.FC<SettingsCollectionEditorProps> =
                     <div className="settings__collection-row" key={name}>
                         <div className="settings__collection-row__header">
                             <span className="settings__collection-row__title">{name}</span>
-                            <button
-                                type="button"
-                                className="btn btn--secondary settings__collection-row__remove"
+                            <Button
+                                variant="secondary"
+                                className="settings__collection-row__remove"
                                 onClick={() => handleRemove(name)}
                                 disabled={loadingConfig}
                             >
                                 Remove
-                            </button>
+                            </Button>
                         </div>
                         <div className="settings__grid">
-                            {fields.map((field) => (
+                            {fields.map((field) => field.type === 'select' ? (
+                                <div key={field.key} className="settings__field">
+                                    <span className="settings__label">{field.label}</span>
+                                    <PopoverSelect
+                                        label={field.label}
+                                        options={resolveOptions(field).map((opt) => ({ id: opt, label: opt }))}
+                                        selectedId={String(configData[section]?.[field.key] ?? '') || null}
+                                        onSelect={(id) => handleConfigChange(section, field.key, id ?? '')}
+                                        placeholder="Select..."
+                                        disabled={loadingConfig}
+                                    />
+                                </div>
+                            ) : (
                                 <label key={field.key} className="settings__field">
                                     <span className="settings__label">{field.label}</span>
-                                    {field.type === 'select' ? (
-                                        <select
-                                            className="settings__input"
-                                            value={String(configData[section]?.[field.key] ?? '')}
-                                            onChange={(e) => handleConfigChange(section, field.key, e.target.value)}
-                                            disabled={loadingConfig}
-                                        >
-                                            <option value="" disabled>Select...</option>
-                                            {resolveOptions(field).map((opt) => (
-                                                <option key={opt} value={opt}>{opt}</option>
-                                            ))}
-                                        </select>
-                                    ) : (
-                                        <input
-                                            className="settings__input"
-                                            type="text"
-                                            value={String(configData[section]?.[field.key] ?? '')}
-                                            onChange={(e) => handleConfigChange(section, field.key, e.target.value)}
-                                            disabled={loadingConfig}
-                                        />
-                                    )}
+                                    <TextInput
+                                        value={String(configData[section]?.[field.key] ?? '')}
+                                        onChange={(e) => handleConfigChange(section, field.key, e.target.value)}
+                                        disabled={loadingConfig}
+                                    />
                                 </label>
                             ))}
                         </div>
@@ -131,22 +130,20 @@ export const SettingsCollectionEditor: React.FC<SettingsCollectionEditorProps> =
             })}
 
             <div className="settings__collection-add">
-                <input
-                    className="settings__input"
-                    type="text"
+                <TextInput
                     placeholder={addPlaceholder}
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
                     disabled={loadingConfig}
                 />
-                <button
-                    type="button"
-                    className="btn btn--secondary"
+                <Button
+                    variant="secondary"
+                    fit
                     onClick={handleAdd}
                     disabled={loadingConfig || !newName.trim()}
                 >
                     Add
-                </button>
+                </Button>
             </div>
         </div>
     );

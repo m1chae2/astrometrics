@@ -54,15 +54,14 @@ The status header stays on screen in every view. It shows the state of the mount
 
 A window narrower than 820 pixels hides CAM, ALT, AZ, temperature and humidity.
 
-### Tray panel
+### Tray menu
 
-The Astrometrics icon in the system tray opens a small panel. Click the icon again to close it.
+The Astrometrics icon in the system tray opens a menu under the icon. The first lines show the observatory, the mount status, the target and where the mount points. They update about every five seconds.
 
 | Item | What it does |
 | --- | --- |
-| Mount | Shows the tracking status, or Disconnected |
-| RA / Dec and Alt / Az | Show where the mount points |
-| Workspaces buttons | Switch the main window to Image Viewer, Astronomy Manager, Planetarium, Image Processing, Observatory or Observation Mgr |
+| Status lines | Show the observatory, the mount (or Disconnected), the target, RA/Dec and Alt/Az. They cannot be clicked |
+| Workspace items | Switch the main window to Image Viewer, Astronomy Manager, Planetarium, Image Processing, Observatory or Observation Mgr |
 | Park | Sends the park command to the mount at once. If it fails, an error message tells you to park the mount by hand |
 | Open App | Brings the main window forward |
 | Quit | Quits Astrometrics |
@@ -73,7 +72,9 @@ Several views use the same lists and dialogs.
 
 ### Target list
 
-The Image Viewer, Image Processing and Observatory Manager each have a target list on the left. It is made of two panels.
+The Image Viewer, Image Processing and Observatory Manager each have a target list on the left. It is made of two panels. In the Observatory Manager the two panels are joined into one Targets panel with two tabs. The List tab opens first. It has the search box and the list, and a small line that names the filter in use, such as "Messier Catalog · Newest". The Filter tab has the catalog and camera choices and the A-Z and Newest sort. Your choice is kept, so pick a filter and then go back to the List tab to see the result.
+
+The three views share one selected target. Pick a target in one view and the others show it too. The app remembers your pick the next time it starts. With no pick (or if the remembered target is gone), the app starts on the target you imaged most recently that has a finished image, so these views do not open empty. A filter or a night view in the Observatory Manager changes only the list; it does not change the selected target.
 
 | Control | What it does |
 | --- | --- |
@@ -99,7 +100,7 @@ The Header Info buttons in Image Processing open this dialog. It lists the heade
 
 ### Ingest From Telescope dialog
 
-The Download Frames button in Image Processing and the Ingest frames button in the Observatory Manager Calibration Library open this dialog. It copies frames from the telescope's storage to your image library.
+The Download Frames button in the Observatory Manager Controls panel (bottom left, next to Add Target and Slew to Target) and the Ingest frames button in the Observatory Manager Calibration Library open this dialog. It copies frames from the telescope's storage to your image library. Download Frames works on the target picked in the list. When auto-download is on, new frames also download by themselves after each exposure. Guide logs also download by themselves, every few minutes while you image and once more after imaging stops, so the past-night guiding views stay current.
 
 | Item | What it does |
 | --- | --- |
@@ -175,7 +176,7 @@ The File Browser toolbar and table have these controls.
 
 | Control | What it does |
 | --- | --- |
-| Camera box | Shows only the frames of one camera. All Cameras shows everything |
+| Camera picker | Opens a short menu of cameras. Pick one to see only its frames. All Cameras shows everything |
 | Search box | Filters frames. The ? button explains the syntax. Examples are `cam: zwo`, `iso > 800`, `exp >= 30`, `name includes dark` and `(iso > 100 && exp > 60)` |
 | Header Info | Opens the FITS Header dialog for the selected file |
 | Trash button with a count | Appears when frames are ticked. It deletes the ticked files after you confirm. Deleting cannot be undone |
@@ -204,7 +205,6 @@ The Image Controls panel has these buttons.
 | Analyze Target | Starts a star analysis. It uses the ticked frames. With none ticked, it uses the final stack, then the shown file, then every listed frame. Spectral frames get spectrum extraction. Other frames get plate solving and photometry |
 | Analyze Temporal Variation | Appears only for spectral frames that already have a spectral stack. It follows how each star's spectrum changes across the raw frames |
 | Cancel | Replaces Analyze Target while an analysis runs |
-| Download Frames | Opens the [Ingest From Telescope dialog](#ingest-from-telescope-dialog) |
 | Stack Frames | Calibrates, aligns and combines the ticked frames. With none ticked, it uses every listed frame. Stack Frames is off when the frames come from more than one camera. The label then reads Stacking requires matching cameras. |
 | Open Siril | Opens Siril for the target. Siril is the outside program that does the stacking |
 | Summary lines | Show the selected Target, its Name and its Catalog ID |
@@ -246,7 +246,7 @@ The terminal starts with these names ready: `targets` (target catalog), `stars` 
 
 **Purpose.** Inspect the brightness history (light curve) and the spectrum of each star the app has identified.
 
-**Layout.** Three columns. The left column picks a star. The center column shows the star summary and two plots. The right column holds the Timeline and Stellar Analysis panels.
+**Layout.** Three columns. The left column picks a star. The center column shows the star summary and two plots. The right column holds the Timeline and Stellar Analysis panels. When you pick a target, the app opens its most useful star for you: one with a spectrum first, then one with photometry, then the first star. If you pick a star yourself, the app remembers it for that target until you close the app.
 
 **Controls.**
 
@@ -314,27 +314,38 @@ A plot that has no data collapses to a one-line note. The notes read No spectrum
 
 **Purpose.** Set up and watch the equipment: the mount, the camera profiles, the safety limits, guiding, the calibration library and the connected INDI devices. INDI is the open standard that lets software talk to astronomy hardware.
 
-**Layout.** The left column is the target list. The center column holds the control panels in rows: Telescope Control, Tracking Settings and the Calibration Library on top; then Camera Profiles, Manual Guide and Safety Limits; then and Guiding Trends with the Alignment and Guiding panel at the bottom. The right column holds the Devices and Device Properties panels. The page does not scroll. A panel that is too small for its content scrolls inside itself.
+**Layout.** The left column holds the Session panel, the Targets panel and the Controls panel. The center column holds the control panels in rows: Telescope Control and Manual Guide (a square) on top, with Camera Profiles under them and the tall Calibration Library to their right; then Guiding Trends with the Alignment and Guiding panel at the bottom. The right column holds the Devices and Device Properties panels. The page does not scroll. A panel that is too small for its content scrolls inside itself.
 
 **Who controls the equipment.** Ekos (the KStars imaging program) captures the frames for now, and this app only watches. While Ekos is in control, the controls that send a command to a device are greyed out. The panels that hold such controls show a Why unavailable? button in the title bar. Hover over it, focus it with the keyboard, or click it to read the reason. The reason also appears as text when you hover over the greyed controls. Panels that only show information, such as Guiding Trends, stay as they are.
+
+**Viewing a past night.** The Session panel at the top of the left column holds the Night menu. It starts on Live, which is how the view always worked. Under Live it lists each night that has data: the date, with the targets imaged that night beside it. Pick a night and the whole view shows that night. A line under the menu reads "Viewing the night of" and the date, and says that controls are live-only. Pick Live to bring the live view back. The panels change like this:
+
+- The controls that command equipment or change the library are greyed out, not hidden. They are every tab of Telescope Control, Manual Guide, Slew to Target, Add Target, Download Frames, Ingest frames, Measure noise and the edit controls in Device Properties. Hover over a greyed control to read why.
+- Guiding Trends shows that night's guiding summary.
+- Alignment and Guiding lists only that night's alignment attempts. If none were recorded, it says so. The Guiding target tab plots live guiding only, and says so.
+- The Targets panel shows only the targets imaged that night. Each row gives the frame count and the number of warnings from that night's review. Pick Live to see the whole list again.
+- Devices and the other read-only panels keep showing live data.
+
+The list of nights updates by itself when a guide log download adds new guiding data.
 
 **Controls.**
 
 | Control | What it does |
 | --- | --- |
-| Add Target | Opens the [Add New Target dialog](#add-new-target-dialog). It is not a device command, so it stays on |
+| Add Target | Opens the [Add New Target dialog](#add-new-target-dialog). It is not a device command, so it stays on while Ekos is in control. It is greyed while you view a past night |
 | Slew to Target | Moves the mount to the coordinates of the selected target. Greyed while Ekos is in control |
-| Start Alignment and Stop Alignment | Start and stop centering on the selected target by plate solving. Plate solving matches the stars in an image to a star catalog. Greyed while Ekos is in control |
+| Start Alignment and Stop Alignment (Controls tab of Telescope Control) | Start and stop centering on the selected target by plate solving. Plate solving matches the stars in an image to a star catalog. Greyed while Ekos is in control |
+| Tracking ON, Tracking OFF, PARK and UNPARK (Controls tab) | Tracking turns the mount's star tracking on or off. PARK sends the mount to its parked position, and UNPARK frees it for use. Greyed while Ekos is in control |
 | Tracking ON and Tracking OFF | Turn the mount's star tracking on or off. Greyed while Ekos is in control |
 | PARK and UNPARK | Send the mount to its parked position, or free it for use. Greyed while Ekos is in control |
-| Alignment and Guiding tabs in Tracking Settings | The Alignment tab holds Accuracy and Settle. The Guiding tab holds Exposure (s) and Gain, with the buttons Start Guiding and Stop Guiding. Start Guiding sends the exposure and gain you typed, and stays greyed while the exposure is empty or zero. A toast tells you if guiding did not start or stop. Switch tabs with a click or the arrow keys. Greyed while Ekos is in control |
+| Alignment and Guiding tabs of Telescope Control | The Alignment tab holds Accuracy and Settle. The Guiding tab holds Exposure (s) and Gain, with the buttons Start Guiding and Stop Guiding. Start Guiding sends the exposure and gain you typed, and stays greyed while the exposure is empty or zero. A toast tells you if guiding did not start or stop. Switch tabs with a click or the arrow keys. Greyed while Ekos is in control |
 | Camera Profiles | Under Recorded noise, a table gives the gain (electrons per analog-to-digital unit, one step of the stored pixel value) and the read noise (electrons) for each camera setting. The first column shows the camera name with its setting (gain, offset, binning and temperature) on a second line. Each value has an Evidence word under it: Measured, Partly measured or Tentative (a datasheet or assumed value). A camera with no recorded noise reads Not measured |
 | Measure noise | A button in the Camera Profiles title bar. It opens a small form. Pick a camera, type a Gain and an Offset, and click Measure. The library reads flat and bias frames and shows the result. Nothing is saved until you click Save measurement and confirm. Close, or the Escape key, shuts the form and puts the focus back on the button |
-| Manual Guide | Eight arrow buttons move the mount while you hold them, and stop when you let go. STOP halts all mount motion. The Slew Speed slider sits beside the pad and has four steps, from Min to Max: Guide, Centering, Find and Max. Greyed while Ekos is in control |
-| Safety Limits | Shows the active telescope's name and its saved limits on two tabs. The Altitude tab holds Enable altitude limits, Minimum altitude and Maximum altitude. The Hour angle tab holds Enable hour angle limit, Maximum hour angle and Meridian flip after. Apply safety limits is in the title bar, so it is always in view. It is on only after you change a value on either tab. It saves the limits for the active telescope, and a message reminds you to copy the session into Ekos again, because Ekos keeps its own copy. The library refuses limits that do not make sense, such as a minimum above the maximum, and the panel shows its reason. Apply is greyed while Ekos is in control. The panel reads No active telescope until you choose a telescope in the Settings Equipment tab |
-| Alignment and Guiding | One panel with two tabs. The Alignment tab is a table of recorded centering rounds with Time, Target, Status, dRA and dDEC in arcseconds. Time is the clock time for today, or the date and time for earlier nights; on a narrow window the Time column is hidden so the target names fit. The symbols are ⟳ solving, ✓ aligned, ⚠ outside tolerance, ✗ failed and — idle; hover over a symbol to read its word. The rows are the library's records as stored. The Guiding target tab is a bullseye chart of dRA against dDEC that fills the tab. Points near the center mean good guiding |
-| Guiding Trends | Plots guiding error over time. The check boxes dRA, dDEC, SNR, RMS and Pulses choose the lines. The History slider sets 10 to 100 points. Both sit in the title bar, so the plot fills the panel. Before any guiding data arrives, the panel says so instead of drawing an empty plot |
-| Calibration Library | The Camera box picks a camera. The small refresh button beside it reads the library again. A second line gives the Darks, Biases and Flats counts for that camera. Choose one of them to show its table below, with room for at least four rows. The table scrolls inside the panel. Darks show Exposure, Offset, Temp, Count and Health. Biases show Gain, Offset, Count and Health. Flats show Filter, Gain, Offset, Count and Health. The Health column says OK, Warning or Not checked for each set. Not checked means nothing could be judged, and it always gives the reason; it does not mean the set is good. Choose the health mark to read the reason in plain words and to see which files to look at. The Check sets button measures the new or changed dark and bias frames in the background, so the sets can be judged; on the Flats tab it checks the flats again. The first check of a large library takes a long time, and the rest is quick. Choose the refresh button when it has finished. Exposures under one second read in milliseconds, such as 10 ms; longer ones in seconds, such as 30 s. The Ingest frames button in the panel header opens the [Ingest From Telescope dialog](#ingest-from-telescope-dialog). A quality statement can send you here with Show in calibration library: the panel switches to that camera and highlights the matching row, or says that no row matches |
+| Manual Guide | Eight arrow buttons move the mount while you hold them, and stop when you let go. STOP halts all mount motion. The Slew Speed slider sits below the pad and has four steps, from Min to Max: Guide, Centering, Find and Max. Greyed while Ekos is in control |
+| Altitude and Hour angle tabs of Telescope Control | Show the active telescope's name and its saved limits. The Altitude tab holds Enable altitude limits, Minimum altitude and Maximum altitude. The Hour angle tab holds Enable hour angle limit, Maximum hour angle and Meridian flip after transit, in degrees. Apply safety limits is at the bottom of both tabs and saves both at once. It is on only after you change a value. It saves the limits for the active telescope, and a message reminds you to copy the session into Ekos again, because Ekos keeps its own copy. The library refuses limits that do not make sense, such as a minimum above the maximum, and the tab shows its reason. Apply is greyed while Ekos is in control. The tab reads No active telescope until you choose a telescope in the Settings Equipment tab |
+| Alignment and Guiding | One panel with two tabs. The Alignment tab is a table of recorded centering rounds with Time, Target, Status, dRA and dDEC in arcseconds. Time is the clock time for today, or the date and time for earlier nights; on a narrow window the Time column is hidden so the target names fit. The symbols are ⟳ solving, ✓ aligned, ⚠ outside tolerance, ✗ failed and — idle; hover over a symbol to read its word. The rows are the library's records as stored. While you view a past night, the table lists only that night's attempts. The Guiding target tab is a bullseye chart of dRA against dDEC that fills the tab. Points near the center mean good guiding |
+| Guiding Trends | Plots guiding error over time. The check boxes dRA, dDEC, SNR, RMS and Pulses choose the lines. The History slider sets 10 to 100 points. Both sit in the title bar, so the plot fills the panel. While the mount is not guiding, the panel shows the summary of the most recent night that has guiding data, titled Last night with guiding and the date, and goes back to the plot as soon as guiding data arrives. If no night has guiding data, the panel says so instead of drawing an empty plot. When you pick a past night in the Night menu at the top of the view, the panel shows that night's summary instead of the plot, and the check boxes and slider are hidden. The summary has the error per axis in arcseconds, how much it widens stars, the share of lost guide frames, the count of large excursions, the notes from the guiding analysis, and a table of the guiding runs. If a night cannot be summarized, the panel gives the reason. Pick Live in the Night menu to see the plot again |
+| Calibration Library | The Camera picker opens a short menu of cameras. The small refresh button beside it reads the library again. A second line has three tabs, Darks, Biases and Flats, each with its count for that camera, such as Darks (25). Choose a tab to show its table below, with room for at least four rows. The table scrolls inside the panel. Darks show Exposure, Offset, Temp, Count and Health. Biases show Gain, Offset, Count and Health. Flats show Filter, Gain, Offset, Count and Health. The Health column says OK, Warning or Not checked for each set. Not checked means nothing could be judged, and it always gives the reason; it does not mean the set is good. Choose the health mark to read the reason in plain words and to see which files to look at. The app measures new dark and bias frames by itself in the background after you ingest or download them, so the sets can be judged. Until that job finishes, a new set reads Not checked. The panel reads the health again when the job ends. The first measuring of a large library takes a long time, and later ones are quick. Exposures under one second read in milliseconds, such as 10 ms; longer ones in seconds, such as 30 s. The Ingest frames button in the panel header opens the [Ingest From Telescope dialog](#ingest-from-telescope-dialog). A quality statement can send you here with Show in calibration library: the panel switches to that camera and highlights the matching row, or says that no row matches |
 | Devices | One button for each INDI device. It reads No INDI devices connected. when none are found |
 | Device Properties | Lists the properties of the chosen device, and lets you edit them |
 
@@ -402,7 +413,7 @@ Adding a package to the session makes it Planned. Suggestions update and delete 
 | Add to Sequence | In the Image List title bar. Adds the package, as edited, to tonight's session at the end of the Execution Queue. While you edit a queued card, Cancel and Modify replace this button |
 | Last Image | Shows the newest captured frame. A button switches between the linear and the stretched view. The frame updates when a capture ends |
 
-Each editor panel reads Choose a package or New package until you pick one. The editor has no framing controls. Framing comes from the Planetarium (see [Planetarium](#planetarium)).
+When you open the Observation Manager with no package picked, it opens the first package in the Planned list (or the first Suggested or Complete one if none is planned), so the editor panels are not empty. They read Choose a package or New package only when the library has no packages. The editor has no framing controls. Framing comes from the Planetarium (see [Planetarium](#planetarium)).
 
 **Visible Targets.** A table with Target, Alt, Az and Until (UTC) for the targets now above the horizon. Until (UTC) is the time of day, in UTC, when the target sets, or Circumpolar. A long name is cut short; hover over it to read it all. Click a row, or press Enter on it, to open that target's package. It works like New package: it opens the existing planned or suggested package, and makes an empty one only if the target has neither.
 

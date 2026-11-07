@@ -4,16 +4,15 @@
  * REQ: IMG-1: Image Management Interface
  * REQ: IMG-5: Automated Stacking Pipeline
  */
-import React, { createContext, useContext, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import { useImageProcessing, UseImageProcessingResult } from '../hooks/useImageProcessing';
 import { useTargetContext } from '../../common/context/TargetContext';
 import { SelectableItem } from '../../common/components/SelectableList';
 import type { TargetListFilterPanelProps } from '../../common/radioList/TargetListFilterPanel';
 import { useTargetFilesLogic } from '../hooks/useTargetFilesLogic';
-import { useIngestionManager, IngestionState } from '../../common/hooks/useIngestionManager';
 
 /**
- * Extended context value including target list, processing state, files, and ingestion.
+ * Extended context value including target list, processing state, and files.
  */
 export interface ImageProcessingContextValue extends UseImageProcessingResult {
     isLocalTarget: boolean;
@@ -24,8 +23,11 @@ export interface ImageProcessingContextValue extends UseImageProcessingResult {
     setFilterText: (text: string) => void;
     // Files Logic
     files: ReturnType<typeof useTargetFilesLogic>;
-    // Ingestion Logic
-    ingestion: IngestionState;
+    /**
+     * Tells the provider the job history is on screen (the Analysis tab was opened),
+     * so it reads the history. Until then it is not read. Safe to call more than once.
+     */
+    requestJobHistory: () => void;
 }
 
 const ImageProcessingContext = createContext<ImageProcessingContextValue | undefined>(undefined);
@@ -54,9 +56,10 @@ export const ImageProcessingProvider: React.FC<ImageProcessingProviderProps> = (
     setFilterText
 }) => {
     const { selectedTarget, reloadKey, framesReloadKey } = useTargetContext();
-    const processingResult = useImageProcessing(selectedTarget, isLocalTarget);
+    const [historyWanted, setHistoryWanted] = useState(false);
+    const requestJobHistory = useCallback(() => setHistoryWanted(true), []);
+    const processingResult = useImageProcessing(selectedTarget, isLocalTarget, historyWanted);
     const files = useTargetFilesLogic(selectedTarget, reloadKey + framesReloadKey, isLocalTarget);
-    const ingestion = useIngestionManager(selectedTarget);
 
     const value: ImageProcessingContextValue = {
         ...processingResult,
@@ -67,7 +70,7 @@ export const ImageProcessingProvider: React.FC<ImageProcessingProviderProps> = (
         filterText,
         setFilterText,
         files,
-        ingestion
+        requestJobHistory
     };
 
     return (

@@ -70,7 +70,9 @@ prepare_backend_scope() {
   fi
 
   BACKEND_SCOPE_UNIT="astrometrics-backend-$1.scope"
-  BACKEND_SCOPE_PREFIX=(systemd-run --user --scope --quiet "--unit=$BACKEND_SCOPE_UNIT" -p "MemoryMax=$max_limit")
+  # --slice puts the scope in astrometrics.slice, the one group that also holds Vite and Electron
+  # (see astrometrics_slice_prefix in run_astrometrics.sh).
+  BACKEND_SCOPE_PREFIX=(systemd-run --user --scope --quiet "--slice=astrometrics.slice" "--unit=$BACKEND_SCOPE_UNIT" -p "MemoryMax=$max_limit")
   if [ -n "$high_limit" ]; then
     BACKEND_SCOPE_PREFIX+=(-p "MemoryHigh=$high_limit")
   fi

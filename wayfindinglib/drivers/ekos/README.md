@@ -4,7 +4,7 @@ This folder reads the log files that Ekos writes on the telescope computer. Ekos
 
 Ekos writes two kinds of file:
 
-- **Guide logs** (`guide_log-*.txt`) record the guiding error frame by frame. They use the PHD2 log format, so `wayfindinglib/drivers/phd2/guide_log_parser.py` reads them. They are not read here.
+- **Guide logs** (`guide_log-*.txt`) record the guiding error frame by frame. They use the PHD2 log format, so `wayfindinglib/drivers/phd2/guide_log_parser.py` reads them (for a log PHD2 itself wrote, it converts the mount rates from pixels per second to arcseconds per second). They are not read here.
 - **Analyze logs** (`ekos-*.analyze`) record the rest of a session. `analyze_log_parser.py` reads them.
 - **KStars text logs** (`log_*.txt`) record what each Ekos module did, in words, when logging is on. `kstars_log_parser.py` reads the guider's dither messages from them.
 

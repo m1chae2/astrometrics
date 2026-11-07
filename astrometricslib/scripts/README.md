@@ -59,16 +59,17 @@ A script here may import astrometricslib's internal modules. It never imports an
 
 ## Backups
 
-The backup scripts copy the library to Google Drive with rclone, a command-line program that copies and syncs files with cloud storage. `drive:` is the name of the rclone remote (the configured Google Drive account), so `drive:Library` is the `Library` folder on that Drive.
+The database backups stay on this computer. They are a safety net for changes to the app (a migration or restack that goes wrong), not an off-site copy. They are never uploaded. The frames are copied to Google Drive separately by `upload_library.py`.
 
 ### `backup_library_databases.py`
 
-Makes a safe copy of the databases and uploads it.
+Makes a safe local copy of the databases.
 
-- **What it copies.** It copies `astrometrics.db` and `astrometrics_log.db` with SQLite's online backup, then checks each copy's integrity. It uploads the copies, `calibration_frames.json` and the configuration file to `drive:Library/_backup/<timestamp>/`. It works with the backend running or stopped.
-- **When it skips.** It does nothing when no source file changed since the last good upload (`--force` overrides). A folder whose upload failed stays on disk and is uploaded first on the next run.
-- **What it keeps.** On Drive it keeps the 7 newest snapshots plus the newest of each calendar month.
-- **Options.** `--dry-run` prints the actions only; `--rclone` and `--remote` choose the program and remote.
+- **What it copies.** It copies `astrometrics.db`, `astrometrics_log.db` and `wayfinding.db` with SQLite's online backup (a consistent copy even while the backend writes), then checks each copy's integrity. It adds `calibration_frames.json` and the configuration file. Everything goes to `~/.cache/astrometrics/backup/<timestamp>/`. It works with the backend running or stopped.
+- **One at a time.** A lock file (`.lock` in the backup folder) allows one backup at a time. A second run logs that another is running and exits at once.
+- **When it skips.** It does nothing when no source file changed since the last snapshot (`--force` overrides) and logs "Backup unchanged, skipped".
+- **What it keeps.** The newest 5 snapshots (`KEEP_SNAPSHOTS`, about 1.5 GB each). It deletes older ones after a good run, never the one it just made, and prints the space freed.
+- **Options.** `--dry-run` prints the actions only; `--backup-root` chooses another folder.
 - **When it runs.** `build/linux/install_backup_timer.sh` sets it up to run every 4 h. `run_backend.sh stop` also starts it in the background, because with the backend stopped the databases are quiet. That backup can never make `stop` fail or wait.
 
 ### `upload_library.py`
@@ -77,13 +78,13 @@ Makes the Google Drive copy (`drive:Library`) match the local library (`frames_p
 
 - **Deleted and renamed files.** A file deleted or replaced locally moves into `drive:Library_deleted/<timestamp>/`. Recycle folders older than 90 days are removed after each good run (`--keep-deleted-days`). A renamed or moved file is moved on Drive, not uploaded again (`--track-renames`).
 - **Safety limits.** One run deletes at most 100 files (`--max-delete`). The run is refused (exit code 2) when the library is missing, empty, or holds fewer than half the files of the last good run (`--accept-file-count` overrides). A file lock stops two runs at once.
-- **What it leaves out.** `_backup`, hidden files and half-written temporary files.
+- **What it leaves out.** `_backup` (old database snapshots from before backups became local), hidden files and half-written temporary files.
 - **Exit codes.** Exit code 1 and a desktop notice mean rclone failed. `--dry-run` reports only.
 - **When it runs.** `build/linux/watch_library_uploads.sh` (the `astrometrics-library-watch` user service) starts it once the library has been quiet for 5 min, and a timer runs it every 4 h.
 
 ### `restore_library_databases.py`
 
-`--list` shows the snapshots on Drive. `--snapshot NAME --destination DIR` downloads one into a new folder, checks each database, and prints how to put the files in place. It never writes to the live library.
+`--list` shows the local snapshots. `--snapshot NAME --destination DIR` copies one into a new folder, checks each database, and prints how to put the files in place. It never writes to the live library.
 
 ### `check_drive_integrity.py`
 
@@ -92,7 +93,7 @@ Read-only. Checks that no raw frame on Drive has gone missing or changed.
 - **What it records.** It lists every file under `drive:Library` with `rclone lsjson` (size, MD5 checksum, modification time). It saves the list as a gzipped manifest in `~/.cache/astrometrics/integrity` (newest 10 kept) and compares it with the previous one. The first run records a baseline.
 - **Serious problems.** A raw frame under `lights/`, `darks/`, `biases/` or `flats/` that is missing, or has a different checksum or size, gives exit code 2, plus a `notify-send` desktop notice unless `--no-notify`.
 - **Moves.** A file whose checksum and size reappear at a new path (such as a frame moved into `_excluded`) is reported as moved, not missing.
-- **Information only.** Derived files (stacks, rejection maps, processed images, JPEGs, `.seq` files, `stacks/` folders) are listed but never count as problems. The `_backup` folder is skipped.
+- **Information only.** Derived files (stacks, rejection maps, processed images, JPEGs, `.seq` files, `stacks/` folders) are listed but never count as problems. The `_backup` folder (old database snapshots from before backups became local) is skipped.
 - **Other exit codes and output.** Exit code 1 means `rclone` failed. `--json` prints a machine-readable summary.
 
 ## Empirical validation and analysis

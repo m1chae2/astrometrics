@@ -56,11 +56,14 @@ export const useSourceMerging = (
   const limitingMagnitude = useMemo(() => computeLimitingMagnitude(currentFOV), [currentFOV]);
   const includeStarsWithoutCatalogMagnitude = currentFOV <= UNCATALOGED_STAR_MAX_FOV_DEG;
 
+  // Rounded up to a whole magnitude so a zoom-in inside one magnitude step is answered by the
+  // sources already fetched; the renderer still applies the exact limit when it draws.
+  const localQueryMagnitude = Math.ceil(limitingMagnitude);
   const { sources: localSources } = usePlanetariumSources(
     raValue,
     decValue,
     queryRadius,
-    limitingMagnitude,
+    localQueryMagnitude,
     includeStarsWithoutCatalogMagnitude,
   );
 
@@ -112,19 +115,24 @@ export const useSourceMerging = (
     { limitingMagnitude: deepStarLimitingMagnitude, debounceMilliseconds: LOCAL_CATALOG_QUERY_DEBOUNCE_MS },
   );
 
+  // Runs only when one of the three lists is a new array (the fetching hooks keep the old
+  // array when a result is unchanged). One pass: local ids first, then online sources not
+  // seen yet.
   const sources = useMemo(() => {
-    const localIds = new Set(localSources.map(source => source.id));
-    const combinedOnline = [
-      ...brightStarSources,
-      ...deepStarSources.filter(source => !localIds.has(source.id)),
-    ];
-    const seenOnlineIds = new Set<string>();
-    const dedupedOnline = combinedOnline.filter(source => {
-      if (localIds.has(source.id) || seenOnlineIds.has(source.id)) return false;
-      seenOnlineIds.add(source.id);
-      return true;
-    });
-    return [...localSources, ...dedupedOnline];
+    const seenIds = new Set<string>();
+    const merged: typeof localSources = [];
+    for (const source of localSources) {
+      seenIds.add(source.id);
+      merged.push(source);
+    }
+    for (const list of [brightStarSources, deepStarSources]) {
+      for (const source of list) {
+        if (seenIds.has(source.id)) continue;
+        seenIds.add(source.id);
+        merged.push(source);
+      }
+    }
+    return merged;
   }, [localSources, brightStarSources, deepStarSources]);
 
   const { targets: libraryTargets } = usePlanetariumTargets();

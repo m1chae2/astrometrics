@@ -5,6 +5,7 @@
  * the right and times read "60 s". A package with no rows says how to add one.
  */
 import React from 'react';
+import { Button } from '../common/components/Button';
 import { filterLabel } from './packageModel';
 import '../common/styles/tables.css'; // Shared table styles
 
@@ -61,25 +62,27 @@ export const ImageList: React.FC<Props> = ({ items, onRemove, onEdit }) => {
                             <td>{filterLabel(String(item.filter ?? ''))}</td>
                             <td className="image-list__actions">
                                 {onEdit && (
-                                    <button
-                                        type="button"
+                                    <Button
+                                        variant="ghost"
+                                        size="square"
                                         onClick={() => onEdit(item)}
-                                        className="icon-btn image-list__edit-btn"
+                                        className="image-list__edit-btn"
                                         title="Edit row"
                                         aria-label={`Edit row ${idx + 1}`}
                                     >
                                         ✎
-                                    </button>
+                                    </Button>
                                 )}
-                                <button
-                                    type="button"
+                                <Button
+                                    variant="ghost"
+                                    size="square"
                                     onClick={() => onRemove(item.targetId, item.uuid || item.id)}
-                                    className="icon-btn-danger image-list__remove-btn"
+                                    className="image-list__remove-btn"
                                     title="Remove row"
                                     aria-label={`Remove row ${idx + 1}`}
                                 >
                                     ✕
-                                </button>
+                                </Button>
                             </td>
                         </tr>
                     ))}

@@ -39,3 +39,34 @@ Without a systemd user session, the backend starts with no limit and the script 
 To see whether the kernel killed the backend, run `build/linux/run_backend.sh status`. After a kill it prints "The kernel's out-of-memory killer stopped a process of the backend" with the scope name. The details are in the user journal: `journalctl --user -u <scope name>`. The scope name is kept in `.run_pids/backend.scope`. A kill of a child such as Siril, not the backend itself, shows up as a failed stack and the same journal line.
 
 The helper functions are in `backend_memory_limit.sh`.
+
+### One group for the whole app
+
+`run_astrometrics.sh` starts the backend, Vite and Electron in separate systemd scopes, and all three scopes sit in one group, `astrometrics.slice`. They are still separate processes, so you can restart one without the others. The group makes them easy to see and to clean up:
+
+```bash
+systemd-cgls --user-unit astrometrics.slice
+build/linux/run_astrometrics.sh status
+```
+
+`status` lists everything in the group. `stop` and `restart` stop each piece in turn and then stop anything still left in the group, so no helper process outlives `stop`. Without a systemd user session the pieces start as before and the group does not exist.
+
+The group holds only what these scripts start. The MCP servers belong to the Claude Code session that started them, and each one exits when that session closes.
+
+## run_astrometrics.sh: graphics card
+
+On a laptop with an Intel and an NVIDIA card, `start` picks the card for the Electron window before Electron starts, because Chromium cannot switch cards while it runs. The choice comes from the environment variable `ASTROMETRICS_GPU`, then the `gpu` key in `[Frontend]` of `astrometrics.config.toml` (read only), then `auto`. The values are `auto`, `intel` and `nvidia`. `auto` means NVIDIA on AC power with the NVIDIA render offload driver present, and Intel on battery. Plugging in or unplugging while the app runs does not switch cards until the next start.
+
+The launcher calls `node electron/gpu_choice.js shell-plan`, which prints the environment and switches to use (`node electron/gpu_choice.js decide` prints the decision as JSON). The same file serves the TPM harness (`build/tpm/gpu_choice.mjs` re-exports it). NVIDIA uses X11 through XWayland, ANGLE with desktop OpenGL (`--use-angle=gl`; the EGL route quietly lands on Intel in Electron) and the PRIME offload variables. Intel keeps the app's normal start. At start-up `electron/gpu_startup_check.js` logs the renderer Electron really got, warns when it is not the requested card, and restarts the app once on Intel if NVIDIA failed.
+
+## Tray menu
+
+`electron/tray_menu.js` gives the tray icon a native menu (status lines, workspaces, Park, Open App, Quit). The desktop draws it under the icon, which GNOME on Wayland needs because an app cannot place its own window there. Status comes from the `telescope:status` RPC every five seconds.
+
+## Presence (is the user looking at the app)
+
+`electron/presence.js` decides whether the user is `present` or `away`. It is used only to decide desktop notifications. Polling, charts and background work do not change when the user is away.
+
+The user is present when the main window has focus and is not minimized, the screen is not locked, the computer is not asleep, and the keyboard or mouse was touched in the last 120 seconds (`IDLE_THRESHOLD_SECONDS`). The idle time is checked every 10 seconds. Window focus is the main signal, because a covered window can still report that it is visible. On Wayland and XWayland only the app's own window focus is known, which is enough.
+
+The page reads the answer through `window.astrometrics.app.getPresence()` and `onPresenceChange()`. A notification marked `notify: true` goes to the desktop only when the user is away. It stays until dismissed, and the main process closes it when the user returns. In a plain browser the page falls back to focus and visibility. See `ui/common/utils/README.md`.

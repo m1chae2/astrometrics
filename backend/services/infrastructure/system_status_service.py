@@ -13,6 +13,17 @@ if TYPE_CHECKING:
     from backend.services.infrastructure.astrometrics_service import AstrometricsService
 
 
+class FrameCopyPulse(BaseModel):
+    """Progress of copying new frames of a target to this computer."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    active: bool = False
+    target_id: str | None = Field(default=None, alias="targetId")
+    measured: int | None = None
+    total: int | None = None
+
+
 class TelescopePulse(BaseModel):
     """Lightweight snapshot of current telescope state for polling."""
 
@@ -34,6 +45,7 @@ class TelescopePulse(BaseModel):
     camera_temperature: str | None = Field(default=None, alias="cameraTemperature")
     camera_status: str | None = Field(default=None, alias="cameraStatus")
     target_name: str | None = Field(default=None, alias="targetName")
+    frame_copy: FrameCopyPulse | None = Field(default=None, alias="frameCopy")
 
 
 class ProcessingJobPulse(BaseModel):
@@ -95,6 +107,7 @@ class SystemStatusService:
             cameraTemperature=tele.get("cameraTemperature", tele.get("camera_temperature")),
             cameraStatus=tele.get("cameraStatus", tele.get("camera_status")),
             targetName=tele.get("targetName", tele.get("target_name")),
+            frameCopy=tele.get("frameCopy"),
         )
 
         proc_jobs = []

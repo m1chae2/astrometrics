@@ -72,6 +72,8 @@ class PHD2Client:
         self._reconnect_cooldown_seconds = reconnect_cooldown_seconds
         self._socket_timeout_seconds = socket_timeout_seconds
         self._last_connection_attempt = 0.0
+        # True after a failed connect has been logged, so repeats stay quiet.
+        self._connect_failure_reported = False
 
     def _can_attempt_connect(self) -> bool:
         """Return whether the reconnect cooldown has elapsed.
@@ -150,8 +152,25 @@ class PHD2Client:
             try:
                 sock = self._connect()
             except OSError as connect_error:
-                logger.warning("PHD2 connection to %s:%s failed: %s", self.host, self.port, connect_error)
+                # PHD2 may simply not be running. Say so once, at warning
+                # level, and keep the repeats out of the job logs (one line
+                # every few seconds would bury the lines that matter).
+                if self._connect_failure_reported:
+                    logger.debug("PHD2 connection to %s:%s still failing", self.host, self.port)
+                else:
+                    self._connect_failure_reported = True
+                    logger.warning(
+                        "PHD2 connection to %s:%s failed: %s. Retrying every %.0f s without more warnings.",
+                        self.host,
+                        self.port,
+                        connect_error,
+                        self._reconnect_cooldown_seconds,
+                    )
                 continue
+
+            if self._connect_failure_reported:
+                logger.info("PHD2 connection to %s:%s restored", self.host, self.port)
+                self._connect_failure_reported = False
 
             try:
                 pending = b""

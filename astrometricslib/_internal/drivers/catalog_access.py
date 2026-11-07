@@ -9,7 +9,6 @@ import logging
 import math
 import os
 import re
-import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
@@ -21,6 +20,7 @@ from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.storage.butler import Butler as _GenericButler
 from astrometricslib.foundation.storage.butler import DatasetSpec
+from astrometricslib.foundation.storage.data_versions import STARS_KIND, TARGETS_KIND, read_data_versions
 
 # Declares this module's own public surface. Without it, sphinx-automodapi
 # documents every imported name too, which is what produced the
@@ -265,6 +265,28 @@ def _split_target_ids(joined_target_ids: Any) -> list[str]:
     return [piece.strip() for piece in str(joined_target_ids).split(",") if piece.strip()]
 
 
+#: SQL condition for "this star belongs to the target". The stored
+#: ``target_id`` is one id, or several ids joined by commas. The first branch
+#: is a plain equality that the ``idx_stellar_objects_target_id`` index
+#: serves. The second branch keeps the older whole-id-between-commas test
+#: (spaces around a comma removed first, as `_split_target_ids` trims each
+#: piece) but looks only at rows that hold a comma, which the same index
+#: lists without reading the table. A value with no comma can match only by
+#: equality, so the result is the same as the older single test. The inner
+#: ``ORDER BY ... LIMIT -1`` makes the planner read the index in order
+#: instead of the table, without naming the index (a name would fail on a
+#: database that lacks it). Takes the target id twice.
+_TARGET_MEMBERSHIP_CONDITION = (
+    "rowid IN ("
+    "SELECT rowid FROM stellar_objects WHERE target_id = ? "
+    "UNION "
+    "SELECT rowid FROM (SELECT rowid, target_id FROM stellar_objects ORDER BY target_id LIMIT -1) "
+    "WHERE target_id LIKE '%,%' AND "
+    "instr(',' || replace(replace(replace(replace(COALESCE(target_id, ''), "
+    "', ', ','), ' ,', ','), ', ', ','), ' ,', ',') || ',', ',' || ? || ',') > 0)"
+)
+
+
 def _summary_from_row(row: dict[str, Any]) -> StarSummary:
     """Build a star summary from one row of the summary columns.
 
@@ -284,6 +306,14 @@ def _summary_from_row(row: dict[str, Any]) -> StarSummary:
         magnitude=_coerce_float(row["magnitude"]),
         spectral_type=row["spectral_type"] or "",
     )
+
+
+_DATASET_VERSION_KINDS = {
+    "target_catalog": TARGETS_KIND,
+    "target_record": TARGETS_KIND,
+    "stellar_catalog": STARS_KIND,
+}
+"""The write counter (see `data_versions`) counting each dataset type."""
 
 
 class AbstractCatalogAccess(ABC):
@@ -673,26 +703,22 @@ class CatalogAccess(AbstractCatalogAccess):
             config = get_configuration()
         self.config = config
         self._generic = self._build_generic_butler(config)
-        self._dataset_versions: dict[str, int] = {}
-        self._dataset_versions_lock = threading.Lock()
 
-    def get_dataset_version(self, dataset_type: str) -> int:
-        """Report how many writes `dataset_type` has had in this process.
+    def get_dataset_version(self, dataset_type: str) -> int | None:
+        """Report how many writes `dataset_type` has had, by any program.
 
         A caller that wants to know whether a dataset has changed since it
         last looked -- e.g. a cache deciding whether to redo an expensive
         scan -- can keep the number it saw last time and compare it to this
         one, instead of re-reading the whole dataset or guessing from a
         timer. Every `put`, `merge_and_record`, and `delete_by_ids` call on
-        `dataset_type` counts as one write. Starts at 0 for a dataset this
-        process hasn't written to yet.
+        `dataset_type` counts as one write.
 
-        This is one in-memory counter per running backend process, not a
-        durable value: it does not see a write made by a different process
-        (e.g. a maintenance script run from the command line while the app
-        isn't running), and it resets on restart. A caller relying on it
-        for correctness, not just avoiding unnecessary work, should still
-        keep a coarse time-based fallback for that case.
+        The count is kept in the library database next to the data (see
+        `astrometricslib.foundation.storage.data_versions`), so it also sees a
+        write made by a different program, such as a maintenance script, and
+        it keeps counting across restarts. A write made by raw SQL that does
+        not count itself is not seen.
 
         Parameters
         ----------
@@ -701,19 +727,19 @@ class CatalogAccess(AbstractCatalogAccess):
 
         Returns
         -------
-        version : `int`
-            The number of writes made to `dataset_type` in this process.
+        version : `int` or `None`
+            The number of writes counted for `dataset_type`. It is 0 for a
+            dataset that has not been written. `None` when the database
+            cannot be read at the moment: the version is unknown, and the
+            caller must not keep an answer that depends on it.
         """
-        with self._dataset_versions_lock:
-            return self._dataset_versions.get(dataset_type, 0)
-
-    def _bump_dataset_version(self, dataset_type: str) -> None:
-        """Record one more write to `dataset_type`.
-
-        Call after a write to it succeeds.
-        """
-        with self._dataset_versions_lock:
-            self._dataset_versions[dataset_type] = self._dataset_versions.get(dataset_type, 0) + 1
+        kind = _DATASET_VERSION_KINDS.get(dataset_type)
+        if kind is None:
+            return 0
+        versions = read_data_versions(os.path.join(str(self.config.get_library_path()), "astrometrics.db"))
+        if versions is None:
+            return None
+        return versions.get(kind, 0)
 
     @staticmethod
     def _build_generic_butler(config: Any) -> _GenericButler:
@@ -726,6 +752,7 @@ class CatalogAccess(AbstractCatalogAccess):
             specs={
                 "target_catalog": DatasetSpec(
                     table_name="targets",
+                    data_version_kind=TARGETS_KIND,
                     model_class=Target,
                     extra_column_types={
                         "name": "TEXT",
@@ -742,6 +769,7 @@ class CatalogAccess(AbstractCatalogAccess):
                 ),
                 "stellar_catalog": DatasetSpec(
                     table_name="stellar_objects",
+                    data_version_kind=STARS_KIND,
                     model_class=StellarObject,
                     extra_column_types={
                         "target_id": "TEXT",
@@ -877,7 +905,6 @@ class CatalogAccess(AbstractCatalogAccess):
             self._generic.put_all("stellar_catalog", obj)
         else:
             raise InvalidArgumentError(f"Write operation not supported on dataset type: {dataset_type}")
-        self._bump_dataset_version("target_catalog" if dataset_type == "target_record" else dataset_type)
 
     def merge_and_record(
         self,
@@ -910,7 +937,6 @@ class CatalogAccess(AbstractCatalogAccess):
             raise InvalidArgumentError(f"merge_and_record is not supported for dataset type: {dataset_type}")
 
         self._generic.merge_and_record(dataset_type, objects, merge_function)
-        self._bump_dataset_version(dataset_type)
 
     def delete_by_ids(self, dataset_type: str, ids: list[str]) -> None:
         """Delete specific records from the database using their IDs.
@@ -931,7 +957,6 @@ class CatalogAccess(AbstractCatalogAccess):
             raise InvalidArgumentError(f"delete_by_ids is not supported for dataset type: {dataset_type}")
 
         self._generic.delete_by_ids(dataset_type, ids)
-        self._bump_dataset_version(dataset_type)
 
     def get_by_ids(self, dataset_type: str, ids: list[str]) -> list[Any]:
         """Load only specific records from the database instead of everything.
@@ -1152,13 +1177,8 @@ class CatalogAccess(AbstractCatalogAccess):
             "AND magnitude != 0 AND magnitude < 1e308)"
         )
         if target_id:
-            # Whole-id match between commas. Spaces around a comma are
-            # removed first, as `_split_target_ids` trims each piece.
-            conditions.append(
-                "instr(',' || replace(replace(replace(replace(COALESCE(target_id, ''), "
-                "', ', ','), ' ,', ','), ', ', ','), ' ,', ',') || ',', ',' || ? || ',') > 0"
-            )
-            values.append(target_id)
+            conditions.append(_TARGET_MEMBERSHIP_CONDITION)
+            values.extend([target_id, target_id])
         if not include_unresolved:
             conditions.append(
                 "NOT (length(rtrim(id, '0123456789')) < length(id) "
@@ -1197,7 +1217,6 @@ class CatalogAccess(AbstractCatalogAccess):
         else:
             order_by_sql = "id"
 
-        total = self._generic.count_where("stellar_catalog", where_sql, values)
         rows = self._generic.select_where(
             "stellar_catalog",
             [
@@ -1218,6 +1237,12 @@ class CatalogAccess(AbstractCatalogAccess):
             limit,
             offset,
         )
+        if offset == 0 and (limit is None or len(rows) < limit):
+            # The page already holds every match, so a second pass over the
+            # table only to count them would repeat the same work.
+            total = len(rows)
+        else:
+            total = self._generic.count_where("stellar_catalog", where_sql, values)
         return total, [_summary_from_row(row) for row in rows]
 
     def list_stars_in_region(

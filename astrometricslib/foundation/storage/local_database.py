@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import sqlite3
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -115,7 +116,42 @@ def connect_db(db_path: str, timeout: float = 30.0) -> sqlite3.Connection:
 
     conn = sqlite3.connect(db_path, timeout=timeout)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
     conn.execute("PRAGMA busy_timeout=60000;")
+    _enable_write_ahead_log(conn)
+    conn.execute("PRAGMA synchronous=NORMAL;")
     return conn
+
+
+WAL_SWITCH_ATTEMPTS = 20
+"""How many times to try switching a database to write-ahead logging.
+
+Chosen by reasoning, not measured: SQLite answers "database is locked" at
+once, without using the busy timeout, when the switch collides with
+another connection that is opening or writing. Such a clash lasts
+milliseconds, so 20 tries
+``WAL_SWITCH_RETRY_SECONDS`` apart (about two seconds in all) are far more
+than needed.
+"""
+
+WAL_SWITCH_RETRY_SECONDS = 0.1
+"""Seconds to wait between tries to switch to write-ahead logging."""
+
+
+def _enable_write_ahead_log(conn: sqlite3.Connection) -> None:
+    """Switch a connection's database to write-ahead logging, retrying if busy.
+
+    Raises
+    ------
+    sqlite3.OperationalError
+        Raised if the database stays locked through every try, or fails
+        for any other reason.
+    """
+    for attempt in range(WAL_SWITCH_ATTEMPTS):
+        try:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            return
+        except sqlite3.OperationalError as busy_error:
+            if "locked" not in str(busy_error) or attempt == WAL_SWITCH_ATTEMPTS - 1:
+                conn.close()
+                raise
+            time.sleep(WAL_SWITCH_RETRY_SECONDS)

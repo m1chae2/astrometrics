@@ -2,10 +2,11 @@
  * TabView Component
  *
  * A reusable tabbed interface component that allows switching between different content panels.
- * Manages active tab state and renders tab headers with associated content.
+ * Manages active tab state and renders the shared Tabs strip with the active tab's content.
  */
 
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
+import { Tabs, tabPanelElementId, tabElementId } from './Tabs';
 import './tabView.css';
 
 export interface Tab {
@@ -50,22 +51,26 @@ export const TabView: React.FC<TabViewProps> = ({
 
     const activeTab = tabs.find(tab => tab.id === activeTabId);
 
+    const idPrefix = useId();
+
     return (
         <div className={`tab-view ${className}`}>
             {!noHeader && (
-                <div className="tab-view__header">
-                    {tabs.map(tab => (
-                        <button
-                            key={tab.id}
-                            className={`tab-view__tab ${activeTabId === tab.id ? 'tab-view__tab--active' : ''}`}
-                            onClick={() => handleTabClick(tab.id)}
-                        >
-                            {tab.label}
-                        </button>
-                    ))}
-                </div>
+                <Tabs
+                    className="tab-view__header"
+                    tabs={tabs.map(({ id, label }) => ({ id, label }))}
+                    selectedId={activeTabId}
+                    onChange={handleTabClick}
+                    ariaLabel="Tabs"
+                    idPrefix={idPrefix}
+                />
             )}
-            <div className="tab-view__content">
+            <div
+                className="tab-view__content"
+                role={activeTab ? 'tabpanel' : undefined}
+                id={activeTab ? tabPanelElementId(idPrefix, activeTab.id) : undefined}
+                aria-labelledby={activeTab && !noHeader ? tabElementId(idPrefix, activeTab.id) : undefined}
+            >
                 {activeTab?.content}
             </div>
         </div>

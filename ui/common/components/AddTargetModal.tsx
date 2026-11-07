@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
+import { TextInput } from './TextInput';
 import { validateRightAscension, validateDeclination } from '../utils/coordinateValidation';
 import { useToast } from '../hooks/useToast';
 import '../styles/addTargetModal.css';
+import { Button } from './Button';
 
 interface AddTargetModalProps {
     isOpen: boolean;
@@ -60,15 +62,14 @@ export const AddTargetModal: React.FC<AddTargetModalProps> = ({ isOpen, onClose,
             <div className="add-target-modal panel" onClick={(e) => e.stopPropagation()}>
                 <div className="panel__header">
                     <h3>Add New Target</h3>
-                    <button className="close-btn" onClick={onClose}>&times;</button>
+                    <Button variant="ghost" className="close-btn" onClick={onClose}>&times;</Button>
                 </div>
                 <form onSubmit={handleSubmit} className="modal-form">
                     <div className="form-group">
                         <label htmlFor="target-name">Target Name *</label>
-                        <input
+                        <TextInput
                             id="target-name"
-                            className="entry entry--fill"
-                            type="text"
+                            width="fill"
                             placeholder="e.g. M42"
                             value={name}
                             onChange={(e) => setName(e.target.value)}
@@ -78,10 +79,9 @@ export const AddTargetModal: React.FC<AddTargetModalProps> = ({ isOpen, onClose,
                     <div className="form-row">
                         <div className="form-group">
                             <label htmlFor="target-ra">RA (Optional)</label>
-                            <input
+                            <TextInput
                                 id="target-ra"
-                                className="entry entry--fill"
-                                type="text"
+                                width="fill"
                                 placeholder="05h 35m 17s"
                                 value={ra}
                                 onChange={(e) => setRa(e.target.value)}
@@ -89,10 +89,9 @@ export const AddTargetModal: React.FC<AddTargetModalProps> = ({ isOpen, onClose,
                         </div>
                         <div className="form-group">
                             <label htmlFor="target-dec">DEC (Optional)</label>
-                            <input
+                            <TextInput
                                 id="target-dec"
-                                className="entry entry--fill"
-                                type="text"
+                                width="fill"
                                 placeholder="-05d 23m 28s"
                                 value={dec}
                                 onChange={(e) => setDec(e.target.value)}
@@ -100,12 +99,12 @@ export const AddTargetModal: React.FC<AddTargetModalProps> = ({ isOpen, onClose,
                         </div>
                     </div>
                     <div className="modal-actions">
-                        <button type="button" className="btn btn--cancel" onClick={onClose} disabled={isSubmitting}>
+                        <Button variant="secondary" onClick={onClose} disabled={isSubmitting}>
                             Cancel
-                        </button>
-                        <button type="submit" className="btn btn--primary" disabled={isSubmitting}>
+                        </Button>
+                        <Button variant="primary" type="submit" disabled={isSubmitting}>
                             {isSubmitting ? 'Adding...' : 'Add Target'}
-                        </button>
+                        </Button>
                     </div>
                 </form>
             </div>

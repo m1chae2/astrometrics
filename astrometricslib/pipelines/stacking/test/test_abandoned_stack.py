@@ -208,7 +208,6 @@ def test_a_stack_that_finishes_after_the_give_up_is_not_recorded(monkeypatch: py
         "_finish_stack_archive",
         lambda staging, stack_file, target_id, kept: archive_results.append(kept),
     )
-    monkeypatch.setattr(stage, "_report_stage", lambda *_: None)
 
     def late_stack(*_: object, **__: object) -> tuple[str, dict]:
         """Stand in for a stack finished just as it was given up on.

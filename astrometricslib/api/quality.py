@@ -726,8 +726,47 @@ class QualityRecords:
                     remeasure,
                     trend_frames,
                     trend_threshold_percent,
+                    self._stored_sky_rates(resolved),
                 )
             return report
+
+    def _stored_sky_rates(self, target: Target) -> dict[str, float]:
+        """Read the stored sky rate of each frame of a target, by frame path.
+
+        The sky rate (electrons per second per pixel) is the sky level with
+        the exposure length divided out, so a trend in it is not caused by a
+        change of exposure.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target whose frames to look up.
+
+        Returns
+        -------
+        rates : `dict` [`str`, `float`]
+            The newest stored rate of each frame that has one.
+        """
+        from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
+        from astrometricslib.pipelines.shared.quality.metrics import FRAME_SKY_RATE_E_PER_S_PER_PX
+        from astrometricslib.utilities.frame_identity import frame_subject_id
+
+        rows = QualityStore(quality_database_path(self._config)).query(
+            metric=FRAME_SKY_RATE_E_PER_S_PER_PX,
+            level=SubjectLevel.FRAME,
+            target_id=target.id,
+            latest_only=True,
+        )
+        rate_by_subject = {
+            row.subject.subject_id: float(row.value)
+            for row in rows
+            if row.value is not None and row.subject.channel is None
+        }
+        return {
+            frame.path: rate_by_subject[frame_subject_id(frame.path, target.id)]
+            for frame in target.frames
+            if frame_subject_id(frame.path, target.id) in rate_by_subject
+        }
 
     def set_aside_frames(self, target: str | Target) -> list[SetAsideFrameRecord]:
         """List the frames in a target's `_excluded` folders, with reasons.

@@ -474,3 +474,48 @@ def test_repeated_attempts_are_reported_and_removed_only_on_request(tmp_path: Pa
     kept = {(row["target_name"], row["delta_ra_arcsec"]) for row in store.get_alignment_attempts()}
     assert kept == {("NGC 6888", 1277.01), ("M 81", -1861.31), ("M 81", -1800.00)}
     assert store.remove_repeated_alignment_attempts()["groups"] == 0
+
+
+def test_data_versions_change_when_a_guiding_sample_is_added(store: ControlRecordStore) -> None:
+    """The version of the samples table changes with a new row; others stay."""
+    before = store.data_versions()
+    store.record_guiding_samples([
+        {"session_id": "2026-10-03", "timestamp": 1.0, "dra": 0.1, "ddec": 0.1, "source": "phd2_log"}
+    ])
+    after = store.data_versions()
+
+    assert before is not None
+    assert after is not None
+    assert after["guiding_samples"] != before["guiding_samples"]
+    assert after["guiding_runs"] == before["guiding_runs"] == 0
+
+
+def test_data_versions_refuse_a_name_that_is_not_a_table_name(store: ControlRecordStore) -> None:
+    """A table name with SQL in it is refused before any query is made."""
+    with pytest.raises(InvalidArgumentError):
+        store.data_versions(["guiding_samples; DROP TABLE guiding_samples"])
+
+
+def test_stores_opened_together_on_a_new_database_all_work(tmp_path: Any) -> None:
+    """Threads that open a new database together all get a working store."""
+    import threading
+
+    path = str(tmp_path / "fresh" / "wayfinding.db")
+    errors: list[BaseException] = []
+    versions: list[Any] = []
+
+    def open_and_read() -> None:
+        """Open the store and read its versions, noting any error."""
+        try:
+            versions.append(ControlRecordStore(path).data_versions())
+        except BaseException as error:  # ruff: ignore[blind-except] - the test reports whatever happened
+            errors.append(error)
+
+    threads = [threading.Thread(target=open_and_read) for _ in range(12)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    assert all(version is not None for version in versions)

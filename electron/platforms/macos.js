@@ -7,7 +7,7 @@
 import path from 'path';
 import fs from 'fs';
 import process from 'process';
-import { screen, Menu } from 'electron';
+import { Menu } from 'electron';
 import { BasePlatform } from './base.js';
 
 /**
@@ -123,37 +123,6 @@ export class MacOSPlatform extends BasePlatform {
     }
 
     return { command: 'python3', args: ['-m', 'backend.main_backend'], isBinary: false };
-  }
-
-  /**
-   * Calculates anchor coordinates directly below the macOS top menubar item.
-   *
-   * @param {Electron.Tray} tray
-   * @param {{ width: number, height: number }} windowSize
-   * @param {Object} [screenModule]
-   * @returns {{ x: number, y: number }}
-   */
-  getTrayPopoverPosition(tray, { width, height }, screenModule = screen) {
-    const trayBounds = tray.getBounds();
-    const display = screenModule.getDisplayNearestPoint({ x: trayBounds.x, y: trayBounds.y });
-    const workArea = display.workArea;
-
-    let x = Math.round(trayBounds.x + (trayBounds.width / 2) - (width / 2));
-    let y = Math.round(trayBounds.y + trayBounds.height);
-
-    x = Math.max(workArea.x, Math.min(x, workArea.x + workArea.width - width));
-    y = Math.max(workArea.y, Math.min(y, workArea.y + workArea.height - height));
-
-    return { x, y };
-  }
-
-  /**
-   * Popovers on macOS dismiss on blur.
-   *
-   * @returns {boolean}
-   */
-  shouldDismissTrayOnBlur() {
-    return true;
   }
 
   /**

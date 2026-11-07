@@ -5,7 +5,9 @@ Description: Usage ``repoint_copy_paths.py <copy_config>`` with
 ASTROMETRICS_SCRATCH set. It rewrites, inside the copy databases only, every
 stored absolute path that points at the real stacks folder (any path with a
 ``/lights/`` folder) or the real data folder, so a run on the copy cannot
-write to the real library. Paths under the frames folder are left alone. It
+write to the real library. With ``--mirror-outside`` it instead moves every
+remaining outside path to ``$ASTROMETRICS_SCRATCH/outside/<original path>``.
+Paths under the frames folder are left alone. It
 refuses when a database is not inside ASTROMETRICS_SCRATCH. Run
 ``realrun.sh`` afterwards; it checks the copy again.
 """
@@ -34,7 +36,7 @@ def main(arguments: list[str]) -> int:
     Parameters
     ----------
     arguments : `list` [`str`]
-        ``[copy_config]``.
+        ``[copy_config]`` or ``["--mirror-outside", copy_config]``.
 
     Returns
     -------
@@ -43,11 +45,16 @@ def main(arguments: list[str]) -> int:
         usage error or a refusal.
     """
     scratch = os.environ.get("ASTROMETRICS_SCRATCH")
+    mirror = bool(arguments) and arguments[0] == "--mirror-outside"
+    arguments = arguments[1:] if mirror else arguments
     if len(arguments) != 1 or not scratch:
-        print("usage: ASTROMETRICS_SCRATCH=... repoint_copy_paths.py <copy_config>", file=sys.stderr)
+        print(
+            "usage: ASTROMETRICS_SCRATCH=... repoint_copy_paths.py [--mirror-outside] <copy_config>",
+            file=sys.stderr,
+        )
         return 2
     try:
-        changed = repoint(arguments[0], scratch)
+        changed = repoint(arguments[0], scratch, mirror_outside=mirror)
     except ValueError as error:
         print(str(error), file=sys.stderr)
         return 2

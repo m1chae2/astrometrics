@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 from astrometricslib.exceptions import ConfigurationError, ConflictError, InvalidArgumentError, NotFoundError
 from wayfindinglib.analytics import capture_history
+from wayfindinglib.analytics.data_versions import review_data_version
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
 from wayfindinglib.models.session.night_list import NightListEntry
 from wayfindinglib.tasks.control_tasks import night_analysis
@@ -392,6 +393,22 @@ def build_night_list(context: ControlContext, limit: int = DEFAULT_LIMIT) -> lis
         library's frame records.
     limit : `int`, optional
         How many of the most recent nights to list.
+
+    Returns
+    -------
+    nights : `list` [`NightListEntry`]
+        One entry per night, oldest first. The list is kept in the context's
+        review cache until the data behind it change, and each caller gets
+        its own copy.
+    """
+    limit = clamp_limit(limit)
+    return context.review_cache.get_or_build(
+        ("nights", limit), lambda: review_data_version(context), lambda: _build_night_list(context, limit)
+    )
+
+
+def _build_night_list(context: ControlContext, limit: int) -> list[NightListEntry]:
+    """List the recorded observing nights afresh, from the stored records.
 
     Returns
     -------

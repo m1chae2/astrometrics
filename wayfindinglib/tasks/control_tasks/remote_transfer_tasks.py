@@ -20,7 +20,7 @@ import os
 import sqlite3
 import threading
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -163,6 +163,7 @@ def download_remote_targets(
     incremental: bool = True,
     prune_missing: bool = False,
     measurement_summaries: list[Any] | None = None,
+    on_copied: Callable[[int], None] | None = None,
 ) -> bool:
     """Download target files into the light frames directory and reindex.
 
@@ -214,6 +215,11 @@ def download_remote_targets(
         this call started is appended to it (nothing is appended when no
         frame was added or the measurement failed). The caller announces the
         result from this one source.
+    on_copied : `Callable` [[`int`], `None`], optional
+        Called once with the number of frames added to the library, right
+        after the copy and re-index and before any measuring, so a caller
+        can show the new frames at once. Not called when no frame was
+        added. A failure in it is logged and never fails the sync.
 
     Returns
     -------
@@ -332,6 +338,11 @@ def download_remote_targets(
         added_paths = astrometrics.targets.add_frames(scan_list, target, telescope=telescope_name)
         astrometrics.targets.reindex_frames(target, prune_missing=prune_missing)
         astrometrics.targets.save()
+        if added_paths and on_copied is not None:
+            try:
+                on_copied(len(added_paths))
+            except Exception:  # a listener must never fail the sync: log it
+                logger.exception("The copy listener of the %s sync failed", target_id)
         # After the copy: the new frames that hold a plate solve give the
         # mount's pointing error, for review.query(kind="alignment").
         record_frame_pointing_errors(context, added_paths)
@@ -562,7 +573,12 @@ def report_download_progress(folder: str, expected: int) -> Generator[None]:
         thread.join(timeout=PROGRESS_POLL_SECONDS + 1.0)
 
 
-def sync_target_frames(context: ControlContext, target_id: str, dry_run: bool = True) -> dict[str, Any]:
+def sync_target_frames(
+    context: ControlContext,
+    target_id: str,
+    dry_run: bool = True,
+    on_copied: Callable[[int], None] | None = None,
+) -> dict[str, Any]:
     """Bring one target's new frames into the library.
 
     A dry run only reports the plan. A real run transfers the files that are
@@ -578,6 +594,8 @@ def sync_target_frames(context: ControlContext, target_id: str, dry_run: bool = 
         The target to sync. It must match a remote target folder.
     dry_run : `bool`, optional
         `True` (default) only reports what would transfer.
+    on_copied : `Callable` [[`int`], `None`], optional
+        See `download_remote_targets`.
 
     Returns
     -------
@@ -624,6 +642,7 @@ def sync_target_frames(context: ControlContext, target_id: str, dry_run: bool = 
             prune_missing=False,
             log_callback=job.info if job is not None else None,
             measurement_summaries=measurement_summaries,
+            on_copied=on_copied,
         )
     if job is not None:
         job.info("Transfer finished." if success else "Transfer failed.")

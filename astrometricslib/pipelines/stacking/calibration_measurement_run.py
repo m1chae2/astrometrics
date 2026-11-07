@@ -29,6 +29,7 @@ run, register entry STK-47). The first run over a library of 2,367 frames
 therefore takes tens of minutes, so callers run it as a job.
 """
 
+import contextvars
 import logging
 import os
 import threading
@@ -251,7 +252,9 @@ def measure_calibration_frames(
 
     done = 0
     with ThreadPoolExecutor(max_workers=CALIBRATION_MEASUREMENT_WORKERS) as pool:
-        futures = {pool.submit(measure_one, item): item for item in pending}
+        # Each task runs in a copy of this job's log context, so its
+        # messages reach the job's log.
+        futures = {pool.submit(contextvars.copy_context().run, measure_one, item): item for item in pending}
         for future in as_completed(futures):
             _, _, path, subject_id = futures[future]
             done += 1

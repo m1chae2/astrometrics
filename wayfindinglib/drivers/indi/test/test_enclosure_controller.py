@@ -43,11 +43,21 @@ class _FakeSwitchElement:
 
 
 class _FakeSwitchVector(list):
-    """A fake INDI switch property vector: a list of elements plus `.s`."""
+    """A fake INDI switch vector: a list of elements with `getState()`."""
 
     def __init__(self, elements: list, vector_state: int) -> None:
         super().__init__(elements)
-        self.s = vector_state
+        self._vector_state = vector_state
+
+    def getState(self) -> int:
+        """Return the vector state, as PyIndi 2.x properties do.
+
+        Returns
+        -------
+        state : `int`
+            The `IPS_*` state this fake was built with.
+        """
+        return self._vector_state
 
 
 class _FakeEnclosureDevice:

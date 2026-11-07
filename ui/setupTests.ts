@@ -6,7 +6,8 @@
  */
 
 import '@testing-library/jest-dom';
-import { expect } from 'vitest';
+import { afterEach, expect } from 'vitest';
+import { resetHandoffsForTests } from './common/utils/displayHandoffStore';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import type { TestingLibraryMatchers } from '@testing-library/jest-dom/matchers';
 
@@ -34,6 +35,23 @@ if (typeof window !== 'undefined') {
   window.Element.prototype.scrollIntoView = vi.fn();
 }
 
+/**
+ * Stand-in for the browser's ResizeObserver, which jsdom does not have.
+ * It never reports a size change; tests that need sizes mock the element sizes.
+ * It is installed once here, as a plain global (not a `vi.stubGlobal`), so
+ * `vi.unstubAllGlobals()` in a test file cannot remove it.
+ */
+class ResizeObserverStub {
+    /** Starts watching an element; does nothing. */
+    observe(): void { /* no-op */ }
+    /** Stops watching an element; does nothing. */
+    unobserve(): void { /* no-op */ }
+    /** Stops watching everything; does nothing. */
+    disconnect(): void { /* no-op */ }
+}
+if (typeof globalThis.ResizeObserver === 'undefined') {
+    globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+}
 
 // We can add custom matchers here later if needed
 // expect.extend({
@@ -158,4 +176,79 @@ global.fetch = vi.fn((url: string | Request | URL, init?: RequestInit) => {
         status: 200,
         statusText: 'OK',
     } as Response);
+});
+
+/**
+ * Origin of the backend that tests reach by default (`getBackendBase()` falls
+ * back to it), which is where a developer's real backend usually runs.
+ */
+const DEFAULT_BACKEND_PORTS = ['5000'];
+
+/**
+ * Tells whether a URL points at a backend port that no test may reach for real.
+ *
+ * A request is allowed only when it goes to the throwaway backend this run
+ * started (`testBackendOrigin`). Everything else aimed at a default backend
+ * port on this machine is blocked.
+ *
+ * @param {string} urlString - The URL a test is trying to open.
+ * @return {boolean} True if the request must be refused.
+ */
+function isForbiddenBackendUrl(urlString: string): boolean {
+    if (testBackendOrigin && urlString.startsWith(testBackendOrigin)) return false;
+    let parsed: URL;
+    try {
+        parsed = new URL(urlString);
+    } catch {
+        return false;
+    }
+    const isLoopback = ['127.0.0.1', 'localhost', '[::1]', '::1', '0.0.0.0'].includes(parsed.hostname);
+    return isLoopback && DEFAULT_BACKEND_PORTS.includes(parsed.port);
+}
+
+/**
+ * Throws the error used by every guard below.
+ *
+ * @param {string} urlString - The refused URL.
+ */
+function refuseBackendAccess(urlString: string): never {
+    throw new Error(
+        `Test tried to reach a real backend at ${urlString}. Unit tests must mock the network. ` +
+            `Tests that need a backend are opt-in: set ASTROMETRICS_LIVE_BACKEND_TESTS=1 and mark the file with ` +
+            `${TEST_BACKEND_MARKER}; they then use a throwaway backend started by the run, never a real one.`,
+    );
+}
+
+// Guard 1: tests that replace fetch with their own mock are fine, but a test that
+// restores the real fetch must still not be able to reach the default backend port.
+const guardedFetch = global.fetch;
+global.fetch = vi.fn((url: string | Request | URL, init?: RequestInit) => {
+    const urlString = typeof url === 'string' ? url : url.toString();
+    if (isForbiddenBackendUrl(urlString)) refuseBackendAccess(urlString);
+    return guardedFetch(url, init);
+}) as typeof global.fetch;
+
+// Guard 2: XMLHttpRequest and WebSocket in jsdom do real network I/O.
+if (typeof XMLHttpRequest !== 'undefined') {
+    const nativeOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]) {
+        if (isForbiddenBackendUrl(String(url))) refuseBackendAccess(String(url));
+        return (nativeOpen as (...args: unknown[]) => void).call(this, method, url, ...rest);
+    } as typeof XMLHttpRequest.prototype.open;
+}
+if (typeof WebSocket !== 'undefined') {
+    const NativeWebSocket = WebSocket;
+    class GuardedWebSocket extends NativeWebSocket {
+        /** Refuses sockets aimed at a real backend, otherwise behaves like WebSocket. */
+        constructor(url: string | URL, protocols?: string | string[]) {
+            if (isForbiddenBackendUrl(String(url).replace(/^ws/, 'http'))) refuseBackendAccess(String(url));
+            super(url, protocols);
+        }
+    }
+    global.WebSocket = GuardedWebSocket as typeof WebSocket;
+}
+
+// A hand-off nobody picked up in one test must not reach the next test.
+afterEach(() => {
+  resetHandoffsForTests();
 });

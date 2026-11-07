@@ -1,4 +1,5 @@
-import React, { useState, useEffect, Suspense, Profiler, ProfilerOnRenderCallback } from 'react';
+import React, { useState, useEffect, Suspense, Profiler, ProfilerOnRenderCallback, Activity } from 'react';
+import { PanelErrorBoundary } from './common/components/PanelErrorBoundary';
 import { callBackend } from './common/services/backendApi';
 import { isAffectedByMeasurement, QualityMeasuredPayload } from './common/queries/qualityQueryKeys';
 import { UI_EVENTS } from './common/types/backendTypes';
@@ -19,25 +20,44 @@ import { PlanningTimeProvider } from './common/context/PlanningTimeContext';
 import { CurrentTargetAnnouncer } from './common/components/CurrentTargetAnnouncer';
 import { handlePlanChanged, PLAN_UPDATED_FROM_ANOTHER_WINDOW, PlanChangedPayload } from './common/utils/planChanged';
 import { TerminalProvider } from './statusHeader/context/TerminalContext';
+import { IngestionJobsProvider } from './common/context/IngestionJobsContext';
 import { RemoteStatusProvider } from './common/context/RemoteStatusContext';
 import { AstrometricsProvider, useAstrometrics } from './common/context/AstrometricsContext';
 import { DISPLAY_DEFINITIONS, isDisplayEnabled } from './common/constants/displayFlags';
 import { normalizeAppMode } from './common/utils/normalizeAppMode';
-// Listens for "Show in calibration library" from the start, so a request sent
-// before the (lazy) Observatory Manager has loaded is kept for it.
-import './observatoryManager/calibration/calibrationRowRequestStore';
+import { useIsModeReady } from './common/utils/appBootReadiness';
+import { postHandoff } from './common/utils/displayHandoffStore';
+import { COMMAND_CONSOLE_EVENT_KIND } from './common/utils/commandConsoleEvents';
+// Listens for "Show these frames" from the start, so the Image Viewer also
+// knows which mode to go back to (see citedFramesStore.ts).
+import './imageViewerDisplay/citedFrames/citedFramesStore';
 import './App.css';
 
+import { Skeleton } from './common/components/Skeleton';
 // Single shared cache for all shared-resource queries (see ui/common/queries/),
 // so multiple views requesting the same data (e.g. the target list) share one
 // in-flight request and one cached result instead of each fetching independently.
-const queryClient = new QueryClient({
+/**
+ * Builds the app's query client with its shared freshness rules.
+ * Exported so tests can count requests under the same rules.
+ *
+ * @return A new query client.
+ */
+export const createAppQueryClient = (): QueryClient => new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 0,
+      // Data read in the last 30 seconds counts as fresh, so coming back to a
+      // display does not read it all again. Every action that changes data
+      // invalidates the queries it affects, and polls use refetchInterval,
+      // so a user's own change is never hidden by this.
+      staleTime: 30_000,
+      // Alt-tabbing back to the app does not refetch. Fresh data comes from
+      // polls, socket events and invalidation.
+      refetchOnWindowFocus: false,
     },
   },
 });
+const queryClient = createAppQueryClient();
 
 
 // Lazy load main display components with named export handling.
@@ -125,6 +145,86 @@ const MODE_PANELS: { mode: string; id: string; Component: React.ComponentType }[
   { mode: 'Observation Manager', id: 'ObservationManager', Component: ObservationManager },
   { mode: 'Command Console', id: 'CommandConsole', Component: CommandConsole },
 ];
+
+/**
+ * Socket actions the Command Console shows: what an AI agent ran in the
+ * terminal, a plot it made, and an editor change.
+ */
+const COMMAND_CONSOLE_ACTIONS: ReadonlySet<string> = new Set([
+  'terminal:agent_exec',
+  'terminal:plot_generated',
+  'editor:sync',
+]);
+
+/**
+ * When another window asks this one to show something and names no display,
+ * these actions go to the display shown here. (A target picked from the tray
+ * menu opens in Image Processing.)
+ */
+const DEFAULT_DISPLAY_FOR_REMOTE_ACTION: Readonly<Record<string, string>> = {
+  targetSelected: 'Image Processing',
+};
+
+/**
+ * The displays that may be paused while hidden (wrapped in React's `Activity`).
+ *
+ * A paused display keeps its state, but React stops rendering it and runs the
+ * cleanup of all its effects (timers, socket listeners, query subscriptions,
+ * animation loops). When it is shown again the effects start over. A display is
+ * safe to pause when (a) nothing sends it a window event while it is hidden
+ * (requests go through the hand-off store, `displayHandoffStore.ts`, which keeps
+ * them until the display runs), (b) no background job runs inside it (frame
+ * downloads run in `IngestionJobsContext`), (c) it does not free things in an
+ * effect cleanup that its state still uses (the Image Viewer's pictures live in
+ * `targetImageCache.ts`), and (d) no effect throws away the user's state when it
+ * starts again. Pausing also stops work nobody can see: the Planetarium's
+ * drawing loop, the Observatory Manager's status polling, and the sky map's
+ * arrow-key listeners.
+ *
+ * Image Processing is included. Its effects that cleared the selected frame, the
+ * analysis result, the checked files and the log now run only when the target
+ * really changes (`useOnValueChange`), and its reads run again when it is shown.
+ */
+export const PAUSABLE_MODES: ReadonlySet<string> = new Set([
+  'Image Viewer',
+  'Astronomy Manager',
+  'Planetarium',
+  'Observatory Manager',
+  'Observation Manager',
+  'Image Processing',
+  'Command Console',
+]);
+
+/**
+ * One display's slot in the app. Shows it, or hides it with CSS and (for the
+ * displays in `PAUSABLE_MODES`) pauses it with `Activity`.
+ *
+ * A display is never paused before it has reported that its first data is
+ * loaded. The startup splash screen waits for that report, and a paused
+ * display does not run its effects, so pausing early would hang the splash.
+ *
+ * @param props.panelMode The mode this slot belongs to.
+ * @param props.activeMode The mode the user is looking at.
+ * @param props.children The display.
+ */
+export const ModePanel: React.FC<{ panelMode: string; activeMode: string; children: React.ReactNode }> = ({
+  panelMode,
+  activeMode,
+  children,
+}) => {
+  const isActive = activeMode === panelMode;
+  const hasLoaded = useIsModeReady(panelMode);
+  const paused = PAUSABLE_MODES.has(panelMode) && !isActive && hasLoaded;
+  return (
+    <div className={isActive ? 'app__mode-panel--visible' : 'app__mode-panel--hidden'}>
+      <Activity mode={paused ? 'hidden' : 'visible'}>
+        <PanelErrorBoundary panelName={panelMode}>
+          <DeferWhileHidden active={isActive}>{children}</DeferWhileHidden>
+        </PanelErrorBoundary>
+      </Activity>
+    </div>
+  );
+};
 
 /**
  * Internal layout wrapper that handles dynamic mode switching,
@@ -223,6 +323,11 @@ const AppContent: React.FC = () => {
           // target is never published back.
         } else if (action === 'log') {
           window.dispatchEvent(new CustomEvent('astrometrics:log', { detail: payload }));
+        } else if (COMMAND_CONSOLE_ACTIONS.has(action)) {
+          // Agent terminal output and editor syncs are for the Command Console.
+          // They wait in the hand-off store (in order) so none is lost while
+          // the console is hidden or paused.
+          postHandoff('Command Console', COMMAND_CONSOLE_EVENT_KIND, { action, payload }, { queue: true });
         } else if (action === 'refresh') {
           window.location.reload();
         } else if (action === 'catalog:changed') {
@@ -304,11 +409,12 @@ const AppContent: React.FC = () => {
     if (window.astrometrics?.app?.onRemoteAction) {
       removeRemoteAction = window.astrometrics.app.onRemoteAction((data: any) => {
         const { action, payload, intent } = data || {};
-        if (action) {
-          window.dispatchEvent(new CustomEvent(`astrometrics:${action}`, { detail: payload }));
-        }
-        if (intent) {
-          window.dispatchEvent(new CustomEvent('astrometrics:navigationIntent', { detail: intent }));
+        // Another window asked this one to show something. It goes through the
+        // hand-off store like a local request, so a hidden display gets it too.
+        const display: string | undefined =
+          intent?.targetDisplay ?? (action ? DEFAULT_DISPLAY_FOR_REMOTE_ACTION[action] : undefined);
+        if (action && display) {
+          postHandoff(display, action, payload ?? intent?.payload, { element: intent?.targetElement });
         }
       });
     }
@@ -357,20 +463,15 @@ const AppContent: React.FC = () => {
         </Profiler>
         <div className="app__content">
           <Suspense
-            fallback={<div className="app__loading">Loading component...</div>}
+            fallback={<Skeleton variant="block" label="Loading this display" />}
           >
             {MODE_PANELS.filter(({ mode: panelMode }) => visitedModes.has(panelMode)).map(
               ({ mode: panelMode, id, Component }) => (
-                <div
-                  key={id}
-                  className={mode === panelMode ? 'app__mode-panel--visible' : 'app__mode-panel--hidden'}
-                >
-                  <DeferWhileHidden active={mode === panelMode}>
-                    <Profiler id={id} onRender={onRenderProfile}>
-                      <Component />
-                    </Profiler>
-                  </DeferWhileHidden>
-                </div>
+                <ModePanel key={id} panelMode={panelMode} activeMode={mode}>
+                  <Profiler id={id} onRender={onRenderProfile}>
+                    <Component />
+                  </Profiler>
+                </ModePanel>
               )
             )}
           </Suspense>
@@ -391,11 +492,13 @@ export const App: React.FC = () => {
         <RemoteStatusProvider>
           <HandoffProvider>
             <TargetProvider>
-              <PlanningTimeProvider>
-                <PlanningProvider>
-                  <AppContent />
-                </PlanningProvider>
-              </PlanningTimeProvider>
+              <IngestionJobsProvider>
+                <PlanningTimeProvider>
+                  <PlanningProvider>
+                    <AppContent />
+                  </PlanningProvider>
+                </PlanningTimeProvider>
+              </IngestionJobsProvider>
             </TargetProvider>
           </HandoffProvider>
         </RemoteStatusProvider>

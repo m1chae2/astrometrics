@@ -22,6 +22,12 @@ from typing import Any
 
 import uvicorn
 
+# The observatory source picks the data folders (real or simulator), so it
+# is applied before anything reads the settings.
+from backend.observatory_source import apply_launch_environment
+
+apply_launch_environment()
+
 # Suppress noisy Astropy FITS warnings
 # REQ: SYS-1.4: Maintain clean logs
 from astropy.utils.exceptions import AstropyDeprecationWarning, AstropyWarning
@@ -144,13 +150,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # folder is served as soon as the drive is mounted.
         logger.warning("%s", not_mounted)
     app.state.telemetry_task = asyncio.create_task(startup.periodic_telemetry_loop())
-    app.state.sky_warmup_task = asyncio.create_task(asyncio.to_thread(startup.warm_start_up_caches))
+    app.state.sky_warmup_task = asyncio.create_task(_warm_up_in_order())
     try:
         yield
     finally:
         app.state.telemetry_task.cancel()
         detach_log_handlers()
         container.shutdown_resources()
+
+
+async def _warm_up_in_order() -> None:
+    """Warm the start-up caches, then the night reviews.
+
+    The night reviews wait for the start-up caches, so they never delay the
+    splash screen or compete with it for the disk.
+    """
+    await asyncio.to_thread(startup.warm_start_up_caches)
+    await asyncio.to_thread(startup.warm_night_reviews)
 
 
 # The app serves only the routes in `backend.public_interface`, so FastAPI's

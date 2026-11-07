@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { fetchTargetObject, sendTargetToPhone, fetchTargetFrameHeader, fetchTargetFiles } from '../../common/services/targetService';
 import { reportError } from '../../common/utils/reportError';
-import { on as onEvent } from '../../common/utils/eventBus';
+import { getTargetsUpdatedVersion } from '../../common/utils/targetsUpdatedVersion';
 import { FrameFilterGroup, TargetDetails } from './targetDetails/TargetDetails';
 import { SectionPanel } from '../../common/components/SectionPanel';
 import { ListActions } from '../../common/components/ListActions';
 import '../../common/styles/panels.css';
+import { Button } from '../../common/components/Button';
 
 /**
  * Props for the TargetDetailsManager component.
@@ -57,6 +58,7 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
   const [dec, setDec] = useState<string>('');
 
   const cacheRef = useRef<Map<string, unknown>>(new Map());
+  const cacheVersionRef = useRef<number>(getTargetsUpdatedVersion());
 
   // REQ: TGT-3: Target Metadata Editor
   const updateTargetState = React.useCallback(async (obj: any) => {
@@ -169,14 +171,18 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
   }, [selectedTarget]);
 
   useEffect(() => {
-    // Clear cache when targets are updated elsewhere in the app.
-    const detach = onEvent('targetsUpdated', () => {
+    // Clear the cache when targets were updated elsewhere in the app. This is
+    // checked here (not with a listener) so it also works when this display
+    // was paused while the update happened.
+    const currentVersion = getTargetsUpdatedVersion();
+    if (cacheVersionRef.current !== currentVersion) {
+      cacheVersionRef.current = currentVersion;
       try {
         cacheRef.current.clear();
       } catch {
         // Ignore cache clear failures.
       }
-    });
+    }
 
     let cancelled = false;
     if (!selectedTarget) {
@@ -207,11 +213,6 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
 
     return () => {
       cancelled = true;
-      try {
-        detach();
-      } catch {
-        // Ignore detacher failures.
-      }
     };
   }, [selectedTarget, updateTargetState]);
 
@@ -245,9 +246,9 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
 
       <SectionPanel title="Target Controls" className="flex-auto">
         <ListActions>
-          <button className="btn" onClick={handleSendToPhone} disabled={!selectedTarget}>Send to Phone</button>
-          <button className="btn" onClick={onSaveTarget}>Save Target</button>
-          <button className="btn" onClick={onDeleteTarget}>Delete Target</button>
+          <Button onClick={handleSendToPhone} disabled={!selectedTarget}>Send to Phone</Button>
+          <Button onClick={onSaveTarget}>Save Target</Button>
+          <Button onClick={onDeleteTarget}>Delete Target</Button>
         </ListActions>
       </SectionPanel>
 

@@ -21,6 +21,17 @@ const { contextBridge, ipcRenderer } = require('electron');
 const hasCustomTitleBar = process.argv.includes('--astrometrics-frameless=true');
 
 /**
+ * The backend's base URL, built from the port the main process passed in
+ * `--astrometrics-backend-port` (taken from `ASTROMETRICS_PORT`). The renderer
+ * uses this one address for every backend call, so a backend on any port works.
+ * Empty when the flag is missing.
+ */
+const backendPortArgument = process.argv.find((argument) => argument.startsWith('--astrometrics-backend-port='));
+const backendBaseUrl = backendPortArgument
+	? `http://127.0.0.1:${backendPortArgument.split('=')[1]}`
+	: '';
+
+/**
  * Public API exposed to the renderer at window.astrometrics.
  * Provides access to restricted main-process functionality.
  */
@@ -97,6 +108,25 @@ const api = {
 			const handler = (_event, data) => callback(data);
 			ipcRenderer.on('remote-action', handler);
 			return () => ipcRenderer.removeListener('remote-action', handler);
+		},
+
+		/**
+		 * Ask whether the user is looking at the app.
+		 * @returns {Promise<'present' | 'away'>}
+		 */
+		getPresence() {
+			return ipcRenderer.invoke('presence-get');
+		},
+
+		/**
+		 * Subscribe to changes of the presence answer.
+		 * @param {function('present' | 'away'): void} callback
+		 * @returns {function(): void} Call to unsubscribe.
+		 */
+		onPresenceChange(callback) {
+			const handler = (_event, state) => callback(state);
+			ipcRenderer.on('presence-changed', handler);
+			return () => ipcRenderer.removeListener('presence-changed', handler);
 		},
 
 		/**
@@ -278,6 +308,9 @@ const api = {
 		}
 	},
 	backend: {
+		/** The backend's base URL, or '' when the main process gave no port. */
+		baseUrl: backendBaseUrl,
+
 		/**
 		 * Get the session token required by the backend's WebSocket endpoints.
 		 * Supplied by the main process, which minted it and passed it to the
@@ -319,29 +352,6 @@ const api = {
 		 */
 		async openFigureWindow(target) {
 			return ipcRenderer.invoke('open-figure-window', target);
-		}
-	},
-	tray: {
-		/**
-		 * Send a quick action from the tray popover to the main process.
-		 * Supported actions: 'park', 'navigate', 'open-app', 'quit'.
-		 * @param {string} action Action identifier.
-		 * @param {Object} [payload] Optional action-specific payload (e.g. { mode: 'Planetarium' }).
-		 */
-		sendAction(action, payload) {
-			ipcRenderer.send('tray-popover-action', { action, payload });
-		},
-
-		/**
-		 * Subscribe to visibility changes of the tray popover window.
-		 * Used to pause background animations and timers when hidden.
-		 * @param {Function} callback (isVisible: boolean) => void
-		 * @returns {Function} Unsubscribe function
-		 */
-		onVisibilityChange(callback) {
-			const handler = (_event, isVisible) => callback(isVisible);
-			ipcRenderer.on('tray-visibility-changed', handler);
-			return () => ipcRenderer.removeListener('tray-visibility-changed', handler);
 		}
 	},
 	terminal: {
@@ -412,7 +422,6 @@ Object.freeze(api);
 Object.freeze(api.app);
 Object.freeze(api.window);
 Object.freeze(api.dialog);
-Object.freeze(api.tray);
 Object.freeze(api.terminal);
 
 contextBridge.exposeInMainWorld('astrometrics', api);

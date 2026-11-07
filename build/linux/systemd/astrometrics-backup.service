@@ -1,7 +1,7 @@
 # Template, installed by build/linux/install_backup_timer.sh.
-# Backs up the library databases to Google Drive, then checks the Drive upload.
+# Backs up the library databases to a local folder (never uploaded), then checks the Drive copy of the frames.
 [Unit]
-Description=Astrometrics database backup and Drive integrity check
+Description=Astrometrics local database backup and Drive integrity check
 After=network-online.target
 Wants=network-online.target
 

@@ -8,12 +8,14 @@ only says which container service method serves it.
 """
 
 import inspect
+import json
 import logging
 from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import Response
 
 from astrometricslib.exceptions import ConfigurationError, ErrorInfo, InvalidArgumentError, to_error_info
 from astrometricslib.jobs import log_context, new_request_id
@@ -23,11 +25,13 @@ from backend.services.infrastructure.frontend_log import log_frontend_message
 from backend.services.rpc_protocol import (
     RPCMethodNotFoundError,
     RPCRequest,
+    get_cors_headers,
     make_rpc_error_response,
-    make_rpc_success_response,
+    serialize_rpc_result,
 )
 
 logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/api", tags=["rpc"])
 
@@ -40,6 +44,7 @@ _DECLARED_METHODS = frozenset(RPC_METHODS)
 _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # System, settings and notifications
     "system:health": ("maintenance_service", "check_health"),
+    "system:static_mounts": ("settings_service", "get_static_mounts"),
     "system:frontend_log": log_frontend_message,
     "system:completions": ("scripting_service", "get_completions"),
     "system:get_config": ("config_service", "get_all_config"),
@@ -124,6 +129,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "observatory:set_active_camera": ("equipment_service", "set_active_camera"),
     "observatory:get_active_telescope": ("equipment_service", "get_active_telescope"),
     "observatory:set_active_telescope": ("equipment_service", "set_active_telescope"),
+    "observatory:get_source": ("observatory_source_service", "get_source"),
+    "observatory:set_source": ("observatory_source_service", "set_source"),
     "observatory:enter_monitoring_mode": ("equipment_service", "enter_monitoring_mode"),
     "observatory:enter_controller_mode": ("equipment_service", "enter_controller_mode"),
     # Ingestion of new frames
@@ -415,8 +422,6 @@ class RPCHandlerRegistry:
         if inspect.iscoroutinefunction(handler):
             result = await handler(**kwargs)
         else:
-            from fastapi.concurrency import run_in_threadpool
-
             result = await run_in_threadpool(handler, **kwargs)
 
         return result
@@ -447,7 +452,13 @@ def _text_param(params: dict[str, Any], name: str) -> str | None:
 
 #: Error codes that mean the caller or the current state is at fault. They are
 #: logged without a traceback, because the cause is already in the message.
-_EXPECTED_CODES = frozenset({"invalid_argument", "not_found", "conflict", "permission_denied"})
+_EXPECTED_CODES = frozenset({
+    "invalid_argument",
+    "not_found",
+    "conflict",
+    "permission_denied",
+    "configuration",
+})
 
 
 def _log_rpc_failure(method: str, exc: Exception, info: ErrorInfo) -> None:
@@ -470,8 +481,37 @@ def _log_rpc_failure(method: str, exc: Exception, info: ErrorInfo) -> None:
         logger.error("RPC %s failed (%s): %s", method, info.code, info.message, exc_info=exc)
 
 
+def _encode_success_body(result: Any, request_id: int | str | None) -> bytes:
+    """Turn a handler result into the bytes of a JSON-RPC success reply.
+
+    The conversion of models and NumPy values and the JSON encoding can take
+    a few hundred milliseconds for a large result, so the caller runs this in
+    a worker thread. The bytes match what ``JSONResponse`` would send.
+
+    Parameters
+    ----------
+    result : `~typing.Any`
+        The raw value the handler returned.
+    request_id : `int` or `str` or `None`
+        The JSON-RPC request identifier to echo back.
+
+    Returns
+    -------
+    body : `bytes`
+        The UTF-8 encoded JSON-RPC success envelope.
+    """
+    envelope = {
+        "jsonrpc": "2.0",
+        "result": {"status": "success", "data": serialize_rpc_result(result)},
+        "id": request_id,
+    }
+    return json.dumps(
+        envelope, ensure_ascii=False, allow_nan=False, indent=None, separators=(",", ":")
+    ).encode("utf-8")
+
+
 @router.post("/rpc")
-async def handle_rpc(request: RPCRequest) -> JSONResponse:
+async def handle_rpc(request: RPCRequest) -> Response:
     """Serve the unified entrypoint for all frontend JSON-RPC calls.
 
     Invokes the appropriate service method and envelopes the result.
@@ -483,8 +523,9 @@ async def handle_rpc(request: RPCRequest) -> JSONResponse:
 
     Returns
     -------
-    response : `~fastapi.responses.JSONResponse`
-        A JSON-RPC success or error envelope.
+    response : `~fastapi.responses.Response`
+        A JSON-RPC success or error envelope. A success reply is encoded in
+        a worker thread, so a large result does not stall the event loop.
     """
     request_id = new_request_id()
     with log_context(
@@ -495,7 +536,10 @@ async def handle_rpc(request: RPCRequest) -> JSONResponse:
     ):
         try:
             result = await rpc_registry.execute(request.method, request.params)
-            return make_rpc_success_response(result, request.id)
+            body = await run_in_threadpool(_encode_success_body, result, request.id)
+            return Response(
+                content=body, status_code=200, headers=get_cors_headers(), media_type="application/json"
+            )
         except RPCMethodNotFoundError as exc:
             logger.warning("RPC method not found: %s", request.method)
             info = ErrorInfo(code="not_found", message=f"Method not found: {exc!s}", request_id=request_id)

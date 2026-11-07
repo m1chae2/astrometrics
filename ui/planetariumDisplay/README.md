@@ -10,7 +10,8 @@ Terms are defined in the [glossary](../../documentation/Glossary.md). This file 
 - `components/` holds the map and its panels. `CelestialSkyMap.tsx` draws the map, `PlanetariumInfoCard.tsx` is the card for a clicked object, `FramingPanel.tsx` is the framing panel, and `PlanetariumToolbar.tsx`, `PlanetariumContextMenu.tsx`, `PlanetariumDateTimeModal.tsx` and `AlignmentPointCard.tsx` hold the other controls.
 - `hooks/` holds the data hooks. `useTargetPackage.ts` and `useMosaicPreview.ts` serve the package actions (see below).
 - `layers/` holds the overlays drawn on the map, such as stars, grid, constellations, the field of view and the framing outline (`FramingOverlay.ts`).
-- `showOnSky/` holds the small store that lets another display ask the map to center on a target.
+- Another display asks the map to center on a target with the `showOnSky` hand-off (see `ui/common/utils/README.md`). `PlanetariumDisplay.tsx` waits until the target lists have loaded, then acts on it. The `locateStar` hand-off from the Astronomy Manager works the same way. Both arrive even if the Planetarium was hidden when they were sent.
+- While the Planetarium is hidden, `App.tsx` pauses it: the drawing loop, the time playback and the arrow-key listeners stop, and start again when it is shown. The map's view and the time offset are kept.
 - `webgl/`, `utils/` and `styles/` hold the star renderer, the projection and time helpers and the stylesheets.
 - `tests/` holds the Vitest tests.
 

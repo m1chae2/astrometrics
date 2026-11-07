@@ -15,10 +15,11 @@
  * REQ: PLN-1.1, REQ: PLN-2.1
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { callBackend } from '../../common/services/backendApi';
 import { PlanetariumSource } from '../../common/types/planetariumTypes';
 import { LOCAL_CATALOG_QUERY_DEBOUNCE_MS } from './useOnlineCatalogSources';
+import { isCoveredByFetched, sameSources, SourceQueryShape } from '../utils/sourceRequestRule';
 
 /**
  * Fetches local library PlanetariumSource objects within a circular sky region.
@@ -26,7 +27,9 @@ import { LOCAL_CATALOG_QUERY_DEBOUNCE_MS } from './useOnlineCatalogSources';
  * Re-fetches whenever the center position or radius changes, once the view has been
  * still for LOCAL_CATALOG_QUERY_DEBOUNCE_MS. The radius is typically set to 1.5× the
  * current FOV by the parent component to preload sources at pan edges. The previous
- * sources stay on screen until the new ones arrive.
+ * sources stay on screen until the new ones arrive. Nothing is requested when the last
+ * completed request already covers the new view (same sky or less, same magnitude limit or
+ * shallower), as when zooming in, and an unchanged result keeps the same array.
  *
  * @func usePlanetariumSources
  * @param {number} ra - Query center Right Ascension in degrees.
@@ -51,8 +54,23 @@ export const usePlanetariumSources = (
   const [sources, setSources] = useState<PlanetariumSource[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  // The last request that completed. A new request that asks for less sky and no deeper
+  // magnitude (zooming in) is already answered by it, so nothing is sent.
+  const fetchedQueryRef = useRef<SourceQueryShape | null>(null);
 
   useEffect(() => {
+    const wantedQuery: SourceQueryShape = {
+      ra,
+      dec,
+      radius,
+      limitingMagnitude,
+      includeUncataloged: includeStarsWithoutCatalogMagnitude,
+    };
+    if (isCoveredByFetched(fetchedQueryRef.current, wantedQuery)) {
+      setLoading(false);
+      return;
+    }
+
     let active = true;
     const abortController = new AbortController();
 
@@ -74,7 +92,9 @@ export const usePlanetariumSources = (
           },
         );
         if (active) {
-          setSources(data);
+          fetchedQueryRef.current = wantedQuery;
+          // Keep the same array when nothing changed, so the sky map does not redraw for it.
+          setSources(previous => (sameSources(previous, data) ? previous : data));
           setError(null);
         }
       } catch (error: unknown) {

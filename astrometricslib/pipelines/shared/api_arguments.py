@@ -84,9 +84,11 @@ def resolve_target(targets: TargetLookup | None, target: str | Target) -> Target
     target : `str` or `Target`
         A target id (matched loosely, as `TargetCatalog.get` does) or a
         `Target` object, which is returned as it is. A name is looked up
-        after reading the stored targets again, so a target that another
-        program (a frame sync, the app) added or changed is seen. That read
-        takes about 0.1 s and keeps the target's unsaved edits in memory.
+        after bringing it up to date with storage, so a target that another
+        program (a frame sync, the app) added or changed is seen. Only that
+        target's row is read (about 10 ms), and nothing is read when nothing
+        has been written since the last read. The target's unsaved edits in
+        memory are kept.
 
     Returns
     -------

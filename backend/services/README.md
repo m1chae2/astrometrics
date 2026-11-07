@@ -9,7 +9,7 @@ Terms are defined in the [glossary](../../documentation/Glossary.md). This file 
 - `analysis/` runs the analysis jobs.
 - `data/` serves targets, stars, images and the deletion archive.
 - `infrastructure/` holds shared plumbing: settings, sockets, the scripting terminal, the handoff state and the safety guards.
-- `observatory/` serves the telescope, equipment, guiding, imaging, planning and the sequencer.
+- `observatory/` serves the telescope, equipment, guiding, imaging, planning and the sequencer. `observatory_source_service.py` runs the Observatory source setting: with a simulator source it starts and stops the stand-in INDI server, PHD2 and driver of `wayfindinglib.simulation`, and a source change saves the choice and restarts the backend (see `backend/observatory_source.py`, which picks the simulator's separate data folders before the settings load).
 - `processing/` serves ingestion, stacking and image processing, jobs, the frame quality measurement run and the slow stack reviews (`stack_review_service.py`, which starts a preview remake or a stack comparison as a background job and answers with the result or the job to follow).
 
 ## Planning services (`observatory/`)
@@ -38,3 +38,9 @@ Every RPC call runs on one of a fixed set of worker threads. A slow whole-catalo
 The star catalog listings and counts use it (`data/stellar_service.py`). The numbers (reads at once, wait times) are constants at the top of the module. They are sized so that most of the workers stay free and so that a wait ends before the client's own time limit.
 
 For exact behavior, read the code.
+
+## Measuring new dark and bias frames
+
+The library's rescan of calibration frames does not measure darks and biases, so a new set would stay "Not checked". `ImageProcessingService.measure_new_calibration_frames` starts that measuring (`calibration:measure_frames`, not forced, so only new or changed files are read) as a background job. It is the one place that starts it. Two callers use it: `IngestionService`, after a rescan that added darks or biases, and `SyncService`, after a Bias, Dark or Flat folder sync that filed darks or biases. Adding only lights or flats starts nothing.
+
+Only one such job runs at a time. A request that arrives while one runs is remembered, and the job starts one more pass when it ends, so late frames are not missed. The job writes its own log in the job list. When a pass ends, the service sends `calibration:measured`, and the Calibration Library panel reads its health again.

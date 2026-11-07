@@ -181,6 +181,7 @@ class RemoteControl(ControlChild):
         incremental: bool | None = None,
         log_callback: Callable[[str], None] | None = None,
         register_job: bool | None = None,
+        on_copied: Callable[[int], None] | None = None,
     ) -> FrameSyncResult:
         """Bring new frames from the observatory computer into the library.
 
@@ -220,6 +221,12 @@ class RemoteControl(ControlChild):
             `True` for a copy of every folder and `False` for one target,
             whose caller usually tracks the work itself. A dry run, or a
             call made while a job already runs, records none.
+        on_copied : `Callable` [[`int`], `None`], optional
+            Called once with the number of frames added to the library,
+            right after the copy and re-index and before the new frames are
+            measured, so a caller can show them at once. Not called when no
+            frame was added. Used for one target (or chosen files or a local
+            folder); refused for every folder and for a calibration folder.
 
         Returns
         -------
@@ -245,7 +252,7 @@ class RemoteControl(ControlChild):
         context = self._context
         if target is None:
             _refuse("Copying every folder", files=files, local_path=local_path, incremental=incremental)
-            _refuse("Copying every folder", dry_run=dry_run or None)
+            _refuse("Copying every folder", dry_run=dry_run or None, on_copied=on_copied)
             return FrameSyncResult.model_validate(
                 tasks.sync_all_remote_folders(
                     context, log_callback, True if register_job is None else register_job
@@ -258,7 +265,7 @@ class RemoteControl(ControlChild):
             target_id=target_id,
         ):
             return FrameSyncResult.model_validate(
-                self._sync_one(target_id, dry_run, files, local_path, incremental, log_callback)
+                self._sync_one(target_id, dry_run, files, local_path, incremental, log_callback, on_copied)
             )
 
     def _sync_one(
@@ -269,6 +276,7 @@ class RemoteControl(ControlChild):
         local_path: str | None,
         incremental: bool | None,
         log_callback: Callable[[str], None] | None,
+        on_copied: Callable[[int], None] | None = None,
     ) -> dict[str, Any]:
         """Copy or index one target's or calibration folder's frames.
 
@@ -284,7 +292,11 @@ class RemoteControl(ControlChild):
         if local_path is not None:
             _refuse("Indexing a local folder", dry_run=dry_run or None, files=files, incremental=incremental)
             success = tasks.download_remote_targets(
-                context, target_id, local_path=local_path, measurement_summaries=measurement_summaries
+                context,
+                target_id,
+                local_path=local_path,
+                measurement_summaries=measurement_summaries,
+                on_copied=on_copied,
             )
             return {
                 "success": bool(success),
@@ -300,6 +312,7 @@ class RemoteControl(ControlChild):
                 log_callback=log_callback,
                 incremental=True if incremental is None else incremental,
                 measurement_summaries=measurement_summaries,
+                on_copied=on_copied,
             )
             return {
                 "success": bool(success),
@@ -307,9 +320,9 @@ class RemoteControl(ControlChild):
                 "measurements": [summary.model_dump(mode="json") for summary in measurement_summaries],
             }
         if tasks.is_calibration_folder(target_id):
-            _refuse("Copying a calibration folder", dry_run=dry_run or None)
+            _refuse("Copying a calibration folder", dry_run=dry_run or None, on_copied=on_copied)
             return tasks.sync_calibration_folder(context, target_id)
-        return tasks.sync_target_frames(context, target_id, dry_run)
+        return tasks.sync_target_frames(context, target_id, dry_run, on_copied)
 
     @background_job("remote_sync", grace_period_seconds=8.0)
     def sync_logs(

@@ -100,9 +100,10 @@ describe('PackageEditor', () => {
 
     it('offers the configured filters by short name, SPEC included', async () => {
         const props = renderEditor(samplePackage);
-        const select = screen.getByRole('combobox', { name: 'Filter' }) as HTMLSelectElement;
-        expect([...select.options].map((option) => option.textContent)).toEqual(['L', 'SPEC']);
-        await userEvent.selectOptions(select, 'Star Analyzer 200');
+        await userEvent.click(screen.getByRole('button', { name: /^Filter:/ }));
+        const menu = screen.getByRole('group', { name: 'Filter' });
+        expect(within(menu).getAllByRole('button').map((option) => option.textContent)).toEqual(['L', 'SPEC']);
+        await userEvent.click(within(menu).getByRole('button', { name: 'SPEC' }));
         await userEvent.click(screen.getByRole('button', { name: 'Add to List' }));
         expect(props.onAddExposure).toHaveBeenCalledWith(expect.objectContaining({ filter: 'Star Analyzer 200' }));
     });

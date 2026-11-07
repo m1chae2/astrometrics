@@ -26,6 +26,7 @@ with the network down does not wait for a timeout on every star of every
 frame.
 """
 
+import contextvars
 import logging
 import os
 import tempfile
@@ -324,7 +325,9 @@ class AstroqueryGaiaXpDriver(GaiaXpDriver):
             except _DOWNLOAD_ERRORS as fetch_error:
                 answer["error"] = fetch_error
 
-        worker = threading.Thread(target=fetch, name=f"gaia-xp-{source_id}", daemon=True)
+        worker = threading.Thread(
+            target=contextvars.copy_context().run, args=(fetch,), name=f"gaia-xp-{source_id}", daemon=True
+        )
         worker.start()
         worker.join(DOWNLOAD_TIMEOUT_SECONDS)
         if worker.is_alive():

@@ -68,6 +68,6 @@ def library(control: ObservatoryControl, monkeypatch: pytest.MonkeyPatch) -> Lib
     monkeypatch.setattr(
         night_analysis,
         "capture_library",
-        lambda context, telescope_name, camera_name, cache: synthetic.frames,
+        lambda context, telescope_name, camera_name, cache, targets=None: synthetic.frames,
     )
     return synthetic

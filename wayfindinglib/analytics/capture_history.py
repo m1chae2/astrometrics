@@ -156,7 +156,9 @@ def read_frame_measurements(astrometrics: Any) -> dict[str, dict[str, tuple[floa
     return by_frame
 
 
-def collect_capture_frames(astrometrics: Any, telescope_name: str, camera_name: str) -> list[CaptureFrame]:
+def collect_capture_frames(
+    astrometrics: Any, telescope_name: str, camera_name: str, targets: Sequence[Any] | None = None
+) -> list[CaptureFrame]:
     """Read every light frame taken with this telescope and camera.
 
     Parameters
@@ -181,7 +183,7 @@ def collect_capture_frames(astrometrics: Any, telescope_name: str, camera_name: 
     telescope_spelling = normalize_name(telescope_name)
     stored = read_frame_measurements(astrometrics)
     frames = []
-    for target in astrometrics.targets.list():
+    for target in astrometrics.targets.list() if targets is None else targets:
         for frame in target.frames:
             if not str(frame.role).upper().endswith("LIGHT") or frame.timestamp is None:
                 continue

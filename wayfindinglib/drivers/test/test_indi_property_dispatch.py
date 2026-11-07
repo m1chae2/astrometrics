@@ -126,6 +126,9 @@ def test_external_guide_pulse_is_recorded_through_update_property() -> None:
     backend/services/observatory/guiding_service.py to read.
     """
     interface = IndiInterface.__new__(IndiInterface)
+    # A live interface has its runtime state; without it the interface
+    # ignores every update (see IndiInterface._can_handle_callbacks).
+    interface._exposure_lock = threading.Lock()
     interface._external_pulses = []
     interface._external_pulses_lock = threading.Lock()
 
@@ -149,6 +152,9 @@ def test_unrelated_number_property_records_no_pulse() -> None:
     recorder must ignore everything that is not a guide pulse.
     """
     interface = IndiInterface.__new__(IndiInterface)
+    # A live interface has its runtime state; without it the interface
+    # ignores every update (see IndiInterface._can_handle_callbacks).
+    interface._exposure_lock = threading.Lock()
     interface._external_pulses = []
     interface._external_pulses_lock = threading.Lock()
 

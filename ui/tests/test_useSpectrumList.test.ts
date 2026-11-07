@@ -217,3 +217,88 @@ describe('useSpectrumList Filtering Suite', () => {
         );
     });
 });
+
+describe('useSpectrumList default star', () => {
+    /** Mocks the list query to return the given stars, already loaded. */
+    const mockStars = (data: Spectrum[]) => {
+        vi.mocked(useAstronomyListQuery).mockReturnValue({
+            data,
+            isLoading: false,
+            error: null,
+            refetch: vi.fn(),
+        } as any);
+    };
+
+    /** A star with a spectrum is chosen over a photometry-only star and over the others. */
+    it('chooses a spectrum star over a photometry-only star over the rest', () => {
+        mockStars([
+            { id: 'plain', name: 'plain' },
+            { id: 'light-curve', name: 'light-curve', has_photometry: true },
+            { id: 'with-spectrum', name: 'with-spectrum', has_spectra: true },
+        ] as Spectrum[]);
+        const setPendingId = vi.fn();
+        renderHook(() => useSpectrumList('Albireo', undefined, '', '', setPendingId));
+        expect(setPendingId).toHaveBeenCalledTimes(1);
+        expect(setPendingId).toHaveBeenCalledWith('with-spectrum');
+    });
+
+    /** With no spectrum star, the photometry star is chosen; with neither, the first star. */
+    it('falls back to a photometry star, then to the first star', () => {
+        mockStars([
+            { id: 'plain', name: 'plain' },
+            { id: 'light-curve', name: 'light-curve', has_photometry: true },
+        ] as Spectrum[]);
+        const withPhotometry = vi.fn();
+        renderHook(() => useSpectrumList('Albireo', undefined, '', '', withPhotometry));
+        expect(withPhotometry).toHaveBeenCalledWith('light-curve');
+
+        mockStars([{ id: 'first', name: 'first' }, { id: 'second', name: 'second' }] as Spectrum[]);
+        const withNeither = vi.fn();
+        renderHook(() => useSpectrumList('Vega', undefined, '', '', withNeither));
+        expect(withNeither).toHaveBeenCalledWith('first');
+    });
+
+    /** A star that is already selected when the panel opens (a hand-off) is kept. */
+    it('keeps a star that was already selected on first open', () => {
+        mockStars([{ id: 'with-spectrum', name: 'with-spectrum', has_spectra: true }] as Spectrum[]);
+        const setPendingId = vi.fn();
+        renderHook(() => useSpectrumList('Albireo', undefined, '', 'handed-off', setPendingId));
+        expect(setPendingId).not.toHaveBeenCalled();
+    });
+
+    /** A star the user picked in a target is chosen again when the user returns to that target. */
+    it('remembers the user pick for a target and replaces the star on a target change', () => {
+        mockStars([
+            { id: 'a-spectrum', name: 'a-spectrum', has_spectra: true },
+            { id: 'a-other', name: 'a-other' },
+        ] as Spectrum[]);
+        const setPendingId = vi.fn();
+        const { result, rerender } = renderHook(
+            ({ target }) => useSpectrumList(target, undefined, '', '', setPendingId),
+            { initialProps: { target: 'Albireo' } }
+        );
+        expect(setPendingId).toHaveBeenLastCalledWith('a-spectrum');
+        act(() => result.current.selectStar('a-other'));
+        expect(setPendingId).toHaveBeenLastCalledWith('a-other');
+
+        mockStars([{ id: 'b-first', name: 'b-first' }] as Spectrum[]);
+        rerender({ target: 'Vega' });
+        expect(setPendingId).toHaveBeenLastCalledWith('b-first');
+
+        mockStars([
+            { id: 'a-spectrum', name: 'a-spectrum', has_spectra: true },
+            { id: 'a-other', name: 'a-other' },
+        ] as Spectrum[]);
+        rerender({ target: 'Albireo' });
+        expect(setPendingId).toHaveBeenLastCalledWith('a-other');
+    });
+
+    /** A target with no stars selects nothing, so the list shows its empty message. */
+    it('selects nothing for a target with no stars', () => {
+        mockStars([]);
+        const setPendingId = vi.fn();
+        const { result } = renderHook(() => useSpectrumList('Empty', undefined, '', '', setPendingId));
+        expect(result.current.items).toHaveLength(0);
+        expect(setPendingId).not.toHaveBeenCalled();
+    });
+});

@@ -230,7 +230,7 @@ def get_online_catalog_sources(
     radius_deg: float,
     enabled_driver_names: list[str],
     magnitude_limit: float | None = None,
-) -> list[tuple[str, StellarObject]]:
+) -> tuple[list[tuple[str, StellarObject]], bool, list[str]]:
     """Query registered online catalog drivers for objects in a sky region.
 
     Unlike get_sources(), this method performs only online catalog queries and
@@ -256,8 +256,12 @@ def get_online_catalog_sources(
 
     Returns
     -------
-    List[Tuple[str, StellarObject]]
+    tagged : `list` [`tuple` [`str`, `StellarObject`]]
         Tagged (driver_name, StellarObject) pairs. Never recorded.
+    truncated : `bool`
+        True when a driver left stars out of its answer.
+    failed_catalogs : `list` [`str`]
+        Names of the drivers whose query failed.
 
     REQ: PLN-3.1, PLN-3.2
     """

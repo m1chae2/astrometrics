@@ -325,7 +325,7 @@ def online_catalog_sources(
     radius_deg: float,
     enabled_driver_names: list[str],
     magnitude_limit: float | None,
-) -> list[SkySource]:
+) -> tuple[list[SkySource], bool, list[str]]:
     """Ask the enabled online catalog drivers for the stars in a region.
 
     Parameters
@@ -347,10 +347,16 @@ def online_catalog_sources(
     sources : `list` [`SkySource`]
         One global source per star found, with ``catalog_source`` naming
         the driver. Nothing is saved to the library.
+    truncated : `bool`
+        True when a driver left stars out of its answer, so the list may be
+        missing the faintest stars in the region.
+    failed_catalogs : `list` [`str`]
+        Names of the drivers whose query failed, so an empty list of
+        sources is not mistaken for empty sky.
     """
     from wayfindinglib.tasks.planning_tasks import resolution_operations
 
-    tagged = resolution_operations.get_online_catalog_sources(
+    tagged, truncated, failed_catalogs = resolution_operations.get_online_catalog_sources(
         sky, ra_deg, dec_deg, radius_deg, enabled_driver_names, magnitude_limit
     )
     sources = []
@@ -358,4 +364,4 @@ def online_catalog_sources(
         source = _online_star_source(star, driver_name)
         if source is not None:
             sources.append(source)
-    return sources
+    return sources, truncated, failed_catalogs

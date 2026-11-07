@@ -23,6 +23,7 @@ import {
 } from '../../common/utils/starDisplayFormat';
 import { EmissionLineResult, SpectralFeatureResult } from '../../common/types/spectralFeatureTypes';
 import { useOptionalTargetContext } from '../../common/context/TargetContext';
+import { Button } from '../../common/components/Button';
 import { QualityChip } from '../../common/components/quality/QualityChip';
 
 /**
@@ -483,14 +484,15 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
                         </div>
                     )}
                     {canAnalyze && (
-                        <button
-                            type="button"
+                        <Button
+                            variant="secondary"
+                            size="small"
                             className="stellar-analysis-details__run-btn"
                             onClick={onAnalyze}
                             disabled={isAnalyzing}
                         >
                             {isAnalyzing ? 'Analyzing…' : 'Run period analysis'}
-                        </button>
+                        </Button>
                     )}
                 </div>
             )}

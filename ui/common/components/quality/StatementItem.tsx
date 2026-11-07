@@ -15,6 +15,7 @@ import { ConfidenceChip } from './ConfidenceChip';
 import { StatementTypeIcon } from './StatementTypeIcon';
 import type { StatementActions } from './useStatementActions';
 import { confidenceWord, formatValue, severityWord, statementKindWord } from './statementLabels';
+import { Button } from '../Button';
 
 export interface StatementItemProps {
     /** The statement, as the library returned it. */
@@ -87,22 +88,20 @@ export const StatementItem: React.FC<StatementItemProps> = ({ statement, itemKey
             {(showEvidence || showCalibration) && (
                 <div className="statement-item__buttons">
                     {actions && rowIds.length > 0 && (
-                        <button
-                            type="button"
-                            className="btn btn--tiny quality-button"
+                        <Button
+                            size="small"
                             onClick={() => actions.showFrames(rowIds, text)}
                         >
                             Evidence
-                        </button>
+                        </Button>
                     )}
                     {actions && isCalibration && (
-                        <button
-                            type="button"
-                            className="btn btn--tiny quality-button"
+                        <Button
+                            size="small"
                             onClick={() => actions.showCalibrationRow(statement)}
                         >
                             Show in calibration library
-                        </button>
+                        </Button>
                     )}
                 </div>
             )}

@@ -166,7 +166,7 @@ Folder: `tasks/execution_tasks/`. Facade: `ObservationExecution` (`api/execution
 - **Queue advancement (Architecture Table 4).** `session_runner.py`: `advance_session`, `abort_session`, `dispose_action`, `ActionDisposition`, `SessionRunnerDependencies` (hardware steps are callables). `queue_runner.py`: `run_queue`. `SafetyAssessment.permits_observing` gates each advance.
 - **Imaging queue.** `imaging_queue.py`: `imaging_dependencies` supplies only a slew and a capture.
 - **Divergence and recovery.** `divergence_recording.py` (`record_divergence`), `meridian_flip.py` (`execute_meridian_flip`, `MeridianFlipSteps`), `fault_recovery.py` (`attempt_recovery`, `recover_fault`), `guide_star_loss_recovery.py` (`attempt_guide_star_recovery`).
-- **Recording.** `session_recorder.py` (`ObservationSessionRecorder`), `post_session_reconciliation.py` (`compute_calibration_stats`, `attach_target_session_ids`, `reconcile_session`).
+- **Recording.** `session_recorder.py` (`ObservationSessionRecorder`), `post_session_reconciliation.py` (`attach_target_session_ids`, `reconcile_session`).
 
 <!-- impl: wayfindinglib.tasks.execution_tasks.session_runner.SessionRunnerDependencies -->
 <!-- impl: wayfindinglib.tasks.execution_tasks.session_runner.ActionDisposition -->
@@ -223,7 +223,12 @@ The `kind` values of `review.query` are `capture`, `guiding`, `sky_coverage`, `r
 
 `Telescope.guiding_protocol` picks the guiding driver (`build_guiding_driver_registry`): `phd2`, `internal` or `simulator`. Only the simulator runs the guide loop. `validate_altitude_limits` and `validate_hour_angle_limits` in `drivers/indi/mount_controller.py` run before each slew. Only the altitude range falls back to `[Observatory.Constraints]`.
 
+When PHD2 runs on the observatory computer (`[Observatory.Guiding] phd2_location`, default `observatory` with the `stellarmate` transfer driver), its event server accepts only local connections, so the backend reaches it through an `SshPortForward` (`drivers/ssh_port_forward.py`) to `phd2_port` (default 4400). A `local` PHD2 uses `localhost:phd2_port`. Only the backend opens a forward (`open_port_forwards=True`); scripts and MCP servers use the mount's guide pulses. Under `setpriv --pdeathsig KILL`, when installed, ssh ends with the app. `StellarMateInterface.port_forward_command` rebuilds the command on each restart. A dead ssh restarts after 5 s (the `PHD2Client` cooldown); the forward counts as up only when its local port accepts a connection; ssh ends a silent link after 45 s (`ServerAliveInterval=15`, `ServerAliveCountMax=3`). These are design estimates, not yet measured.
+
+A failing ``.local`` lookup does not drop a working link. `KnownHostAddress` (`drivers/host_resolver.py`) keeps the last resolved address; while the lookup fails, INDI connects to it and ssh and rsync get `-o HostName=<address> -o HostKeyAlias=<name>`, so `known_hosts` is still checked under the name. A changed host name clears it. A connected INDI client is replaced only when its connection is down or `MAX_CONSECUTIVE_PROBE_FAILURES` (3) handshakes at least 5 s apart fail; a failed lookup never counts. The limit is a design estimate, not yet measured.
+
 <!-- impl: wayfindinglib.drivers.interfaces.registry.build_guiding_driver_registry -->
+<!-- impl: wayfindinglib.drivers.ssh_port_forward.SshPortForward -->
 <!-- impl: wayfindinglib.drivers.indi_interface.IndiInterface -->
 <!-- impl: wayfindinglib.drivers.simulators.indi_simulator.SimulatorIndiInterface -->
 <!-- impl: wayfindinglib.drivers.stellarmate_interface.StellarMateInterface -->

@@ -971,6 +971,16 @@ export interface PhotometryResult {
 }
 
 /**
+ * Progress of copying new frames of a target to this computer.
+ */
+export interface FrameCopyPulse {
+  active?: boolean;
+  targetId?: string | null;
+  measured?: number | null;
+  total?: number | null;
+}
+
+/**
  * Lightweight snapshot of current telescope state for polling.
  */
 export interface TelescopePulse {
@@ -992,6 +1002,7 @@ export interface TelescopePulse {
   cameraTemperature?: string | null;
   cameraStatus?: string | null;
   targetName?: string | null;
+  frameCopy?: FrameCopyPulse | null;
 }
 
 /**
@@ -5691,6 +5702,7 @@ export enum DelegationState {
  */
 export const RPC_METHODS = [
   "system:health",
+  "system:static_mounts",
   "system:frontend_log",
   "system:completions",
   "system:get_config",
@@ -5760,6 +5772,8 @@ export const RPC_METHODS = [
   "observatory:set_active_camera",
   "observatory:get_active_telescope",
   "observatory:set_active_telescope",
+  "observatory:get_source",
+  "observatory:set_source",
   "observatory:enter_monitoring_mode",
   "observatory:enter_controller_mode",
   "ingestion:start",
@@ -5889,6 +5903,12 @@ export const UI_EVENTS = {
   "catalog:changed": "catalog:changed",
   /** A frame measurement job stored new quality rows. The payload is {targetId, framesMeasured, rowsWritten, observingNightIds}. */
   "quality:measured": "quality:measured",
+  /** A frame sync (the Download Frames button, an automatic download or an AI tool) copied new frames into the library, before they are measured. The payload is {targetId, framesAdded}. */
+  "library:frames_updated": "library:frames_updated",
+  /** The background measuring of new dark and bias frames (it starts after an ingest or a calibration folder sync) has ended. The payload is empty. The calibration library reads the set health again. */
+  "calibration:measured": "calibration:measured",
+  /** A guide log sync (the sync button or the automatic download) stored guiding samples. The payload is {nightIds, samplesStored}, where nightIds lists the observing nights the samples belong to. Past-night guiding views read again. */
+  "library:guiding_updated": "library:guiding_updated",
   /** A write changed the night plan. The payload is {sessionId, revision, changed}, where revision is the plan revision now stored and changed lists the kind of each change. */
   "plan:changed": "plan:changed",
   /** A write created, edited, reopened, dismissed, brought back, re-framed, deleted or promoted an observation package, or a suggestion refresh ran. The payload is {packageId, targetId, kind, revision}; kind says which, and a promotion has no revision. After a refresh, kind is "refreshed", packageId and targetId are null, and the payload adds the counts added, updated, deleted, completed, reverted and checklistItemsAdded, and the ids deletedPackageIds (suggestions removed) and completedPackageIds. */

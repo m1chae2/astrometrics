@@ -1,5 +1,6 @@
 """Orchestrate scientific analysis tasks (photometry, spectroscopy)."""
 
+import json
 import logging
 import os
 import sqlite3
@@ -30,6 +31,29 @@ logger = logging.getLogger(__name__)
 # ten stars are enough to set the baseline without spending time on faint
 # detections that are mostly noise.
 MASTER_STACK_STAR_LIMIT = 10
+
+
+def _json_default(value: Any) -> Any:
+    """Convert a value the `json` module cannot write into plain data.
+
+    Returns
+    -------
+    plain : `Any`
+        A Pydantic model as a dict, a NumPy scalar or array as Python
+        numbers, or a `Path` as text.
+
+    Raises
+    ------
+    TypeError
+        If the value has no plain form.
+    """
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    if hasattr(value, "tolist"):
+        return value.tolist()
+    if isinstance(value, os.PathLike):
+        return os.fspath(value)
+    raise TypeError(f"Cannot store {type(value).__name__} in a job result.")
 
 
 def _is_same_file(first_path: str, second_path: str) -> bool:
@@ -172,6 +196,11 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 # backend process entirely (a standalone script calling
                 # analyze_target() directly).
                 if job.status == "completed":
+                    # The finished summary was saved on the job record
+                    # (see `_store_job_result`), so it survives a restart.
+                    stored_result = (job.output_metrics or {}).get("result")
+                    if isinstance(stored_result, dict):
+                        return stored_result
                     return {"status": "finished", "jobId": job.id}
                 elif job.status == "failed":
                     return {"status": "failed", "jobId": job.id, "error": job.message}
@@ -240,7 +269,27 @@ class AnalysisOrchestrator(BaseBackgroundService):
             log_file_path=job.log_file_path if job else None,
             job_store=self._job_service.repository if self._job_service else None,
         ):
-            return self._run_analysis_task_body(job_id, target_id, image_files, filter_name, type)
+            result = self._run_analysis_task_body(job_id, target_id, image_files, filter_name, type)
+            self._store_job_result(job_id, result)
+            return result
+
+    def _store_job_result(self, job_id: str, result: dict[str, Any]) -> None:
+        """Save the finished summary on the job record.
+
+        The job table already keeps each job's output numbers, and the
+        library's own job runner keeps a job's result under the
+        `"result"` key there, so this follows the same convention. It
+        lets `get_analysis_results` answer after a backend restart.
+        Failing to save is logged, not raised: the analysis itself
+        succeeded.
+        """
+        if not self._job_service:
+            return
+        try:
+            plain_result = json.loads(json.dumps(result, default=_json_default))
+            self._job_service.update_job(job_id, output_metrics={"result": plain_result})
+        except TypeError, ValueError, sqlite3.Error:
+            logger.warning("Could not save the result of analysis job %s.", job_id, exc_info=True)
 
     def _run_analysis_task_body(
         self,

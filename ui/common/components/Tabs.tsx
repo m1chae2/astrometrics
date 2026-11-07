@@ -23,6 +23,10 @@ export interface TabsProps {
     ariaLabel: string;
     /** Prefix that makes the element ids unique when two tab strips share a page. */
     idPrefix: string;
+    /** "regular" (the default) or "compact", which uses narrower side padding for tight panels. */
+    size?: 'regular' | 'compact';
+    /** Extra class names for the tab list, for layout. */
+    className?: string;
 }
 
 /**
@@ -46,14 +50,17 @@ export function tabPanelElementId(idPrefix: string, tabId: string): string {
 }
 
 /**
- * Shows a tab strip. Only the selected tab is in the Tab key order; the arrow keys,
+ * Shows a tab strip in the one underline style the app uses for tabs and two-way switches. Only the selected tab is in the Tab key order; the arrow keys,
  * Home and End move between tabs and select the one they land on.
  *
  * @param props See {@link TabsProps}.
  * @return The tab list element.
  */
-export const Tabs: React.FC<TabsProps> = ({ tabs, selectedId, onChange, ariaLabel, idPrefix }) => {
+export const Tabs: React.FC<TabsProps> = ({
+    tabs, selectedId, onChange, ariaLabel, idPrefix, size = 'regular', className = '',
+}) => {
     const buttonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+    const tabListRef = useRef<HTMLDivElement | null>(null);
 
     /**
      * Moves selection and focus with the arrow keys, Home and End.
@@ -61,6 +68,8 @@ export const Tabs: React.FC<TabsProps> = ({ tabs, selectedId, onChange, ariaLabe
      * @param index Index of the tab that has focus.
      */
     const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+        // A key press brings the focus ring back after a mouse click hid it.
+        tabListRef.current?.removeAttribute('data-pointer');
         let nextIndex: number;
         if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length;
         else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length;
@@ -74,7 +83,7 @@ export const Tabs: React.FC<TabsProps> = ({ tabs, selectedId, onChange, ariaLabe
     };
 
     return (
-        <div className="tabs" role="tablist" aria-label={ariaLabel}>
+        <div ref={tabListRef} onPointerDown={() => tabListRef.current?.setAttribute('data-pointer', 'true')} className={`tabs${size !== 'regular' ? ` tabs--${size}` : ''}${className ? ` ${className}` : ''}`} role="tablist" aria-label={ariaLabel}>
             {tabs.map((tab, index) => {
                 const isSelected = tab.id === selectedId;
                 return (

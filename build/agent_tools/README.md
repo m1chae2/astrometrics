@@ -58,4 +58,4 @@ which may stay at its real read-only place.
 To fix a fresh copy, run `ASTROMETRICS_SCRATCH=... build/agent_tools/repoint_copy_paths.py
 <copy_config>`. It rewrites paths that contain a `/lights/` folder to the copy's stacks folder, and
 paths under the real data folder to the copy library folder. It edits only databases inside
-`ASTROMETRICS_SCRATCH` and refuses otherwise. Tests are in `backend/tests/test_copy_path_guard.py`.
+`ASTROMETRICS_SCRATCH` and refuses otherwise. With `--mirror-outside`, it instead moves every stored path still outside the copy (for example an old stacks folder) to `ASTROMETRICS_SCRATCH/outside/<original path>`; `build/tpm/real_snapshot.py prepare` does this for its database copies. Tests are in `backend/tests/test_copy_path_guard.py`.

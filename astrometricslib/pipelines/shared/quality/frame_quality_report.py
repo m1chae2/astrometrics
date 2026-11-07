@@ -19,7 +19,7 @@ Each report here also finds slow drifts across the newest frames
 """
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from astrometricslib.foundation.errors import InvalidArgumentError
@@ -27,12 +27,78 @@ from astrometricslib.models.quality.quality_reports import InputQualityReport, R
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.shared.quality import frame_selection, frame_statistics
-from astrometricslib.pipelines.shared.quality.frame_trends import find_trends
+from astrometricslib.pipelines.shared.quality.frame_trends import MINIMUM_FRAMES, find_trends
 
 __all__ = ["input_quality_report", "raw_check_report"]
 
 INPUT_QUALITY_METRICS = ("background_level", "saturated_pixel_fraction", "measured_fwhm_px")
 """The numbers `input_quality_report` gives for each frame."""
+
+SKY_RATE_KEY = "sky_rate_e_per_s_per_px"
+"""The row key for a frame's stored sky rate (electrons per second per pixel),
+which does not depend on the exposure length."""
+
+
+def _exposure_seconds(exposure: object) -> float | None:
+    """Read a frame's exposure text as seconds.
+
+    Parameters
+    ----------
+    exposure : `object`
+        The frame record's exposure, a number or text such as ``"30"``.
+
+    Returns
+    -------
+    seconds : `float` or `None`
+        The exposure rounded to a millisecond, or `None` if unreadable.
+    """
+    try:
+        return round(float(exposure), 3)  # type: ignore[arg-type]
+    except TypeError, ValueError:
+        return None
+
+
+def _background_trend_metrics(
+    recent_rows: list[dict[str, Any]],
+) -> tuple[dict[str, str], list[str]]:
+    """Choose which sky-level numbers can be trended over a window of frames.
+
+    The raw background in ADU grows with the exposure length, so it is
+    trended only when every frame in the window has the same exposure. The
+    sky rate (per second) does not depend on the exposure, so it is trended
+    whenever the window has stored rates.
+
+    Parameters
+    ----------
+    recent_rows : `list` [`dict`]
+        The window's frame rows, in time order.
+
+    Returns
+    -------
+    metrics : `dict` [`str`, `str`]
+        The row keys to trend, mapped to the direction that is a worry.
+    notes : `list` [`str`]
+        Plain sentences saying what was left out and why.
+    """
+    metrics: dict[str, str] = {}
+    notes: list[str] = []
+    exposures = {_exposure_seconds(row.get("exposure")) for row in recent_rows}
+    has_rates = any(row.get(SKY_RATE_KEY) is not None for row in recent_rows)
+    if has_rates:
+        metrics[SKY_RATE_KEY] = "either"
+    if len(exposures) <= 1:
+        metrics["background_level"] = "either"
+    elif has_rates:
+        notes.append(
+            "background_level was not trended because the frames have different exposure lengths; "
+            f"{SKY_RATE_KEY} (per second) was trended instead."
+        )
+    else:
+        notes.append(
+            "The sky level was not trended: the frames have different exposure lengths and none "
+            f"has a stored {SKY_RATE_KEY} (run quality.record_frame_measurements first)."
+        )
+    return metrics, notes
 
 
 def _newest_or_first(items: list[Any], selection: frame_selection.FrameSelection, limit: int) -> list[Any]:
@@ -126,6 +192,7 @@ def input_quality_report(
     remeasure: bool,
     trend_frames: int,
     trend_threshold_percent: float,
+    sky_rate_by_path: Mapping[str, float] | None = None,
 ) -> InputQualityReport:
     """Measure the newest light frames of a target, on a copy of it.
 
@@ -149,6 +216,10 @@ def input_quality_report(
         How many of the newest frames to look at for a drift.
     trend_threshold_percent : `float`
         How far a number must move, as a percentage, to count as a drift.
+    sky_rate_by_path : `Mapping` [`str`, `float`], optional
+        Each frame's stored sky rate (electrons per second per pixel), by the
+        frame's path. The sky is trended in these units because they do not
+        change with the exposure length. Frames without a rate get none.
 
     Returns
     -------
@@ -173,6 +244,7 @@ def input_quality_report(
             "camera": frame.camera,
             "exposure": frame.exposure,
             "filter": str(frame.filter),
+            SKY_RATE_KEY: (sky_rate_by_path or {}).get(frame.path),
             **{name: getattr(frame.measurements, name) for name in INPUT_QUALITY_METRICS},
         }
         for frame in working.frames
@@ -190,6 +262,11 @@ def input_quality_report(
             if values
             else {"frames": 0}
         )
+    trend_metrics, trend_notes = _background_trend_metrics(rows[-max(trend_frames, MINIMUM_FRAMES) :])
+    trend_metrics["measured_fwhm_px"] = "rising"
+    trends = find_trends(rows, trend_metrics, trend_frames, trend_threshold_percent)
+    if trend_notes:
+        trends["notes"] = trend_notes
     return InputQualityReport(
         target_id=target.id,
         light_frames_in_target=sum(1 for frame in every_light if not frame_is_spectral(frame)),
@@ -198,12 +275,7 @@ def input_quality_report(
         frames_measured=len(rows),
         counts=counts,
         summary=summary,
-        trends=find_trends(
-            rows,
-            {"measured_fwhm_px": "rising", "background_level": "either"},
-            trend_frames,
-            trend_threshold_percent,
-        ),
+        trends=trends,
         frames=rows,
         note="Nothing was saved. Frames that were already measured keep their stored values.",
     )

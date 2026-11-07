@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { ParsedFitsData } from './useFitsLoader';
 import { StretchParameters } from '../../types/backendTypes';
+import { drawBitmapSafely, isBitmapUsable } from '../utils/bitmapGuard';
 
 /** Source of ids that tie each draw request to its reply, so a late reply for an old image is ignored. */
 let nextRenderRequestId = 1;
@@ -17,6 +18,10 @@ let nextRenderRequestId = 1;
  * pixels. `stretchParameters` is the library's automatic stretch for the
  * image, applied when `stretch` is true; without it the view is linear. Pass a constant, not a new array on every render, or the image is
  * redrawn each time.
+ *
+ * `onDrawn` is called after each draw with the object that was drawn (the
+ * `ParsedFitsData` or the `ImageBitmap`), so the viewer knows when a picture
+ * is really on the canvas. Pass a stable function.
  */
 export const useCanvasDrawer = (
     canvasRef: React.RefObject<HTMLCanvasElement | null>,
@@ -26,13 +31,16 @@ export const useCanvasDrawer = (
     setDrawnSize: (size: { w: number, h: number }) => void,
     stretch: boolean = true,
     displayRange?: readonly [number, number],
-    stretchParameters?: StretchParameters | null
+    stretchParameters?: StretchParameters | null,
+    onDrawn?: (drawn: ParsedFitsData | ImageBitmap) => void
 ) => {
 
     // Initial draw for Bitmaps (Processed Backend Images)
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas || !bitmap || parsedData) return;
+        // A closed bitmap cannot be drawn; wait for a usable one instead of crashing.
+        if (!isBitmapUsable(bitmap)) return;
 
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
@@ -50,11 +58,13 @@ export const useCanvasDrawer = (
 
         ctx.clearRect(0, 0, logicalW, logicalH);
         ctx.scale(1 / dpr, 1 / dpr);
-        ctx.drawImage(bitmap, 0, 0);
+        const drawn = drawBitmapSafely(ctx, bitmap);
         ctx.setTransform(1, 0, 0, 1, 0, 0); // reset
+        if (!drawn) return;
 
         setDrawnSize({ w: logicalW, h: logicalH });
-    }, [canvasRef, bitmap, parsedData, setDrawnSize]);
+        onDrawn?.(bitmap);
+    }, [canvasRef, bitmap, parsedData, setDrawnSize, onDrawn]);
 
     // FITS Rendering Effect
     useEffect(() => {
@@ -89,9 +99,15 @@ export const useCanvasDrawer = (
                 canvas.style.height = `${logicalH}px`;
                 canvas.style.filter = 'none'; // Ensure clean state
                 ctx.imageSmoothingEnabled = false;
-                ctx.drawImage(bitmap, 0, 0);
-                bitmap.close();
+                const drawn = drawBitmapSafely(ctx, bitmap);
+                try {
+                    bitmap.close();
+                } catch {
+                    // Already closed.
+                }
+                if (!drawn) return;
                 setDrawnSize({ w: logicalW, h: logicalH });
+                onDrawn?.(parsedData);
             }
         };
 
@@ -112,5 +128,5 @@ export const useCanvasDrawer = (
         return () => {
             worker.removeEventListener('message', handleMessage);
         };
-    }, [canvasRef, workerRef, parsedData, setDrawnSize, stretch, displayRange, stretchParameters]);
+    }, [canvasRef, workerRef, parsedData, setDrawnSize, stretch, displayRange, stretchParameters, onDrawn]);
 };

@@ -1,5 +1,6 @@
 import React from 'react';
 import '../styles/ConfirmDialog.css';
+import { Button } from './Button';
 
 export interface Props {
   open: boolean;
@@ -33,8 +34,8 @@ export const ConfirmDialog: React.FC<Props> = ({
         <h3>{title}</h3>
         <div className="confirm-body">{message}</div>
         <div className="confirm-actions">
-          <button className="btn" onClick={onCancel}>{cancelLabel}</button>
-          <button className="btn btn--danger" onClick={onConfirm}>{confirmLabel}</button>
+          <Button onClick={onCancel}>{cancelLabel}</Button>
+          <Button variant="danger" onClick={onConfirm}>{confirmLabel}</Button>
         </div>
       </div>
     </div>

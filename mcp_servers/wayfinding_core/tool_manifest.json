@@ -534,6 +534,13 @@
       "interim_block": "",
       "note": "Slow: reads every session and target twice."
     },
+    "review_invalidate_night": {
+      "tool_class": "unclassified",
+      "category": "observatory-status",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Forgets the app's kept night reviews. Housekeeping for the backend, not a question."
+    },
     "review_query": {
       "tool_class": "compute",
       "category": "observatory-status",

@@ -16,4 +16,8 @@ export const useRemoteTargetsQuery = () =>
         queryKey: ['remoteTargets'],
         queryFn: scanRemoteTargets,
         refetchInterval: 30000,
+        // Equal to the poll interval, so a display coming back into view does
+        // not start an extra folder scan.
+        staleTime: 30000,
+        refetchOnWindowFocus: false,
     });

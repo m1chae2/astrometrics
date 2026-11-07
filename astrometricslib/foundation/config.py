@@ -1619,6 +1619,68 @@ class AppConfiguration:
         """
         return self.app_config.get("Observatory.RemoteTransfer", "driver", fallback="stellarmate")
 
+    def get_auto_download_frames(self) -> bool:
+        """Return whether finished frames and guide logs copy by themselves.
+
+        The key is ``auto_download`` in ``Observatory.RemoteTransfer``. When
+        it is not set, the answer is `True` if the remote-transfer driver is
+        ``"stellarmate"`` (the camera runs on the observatory computer) and
+        `False` otherwise. The value is read on every call, so a change in
+        the settings file applies without a restart.
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` when a finished frame should start a download, and guide
+            logs should download every few minutes while imaging and once
+            after imaging stops.
+        """
+        default = self.get_remote_transfer_driver_name() == "stellarmate"
+        return bool(
+            self.app_config.getboolean("Observatory.RemoteTransfer", "auto_download", fallback=default)
+        )
+
+    def get_phd2_location(self) -> str:
+        """Return where PHD2 runs: ``"observatory"`` or ``"local"``.
+
+        ``"observatory"`` means PHD2 runs on the telescope computer, and
+        the app reaches its event server through an SSH port forward.
+        ``"local"`` means PHD2 runs on this computer. When the key
+        ``phd2_location`` in ``Observatory.Guiding`` is not set, the answer
+        is ``"observatory"`` if the remote-transfer driver is
+        ``"stellarmate"`` and ``"local"`` otherwise.
+
+        Returns
+        -------
+        location : `str`
+            ``"observatory"`` or ``"local"``.
+
+        Raises
+        ------
+        ValueError
+            If the configured value is neither.
+        """
+        default = "observatory" if self.get_remote_transfer_driver_name() == "stellarmate" else "local"
+        value = (
+            str(self.app_config.get("Observatory.Guiding", "phd2_location", fallback=default)).strip().lower()
+        )
+        if value not in ("observatory", "local"):
+            raise ValueError(f"phd2_location must be 'observatory' or 'local', not '{value}'.")
+        return value
+
+    def get_phd2_remote_port(self) -> int:
+        """Return the port PHD2's event server listens on, default 4400.
+
+        The port is on the observatory computer for ``"observatory"`` and on
+        this computer for ``"local"``.
+
+        Returns
+        -------
+        port : `int`
+            The configured port.
+        """
+        return int(self.app_config.get("Observatory.Guiding", "phd2_port", fallback="4400"))
+
     def get_min_altitude(self) -> float:
         """Return the minimum allowed altitude for telescope slews.
 

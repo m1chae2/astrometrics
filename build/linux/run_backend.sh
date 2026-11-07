@@ -252,6 +252,19 @@ start_foreground() {
   ASTROMETRICS_BIND_HOST="$BIND_HOST" exec "$PYTHON" -u -m "$BACKEND_MODULE"
 }
 
+# Prints the pids of `backend.main_backend` processes listening on the given TCP
+# port (one per line). Other processes on the port, and backends on other ports,
+# are never listed.
+backend_port_owner_pids() {
+  local port="$1" pid
+  command -v ss >/dev/null 2>&1 || return 0
+  for pid in $(ss -ltnpH "sport = :${port}" 2>/dev/null | grep -o 'pid=[0-9]*' | sed 's/pid=//' | sort -u); do
+    if tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q "backend\.main_backend"; then
+      echo "$pid"
+    fi
+  done
+}
+
 stop_backend() {
   if [ -f "$PID_FILE" ]; then
     pid=$(cat "$PID_FILE")
@@ -281,10 +294,17 @@ stop_backend() {
     rm -f "$PID_FILE"
   fi
 
-  # Clean up any orphaned backend instances by module name or port 5000
-  pkill -f "python.*backend.main_backend" 2>/dev/null || true
+  # Clean up an orphaned app backend, but only the one that owns the app port.
+  # This used to be `pkill -f "python.*backend.main_backend"`, which killed every
+  # backend on the machine, including the throwaway sandbox backends of the TPM
+  # harness (build/tpm/run_tpm.sh) and developers' test backends. Those listen on
+  # other ports, so selecting by port keeps them alive.
+  for orphan_pid in $(backend_port_owner_pids "${ASTROMETRICS_PORT:-5000}"); do
+    echo "Stopping orphaned backend pid $orphan_pid on port ${ASTROMETRICS_PORT:-5000}..."
+    kill "$orphan_pid" 2>/dev/null || true
+  done
   if command -v fuser >/dev/null 2>&1; then
-    fuser -k 5000/tcp 2>/dev/null || true
+    fuser -k "${ASTROMETRICS_PORT:-5000}"/tcp 2>/dev/null || true
   fi
   echo "Stopped."
 

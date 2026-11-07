@@ -1,4 +1,4 @@
-import { callBackend, fetchImageFile, resolveImageSrc } from '../backendApi';
+import { callBackend, fetchImageFile, loadStaticMounts, resolveImageSrc } from '../backendApi';
 import { reportError } from '../../utils/reportError';
 import { dataUrlToBlob } from '../../utils/dataUrl';
 
@@ -20,13 +20,51 @@ export function isProcessedFitsPath(path: string): boolean {
 }
 
 /**
+ * Names the small JPEG preview that the stacking pipeline saves next to a
+ * stretched FITS picture (`<stack>_processed.fits` and `<stack>_preview.jpg`).
+ *
+ * @param processedFitsPath Path of the stretched FITS picture.
+ * @returns The preview's path, or null when the path does not follow that naming.
+ */
+export function previewPathForProcessedFits(processedFitsPath: string): string | null {
+    if (!isProcessedFitsPath(processedFitsPath)) return null;
+    return processedFitsPath.replace(/_processed\.fits?$/i, '_preview.jpg');
+}
+
+/**
+ * Fetches a stretched FITS picture's small JPEG preview, if the file exists.
+ *
+ * @param processedFitsPath Path of the stretched FITS picture.
+ * @param signal Aborts the request.
+ * @returns The preview picture, or null when there is none or it cannot be read.
+ */
+async function fetchPreviewPicture(processedFitsPath: string, signal?: AbortSignal): Promise<Blob | null> {
+    const previewPath = previewPathForProcessedFits(processedFitsPath);
+    await loadStaticMounts();
+    const src = previewPath ? resolveImageSrc(previewPath) : null;
+    if (!src) return null;
+    try {
+        const response = await fetchImageFile(src, signal);
+        if (!response.ok || response.status === 204) return null;
+        const blob = await response.blob();
+        return blob.size > 0 ? new Blob([blob], { type: 'image/jpeg' }) : null;
+    } catch {
+        // The preview is optional; a missing or unreadable one is not an error.
+        return null;
+    }
+}
+
+/**
  * Fetches the processed image blob for a target object using its registered target details.
  * Retrieves target metadata through the JSON-RPC backend call, resolves the static path,
- * and fetches the image blob directly.
+ * and fetches the image blob directly. For a stretched FITS picture it can also
+ * hand over its small JPEG preview through `onPreview`, usually well before the
+ * FITS file arrives.
  */
 export async function fetchProcessedImage(
     objectId: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onPreview?: (preview: Blob) => void
 ): Promise<Blob | null> {
     try {
         const target = await callBackend("target:get", { target_id: objectId });
@@ -51,10 +89,17 @@ export async function fetchProcessedImage(
         }
 
         const ext = imagePath.split('.').pop()?.toLowerCase();
+        await loadStaticMounts();
         if (isProcessedFitsPath(imagePath)) {
             const src = resolveImageSrc(imagePath);
             if (!src) {
                 return null;
+            }
+            // Start the small preview alongside the big file, so it can be drawn first.
+            if (onPreview) {
+                void fetchPreviewPicture(imagePath, signal).then((preview) => {
+                    if (preview && !signal?.aborted) onPreview(preview);
+                });
             }
             const response = await fetchImageFile(src, signal, true);
             if (response.status === 404 || response.status === 204) {
@@ -118,7 +163,11 @@ export async function fetchTargetFrame(
         exposure,
         index
     });
+    await loadStaticMounts();
     const src = resolveImageSrc(path);
+    if (!src) {
+        throw new Error(`The backend serves no folder that holds the target frame ${path}`);
+    }
     const response = await fetchImageFile(src, signal);
     if (!response.ok) {
         throw new Error(`Failed to fetch target frame blob from path ${src}: ${response.status} ${response.statusText}`);

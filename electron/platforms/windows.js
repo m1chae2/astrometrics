@@ -8,7 +8,6 @@ import path from 'path';
 import fs from 'fs';
 import process from 'process';
 import { execSync } from 'child_process';
-import { screen } from 'electron';
 import { BasePlatform } from './base.js';
 
 /**
@@ -119,47 +118,6 @@ export class WindowsPlatform extends BasePlatform {
     }
 
     return { command: 'python.exe', args: ['-m', 'backend.main_backend'], isBinary: false };
-  }
-
-  /**
-   * Calculates anchor coordinates docking above or below the Windows taskbar.
-   *
-   * @param {Electron.Tray} tray
-   * @param {{ width: number, height: number }} windowSize
-   * @param {Object} [screenModule]
-   * @returns {{ x: number, y: number }}
-   */
-  getTrayPopoverPosition(tray, { width, height }, screenModule = screen) {
-    const trayBounds = tray.getBounds();
-    const display = screenModule.getDisplayNearestPoint({ x: trayBounds.x, y: trayBounds.y });
-    const workArea = display.workArea;
-
-    let x = Math.round(trayBounds.x + (trayBounds.width / 2) - (width / 2));
-    let y;
-
-    // Check if taskbar is at bottom or top
-    if (trayBounds.y >= workArea.y + workArea.height / 2) {
-      // Taskbar at bottom: place window directly above tray icon
-      y = Math.round(trayBounds.y - height);
-    } else {
-      // Taskbar at top: place window directly below tray icon
-      y = Math.round(trayBounds.y + trayBounds.height);
-    }
-
-    // Clamp coordinates strictly within the current screen's work area
-    x = Math.max(workArea.x, Math.min(x, workArea.x + workArea.width - width));
-    y = Math.max(workArea.y, Math.min(y, workArea.y + workArea.height - height));
-
-    return { x, y };
-  }
-
-  /**
-   * Windows users expect popovers to dismiss when clicking outside (blur).
-   *
-   * @returns {boolean}
-   */
-  shouldDismissTrayOnBlur() {
-    return true;
   }
 
   /**

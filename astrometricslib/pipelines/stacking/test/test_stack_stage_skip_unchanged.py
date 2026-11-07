@@ -255,3 +255,18 @@ def test_a_stack_made_before_records_existed_is_built_once(setup: tuple[Path, li
     run_stage(make_target(lights), engine)
 
     assert engine.calls == 2
+
+
+def test_a_skipped_stack_still_gets_its_plate_solution_checked(
+    setup: tuple[Path, list[Path], Engine], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An up-to-date stack still goes to the plate-solution step."""
+    _, lights, engine = setup
+    first = run_stage(make_target(lights), engine)
+    checked: list[str | None] = []
+    monkeypatch.setattr(stacking_tasks, "_save_stack_plate_solution", lambda run, path: checked.append(path))
+
+    second = run_stage(make_target(lights), engine)
+
+    assert engine.calls == 1
+    assert checked == [second] == [first]

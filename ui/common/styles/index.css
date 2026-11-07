@@ -19,7 +19,7 @@ body,
 /* App-wide base font and background */
 body {
   font-family: var(--font-family-base);
-  font-size: 16px;
+  font-size: var(--base-font-size);
   /* Reset to reasonable default */
   background-color: var(--grey-darkest);
   color: var(--white);
@@ -62,6 +62,13 @@ input[type=number] {
   /* Firefox support */
 }
 
+/* Checkboxes, radio buttons and sliders use the theme accent. */
+input[type=checkbox],
+input[type=radio],
+input[type=range] {
+  accent-color: var(--accent-blue);
+}
+
 input:focus {
   border-color: var(--primary-blue) !important;
 }
@@ -70,7 +77,7 @@ input:focus {
 select {
   margin-right: 8px;
   padding: 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--term-border);
   color: var(--text-light);
   border: 1px solid var(--grey-light);
@@ -83,7 +90,7 @@ select {
 
 /* Reduced motion: when the desktop asks for less motion (GNOME 51 widened its
   Reduced Motion setting), remove transitions and decorative animations.
-  Loading spinners stay, because they show that work is still running. */
+  The loading bar has its own reduced-motion rule in Skeleton.css. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -93,9 +100,9 @@ select {
     transition-delay: 0s !important;
   }
 
-  *:not([class*="spinner"]),
-  *:not([class*="spinner"])::before,
-  *:not([class*="spinner"])::after {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
     animation-delay: 0s !important;
     animation-iteration-count: 1 !important;

@@ -17,6 +17,18 @@ Key behavior
   returned by the backend. The parsing block normalizes those shapes into two
   `number[]` arrays (wavelength and flux).
 
+Default star
+
+- No view should look empty when there is data to show. When a target's star list first
+  loads (on first open, or after the target changes), `useSpectrumList` picks a star
+  (`chooseDefaultStar`). The backend lists a target's stars most useful first. The pick is the
+  first star with a spectrum, else the first with photometry, else the first star.
+- A star the user picked in a target is remembered for the session and chosen again when the
+  user returns to that target. A star already open on first mount (a hand-off from another
+  view) is kept.
+- A target with no stars selects nothing, so the list shows its "No stars found" message.
+- The Planetarium's "Stars in <target>" list uses the same hook, so it gets the same default.
+
 Quality chip
 
 - `StarSummaryCard` shows a `QualityChip` (from `ui/common/components/quality/`) under the

@@ -17,6 +17,7 @@ import { SectionPanel } from '../common/components/SectionPanel';
 import { ConfirmDialog } from '../common/components/ConfirmDialog';
 import { TabPanel, Tabs, type TabDefinition } from '../common/components/Tabs';
 import { EmptyState } from '../common/components/EmptyState';
+import { InfoButton } from '../common/components/InfoButton';
 import { useCommandAvailability } from '../common/hooks/useCommandAvailability';
 import { captureTestFrame } from '../common/services/imaging/captureService';
 import { emitToast } from '../common/utils/emitToast';
@@ -25,6 +26,7 @@ import { ditherValuesOf, frameTypeFromLabel, labelFromFrameType } from './packag
 import { useAvailableFilters } from './hooks/useAvailableFilters';
 import '../common/styles/panels.css';
 import './packageLibrary.css';
+import { Button } from '../common/components/Button';
 
 /** The two views of the Image Planner panel. */
 const PLANNER_TABS: TabDefinition[] = [
@@ -171,20 +173,24 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
             {errorMessage && (
                 <div className="package-library__error" role="alert">
                     <span>{errorMessage}</span>
-                    <button type="button" className="btn btn--tiny" onClick={onDismissError}>Dismiss</button>
+                    <Button size="small" onClick={onDismissError}>Dismiss</Button>
                 </div>
             )}
             {removedNotice && (
                 <div className="package-library__error" role="alert">
                     <span>{removedNotice.text}</span>
-                    <button type="button" className="btn btn--tiny btn--primary" onClick={removedNotice.onSave}>
+                    <Button variant="primary" size="small" onClick={removedNotice.onSave}>
                         Save as planned package
-                    </button>
+                    </Button>
                 </div>
             )}
             <div className="target-planner__top-row">
                 <div className="target-planner__left-column">
-                    <SectionPanel title="Image Planner" className="target-planner__planner">
+                    <SectionPanel
+                        title="Image Planner"
+                        className="target-planner__planner"
+                        headerContent={!availability.canCommand ? <InfoButton label="Why unavailable?" text={availability.reason} /> : undefined}
+                    >
                         {editedPackage ? (
                             <>
                                 <Tabs
@@ -233,37 +239,40 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
                             <span className="target-planner__header-actions">
                                 {isEditingQueueEntry ? (
                                     <>
-                                        <button type="button" className="btn btn--tiny" onClick={onCancelEdit}>
+                                        <Button size="small" fit onClick={onCancelEdit}>
                                             Cancel
-                                        </button>
-                                        <button
-                                            type="button"
-                                            className="btn btn--tiny btn--primary"
+                                        </Button>
+                                        <Button
+                                            variant="primary"
+                                            size="small"
+                                            fit
                                             disabled={!canAdd}
                                             onClick={() => editedPackage && onAddToSequence(editedPackage)}
                                         >
                                             Modify
-                                        </button>
+                                        </Button>
                                     </>
                                 ) : (
-                                    <button
-                                        type="button"
-                                        className="btn btn--tiny btn--primary"
+                                    <Button
+                                        variant="primary"
+                                        size="small"
+                                            fit
                                         disabled={!canAdd}
                                         onClick={() => editedPackage && onAddToSequence(editedPackage)}
                                     >
                                         Add to Sequence
-                                    </button>
+                                    </Button>
                                 )}
                                 {onDeletePackage && !isEditingQueueEntry && (
-                                    <button
-                                        type="button"
+                                    <Button
+                                        variant="danger"
+                                        size="small"
+                                            fit
                                         ref={deleteButtonRef}
-                                        className="btn btn--tiny btn--danger"
                                         onClick={() => setIsConfirmingDelete(true)}
                                     >
                                         Delete package
-                                    </button>
+                                    </Button>
                                 )}
                             </span>
                         ) : undefined}

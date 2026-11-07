@@ -1,5 +1,7 @@
 import React from 'react';
-import { RadioListManager } from '../common/radioList/RadioListManager';
+import { useQuery } from '@tanstack/react-query';
+import { RadioListFiltering } from '../common/radioList/RadioListFiltering';
+import { SelectableList } from '../common/components/SelectableList';
 import { TargetListFilterPanel } from '../common/radioList/TargetListFilterPanel';
 import { useTargetListLogic } from '../common/hooks/useTargetListLogic';
 import { ListActions } from '../common/components/ListActions';
@@ -17,14 +19,46 @@ import { useReportModeReady } from '../common/utils/appBootReadiness';
 import { useCommandAvailability } from '../common/hooks/useCommandAvailability';
 import { useEquipmentConfiguration } from '../common/hooks/useEquipmentConfiguration';
 import { CommandGate, WhyUnavailableButton } from './CommandGate';
+import { IngestFramesModal } from '../common/components/IngestFramesModal';
+import { useIngestionManager } from '../common/hooks/useIngestionManager';
+import { OBSERVATORY_INGESTION_CHANNEL } from '../common/context/IngestionJobsContext';
+import { SessionPicker } from '../common/components/SessionPicker';
+import { callBackend } from '../common/services/backendApi';
+import { qualityQueryKeys } from '../common/queries/qualityQueryKeys';
+import { Tabs, TabPanel, type TabDefinition } from '../common/components/Tabs';
+import { CAMERA_ALL } from '../common/hooks/targetListFiltering';
+import { ObservatoryNightContext } from './ObservatoryNightContext';
+import { useObservatoryNightPicker } from './hooks/useObservatoryNightPicker';
 
 import './observatoryManager.css';
+import { Button } from '../common/components/Button';
+
+/**
+ * Makes a target id comparable: no underscores or spaces, lower case.
+ *
+ * @param targetId A target id or name.
+ * @returns The comparable text.
+ */
+const normalizeTargetId = (targetId: string): string => targetId.replace(/[_\s]/g, '').toLowerCase();
+
+/** The two tabs of the Targets panel. List comes first and is the one shown at the start. */
+const TARGET_PANEL_TABS: TabDefinition[] = [
+    { id: 'list', label: 'List' },
+    { id: 'filter', label: 'Filter' },
+];
+
+/** Prefix that keeps the Targets tab element ids unique on the page. */
+const TARGET_PANEL_TABS_ID_PREFIX = 'observatory-targets';
 
 /**
  * ObservatoryManager component.
  *
  * The main container for the Observatory/Telescope management interface.
  * Orchestrates target selection, telescope control, and status monitoring.
+ * A Session panel at the top of the left column chooses what the whole view shows: "Live" (today's
+ * behavior) or one past observing night. For a past night, a banner says so, the controls that
+ * command equipment or change the library are greyed with the reason, the panels show that
+ * night's data, and the Targets panel shows the targets imaged that night (with a way to see all).
  */
 export const ObservatoryManager: React.FC = () => {
     const {
@@ -35,6 +69,7 @@ export const ObservatoryManager: React.FC = () => {
         forceReload,
         raShared,
         decShared,
+        setSelectedTarget,
     } = useTargetContext();
 
     const { remoteTargets } = useRemoteStatusContext();
@@ -44,7 +79,29 @@ export const ObservatoryManager: React.FC = () => {
         filterText,
         setFilterText,
         isLoading,
-    } = useTargetListLogic(reloadKey, pendingTarget, selectedTarget, setPendingTarget, undefined, remoteTargets);
+    } = useTargetListLogic(reloadKey, pendingTarget, selectedTarget, setPendingTarget, setSelectedTarget, remoteTargets);
+
+    // Which Targets tab is showing. The filter choices live in the shared filter state, so they
+    // are kept when the user goes back to the List tab.
+    const [targetsTab, setTargetsTab] = React.useState('list');
+    // A short line that says what the list shows, such as "Messier Catalog · Newest".
+    const activeFilterText = [
+        filterPanel.selectedCatalog,
+        filterPanel.selectedCamera === CAMERA_ALL ? null : filterPanel.selectedCamera,
+        filterPanel.sort,
+    ].filter(Boolean).join(' · ');
+
+    // The night picker at the top of the view. Panels read the choice from the context below.
+    const nightPicker = useObservatoryNightPicker();
+    const { isLive, nightId, nightDate, night, liveOnlyReason } = nightPicker.value;
+
+    // The night's review gives each target's frame count and warnings for the list's second line.
+    const nightQualityQuery = useQuery({
+        queryKey: qualityQueryKeys.nightQuality(nightId ?? ''),
+        queryFn: () => callBackend('history:night_quality', { session_id: nightId as string }),
+        enabled: !isLive && nightId !== null,
+        retry: false,
+    });
 
     const { trackingStatus, telemetry } = useTelescopeStatus();
     // Equipment commands stay off until the library says this app may send them.
@@ -71,41 +128,150 @@ export const ObservatoryManager: React.FC = () => {
         handlers
     } = useObservatoryControl(forceReload);
 
-    // Construct Panels
-    const targetListPanel = (
-        <RadioListManager
-            title="Target List"
-            items={items}
-            selectedId={selectedTarget}
-            pendingId={pendingTarget}
-            onSelect={setPendingTarget}
-            topPanel={<TargetListFilterPanel {...filterPanel} />}
-            topPanelTitle="Filter Targets"
-            filterText={filterText}
-            onFilterTextChange={setFilterText}
-            isLoading={isLoading}
-            loadingMessage="Loading targets…"
-            emptyMessage="No targets in the catalog."
-            actions={
-                <ListActions>
-                    <button className="btn" onClick={handlers.onAddTarget}>Add Target</button>
-                    <CommandGate disabled={!availability.canCommand} reason={availability.reason}>
-                        <button
-                            className="btn btn--primary"
-                            disabled={!availability.canCommand}
-                            aria-disabled={!availability.canCommand}
-                            onClick={() => {
-                                if (!availability.canCommand) return;
-                                void handlers.onSlewToTarget(raShared, decShared);
-                            }}
+    // The "Download Frames" window copies frames from the telescope to the library.
+    // It starts on the target the user has picked in the list.
+    const ingestion = useIngestionManager(selectedTarget, OBSERVATORY_INGESTION_CHANNEL);
+    const { openIngestModal, closeIngestModal, isIngestModalOpen, isActive: isDownloading } = ingestion;
+
+    // The download keeps running and finishes in `IngestionJobsContext` (which
+    // is always running), so nothing here has to stay awake while this display
+    // is hidden: it only shows the state.
+
+    const downloadFramesTitle = isDownloading
+        ? 'Frames are being downloaded from the telescope.'
+        : !selectedTarget
+            ? 'Pick a target in the list first.'
+            : 'Copy frames from the telescope into the library.';
+
+    // Equipment commands also stay off while a past night is shown.
+    const commandsDisabled = !availability.canCommand || !isLive;
+    const commandsDisabledReason = !isLive ? liveOnlyReason : availability.reason;
+
+    // The targets imaged on the chosen night, and the list the panel shows for it.
+    const nightTargetKeys = React.useMemo(
+        () => new Set((night?.targetsImaged ?? []).map(normalizeTargetId)),
+        [night],
+    );
+    const nightTargetQuality = React.useMemo(() => {
+        const byTarget = new Map<string, { framesTaken: number; warningCount: number }>();
+        for (const entry of nightQualityQuery.data?.targets ?? []) {
+            byTarget.set(normalizeTargetId(entry.targetId), {
+                framesTaken: entry.framesTaken,
+                warningCount: entry.needsAttention.warningCount,
+            });
+        }
+        return byTarget;
+    }, [nightQualityQuery.data]);
+    const nightItems = React.useMemo(() => {
+        if (isLive) return items;
+        const decoratedItems = items.map((item) => {
+            const quality = nightTargetQuality.get(normalizeTargetId(item.id));
+            if (!quality || !nightTargetKeys.has(normalizeTargetId(item.id))) return item;
+            const frames = `${quality.framesTaken} frame${quality.framesTaken === 1 ? '' : 's'}`;
+            const warnings = quality.warningCount > 0
+                ? `, ${quality.warningCount} warning${quality.warningCount === 1 ? '' : 's'}`
+                : '';
+            return { ...item, subtitle: `${frames}${warnings}` };
+        });
+        return decoratedItems.filter((item) => nightTargetKeys.has(normalizeTargetId(item.id)));
+    }, [isLive, items, nightTargetKeys, nightTargetQuality]);
+
+    // The left column: Session, Targets (filters, search and list in one panel) and Controls.
+    const leftColumn = (
+        <div className="manager panel-group observatory-left-column">
+            <SectionPanel title="Session" className="flex-auto observatory-session-panel">
+                <div className="observatory-session">
+                    <SessionPicker
+                        label="Night"
+                        options={nightPicker.options}
+                        selectedId={nightPicker.selectedId}
+                        onSelect={nightPicker.select}
+                        fill
+                    />
+                    {/* A status region that is always present, so a screen reader announces the text when it appears. */}
+                    <div role="status" className="observatory-night-banner" data-testid="night-banner">
+                        {liveOnlyReason}
+                    </div>
+                </div>
+            </SectionPanel>
+
+            <SectionPanel title="Targets" className="flex-fill flex-col observatory-targets-panel">
+                <Tabs
+                    tabs={TARGET_PANEL_TABS}
+                    selectedId={targetsTab}
+                    onChange={setTargetsTab}
+                    ariaLabel="Targets views"
+                    idPrefix={TARGET_PANEL_TABS_ID_PREFIX}
+                    size="compact"
+                    className="observatory-targets-tabs"
+                />
+                <TabPanel idPrefix={TARGET_PANEL_TABS_ID_PREFIX} tabId="list" selected={targetsTab === 'list'}>
+                    {isLive && (
+                        <div className="observatory-targets-panel__active-filter" data-testid="active-filter">
+                            {activeFilterText}
+                        </div>
+                    )}
+                    <RadioListFiltering
+                        options={[]}
+                        selectedOption=""
+                        onOptionChange={() => undefined}
+                        filterText={filterText}
+                        onFilterTextChange={setFilterText}
+                    />
+                    <SelectableList
+                        className="observatory-targets-panel__list"
+                        items={nightItems}
+                        selectedId={selectedTarget}
+                        pendingId={pendingTarget}
+                        onSelect={setPendingTarget}
+                        isLoading={isLoading}
+                        loadingMessage="Loading targets"
+                        emptyMessage={isLive ? 'No targets in the catalog.' : `No targets were imaged on the night of ${nightDate}.`}
+                    />
+                </TabPanel>
+                <TabPanel idPrefix={TARGET_PANEL_TABS_ID_PREFIX} tabId="filter" selected={targetsTab === 'filter'}>
+                    <TargetListFilterPanel {...filterPanel} />
+                </TabPanel>
+            </SectionPanel>
+
+            <SectionPanel
+                title="Controls"
+                className="flex-auto manager__actions-panel"
+                headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}
+            >
+                <div className="manager__actions">
+                    <ListActions>
+                        <Button
+                            disabled={!isLive}
+                            title={isLive ? undefined : liveOnlyReason}
+                            onClick={handlers.onAddTarget}
                         >
-                            Slew to Target
-                        </button>
-                    </CommandGate>
-                    <WhyUnavailableButton disabled={!availability.canCommand} reason={availability.reason} />
-                </ListActions>
-            }
-        />
+                            Add Target
+                        </Button>
+                        <Button
+                            disabled={!isLive || !selectedTarget || isDownloading}
+                            title={isLive ? downloadFramesTitle : liveOnlyReason}
+                            onClick={openIngestModal}
+                        >
+                            {isDownloading ? 'Downloading…' : 'Download Frames'}
+                        </Button>
+                        <CommandGate disabled={commandsDisabled} reason={commandsDisabledReason}>
+                            <Button
+                                variant="primary"
+                                disabled={commandsDisabled}
+                                aria-disabled={commandsDisabled}
+                                onClick={() => {
+                                    if (commandsDisabled) return;
+                                    void handlers.onSlewToTarget(raShared, decShared);
+                                }}
+                            >
+                                Slew to Target
+                            </Button>
+                        </CommandGate>
+                    </ListActions>
+                </div>
+            </SectionPanel>
+        </div>
     );
 
     const controlPanel = (
@@ -124,14 +290,12 @@ export const ObservatoryManager: React.FC = () => {
             guidingGain={guidingGain}
             onGuidingExposureChange={setGuidingExposure}
             onGuidingGainChange={setGuidingGain}
-            onGuideStart={handlers.onGuideStart}
-            onGuideStop={handlers.onGuideStop}
             alignmentAttempts={telemetry.alignmentAttempts || []}
             onStartAlignment={() => handlers.onStartAlignment(raShared, decShared)}
             onStopAlignment={handlers.onStopAlignment}
             isAligningActive={telemetry.alignmentActive}
-            commandsDisabled={!availability.canCommand}
-            commandsDisabledReason={availability.reason}
+            commandsDisabled={commandsDisabled}
+            commandsDisabledReason={commandsDisabledReason}
             cameras={equipment.availableCameras}
             camerasLoading={equipment.loading}
             camerasError={equipment.error}
@@ -144,18 +308,23 @@ export const ObservatoryManager: React.FC = () => {
     );
 
     return (
-        <>
+        <ObservatoryNightContext.Provider value={nightPicker.value}>
             <AddTargetModal
                 isOpen={isAddModalOpen}
                 onClose={() => setIsAddModalOpen(false)}
                 onAdd={handlers.onAddTargetSubmit}
             />
+            <IngestFramesModal
+                isOpen={isIngestModalOpen}
+                onClose={closeIngestModal}
+                ingestionState={ingestion}
+            />
             <GenericDisplayLayout
                 className="observatory-display-container"
-                leftPanel={targetListPanel}
+                leftPanel={leftColumn}
                 centerPanel={controlPanel}
                 rightPanel={statusPanel}
             />
-        </>
+        </ObservatoryNightContext.Provider>
     );
 };

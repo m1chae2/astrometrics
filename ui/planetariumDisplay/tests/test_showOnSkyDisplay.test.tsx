@@ -83,14 +83,14 @@ vi.mock('../../astronomyManager/hooks/useStarsBySpectralClassList', () => ({ use
 vi.mock('../../common/utils/appBootReadiness', () => ({ useReportModeReady: vi.fn() }));
 
 import { PlanetariumDisplay } from '../PlanetariumDisplay';
-import { getShowOnSkyRequest } from '../showOnSky/showOnSkyStore';
+import { peekHandoffs, postHandoff } from '../../common/utils/displayHandoffStore';
 
 /**
- * Sends the window event the app turns a remote action into.
- * @param detail The event payload.
+ * Posts the hand-off a "Show on sky" action makes.
+ * @param detail The payload.
  */
 function sendShowOnSky(detail: unknown): void {
-  window.dispatchEvent(new CustomEvent('astrometrics:showOnSky', { detail }));
+  postHandoff('Planetarium', 'showOnSky', detail);
 }
 
 describe('Planetarium showOnSky', () => {
@@ -101,7 +101,7 @@ describe('Planetarium showOnSky', () => {
     await waitFor(() => expect(mapProps.current.center).toEqual({ ra: 148.9, dec: 69.1 }));
     expect(setSelectedTarget).toHaveBeenCalledWith('M 81');
     expect(mapProps.current.slewRequestId).toBeGreaterThan(0);
-    expect(getShowOnSkyRequest()).toBeNull();
+    expect(peekHandoffs('Planetarium', 'showOnSky')).toHaveLength(0);
   });
 
   /** A request that arrives while mounted centers the map too. */

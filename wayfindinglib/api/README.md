@@ -37,7 +37,7 @@ The rules:
 
 ### `review.py`
 
-`ObservationReview` (`wayfinder.review`) answers how the nights went. `query` reads past nights and analyses, `get_live_session_status` reads the night in progress, `frame_guiding` links a target's frames to the guiding record, `query_alignment_sessions` and `query_alignment_records` read pointing alignment, and `get_performance_envelope` reads the limits that the equipment has shown.
+`ObservationReview` (`wayfinder.review`) answers how the nights went. `query` reads past nights and analyses, `get_live_session_status` reads the night in progress, `frame_guiding` links a target's frames to the guiding record, `query_alignment_sessions` and `query_alignment_records` read pointing alignment, `get_performance_envelope` reads the limits that the equipment has shown, and `invalidate_night` forgets the kept night reviews. The library keeps each night review and the list of nights in memory until the frames, measurements, guiding records or equipment behind them change, so opening a night again is fast.
 
 ### `control/`
 
@@ -52,6 +52,6 @@ The rules:
 
 Each of `mount`, `imaging`, `guiding`, `safety` and `equipment` has a `status` call with the same shape: it takes an optional `include` list of sections and returns a typed status. `mount.status` reads only the mount. `close` stops the INDI session (INDI is the protocol that talks to the devices) when a program is done.
 
-`Wayfinder` builds its own INDI session. Give `simulated=True` for the simulator, or leave it unset to use the simulator when `ASTROMETRICS_TESTING` is set. `separate_process=True` runs the session in a process of its own, which a program with a busy event loop needs. The driver properties on `control` are private.
+`Wayfinder` builds its own INDI session. Give `simulated=True` for the simulator, or leave it unset to use the simulator when `ASTROMETRICS_TESTING` is set. `separate_process=True` runs the session in a process of its own, which a program with a busy event loop needs. `open_port_forwards=True` lets the library open live SSH tunnels, such as the one to PHD2 on the observatory computer; it is off by default and only the backend turns it on. The driver properties on `control` are private.
 
 For exact behavior, read the code.

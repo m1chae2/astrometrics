@@ -9,6 +9,7 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { PlanetariumSource, PlanetariumTarget, ObserverLocation, ConstellationLineSegment } from '../../common/types/planetariumTypes';
 import { getAltAz, getRaDec, projectAltAz, pixelsPerDegree } from '../utils/projectionMath';
+import { PopoverSelect } from '../../common/components/PopoverSelect';
 import { safeParse } from '../utils/coordinateUtils';
 import { calculateLST } from '../utils/siderealTime';
 import { findNearestSource } from '../utils/hitTesting';
@@ -30,8 +31,13 @@ import { AlignmentOverlay } from '../layers/AlignmentOverlay';
 import { TrackingRiskOverlay } from '../layers/TrackingRiskOverlay';
 import { FramingOverlay, FramingPanelCorners } from '../layers/FramingOverlay';
 import { StarFieldRenderer } from '../webgl/StarFieldRenderer';
+import { perfEnd, perfStart } from '../utils/perfMarks';
 import { useTimeController } from '../hooks/useTimeController';
 import { useSkyMapInput } from '../hooks/useSkyMapInput';
+import { easePanStep } from '../utils/panEasing';
+import { FovNotifyGate, easeFovTowardTarget } from '../utils/zoomEasing';
+import { Button } from '../../common/components/Button';
+import { Slider } from '../../common/components/Slider';
 
 /**
  * Props for CelestialSkyMap.
@@ -108,26 +114,14 @@ interface Props {
   framingPanels?: FramingPanelCorners[];
 }
 
-// How much Local Sidereal Time must drift since the last drawn frame before
-// that drift alone is worth a redraw, at a wide FOV. 0.001 degrees corresponds
-// to roughly a quarter of a real second at 1x live-time speed — imperceptible
-// to the eye, so idle "live time" viewing redraws only a few times a second
-// instead of every rAF tick. During fast time-scrubbing (up to 1000x) LST
-// advances much faster per frame, so this same threshold is crossed on nearly
-// every tick, restoring full-rate smoothness automatically with no special-casing.
-const LST_REDRAW_EPSILON_DEGREES = 0.001;
+/** The speeds the time controller offers for the accelerated sky rotation. */
+const TIME_SPEED_OPTIONS = [1, 5, 25, 100, 1000].map((speed) => ({ id: String(speed), label: `${speed}x` }));
 
-// How many screen pixels a source may drift from sidereal motion alone before
-// that drift is worth a redraw, independent of zoom. A fixed *degrees*
-// threshold alone is calibrated against wall-clock time only: at a wide FOV
-// 0.001° is sub-pixel and invisible, but at a tight zoom (small FOV, large
-// pixels-per-degree) that same angular drift is many pixels — enough to make
-// an idle, untracked view visibly jump/flicker at only ~4 redraws/second
-// instead of updating smoothly. The actual redraw threshold below takes
-// whichever of the two (degrees or pixel-equivalent) is smaller, so wide-FOV
-// idle viewing keeps its original ~4Hz cadence while tight zooms redraw every
-// frame once sidereal drift exceeds this many pixels.
-const LST_REDRAW_EPSILON_PIXELS = 1.5;
+// How many screen pixels the sky may turn (sidereal motion alone) before that drift is
+// worth a redraw. The sky turns about 0.25 degrees a minute, so at a wide field of view
+// an idle map redraws every several seconds, and at a tight zoom about once a second.
+// Time playback moves the sky much faster than this each frame, so it draws at full rate.
+const LST_REDRAW_EPSILON_PIXELS = 0.5;
 
 /**
  * High-performance celestial sky map rendered on HTML5 Canvas.
@@ -246,6 +240,9 @@ export const CelestialSkyMap: React.FC<Props> = ({
   const targetAltRef = useRef<number>(0.0);
 
   const localFOVRef = useRef<number>(fov);
+  // Where the wheel and keys want the FOV to end up; the render loop eases localFOVRef toward it.
+  const targetFovRef = useRef<number>(fov);
+  const fovNotifyGateRef = useRef<FovNotifyGate>(new FovNotifyGate(fov));
   const currentLSTRef = useRef<number>(0.0);
   const sensorFovWidthDegRef = useRef<number | undefined>(sensorFovWidthDeg);
   const sensorFovHeightDegRef = useRef<number | undefined>(sensorFovHeightDeg);
@@ -407,8 +404,8 @@ export const CelestialSkyMap: React.FC<Props> = ({
     if (parentCenterNotifyTimeout.current !== null) {
       window.clearTimeout(parentCenterNotifyTimeout.current);
     }
-    // See notifyParentFOV above — same debounce-resets-on-every-tick shape,
-    // shortened for the same reason (catalogSourceCache made settling cheap).
+    // Debounce that restarts on every pan step, kept short because catalogSourceCache
+    // makes settling cheap.
     parentCenterNotifyTimeout.current = window.setTimeout(() => {
       const raDec = getRaDec(alt, az, currentLSTRef.current, observerLat);
       onCenterChange(raDec.ra, raDec.dec);
@@ -425,9 +422,20 @@ export const CelestialSkyMap: React.FC<Props> = ({
   }, []);
 
   // Sync local FOV and sensor FOV refs
+  // The FOV prop echoes what this component reported when a zoom settled; ignore that echo
+  // so it cannot pull a zoom in progress back. Any other value was set from outside (for
+  // example a star pick), so the view jumps to it as before.
   useEffect(() => {
+    if (fov === fovNotifyGateRef.current.lastNotified) return;
+    fovNotifyGateRef.current.adoptExternal(fov);
     localFOVRef.current = fov;
+    targetFovRef.current = fov;
   }, [fov]);
+
+  const onFOVChangeRef = useRef(onFOVChange);
+  useEffect(() => {
+    onFOVChangeRef.current = onFOVChange;
+  }, [onFOVChange]);
 
   useEffect(() => {
     sensorFovWidthDegRef.current = sensorFovWidthDeg;
@@ -437,35 +445,10 @@ export const CelestialSkyMap: React.FC<Props> = ({
     sensorFovHeightDegRef.current = sensorFovHeightDeg;
   }, [sensorFovHeightDeg]);
 
-  const parentNotifyTimeout = useRef<number | null>(null);
-  const notifyParentFOV = useCallback((nextFOV: number) => {
-    if (parentNotifyTimeout.current !== null) {
-      window.clearTimeout(parentNotifyTimeout.current);
-    }
-    // Resets on every wheel/key tick, so the source-fetching hooks
-    // (queryRadius -> useOnlineCatalogSources/usePlanetariumSources) never see
-    // the new FOV until ticks stop arriving faster than this delay. 80ms was
-    // tuned back when every settle meant a real backend fetch; now that
-    // catalogSourceCache usually resolves settles with no network call, one
-    // rAF frame's worth of coalescing is enough to avoid over-firing.
-    parentNotifyTimeout.current = window.setTimeout(() => {
-      onFOVChange(nextFOV);
-      parentNotifyTimeout.current = null;
-    }, 16);
-  }, [onFOVChange]);
-
-  useEffect(() => {
-    return () => {
-      if (parentNotifyTimeout.current !== null) {
-        window.clearTimeout(parentNotifyTimeout.current);
-      }
-    };
-  }, []);
-
   // Pointer-drag panning, wheel zoom, and arrow-key pan/zoom
   const { isDragging, onPointerDown, onPointerMove, onPointerUp, onWheel } = useSkyMapInput({
-    canvasRef, centerAzRef, centerAltRef, targetAzRef, targetAltRef, localFOVRef,
-    setTrackingMode, notifyParentFOV,
+    canvasRef, centerAzRef, centerAltRef, targetAzRef, targetAltRef, localFOVRef, targetFovRef,
+    setTrackingMode,
   });
 
   // Main Fixed-Rate requestAnimationFrame render loop
@@ -507,6 +490,16 @@ export const CelestialSkyMap: React.FC<Props> = ({
         targetAltRef.current = targetAltAz.alt;
       }
 
+      // 1b. Ease the zoom toward its target. The parent hears about the FOV only when the
+      // zoom settles, or every FOV_NOTIFY_INTERVAL_MS during a long gesture, so React state
+      // and catalog requests do not run on every wheel tick.
+      if (localFOVRef.current !== targetFovRef.current) {
+        const zoomStep = easeFovTowardTarget(localFOVRef.current, targetFovRef.current);
+        localFOVRef.current = zoomStep.fov;
+        const fovToReport = fovNotifyGateRef.current.update(zoomStep.fov, zoomStep.settled, performance.now());
+        if (fovToReport !== null) onFOVChangeRef.current(fovToReport);
+      }
+
       // 2. Apply linear damping to smooth viewport pan transitions
       // 0.15 damping factor gives ~5 frames to cover 50% of remaining distance at 60fps
       let deltaAltitude = targetAltRef.current - centerAltRef.current;
@@ -514,12 +507,16 @@ export const CelestialSkyMap: React.FC<Props> = ({
       if (deltaAzimuth > 180) deltaAzimuth -= 360;
       if (deltaAzimuth < -180) deltaAzimuth += 360;
 
-      const deltaThreshold = 0.001;
-      const needsMovement = Math.abs(deltaAltitude) > deltaThreshold || Math.abs(deltaAzimuth) > deltaThreshold;
-
-      if (needsMovement) {
-        centerAltRef.current += deltaAltitude * 0.15;
-        centerAzRef.current = (centerAzRef.current + deltaAzimuth * 0.15 + 360) % 360;
+      // Closes the gap in steps, then snaps onto the target (inside a fraction of a
+      // pixel) so the easing ends and the map can stop redrawing.
+      if (deltaAltitude !== 0 || deltaAzimuth !== 0) {
+        const panStep = easePanStep(
+          deltaAltitude,
+          deltaAzimuth,
+          pixelsPerDegree(canvas.width, canvas.height, localFOVRef.current),
+        );
+        centerAltRef.current += panStep.altitudeStep;
+        centerAzRef.current = (centerAzRef.current + panStep.azimuthStep + 360) % 360;
 
         // Throttled notification back to parent React component coordinates state
         throttledNotifyParentCenter(centerAltRef.current, centerAzRef.current);
@@ -535,16 +532,14 @@ export const CelestialSkyMap: React.FC<Props> = ({
 
       // 3b. Skip the redraw entirely if nothing that affects the picture has
       // changed since the last frame we actually drew: the camera (az/alt/fov),
-      // sidereal time (beyond whichever of LST_REDRAW_EPSILON_DEGREES or the
-      // current zoom's LST_REDRAW_EPSILON_PIXELS is smaller), canvas size, and
+      // sidereal time (beyond LST_REDRAW_EPSILON_PIXELS at the current zoom), canvas size, and
       // every overlay-relevant prop are all unchanged.
       const lastDrawn = lastDrawnFrameStateRef.current;
       let lstDeltaDegrees = lastDrawn ? Math.abs(currentFrameLST - lastDrawn.lst) : Infinity;
       if (lstDeltaDegrees > 180) lstDeltaDegrees = 360 - lstDeltaDegrees;
 
-      const lstEpsilonPixelsAsDegrees =
+      const lstEpsilonDegrees =
         LST_REDRAW_EPSILON_PIXELS / pixelsPerDegree(canvas.width, canvas.height, localFOVRef.current);
-      const lstEpsilonDegrees = Math.min(LST_REDRAW_EPSILON_DEGREES, lstEpsilonPixelsAsDegrees);
 
       const cameraChanged =
         !lastDrawn ||
@@ -604,6 +599,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
       };
 
       // 5. Execute overlay draw stack sequentially
+      const overlayDrawStartedAt = perfStart();
       overlays.forEach(overlay => {
         try {
           overlay.draw(context, projectionContext);
@@ -611,6 +607,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
           console.error(`Failed to draw overlay '${overlay.id}':`, error);
         }
       });
+      perfEnd('planetarium:overlay_draw', overlayDrawStartedAt);
 
       // 5b. Draw the WebGL star field on its own canvas, if available.
       if (starFieldRendererRef.current) {
@@ -717,31 +714,29 @@ export const CelestialSkyMap: React.FC<Props> = ({
       <canvas ref={starCanvasRef} style={{ pointerEvents: 'none' }} />
 
       <div className="celestial-time-controller">
-        <button
-          className={`celestial-time-btn ${isTimePlaying ? 'active' : ''}`}
+        <Button
+          variant="secondary"
+          size="small"
+          active={isTimePlaying}
+          aria-pressed={isTimePlaying}
           onClick={() => setIsTimePlaying(!isTimePlaying)}
           title="Play/Pause Sky Sidereal Rotation"
         >
           {isTimePlaying ? '⏸' : '▶'}
-        </button>
+        </Button>
 
         {isTimePlaying && (
-          <select
-            className="celestial-time-select"
-            value={timeSpeed}
-            onChange={(e) => setTimeSpeed(Number(e.target.value))}
-            title="Accelerated Time Speed"
-          >
-            <option value="1">1x</option>
-            <option value="5">5x</option>
-            <option value="25">25x</option>
-            <option value="100">100x</option>
-            <option value="1000">1000x</option>
-          </select>
+          <PopoverSelect
+            label="Accelerated Time Speed"
+            options={TIME_SPEED_OPTIONS}
+            selectedId={String(timeSpeed)}
+            onSelect={(id) => setTimeSpeed(Number(id ?? 1))}
+            size="compact"
+            placement="above"
+          />
         )}
 
-        <input
-          type="range"
+        <Slider
           className="celestial-time-slider"
           min="-720"
           max="720"

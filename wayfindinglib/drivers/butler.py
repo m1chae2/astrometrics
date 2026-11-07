@@ -22,10 +22,11 @@ the same ``wayfinding.db`` file. `DiskButler.control_records` gives the
 import configparser
 import json
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
-from astrometricslib.drivers import AbstractButler, DatasetSpec, connect_db
+from astrometricslib.drivers import AbstractButler, DatasetSpec, bump_data_version, connect_db
 from astrometricslib.drivers import Butler as _GenericButler
 from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.drivers.control_record_store import ControlRecordStore
@@ -223,6 +224,7 @@ class DiskButler(AbstractButler):
         self.config = app_config
         self.__generic: _GenericButler | None = None
         self.__control_records: ControlRecordStore | None = None
+        self.__control_records_lock = threading.Lock()
 
     @property
     def library_path(self) -> Path:
@@ -245,9 +247,10 @@ class DiskButler(AbstractButler):
         records : `ControlRecordStore`
             The record store.
         """
-        if self.__control_records is None:
-            self.__control_records = ControlRecordStore(str(self.library_path / "wayfinding.db"))
-        return self.__control_records
+        with self.__control_records_lock:
+            if self.__control_records is None:
+                self.__control_records = ControlRecordStore(str(self.library_path / "wayfinding.db"))
+            return self.__control_records
 
     @property
     def _generic(self) -> _GenericButler:
@@ -265,6 +268,7 @@ class DiskButler(AbstractButler):
                     model_class=model_class,
                     id_field=_ID_FIELD_FOR.get(dataset_type, "id"),
                     serializer=lambda obj: obj.model_dump(mode="json", by_alias=True),
+                    data_version_kind=table_name,
                 )
                 for dataset_type, (table_name, model_class) in _DATASET_TYPES.items()
             }
@@ -412,6 +416,7 @@ class DiskButler(AbstractButler):
                 "AND COALESCE(json_extract(data_json, '$.revision'), 0) = ?",
                 (payload, session.id, expected_revision),
             )
+            bump_data_version(connection, "wayfinding_observation_sessions")
             connection.commit()
             return cursor.rowcount == 1
         except sqlite3.OperationalError as error:
@@ -467,6 +472,7 @@ class DiskButler(AbstractButler):
                 "INSERT INTO wayfinding_observation_sessions (id, data_json) VALUES (?, ?)",
                 (session.id, payload),
             )
+            bump_data_version(connection, "wayfinding_observation_sessions")
             connection.commit()
         except BaseException:
             connection.rollback()
@@ -512,6 +518,7 @@ class DiskButler(AbstractButler):
                 "AND COALESCE(json_extract(data_json, '$.revision'), 0) = ?",
                 (payload, package.id, expected_revision),
             )
+            bump_data_version(connection, "observation_packages")
             connection.commit()
             return cursor.rowcount == 1
         except sqlite3.OperationalError as error:
@@ -556,6 +563,7 @@ class DiskButler(AbstractButler):
                 "AND (? IS NULL OR json_extract(data_json, '$.status') = ?)",
                 (package_id, expected_revision, expected_revision, only_status, only_status),
             )
+            bump_data_version(connection, "observation_packages")
             connection.commit()
             return cursor.rowcount == 1
         finally:
@@ -611,6 +619,7 @@ class DiskButler(AbstractButler):
                 "INSERT OR REPLACE INTO wayfinding_observation_sessions (id, data_json) VALUES (?, ?)",
                 (session.id, payload),
             )
+            bump_data_version(connection, "wayfinding_observation_sessions")
             connection.commit()
         except BaseException:
             connection.rollback()

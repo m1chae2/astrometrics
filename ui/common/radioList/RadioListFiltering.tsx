@@ -1,6 +1,6 @@
 import React from 'react';
-import { CustomSelect } from '../components/CustomSelect';
-import '../styles/entry.css';
+import { PopoverSelect } from '../components/PopoverSelect';
+import { TextInput } from '../components/TextInput';
 import '../styles/manager.css';
 
 export interface RadioListFilteringProps {
@@ -26,15 +26,14 @@ export const RadioListFiltering: React.FC<RadioListFilteringProps> = ({
     return (
         <div className="manager__filter">
             {options.length > 0 && (
-                <CustomSelect
-                    options={options}
-                    value={selectedOption}
-                    onChange={onOptionChange}
+                <PopoverSelect
+                    label="Filter"
+                    options={options.map((option) => ({ id: option, label: option }))}
+                    selectedId={selectedOption}
+                    onSelect={(picked) => { if (picked !== null) onOptionChange(picked); }}
                 />
             )}
-            <input
-                type="text"
-                className="entry"
+            <TextInput
                 placeholder={placeholder}
                 value={filterText}
                 onChange={(e) => onFilterTextChange(e.target.value)}

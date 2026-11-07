@@ -69,6 +69,11 @@ class ObservatoryControl:
     separate_process : `bool`, optional
         Run the INDI session in a process of its own, so a slow INDI
         call cannot freeze the caller. `close` stops that process.
+    open_port_forwards : `bool`, optional
+        Allow live SSH port forwards, such as the one to PHD2 on the
+        observatory computer. `False` by default: each process would
+        otherwise open its own SSH connection, and the backend is the one
+        process that should hold live links. `close` stops them.
 
     Attributes
     ----------
@@ -102,6 +107,7 @@ class ObservatoryControl:
         astrometrics: Astrometrics | None = None,
         simulated: bool | None = None,
         separate_process: bool = False,
+        open_port_forwards: bool = False,
     ) -> None:
         """Build the shared context and the six children."""
         if config is None:
@@ -116,6 +122,7 @@ class ObservatoryControl:
             astrometrics=astrometrics,
             simulated=simulated,
             separate_process=separate_process,
+            open_port_forwards=open_port_forwards,
         )
         self.mount = MountControl(self._context)
         self.imaging = ImagingControl(self._context)

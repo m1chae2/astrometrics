@@ -16,8 +16,10 @@ drivers, since retrieving files from a telescope host is not part of
 INDI or ASCOM.
 """
 
+import ipaddress
 import logging
 import os
+import re
 import subprocess
 import threading
 import time
@@ -25,9 +27,36 @@ from typing import Any
 
 from astrometricslib.drivers import require_mounted_storage, scratch_directory, stop_process_group
 from astrometricslib.exceptions import ConfigurationError, ExternalServiceError
+from wayfindinglib.drivers.host_resolver import KnownHostAddress
 from wayfindinglib.drivers.interfaces.remote_transfer_driver import RemoteTransferDriver
 
 logger = logging.getLogger(__name__)
+
+_UNREACHABLE_MARKERS = (
+    "could not resolve hostname",
+    "timed out",
+    "connection refused",
+    "no route to host",
+    "name or service not known",
+    "temporary failure in name resolution",
+    "network is unreachable",
+    "host is down",
+    "connection timed out",
+    "connection closed by",
+    "connection reset by",
+    "kex_exchange_identification",
+)
+"""Parts of ssh error text that mean the telescope computer is unusable now.
+
+These are an expected state (the computer is off, the network is down, or ssh
+cannot run on this computer), so they set the offline status and are logged
+once at info level. ``kex_exchange_identification`` is what ssh prints when a
+connection opens and is dropped at once, for example in a sealed network.
+``permission denied (publickey)`` and ``bad owner or permissions`` are
+deliberately not listed: both are configuration errors (the login was refused,
+or ssh rejects the user's own config files), so they stay errors the user must
+see and fix.
+"""
 
 _RSYNC_BASE_OPTIONS = ("-avz", "--no-p", "--no-g", "--no-o", "-s")
 """Options every rsync transfer from the telescope computer uses."""
@@ -50,6 +79,63 @@ never finishes. It is set far above a healthy transfer: a full night from the
 telescope computer is tens of gigabytes, and 100 GB at a slow 5 MB/s over
 Wi-Fi takes about 5.6 hours, so 12 hours leaves more than twice that margin.
 """
+
+_SSH_CONNECT_TIMEOUT_OPTION = "ConnectTimeout=2"
+"""SSH option that every ssh command to the telescope computer carries.
+
+Design estimate. Without it, a host that does not answer holds each command
+for the operating system's connect timeout, which is far longer than a screen
+should wait.
+"""
+
+_HOST_ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+"""Shape of a host name or ssh alias that is safe to put on a command line.
+
+It starts with a letter or digit, so ssh and rsync cannot read it as an
+option (a leading ``-``), and it has no spaces, quotes or other shell or ssh
+syntax characters. An IP address is checked separately.
+"""
+
+_RSYNC_SSH_OPTIONS = ("BatchMode=yes", "ConnectTimeout=10")
+"""SSH options for the ssh that rsync starts.
+
+Design estimate. ``BatchMode`` stops ssh from waiting for a password nobody
+can type in a background download. 10 s to connect is longer than the 2 s used
+for quick probes because a download is worth waiting a little for, and rsync's
+own ``--timeout`` still guards a transfer that stalls.
+"""
+
+_PORT_FORWARD_OPTIONS = (
+    "LogLevel=ERROR",
+    "ExitOnForwardFailure=yes",
+    "BatchMode=yes",
+    "ServerAliveInterval=15",
+    "ServerAliveCountMax=3",
+)
+"""SSH options for the long-lived port forward.
+
+Design estimate. ``LogLevel=ERROR`` keeps ssh quiet except for errors, so
+a refused channel (PHD2 stopped) writes less text to the error pipe.
+``ExitOnForwardFailure`` makes ssh exit when the forward
+cannot be set up, so the supervisor sees the failure. ``BatchMode`` stops ssh
+from asking for a password, which nobody could answer. The two keep-alive
+options end a link that went silent after 15 s x 3 = 45 s, so a dead Wi-Fi
+connection is replaced instead of left half-open.
+"""
+
+_COMMAND_TIMEOUT_SECONDS = 30
+"""Hard limit on one ssh command (a probe or a listing), in seconds.
+
+Design estimate. The connect step already gives up after 2 s, so this only
+guards a command that connected and then hangs, such as a listing on a stalled
+disk. A recursive ``find`` over a night of frames on the telescope computer
+should finish in a few seconds, so 30 s leaves a wide margin without letting
+one call hold a thread (or an MCP reply) for minutes. Downloads do not use it;
+`_run_rsync` has its own limits.
+"""
+
+_SSH_PORT = 22
+"""Port passed to the name lookup for the saved-address check."""
 
 _OFFLINE_REPROBE_SECONDS = 10.0
 """While the host is offline, recheck in the background this often."""
@@ -80,6 +166,7 @@ class StellarMateInterface(RemoteTransferDriver):
             Local frames directory base destination path.
         """
         self.host_alias = host_alias
+        self._known_address = KnownHostAddress(host_alias)
         self.remote_pictures_path = remote_pictures_path
         self.frames_path = frames_path
         self._last_connection_status = None  # None=Unknown, True=Online, False=Offline
@@ -87,24 +174,84 @@ class StellarMateInterface(RemoteTransferDriver):
         self._first_probe_lock = threading.Lock()
         self._background_probe_running = False
 
+    def _checked_host_alias(self) -> str:
+        """Return the host alias after checking that it is safe to use.
+
+        The alias goes into ssh and rsync command lines. A value such as
+        ``-oProxyCommand=...`` would be read by them as an option, so only
+        a plain host name, ssh alias or IP address is accepted.
+
+        Returns
+        -------
+        host_alias : `str`
+            The alias, unchanged.
+
+        Raises
+        ------
+        ConfigurationError
+            If the alias is empty or is not a plain host name or IP address.
+        """
+        alias = self.host_alias
+        if alias and _HOST_ALIAS_PATTERN.fullmatch(alias):
+            return alias
+        try:
+            ipaddress.ip_address(alias)
+        except ValueError:
+            raise ConfigurationError(
+                f"The observatory host {alias!r} is not a valid host name or IP address. "
+                "Use letters, digits, dots, hyphens and underscores, starting with a letter or digit."
+            ) from None
+        return alias
+
     @property
     def driver_name(self) -> str:
         """Registry key for this driver."""
         return "stellarmate"
 
-    def _update_connection_status(self, is_online: bool) -> None:
+    def _ssh_address_options(self) -> list[str]:
+        """Build the ssh options that reach the host by its saved address.
+
+        While the host name resolves, the list is empty and ssh uses the name
+        as before. While only the name lookup fails and an earlier address is
+        known, the options point ssh at that address. ``HostName`` replaces
+        only where ssh connects, so the user name and keys from the ssh
+        configuration still match the alias. ``HostKeyAlias`` makes ssh check
+        the host key under the alias, so ``known_hosts`` still matches and the
+        key check is not weakened.
+
+        Returns
+        -------
+        options : `list` [`str`]
+            Tokens to put right after ``ssh``, possibly empty.
+        """
+        if not self.host_alias:
+            return []
+        self._known_address.set_hostname(self.host_alias)
+        address = self._known_address.fallback_address(_SSH_PORT)
+        if address is None:
+            return []
+        return ["-o", f"HostName={address}", "-o", f"HostKeyAlias={self.host_alias}"]
+
+    def _update_connection_status(self, is_online: bool, reason: str = "") -> None:
         """Update the internal connection status and log state changes.
+
+        Each change is logged once, at info level.
 
         Parameters
         ----------
         is_online : `bool`
             Whether the remote host is currently reachable.
+        reason : `str`, optional
+            Why the host is offline, such as ssh's error text. Only used
+            for the offline message.
         """
         if self._last_connection_status != is_online:
             if is_online:
                 logger.info("Remote Host '%s' is now ONLINE.", self.host_alias)
             else:
-                logger.debug("Remote Host '%s' is now OFFLINE.", self.host_alias)
+                logger.info(
+                    "Remote Host '%s' is now OFFLINE: %s", self.host_alias, reason or "no reason given"
+                )
             self._last_connection_status = is_online
 
     def _run_command(self, cmd_list: list[str]) -> str:
@@ -146,6 +293,44 @@ class StellarMateInterface(RemoteTransferDriver):
 
         return self._execute_command(cmd_list)
 
+    def port_forward_command(self, local_port: int, remote_port: int) -> list[str]:
+        """Build the ssh command that forwards a local port to the host.
+
+        The forward listens only on the loopback address and reaches
+        ``localhost:<remote_port>`` as seen from the telescope computer.
+        This only builds the command; `SshPortForward` runs it.
+
+        Parameters
+        ----------
+        local_port : `int`
+            Port to listen on, on this computer.
+        remote_port : `int`
+            Port to reach on the telescope computer.
+
+        Returns
+        -------
+        command : `list` [`str`]
+            The ssh command tokens.
+
+        Notes
+        -----
+        A host alias that is not a valid host name or IP address raises
+        `ConfigurationError`.
+        """
+        host_alias = self._checked_host_alias()
+        options = [_SSH_CONNECT_TIMEOUT_OPTION, *_PORT_FORWARD_OPTIONS]
+        option_tokens = [token for option in options for token in ("-o", option)]
+        return [
+            "ssh",
+            "-N",
+            *option_tokens,
+            *self._ssh_address_options(),
+            "-L",
+            f"127.0.0.1:{local_port}:localhost:{remote_port}",
+            "--",
+            host_alias,
+        ]
+
     def _start_background_probe(self) -> None:
         """Check in a background thread whether the offline host is back.
 
@@ -160,9 +345,11 @@ class StellarMateInterface(RemoteTransferDriver):
         def probe() -> None:
             """Run one connection check and record the answer."""
             try:
-                self._execute_command(["ssh", self.host_alias, "echo", "connected"])
+                self._execute_command(["ssh", "--", self.host_alias, "echo", "connected"])
             except ExternalServiceError:
                 pass  # _execute_command already recorded the host as offline
+            except ConfigurationError as error:
+                logger.warning("Cannot check the connection: %s", error)
             finally:
                 self._background_probe_running = False
 
@@ -185,32 +372,48 @@ class StellarMateInterface(RemoteTransferDriver):
         ------
         ExternalServiceError
             Raised if the command fails.
+
+        Notes
+        -----
+        A host alias that is not a valid host name or IP address raises
+        `ConfigurationError` before any command runs.
         """
         if cmd_list and cmd_list[0] == "ssh":
+            self._checked_host_alias()
             cmd_list = cmd_list.copy()
             cmd_list.insert(1, "-o")
-            cmd_list.insert(2, "ConnectTimeout=2")
+            cmd_list.insert(2, _SSH_CONNECT_TIMEOUT_OPTION)
+            cmd_list[3:3] = self._ssh_address_options()
 
         self._last_probe_time = time.time()
 
         try:
-            result = subprocess.run(cmd_list, capture_output=True, text=True, check=True)
+            result = subprocess.run(
+                cmd_list,
+                capture_output=True,
+                text=True,
+                check=True,
+                stdin=subprocess.DEVNULL,
+                timeout=_COMMAND_TIMEOUT_SECONDS,
+            )
             self._update_connection_status(True)
             return result.stdout.strip()
 
+        except subprocess.TimeoutExpired as e:
+            reason = f"no answer within {_COMMAND_TIMEOUT_SECONDS} s"
+            self._update_connection_status(False, reason)
+            raise ExternalServiceError(f"SSH/Command Failed: {reason}") from e
+
+        except FileNotFoundError as e:
+            self._update_connection_status(False, f"the ssh program was not found ({e})")
+            raise ExternalServiceError(f"SSH/Command Failed: {e}") from e
+
         except subprocess.CalledProcessError as e:
             err_msg = e.stderr.lower() if e.stderr else ""
-            is_conn_error = (
-                "could not resolve hostname" in err_msg
-                or "timed out" in err_msg
-                or "connection refused" in err_msg
-                or "no route to host" in err_msg
-            )
+            is_conn_error = any(marker in err_msg for marker in _UNREACHABLE_MARKERS)
 
             if is_conn_error:
-                if self._last_connection_status is not False:
-                    logger.debug("SSH Connection Failed: %s", e.stderr.strip())
-                self._update_connection_status(False)
+                self._update_connection_status(False, (e.stderr or "").strip())
             else:
                 logger.exception("Command failed: %s\nStderr: %s", cmd_list, e.stderr)
                 self._update_connection_status(True)
@@ -220,14 +423,21 @@ class StellarMateInterface(RemoteTransferDriver):
     def check_connection(self) -> bool:
         """Probe the host connection to check if the telescope is online.
 
+        This is the explicit "is it reachable right now?" question, so it
+        always runs a real probe, even when the host is known to be
+        offline, and records the answer as the new status.
+
         Returns
         -------
         is_online : `bool`
             `True` if the SSH probe succeeded; `False` otherwise.
         """
         try:
-            self._run_command(["ssh", self.host_alias, "echo", "connected"])
+            self._execute_command(["ssh", "--", self.host_alias, "echo", "connected"])
             return True
+        except ConfigurationError as error:
+            logger.warning("Cannot check the connection: %s", error)
+            return False
         except ExternalServiceError, OSError:
             return False
 
@@ -242,7 +452,7 @@ class StellarMateInterface(RemoteTransferDriver):
         """
         try:
             cmd = f"ls -F {self.remote_pictures_path} | grep '/$'"
-            output = self._run_command(["ssh", self.host_alias, cmd])
+            output = self._run_command(["ssh", "--", self.host_alias, cmd])
             dirs = [d.rstrip("/") for d in output.split("\n") if d.strip()]
             return dirs
         except ExternalServiceError, OSError:
@@ -309,7 +519,7 @@ class StellarMateInterface(RemoteTransferDriver):
             cmd = (
                 f"find '{remote_path}' -type f \\( -name '*.fits' -o -name '*.fit' \\) -printf '%P\\n' | sort"
             )
-            output = self._run_command(["ssh", self.host_alias, cmd])
+            output = self._run_command(["ssh", "--", self.host_alias, cmd])
             files = [f.strip() for f in output.split("\n") if f.strip()]
             return files
         except ExternalServiceError, OSError:
@@ -344,7 +554,7 @@ class StellarMateInterface(RemoteTransferDriver):
                 f"find '{remote_path}' -type f \\( -name '*.fits' -o -name '*.fit' \\) "
                 f"-printf '%s\\t%P\\n' | sort -k2"
             )
-            output = self._run_command(["ssh", self.host_alias, cmd])
+            output = self._run_command(["ssh", "--", self.host_alias, cmd])
             files_with_sizes = []
             for line in output.split("\n"):
                 if "\t" not in line:
@@ -376,7 +586,7 @@ class StellarMateInterface(RemoteTransferDriver):
             folder_name = self._resolve_remote_folder_name(folder_name)
             remote_path = f"{self.remote_pictures_path}/{folder_name}"
             cmd = f"find '{remote_path}' -type f \\( -name '*.fits' -o -name '*.fit' \\) | wc -l"
-            output = self._run_command(["ssh", self.host_alias, cmd])
+            output = self._run_command(["ssh", "--", self.host_alias, cmd])
             return int(output)
         except ExternalServiceError, OSError, ValueError:
             if self._last_connection_status is not False:
@@ -511,10 +721,20 @@ class StellarMateInterface(RemoteTransferDriver):
             `_RSYNC_STALL_TIMEOUT_SECONDS` fails by itself (rsync's own
             ``--timeout``), and one that runs past
             `_RSYNC_OVERALL_LIMIT_SECONDS` is stopped.
+
+        Notes
+        -----
+        A host alias that is not a valid host name or IP address raises
+        `ConfigurationError` before rsync starts.
         """
+        self._checked_host_alias()
+        address_options = self._ssh_address_options()
+        safety_options = [token for option in _RSYNC_SSH_OPTIONS for token in ("-o", option)]
+        remote_shell = ["-e", " ".join(["ssh", *safety_options, *address_options])]
         rsync_cmd = [
             "rsync",
             *_RSYNC_BASE_OPTIONS,
+            *remote_shell,
             f"--timeout={_RSYNC_STALL_TIMEOUT_SECONDS}",
             *extra_options,
             f"{self.host_alias}:{remote_path}",
@@ -596,7 +816,7 @@ class StellarMateInterface(RemoteTransferDriver):
             path order. Empty if the host cannot be reached.
         """
         try:
-            output = self._run_command(["ssh", self.host_alias, find_command])
+            output = self._run_command(["ssh", "--", self.host_alias, find_command])
         except ExternalServiceError, OSError:
             if self._last_connection_status is not False:
                 logger.exception("Failed to list remote files")

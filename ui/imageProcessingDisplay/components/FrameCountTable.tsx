@@ -9,6 +9,7 @@ import React, { useMemo } from 'react';
 import { SectionPanel } from '../../common/components/SectionPanel';
 import { CalibrationEntry } from '../../common/types/backendTypes';
 
+import { Skeleton } from '../../common/components/Skeleton';
 export interface LightFrameStatistic {
     exposure: string;
     filter: string;
@@ -59,7 +60,7 @@ const FrameAnalysisRow: React.FC<FrameAnalysisRowProps> = ({
 
     if (isLoading) {
         libraryStatusClass = 'cal-status--checking';
-        libraryContent = <span>Checking...</span>;
+        libraryContent = <Skeleton variant="line" label="Checking the calibration library" />;
     } else if (libraryCount !== null) {
         if (libraryCount > 0) {
             libraryStatusClass = 'cal-status--success';
@@ -162,7 +163,7 @@ export const UnifiedFrameAnalysis: React.FC<UnifiedFrameAnalysisProps> = ({
 
     return (
         <div className="frame-analysis-content">
-            <div className="tab-view__header tab-view__header--inline" style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+            <div className="frame-analysis-heading">
                 <span style={{ fontWeight: 'bold', fontSize: '1.1em' }}>Session Frames</span>
                 {cameraSelector}
             </div>

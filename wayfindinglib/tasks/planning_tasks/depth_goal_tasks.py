@@ -64,9 +64,7 @@ FIXED_PATTERN_CAUSE_SENTENCES = {
     FixedPatternCause.BANDING: "The frames carry a fixed stripe pattern.",
     FixedPatternCause.GRADIENT: "The sky brightness has a slope across the frame that stays in every frame.",
     FixedPatternCause.CALIBRATION_MASTERS: "Noise in the calibration frames is the same in every frame.",
-    FixedPatternCause.SKY_STRUCTURE: (
-        "The sky has fixed structure, likely faint light or a slope in the background."
-    ),
+    FixedPatternCause.SKY_STRUCTURE: "The sky has fixed structure, likely faint light in the background.",
     FixedPatternCause.UNPLACED: "The noise has a fixed part we can't place yet.",
 }
 """One plain sentence for each cause of fixed-pattern noise (row WAY-D94).

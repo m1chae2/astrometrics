@@ -44,9 +44,9 @@
 
 .astronomy-display__collapsed-note {
     padding: 8px 12px;
-    color: var(--text-muted, #757575);
+    color: var(--text-muted, var(--cmd-fg-dimmer));
     font-style: italic;
-    font-size: 0.85rem;
+    font-size: var(--control-font-size);
 }
 
 .astronomy-display__right-column {
@@ -75,20 +75,20 @@
     flex-direction: column;
     height: 100%;
     width: 100%;
-    font-size: 0.85rem;
+    font-size: var(--control-font-size);
 }
 
 /* Star Summary Card */
 .star-summary-card {
-    background: var(--surface-secondary, rgba(255, 255, 255, 0.04));
-    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
-    border-radius: 6px;
+    background: var(--surface-secondary, color-mix(in srgb, var(--white) 4%, transparent));
+    border: 1px solid var(--border-color, color-mix(in srgb, var(--white) 10%, transparent));
+    border-radius: var(--radius-md);
     padding: 8px 12px;
     display: flex;
     flex-direction: column;
     gap: 4px;
-    font-size: 0.85rem;
-    color: var(--text-primary, #e0e0e0);
+    font-size: var(--control-font-size);
+    color: var(--text-primary, var(--text-lighter));
 }
 
 .star-summary-card__header {
@@ -100,101 +100,45 @@
 
 .star-summary-card__title {
     font-weight: 600;
-    font-size: 0.95rem;
-    color: var(--text-title, #ffffff);
+    font-size: var(--panel-header-size);
+    color: var(--text-title, var(--white));
 }
 
-.star-summary-card__badge {
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 0.75rem;
-    font-weight: 600;
-}
-
+/* Badges use the shared .badge look (sharedComponents.css). Each kind only picks its color. */
 .spectral-badge {
-    background: rgba(33, 150, 243, 0.2);
-    color: #64b5f6;
-    border: 1px solid rgba(33, 150, 243, 0.4);
+    --badge-color: var(--accent-blue);
 }
 
 /* A type measured from this star's own spectrum, as opposed to a catalog lookup. */
 .spectral-badge--measured {
-    background: rgba(76, 175, 80, 0.2);
-    color: #81c784;
-    border-color: rgba(76, 175, 80, 0.4);
+    --badge-color: var(--success-green);
 }
 
 /* A poor template match, or one far from the catalog type: shown in amber so it
    is not read as a measurement. Must come after the measured style above: both
    have the same weight, so the later one wins. */
 .spectral-badge--caution {
-    background: rgba(255, 152, 0, 0.2);
-    color: #ffb74d;
-    border-color: rgba(255, 152, 0, 0.4);
+    --badge-color: var(--warning-amber);
 }
 
 /* A type that is not known, in grey so it reads as an absence, not a finding. */
 .spectral-badge--neutral {
-    background: rgba(158, 158, 158, 0.15);
-    color: #bdbdbd;
-    border-color: rgba(158, 158, 158, 0.35);
+    --badge-color: var(--text-dim);
 }
 
 /* A repeating brightness pattern the searches found. */
 .variability-badge {
-    background: rgba(255, 152, 0, 0.2);
-    color: #ffb74d;
-    border: 1px solid rgba(255, 152, 0, 0.4);
+    --badge-color: var(--warning-amber);
 }
 
+/* A target tag is a badge that is also a button: it opens the target. */
 .target-tag-badge {
-    background: rgba(156, 39, 176, 0.2);
-    color: #ce93d8;
-    border: 1px solid rgba(156, 39, 176, 0.4);
-    padding: 1px 7px;
-    border-radius: 4px;
-    font-size: 0.75rem;
-    font-family: inherit;
-    line-height: 1.4;
-    margin-right: 4px;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    outline: none;
-    transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
-    user-select: none;
+    margin-right: var(--space-1);
 }
 
-.target-tag-badge:hover,
-.target-tag-badge:focus-visible {
-    background: rgba(156, 39, 176, 0.45);
-    color: #ffffff;
-    border-color: rgba(206, 147, 216, 0.85);
-    transform: translateY(-1px);
-    box-shadow: 0 2px 6px rgba(156, 39, 176, 0.4);
-}
-
-.target-tag-badge:active {
-    transform: translateY(0);
-}
-
+/* Layout only: the button is a btn--tiny and sits at the right end of the row. */
 .star-summary-card__locate-btn {
     margin-left: auto;
-    background: transparent;
-    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.2));
-    color: var(--text-secondary, #a0a0a0);
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 0.75rem;
-    cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
-}
-
-.star-summary-card__locate-btn:hover {
-    background: var(--accent-color, #2196f3);
-    border-color: var(--accent-color, #2196f3);
-    color: #ffffff;
 }
 
 .star-summary-card__details {
@@ -202,13 +146,13 @@
     align-items: center;
     gap: 16px;
     flex-wrap: wrap;
-    font-size: 0.82rem;
-    color: var(--text-secondary, #a0a0a0);
+    font-size: var(--compact-font-size);
+    color: var(--text-secondary, var(--text-dimmer));
 }
 
 .star-summary-card__item .item-label {
     font-weight: 500;
-    color: var(--text-muted, #808080);
+    color: var(--text-muted, var(--text-muted));
 }
 
 /* Stellar Analysis Details */
@@ -217,19 +161,19 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
-    font-size: 0.85rem;
+    font-size: var(--control-font-size);
 }
 
 .stellar-analysis-details__empty {
     padding: 12px;
-    color: var(--text-muted, #757575);
+    color: var(--text-muted, var(--cmd-fg-dimmer));
     font-style: italic;
-    font-size: 0.85rem;
+    font-size: var(--control-font-size);
 }
 
 .stellar-analysis-details__empty-note {
     padding: 4px 0;
-    color: var(--text-muted, #757575);
+    color: var(--text-muted, var(--cmd-fg-dimmer));
     font-style: italic;
 }
 
@@ -239,9 +183,9 @@
     align-items: center;
     justify-content: center;
     margin-left: 6px;
-    font-size: 0.85em;
+    font-size: var(--control-font-size);
     font-weight: normal;
-    color: var(--text-dim, #9aa5b5);
+    color: var(--text-dim, var(--text-dim));
     cursor: help;
     outline: none;
     transition: color 0.15s ease;
@@ -249,7 +193,7 @@
 
 .stellar-analysis-details__info:hover,
 .stellar-analysis-details__info:focus-visible {
-    color: var(--text-primary, #ffffff);
+    color: var(--text-primary, var(--white));
 }
 
 .stellar-analysis-details__tooltip {
@@ -259,14 +203,14 @@
     width: max-content;
     max-width: 280px;
     padding: 8px 12px;
-    background: rgba(30, 30, 34, 0.94);
+    background: color-mix(in srgb, var(--grey-darkest) 94%, transparent);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
-    color: #f0f0f4;
-    font-size: 0.78rem;
+    border: 1px solid color-mix(in srgb, var(--white) 12%, transparent);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 8px 24px color-mix(in srgb, var(--black) 50%, transparent), 0 2px 6px color-mix(in srgb, var(--black) 30%, transparent);
+    color: var(--text-light);
+    font-size: var(--section-label-size);
     font-weight: 400;
     line-height: 1.45;
     text-align: left;
@@ -296,53 +240,35 @@
 }
 
 .stellar-analysis-details__note {
-    color: var(--text-muted, #9e9e9e);
-    font-size: 0.8rem;
+    color: var(--text-muted, var(--text-dimmer));
+    font-size: var(--compact-font-size);
     line-height: 1.35;
 }
 
 .stellar-analysis-details__note--error {
-    color: #ef9a9a;
+    color: var(--astro-red-light);
 }
 
+/* Layout only: the button is a small secondary Button at the left of its row. */
 .stellar-analysis-details__run-btn {
     align-self: flex-start;
-    background: transparent;
-    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.2));
-    color: var(--text-secondary, #a0a0a0);
-    padding: 3px 10px;
-    border-radius: 4px;
-    font-size: 0.78rem;
-    cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
-}
-
-.stellar-analysis-details__run-btn:hover:not(:disabled) {
-    background: var(--accent-color, #2196f3);
-    border-color: var(--accent-color, #2196f3);
-    color: #ffffff;
-}
-
-.stellar-analysis-details__run-btn:disabled {
-    opacity: 0.6;
-    cursor: default;
 }
 
 .stellar-analysis-details__section {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 8px;
+    background: color-mix(in srgb, var(--white) 3%, transparent);
+    border: 1px solid color-mix(in srgb, var(--white) 5%, transparent);
+    border-radius: var(--radius-lg);
     padding: 10px 12px 12px;
 }
 
 .stellar-analysis-details__section-title {
     font-weight: 600;
-    font-size: 0.85rem;
-    color: var(--slate-blue-light, #4b8ec8);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    font-size: var(--control-font-size);
+    color: var(--slate-blue-light, var(--slate-blue-light));
+    border-bottom: 1px solid color-mix(in srgb, var(--white) 7%, transparent);
     padding-bottom: 4px;
     margin-bottom: 4px;
 }
@@ -357,22 +283,22 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-size: 0.82rem;
+    font-size: var(--compact-font-size);
 }
 
 .analysis-label {
-    color: var(--text-secondary, #9e9e9e);
+    color: var(--text-secondary, var(--text-dimmer));
 }
 
 .analysis-value {
     font-weight: 500;
-    color: var(--text-primary, #ffffff);
+    color: var(--text-primary, var(--white));
 }
 
 /* A value that should not be read as a firm finding, such as a marginal separation
    between candidates. Matches the amber used for a poor template match. */
 .analysis-value--caution {
-    color: #ffb74d;
+    color: var(--warning-orange);
 }
 
 /* Viewer Segmented Controls */
@@ -384,17 +310,6 @@
     padding: 2px 4px;
 }
 
-.astronomy-viewer__segmented-control {
-    display: inline-flex;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 6px;
-    padding: 2px;
-}
-
-/* .segmented-btn itself is defined in the shared segmentedToggle.css
-   (imported at the top of this file) since Planetarium's mode toggle reuses it too. */
-
 /* Absorption feature results table */
 /* The wrapper scrolls sideways rather than clipping if a narrow window makes the table too wide. */
 .stellar-analysis-details__table-wrapper {
@@ -404,7 +319,7 @@
 .stellar-analysis-details__table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.72rem;
+    font-size: var(--section-label-size);
 }
 
 .stellar-analysis-details__table td,
@@ -419,27 +334,27 @@
 .stellar-analysis-details__table th {
     text-align: left;
     font-weight: 500;
-    color: var(--text-muted, #808080);
+    color: var(--text-muted, var(--text-muted));
     padding: 2px 3px;
-    border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+    border-bottom: 1px solid var(--border-color, color-mix(in srgb, var(--white) 10%, transparent));
 }
 
 .stellar-analysis-details__table td {
     padding: 2px 3px;
-    color: var(--text-secondary, #a0a0a0);
+    color: var(--text-secondary, var(--text-dimmer));
 }
 
 .feature-row--detected td {
-    color: var(--text-primary, #ffffff);
+    color: var(--text-primary, var(--white));
     font-weight: 600;
 }
 
 .feature-row--possible td {
-    color: var(--text-primary, #ffffff);
+    color: var(--text-primary, var(--white));
 }
 
 .feature-row--inconclusive td {
-    color: var(--ubuntu-orange, #e95420);
+    color: var(--ubuntu-orange, var(--ubuntu-orange));
 }
 
 .feature-row--not_covered td {
@@ -454,7 +369,7 @@
 }
 
 .stellar-analysis-details__result-title {
-    font-size: 0.78rem;
-    color: var(--text-primary, #ffffff);
+    font-size: var(--section-label-size);
+    color: var(--text-primary, var(--white));
     font-weight: 500;
 }

@@ -8,6 +8,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { Button } from '../../common/components/Button';
 
 /**
  * Props for PlanetariumDateTimeModal.
@@ -133,33 +134,27 @@ export const PlanetariumDateTimeModal: React.FC<Props> = ({
       {/* Header */}
       <div className="planetarium-datetime-modal__header">
         <div className="planetarium-datetime-modal__title">Date and Time</div>
-        <button className="planetarium-datetime-modal__close" onClick={onClose}>&times;</button>
+        <Button variant="ghost" size="square" className="planetarium-datetime-modal__close" onClick={onClose}>&times;</Button>
       </div>
 
       {/* Tabs */}
       <div className="planetarium-datetime-modal__tabs">
-        <button
-          className="planetarium-datetime-modal__tab"
+        <Button
+          variant="ghost"
+          active={activeTab === 'datetime'}
+          className={`planetarium-datetime-modal__tab${activeTab === 'datetime' ? ' planetarium-datetime-modal__tab--active' : ''}`}
           onClick={() => setActiveTab('datetime')}
-          style={{
-            background: activeTab === 'datetime' ? 'rgba(255,255,255,0.1)' : 'transparent',
-            fontWeight: activeTab === 'datetime' ? 'bold' : 'normal',
-            borderBottom: activeTab === 'datetime' ? '2px solid #5c9eff' : 'none',
-          }}
         >
           Date and Time
-        </button>
-        <button
-          className="planetarium-datetime-modal__tab"
+        </Button>
+        <Button
+          variant="ghost"
+          active={activeTab === 'julian'}
+          className={`planetarium-datetime-modal__tab${activeTab === 'julian' ? ' planetarium-datetime-modal__tab--active' : ''}`}
           onClick={() => setActiveTab('julian')}
-          style={{
-            background: activeTab === 'julian' ? 'rgba(255,255,255,0.1)' : 'transparent',
-            fontWeight: activeTab === 'julian' ? 'bold' : 'normal',
-            borderBottom: activeTab === 'julian' ? '2px solid #5c9eff' : 'none',
-          }}
         >
           Julian Day
-        </button>
+        </Button>
       </div>
 
       {/* Content */}
@@ -172,23 +167,23 @@ export const PlanetariumDateTimeModal: React.FC<Props> = ({
               <div className="planetarium-datetime-modal__spinner-group">
                 {/* Year spinner */}
                 <div className="planetarium-datetime-modal__spinner">
-                  <button className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year + 1, month, day, hours, minutes, seconds)}>▲</button>
+                  <Button variant="ghost" size="square" className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year + 1, month, day, hours, minutes, seconds)}>▲</Button>
                   <span className="planetarium-datetime-modal__val">{year}</span>
-                  <button className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year - 1, month, day, hours, minutes, seconds)}>▼</button>
+                  <Button variant="ghost" size="square" className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year - 1, month, day, hours, minutes, seconds)}>▼</Button>
                 </div>
                 <span className="planetarium-datetime-modal__separator">-</span>
                 {/* Month spinner */}
                 <div className="planetarium-datetime-modal__spinner">
-                  <button className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year, month + 1, day, hours, minutes, seconds)}>▲</button>
+                  <Button variant="ghost" size="square" className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year, month + 1, day, hours, minutes, seconds)}>▲</Button>
                   <span className="planetarium-datetime-modal__val">{month}</span>
-                  <button className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year, month - 1, day, hours, minutes, seconds)}>▼</button>
+                  <Button variant="ghost" size="square" className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year, month - 1, day, hours, minutes, seconds)}>▼</Button>
                 </div>
                 <span className="planetarium-datetime-modal__separator">-</span>
                 {/* Day spinner */}
                 <div className="planetarium-datetime-modal__spinner">
-                  <button className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year, month, day + 1, hours, minutes, seconds)}>▲</button>
+                  <Button variant="ghost" size="square" className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year, month, day + 1, hours, minutes, seconds)}>▲</Button>
                   <span className="planetarium-datetime-modal__val">{day}</span>
-                  <button className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year, month, day - 1, hours, minutes, seconds)}>▼</button>
+                  <Button variant="ghost" size="square" className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year, month, day - 1, hours, minutes, seconds)}>▼</Button>
                 </div>
               </div>
             </div>
@@ -202,23 +197,23 @@ export const PlanetariumDateTimeModal: React.FC<Props> = ({
               <div className="planetarium-datetime-modal__spinner-group">
                 {/* Hours spinner */}
                 <div className="planetarium-datetime-modal__spinner">
-                  <button className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year, month, day, hours + 1, minutes, seconds)}>▲</button>
+                  <Button variant="ghost" size="square" className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year, month, day, hours + 1, minutes, seconds)}>▲</Button>
                   <span className="planetarium-datetime-modal__val">{String(hours).padStart(2, '0')}</span>
-                  <button className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year, month, day, hours - 1, minutes, seconds)}>▼</button>
+                  <Button variant="ghost" size="square" className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year, month, day, hours - 1, minutes, seconds)}>▼</Button>
                 </div>
                 <span className="planetarium-datetime-modal__separator">:</span>
                 {/* Minutes spinner */}
                 <div className="planetarium-datetime-modal__spinner">
-                  <button className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year, month, day, hours, minutes + 1, seconds)}>▲</button>
+                  <Button variant="ghost" size="square" className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year, month, day, hours, minutes + 1, seconds)}>▲</Button>
                   <span className="planetarium-datetime-modal__val">{String(minutes).padStart(2, '0')}</span>
-                  <button className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year, month, day, hours, minutes - 1, seconds)}>▼</button>
+                  <Button variant="ghost" size="square" className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year, month, day, hours, minutes - 1, seconds)}>▼</Button>
                 </div>
                 <span className="planetarium-datetime-modal__separator">:</span>
                 {/* Seconds spinner */}
                 <div className="planetarium-datetime-modal__spinner">
-                  <button className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year, month, day, hours, minutes, seconds + 1)}>▲</button>
+                  <Button variant="ghost" size="square" className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year, month, day, hours, minutes, seconds + 1)}>▲</Button>
                   <span className="planetarium-datetime-modal__val">{String(seconds).padStart(2, '0')}</span>
-                  <button className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year, month, day, hours, minutes, seconds - 1)}>▼</button>
+                  <Button variant="ghost" size="square" className="planetarium-datetime-modal__arrow-btn" onClick={() => handleGregorianChange(year, month, day, hours, minutes, seconds - 1)}>▼</Button>
                 </div>
               </div>
             </div>
@@ -227,11 +222,11 @@ export const PlanetariumDateTimeModal: React.FC<Props> = ({
           <div className="planetarium-datetime-modal__jd-section">
             <div className="planetarium-datetime-modal__section-label">Julian Day Number</div>
             <div className="planetarium-datetime-modal__spinner-group">
-              <button className="planetarium-datetime-modal__arrow-btn" style={{ fontSize: '16px' }} onClick={() => handleJulianChange(julianDay - 1.0)}>◀</button>
+              <Button variant="ghost" size="square" className="planetarium-datetime-modal__arrow-btn planetarium-datetime-modal__arrow-btn--large" onClick={() => handleJulianChange(julianDay - 1.0)}>◀</Button>
               <div className="planetarium-datetime-modal__jd-display">
                 {julianDay.toFixed(5)}
               </div>
-              <button className="planetarium-datetime-modal__arrow-btn" style={{ fontSize: '16px' }} onClick={() => handleJulianChange(julianDay + 1.0)}>▶</button>
+              <Button variant="ghost" size="square" className="planetarium-datetime-modal__arrow-btn planetarium-datetime-modal__arrow-btn--large" onClick={() => handleJulianChange(julianDay + 1.0)}>▶</Button>
             </div>
             <div className="planetarium-datetime-modal__jd-hint">Adjust by +/- 1.0 day increments</div>
           </div>
@@ -240,12 +235,13 @@ export const PlanetariumDateTimeModal: React.FC<Props> = ({
 
       {/* Footer */}
       <div className="planetarium-datetime-modal__footer">
-        <button
-          className="planetarium-datetime-modal__reset-btn"
+        <Button
+          variant="secondary"
+          fullWidth
           onClick={onResetToNow}
         >
           Reset to Now
-        </button>
+        </Button>
       </div>
     </div>
   );

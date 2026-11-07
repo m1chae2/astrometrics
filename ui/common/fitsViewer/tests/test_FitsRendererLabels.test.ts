@@ -9,26 +9,35 @@ import { computeBadgePlacement, formatStarDisplayName, isStarSelected } from '..
 
 describe('formatStarDisplayName', () => {
   /**
+   * Tests that stars close together on the sky get different labels.
+   */
+  it('keeps nearby 2MASS stars apart', () => {
+    // Three stars from one M 31 frame that the old short form all showed as "2MASS 0043+4112".
+    const labels = ['2MASS J00434512+4112345', '2MASS J00434988+4112071', '2MASS J00433301+4112590'].map(formatStarDisplayName);
+    expect(new Set(labels).size).toBe(3);
+  });
+
+  /**
    * Tests 2MASS coordinate compression to concise HUD badge notation.
    */
-  it('compresses lengthy 2MASS coordinate identifiers into short sky notation', () => {
-    expect(formatStarDisplayName('2MASS J16413289+3626285')).toBe('2MASS 1641+3626');
-    expect(formatStarDisplayName('2MASS 16413289-3626285')).toBe('2MASS 1641-3626');
+  it('shortens 2MASS identifiers to whole seconds of RA and Dec', () => {
+    expect(formatStarDisplayName('2MASS J16413289+3626285')).toBe('2MASS 164132+362628');
+    expect(formatStarDisplayName('2MASS 16413289-3626285')).toBe('2MASS 164132-362628');
   });
 
   /**
    * Tests GPM survey coordinate compression.
    */
-  it('compresses GPM survey identifiers into integer degree coordinates', () => {
-    expect(formatStarDisplayName('GPM 258.328551+36.535702')).toBe('GPM 258+36');
-    expect(formatStarDisplayName('GPM 12.345678-05.987654')).toBe('GPM 12-05');
+  it('shortens GPM survey identifiers to three decimal places', () => {
+    expect(formatStarDisplayName('GPM 258.328551+36.535702')).toBe('GPM 258.329+36.536');
+    expect(formatStarDisplayName('GPM 12.345678-05.987654')).toBe('GPM 12.346-5.988');
   });
 
   /**
    * Tests SDSS survey coordinate compression.
    */
   it('compresses SDSS coordinate identifiers into short sky notation', () => {
-    expect(formatStarDisplayName('SDSS J164132.89+362628.5')).toBe('SDSS 1641+3626');
+    expect(formatStarDisplayName('SDSS J164132.89+362628.5')).toBe('SDSS 164132+362628');
   });
 
   /**

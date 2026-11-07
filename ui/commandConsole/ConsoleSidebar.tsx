@@ -4,7 +4,11 @@
  */
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { callBackend } from '../common/services/backendApi';
+import { Tabs } from '../common/components/Tabs';
+import { Button } from '../common/components/Button';
+import { TextInput } from '../common/components/TextInput';
 
+import { Skeleton } from '../common/components/Skeleton';
 export interface ScriptRecipeItem {
   id: string;
   name: string;
@@ -41,6 +45,8 @@ interface ConsoleSidebarProps {
   onSelectUserScript: (script: UserScriptItem) => void;
   onSelectDocTopic?: (topicId: string) => void;
   onNewScript: () => void;
+  /** True until the first read of recipes, scripts and topics finishes: skeletons show instead of the lists. */
+  isLoading?: boolean;
 }
 
 export const ConsoleSidebar: React.FC<ConsoleSidebarProps> = ({
@@ -54,6 +60,7 @@ export const ConsoleSidebar: React.FC<ConsoleSidebarProps> = ({
   onSelectUserScript,
   onSelectDocTopic,
   onNewScript,
+  isLoading = false,
 }) => {
   const [internalTab, setInternalTab] = useState<'scripts' | 'docs'>('scripts');
   const [docFilter, setDocFilter] = useState('');
@@ -155,22 +162,18 @@ export const ConsoleSidebar: React.FC<ConsoleSidebarProps> = ({
 
   return (
     <div className="console-sidebar">
-      <div className="console-sidebar__tabs">
-        <button
-          className={`console-sidebar__tab ${activeTab === 'scripts' ? 'console-sidebar__tab--active' : ''}`}
-          onClick={() => handleTabSwitch('scripts')}
-          type="button"
-        >
-          Scripts & Recipes
-        </button>
-        <button
-          className={`console-sidebar__tab ${activeTab === 'docs' ? 'console-sidebar__tab--active' : ''}`}
-          onClick={() => handleTabSwitch('docs')}
-          type="button"
-        >
-          Docs ({docTopics.length})
-        </button>
-      </div>
+      <Tabs
+        className="console-sidebar__tabs"
+        tabs={[
+          { id: 'scripts', label: 'Scripts & Recipes' },
+          { id: 'docs', label: 'Docs', count: docTopics.length },
+        ]}
+        selectedId={activeTab}
+        onChange={(tabId) => handleTabSwitch(tabId as 'scripts' | 'docs')}
+        ariaLabel="Console sidebar"
+        idPrefix="console-sidebar"
+        size="compact"
+      />
 
       <div className="console-panel__body">
         {activeTab === 'scripts' ? (
@@ -179,16 +182,17 @@ export const ConsoleSidebar: React.FC<ConsoleSidebarProps> = ({
               <span style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-dim)' }}>
                 User Scripts
               </span>
-              <button
-                className="editor-btn"
-                style={{ padding: '2px 6px', fontSize: '11px' }}
+              <Button
+                variant="secondary"
+                size="small"
                 onClick={onNewScript}
-                type="button"
               >
                 + New
-              </button>
+              </Button>
             </div>
-            {userScripts.length === 0 ? (
+            {isLoading ? (
+              <Skeleton variant="list" lines={1} count={4} label="Loading scripts" />
+            ) : userScripts.length === 0 ? (
               <div style={{ padding: '8px', fontSize: '12px', color: 'var(--text-dim)' }}>
                 No saved scripts yet.
               </div>
@@ -232,25 +236,16 @@ export const ConsoleSidebar: React.FC<ConsoleSidebarProps> = ({
         ) : (
           <div className="console-sidebar__list">
             <div style={{ padding: '4px 6px', marginBottom: '4px' }}>
-              <input
-                type="text"
-                style={{
-                  width: '100%',
-                  padding: '5px 8px',
-                  fontSize: '11px',
-                  background: 'var(--cmd-bg-dark, #181818)',
-                  border: '1px solid var(--term-border, #333)',
-                  borderRadius: '3px',
-                  color: 'var(--text-primary, #fff)',
-                  outline: 'none',
-                  boxSizing: 'border-box',
-                }}
+              <TextInput
+                className="console-sidebar__filter"
                 placeholder="Filter documentation & APIs..."
                 value={docFilter}
                 onChange={(e) => setDocFilter(e.target.value)}
               />
             </div>
-            {docFilter.trim() && docSearchResults === null ? (
+            {isLoading ? (
+              <Skeleton variant="list" lines={1} count={6} label="Loading documentation topics" />
+            ) : docFilter.trim() && docSearchResults === null ? (
               <div style={{ padding: '12px', fontSize: '12px', color: 'var(--text-dim)' }}>
                 Searching documentation...
               </div>

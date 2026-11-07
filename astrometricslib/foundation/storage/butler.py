@@ -11,10 +11,14 @@ have no analog here and stay in astrometricslib's own extension of
 this class.
 """
 
+import functools
+import hashlib
 import json
 import logging
 import os
 import re
+import sqlite3
+import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -22,12 +26,143 @@ from typing import Any
 
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.paths import locks_directory
+from astrometricslib.foundation.storage.data_versions import bump_data_version
 from astrometricslib.foundation.storage.local_database import connect_db, safe_json_dumps
 from astrometricslib.foundation.storage.process_locks import file_lock
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["AbstractButler", "Butler", "DatasetSpec"]
+__all__ = ["AbstractButler", "Butler", "DatasetSpec", "reset_ensured_tables"]
+
+_ENSURED_TABLES: dict[tuple[str, str, str], tuple[int, int]] = {}
+"""Tables already created and brought up to date in this process.
+
+The key is (database path, table name, a fingerprint of the columns and
+indexes the spec declares), so a spec whose columns change is set up again.
+Two specs with the same table and columns share one entry.
+The value is the (device, inode) of the database file when that was done, so a
+file that is deleted and replaced is set up again."""
+
+_ENSURED_TABLES_LOCK = threading.Lock()
+"""Guards `_ENSURED_TABLES`; two threads may open the same database at once."""
+
+
+def _file_identity(path: str) -> tuple[int, int] | None:
+    """Give the device and inode number of a non-empty file.
+
+    Parameters
+    ----------
+    path : `str`
+        The database file.
+
+    Returns
+    -------
+    identity : `tuple` [`int`, `int`] or `None`
+        The (device, inode) pair, or `None` if the file is missing or empty
+        (a new file whose tables are not written yet).
+    """
+    try:
+        status = os.stat(path)
+    except OSError:
+        return None
+    return (status.st_dev, status.st_ino) if status.st_size > 0 else None
+
+
+def _spec_fingerprint(spec: DatasetSpec) -> str:
+    """Summarize the columns and indexes a dataset spec declares.
+
+    Parameters
+    ----------
+    spec : `DatasetSpec`
+        The dataset type whose table is set up.
+
+    Returns
+    -------
+    fingerprint : `str`
+        A short code that is equal for two specs only when they declare the
+        same table name, extra columns (with types) and indexes. Unlike
+        ``id(spec)``, it cannot be reused by a different spec after the first
+        one is deleted.
+    """
+    text = repr((spec.table_name, sorted(spec.extra_column_types.items()), spec.indexed_columns))
+    return hashlib.blake2b(text.encode("utf-8"), digest_size=8).hexdigest()
+
+
+def _is_schema_error(error: sqlite3.Error) -> bool:
+    """Say whether an error means the table or a column is not there.
+
+    Parameters
+    ----------
+    error : `sqlite3.Error`
+        The error a statement raised.
+
+    Returns
+    -------
+    is_schema_error : `bool`
+        `True` for "no such table", "no such column", "no such index" and
+        "table ... has no column named ...".
+    """
+    return isinstance(error, sqlite3.OperationalError) and any(
+        phrase in str(error)
+        for phrase in ("no such table", "no such column", "no such index", "has no column named")
+    )
+
+
+def _recheck_schema_once(method: Callable[..., Any]) -> Callable[..., Any]:
+    """Wrap a `Butler` method so a missing table or column is fixed once.
+
+    A database file can be replaced in place by an older copy (a backup
+    restore), and the remembered "table is set up" note is then wrong. When
+    the method fails with "no such table", "no such column" or "no such
+    index", the notes for this database are forgotten and the method runs
+    once more. The second run sets the table up again. A second failure goes
+    to the caller.
+
+    Parameters
+    ----------
+    method : `~collections.abc.Callable`
+        A method of `Butler` that sets up a table before it uses it.
+
+    Returns
+    -------
+    wrapped : `~collections.abc.Callable`
+        The method with one retry.
+    """
+
+    @functools.wraps(method)
+    def wrapper(self: Butler, *args: Any, **kwargs: Any) -> Any:
+        """Run the method, and once more after a schema error.
+
+        Returns
+        -------
+        result : `Any`
+            What the method returns.
+
+        Raises
+        ------
+        sqlite3.OperationalError
+            For a database error other than a missing table or column, or
+            when the second run fails too.
+        """
+        try:
+            return method(self, *args, **kwargs)
+        except sqlite3.OperationalError as error:
+            if not _is_schema_error(error):
+                raise
+            self._forget_ensured_tables()
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
+def reset_ensured_tables() -> None:
+    """Forget which tables were already set up, so each is checked again.
+
+    Tests call this after they delete or rewrite a database file by hand.
+    """
+    with _ENSURED_TABLES_LOCK:
+        _ENSURED_TABLES.clear()
+
 
 # How many ids one `WHERE id IN (...)` query may carry. SQLite refuses a
 # statement with more bound values than its compiled-in limit (as low as 999
@@ -93,6 +228,12 @@ class DatasetSpec:
     The expression runs once, in the same call that adds the column, and
     never again, so later writes are never overwritten. Columns that
     were not just added are ignored."""
+    data_version_kind: str | None = None
+    """The kind of data this table holds, as named in
+    `astrometricslib.foundation.storage.data_versions`. When set, every write
+    through the Butler (`put`, `put_all`, `merge_and_record`,
+    `delete_by_ids`) adds one to that kind's counter in the same transaction,
+    so a cache can tell that the table changed. `None` keeps no counter."""
 
 
 class AbstractButler(ABC):
@@ -164,7 +305,54 @@ class Butler(AbstractButler):
         except KeyError:
             raise InvalidArgumentError(f"Unknown dataset type: {dataset_type}") from None
 
-    def _ensure_table(self, cursor, spec: DatasetSpec) -> None:  # ruff: ignore[missing-type-function-argument]
+    def _ensure_table(self, cursor: sqlite3.Cursor, spec: DatasetSpec) -> None:
+        """Set up the table and its indexes, once per process.
+
+        The work (``CREATE TABLE IF NOT EXISTS``, a column check and the
+        index statements) costs about 30 microseconds even when nothing
+        changes, and every read and write used to repeat it. Now it runs
+        once for each database file and table. The file's device and inode
+        number are remembered, so a database that is deleted and replaced is
+        set up again. A file swapped in place (a backup restore) keeps its
+        inode, so the public methods also forget the note and try once more
+        when a statement fails with a missing table or column (see
+        `_recheck_schema_once`). `reset_ensured_tables` forgets everything.
+
+        Parameters
+        ----------
+        cursor : `sqlite3.Cursor`
+            A cursor on an open connection to this butler's database.
+        spec : `DatasetSpec`
+            The dataset type whose table is needed.
+        """
+        database_path = self._db_path()
+        key = (database_path, spec.table_name, _spec_fingerprint(spec))
+        file_identity = _file_identity(database_path)
+        if file_identity is not None and _ENSURED_TABLES.get(key) == file_identity:
+            return
+        self._create_or_update_table(cursor, spec)
+        file_identity = _file_identity(database_path)
+        if file_identity is not None:
+            with _ENSURED_TABLES_LOCK:
+                _ENSURED_TABLES[key] = file_identity
+
+    def _forget_ensured_tables(self) -> None:
+        """Forget which tables of this butler's database were set up."""
+        database_path = self._db_path()
+        with _ENSURED_TABLES_LOCK:
+            for key in [key for key in _ENSURED_TABLES if key[0] == database_path]:
+                del _ENSURED_TABLES[key]
+
+    def _create_or_update_table(self, cursor: sqlite3.Cursor, spec: DatasetSpec) -> None:
+        """Create the table and indexes and add any column the spec gained.
+
+        Parameters
+        ----------
+        cursor : `sqlite3.Cursor`
+            A cursor on an open connection to this butler's database.
+        spec : `DatasetSpec`
+            The dataset type whose table is needed.
+        """
         extra_columns_sql = "".join(
             f", {name} {sql_type}" for name, sql_type in spec.extra_column_types.items()
         )
@@ -187,6 +375,8 @@ class Butler(AbstractButler):
                 backfill_expression = spec.column_backfills.get(name)
                 if backfill_expression is not None:
                     cursor.execute(f"UPDATE {spec.table_name} SET {name} = {backfill_expression}")
+                    # The backfill rewrote rows in place, so count it.
+                    self._bump_version(cursor.connection, spec)
                     # Read-only callers never commit, and an UPDATE that is
                     # not committed is undone when the connection closes.
                     # The column already exists by then, so this code would
@@ -209,7 +399,7 @@ class Butler(AbstractButler):
             values.update(spec.extra_columns(obj))
         return values
 
-    def _upsert_one(self, cursor, spec: DatasetSpec, obj: Any) -> None:  # ruff: ignore[missing-type-function-argument]
+    def _upsert_one(self, cursor: sqlite3.Cursor, spec: DatasetSpec, obj: Any) -> None:
         values = self._row_values(spec, obj)
         columns = list(values.keys())
         placeholders = ",".join("?" for _ in columns)
@@ -218,6 +408,7 @@ class Butler(AbstractButler):
             [values[column] for column in columns],
         )
 
+    @_recheck_schema_once
     def get_all(self, dataset_type: str) -> list[Any]:
         """Load every row for a dataset type.
 
@@ -239,6 +430,7 @@ class Butler(AbstractButler):
         finally:
             conn.close()
 
+    @_recheck_schema_once
     def list_projected(
         self,
         dataset_type: str,
@@ -365,6 +557,7 @@ class Butler(AbstractButler):
         finally:
             conn.close()
 
+    @_recheck_schema_once
     def select_where(
         self,
         dataset_type: str,
@@ -443,6 +636,7 @@ class Butler(AbstractButler):
         finally:
             conn.close()
 
+    @_recheck_schema_once
     def count_where(
         self,
         dataset_type: str,
@@ -482,6 +676,7 @@ class Butler(AbstractButler):
         finally:
             conn.close()
 
+    @_recheck_schema_once
     def count_grouped(
         self,
         dataset_type: str,
@@ -550,6 +745,7 @@ class Butler(AbstractButler):
         finally:
             conn.close()
 
+    @_recheck_schema_once
     def get_by_ids(self, dataset_type: str, ids: list[str]) -> list[Any]:
         """Load only the rows matching the given ids.
 
@@ -580,6 +776,7 @@ class Butler(AbstractButler):
         finally:
             conn.close()
 
+    @_recheck_schema_once
     def existing_ids(self, dataset_type: str, ids: list[str]) -> set[str]:
         """Say which of the given ids are recorded, without loading any record.
 
@@ -643,6 +840,7 @@ class Butler(AbstractButler):
         """
         return self.get(dataset_type, selector) is not None
 
+    @_recheck_schema_once
     def put(self, obj: Any, dataset_type: str, selector: dict[str, Any] | None = None) -> None:
         """Upsert a single record."""
         spec = self._spec(dataset_type)
@@ -651,10 +849,26 @@ class Butler(AbstractButler):
             cursor = conn.cursor()
             self._ensure_table(cursor, spec)
             self._upsert_one(cursor, spec, obj)
+            self._bump_version(conn, spec)
             conn.commit()
         finally:
             conn.close()
 
+    @staticmethod
+    def _bump_version(conn: sqlite3.Connection, spec: DatasetSpec) -> None:
+        """Count a write in the open transaction, if the table keeps a count.
+
+        Parameters
+        ----------
+        conn : `sqlite3.Connection`
+            The connection whose transaction holds the write.
+        spec : `DatasetSpec`
+            The table written.
+        """
+        if spec.data_version_kind is not None:
+            bump_data_version(conn, spec.data_version_kind)
+
+    @_recheck_schema_once
     def put_all(self, dataset_type: str, objects: list[Any]) -> None:
         """Replace the whole table so it exactly matches `objects`.
 
@@ -678,10 +892,12 @@ class Butler(AbstractButler):
                 cursor.execute(f"DELETE FROM {spec.table_name} WHERE id NOT IN ({placeholders})", active_ids)
             else:
                 cursor.execute(f"DELETE FROM {spec.table_name}")
+            self._bump_version(conn, spec)
             conn.commit()
         finally:
             conn.close()
 
+    @_recheck_schema_once
     def merge_and_record(
         self,
         dataset_type: str,
@@ -727,10 +943,12 @@ class Butler(AbstractButler):
                 self._ensure_table(cursor, spec)
                 for merged in merged_records:
                     self._upsert_one(cursor, spec, merged)
+                self._bump_version(conn, spec)
                 conn.commit()
             finally:
                 conn.close()
 
+    @_recheck_schema_once
     def delete_by_ids(self, dataset_type: str, ids: list[str]) -> None:
         """Lock-guarded, targeted delete of only the given ids.
 
@@ -748,6 +966,7 @@ class Butler(AbstractButler):
                 self._ensure_table(cursor, spec)
                 placeholders = ",".join("?" for _ in ids)
                 cursor.execute(f"DELETE FROM {spec.table_name} WHERE id IN ({placeholders})", list(ids))
+                self._bump_version(conn, spec)
                 conn.commit()
             finally:
                 conn.close()

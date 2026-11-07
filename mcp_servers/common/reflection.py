@@ -172,7 +172,7 @@ WITHHELD_METHOD_PREFIXES = ("delete",)
 # in the job list (the server already runs each slow call as a job), and
 # progress callbacks, which a client cannot send. They are left out of every
 # tool's schema.
-SERVER_ONLY_PARAMETERS = ("register_job", "on_item_complete", "on_progress")
+SERVER_ONLY_PARAMETERS = ("register_job", "on_item_complete", "on_progress", "on_copied")
 
 
 def _call_arguments(kwargs: dict[str, Any], parameter_names: set[str]) -> dict[str, Any]:

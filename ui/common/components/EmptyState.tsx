@@ -1,5 +1,5 @@
 import React from 'react';
-import { LoadingSpinner } from './LoadingSpinner';
+import { Skeleton } from './Skeleton';
 import '../styles/emptyState.css';
 
 export interface EmptyStateProps {
@@ -10,16 +10,19 @@ export interface EmptyStateProps {
 }
 
 /**
- * Shared "nothing to show yet" message for list-shaped panels, so every
- * view uses the same visual convention for loading vs. truly-empty data
- * instead of going blank or improvising its own text.
+ * Shared message for list-shaped panels: "empty" and "error" show text; "loading" shows the
+ * shared list Skeleton, with `message` as its hidden label. Loading and empty stay distinct.
  */
-export const EmptyState: React.FC<EmptyStateProps> = ({ variant = 'empty', message, className = '' }) => (
-    <div
-        className={`empty-state empty-state--${variant} ${className}`}
-        role={variant === 'loading' ? 'status' : variant === 'error' ? 'alert' : undefined}
-    >
-        {variant === 'loading' && <LoadingSpinner size={16} />}
-        <span className="empty-state__text">{message}</span>
-    </div>
-);
+export const EmptyState: React.FC<EmptyStateProps> = ({ variant = 'empty', message, className = '' }) => {
+    if (variant === 'loading') {
+        return <Skeleton variant="list" label={typeof message === 'string' ? message : 'Loading'} className={className} />;
+    }
+    return (
+        <div
+            className={`empty-state empty-state--${variant} ${className}`}
+            role={variant === 'error' ? 'alert' : undefined}
+        >
+            <span className="empty-state__text">{message}</span>
+        </div>
+    );
+};

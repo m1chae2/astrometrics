@@ -3,6 +3,7 @@ import { SelectableList, SelectableItem } from '../components/SelectableList';
 import { RadioListFiltering } from './RadioListFiltering';
 import { SectionPanel } from '../components/SectionPanel';
 import '../styles/manager.css';
+import { Button } from '../components/Button';
 
 export interface RadioListManagerProps {
     // Data props
@@ -132,27 +133,27 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
             {/* Pagination Controls */}
             {onPageChange && (
                 <div className="manager__pagination">
-                    <button
-                        type="button"
-                        className="manager__pagination-btn"
+                    <Button
+                        variant="secondary"
+                        size="small"
                         onClick={() => onPageChange(Math.max(1, page - 1))}
                         disabled={page <= 1}
                         aria-label="Previous Page"
                     >
                         &larr; Prev
-                    </button>
+                    </Button>
                     <span className="manager__pagination-label">
                         Page {page}{totalPages !== undefined ? ` / ${totalPages}` : ''}
                     </span>
-                    <button
-                        type="button"
-                        className="manager__pagination-btn"
+                    <Button
+                        variant="secondary"
+                        size="small"
                         onClick={() => onPageChange(page + 1)}
                         disabled={totalPages !== undefined ? page >= totalPages : !hasMore}
                         aria-label="Next Page"
                     >
                         Next &rarr;
-                    </button>
+                    </Button>
                 </div>
             )}
         </>

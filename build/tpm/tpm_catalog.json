@@ -1,0 +1,2360 @@
+{
+  "schema": 1,
+  "about": "Definitions only. Measured values live in each run's tpm.json; baselines live in tpm_baseline.json. threshold_status: TBD (no limit yet), TBR (proposed limit, shown with margin, never pass or fail), Confirmed (a limit that fails a run when breached). A threshold is in the TPM's unit, or {factor, of} for a limit relative to a run fact (exposure_seconds, frame_interval_seconds). cold_only: true marks a limit that applies only to a --cold run (the file cache was dropped before it); a warm run still measures the value but gets no limit for it.",
+  "displays": [
+    {
+      "name": "Image Viewer",
+      "actions": [
+        {
+          "action": "select_target",
+          "pool": "imaging"
+        }
+      ]
+    },
+    {
+      "name": "Image Processing",
+      "actions": [
+        {
+          "action": "select_target",
+          "pool": "imaging"
+        },
+        {
+          "action": "change_tab",
+          "tab": "Analysis"
+        },
+        {
+          "action": "change_tab",
+          "tab": "Data"
+        }
+      ]
+    },
+    {
+      "name": "Astronomy Manager",
+      "actions": [
+        {
+          "action": "select_target",
+          "pool": "stars"
+        }
+      ]
+    },
+    {
+      "name": "Planetarium",
+      "actions": [
+        {
+          "action": "select_target",
+          "pool": "imaging"
+        },
+        {
+          "action": "pan"
+        },
+        {
+          "action": "zoom"
+        },
+        {
+          "action": "change_time"
+        }
+      ]
+    },
+    {
+      "name": "Observatory Manager",
+      "actions": [
+        {
+          "action": "select_target",
+          "pool": "imaging"
+        },
+        {
+          "action": "open_night"
+        },
+        {
+          "action": "back_to_live"
+        }
+      ]
+    },
+    {
+      "name": "Observation Manager",
+      "excluded": "prototype display"
+    },
+    {
+      "name": "Command Console",
+      "excluded": "prototype display"
+    }
+  ],
+  "tpms": [
+    {
+      "id": "time_to_app_ready",
+      "name": "time_to_app_ready",
+      "title": "Time until the app is ready",
+      "why": "You start the app and want to use it before you lose your train of thought.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "performance mark in the page",
+      "statistic": "single value",
+      "threshold": 5000,
+      "objective": 2000,
+      "threshold_status": "TBR",
+      "source": "Nielsen response-time limits (0.1 s feels instant, 1 s keeps the flow of thought, 10 s is the attention limit); 5 s threshold, 2 s objective is reachable on this CPU (measured about 1.8 s).",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "time_to_app_ready_cold",
+      "name": "time_to_app_ready_cold",
+      "title": "Time until the app is ready, cold start",
+      "why": "The first start after a reboot reads everything from the disk, and you still want to begin without losing your train of thought.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "performance mark in the page, first load of the run; the limit applies only to a --cold run (files dropped from the page cache before the run)",
+      "statistic": "single value",
+      "threshold": 10000,
+      "objective": 5000,
+      "threshold_status": "TBR",
+      "source": "proposal 2026-11-06",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "cold_only": true
+    },
+    {
+      "id": "first_display_open_by_display",
+      "name": "first_display_open[{display}]",
+      "title": "First open of a display, cold start",
+      "why": "The first time you open a display after a cold start, the click should still answer quickly.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "display"
+      },
+      "method": "click-to-settled time of the first visit to each display in lap 1 of the flow; the limit applies only to a --cold run",
+      "statistic": "single value",
+      "threshold": 3000,
+      "objective": 1000,
+      "threshold_status": "TBR",
+      "source": "proposal 2026-11-06",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "cold_only": true
+    },
+    {
+      "id": "first_rpc",
+      "name": "first_rpc[{rpc}]",
+      "title": "First backend call, cold start",
+      "why": "The first query on real data reads database pages that are not in memory yet.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "rpc",
+        "rpcs": [
+          "history:night_quality",
+          "target:get_targets",
+          "processing:stack_summary"
+        ]
+      },
+      "method": "latency of the first call of each method in the run (the page's own timing of the fetch); the limit applies only to a --cold run",
+      "statistic": "single value",
+      "threshold": 5000,
+      "objective": 1000,
+      "threshold_status": "TBR",
+      "source": "proposal 2026-11-06",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "cold_only": true
+    },
+    {
+      "id": "display_switch_median",
+      "name": "display_switch_median",
+      "title": "Display switch, typical",
+      "why": "Switching displays should feel immediate.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "click-to-settled timing in the flow",
+      "statistic": "median",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "catalog_failures",
+      "name": "catalog_failures",
+      "title": "Star catalog read failures",
+      "why": "Every star catalog the Planetarium asks for should be readable, so the sky map is not missing stars.",
+      "unit": "count",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "Planetarium star-catalog calls (planetarium:get_catalog_sources) in the flow whose reply lists a driver in failedCatalogs. flow.mjs records failedCatalogs for each call; the value is the number of calls with a non-empty list. Not measured if no call carried the field.",
+      "statistic": "count",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. The user sets it. Added 2026-11-06 after a sandboxed bright-star driver returned no stars.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "display_switch_p95",
+      "name": "display_switch_p95",
+      "title": "Display switch, slow cases",
+      "why": "Even the slow switches must keep your flow of thought.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "click-to-settled timing in the flow",
+      "statistic": "p95",
+      "threshold": 1000,
+      "objective": 300,
+      "threshold_status": "Confirmed",
+      "source": "Nielsen response-time limits (0.1 s feels instant, 1 s keeps the flow of thought, 10 s is the attention limit).",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "confirmed": {
+        "date": "2026-11-06",
+        "by": "confirmed by the user",
+        "source": "Nielsen response-time limits (0.1 s feels instant, 1 s keeps the flow of thought, 10 s is the attention limit)."
+      }
+    },
+    {
+      "id": "display_switch_median_by_display",
+      "name": "display_switch_median[{display}]",
+      "title": "Display switch per display",
+      "why": "A single slow display shows up here.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "display"
+      },
+      "method": "click-to-settled timing in the flow",
+      "statistic": "median",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "interaction_latency_select_target",
+      "name": "interaction_latency_select_target",
+      "title": "Select a target (response time)",
+      "why": "A click should show its result before you doubt that it worked.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "interaction",
+        "interaction": "select_target"
+      },
+      "method": "click-to-settled timing in the flow",
+      "statistic": "median",
+      "threshold": 500,
+      "objective": 200,
+      "threshold_status": "Confirmed",
+      "source": "Google Core Web Vitals Interaction to Next Paint: good up to 200 ms, poor over 500 ms.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "confirmed": {
+        "date": "2026-11-06",
+        "by": "confirmed by the user",
+        "source": "Google Core Web Vitals Interaction to Next Paint: good up to 200 ms, poor over 500 ms."
+      }
+    },
+    {
+      "id": "interaction_latency_open_night",
+      "name": "interaction_latency_open_night",
+      "title": "Open an observing night (response time)",
+      "why": "A click should show its result before you doubt that it worked.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "interaction",
+        "interaction": "open_night"
+      },
+      "method": "click-to-settled timing in the flow",
+      "statistic": "median",
+      "threshold": 3000,
+      "objective": 1000,
+      "threshold_status": "TBR",
+      "source": "Between the 1 s flow limit and the 10 s attention limit (Nielsen); the night review loads much data.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "interaction_latency_change_tab",
+      "name": "interaction_latency_change_tab",
+      "title": "Change a tab (response time)",
+      "why": "A click should show its result before you doubt that it worked.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "interaction",
+        "interaction": "change_tab"
+      },
+      "method": "click-to-settled timing in the flow",
+      "statistic": "median",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "total_blocking_time_load",
+      "name": "total_blocking_time[Load app]",
+      "title": "Main-thread blocking at load",
+      "why": "A blocked page cannot answer clicks.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "Lighthouse audit total-blocking-time",
+      "statistic": "single value",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "total_blocking_time_by_display",
+      "name": "total_blocking_time[{display}]",
+      "title": "Main-thread blocking per display",
+      "why": "A blocked page cannot answer clicks.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "display"
+      },
+      "method": "Lighthouse audit total-blocking-time",
+      "statistic": "median",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "inp_worst",
+      "name": "inp_worst",
+      "title": "Worst Interaction to Next Paint",
+      "why": "No click should ever feel stuck.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "Lighthouse audit interaction-to-next-paint",
+      "statistic": "max",
+      "threshold": 500,
+      "objective": 200,
+      "threshold_status": "Confirmed",
+      "source": "Google Core Web Vitals: good up to 200 ms, poor over 500 ms.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "confirmed": {
+        "date": "2026-11-06",
+        "by": "confirmed by the user",
+        "source": "Google Core Web Vitals: good up to 200 ms, poor over 500 ms."
+      }
+    },
+    {
+      "id": "cls_load",
+      "name": "cls_load",
+      "title": "Layout shift at load",
+      "why": "The page should not jump while you aim at a control.",
+      "unit": "score",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "Lighthouse audit cumulative-layout-shift",
+      "statistic": "single value",
+      "threshold": 0.25,
+      "objective": 0.1,
+      "threshold_status": "Confirmed",
+      "source": "Google Core Web Vitals: good up to 0.1, poor over 0.25.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "confirmed": {
+        "date": "2026-11-06",
+        "by": "confirmed by the user",
+        "source": "Google Core Web Vitals: good up to 0.1, poor over 0.25."
+      }
+    },
+    {
+      "id": "cls_worst_display_step",
+      "name": "cls_worst_display_step",
+      "title": "Worst layout shift in a display step",
+      "why": "The page should not jump while you aim at a control.",
+      "unit": "score",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "Lighthouse audit cumulative-layout-shift",
+      "statistic": "max",
+      "threshold": 0.25,
+      "objective": 0.1,
+      "threshold_status": "Confirmed",
+      "source": "Google Core Web Vitals: good up to 0.1, poor over 0.25.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "confirmed": {
+        "date": "2026-11-06",
+        "by": "confirmed by the user",
+        "source": "Google Core Web Vitals: good up to 0.1, poor over 0.25."
+      }
+    },
+    {
+      "id": "script_transfer_size_load",
+      "name": "script_transfer_size_load",
+      "title": "JavaScript size at load",
+      "why": "Less code means a faster start, also over a slow link.",
+      "unit": "KB",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "Lighthouse resource summary",
+      "statistic": "single value",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "request_count_load",
+      "name": "request_count_load",
+      "title": "Requests at load",
+      "why": "Fewer requests mean a faster start.",
+      "unit": "requests",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "Lighthouse resource summary",
+      "statistic": "single value",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "informational": true
+    },
+    {
+      "id": "planetarium_fps_panning",
+      "name": "planetarium_fps_panning",
+      "title": "Planetarium frame rate while panning",
+      "why": "The sky should follow your hand smoothly.",
+      "unit": "fps",
+      "better": "higher",
+      "scope": {
+        "per": "run"
+      },
+      "method": "animation-frame count in the flow",
+      "statistic": "mean",
+      "threshold": 30,
+      "objective": 60,
+      "threshold_status": "Confirmed",
+      "source": "60 Hz laptop panel caps the rate at 60 fps; below 30 fps the motion looks choppy.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "confirmed": {
+        "date": "2026-11-06",
+        "by": "confirmed by the user",
+        "source": "60 Hz laptop panel caps the rate at 60 fps; below 30 fps the motion looks choppy."
+      }
+    },
+    {
+      "id": "planetarium_fps_zooming",
+      "name": "planetarium_fps_zooming",
+      "title": "Planetarium frame rate while the zoom animates",
+      "why": "The sky should zoom smoothly. The sky map draws only while it moves, so only the frames of the animation count.",
+      "unit": "fps",
+      "better": "higher",
+      "scope": {
+        "per": "run"
+      },
+      "method": "DevTools trace of the Planetarium zoom: drawn frames per second inside stretches of active animation (idle gaps of 100 ms or more excluded)",
+      "statistic": "mean",
+      "threshold": 30,
+      "objective": 60,
+      "threshold_status": "Confirmed",
+      "source": "60 Hz laptop panel caps the rate at 60 fps; below 30 fps the motion looks choppy.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "confirmed": {
+        "date": "2026-11-06",
+        "by": "confirmed by the user",
+        "source": "60 Hz laptop panel caps the rate at 60 fps; below 30 fps the motion looks choppy."
+      }
+    },
+    {
+      "id": "fps_hw",
+      "name": "fps_hw",
+      "title": "Planetarium frame rate on real graphics",
+      "why": "The same rate, kept only when WebGL drew on a graphics card.",
+      "unit": "fps",
+      "better": "higher",
+      "scope": {
+        "per": "run"
+      },
+      "method": "animation-frame count in the flow",
+      "statistic": "mean",
+      "threshold": 30,
+      "objective": 60,
+      "threshold_status": "Confirmed",
+      "source": "60 Hz laptop panel caps the rate at 60 fps; below 30 fps the motion looks choppy.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "confirmed": {
+        "date": "2026-11-06",
+        "by": "confirmed by the user",
+        "source": "60 Hz laptop panel caps the rate at 60 fps; below 30 fps the motion looks choppy."
+      }
+    },
+    {
+      "id": "pan_frame_ms_p50",
+      "name": "pan_frame_ms_p50",
+      "title": "Pan frame time, typical",
+      "why": "Frame time shows how much of a frame the page uses.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "DevTools trace of the Planetarium pan",
+      "statistic": "median",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "pan_frame_ms_p95",
+      "name": "pan_frame_ms_p95",
+      "title": "Pan frame time, slow frames",
+      "why": "A few slow frames are the stutter you see.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "DevTools trace of the Planetarium pan",
+      "statistic": "p95",
+      "threshold": 33.3,
+      "objective": 16.7,
+      "threshold_status": "Confirmed",
+      "source": "Derived from the frame-rate limits: 1000/30 = 33.3 ms and 1000/60 = 16.7 ms.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "confirmed": {
+        "date": "2026-11-06",
+        "by": "confirmed by the user",
+        "source": "Derived from the frame-rate limits: 1000/30 = 33.3 ms and 1000/60 = 16.7 ms."
+      }
+    },
+    {
+      "id": "star_project_ms_p50",
+      "name": "star_project_ms_p50",
+      "title": "Star projection and upload time",
+      "why": "Shows where a slow frame spends its time.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "performance mark in the page (Planetarium)",
+      "statistic": "median",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "overlay_draw_ms_p50",
+      "name": "overlay_draw_ms_p50",
+      "title": "Overlay drawing time",
+      "why": "Shows where a slow frame spends its time.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "performance mark in the page (Planetarium)",
+      "statistic": "median",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "gpu_ms_p50",
+      "name": "gpu_ms_p50",
+      "title": "Graphics process busy time per frame",
+      "why": "Shows whether the graphics card or the page limits the frame rate.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "DevTools trace of the Planetarium pan",
+      "statistic": "median",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "zoom_frame_ms_p50",
+      "name": "zoom_frame_ms_p50",
+      "title": "Zoom frame time while animating, typical",
+      "why": "Frame time shows how much of a frame the page uses while the zoom eases (idle gaps between wheel ticks are left out).",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "DevTools trace of the Planetarium zoom: frames of active animation only (a gap of 100 ms or more is the sky map idle, not a slow frame)",
+      "statistic": "median",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "zoom_frame_ms_p95",
+      "name": "zoom_frame_ms_p95",
+      "title": "Zoom frame time while animating, slow frames",
+      "why": "A few slow frames are the stutter you see while the zoom eases. Idle gaps between wheel ticks are not frames: the sky map draws only when something changes.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "DevTools trace of the Planetarium zoom: frames of active animation only (a gap of 100 ms or more is the sky map idle, not a slow frame)",
+      "statistic": "p95",
+      "threshold": 33.3,
+      "objective": 16.7,
+      "threshold_status": "Confirmed",
+      "source": "Derived from the frame-rate limits: 1000/30 = 33.3 ms and 1000/60 = 16.7 ms.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "confirmed": {
+        "date": "2026-11-06",
+        "by": "confirmed by the user",
+        "source": "Derived from the frame-rate limits: 1000/30 = 33.3 ms and 1000/60 = 16.7 ms."
+      }
+    },
+    {
+      "id": "zoom_slow_frames",
+      "name": "zoom_slow_frames",
+      "title": "Zoom frames over 20 ms",
+      "why": "Each one is a frame that missed a 60 Hz screen's refresh (took over 1.2 refreshes) while the zoom was animating.",
+      "unit": "frames",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "DevTools trace of the Planetarium zoom: count of intervals over 20 ms (1.2 refreshes of a 60 Hz screen) inside active animation",
+      "statistic": "count",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "zoom_tick_latency_ms_p50",
+      "name": "zoom_tick_latency_ms_p50",
+      "title": "Zoom response to a wheel tick, typical",
+      "why": "How long after you turn the wheel the sky first changes.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "DevTools trace of the Planetarium zoom: from the wheel input event to the first frame drawn after it, per tick",
+      "statistic": "median",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "zoom_tick_latency_ms_p95",
+      "name": "zoom_tick_latency_ms_p95",
+      "title": "Zoom response to a wheel tick, slow",
+      "why": "The slowest ticks are the ones that feel laggy.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "DevTools trace of the Planetarium zoom: from the wheel input event to the first frame drawn after it, per tick",
+      "statistic": "p95",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "zoom_settle_ms_p50",
+      "name": "zoom_settle_ms_p50",
+      "title": "Zoom settle time, typical",
+      "why": "How long the zoom keeps easing after a wheel tick before the sky is still.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "DevTools trace of the Planetarium zoom: from the wheel tick to the last frame of its easing (ticks whose easing runs into the next tick are left out)",
+      "statistic": "median",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "zoom_settle_ms_p95",
+      "name": "zoom_settle_ms_p95",
+      "title": "Zoom settle time, slow",
+      "why": "A slow settle feels like the sky drifting after you stop.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "DevTools trace of the Planetarium zoom: from the wheel tick to the last frame of its easing (ticks whose easing runs into the next tick are left out)",
+      "statistic": "p95",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "zoom_long_tasks",
+      "name": "zoom_long_tasks",
+      "title": "Zoom main-thread tasks over 50 ms",
+      "why": "A task over 50 ms blocks the page, so the sky and the buttons cannot answer.",
+      "unit": "tasks",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "DevTools trace of the Planetarium zoom: main-thread tasks longer than 50 ms in the zoom window",
+      "statistic": "count",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "zoom_main_thread_ms_per_frame",
+      "name": "zoom_main_thread_ms_per_frame",
+      "title": "Zoom main-thread time per frame",
+      "why": "Shows whether the page's own code limits the frame rate.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "DevTools trace of the Planetarium zoom",
+      "statistic": "mean",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "zoom_gpu_ms_p50",
+      "name": "zoom_gpu_ms_p50",
+      "title": "Zoom graphics busy time per frame",
+      "why": "Shows whether the graphics card limits the frame rate.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "DevTools trace of the Planetarium zoom",
+      "statistic": "median",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "planetarium_idle_draws_per_second",
+      "name": "planetarium_idle_draws_per_second",
+      "title": "Planetarium draws while idle",
+      "why": "A still sky should cost nothing: no drawn frame, no battery, no fan.",
+      "unit": "draws/s",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "DevTools trace of a 3 s idle window after the zoom has settled: drawn compositor frames divided by the window length. Expected about 0 after the idle fix.",
+      "statistic": "single value",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Expectation about 0 draws per second after the idle fix; needs a measured run before a limit is proposed.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "js_heap_after_last_lap",
+      "name": "js_heap_after_last_lap",
+      "title": "JavaScript memory after the last lap",
+      "why": "Memory use of the page.",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "DevTools heap size after garbage collection",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "js_heap_growth_per_lap",
+      "name": "js_heap_growth_per_lap",
+      "title": "JavaScript memory growth per lap",
+      "why": "A night of use must not leak memory.",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "DevTools heap size after garbage collection",
+      "statistic": "mean",
+      "threshold": 1,
+      "objective": 0,
+      "threshold_status": "TBR",
+      "source": "A 10 h night is about 1000 display visits; growth must stay near zero.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "electron_peak_memory_mb",
+      "name": "electron_{process}_peak_memory_mb",
+      "title": "Electron process peak memory",
+      "why": "Memory the desktop shell uses.",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "process",
+        "processes": [
+          "main",
+          "renderer",
+          "gpu"
+        ]
+      },
+      "method": "Electron process metrics",
+      "statistic": "max",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "electron_mean_cpu_percent",
+      "name": "electron_{process}_mean_cpu_percent",
+      "title": "Electron process mean CPU",
+      "why": "CPU the desktop shell uses.",
+      "unit": "%",
+      "better": "lower",
+      "scope": {
+        "per": "process",
+        "processes": [
+          "main",
+          "renderer",
+          "gpu"
+        ]
+      },
+      "method": "Electron process metrics",
+      "statistic": "mean",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "backend_peak_rss",
+      "name": "backend_peak_rss",
+      "title": "Backend peak memory",
+      "why": "The backend runs all night next to KStars, Siril and the browser, and past out-of-memory kills must not repeat.",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "backend process samples",
+      "statistic": "max",
+      "threshold": 4096,
+      "objective": 1536,
+      "threshold_status": "TBR",
+      "source": "About 13% of 30.5 GB RAM, which leaves room for KStars, Siril and the browser. Past OOM kills.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "backend_cpu_time",
+      "name": "backend_cpu_time",
+      "title": "Backend CPU time",
+      "why": "CPU the backend uses during the run.",
+      "unit": "s",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "backend process samples",
+      "statistic": "sum",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "rpc_count_load",
+      "name": "rpc_count_load",
+      "title": "Backend calls at load",
+      "why": "Fewer calls mean a faster start.",
+      "unit": "calls",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "page's RPC recorder",
+      "statistic": "sum",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "informational": true
+    },
+    {
+      "id": "rpc_count_per_visit",
+      "name": "rpc_count_per_visit[{display}]",
+      "title": "Backend calls per display visit",
+      "why": "Fewer calls mean a lighter display.",
+      "unit": "calls",
+      "better": "lower",
+      "scope": {
+        "per": "display"
+      },
+      "method": "page's RPC recorder",
+      "statistic": "mean",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "informational": true
+    },
+    {
+      "id": "rpc_p95",
+      "name": "rpc_p95[{rpc}]",
+      "title": "Backend call round trip",
+      "why": "Slow calls make a display wait.",
+      "unit": "ms",
+      "better": "lower",
+      "scope": {
+        "per": "rpc",
+        "rpcs": [
+          "history:night_quality",
+          "target:get_targets",
+          "processing:stack_summary"
+        ]
+      },
+      "method": "page's RPC recorder",
+      "statistic": "p95",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "idle_rpc_per_minute",
+      "name": "idle_rpc_per_minute",
+      "title": "Backend calls per minute while idle",
+      "why": "An idle page should not keep the backend busy.",
+      "unit": "calls/min",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "page's RPC recorder",
+      "statistic": "mean",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "informational": true
+    },
+    {
+      "id": "backend_idle_cpu_percent",
+      "name": "backend_idle_cpu_percent",
+      "title": "Backend CPU while idle",
+      "why": "The backend runs all night, on battery in the field.",
+      "unit": "% of one core",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "backend process samples",
+      "statistic": "mean",
+      "threshold": 10,
+      "objective": 2,
+      "threshold_status": "TBR",
+      "source": "Runs all night and on battery in the field. Not measured yet.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "not_measured_yet": true,
+      "note": "not measured yet"
+    },
+    {
+      "id": "frames_auto_downloaded",
+      "name": "frames_auto_downloaded",
+      "title": "Frames copied into the library by the app",
+      "why": "The app should bring in every frame the camera takes.",
+      "unit": "frames",
+      "better": "higher",
+      "scope": {
+        "observatory_profile": "simulated or replay"
+      },
+      "method": "observatory stats (simulated or replay profile)",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "informational": true
+    },
+    {
+      "id": "guide_events_received",
+      "name": "guide_events_received",
+      "title": "Guide steps received from PHD2",
+      "why": "The app should see every guide step.",
+      "unit": "events",
+      "better": "higher",
+      "scope": {
+        "observatory_profile": "simulated or replay"
+      },
+      "method": "observatory stats (simulated or replay profile)",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "informational": true
+    },
+    {
+      "id": "frame_to_library_seconds",
+      "name": "frame_to_library_seconds",
+      "title": "Time from a new frame to its copy in the library",
+      "why": "The app must keep up with the camera.",
+      "unit": "s",
+      "better": "lower",
+      "scope": {
+        "observatory_profile": "simulated or replay"
+      },
+      "method": "observatory stats (simulated or replay profile)",
+      "statistic": "median",
+      "threshold": {
+        "factor": 1.0,
+        "of": "exposure_seconds"
+      },
+      "objective": {
+        "factor": 0.25,
+        "of": "exposure_seconds"
+      },
+      "threshold_status": "TBR",
+      "source": "Threshold is the shortest exposure; objective is 25% of it. The app must keep up with capture.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "guide_log_lines_pulled",
+      "name": "guide_log_lines_pulled",
+      "title": "Guide log lines pulled",
+      "why": "The log sync should fetch the whole guide log.",
+      "unit": "lines",
+      "better": "higher",
+      "scope": {
+        "observatory_profile": "simulated or replay"
+      },
+      "method": "observatory stats (simulated or replay profile)",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "informational": true
+    },
+    {
+      "id": "ekos_log_lines_pulled",
+      "name": "ekos_log_lines_pulled",
+      "title": "Ekos log lines pulled",
+      "why": "The log sync should fetch the whole Ekos analyze log, which grows all night.",
+      "unit": "lines",
+      "better": "higher",
+      "scope": {
+        "observatory_profile": "replay"
+      },
+      "method": "observatory stats (replay profile)",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "informational": true
+    },
+    {
+      "id": "analysis_seconds_per_frame",
+      "name": "analysis_seconds_per_frame",
+      "title": "Analysis time per frame",
+      "why": "Analysis must finish before the next frame arrives.",
+      "unit": "s",
+      "better": "lower",
+      "scope": {
+        "observatory_profile": "simulated"
+      },
+      "method": "backend log",
+      "statistic": "median",
+      "threshold": {
+        "factor": 0.5,
+        "of": "frame_interval_seconds"
+      },
+      "objective": {
+        "factor": 0.1,
+        "of": "frame_interval_seconds"
+      },
+      "threshold_status": "TBR",
+      "source": "50% and 10% of the frame interval. Not measured yet.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "not_measured_yet": true,
+      "note": "not measured yet"
+    },
+    {
+      "id": "wifi_transfer_rate",
+      "name": "wifi_transfer_rate",
+      "title": "Wi-Fi transfer from the telescope computer",
+      "why": "Frames must cross the link faster than the camera makes them.",
+      "unit": "MB/s",
+      "better": "higher",
+      "scope": {
+        "observatory_profile": "simulated"
+      },
+      "method": "observatory stats",
+      "statistic": "median",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "note": "Measure the link first.",
+      "not_measured_yet": true
+    },
+    {
+      "id": "console_errors",
+      "name": "console_errors",
+      "title": "Browser console errors",
+      "why": "The user should see no errors in the web browser console.",
+      "unit": "count",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "Console messages of level error and uncaught page errors during the whole flow (Chrome flow and Electron renderer, including the Electron start-up and idle time). Each message and its source URL goes to info.errors.",
+      "statistic": "count",
+      "threshold": 0,
+      "objective": 0,
+      "threshold_status": "Confirmed",
+      "source": "User requirement 2026-11-06: no errors in the browser console and no error notifications at start-up; the limit is zero.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "confirmed": {
+        "date": "2026-11-06",
+        "by": "user requirement 2026-11-06",
+        "source": "I should be getting no errors in the web browser console, and no error notifications at start-up."
+      }
+    },
+    {
+      "id": "failed_requests",
+      "name": "failed_requests",
+      "title": "Failed requests",
+      "why": "A request that fails (status 400 or more, or no answer) is a broken image, call or file.",
+      "unit": "count",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "Responses with status 400 or more and failed requests during the whole flow, except requests the browser cancelled (net::ERR_ABORTED, listed apart). Each URL and status goes to info.errors.",
+      "statistic": "count",
+      "threshold": 0,
+      "objective": 0,
+      "threshold_status": "Confirmed",
+      "source": "User requirement 2026-11-06: no errors in the browser console and no error notifications at start-up; the limit is zero.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "confirmed": {
+        "date": "2026-11-06",
+        "by": "user requirement 2026-11-06",
+        "source": "I should be getting no errors in the web browser console, and no error notifications at start-up."
+      }
+    },
+    {
+      "id": "error_toasts",
+      "name": "error_toasts",
+      "title": "Error and warning toasts",
+      "why": "The user should see no error or warning pop-ups from a clean run.",
+      "unit": "count",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "In-app toasts of kind error or warning, caught from the window event astrometrics:toast that emitToast sends. Each text goes to info.errors.",
+      "statistic": "count",
+      "threshold": 0,
+      "objective": 0,
+      "threshold_status": "Confirmed",
+      "source": "User requirement 2026-11-06: no errors in the browser console and no error notifications at start-up; the limit is zero.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "confirmed": {
+        "date": "2026-11-06",
+        "by": "user requirement 2026-11-06",
+        "source": "I should be getting no errors in the web browser console, and no error notifications at start-up."
+      }
+    },
+    {
+      "id": "desktop_notifications",
+      "name": "desktop_notifications",
+      "title": "Desktop notifications",
+      "why": "The app must send no native notification, and none at start-up.",
+      "unit": "count",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "Native notifications the page asked Electron to show (the show-notification IPC channel, counted in electron/perf_metrics.js when ASTROMETRICS_PERF_METRICS is set). Only an Electron run measures it; counted before the app's own cooldown.",
+      "statistic": "count",
+      "threshold": 0,
+      "objective": 0,
+      "threshold_status": "Confirmed",
+      "source": "User requirement 2026-11-06: no errors in the browser console and no error notifications at start-up; the limit is zero.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "confirmed": {
+        "date": "2026-11-06",
+        "by": "user requirement 2026-11-06",
+        "source": "I should be getting no errors in the web browser console, and no error notifications at start-up."
+      }
+    },
+    {
+      "id": "backend_error_log_lines",
+      "name": "backend_error_log_lines",
+      "title": "Backend ERROR log lines",
+      "why": "A clean run should leave no line at ERROR level in the backend log.",
+      "unit": "count",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "Lines at ERROR or CRITICAL level in the throwaway backend's backend.log, from the backend's start to its end. Each line goes to info.errors.",
+      "statistic": "count",
+      "threshold": 0,
+      "objective": 0,
+      "threshold_status": "Confirmed",
+      "source": "User requirement 2026-11-06: no errors in the browser console and no error notifications at start-up; the limit is zero.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "confirmed": {
+        "date": "2026-11-06",
+        "by": "user requirement 2026-11-06",
+        "source": "I should be getting no errors in the web browser console, and no error notifications at start-up."
+      }
+    },
+    {
+      "id": "disk_read_mb",
+      "name": "disk_read_mb[{process_group}]",
+      "title": "Disk read per process group",
+      "why": "How much the app makes the disk read, group by group (backend, pool workers, INDI, Siril, GraXpert, denoise tools, Electron, browser).",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "process_group",
+        "process_groups": [
+          "backend",
+          "backend_workers",
+          "indi",
+          "siril",
+          "graxpert",
+          "denoise_tools",
+          "backend_other",
+          "electron",
+          "browser"
+        ]
+      },
+      "method": "Resource sampler (resource_usage.py): reads /proc/<pid>/io, stat and status of the backend and every process under it once a second. Sum of read_bytes (bytes the process caused to be read from storage) over every process of the group, last sample minus first. A process that ends between two samples keeps its last seen value, so the number is a lower bound for very short programs. rchar and wchar (bytes passed to read and write calls, file cache included) are kept in info.resources for information.",
+      "statistic": "sum",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "disk_write_mb",
+      "name": "disk_write_mb[{process_group}]",
+      "title": "Disk written per process group",
+      "why": "How much the app makes the disk write, group by group; it shows what hurts a drive or a slow network share.",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "process_group",
+        "process_groups": [
+          "backend",
+          "backend_workers",
+          "indi",
+          "siril",
+          "graxpert",
+          "denoise_tools",
+          "backend_other",
+          "electron",
+          "browser"
+        ]
+      },
+      "method": "Resource sampler (resource_usage.py): reads /proc/<pid>/io, stat and status of the backend and every process under it once a second. Sum of write_bytes over every process of the group, last sample minus first. Lower bound for very short programs.",
+      "statistic": "sum",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "disk_read_mb_per_lap",
+      "name": "disk_read_mb_per_lap[{process_group}]",
+      "title": "Disk read per lap",
+      "why": "How much the disk reads while the flow visits every display once.",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "process_group",
+        "process_groups": [
+          "backend",
+          "backend_workers",
+          "indi",
+          "siril",
+          "graxpert",
+          "denoise_tools",
+          "backend_other",
+          "electron",
+          "browser"
+        ]
+      },
+      "method": "Resource sampler (resource_usage.py): reads /proc/<pid>/io, stat and status of the backend and every process under it once a second. The read_bytes of the group in the wall-clock window of one lap of the flow (flow-metrics.json lapWindows), median over the laps. Only runs with the display flow.",
+      "statistic": "median",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "disk_write_mb_per_lap",
+      "name": "disk_write_mb_per_lap[{process_group}]",
+      "title": "Disk written per lap",
+      "why": "How much the disk writes while the flow visits every display once.",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "process_group",
+        "process_groups": [
+          "backend",
+          "backend_workers",
+          "indi",
+          "siril",
+          "graxpert",
+          "denoise_tools",
+          "backend_other",
+          "electron",
+          "browser"
+        ]
+      },
+      "method": "Resource sampler (resource_usage.py): reads /proc/<pid>/io, stat and status of the backend and every process under it once a second. The write_bytes of the group in the window of one lap, median over the laps. Only runs with the display flow.",
+      "statistic": "median",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "backend_tree_cpu_time",
+      "name": "backend_tree_cpu_time",
+      "title": "Backend process tree CPU time",
+      "why": "The backend starts many programs; its own CPU time alone hides most of the cost of a stack or an analysis.",
+      "unit": "s",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "Resource sampler. Sum over the live processes of the backend's tree of their own CPU time plus the CPU time of their finished, collected children (the kernel's cutime and cstime, so a child that ends between samples is still counted); last sample minus first.",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "backend_tree_peak_rss",
+      "name": "backend_tree_peak_rss",
+      "title": "Backend process tree peak memory",
+      "why": "The backend plus Siril, GraXpert and the pool workers share the computer's memory with KStars and the browser; only the sum shows an out-of-memory risk.",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "Resource sampler. The largest sum of resident memory over all processes of the backend's tree in any one sample (once a second). A peak shorter than a second can be missed; info.resources.trees.backend.peak_sum_mb is the sum of every process's own peak (an upper bound).",
+      "statistic": "max",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "nvidia_util_percent_mean",
+      "name": "nvidia_util_percent_mean",
+      "title": "NVIDIA utilization, mean",
+      "why": "How busy the NVIDIA card is during the run; GraXpert and the denoise tools run on it.",
+      "unit": "%",
+      "better": "lower",
+      "scope": {
+        "per": "run",
+        "only_when": "an NVIDIA card is present"
+      },
+      "method": "nvidia-smi utilization.gpu every 2 seconds (setup_fingerprint.py nvidia-sample), mean over the run. Empty when there is no NVIDIA card. Reading nvidia-smi can keep the card awake.",
+      "statistic": "mean",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "informational": true
+    },
+    {
+      "id": "nvidia_util_percent_peak",
+      "name": "nvidia_util_percent_peak",
+      "title": "NVIDIA utilization, peak",
+      "why": "The busiest moment of the NVIDIA card.",
+      "unit": "%",
+      "better": "lower",
+      "scope": {
+        "per": "run",
+        "only_when": "an NVIDIA card is present"
+      },
+      "method": "Same samples, largest value.",
+      "statistic": "max",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "informational": true
+    },
+    {
+      "id": "nvidia_memory_mb_peak",
+      "name": "nvidia_memory_mb_peak",
+      "title": "NVIDIA memory in use, peak",
+      "why": "GPU memory the run needs, to check that the card's memory is enough. The value is what the whole card has in use (the desktop included), not only the run.",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "run",
+        "only_when": "an NVIDIA card is present"
+      },
+      "method": "nvidia-smi memory.used every 2 seconds, largest value.",
+      "statistic": "max",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "informational": true
+    },
+    {
+      "id": "processing_stage_seconds",
+      "name": "processing_stage_seconds[{stage}]",
+      "title": "Stacking stage wall time",
+      "why": "Where the minutes of a stack go; a change that slows one stage shows here before it shows in the total.",
+      "unit": "s",
+      "better": "lower",
+      "scope": {
+        "per": "stage",
+        "scenario": "processing",
+        "stages": [
+          "choose_frames",
+          "screen_frames",
+          "prepare",
+          "stacking",
+          "summarize",
+          "quality",
+          "preview"
+        ]
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. The stack job logs one line 'Stage N of M' at the start of each stage, with a time to the millisecond (processing:job_log_tail). A stage runs to the next stage's line; the last one to the end of the job. A skipped stage gives no TPM.",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "processing_stage_cpu_seconds",
+      "name": "processing_stage_cpu_seconds[{stage}]",
+      "title": "Stacking stage CPU time",
+      "why": "CPU the backend and its programs use in a stage (Siril's threads count).",
+      "unit": "s",
+      "better": "lower",
+      "scope": {
+        "per": "stage",
+        "scenario": "processing",
+        "stages": [
+          "choose_frames",
+          "screen_frames",
+          "prepare",
+          "stacking",
+          "summarize",
+          "quality",
+          "preview"
+        ]
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. CPU time of the backend's process tree inside the stage window, from the 0.5 s samples (resource_usage.py).",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "processing_stage_peak_rss_mb",
+      "name": "processing_stage_peak_rss_mb[{stage}]",
+      "title": "Stacking stage peak memory",
+      "why": "The memory a stage needs, backend and programs together.",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "stage",
+        "scenario": "processing",
+        "stages": [
+          "choose_frames",
+          "screen_frames",
+          "prepare",
+          "stacking",
+          "summarize",
+          "quality",
+          "preview"
+        ]
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. Largest sum of resident memory of the backend's process tree in the stage window (samples every 0.5 s, plus the sample before and after).",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "processing_stage_disk_read_mb",
+      "name": "processing_stage_disk_read_mb[{stage}]",
+      "title": "Stacking stage disk read",
+      "why": "How much a stage reads from storage (frames, calibration frames, catalogs).",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "stage",
+        "scenario": "processing",
+        "stages": [
+          "choose_frames",
+          "screen_frames",
+          "prepare",
+          "stacking",
+          "summarize",
+          "quality",
+          "preview"
+        ]
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. read_bytes of every process of the backend's tree in the stage window.",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "processing_stage_disk_write_mb",
+      "name": "processing_stage_disk_write_mb[{stage}]",
+      "title": "Stacking stage disk written",
+      "why": "How much a stage writes to storage (calibrated frames, the stack, pictures).",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "stage",
+        "scenario": "processing",
+        "stages": [
+          "choose_frames",
+          "screen_frames",
+          "prepare",
+          "stacking",
+          "summarize",
+          "quality",
+          "preview"
+        ]
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. write_bytes of every process of the backend's tree in the stage window.",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "processing_stage_nvidia_util_percent_mean",
+      "name": "processing_stage_nvidia_util_percent_mean[{stage}]",
+      "title": "Stacking stage NVIDIA utilization",
+      "why": "Which stage uses the NVIDIA card (the preview's GraXpert and denoise steps).",
+      "unit": "%",
+      "better": "lower",
+      "scope": {
+        "per": "stage",
+        "scenario": "processing",
+        "stages": [
+          "choose_frames",
+          "screen_frames",
+          "prepare",
+          "stacking",
+          "summarize",
+          "quality",
+          "preview"
+        ]
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. Mean of the nvidia-smi utilization rows (every 2 seconds) inside the stage window. Empty for a stage shorter than the sampling interval, or with no NVIDIA card.",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "informational": true
+    },
+    {
+      "id": "processing_stage_nvidia_memory_mb_peak",
+      "name": "processing_stage_nvidia_memory_mb_peak[{stage}]",
+      "title": "Stacking stage NVIDIA memory",
+      "why": "GPU memory a stage needs. The value is what the whole card has in use, not only the stage.",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "stage",
+        "scenario": "processing",
+        "stages": [
+          "choose_frames",
+          "screen_frames",
+          "prepare",
+          "stacking",
+          "summarize",
+          "quality",
+          "preview"
+        ]
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. Largest nvidia-smi memory.used row inside the stage window.",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "informational": true
+    },
+    {
+      "id": "processing_total_seconds",
+      "name": "processing_total_seconds",
+      "title": "Stack and analysis wall time",
+      "why": "How long the user waits from pressing Process to the end of the analysis for one target.",
+      "unit": "s",
+      "better": "lower",
+      "scope": {
+        "per": "run",
+        "scenario": "processing"
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. Stack job time (from the RPC call to the job's completion time) plus the time of every analysis step.",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "processing_frame_count",
+      "name": "processing_frame_count",
+      "title": "Frames in the stack input",
+      "why": "The input size of the run, so two runs can be told to have the same input. Fixed by the target and the camera.",
+      "unit": "frames",
+      "better": "higher",
+      "scope": {
+        "per": "run",
+        "scenario": "processing"
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. Frames of the chosen camera in target:get_files (spectroscopy frames left out), as sent to processing:stack. The hash of their paths is in info.processing.plan.paths_sha.",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "informational": true
+    },
+    {
+      "id": "processing_failed_jobs",
+      "name": "processing_failed_jobs",
+      "title": "Failed processing jobs",
+      "why": "A stack or analysis job that fails or times out makes every other number of the run meaningless.",
+      "unit": "count",
+      "better": "lower",
+      "scope": {
+        "per": "run",
+        "scenario": "processing"
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. The stack job counts if it did not complete; each analysis step counts if a job it started failed, was cancelled or timed out.",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "informational": true
+    },
+    {
+      "id": "analysis_seconds",
+      "name": "analysis_seconds[{step}]",
+      "title": "Analysis step wall time",
+      "why": "How long each analysis the display offers takes after the stack: photometry (Analyze Target), frame measurements and the stack comparison.",
+      "unit": "s",
+      "better": "lower",
+      "scope": {
+        "per": "step",
+        "scenario": "processing",
+        "steps": [
+          "photometry",
+          "frame_measurements",
+          "stack_comparison"
+        ]
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. From the RPC call until every job it started has ended (processing:list_jobs for the target, new jobs only; the quality calls do not return their job's number).",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "analysis_cpu_seconds",
+      "name": "analysis_cpu_seconds[{step}]",
+      "title": "Analysis step CPU time",
+      "why": "CPU an analysis step uses, backend and pool workers together.",
+      "unit": "s",
+      "better": "lower",
+      "scope": {
+        "per": "step",
+        "scenario": "processing",
+        "steps": [
+          "photometry",
+          "frame_measurements",
+          "stack_comparison"
+        ]
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. CPU time of the backend's process tree inside the step window.",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "analysis_peak_rss_mb",
+      "name": "analysis_peak_rss_mb[{step}]",
+      "title": "Analysis step peak memory",
+      "why": "Memory an analysis step needs, pool workers included.",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "step",
+        "scenario": "processing",
+        "steps": [
+          "photometry",
+          "frame_measurements",
+          "stack_comparison"
+        ]
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. Largest sum of resident memory of the backend's process tree inside the step window.",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    }
+  ],
+  "lighthouse_budgets": [
+    {
+      "kind": "timing",
+      "metric": "total-blocking-time",
+      "budget": 300,
+      "tpm": "total_blocking_time_load"
+    },
+    {
+      "kind": "timing",
+      "metric": "cumulative-layout-shift",
+      "budget": 0.1,
+      "tpm": "cls_load"
+    },
+    {
+      "kind": "resourceSizes",
+      "metric": "script",
+      "budget": 4000,
+      "tpm": "script_transfer_size_load"
+    },
+    {
+      "kind": "resourceSizes",
+      "metric": "total",
+      "budget": 9000
+    },
+    {
+      "kind": "resourceCounts",
+      "metric": "script",
+      "budget": 40
+    },
+    {
+      "kind": "resourceCounts",
+      "metric": "total",
+      "budget": 120,
+      "tpm": "request_count_load"
+    }
+  ]
+}

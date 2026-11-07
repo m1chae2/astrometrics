@@ -1,16 +1,18 @@
-r"""Back up the library databases and settings to Google Drive with rclone.
+r"""Back up the library databases and settings to a local folder.
 
 The script makes a safe copy of ``astrometrics.db``, ``astrometrics_log.db``
 and the observatory database ``wayfinding.db`` (SQLite's online backup, then
-an integrity check), adds
-``calibration_frames.json`` and the configuration file, and uploads the folder
-to ``drive:Library/_backup/<YYYYmmdd_HHMMSS>/``. It works whether or not the
+an integrity check), adds ``calibration_frames.json`` and the configuration
+file, and stores them in ``~/.cache/astrometrics/backup/<YYYYmmdd_HHMMSS>/``.
+The copies are a safety net for changes to the app (a migration or a restack
+that goes wrong). Nothing is uploaded anywhere. It works whether or not the
 backend is running.
 
-It does nothing when none of those files changed since the last good upload.
-A folder whose upload failed stays on disk and is uploaded first on the next
-run. On Drive it keeps the 7 newest snapshots plus the newest snapshot of each
-calendar month, and deletes the rest.
+Only one backup runs at a time (an exclusive lock on ``.lock`` in the backup
+folder); a second run logs that and exits at once. It does nothing when none
+of the files changed since the last snapshot (``--force`` overrides). It
+keeps the newest `KEEP_SNAPSHOTS` snapshots and deletes older ones, never the
+one it just made.
 
 Run::
 
@@ -20,18 +22,19 @@ Run::
 """
 
 import argparse
+import fcntl
 import json
 import logging
 import re
 import shutil
-import subprocess
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import IO
 
 from astrometricslib._internal.drivers.local_database import snapshot_sqlite_database
-from astrometricslib.foundation.paths import data_directory, remote_snapshot_path, scratch_directory
+from astrometricslib.foundation.paths import backup_directory, data_directory, is_in_simulator_world
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +42,13 @@ DATABASE_FILE_NAMES = ("astrometrics.db", "astrometrics_log.db")
 CALIBRATION_FILE_NAME = "calibration_frames.json"
 WAYFINDING_DATABASE_RELATIVE_PATH = Path("wayfinding") / "wayfinding.db"
 STATE_FILE_NAME = "state.json"
+LOCK_FILE_NAME = ".lock"
 SNAPSHOT_NAME_PATTERN = re.compile(r"^\d{8}_\d{6}$")
-NEWEST_SNAPSHOTS_TO_KEEP = 7
+# Design choice: the snapshots are a regression safety net for changes to the
+# app, not an archive. Each is about 1.5 GB, so five recent ones (a few days
+# of work) fit comfortably on the local disk. Raise it if you need to go
+# further back.
+KEEP_SNAPSHOTS = 5
 
 
 def compute_source_fingerprint(
@@ -130,103 +138,109 @@ def stage_snapshot(
     return all_ok
 
 
-def run_rclone(rclone_command: str, arguments: list[str]) -> subprocess.CompletedProcess[str]:
-    """Run rclone and capture its output.
+def snapshots_to_delete(snapshot_names: list[str], protected_name: str | None = None) -> list[str]:
+    """Pick the local snapshots that retention removes.
 
-    Parameters
-    ----------
-    rclone_command : `str`
-        The rclone executable.
-    arguments : `list` [`str`]
-        Arguments after the executable.
-
-    Returns
-    -------
-    result : `subprocess.CompletedProcess`
-        The finished process (the caller checks ``returncode``).
-    """
-    return subprocess.run([rclone_command, *arguments], capture_output=True, text=True, check=False)
-
-
-def upload_staging_folder(staging_folder: Path, rclone_command: str, remote: str) -> bool:
-    """Upload one staging folder with ``rclone copy``.
-
-    Parameters
-    ----------
-    staging_folder : `pathlib.Path`
-        Folder named by its timestamp.
-    rclone_command : `str`
-        The rclone executable.
-    remote : `str`
-        Remote name including the colon.
-
-    Returns
-    -------
-    uploaded : `bool`
-        `True` if rclone exited with status 0.
-    """
-    result = run_rclone(
-        rclone_command, ["copy", str(staging_folder), remote_snapshot_path(remote, staging_folder.name) + "/"]
-    )
-    if result.returncode != 0:
-        logger.error("rclone copy of %s failed: %s", staging_folder, result.stderr.strip())
-    return result.returncode == 0
-
-
-def snapshots_to_delete(snapshot_names: list[str]) -> list[str]:
-    """Pick the snapshots that retention removes.
-
-    Keeps the newest 7 plus the newest snapshot of each calendar month.
+    Keeps the newest `KEEP_SNAPSHOTS` and never the one named in
+    ``protected_name``.
 
     Parameters
     ----------
     snapshot_names : `list` [`str`]
         Snapshot folder names (``YYYYmmdd_HHMMSS``). Others are ignored.
+    protected_name : `str`, optional
+        A snapshot that must never be deleted, such as the one just made.
 
     Returns
     -------
     names_to_delete : `list` [`str`]
-        Names that fall outside both rules, oldest first.
+        Names outside the newest `KEEP_SNAPSHOTS`, oldest first.
     """
     valid_names = sorted(name for name in snapshot_names if SNAPSHOT_NAME_PATTERN.match(name))
-    keep = set(valid_names[-NEWEST_SNAPSHOTS_TO_KEEP:])
-    newest_per_month: dict[str, str] = {}
-    for name in valid_names:
-        newest_per_month[name[:6]] = name
-    keep.update(newest_per_month.values())
+    keep = set(valid_names[-KEEP_SNAPSHOTS:])
+    if protected_name is not None:
+        keep.add(protected_name)
     return [name for name in valid_names if name not in keep]
 
 
-def apply_retention(rclone_command: str, remote: str, dry_run: bool) -> None:
-    """Delete old snapshots on the remote.
+def folder_size_bytes(folder: Path) -> int:
+    """Add up the size of every file below a folder.
 
     Parameters
     ----------
-    rclone_command : `str`
-        The rclone executable.
-    remote : `str`
-        Remote name including the colon.
+    folder : `pathlib.Path`
+        The folder.
+
+    Returns
+    -------
+    size : `int`
+        Total size in bytes.
+    """
+    return sum(path.stat().st_size for path in folder.rglob("*") if path.is_file())
+
+
+def apply_retention(backup_root: Path, protected_name: str | None, dry_run: bool) -> int:
+    """Delete old local snapshots, keeping the newest `KEEP_SNAPSHOTS`.
+
+    Parameters
+    ----------
+    backup_root : `pathlib.Path`
+        Folder holding the snapshot folders.
+    protected_name : `str`, optional
+        A snapshot that is never deleted (the one just made).
     dry_run : `bool`
         If `True`, only print what would be deleted.
+
+    Returns
+    -------
+    freed_bytes : `int`
+        Bytes freed (or that would be freed in a dry run).
     """
-    listing = run_rclone(rclone_command, ["lsf", "--dirs-only", remote_snapshot_path(remote) + "/"])
-    if listing.returncode != 0:
-        logger.warning("Could not list remote snapshots; skipping retention: %s", listing.stderr.strip())
-        return
-    snapshot_names = [line.strip().rstrip("/") for line in listing.stdout.splitlines() if line.strip()]
-    for name in snapshots_to_delete(snapshot_names):
+    existing_names = [folder.name for folder in backup_root.iterdir() if folder.is_dir()]
+    freed_bytes = 0
+    for name in snapshots_to_delete(existing_names, protected_name):
+        folder = backup_root / name
+        size = folder_size_bytes(folder)
         if dry_run:
-            print(f"[dry-run] would purge {remote_snapshot_path(remote, name)}")
-            continue
-        purge = run_rclone(rclone_command, ["purge", remote_snapshot_path(remote, name)])
-        if purge.returncode != 0:
-            logger.warning("Could not purge %s: %s", name, purge.stderr.strip())
+            print(f"[dry-run] would delete old snapshot {folder}")
         else:
-            logger.info("Purged old snapshot %s", name)
+            shutil.rmtree(folder)
+            logger.info("Deleted old snapshot %s", name)
+        freed_bytes += size
+    if freed_bytes:
+        verb = "would free" if dry_run else "Freed"
+        print(f"{verb} {freed_bytes / 1e9:.2f} GB by deleting old snapshots")
+    return freed_bytes
+
+
+def acquire_lock(lock_path: Path) -> IO[str] | None:
+    """Take the exclusive lock that allows only one backup at a time.
+
+    The lock is released when the returned file is closed or the process
+    ends, even if it crashes.
+
+    Parameters
+    ----------
+    lock_path : `pathlib.Path`
+        The lock file. It is created if missing.
+
+    Returns
+    -------
+    lock_file : `typing.IO` or `None`
+        The open lock file (keep it open while backing up), or `None` if
+        another backup already holds the lock.
+    """
+    lock_file = open(lock_path, "w")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        lock_file.close()
+        return None
+    return lock_file
 
 
 def read_state(state_path: Path) -> dict:
-    """Read the saved record of the last good upload.
+    """Read the saved record of the last snapshot.
 
     Parameters
     ----------
@@ -255,8 +269,6 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--dry-run", action="store_true", help="Print what would happen; change nothing.")
     parser.add_argument("--force", action="store_true", help="Back up even if nothing changed.")
-    parser.add_argument("--rclone", default="rclone", help="The rclone executable. Default: rclone.")
-    parser.add_argument("--remote", default="drive:", help="The rclone remote, with colon. Default: drive:.")
     parser.add_argument(
         "--library-path", type=Path, default=None, help="Library folder. Default: from the config."
     )
@@ -264,13 +276,16 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         "--config-path", type=Path, default=None, help="Config file. Default: the one in use."
     )
     parser.add_argument(
-        "--staging-root", type=Path, default=None, help="Staging folder. Default: scratch/backup."
+        "--backup-root",
+        type=Path,
+        default=None,
+        help="Folder that holds the snapshots. Default: ~/.cache/astrometrics/backup.",
     )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Back up the databases and upload them, then apply retention.
+    """Make a local snapshot of the databases, then delete the oldest ones.
 
     Parameters
     ----------
@@ -280,7 +295,8 @@ def main(argv: list[str] | None = None) -> int:
     Returns
     -------
     exit_code : `int`
-        0 on success or when nothing changed, 1 if a snapshot or upload failed.
+        0 on success, when nothing changed, or when another backup is
+        running; 1 if a snapshot failed.
     """
     arguments = _build_argument_parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -293,52 +309,50 @@ def main(argv: list[str] | None = None) -> int:
         configuration = get_configuration()
         library_path = library_path or Path(str(configuration.get_library_path()))
         config_file_path = config_file_path or configuration.config_file_path
+    if is_in_simulator_world(library_path) or is_in_simulator_world(data_directory()):
+        # A simulated observatory's folder holds temporary copies. They are
+        # not worth a snapshot, and the snapshot would crowd out real ones.
+        logger.info("The library is a simulator's temporary copy; nothing to back up")
+        return 0
     # The observatory database, at wayfindinglib's default location.
     extra_database_paths = (Path(data_directory()) / WAYFINDING_DATABASE_RELATIVE_PATH,)
-    staging_root = arguments.staging_root or Path(scratch_directory()) / "backup"
-    state_path = staging_root / STATE_FILE_NAME
+    backup_root = arguments.backup_root or Path(backup_directory())
+    state_path = backup_root / STATE_FILE_NAME
     dry_run = arguments.dry_run
-    exit_code = 0
 
-    if not dry_run:
-        staging_root.mkdir(parents=True, exist_ok=True)
+    backup_root.mkdir(parents=True, exist_ok=True)
+    lock_file = acquire_lock(backup_root / LOCK_FILE_NAME)
+    if lock_file is None:
+        logger.info("Another backup is already running; exiting")
+        return 0
+    try:
+        # A folder left by a crashed run was never finished; remove it.
+        for partial_folder in backup_root.glob("*.partial"):
+            if not dry_run:
+                shutil.rmtree(partial_folder, ignore_errors=True)
 
-    # Retry folders left by an earlier failed upload, oldest first.
-    leftover_folders = (
-        sorted(
-            folder
-            for folder in staging_root.iterdir()
-            if folder.is_dir() and SNAPSHOT_NAME_PATTERN.match(folder.name)
-        )
-        if staging_root.exists()
-        else []
-    )
-    for leftover_folder in leftover_folders:
+        fingerprint = compute_source_fingerprint(library_path, config_file_path, extra_database_paths)
+        saved_state = read_state(state_path)
+        last_snapshot_exists = (backup_root / str(saved_state.get("last_snapshot", ""))).is_dir()
+        if not arguments.force and last_snapshot_exists and saved_state.get("fingerprint") == fingerprint:
+            logger.info("Backup unchanged, skipped")
+            return 0
+
+        snapshot_name = time.strftime("%Y%m%d_%H%M%S")
+        snapshot_folder = backup_root / snapshot_name
         if dry_run:
-            print(f"[dry-run] would upload leftover {leftover_folder}")
-        elif upload_staging_folder(leftover_folder, arguments.rclone, arguments.remote):
-            shutil.rmtree(leftover_folder)
-        else:
-            exit_code = 1
+            print(f"[dry-run] would snapshot {library_path} into {snapshot_folder}")
+            apply_retention(backup_root, snapshot_name, dry_run)
+            return 0
 
-    fingerprint = compute_source_fingerprint(library_path, config_file_path, extra_database_paths)
-    if not arguments.force and read_state(state_path).get("fingerprint") == fingerprint:
-        logger.info("Backup unchanged since the last upload; nothing to do")
-        return exit_code
-
-    snapshot_name = time.strftime("%Y%m%d_%H%M%S")
-    staging_folder = staging_root / snapshot_name
-    if dry_run:
-        print(f"[dry-run] would snapshot {library_path} into {staging_folder}")
-        print(f"[dry-run] would upload to {remote_snapshot_path(arguments.remote, snapshot_name)}/")
-    else:
-        if not stage_snapshot(library_path, config_file_path, staging_folder, extra_database_paths):
-            logger.error("A database snapshot failed; not uploading %s", staging_folder)
-            shutil.rmtree(staging_folder, ignore_errors=True)
+        # Write into a ".partial" folder and rename when complete, so a
+        # snapshot folder is always whole.
+        partial_folder = backup_root / f"{snapshot_name}.partial"
+        if not stage_snapshot(library_path, config_file_path, partial_folder, extra_database_paths):
+            logger.error("A database snapshot failed; removing %s", partial_folder)
+            shutil.rmtree(partial_folder, ignore_errors=True)
             return 1
-        if not upload_staging_folder(staging_folder, arguments.rclone, arguments.remote):
-            return 1
-        shutil.rmtree(staging_folder)
+        partial_folder.rename(snapshot_folder)
         state_path.write_text(
             json.dumps({
                 "fingerprint": fingerprint,
@@ -346,10 +360,11 @@ def main(argv: list[str] | None = None) -> int:
                 "at": datetime.now().isoformat(),
             })
         )
-        logger.info("Uploaded snapshot %s", snapshot_name)
-
-    apply_retention(arguments.rclone, arguments.remote, dry_run)
-    return exit_code
+        logger.info("Saved snapshot %s", snapshot_folder)
+        apply_retention(backup_root, snapshot_name, dry_run)
+        return 0
+    finally:
+        lock_file.close()
 
 
 if __name__ == "__main__":

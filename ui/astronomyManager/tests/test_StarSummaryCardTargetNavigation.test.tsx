@@ -11,6 +11,7 @@ import { render as baseRender, screen, fireEvent, waitFor } from '@testing-libra
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StarSummaryCard } from '../components/StarSummaryCard';
 import { TargetProvider, useTargetContext } from '../../common/context/TargetContext';
+import { peekHandoffs } from '../../common/utils/displayHandoffStore';
 
 const callBackendMock = vi.fn();
 
@@ -82,17 +83,15 @@ describe('StarSummaryCard Target Navigation', () => {
   /**
    * Verifies that clicking an associated target button dispatches mode change and target selection events.
    */
-  it('dispatches targetSelected and modeChange events when a target button is clicked', () => {
+  it('posts a targetSelected hand-off and dispatches a modeChange event when a target button is clicked', () => {
     const astronomyData = {
       id: 'CI* NGC 6205 KAD 656',
       name: 'CI* NGC 6205 KAD 656',
       targetIds: ['M 13'],
     };
 
-    const targetSelectedSpy = vi.fn();
     const modeChangeSpy = vi.fn();
 
-    window.addEventListener('astrometrics:targetSelected', targetSelectedSpy);
     window.addEventListener('astrometrics:modeChange', modeChangeSpy);
 
     render(
@@ -105,9 +104,9 @@ describe('StarSummaryCard Target Navigation', () => {
     fireEvent.click(m13Button);
 
     // Verify events dispatched
-    expect(targetSelectedSpy).toHaveBeenCalled();
-    const targetEvent = targetSelectedSpy.mock.calls[0][0] as CustomEvent;
-    expect(targetEvent.detail).toEqual({
+    const waiting = peekHandoffs('Image Processing', 'targetSelected');
+    expect(waiting).toHaveLength(1);
+    expect(waiting[0].payload).toEqual({
       targetId: 'M 13',
       starId: 'CI* NGC 6205 KAD 656',
       enableAstrometry: true,
@@ -127,7 +126,6 @@ describe('StarSummaryCard Target Navigation', () => {
     expect(screen.getByTestId('selected-target-value').textContent).toBe('M 13');
     expect(screen.getByTestId('pending-target-value').textContent).toBe('M 13');
 
-    window.removeEventListener('astrometrics:targetSelected', targetSelectedSpy);
     window.removeEventListener('astrometrics:modeChange', modeChangeSpy);
   });
 

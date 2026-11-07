@@ -4,8 +4,8 @@
  * REQ: IMG-1.2: The display SHALL show a summary of frame counts.
  * REQ: IMG-5.1: The display SHALL provide a "Process Target" command.
  */
-import { useState, useEffect, useRef } from 'react';
-import { processTarget, cancelProcessing, fetchAllProcesses, fetchJobs, fetchJobLogTail, streamJobLog, dismissJob, openSiril } from '../../common/services/imaging/processingService';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { processTarget, cancelProcessing, fetchAllProcesses, fetchJobs, fetchJobLogTail, streamJobLog, openSiril } from '../../common/services/imaging/processingService';
 import {
     GroupedFrameStat,
     ProcessStatus,
@@ -14,6 +14,7 @@ import {
 import { fetchFrameStatsGrouped } from '../../common/services/targetService';
 import { reportError } from '../../common/utils/reportError';
 import { useTargetContext } from '../../common/context/TargetContext';
+import { useOnValueChange } from './useOnValueChange';
 import { useAstrometrics } from '../../common/context/AstrometricsContext';
 
 export type LightFrameRow = [string, string, number];
@@ -34,13 +35,24 @@ export interface StackingJobResult {
     onSelectJob: (job: ProcessingJob) => void;
     activeJobId: string | null;
     setActiveJobId: (jobId: string | null) => void;
-    onDismissJob: (jobId: string) => Promise<void>;
+    /** Jobs of any type for the selected target that are running right now (from the app-wide active-jobs feed). */
+    targetActiveJobs: ProcessingJob[];
     openSiril: () => Promise<void>;
 }
 
+/**
+ * Keeps one target's stacking state: its light frames, the running job, its log
+ * and (once asked for) the job history.
+ *
+ * @param selectedTarget The target to follow.
+ * @param shouldFetch Whether to read from the library at all (false for a target that is not local).
+ * @param historyWanted Whether the job history and the last job's log are on screen (the Analysis
+ *   tab). They are only read once this is true, because nothing else shows them.
+ */
 export function useStackingJob(
     selectedTarget: string,
-    shouldFetch: boolean = true
+    shouldFetch: boolean = true,
+    historyWanted: boolean = true
 ): StackingJobResult {
     const { framesReloadKey, invalidate } = useTargetContext();
     const { activeJobs } = useAstrometrics();
@@ -51,46 +63,60 @@ export function useStackingJob(
     const [jobHistory, setJobHistory] = useState<ProcessingJob[]>([]);
     const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
     const prevIsProcessing = useRef<boolean>(false);
+    /** The running-job ids seen last time, to notice when one starts or finishes. */
+    const previousActiveJobIds = useRef<string>('');
 
-    // Clear state when target changes and fetch history
-    useEffect(() => {
-        let mounted = true;
+    /** The target whose job history and log were already read, so a refresh keeps the shown log. */
+    const historyLoadedForTarget = useRef<string | null>(null);
+
+    // Clear state only when the target really changes, not when the display is shown again.
+    useOnValueChange(selectedTarget, () => {
         setLogLines([]);
         setLightFrames([]);
         setIsProcessing(false);
         prevIsProcessing.current = false;
+        previousActiveJobIds.current = '';
+        historyLoadedForTarget.current = null;
+    });
 
-        if (selectedTarget) {
-            setLoadingHistory(true);
-            // First, try to find the latest job for this target
-            fetchJobs(selectedTarget).then(jobs => {
-                if (!mounted) return;
-                setJobHistory(jobs);
-                setLoadingHistory(false);
-                // jobs are sorted by createdAt DESC in backend; scope to
-                // stacking so an in-flight analysis job for this target
-                // isn't mistaken for a stacking job (see Global Process
-                // Monitoring below for why that scoping matters).
-                const latestJob = jobs.find(j => j.jobType === 'stacking');
-                if (latestJob) {
-                    setIsProcessing(latestJob.status === 'started');
-                    setActiveJobId(latestJob.id);
-                    fetchJobLogTail(latestJob.id, 5000).then(lines => {
-                        if (mounted && lines.length > 0) {
-                            setLogLines(lines);
-                        }
-                    });
-                } else {
-                    setActiveJobId(null);
-                }
-            }).catch(err => {
-                setLoadingHistory(false);
-                console.warn("Failed to fetch jobs for target:", err);
-            });
-        }
-
+    // Read the job history and the latest job's log, but only once the Analysis
+    // tab (the only place they show) has been opened. Without this, every open of
+    // the display paid for two reads nobody could see.
+    useEffect(() => {
+        if (!selectedTarget || !historyWanted) return;
+        let mounted = true;
+        setLoadingHistory(true);
+        // First, try to find the latest job for this target
+        fetchJobs(selectedTarget).then(jobs => {
+            if (!mounted) return;
+            setJobHistory(jobs);
+            setLoadingHistory(false);
+            // jobs are sorted by createdAt DESC in backend; scope to
+            // stacking so an in-flight analysis job for this target
+            // isn't mistaken for a stacking job (see Global Process
+            // Monitoring below for why that scoping matters).
+            const latestJob = jobs.find(j => j.jobType === 'stacking');
+            // When the display is shown again, only the list is refreshed. The log the
+            // user picked and the job being followed stay as they are.
+            if (historyLoadedForTarget.current === selectedTarget) return;
+            historyLoadedForTarget.current = selectedTarget;
+            if (latestJob) {
+                setIsProcessing(latestJob.status === 'started');
+                setActiveJobId(latestJob.id);
+                fetchJobLogTail(latestJob.id, 5000).then(lines => {
+                    if (mounted && lines.length > 0) {
+                        setLogLines(lines);
+                    }
+                });
+            } else {
+                setActiveJobId(null);
+            }
+        }).catch(err => {
+            if (mounted) setLoadingHistory(false);
+            console.warn("Failed to fetch jobs for target:", err);
+        });
         return () => { mounted = false; };
-    }, [selectedTarget]);
+    }, [selectedTarget, historyWanted]);
 
     // Identifies which fetch of the light-frame summary is currently wanted:
     // null means "nothing to fetch" (no target selected, or `shouldFetch` --
@@ -159,7 +185,6 @@ export function useStackingJob(
         // of frames and job history (a one-off fetch, not a recurring poll).
         if (prevIsProcessing.current && !currentlyProcessing) {
             invalidate('frames');
-            fetchJobs(selectedTarget).then(setJobHistory).catch(() => { /* Ignore */ });
         }
 
         setIsProcessing(currentlyProcessing);
@@ -171,12 +196,47 @@ export function useStackingJob(
     }, [selectedTarget, invalidate, activeJobs]);
 
 
+    // The app-wide active-jobs feed (AstrometricsContext `activeJobs`) is the
+    // one signal that a job started or finished. Jobs of any type for this
+    // target that are running right now are shown at the top of the list.
+    const targetActiveJobs = useMemo(
+        () => activeJobs.filter((job) => job.targetId === selectedTarget),
+        [activeJobs, selectedTarget]
+    );
+    const targetActiveJobIds = useMemo(
+        () => targetActiveJobs.map((job) => job.id).sort().join(','),
+        [targetActiveJobs]
+    );
+    // Reload the history whenever the set of running jobs changes: a new id
+    // means a job started, a missing id means one finished. The first value
+    // after a target change is skipped because the target-change effect
+    // above already loads the history.
+    useEffect(() => {
+        if (!selectedTarget) return;
+        const previous = previousActiveJobIds.current;
+        previousActiveJobIds.current = targetActiveJobIds;
+        if (previous === targetActiveJobIds) return;
+        // Until the history is on screen it is not kept up to date; it is read
+        // when it is first wanted.
+        if (!historyWanted) return;
+        let mounted = true;
+        fetchJobs(selectedTarget).then((jobs) => {
+            if (mounted) setJobHistory(jobs);
+        }).catch(() => { /* Ignore */ });
+        return () => { mounted = false; };
+    }, [selectedTarget, targetActiveJobIds, historyWanted]);
+
     // Log Streaming
     useEffect(() => {
         let cancelStream: (() => void) | undefined;
         let cancelled = false;
         if (isProcessing && activeJobId) {
+            // A new stream replays the job's whole log, so start from an
+            // empty panel to avoid showing lines twice or from another job.
+            setLogLines([]);
             streamJobLog(activeJobId, (line) => {
+                // Ignore late lines from a stream that was already cancelled.
+                if (cancelled) return;
                 setLogLines((prev) => {
                     if (prev.length > 0 && prev[prev.length - 1] === line) return prev;
                     return [...prev, line];
@@ -200,6 +260,9 @@ export function useStackingJob(
     const startProcessing = async (imageFiles?: string[], logFile?: string) => {
         if (!selectedTarget) return;
         setLogLines([]);
+        // Forget the previous job so its log is not streamed while we wait
+        // for the new job's id.
+        setActiveJobId(null);
         setIsProcessing(true);
         try {
             const result = await processTarget(selectedTarget, imageFiles, logFile);
@@ -239,16 +302,7 @@ export function useStackingJob(
         },
         activeJobId,
         setActiveJobId,
-        onDismissJob: async (jobId: string) => {
-            const success = await dismissJob(jobId);
-            if (success) {
-                setJobHistory(prev => prev.filter(j => j.id !== jobId));
-                if (activeJobId === jobId) {
-                    setActiveJobId(null);
-                    setLogLines([]);
-                }
-            }
-        },
+        targetActiveJobs,
         openSiril: async () => {
             if (!selectedTarget) return;
             await openSiril(selectedTarget);

@@ -6,7 +6,7 @@
     border-collapse: collapse;
     font-size: var(--table-font-size, 12px);
     /* Ensure consistent font size */
-    color: var(--white, #e0e0e0);
+    color: var(--white, var(--text-lighter));
 }
 
 .data-table th {
@@ -19,7 +19,7 @@
     color: var(--text-dimmer);
     font-weight: 500;
     z-index: 10;
-    font-size: 11px;
+    font-size: var(--small-font-size);
     text-transform: uppercase;
     letter-spacing: 0.03em;
 }
@@ -32,7 +32,7 @@
 
 /* Row States */
 .data-table tr.selected {
-    background-color: var(--primary-blue, #094771);
+    background-color: var(--primary-blue, var(--slate-blue));
     color: var(--white);
 }
 
@@ -42,20 +42,20 @@
 
 /* Status Colors */
 .status-rejected {
-    color: var(--accent-red, #f48771);
+    color: var(--accent-red, var(--ubuntu-orange-light));
     /* Red-ish for outliers */
     font-style: italic;
 }
 
 .status-included {
-    color: var(--success-green, #89d185);
+    color: var(--success-green, var(--success-green));
     /* Green-ish */
 }
 
 /* Utility Classes for Table Content */
 .text-muted {
     color: var(--text-muted);
-    font-size: 0.75rem;
+    font-size: var(--section-label-size);
 }
 
 .text-bold {
@@ -64,8 +64,8 @@
 }
 
 .text-desc {
-    color: var(--desc-color, #aaa);
-    font-size: 0.8rem;
+    color: var(--desc-color, var(--text-dim));
+    font-size: var(--compact-font-size);
 }
 
 .col-idx {

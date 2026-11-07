@@ -48,6 +48,7 @@ from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_N
 from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
     QUARANTINE_EXCLUSION_REASON_PREFIX,
 )
+from astrometricslib.pipelines.stacking.stage_progress import LoopProgress
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -438,9 +439,20 @@ def judge_batch(measurements: Sequence[dict[str, Any]]) -> list[QuarantineDecisi
 
 
 def _measure_frames(
-    frames: Sequence[Any], measure: Callable[[str], dict[str, Any]]
+    frames: Sequence[Any],
+    measure: Callable[[str], dict[str, Any]],
+    progress: LoopProgress | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Measure frames in parallel, keeping the ones that can be read.
+
+    Parameters
+    ----------
+    frames : `Sequence`
+        The frames to measure.
+    measure : `Callable`
+        Measures one frame file.
+    progress : `LoopProgress` or `None`, optional
+        Told about each frame as its result comes in, to write progress lines.
 
     Returns
     -------
@@ -476,7 +488,11 @@ def _measure_frames(
         return caller_context.copy().run(safe_measure, frame)
 
     with ThreadPoolExecutor(max_workers=MEASUREMENT_THREADS) as pool:
-        results = list(pool.map(measure_in_job_context, frames))
+        results = []
+        for result in pool.map(measure_in_job_context, frames):
+            results.append(result)
+            if progress is not None:
+                progress.tick()
     unreadable = [frame.path for frame, result in zip(frames, results, strict=True) if result is None]
     if unreadable:
         # One line, not one per frame: a folder of missing frames would
@@ -513,7 +529,12 @@ def find_frames_to_quarantine(
         measured.
     """
     report = QuarantineReport()
-    for batch in split_into_batches(frames):
+    batches = split_into_batches(frames)
+    # Only batches big enough to judge are measured, so only they are counted.
+    progress = LoopProgress(
+        "Checked", sum(len(batch) for batch in batches if len(batch) >= MINIMUM_FRAMES_TO_JUDGE)
+    )
+    for batch in batches:
         if len(batch) < MINIMUM_FRAMES_TO_JUDGE:
             report.batches_too_small += 1
             report.notes.append(
@@ -521,7 +542,7 @@ def find_frames_to_quarantine(
                 f"(at least {MINIMUM_FRAMES_TO_JUDGE} needed); none moved."
             )
             continue
-        measurements, unreadable = _measure_frames(batch, measure)
+        measurements, unreadable = _measure_frames(batch, measure, progress)
         report.unreadable.extend(unreadable)
         report.measurements.extend(measurements)
         if len(measurements) < MINIMUM_FRAMES_TO_JUDGE:

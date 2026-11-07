@@ -1,3 +1,7 @@
+import { Button } from '../../../common/components/Button';
+import { Checkbox } from '../../../common/components/Checkbox';
+import { TextInput } from '../../../common/components/TextInput';
+import { PopoverSelect } from '../../../common/components/PopoverSelect';
 import { ConfigData } from '../utils/configUtils';
 import { DISPLAY_DEFINITIONS, isDisplayEnabled } from '../../../common/constants/displayFlags';
 
@@ -31,44 +35,36 @@ export const GeneralForm: React.FC<GeneralFormProps> = ({
             <h3>General</h3>
 
             <h4>Secondary Window</h4>
-            <label className="settings__field settings__field--row">
-                <input
-                    type="checkbox"
-                    checked={secondaryWindowEnabled}
-                    onChange={(e) => handleToggleSecondaryWindow(e.target.checked)}
-                    className="settings__checkbox"
-                />
-                <span>Enable Secondary Window</span>
-            </label>
+            <Checkbox
+                className="settings__field settings__field--row"
+                label="Enable Secondary Window"
+                checked={secondaryWindowEnabled} onChange={(e) => handleToggleSecondaryWindow(e.target.checked)}
+            />
             {secondaryWindowEnabled && (
-                <label className="settings__field" style={{ marginTop: '8px' }}>
+                <div className="settings__field" style={{ marginTop: '8px' }}>
                     <span className="settings__label">Secondary Window Display</span>
-                    <select
-                        className="settings__input"
-                        value={String(configData['Frontend']?.['secondary_window_mode'] || 'Image Processing')}
-                        onChange={(e) => handleConfigChange('Frontend', 'secondary_window_mode', e.target.value)}
-                        aria-label="Secondary Window Default Display"
-                    >
-                        {DISPLAY_DEFINITIONS.filter(({ mode }) => isDisplayEnabled(configData, mode)).map(({ mode }) => (
-                            <option key={mode} value={mode}>{mode}</option>
-                        ))}
-                    </select>
-                </label>
+                    <PopoverSelect
+                        label="Secondary Window Default Display"
+                        options={DISPLAY_DEFINITIONS
+                            .filter(({ mode }) => isDisplayEnabled(configData, mode))
+                            .map(({ mode }) => ({ id: mode, label: mode }))}
+                        selectedId={String(configData['Frontend']?.['secondary_window_mode'] || 'Image Processing')}
+                        onSelect={(id) => handleConfigChange('Frontend', 'secondary_window_mode', id ?? '')}
+                    />
+                </div>
             )}
 
             <div className="settings__divider">
                 <h4>Displays</h4>
                 {DISPLAY_DEFINITIONS.map(({ mode, flag }) => (
-                    <label className="settings__field settings__field--row" key={flag}>
-                        <input
-                            type="checkbox"
-                            checked={configData['Frontend']?.[flag] !== 'false'}
-                            onChange={(e) => handleConfigChange('Frontend', flag, e.target.checked ? 'true' : 'false')}
-                            className="settings__checkbox"
-                            disabled={loadingConfig}
-                        />
-                        <span>{mode}</span>
-                    </label>
+                    <Checkbox
+                        key={flag}
+                        className="settings__field settings__field--row"
+                        label={mode}
+                        checked={configData['Frontend']?.[flag] !== 'false'}
+                        onChange={(e) => handleConfigChange('Frontend', flag, e.target.checked ? 'true' : 'false')}
+                        disabled={loadingConfig}
+                    />
                 ))}
             </div>
 
@@ -76,9 +72,7 @@ export const GeneralForm: React.FC<GeneralFormProps> = ({
                 <h4>Image Library</h4>
                 <label className="settings__field">
                     <span className="settings__label">Library Path</span>
-                    <input
-                        className="settings__input"
-                        type="text"
+                    <TextInput
                         value={String(configData[IMAGE_LIBRARY_SECTION]?.['path'] ?? '')}
                         onChange={(e) => handleConfigChange(IMAGE_LIBRARY_SECTION, 'path', e.target.value)}
                         disabled={loadingConfig}
@@ -92,14 +86,13 @@ export const GeneralForm: React.FC<GeneralFormProps> = ({
                 <div className="settings__action-section">
                     <h4 className="settings__subgroup-title">Maintenance</h4>
                     <div className="settings__action-row">
-                        <button
-                            className={`btn ${isReindexing ? 'btn--disabled' : ''} settings__action-label`}
+                        <Button
+                            fit
                             onClick={onReindex}
                             disabled={isReindexing}
-                            type="button"
                         >
                             {isReindexing ? 'Reindexing...' : 'Reindex Library'}
-                        </button>
+                        </Button>
                         {isReindexing && (
                             <div className="settings__progress-info">
                                 <span className="settings__progress-text">{reindexingStatus}</span>

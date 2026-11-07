@@ -28,6 +28,7 @@ from typing import Literal
 RPC_METHODS: tuple[str, ...] = (
     # System, settings and notifications
     "system:health",
+    "system:static_mounts",
     "system:frontend_log",
     "system:completions",
     "system:get_config",
@@ -104,6 +105,8 @@ RPC_METHODS: tuple[str, ...] = (
     "observatory:set_active_camera",
     "observatory:get_active_telescope",
     "observatory:set_active_telescope",
+    "observatory:get_source",
+    "observatory:set_source",
     "observatory:enter_monitoring_mode",
     "observatory:enter_controller_mode",
     # Ingestion of new frames
@@ -278,6 +281,23 @@ UI_EVENTS: tuple[UiEvent, ...] = (
         "quality:measured",
         "A frame measurement job stored new quality rows. The payload is "
         "{targetId, framesMeasured, rowsWritten, observingNightIds}.",
+    ),
+    UiEvent(
+        "library:frames_updated",
+        "A frame sync (the Download Frames button, an automatic download or an AI tool) copied new frames "
+        "into the library, before they are measured. The payload is "
+        "{targetId, framesAdded}.",
+    ),
+    UiEvent(
+        "calibration:measured",
+        "The background measuring of new dark and bias frames (it starts after an ingest or a calibration "
+        "folder sync) has ended. The payload is empty. The calibration library reads the set health again.",
+    ),
+    UiEvent(
+        "library:guiding_updated",
+        "A guide log sync (the sync button or the automatic download) stored guiding samples. The "
+        "payload is {nightIds, samplesStored}, where nightIds lists the observing nights the samples "
+        "belong to. Past-night guiding views read again.",
     ),
     UiEvent(
         "plan:changed",

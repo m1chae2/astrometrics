@@ -99,6 +99,18 @@ Weighted stacking (`stack_weight = wfwhm`) needs a Siril that accepts the `-weig
 `--with-local-solver` installs index files sized for the camera and telescope in the configuration template. A different camera or telescope sees a different amount of sky and needs index files to match. They are listed by field-of-view size at [data.astrometry.net](https://data.astrometry.net). You can also run `apt-cache search astrometry-data`.
 :::
 
+### Graphics card on a laptop with two cards
+
+On Linux, a laptop with an Intel card and an NVIDIA card can draw the app window on either one. The `gpu` setting in the `[Frontend]` section picks the card. You can also set the environment variable `ASTROMETRICS_GPU` for one start, and it wins over the file.
+
+| Value | Meaning |
+| --- | --- |
+| `auto` (default) | NVIDIA when the charger is plugged in and the NVIDIA driver for render offload is installed. Intel on battery or without that driver. |
+| `intel` | Always the Intel card. |
+| `nvidia` | Always the NVIDIA card. Falls back to Intel when the driver is missing. |
+
+The app chooses at start. It cannot switch cards while it runs, so plugging in or unplugging the charger changes nothing until you restart the app. The start-up log (`electron.log`) says which card was asked for and which one the window got. If NVIDIA was chosen but the window did not get it, the app restarts once on Intel.
+
 ### Storage layout
 
 Astrometrics keeps each kind of file in its own place. The library folders follow your settings. The other folders follow the Linux standard for program files (the XDG Base Directory layout), so a backup tool can skip the disposable ones and a cache can be wiped in one step.
@@ -110,13 +122,19 @@ Astrometrics keeps each kind of file in its own place. The library folders follo
 | Settings | `astrometrics.config.toml` (the Electron app keeps its own browser profile in the same folder) | `~/.config/astrometrics` | None |
 | Local data | The databases (`astrometrics.db`, `astrometrics_log.db`), `calibration_frames.json`, the star catalog, the observatory database and Ekos logs (`wayfinding/`), the capability-gap database, your saved scripts (`scripts/`) | `~/.local/share/astrometrics` | `path` (leave empty) |
 | Logs | App and Siril logs (`logs/`), backend and Electron console output (`logs/run/`, earlier runs in `logs/run_archive/`), the stop-time backup log | `~/.local/state/astrometrics` | None |
-| Disposable files | Scratch files, Siril work folders, Gaia caches, locks, backup staging, integrity manifests | `~/.cache/astrometrics` | None |
+| Disposable files | Scratch files, Siril work folders, Gaia caches, locks, local database snapshots (`backup/`), integrity manifests | `~/.cache/astrometrics` | None |
 
 The working library is on the local disk, so frames and stacks open at disk speed and work offline. Set `frames_mount_point` only when the library is on a drive that can be missing, such as a USB disk. Keep the databases on the local disk too. SQLite needs real file locking, and a network mount does not provide it reliably.
 
-**Backups.** Optional scripts copy the library and the databases to Google Drive with rclone, a command-line program that syncs files with cloud storage. The `build/linux/install_backup_timer.sh` script sets up the systemd user timers that run them. Each script, its limits and its options are described in `astrometricslib/scripts/README.md`.
+**Backups.** Optional scripts keep two kinds of copy. One copies the library's frames to Google Drive with rclone, a command-line program that syncs files with cloud storage. The other saves snapshots of the databases to the local `backup/` folder only, to undo a change to the app that goes wrong; it never uploads them. The `build/linux/install_backup_timer.sh` script sets up the systemd user timers that run them. Each script, its limits and its options are described in `astrometricslib/scripts/README.md`.
 
 **Cleanup.** `./build/linux/clean_caches.sh` deletes disposable files from `~/.cache/astrometrics`. Add `--dry-run` to list what it would remove first.
+
+### Work without a telescope
+
+To work on the app with your telescope off, open **Settings**, then **Observatory**, and set **Observatory source** to **Simulated**. The app then shows a temporary copy of your library and a fake telescope on this computer. New simulated frames download, analyze and review with the normal code. Your real library is only read: every change goes to a temporary folder in `~/.local/share/astrometrics-simulator`, which is deleted when you switch back to **Real**.
+
+Switching restarts the backend and waits until the fake telescope is up. A **SIMULATOR** chip stays in the top bar; **SIMULATOR FAILED** means it could not start, and the app then has no telescope at all (never your real one). It needs `fuse-overlayfs`, `indiserver`, the `indi_simulator_*` drivers and `rsync`, and does not run in the packaged app.
 
 ## Check that it works
 

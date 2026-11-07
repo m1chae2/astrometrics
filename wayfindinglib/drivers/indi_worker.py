@@ -37,10 +37,12 @@ import traceback
 import uuid
 from concurrent.futures import Future
 from multiprocessing import Queue
+from multiprocessing.connection import Connection
 from multiprocessing.process import BaseProcess
 from typing import Any
 
 from astrometricslib.exceptions import HardwareError
+from wayfindinglib.drivers.indi.pyindi_compatibility import INDI_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +58,13 @@ _STOP_SENTINEL = None
 """Placed on the command queue to tell the worker loop to exit cleanly."""
 
 
-def _worker_main(testing: bool, command_queue: Queue, result_queue: Queue, parent_pid: int) -> None:
+def _worker_main(
+    testing: bool,
+    command_queue: Queue,
+    result_queue: Queue,
+    parent_pid: int,
+    lifeline: Connection | None = None,
+) -> None:
     """Build the real INDI session and serve requests for it, in-process.
 
     Runs entirely inside the spawned worker process. Builds one session
@@ -85,6 +93,9 @@ def _worker_main(testing: bool, command_queue: Queue, result_queue: Queue, paren
         periodically so an orphaned worker (parent killed without a chance
         to signal shutdown) exits on its own instead of holding a telescope
         connection open forever.
+    lifeline : `multiprocessing.connection.Connection`, optional
+        The read end of a pipe whose write end only the backend holds. See
+        `serve_requests`.
     """
     session = None
     try:
@@ -98,17 +109,161 @@ def _worker_main(testing: bool, command_queue: Queue, result_queue: Queue, paren
         else:
             from wayfindinglib.drivers.indi_interface import IndiInterface
 
-            session = IndiInterface(config=config)
+            session = RebuildingSession(lambda: IndiInterface(config=config))
     except Exception:
         # This is the top of the worker process, so any error has to stop
         # here. The traceback is logged, and the loop below still runs so
         # every request gets back a clear "no session" error.
         logger.exception("INDI worker failed to build its session")
 
-    serve_requests(session, command_queue, result_queue, parent_pid)
+    try:
+        serve_requests(session, command_queue, result_queue, parent_pid, lifeline)
+    finally:
+        _close_session_callbacks(session)
 
 
-def serve_requests(session: Any, command_queue: Queue, result_queue: Queue, parent_pid: int) -> None:
+def _close_session_callbacks(session: Any) -> None:
+    """Make the session ignore late INDI updates before the worker exits.
+
+    The client library can send one last property update from its own
+    thread while the session object is being deleted. By then the object
+    has lost its attributes, so closing the callbacks first keeps that
+    update from running against a half-deleted object.
+
+    Parameters
+    ----------
+    session : `Any`
+        The worker's session, or `None` when it could not be built. A
+        session without ``close_callbacks`` (the simulator) is left alone.
+    """
+    close_callbacks = getattr(session, "close_callbacks", None)
+    if close_callbacks is None:
+        return
+    try:
+        close_callbacks()
+    except Exception:
+        logger.debug("Closing the INDI session's callbacks failed", exc_info=True)
+
+
+class RebuildingSession:
+    """Holds the INDI client and swaps in a new one when it goes stale.
+
+    A `PyIndi.BaseClient` that has lost its server is not reliable to reuse:
+    after an indiserver restart, the long-lived client kept connecting and
+    being dropped about 6 seconds later, while a new client connected fine.
+    So when the client asks (`stale_client`), this holder closes it, builds
+    a new one from `factory`, and connects. The swap runs on the worker's
+    request thread, after the call that asked for it has returned, never on
+    PyIndi's callback thread. Every other attribute is passed through to the
+    current client.
+    """
+
+    def __init__(self, factory: Any) -> None:
+        """Build the first client.
+
+        Parameters
+        ----------
+        factory : `Callable`
+            Returns a new, unconnected client each time it is called.
+        """
+        self._factory = factory
+        self._client = self._new_client()
+
+    def _new_client(self, previous: Any = None) -> Any:
+        """Build a client; copy retry timing and saved address from `previous`.
+
+        Returns
+        -------
+        client : `Any`
+            The new client, marked as able to be replaced.
+        """
+        client = self._factory()
+        client.supports_rebuild = True
+        if previous is not None:
+            client.connection_manager.adopt_state_from(previous.connection_manager)
+            client._connection_loss_reported = previous._connection_loss_reported
+        return client
+
+    def _replace_client_if_stale(self) -> None:
+        """Swap in a new connected client if the current one asked for it."""
+        old = self._client
+        if not getattr(old, "stale_client", False):
+            return
+        try:
+            old._expected_disconnect = True
+            old.close_callbacks()
+            old.disconnectServer()
+        except INDI_ERRORS as close_error:
+            # The old client is being dropped anyway, so closing it is best
+            # effort.
+            logger.debug("Closing the stale INDI client failed: %s", close_error)
+        self._client = self._new_client(old)
+        del old
+        self._client.connect_to_server()
+        self._client.connection_manager.record_connection_result(self._client.isServerConnected())
+
+    def __getattr__(self, name: str) -> Any:
+        """Pass `name` to the current client; swap clients after a method call.
+
+        Returns
+        -------
+        attribute : `Any`
+            The client's attribute, or for a method a wrapper that runs it
+            and then replaces the client if it went stale.
+        """
+        attribute = getattr(self._client, name)
+        if not callable(attribute):
+            return attribute
+
+        def _call(*args: Any, **kwargs: Any) -> Any:
+            """Run the method, then swap clients if needed.
+
+            A failure during the swap is logged. It must not replace the
+            method's own result or exception.
+
+            Returns
+            -------
+            result : `Any`
+                Whatever the method returned.
+            """
+            try:
+                return attribute(*args, **kwargs)
+            finally:
+                try:
+                    self._replace_client_if_stale()
+                except Exception:
+                    logger.exception("Replacing the stale INDI client failed")
+
+        return _call
+
+
+def _lifeline_is_cut(lifeline: Connection) -> bool:
+    """Say whether the backend let go of the worker's lifeline.
+
+    Parameters
+    ----------
+    lifeline : `multiprocessing.connection.Connection`
+        The read end of the lifeline pipe.
+
+    Returns
+    -------
+    cut : `bool`
+        `True` when the other end was closed (end of file) or the pipe
+        failed. The backend never writes to it.
+    """
+    try:
+        return lifeline.poll(0)
+    except OSError, EOFError, ValueError:
+        return True
+
+
+def serve_requests(
+    session: Any,
+    command_queue: Queue,
+    result_queue: Queue,
+    parent_pid: int,
+    lifeline: Connection | None = None,
+) -> None:
     """Read requests and call them on `session` until told to stop.
 
     Separated from `_worker_main` so the request-serving loop itself --
@@ -125,9 +280,18 @@ def serve_requests(session: Any, command_queue: Queue, result_queue: Queue, pare
         As in `_worker_main`.
     parent_pid : `int`
         As in `_worker_main`.
+    lifeline : `multiprocessing.connection.Connection`, optional
+        The read end of a pipe whose only write end is held by the backend.
+        The loop ends as soon as the pipe reports anything: the backend
+        closed it (it stopped this worker), or the backend's process image
+        was replaced by an in-place restart (``os.execve`` closes the write
+        end but keeps the process id, so the parent id check cannot see it).
     """
     last_liveness_check = time.monotonic()
     while True:
+        if lifeline is not None and _lifeline_is_cut(lifeline):
+            logger.warning("INDI worker's lifeline to the backend was cut; exiting.")
+            return
         now = time.monotonic()
         if now - last_liveness_check >= _PARENT_LIVENESS_CHECK_SECONDS:
             last_liveness_check = now
@@ -195,7 +359,8 @@ class IndiWorkerClient:
             Overrides the worker process's entry point. Must be a
             module-level function (picklable by name, since the worker is
             spawned fresh) taking `(testing, command_queue, result_queue,
-            parent_pid)`, the same signature as the default, `_worker_main`.
+            parent_pid, lifeline)`, the same signature as the default,
+            `_worker_main`.
             Exists so tests can run the real IPC plumbing against a trivial
             stand-in session instead of real INDI hardware.
         """
@@ -208,6 +373,7 @@ class IndiWorkerClient:
         self._pending_lock = threading.Lock()
         self._restart_lock = threading.Lock()
         self._process: BaseProcess | None = None
+        self._lifeline_writer: Connection | None = None
         self._dispatch_thread: threading.Thread | None = None
         self._stopped = False
 
@@ -240,13 +406,21 @@ class IndiWorkerClient:
         )
         self._dispatch_thread.start()
 
+        # The lifeline: the worker gets the read end; only this process holds
+        # the write end, and it is not inherited by programs this process
+        # runs, so it closes when the backend stops the worker or replaces its
+        # own process image (an in-place restart).
+        if self._lifeline_writer is not None:
+            self._lifeline_writer.close()
+        lifeline_reader, self._lifeline_writer = self._context.Pipe(duplex=False)
         self._process = self._context.Process(
             target=self._worker_target,
-            args=(self._testing, self._command_queue, result_queue, os.getpid()),
+            args=(self._testing, self._command_queue, result_queue, os.getpid(), lifeline_reader),
             name="IndiWorker",
             daemon=True,
         )
         self._process.start()
+        lifeline_reader.close()
 
     def _dispatch_results(self, result_queue: Queue) -> None:
         """Resolve pending futures as responses arrive on `result_queue`.
@@ -396,6 +570,11 @@ class IndiWorkerClient:
                 if not future.done():
                     future.set_exception(HardwareError("INDI worker stopped.", retryable=False))
             self._pending.clear()
+        if self._lifeline_writer is not None:
+            # Closing it also tells a worker that missed the stop sentinel
+            # to exit.
+            self._lifeline_writer.close()
+            self._lifeline_writer = None
         if self._process is not None and not self._process.is_alive():
             self._process.close()
         self._process = None

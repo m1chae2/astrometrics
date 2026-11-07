@@ -220,3 +220,96 @@ def test_parse_phd2_guide_log_skips_malformed_lines(tmp_path: Path) -> None:
     samples = parse_phd2_guide_log(_write(tmp_path, "guide_log.txt", text))
 
     assert len(samples) == 3
+
+
+def _find_contract_fixture() -> Path:
+    """Find the PHD2 contract guide log, wherever the fixtures live now.
+
+    Returns
+    -------
+    path : `pathlib.Path`
+        The fixture file.
+    """
+    root = Path(__file__).resolve().parents[4]
+    candidates = [
+        root / "wayfindinglib" / "simulation" / "test" / "fixtures" / "phd2_contract_guide_log.txt",
+        root / "build" / "tpm" / "fixtures" / "phd2_contract_guide_log.txt",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return candidates[0]
+
+
+_RECORDED_PHD2_LOG = _find_contract_fixture()
+
+
+def test_ekos_calibration_speeds_and_section_rates_are_unchanged(tmp_path: Path) -> None:
+    """Verify an Ekos log keeps its guide speeds and arcsec/s rates."""
+    parsed_log = parse_guide_log_file(_write(tmp_path, "guide_log.txt", _EKOS_LOG))
+
+    (calibration,) = parsed_log.calibrations
+    assert calibration.ra_rate_arcsec_per_second == pytest.approx(5.1)
+    assert calibration.dec_rate_arcsec_per_second == pytest.approx(7.5)
+    (section,) = parsed_log.sections
+    assert section.ra_rate_arcsec_per_second == pytest.approx(5.061)
+    assert section.dec_rate_arcsec_per_second == pytest.approx(7.530)
+
+
+def test_phd2_written_log_gives_calibration_speeds_and_angle() -> None:
+    """Verify a PHD2 2.6.14 log gives guide speeds and camera angle."""
+    parsed_log = parse_guide_log_file(str(_RECORDED_PHD2_LOG))
+
+    assert parsed_log.written_by_ekos is False
+    (calibration,) = parsed_log.calibrations
+    # "RA Guide Speed = 7.5 a-s/s, Dec Guide Speed = 7.5 a-s/s"
+    assert calibration.ra_rate_arcsec_per_second == pytest.approx(7.5)
+    assert calibration.dec_rate_arcsec_per_second == pytest.approx(7.5)
+    # "West calibration complete. Angle = -178.1 deg"
+    assert calibration.camera_angle_deg == pytest.approx(-178.1)
+
+
+def test_phd2_written_log_section_rates_are_converted_from_pixels_per_second() -> None:
+    """Verify PHD2's px/s rates become arcsec/s at 1.24 arcsec/px."""
+    parsed_log = parse_guide_log_file(str(_RECORDED_PHD2_LOG))
+
+    section = parsed_log.sections[0]
+    assert section.pixel_scale_arcsec_per_px == pytest.approx(1.24)
+    assert section.ra_rate_arcsec_per_second == pytest.approx(4.239 * 1.24)
+    assert section.dec_rate_arcsec_per_second == pytest.approx(5.850 * 1.24)
+
+
+def test_phd2_written_log_without_pixel_scale_leaves_section_rates_empty(tmp_path: Path) -> None:
+    """Verify px/s rates stay empty when the pixel scale is unknown."""
+    text = _RECORDED_PHD2_LOG.read_text(encoding="utf-8")
+    scaleless = "\n".join(line for line in text.splitlines() if not line.startswith("Pixel scale = "))
+    section = parse_guide_log_file(_write(tmp_path, "PHD2_GuideLog.txt", scaleless)).sections[0]
+
+    assert section.ra_rate_arcsec_per_second is None
+    assert section.dec_rate_arcsec_per_second is None
+
+
+def test_section_rate_matches_the_guide_speed_times_cosine_of_calibration_declination() -> None:
+    """The log's section rates agree with its guide speeds, within 10 percent.
+
+    PHD2 writes the rates in pixels per second. The parser multiplies them by
+    the pixel scale, so the RA rate is the on-sky rate at the calibration
+    declination: the guide speed (a fraction of the sidereal rate) times
+    cos(Cal Dec). The Dec rate matches the Dec guide speed with no factor.
+    """
+    import math
+    import re
+
+    fixture = _find_contract_fixture()
+    parsed = parse_guide_log_file(str(fixture))
+    calibration_declination = float(re.search(r"Cal Dec = (-?[\d.]+)", fixture.read_text()).group(1))
+    calibration = parsed.calibrations[0]
+    section = parsed.sections[0]
+
+    assert section.pixel_scale_arcsec_per_px is not None
+    assert section.ra_rate_arcsec_per_second == pytest.approx(
+        calibration.ra_rate_arcsec_per_second * math.cos(math.radians(calibration_declination)), rel=0.10
+    )
+    assert section.dec_rate_arcsec_per_second == pytest.approx(
+        calibration.dec_rate_arcsec_per_second, rel=0.10
+    )

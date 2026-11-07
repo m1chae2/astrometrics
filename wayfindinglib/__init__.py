@@ -140,6 +140,7 @@ class Wayfinder:
         *,
         simulated: bool | None = None,
         separate_process: bool = False,
+        open_port_forwards: bool = False,
     ) -> None:
         """Build the four sub-APIs over a shared configuration and storage.
 
@@ -162,6 +163,11 @@ class Wayfinder:
             such as the backend, should ask for it: the INDI client
             library holds Python's global lock during its blocking calls
             and would freeze everything else. `False` by default.
+        open_port_forwards : `bool`, optional
+            Allow live SSH port forwards, such as the one to PHD2 on the
+            observatory computer. `False` by default: each process would
+            otherwise open its own SSH connection, and the backend is the
+            one process that should hold live links.
 
         Attributes
         ----------
@@ -196,6 +202,7 @@ class Wayfinder:
             astrometrics=self.astrometrics,
             simulated=simulated,
             separate_process=separate_process,
+            open_port_forwards=open_port_forwards,
         )
         self.planning = ObservationPlanning(self.config, butler, astrometrics=self.astrometrics)
         self.review = ObservationReview(self.control)

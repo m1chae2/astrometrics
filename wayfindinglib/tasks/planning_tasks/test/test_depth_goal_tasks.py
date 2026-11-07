@@ -336,7 +336,7 @@ def test_more_frames_will_not_help_names_what_to_fix(butler: DiskButler, forecas
         ),
         (
             FixedPatternCause.SKY_STRUCTURE,
-            "The sky has fixed structure, likely faint light or a slope in the background.",
+            "The sky has fixed structure, likely faint light in the background.",
         ),
         (FixedPatternCause.UNPLACED, "The noise has a fixed part we can't place yet."),
     ],

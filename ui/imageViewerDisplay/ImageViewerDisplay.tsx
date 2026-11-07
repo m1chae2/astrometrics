@@ -11,6 +11,7 @@ import { useTargetActions } from '../common/hooks/useTargetActions';
 import { on as onEvent, emit as emitEvent } from '../common/utils/eventBus';
 import { useRemoteStatusContext } from '../common/context/RemoteStatusContext';
 import { useTargetImage } from './hooks/useTargetImage';
+import { useNeighborPrefetch } from './hooks/useNeighborPrefetch';
 import { GenericDisplayLayout } from '../common/components/GenericDisplayLayout';
 import { useReportModeReady } from '../common/utils/appBootReadiness';
 import { CitedFramesPanel } from './citedFrames/CitedFramesPanel';
@@ -64,11 +65,13 @@ export const ImageViewerDisplay: React.FC = () => {
 
   const activeTarget = selectedTarget || pendingTarget;
 
-  const { imageUrl, imageBlob, loading, error } = useTargetImage(
+  const { imageUrl, imageBlob, previewBlob, loading, error } = useTargetImage(
     activeTarget,
     handleImageLoaded
   );
   useReportModeReady('Image Viewer', !loading);
+  // Warm the pictures of the targets just above and below the selected one in the list.
+  useNeighborPrefetch(items.map((item) => ({ id: item.id, hasImage: Boolean(item.isProcessed) })), activeTarget, !loading && !error);
   // A frame opened from the Evidence list is shown in place of the target's image.
   const { openedFrame, openFrame, closeFrame } = useOpenedFrame();
 
@@ -105,7 +108,7 @@ export const ImageViewerDisplay: React.FC = () => {
       onFilterTextChange={setFilterText}
       highlightedIds={highlightedIds}
       isLoading={isTargetListLoading}
-      loadingMessage="Loading targets…"
+      loadingMessage="Loading targets"
       emptyMessage="No targets in the catalog."
     />
   );
@@ -115,6 +118,7 @@ export const ImageViewerDisplay: React.FC = () => {
     <TargetViewerManager
       imageUrl={openedFrame ? openedFrame.imageUrl : imageUrl}
       imageBlob={openedFrame ? openedFrame.imageBlob : imageBlob}
+      previewBlob={openedFrame ? null : previewBlob}
       loading={openedFrame ? openedFrame.loading : loading}
       error={openedFrame ? openedFrame.error : error}
       selectedTarget={selectedTarget}

@@ -5,10 +5,18 @@ Description: `StellarCatalog.query(target_id=..., detail="overlay")` calls
 reference image: its stacked image, or its processed image when there is no
 stack.
 
+The image can be named by the caller (the file the app is showing). Without
+a name, the target's current stack is used.
+
 A star's pixel position comes from the image's world coordinate system (WCS).
 The WCS is the block of FITS header keywords that maps pixels to sky
 positions, so a star's right ascension and declination give its pixel
-column and row. Stars that land outside the image are left out.
+column and row. Only a plate solution counts: the sky-map keywords a capture
+program writes are the position the mount was told to point at, and stars
+placed with them can sit tens of pixels off. Such an image is treated as
+having no WCS, with a reason that says so. Stars that land outside the image
+are left out. Files ending in ``.fits``, ``.fit`` or ``.fts`` (any case) are
+read.
 
 Two passes find the stars:
 
@@ -21,6 +29,13 @@ Two passes find the stars:
    the target's full star records are read. A star then uses the pixel
    center saved when it was detected, or the WCS when there is one.
 
+A saved pixel center belongs to the image grid it was measured on, and the
+record does not say which grid that was. So the centers are used only for
+the target's current stack, and only when the target has a single stack
+(one telescope and camera setup). With two or more stacks, a center may
+come from any of them, so an image without a WCS gets no stars and a
+short reason instead of wrongly placed ones.
+
 Star clusters and ``Star_<n>`` field detections are never labeled.
 """
 
@@ -30,6 +45,7 @@ from typing import Any
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
 from astrometricslib.models.catalog_queries import OverlayStar
 from astrometricslib.models.stellar_source import StellarObject, has_catalog_magnitude
+from astrometricslib.pipelines.shared.session_identification import header_is_plate_solved
 from astrometricslib.pipelines.shared.star_catalog_queries import (
     POSITION_ONLY_STAR_ID_PREFIX,
     StarQuery,
@@ -43,6 +59,15 @@ __all__ = ["build_overlay", "target_id_spellings"]
 
 SUMMARY_PASS_MINIMUM = 100
 """Fewest summaries the first pass tries, whatever the limit."""
+
+NO_SKY_SOLUTION_REASON = "No sky solution for this image yet"
+"""Reason given when an image has no WCS and no saved center fits it."""
+
+POINTING_ONLY_REASON = "Header pointing only, not plate-solved"
+"""Reason given when an image has a sky map that is only a pointing guess."""
+
+FITS_SUFFIXES = (".fits", ".fit", ".fts")
+"""File name endings (compared in lower case) that are read as FITS."""
 
 CLUSTER_SPECTRAL_TYPES = ("GlC", "Cluster")
 """Spectral types that mark a star cluster, which is not labeled."""
@@ -91,8 +116,12 @@ def _reference_image_path(target: Any) -> str | None:
     return str(path) if path else None
 
 
-def _read_reference_geometry(image_path: str | None) -> tuple[int | None, int | None, Any]:
+def _read_reference_geometry(image_path: str | None) -> tuple[int | None, int | None, Any, str | None]:
     """Read an image's size and its WCS, if it is a FITS file.
+
+    Only a plate solution counts as a WCS. The sky-map keywords of a camera
+    program are the place the mount was told to point, so stars drawn with
+    them can sit far from where they really are.
 
     Parameters
     ----------
@@ -106,10 +135,14 @@ def _read_reference_geometry(image_path: str | None) -> tuple[int | None, int | 
     height : `int` or `None`
         ``NAXIS2``, or `None` when unknown.
     wcs : `astropy.wcs.WCS` or `None`
-        The image's sky mapping, or `None` when it has none.
+        The image's sky mapping, or `None` when it has none or it is not a
+        plate solution.
+    reason : `str` or `None`
+        `POINTING_ONLY_REASON` when the header has a sky map that is not a
+        plate solution, else `None`.
     """
-    if not image_path or not str(image_path).endswith(".fits"):
-        return None, None, None
+    if not image_path or not str(image_path).lower().endswith(FITS_SUFFIXES):
+        return None, None, None, None
     from astropy.wcs import WCS
 
     width = height = wcs = None
@@ -117,17 +150,21 @@ def _read_reference_geometry(image_path: str | None) -> tuple[int | None, int | 
         header = read_header(image_path)
     except FITS_READ_ERRORS as error:
         logger.debug("Could not read the WCS of reference image %s: %s", image_path, error)
-        return None, None, None
+        return None, None, None, None
     if header.get("NAXIS1") is not None:
         width = int(header["NAXIS1"])
     if header.get("NAXIS2") is not None:
         height = int(header["NAXIS2"])
+    reason = None
     try:
         candidate = WCS(header)
-        wcs = candidate if candidate.is_celestial else None
+        if candidate.is_celestial and header_is_plate_solved(header):
+            wcs = candidate
+        elif candidate.is_celestial:
+            reason = POINTING_ONLY_REASON
     except DATA_ERRORS:
         wcs = None
-    return width, height, wcs
+    return width, height, wcs, reason
 
 
 def _project(wcs: Any, ra_deg: Any, dec_deg: Any) -> tuple[float, float] | None:
@@ -268,8 +305,12 @@ def _record_pass(
     width: int | None,
     height: int | None,
     limit: int | None,
+    use_saved_centers: bool = True,
 ) -> list[OverlayStar]:
     """Place stars from their full records, by saved center or WCS.
+
+    ``use_saved_centers`` is `False` when the saved centers may belong to a
+    different image grid than the one drawn on, so only the WCS is used.
 
     Returns
     -------
@@ -284,7 +325,9 @@ def _record_pass(
             continue
         if star.stellar_spectral_type == "Cluster" or star.id.startswith("Star_"):
             continue
-        pixel = _saved_center(star) or _project(wcs, star.right_ascension, star.declination)
+        pixel = (_saved_center(star) if use_saved_centers else None) or _project(
+            wcs, star.right_ascension, star.declination
+        )
         if pixel is None or not _inside(pixel, width, height):
             continue
         candidates.append((star, pixel))
@@ -306,8 +349,32 @@ def _record_pass(
     ]
 
 
-def build_overlay(storage: Any, target_id: str, limit: int | None) -> list[OverlayStar]:
-    """Place a target's catalog stars on its reference image.
+def _saved_centers_fit(target: Any, image_path: str | None, reference_path: str | None) -> bool:
+    """Tell whether the saved pixel centers can be trusted for an image.
+
+    The centers carry no tag of the image they were measured on. They are
+    trusted only when the image is the target's current stack and that is
+    the target's only stack, so no other image could have supplied them.
+
+    Returns
+    -------
+    trusted : `bool`
+        `True` when the saved centers belong to this image's pixel grid, or
+        when there is no image to draw on.
+    """
+    if not image_path:
+        return True
+    if image_path != reference_path:
+        return False
+    stacking = getattr(target, "stacking", None)
+    configurations = getattr(stacking, "stacks_by_configuration", None) or {}
+    return len(configurations) <= 1
+
+
+def build_overlay(
+    storage: Any, target_id: str, limit: int | None, image_path: str | None = None
+) -> tuple[list[OverlayStar], str | None]:
+    """Place a target's catalog stars on an image.
 
     Parameters
     ----------
@@ -317,12 +384,18 @@ def build_overlay(storage: Any, target_id: str, limit: int | None) -> list[Overl
         The target. ``"M 13"`` and ``"M_13"`` name the same target.
     limit : `int` or `None`
         Most stars to place. `None` places every star found.
+    image_path : `str`, optional
+        The image to place the stars on (the file being shown). Its size and
+        WCS are read from the file. By default, the target's current stack.
 
     Returns
     -------
     overlay : `list` [`OverlayStar`]
         The placed stars, most useful first. Empty when the target has no
         stars that can be placed.
+    reason : `str` or `None`
+        Why the list is empty when the image has no plate-solved WCS and the
+        saved pixel centers do not fit it, else `None`.
     """
     spellings = target_id_spellings(target_id)
     target = None
@@ -331,7 +404,10 @@ def build_overlay(storage: Any, target_id: str, limit: int | None) -> list[Overl
         if found:
             target = found[0]
             break
-    width, height, wcs = _read_reference_geometry(_reference_image_path(target))
+    reference_path = _reference_image_path(target)
+    chosen_path = str(image_path) if image_path else reference_path
+    width, height, wcs, wcs_reason = _read_reference_geometry(chosen_path)
+    use_saved_centers = _saved_centers_fit(target, chosen_path, reference_path)
 
     for spelling in spellings:
         rows = run_star_query(
@@ -344,7 +420,7 @@ def build_overlay(storage: Any, target_id: str, limit: int | None) -> list[Overl
                 radii = {record.id: record.radius_px for record in records}
                 for star in placed:
                     star.radius_px = radii.get(star.id)
-                return placed
+                return placed, None
             break
 
     # Only the stars of the target itself are read, under the first spelling
@@ -353,5 +429,9 @@ def build_overlay(storage: Any, target_id: str, limit: int | None) -> list[Overl
     for spelling in spellings:
         records = run_star_query(storage, StarQuery(target_id=spelling), "objects", None, 0).objects or []
         if records:
-            return _record_pass(records, spellings, wcs, width, height, limit)
-    return []
+            placed = _record_pass(records, spellings, wcs, width, height, limit, use_saved_centers)
+            reason = None
+            if not placed and wcs is None and not use_saved_centers:
+                reason = wcs_reason or NO_SKY_SOLUTION_REASON
+            return placed, reason
+    return [], None

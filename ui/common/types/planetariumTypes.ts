@@ -45,6 +45,21 @@ export interface PlanetariumSource {
 }
 
 /**
+ * What `planetarium:get_catalog_sources` replies with.
+ *
+ * `starsTruncated` is true when a catalog driver cut its answer short (the Gaia driver stops at
+ * 20,000 stars), so fainter stars inside the circle are missing. A cut answer must not be reused
+ * for a different view, because a fresh query for that view would return stars this one lacks.
+ * An answer with failedCatalogs is missing the stars of those catalogs, so it is shown but not kept.
+ */
+export interface CatalogSourcesResult {
+  sources: PlanetariumSource[];
+  starsTruncated: boolean;
+  /** Names of the catalog drivers that could not answer; empty when all did. */
+  failedCatalogs: string[];
+}
+
+/**
  * PlanetariumTarget Interface
  *
  * Defines a target with an associated stacked FITS image for sky projection.

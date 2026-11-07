@@ -242,10 +242,19 @@ def test_online_catalog_sources_name_their_driver(tmp_path: Path, monkeypatch: p
     monkeypatch.setattr(
         resolution_operations,
         "get_online_catalog_sources",
-        lambda *args: [("deep_stars", StellarObject(id="Gaia 1", ra=1.0, dec=2.0, magnitude=12.1))],
+        lambda *args: (
+            [("deep_stars", StellarObject(id="Gaia 1", ra=1.0, dec=2.0, magnitude=12.1))],
+            True,
+            ["hipparcos"],
+        ),
     )
 
-    (source,) = sky_sources.online_catalog_sources(sky, 1.0, 2.0, 0.5, ["deep_stars"], 13.0)
+    (source,), truncated, failed_catalogs = sky_sources.online_catalog_sources(
+        sky, 1.0, 2.0, 0.5, ["deep_stars"], 13.0
+    )
+
+    assert truncated is True
+    assert failed_catalogs == ["hipparcos"]
 
     assert source.catalog_source == "deep_stars"
     assert source.is_global is True

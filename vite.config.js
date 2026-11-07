@@ -1,12 +1,10 @@
 /**
  * @fileoverview Vite configuration for building and serving the React application.
  *
- * Supports multi-page build: the main app (index.html) and the system tray
- * popover (tray_popover.html) are built as separate Rollup entry points while
- * sharing the same vendor chunk split.
+ * The build has one page, the main app (index.html), with a vendor chunk split.
  *
  * CSP injection is handled by the inline `injectCspPlugin`, which replaces the
- * <%- csp %> placeholder in every HTML file during both dev and build. No
+ * <!-- csp --> placeholder (a plain HTML comment, so the raw files stay valid HTML) in every HTML file during both dev and build. No
  * third-party HTML plugin is needed.
  */
 
@@ -20,18 +18,18 @@ export default defineConfig(({ mode }) => {
   // Strict CSP for production, Lax for Dev (HMR requires ws:)
   // backend runs on 127.0.0.1:5000, so we must allow it.
   const cspContent = isProd
-    ? "<!-- Production CSP --> <meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'self'; script-src 'self'; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https: http://127.0.0.1:* ws://127.0.0.1:*; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self';\">"
+    ? "<!-- Production CSP --> <meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'self'; script-src 'self'; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https: http://127.0.0.1:* ws://127.0.0.1:*; img-src 'self' data: blob: http://127.0.0.1:*; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self';\">"
     : "<!-- Dev CSP --> <meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'self'; connect-src 'self' http: ws: data:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; worker-src 'self' blob:; child-src 'self' blob:; img-src 'self' data: blob: http:; style-src 'self' 'unsafe-inline';\">";
 
   /**
-   * Inline Vite plugin that replaces the <%- csp %> EJS placeholder in any
+   * Inline Vite plugin that replaces the <!-- csp --> comment placeholder in any
    * HTML file with the resolved CSP meta tag. Applied to all HTML files so
-   * both index.html and tray_popover.html receive the tag.
+   * index.html receives the tag.
    */
   const injectCspPlugin = {
     name: 'inject-csp',
     transformIndexHtml(html) {
-      return html.replace(/<%- csp %>/g, cspContent);
+      return html.replace(/<!-- csp -->/g, cspContent);
     },
   };
 
@@ -72,7 +70,6 @@ export default defineConfig(({ mode }) => {
       rolldownOptions: {
         input: {
           main: path.resolve(import.meta.dirname, 'ui/index.html'),
-          tray_popover: path.resolve(import.meta.dirname, 'ui/tray_popover.html'),
         },
         output: {
           codeSplitting: {

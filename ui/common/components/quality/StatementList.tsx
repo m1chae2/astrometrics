@@ -11,6 +11,7 @@ import type { TargetStatement } from '../../types/backendTypes';
 import { StatementItem } from './StatementItem';
 import type { StatementActions } from './useStatementActions';
 import { statementKey } from './statementLabels';
+import { Button } from '../Button';
 
 export interface StatementListProps {
     /** The statements, in the order the library returned them. */
@@ -43,10 +44,9 @@ export const StatementList: React.FC<StatementListProps> = ({ statements, topCou
                 })}
             </ul>
             {hasMore && (
-                <button
+                <Button
+                    size="small"
                     ref={toggleReference}
-                    type="button"
-                    className="btn btn--tiny quality-button"
                     aria-expanded={showAll}
                     onClick={() => {
                         setShowAll((value) => !value);
@@ -54,7 +54,7 @@ export const StatementList: React.FC<StatementListProps> = ({ statements, topCou
                     }}
                 >
                     {showAll ? 'Show fewer' : `Show all ${statements.length}`}
-                </button>
+                </Button>
             )}
         </div>
     );

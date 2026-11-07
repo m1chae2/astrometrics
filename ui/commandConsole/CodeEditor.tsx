@@ -5,6 +5,7 @@
 import React from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { python } from '@codemirror/lang-python';
+import { Button } from '../common/components/Button';
 
 interface CodeEditorProps {
   value: string;
@@ -35,23 +36,23 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
           {onClear && (
-            <button className="editor-btn" onClick={onClear} type="button">
+            <Button variant="secondary" size="small" onClick={onClear}>
               Clear
-            </button>
+            </Button>
           )}
           {onSave && (
-            <button className="editor-btn" onClick={onSave} type="button">
+            <Button variant="secondary" size="small" onClick={onSave}>
               Save Script
-            </button>
+            </Button>
           )}
-          <button
-            className="editor-btn editor-btn--primary"
+          <Button
+            variant="primary"
+            size="small"
             onClick={onRun}
             disabled={isRunning}
-            type="button"
           >
             {isRunning ? 'Running...' : 'Run Script (Ctrl+Enter)'}
-          </button>
+          </Button>
         </div>
       </div>
 

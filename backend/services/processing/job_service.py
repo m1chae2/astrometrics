@@ -117,16 +117,24 @@ class JobService:
         return self.repository.get_log_entries_for_job(job_id)
 
     def get_jobs_for_target(
-        self, target_id: str, job_type: str | None = None, status: str | None = None, limit: int = 50
+        self,
+        target_id: str,
+        job_type: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+        before: str | None = None,
     ) -> list[ProcessingJob]:
         """Retrieve historical jobs for a target.
+
+        Pass ``before`` (an ISO time) to get only jobs created earlier than
+        that time, so a caller can page back through history.
 
         Returns
         -------
         jobs : `list`
             Historical jobs for the target, matching the given filters.
         """
-        return self.repository.get_jobs_by_target(target_id, job_type, status, limit)
+        return self.repository.get_jobs_by_target(target_id, job_type, status, limit, before)
 
     def get_recent_jobs(self, limit: int = 50, job_type: str | None = None) -> list[ProcessingJob]:
         """Retrieve most recent jobs globally.
@@ -151,9 +159,16 @@ class JobService:
         return [j for j in all_recent if j.status in ["started", "running"]]
 
     def list_jobs(
-        self, target_id: str | None = None, job_type: str | None = None, limit: int = 50
+        self,
+        target_id: str | None = None,
+        job_type: str | None = None,
+        limit: int = 50,
+        before: str | None = None,
     ) -> list[ProcessingJob]:
         """List jobs from history, optionally filtered.
+
+        ``before`` (an ISO time) keeps only jobs created earlier than that
+        time. It applies to a single target only.
 
         Returns
         -------
@@ -162,7 +177,7 @@ class JobService:
             jobs globally.
         """
         if target_id:
-            return self.get_jobs_for_target(target_id, job_type=job_type, limit=limit)
+            return self.get_jobs_for_target(target_id, job_type=job_type, limit=limit, before=before)
         else:
             return self.get_recent_jobs(limit=limit, job_type=job_type)
 

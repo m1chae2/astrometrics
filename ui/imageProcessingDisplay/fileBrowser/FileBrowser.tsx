@@ -1,7 +1,17 @@
 import React, { useState, useMemo } from 'react';
 import { matchesQuery } from '../../common/utils/searchLogic';
 import { EmptyState } from '../../common/components/EmptyState';
+import { PopoverSelect } from '../../common/components/PopoverSelect';
+import { Button } from '../../common/components/Button';
+import { Checkbox } from '../../common/components/Checkbox';
+import { TextInput } from '../../common/components/TextInput';
 import '../imageProcessingDisplay.css'; // Consolidated styles
+
+/** Why a frame is marked "Unusual brightness" (shown when you hover over it). */
+const UNUSUAL_BRIGHTNESS_TOOLTIP =
+    "This frame's reference stars were much brighter or dimmer than in the night's other frames " +
+    '(more than 3 standard deviations from the typical frame), so the variable-star search left it out. ' +
+    'It is still in the stack.';
 
 export interface FileItem {
     path: string;
@@ -77,36 +87,38 @@ export const FileBrowserToolbar: React.FC<{
             <div className={`file-browser__toolbar ${className}`}>
                 <div className="file-browser__search-container">
                     {uniqueCameras.length > 0 && (
-                        <select
-                            className="file-browser__camera-select"
-                            value={selectedCamera}
-                            onChange={(e) => onCameraChange(e.target.value)}
-                        >
-                            <option value="All">All Cameras</option>
-                            {uniqueCameras.map(cam => (
-                                <option key={cam} value={cam}>{cam}</option>
-                            ))}
-                        </select>
+                        <PopoverSelect
+                            label="Camera"
+                            options={uniqueCameras.map((camera) => ({ id: camera, label: camera }))}
+                            selectedId={selectedCamera === 'All' ? null : selectedCamera}
+                            onSelect={(id) => onCameraChange(id ?? 'All')}
+                            emptyLabel="All Cameras"
+                            size="compact"
+                        />
                     )}
-                    <input
-                        type="text"
-                        className="entry file-browser__search-input file-browser__search-input--full"
+                    <TextInput
+                        size="small"
+                        className="file-browser__search-input"
                         placeholder="Search files... (e.g. iso>800)"
                         value={searchTerm}
                         onChange={(e) => onSearchChange(e.target.value)}
                     />
                 </div>
-                <button
-                    className="btn btn--secondary file-browser__header-btn"
+                <Button
+                    variant="secondary"
+                    size="small"
+                    className="file-browser__header-btn"
                     onClick={onShowHeader}
                     disabled={!onShowHeader}
                     title="View FITS Header Info"
                 >
                     Header Info
-                </button>
+                </Button>
                 {checkedFiles.size > 0 && onDeleteFiles ? (
-                    <button
-                        className="btn btn--danger file-browser__delete-btn"
+                    <Button
+                        variant="danger"
+                        size="small"
+                        className="file-browser__delete-btn"
                         onClick={handleDeleteClick}
                         title={`Delete ${checkedFiles.size} Selected Files`}
                     >
@@ -115,15 +127,18 @@ export const FileBrowserToolbar: React.FC<{
                             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                         </svg>
                         <span>{checkedFiles.size}</span>
-                    </button>
+                    </Button>
                 ) : (
-                    <button
-                        className="file-browser__help-button"
+                    <Button
+                        variant="ghost"
+                        size="square"
+                        className="info-button__trigger"
+                        aria-label="Search filter help"
                         onClick={() => setShowHelp(!showHelp)}
                         title="Search Filter Help"
                     >
                         ?
-                    </button>
+                    </Button>
                 )}
                 {showHelp && checkedFiles.size === 0 && (
                     <div className="search-help-popup file-browser__help-popup">
@@ -139,12 +154,14 @@ export const FileBrowserToolbar: React.FC<{
                             <li><code>(iso {'>'} 100 && exp {'>'} 60)</code></li>
                         </ul>
                         <div className="file-browser__help-close-container">
-                            <button
-                                className="btn btn--secondary file-browser__help-close-btn"
+                            <Button
+                                variant="secondary"
+                                size="small"
+                                className="file-browser__help-close-btn"
                                 onClick={() => setShowHelp(false)}
                             >
                                 Close
-                            </button>
+                            </Button>
                         </div>
                     </div>
                 )}
@@ -250,8 +267,8 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                     <thead>
                         <tr>
                             <th className="file-browser__checkbox-cell">
-                                <input
-                                    type="checkbox"
+                                <Checkbox
+                                    aria-label="Select all files"
                                     checked={sortedFiles.length > 0 && sortedFiles.every(f => checkedFiles.has(f.path))}
                                     onChange={() => onToggleAll(sortedFiles)}
                                 />
@@ -312,8 +329,8 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                                     }}
                                 >
                                     <td onClick={(e) => e.stopPropagation()}>
-                                        <input
-                                            type="checkbox"
+                                        <Checkbox
+                                            aria-label={`Select ${file.name}`}
                                             checked={isChecked}
                                             onChange={() => {}}
                                             onClick={(e) => {
@@ -334,9 +351,13 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                                     <td>{file.camera}</td>
                                     <td>{file.filter}</td>
                                     <td>{file.exposure}</td>
-                                    {/* REQ: IMG-2.7: The display SHALL visually distinguish "Rejected" frames from "Included" frames. */}
-                                    <td className={rejected ? 'status-rejected' : isOutlier ? 'status-warning' : 'status-included'}>
-                                        {rejected ? 'Rejected' : isOutlier ? '⚠️ Outlier' : 'Included'}
+                                    {/* The variable-star search can leave a frame out. That says nothing
+                                        about stacking, so the text names what was unusual, not "Rejected". */}
+                                    <td
+                                        className={rejected ? 'status-rejected' : isOutlier ? 'status-warning' : 'status-included'}
+                                        title={rejected ? UNUSUAL_BRIGHTNESS_TOOLTIP : undefined}
+                                    >
+                                        {rejected ? 'Unusual brightness' : isOutlier ? '⚠️ Outlier' : 'Included'}
                                     </td>
                                 </tr>
                             );

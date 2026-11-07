@@ -6,6 +6,9 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 import { on as onEvent } from '../utils/eventBus';
+import { observeHandoffs } from '../utils/displayHandoffStore';
+import { socketClient } from '../utils/socketClient';
+import { UI_EVENTS } from '../types/backendTypes';
 import { DisplayActiveContext } from './DisplayActiveContext';
 import { useOptionalHandoff } from './HandoffContext';
 
@@ -123,16 +126,16 @@ export const TargetProvider: React.FC<TargetProviderProps> = ({ children }) => {
 
     // Synchronize external target selection events (e.g. from Astronomy Manager, Planetarium, or WebSocket)
     useEffect(() => {
-        const handleTargetSelected = (event: Event) => {
-            const raw = (event as CustomEvent).detail;
+        // Watch every "target selected" hand-off, whichever display it is for.
+        // This provider is always running, so it needs no waiting copy.
+        return observeHandoffs('targetSelected', (handoff) => {
+            const raw = handoff.payload as string | { targetId?: string } | null | undefined;
             const targetId = typeof raw === 'string' ? raw : raw?.targetId;
             if (targetId) {
                 setSelectedTarget(targetId);
                 setPendingTarget(targetId);
             }
-        };
-        window.addEventListener('astrometrics:targetSelected', handleTargetSelected);
-        return () => window.removeEventListener('astrometrics:targetSelected', handleTargetSelected);
+        });
     }, [setSelectedTarget, setPendingTarget]);
 
     useEffect(() => {
@@ -145,6 +148,17 @@ export const TargetProvider: React.FC<TargetProviderProps> = ({ children }) => {
             } catch {
                 // Ignore
             }
+        };
+    }, [invalidate]);
+
+    // An automatic download added frames to the library: read the frame lists again.
+    useEffect(() => {
+        const onAction = (action: string): void => {
+            if (action === UI_EVENTS['library:frames_updated']) invalidate('frames');
+        };
+        socketClient.on('action', onAction);
+        return () => {
+            socketClient.off('action', onAction);
         };
     }, [invalidate]);
 

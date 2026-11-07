@@ -66,6 +66,7 @@ from urllib.parse import quote
 
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
 from astrometricslib.foundation.errors import InvalidArgumentError, StorageError
+from astrometricslib.foundation.storage.data_versions import QUALITY_KIND, bump_data_version
 from astrometricslib.foundation.storage.local_database import connect_db
 from astrometricslib.models.quality.calibration_identities import (
     CalibrationFileIdentity,
@@ -559,7 +560,14 @@ class QualityStore:
         try:
             connection.execute("BEGIN IMMEDIATE")
             self._migrate(connection)
+            changes_before = connection.total_changes
             yield connection
+            if connection.total_changes != changes_before:
+                # Count the write in the same transaction, so a cache sees
+                # the new rows and the new count together. A body that wrote
+                # nothing (a repeated measurement is ignored, a capture
+                # setting already exists) leaves the count alone.
+                bump_data_version(connection, QUALITY_KIND)
             connection.commit()
         except (sqlite3.Error, OSError) as error:
             connection.rollback()
@@ -706,6 +714,11 @@ class QualityStore:
         if 1 <= version < 5:
             # A new file (version 0) has no rows to rename.
             QualityStore._migrate_from_version_4(connection)
+        if 1 <= version < SCHEMA_VERSION:
+            # A migration rewrote rows in place (merged settings, renamed
+            # metrics). Count it in the same transaction, so a kept result
+            # built from the old rows is rebuilt.
+            bump_data_version(connection, QUALITY_KIND)
         has_version_table = connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'quality_schema_version'"
         ).fetchone()

@@ -192,7 +192,7 @@ def no_stack_plate_solve(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     from astrometricslib.pipelines.stacking.post_processing import stack_noise
 
-    def failed_solve(stack_path: str, drivers: object = None) -> tuple[None, str]:
+    def failed_solve(stack_path: str, drivers: object = None) -> tuple[None, str, str]:
         """Give the answer of a solve that was not run.
 
         Parameters
@@ -208,8 +208,10 @@ def no_stack_plate_solve(monkeypatch: pytest.MonkeyPatch) -> None:
             Never a solution.
         reason : `str`
             Says the solve was not run.
+        wcs_source : `str`
+            The source a solve would have recorded (unused).
         """
-        return None, "plate-solving the stack itself was not run in this test"
+        return None, "plate-solving the stack itself was not run in this test", "plate solve of the stack"
 
     # The real function stays reachable for the test of its own error handling.
     failed_solve.real_function = stack_noise._plate_solve_stack_wcs  # type: ignore[attr-defined]

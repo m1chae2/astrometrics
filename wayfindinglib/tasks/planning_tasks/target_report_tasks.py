@@ -44,6 +44,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from astrometricslib import Target
+from astrometricslib.drivers import VersionedCache
 from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.reports import (
     CaptureSetting,
@@ -51,6 +52,7 @@ from astrometricslib.reports import (
     QualityMeasurement,
     observing_night_id,
 )
+from wayfindinglib.analytics.data_versions import report_data_version
 from wayfindinglib.analytics.result_quality.aggregates import (
     MeasuredNoiseCheck,
     capture_setting_summaries,
@@ -2055,6 +2057,56 @@ def _starting_point(
 # -----------------------------------------------------------------------------
 
 
+TARGET_REPORT_CACHE_MAXIMUM_ENTRIES = 32
+"""How many target reports are kept (one per target and noise ratio).
+
+Design estimate: the depth goal asks for one or two reports per target, and a
+night's planning for a few more. A report is some tens of kilobytes, so 32 of
+them stay under a few megabytes. Not measured."""
+
+_TARGET_REPORT_CACHE = VersionedCache(maximum_entries=TARGET_REPORT_CACHE_MAXIMUM_ENTRIES)
+"""The built reports, each kept until the data behind it changes."""
+
+
+def _report_cache_key(target: Target, config: Any, target_noise_ratio: float) -> tuple | None:
+    """Name the report for the cache.
+
+    The report depends on more than the data version: on which library and
+    target it is for, the noise ratio it aims at, the stack weight setting,
+    and the hour (the starting point uses the sky and the Moon at the time).
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+    config : `AppConfiguration`
+        The configuration.
+    target_noise_ratio : `float`
+        The noise ratio the report aims at.
+
+    Returns
+    -------
+    key : `tuple` or `None`
+        The key, or `None` if the library cannot be named (nothing is kept).
+    """
+    try:
+        library = str(config.get_library_path())
+        weight = str(config.get_stack_weight()) if hasattr(config, "get_stack_weight") else ""
+    except AttributeError, OSError, TypeError, ValueError:
+        return None
+    hour = datetime.now(UTC).strftime("%Y-%m-%dT%H")
+    # The frame count catches frames the held target gained but has not saved.
+    return (
+        "target_report",
+        library,
+        target.id,
+        len(target.frames),
+        round(target_noise_ratio, 9),
+        weight,
+        hour,
+    )
+
+
 def build_target_dataset_report(
     target: Target,
     *,
@@ -2064,7 +2116,78 @@ def build_target_dataset_report(
     at: datetime | None = None,
     target_noise_ratio: float = TARGET_NOISE_RATIO,
 ) -> TargetDatasetReport:
-    """Build the report on one target's data.
+    """Build the report on one target's data, or give the one built before.
+
+    A report takes seconds to build, and the display that asks for it asks
+    again a moment later. A report built for "now" (`at` omitted) is kept in
+    a `VersionedCache` until the data behind it changes: the library's write
+    counters, the wayfinding tables the report reads, and the active
+    equipment and site (see `report_data_version`). It reflects what is
+    stored, so frames the held target gained but has not saved are seen only
+    by their count. A report for a given `at` is built every time. The caller
+    gets its own copy.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+    astrometrics : `Astrometrics`
+        The science library handle. Its ``quality``, ``processing`` and
+        ``targets`` parts are read.
+    butler : `DiskButler`
+        The storage layer, for the stored night plans, the Ekos session
+        records and the site.
+    config : `AppConfiguration`
+        The configuration, for the equipment and the stacker's weight mode.
+    at : `datetime`, optional
+        The time the report is for. Used only by the starting point.
+        Defaults to now.
+    target_noise_ratio : `float`, optional
+        The noise after the recommended additional frames over the noise now.
+        The default is one doubling of the effective time. The depth goal
+        passes the ratio that reaches its depth.
+
+    Returns
+    -------
+    report : `TargetDatasetReport`
+        The summaries, the statements in priority order, how many warnings
+        need attention, the starting point when there are no frames, the
+        forecast checks and the science outcomes. Nothing is stored.
+    """
+    key = None if at is not None else _report_cache_key(target, config, target_noise_ratio)
+    if key is None:
+        return _build_target_dataset_report(
+            target,
+            astrometrics=astrometrics,
+            butler=butler,
+            config=config,
+            at=at,
+            target_noise_ratio=target_noise_ratio,
+        )
+    return _TARGET_REPORT_CACHE.get_or_build(
+        key,
+        lambda: report_data_version(config, butler),
+        lambda: _build_target_dataset_report(
+            target,
+            astrometrics=astrometrics,
+            butler=butler,
+            config=config,
+            at=at,
+            target_noise_ratio=target_noise_ratio,
+        ),
+    )
+
+
+def _build_target_dataset_report(
+    target: Target,
+    *,
+    astrometrics: Any,
+    butler: Any,
+    config: Any,
+    at: datetime | None = None,
+    target_noise_ratio: float = TARGET_NOISE_RATIO,
+) -> TargetDatasetReport:
+    """Build the report on one target's data, without using the cache.
 
     Parameters
     ----------

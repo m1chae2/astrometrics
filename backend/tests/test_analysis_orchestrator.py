@@ -20,7 +20,9 @@ import pytest
 from astrometricslib import FrameRecord, Target
 from astrometricslib._internal.results import BatchRunSummary
 from astrometricslib.exceptions import InvalidArgumentError
+from astrometricslib.jobs import JobStore
 from backend.services.analysis.analysis_orchestrator import AnalysisOrchestrator
+from backend.services.processing.job_service import JobService
 
 
 def _make_orchestrator(astrometrics: MagicMock | None = None) -> AnalysisOrchestrator:
@@ -265,3 +267,58 @@ class TestAnalysisFailures:
         result = orchestrator.get_analysis_results("FailedTarget")
 
         assert result == {"status": "failed", "jobId": "job9", "error": "Plate solve failed"}
+
+
+class TestResultSurvivesRestart:
+    """Verify the finished summary is read back from the job store."""
+
+    def _make_job_service(self, tmp_path: Path) -> JobService:
+        """Build a real job service on a throwaway database.
+
+        Returns
+        -------
+        job_service : `JobService`
+            A job service backed by a database under `tmp_path`.
+        """
+        return JobService(JobStore(str(tmp_path / "jobs.db")))
+
+    def _make_orchestrator_with(self, job_service: JobService) -> AnalysisOrchestrator:
+        """Build an orchestrator that shares the given job service.
+
+        Returns
+        -------
+        orchestrator : `AnalysisOrchestrator`
+            An orchestrator with no in-memory futures.
+        """
+        orchestrator = _make_orchestrator()
+        orchestrator._job_service = job_service
+        return orchestrator
+
+    def test_summary_is_returned_by_a_new_orchestrator(self, tmp_path: Path) -> None:
+        """A second orchestrator on the same job store returns the summary."""
+        job_service = self._make_job_service(tmp_path)
+        summary = {
+            "status": "finished",
+            "totalImages": 12,
+            "rejectedCount": 7,
+            "rejectedFiles": ["/lib/a.fits"],
+            "variableCandidates": [{"starId": 3, "score": 1.5}],
+        }
+        first = self._make_orchestrator_with(job_service)
+        job = job_service.create_job(target_id="M 31", job_type="analysis", log_file=None)
+        first._store_job_result(job.id, summary)
+        job_service.update_job(job.id, status="completed", progress=100.0)
+
+        restarted = self._make_orchestrator_with(job_service)
+
+        assert restarted.get_analysis_results("M 31") == summary
+
+    def test_job_without_stored_summary_reports_finished(self, tmp_path: Path) -> None:
+        """A completed job with no saved summary still answers."""
+        job_service = self._make_job_service(tmp_path)
+        job = job_service.create_job(target_id="M 31", job_type="analysis", log_file=None)
+        job_service.update_job(job.id, status="completed", progress=100.0)
+
+        result = self._make_orchestrator_with(job_service).get_analysis_results("M 31")
+
+        assert result == {"status": "finished", "jobId": job.id}

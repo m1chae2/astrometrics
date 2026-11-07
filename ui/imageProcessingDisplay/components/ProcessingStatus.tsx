@@ -1,7 +1,9 @@
 import React, { useEffect, useRef } from 'react';
-import { LoadingSpinner } from '../../common/components/LoadingSpinner';
+import { UpdatingBar } from '../../common/components/Skeleton';
 import '../imageProcessingDisplay.css';
+import { Button } from '../../common/components/Button';
 
+import { Skeleton } from '../../common/components/Skeleton';
 /**
  * Component for displaying real-time processing logs.
  * REQ: IMG-5.4: The display SHALL indicate the current state of processing.
@@ -49,7 +51,7 @@ export const ProcessingStatus: React.FC<ProcessingStatusProps> = ({
         <div className={`processing-status-panel ${isSuccess ? 'processing-status-panel--success' : ''}`}>
             <div className="processing-status-header">
                 <div className="processing-status-title">
-                    {isProcessing && <LoadingSpinner size={14} />}
+                    {isProcessing && <UpdatingBar label="Processing" inline />}
                     {isProcessing
                         ? 'Processing Active'
                         : (isIdle ? 'Idle' : (isSuccess ? 'Processing Successful' : 'Processing Complete'))
@@ -57,12 +59,13 @@ export const ProcessingStatus: React.FC<ProcessingStatusProps> = ({
                 </div>
                 <div className="processing-status-actions">
                     {isProcessing && onCancel && (
-                        <button
-                            className="btn btn--danger btn--tiny"
+                        <Button
+                            variant="danger"
+                            size="small"
                             onClick={onCancel}
                         >
                             Cancel
-                        </button>
+                        </Button>
                     )}
 
                 </div>

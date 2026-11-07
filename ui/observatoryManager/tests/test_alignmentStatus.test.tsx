@@ -7,9 +7,14 @@
 
 import React from 'react';
 import { readFileSync } from 'node:fs';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
+vi.mock('../../common/services/backendApi', () => ({
+    callBackend: () => Promise.resolve([]),
+}));
+
 import { AlignmentStatus } from '../panels/AlignmentStatus';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GuidingTrendsPlot } from '../panels/GuidingStatusPanel';
 
 describe('AlignmentStatus', () => {
@@ -42,9 +47,17 @@ describe('AlignmentStatus', () => {
 });
 
 describe('GuidingTrendsPlot', () => {
+    /** While the first read of the nights is pending, the panel shows a chart skeleton, not the empty message. */
+    it('shows a skeleton on first load, before the empty message', async () => {
+        render(<QueryClientProvider client={new QueryClient()}><GuidingTrendsPlot history={[]} /></QueryClientProvider>);
+        expect(screen.getByText('Loading guiding trends')).toBeTruthy();
+        expect(screen.queryByText(/No guiding data yet/)).toBeNull();
+        expect(await screen.findByText(/No guiding data yet/)).toBeTruthy();
+    });
+
     /** With no samples the panel says so in words instead of drawing a plot whose time axis reads 00:00:00. */
-    it('shows a message before any guiding data', () => {
-        render(<GuidingTrendsPlot history={[]} />);
-        expect(screen.getByText(/No guiding data yet/)).toBeTruthy();
+    it('shows a message before any guiding data', async () => {
+        render(<QueryClientProvider client={new QueryClient()}><GuidingTrendsPlot history={[]} /></QueryClientProvider>);
+        expect(await screen.findByText(/No guiding data yet/)).toBeTruthy();
     });
 });

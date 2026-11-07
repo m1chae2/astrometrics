@@ -112,6 +112,35 @@ def log_context(**fields: Any) -> Generator[None]:
             _job_ids.reset(job_token)
 
 
+@contextmanager
+def background_log_context(name: str, **fields: str | None) -> Generator[None]:
+    """Mark the log lines written inside the block as background work.
+
+    A line with no job id and no request id might come from job work that
+    lost its context, so the job log router copies it into every running
+    job's log. Background work (a status poll, a download loop, a port
+    forward) is not job work. This gives it a request-style id, which the
+    router reads as "this belongs to something else; do not copy it into a
+    job". A job started inside the block still writes to its own log,
+    because its job id takes priority over this marker.
+
+    Parameters
+    ----------
+    name : `str`
+        What the work is, such as ``sync`` or ``telemetry``. It appears in
+        the log line's ``request_id``.
+    **fields : `str` or `None`
+        More context fields, such as ``target_id``.
+
+    Yields
+    ------
+    None
+        The block runs with the marker.
+    """
+    with log_context(request_id=f"background:{name}:{uuid.uuid4().hex[:6]}", **fields):
+        yield
+
+
 def active_job_ids() -> tuple[str, ...]:
     """Give the ids of the jobs the calling work runs inside.
 
@@ -232,6 +261,12 @@ class JobLogRouter(logging.Handler):
     without copying it, cannot be told apart. A record from such work is sent
     to every registered sink, but only if its logger belongs to one of the
     packages the sink registered for (`package_logger_names`).
+
+    A record that carries a request id but no job id was written by work for
+    a request, such as one made by the user interface while a job runs. It
+    belongs to that request, so it is never copied into a job's log. The
+    backend gives its own background work (status polling, the automatic
+    frame download) a request-style id for the same reason.
     """
 
     def __init__(self) -> None:
@@ -303,6 +338,10 @@ class JobLogRouter(logging.Handler):
                     if job_id in job_ids
                     for handler in handlers
                 ]
+            elif getattr(record, "request_id", None):
+                # Work for a request, not for a job: leave it out of every
+                # job's log.
+                sinks = []
             else:
                 sinks = [
                     handler

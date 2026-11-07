@@ -10,21 +10,21 @@
 .metric-box {
     background-color: var(--grey-dark);
     padding: 8px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     text-align: center;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    border: 1px solid color-mix(in srgb, var(--white) 5%, transparent);
 }
 
 .metric-label {
-    font-size: 11px;
-    color: var(--text-muted, #aaa);
+    font-size: var(--small-font-size);
+    color: var(--text-muted, var(--text-dim));
     margin-bottom: 4px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
 
 .metric-value {
-    font-size: 18px;
+    font-size: var(--large-font-size);
     font-weight: bold;
     color: var(--white);
 }

@@ -31,7 +31,7 @@ from wayfindinglib.models.session.ekos_session import (
 
 logger = logging.getLogger(__name__)
 
-_UTC_OFFSET_HOURS_BY_ABBREVIATION = {
+UTC_OFFSET_HOURS_BY_ABBREVIATION = {
     "UTC": 0,
     "GMT": 0,
     "EST": -5,
@@ -72,7 +72,7 @@ def _start_time_to_epoch(start_text: str, zone_abbreviation: str) -> float:
         know is read as the parsing machine's local time.
     """
     naive_start = datetime.strptime(start_text, "%Y-%m-%d %H:%M:%S.%f")
-    offset_hours = _UTC_OFFSET_HOURS_BY_ABBREVIATION.get(zone_abbreviation.strip().upper())
+    offset_hours = UTC_OFFSET_HOURS_BY_ABBREVIATION.get(zone_abbreviation.strip().upper())
     if offset_hours is None:
         logger.warning("Unknown time zone %r in Ekos log; using this machine's local time", zone_abbreviation)
         return naive_start.timestamp()

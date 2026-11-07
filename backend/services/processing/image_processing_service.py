@@ -3,7 +3,9 @@
 import logging
 import os
 import sqlite3
+import threading
 import time
+from collections.abc import Iterable
 from typing import Any
 
 from astrometricslib.exceptions import AstrometricsError, NotFoundError
@@ -21,6 +23,10 @@ LOG_DIR = None  # Will be initialized from config
 # request then returns the job's id and the work goes on in the background.
 CALIBRATION_MEASUREMENT_GRACE_SECONDS = 3.0
 
+# The kinds of calibration frame that are measured after they arrive. Flats
+# are measured when the library rescans them, so they are not listed.
+MEASURED_CALIBRATION_KINDS = ("dark", "bias")
+
 
 class ImageProcessingService(BaseBackgroundService):
     """Service for managing background image processing tasks."""
@@ -35,6 +41,7 @@ class ImageProcessingService(BaseBackgroundService):
         notification_service: Any = None,
         job_service: Any = None,
         astrometrics_service: Any = None,
+        socket_manager: Any = None,
     ) -> None:
         """Initialize the image processing orchestration service.
 
@@ -57,8 +64,15 @@ class ImageProcessingService(BaseBackgroundService):
             Manages persistent state for long-running stacking jobs.
         astrometrics_service : `Any`, optional
             Maintains the global event bus.
+        socket_manager : `Any`, optional
+            Sends the ``calibration:measured`` event when the automatic
+            measurement of new dark and bias frames ends. None sends nothing.
         """
         super().__init__(job_service=job_service, astrometrics_service=astrometrics_service)
+        self._socket_manager = socket_manager
+        self._calibration_measurement_lock = threading.Lock()
+        self._calibration_measurement_running = False
+        self._calibration_kinds_waiting: set[str] = set()
         self._processing_api = processing_api
         self._job_repository = job_repository
 
@@ -114,6 +128,90 @@ class ImageProcessingService(BaseBackgroundService):
             ),
             grace_period_seconds=CALIBRATION_MEASUREMENT_GRACE_SECONDS,
         )
+
+    def measure_new_calibration_frames(self, kinds: Iterable[str]) -> bool:
+        """Measure newly added dark and bias frames in the background.
+
+        The ingest and the frame sync call this after they add frames. Only
+        one measurement runs at a time. If one is already running, this
+        remembers the kinds and the running job starts one more pass when it
+        ends, so frames that arrived late are not missed. A pass reads only
+        the new or changed files, so it is quick when nothing is new. The job
+        records its own log lines in the job list. When it ends, the
+        ``calibration:measured`` event tells the app to read the health
+        again. A failure is logged and never reaches the caller.
+
+        Parameters
+        ----------
+        kinds : `Iterable` [`str`]
+            The kinds of frame that were added (``"dark"``, ``"bias"`` or
+            ``"flat"``). Flats are ignored.
+
+        Returns
+        -------
+        started : `bool`
+            `True` when a job was started now, `False` when there was nothing
+            to measure or a job was already running.
+        """
+        wanted = {kind for kind in kinds if kind in MEASURED_CALIBRATION_KINDS}
+        if not wanted:
+            return False
+        with self._calibration_measurement_lock:
+            if self._calibration_measurement_running:
+                self._calibration_kinds_waiting |= wanted
+                return False
+            self._calibration_measurement_running = True
+        self._start_calibration_pass(wanted)
+        return True
+
+    def _start_calibration_pass(self, kinds: set[str]) -> None:
+        """Start one measuring job for `kinds`.
+
+        Parameters
+        ----------
+        kinds : `set` [`str`]
+            The kinds to measure, each ``"dark"`` or ``"bias"``.
+        """
+
+        def measure() -> Any:
+            """Measure the kinds, then announce and run any waiting pass.
+
+            Returns
+            -------
+            report : `Any`
+                The measuring report.
+            """
+            try:
+                only_kind = next(iter(kinds)) if len(kinds) == 1 else None
+                return self._calibration.measure_frames(kind=only_kind, force=False, register_job=True)
+            finally:
+                self._finish_calibration_pass()
+
+        try:
+            run_as_background_job(measure, grace_period_seconds=0.0)
+        except Exception:  # the trigger must never fail an ingest or a sync: log it
+            # A failed job already cleared the running flag in its `finally`.
+            logger.exception("The measuring of the new calibration frames failed")
+
+    def _finish_calibration_pass(self) -> None:
+        """Announce the end of a pass, then run the pass that was waiting."""
+        self._announce_calibration_measured()
+        with self._calibration_measurement_lock:
+            waiting = set(self._calibration_kinds_waiting)
+            self._calibration_kinds_waiting.clear()
+            if not waiting:
+                self._calibration_measurement_running = False
+                return
+        self._start_calibration_pass(waiting)
+
+    def _announce_calibration_measured(self) -> None:
+        """Send the ``calibration:measured`` event."""
+        if self._socket_manager is None:
+            return
+        try:
+            self._socket_manager.broadcast_ui_event_sync("calibration:measured", {})
+        except Exception:  # an announcement must never fail the job: log it
+            logger.exception("Could not announce the calibration measurement")
 
     def get_processing_status(self, target_id: str) -> dict:
         """Verify if a target has any running stacking jobs.
@@ -378,7 +476,7 @@ def start_siril_processing_task(
         # and saves the target. This job is already in the job list, so the
         # stack records its provenance against it instead of a new job.
         from astrometricslib.exceptions import ProcessingError
-        from astrometricslib.jobs import log_context
+        from astrometricslib.jobs import log_context, running_as_job
 
         kind = (
             "spectral"
@@ -386,7 +484,19 @@ def start_siril_processing_task(
             else "imaging"
         )
         try:
-            with log_context(job_id=job_id):
+            # `running_as_job` makes this job row the current job, so the
+            # stack's stage progress ("Stage 2 of 7") moves the job's bar.
+            # This service still marks the job finished.
+            with (
+                log_context(job_id=job_id),
+                running_as_job(
+                    job_id,
+                    job_repository,
+                    job_type="stacking",
+                    target_id=target_id,
+                    log_file_path=log_file_path,
+                ),
+            ):
                 stack_result = target_service.astrometrics.processing.stack(
                     target, frames=frames_to_stack, kind=kind, log_file=log_file_path, register_job=False
                 )

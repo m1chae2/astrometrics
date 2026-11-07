@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { Button } from './Button';
 import { EmptyState } from './EmptyState';
 import '../../common/styles/listCommon.css';
 
@@ -82,7 +83,7 @@ export const SelectableList: React.FC<SelectableListProps> = ({
     className = '',
     highlightedIds,
     isLoading = false,
-    loadingMessage = 'Loading…',
+    loadingMessage = 'Loading the list',
     emptyMessage = 'No items to display.',
     isError = false,
     errorMessage = 'Could not load the list.',
@@ -104,6 +105,8 @@ export const SelectableList: React.FC<SelectableListProps> = ({
         const updateViewportHeight = () => setViewportHeight(node.clientHeight);
         updateViewportHeight();
 
+        // Older WebViews may lack ResizeObserver; the height is then read once.
+        if (typeof ResizeObserver === 'undefined') return;
         const resizeObserver = new ResizeObserver(updateViewportHeight);
         resizeObserver.observe(node);
         return () => resizeObserver.disconnect();
@@ -146,9 +149,9 @@ export const SelectableList: React.FC<SelectableListProps> = ({
                             <>
                                 {errorMessage}
                                 {onRetry && (
-                                    <button type="button" className="manager__retry-btn" onClick={onRetry}>
+                                    <Button variant="secondary" size="small" className="manager__retry-btn" onClick={onRetry}>
                                         Try again
-                                    </button>
+                                    </Button>
                                 )}
                             </>
                         }

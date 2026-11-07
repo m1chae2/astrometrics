@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { TextInput } from '../../../common/components/TextInput';
 
 /** Props for the TargetIdentification component. */
 interface Props {
@@ -95,8 +96,7 @@ export const TargetIdentification: React.FC<Props> = ({
               <label htmlFor="catalog-id" className="target-identification__label">
                 Catalog ID:
               </label>
-              <input
-                type="text"
+              <TextInput
                 id="catalog-id"
                 name="catalog-id"
                 className="target-input"
@@ -108,8 +108,7 @@ export const TargetIdentification: React.FC<Props> = ({
               <label htmlFor="input-target-ra" className="target-identification__label">
                 RA:
               </label>
-              <input
-                type="text"
+              <TextInput
                 id="input-target-ra"
                 name="ra"
                 className="target-input"
@@ -123,8 +122,7 @@ export const TargetIdentification: React.FC<Props> = ({
               <label htmlFor="common-name" className="target-identification__label">
                 Common Name:
               </label>
-              <input
-                type="text"
+              <TextInput
                 id="common-name"
                 name="common-name"
                 className="target-input"
@@ -138,8 +136,7 @@ export const TargetIdentification: React.FC<Props> = ({
               <label htmlFor="input-target-dec" className="target-identification__label">
                 DEC:
               </label>
-              <input
-                type="text"
+              <TextInput
                 id="input-target-dec"
                 name="dec"
                 className="target-input"

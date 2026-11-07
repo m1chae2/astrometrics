@@ -32,11 +32,12 @@ import json
 import logging
 import math
 import sqlite3
+import threading
 from collections.abc import Iterable
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib.drivers import connect_db
+from astrometricslib.drivers import bump_data_version, connect_db, read_data_versions
 from astrometricslib.exceptions import InvalidArgumentError, StorageError
 from astrometricslib.reports import observing_night_id
 
@@ -46,6 +47,25 @@ if TYPE_CHECKING:
 __all__ = ["ControlRecordStore"]
 
 logger = logging.getLogger(__name__)
+
+RECORD_VERSION_TABLES = ("guiding_samples", "guiding_runs", "ekos_session_contexts", "site_profiles")
+"""The tables a night review reads, whose versions `data_versions` gives."""
+
+BULK_GUIDING_SAMPLES_KIND = "guiding_samples_bulk"
+"""Counter that `replace_guiding_samples` adds one to (a guide log sync).
+
+Live guiding adds only to the ``guiding_samples`` counter. A target report
+watches this one instead, so a sync of past samples rebuilds it and live
+guiding does not.
+"""
+
+_SETUP_LOCK = threading.Lock()
+"""Lets one thread at a time create the tables of a database.
+
+Several threads that open the same new database together would each try to
+switch it to write-ahead logging and create the tables, and SQLite answers
+some of those attempts at once with "database is locked" instead of waiting.
+"""
 
 _NIGHT_OF_TIMESTAMP = "strftime('%Y-%m-%d', timestamp - 43200, 'unixepoch', 'localtime')"
 """SQL that names the observing night a row's ``timestamp`` falls in."""
@@ -162,6 +182,18 @@ class ControlRecordStore:
 
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
+        with _SETUP_LOCK:
+            self._create_tables()
+
+    def _create_tables(self) -> None:
+        """Create the missing tables, indexes and columns.
+
+        Raises
+        ------
+        StorageError
+            Raised if the database cannot be opened or set up.
+        """
+        db_path = self.db_path
         connection = self._connect()
         try:
             for statement in _SCHEMA:
@@ -304,6 +336,7 @@ class ControlRecordStore:
                 )
             else:
                 logger.debug("Skipping an alignment attempt that is already stored.")
+            bump_data_version(connection, "alignment_attempts")
             connection.commit()
         except sqlite3.Error, StorageError:
             logger.exception("Could not store an alignment attempt.")
@@ -360,6 +393,7 @@ class ControlRecordStore:
                 connection.executemany(
                     "DELETE FROM alignment_attempts WHERE id = ?", [(row_id,) for row_id in repeated_ids]
                 )
+                bump_data_version(connection, "alignment_attempts")
                 connection.commit()
                 removed = len(repeated_ids)
         except sqlite3.Error as error:
@@ -573,6 +607,7 @@ class ControlRecordStore:
         try:
             connection = self._connect()
             connection.executemany(_INSERT_GUIDING_SAMPLE_SQL, _guiding_sample_rows(samples))
+            bump_data_version(connection, "guiding_samples")
             connection.commit()
         except sqlite3.Error, StorageError:
             logger.exception("Could not store %d guiding samples.", len(samples))
@@ -631,6 +666,8 @@ class ControlRecordStore:
             )
             replaced_count = cursor.rowcount
             connection.executemany(_INSERT_GUIDING_SAMPLE_SQL, _guiding_sample_rows(samples))
+            bump_data_version(connection, "guiding_samples")
+            bump_data_version(connection, BULK_GUIDING_SAMPLES_KIND)
             connection.commit()
         except sqlite3.Error as write_error:
             raise StorageError(f"Could not store {len(samples)} guiding samples.") from write_error
@@ -725,6 +762,7 @@ class ControlRecordStore:
                     json.dumps(points) if points else None,
                 ),
             )
+            bump_data_version(connection, "polar_alignments")
             connection.commit()
         except sqlite3.Error, StorageError:
             logger.exception("Could not store a polar alignment run.")
@@ -759,6 +797,66 @@ class ControlRecordStore:
             except ValueError:
                 row["paa_points"] = []
         return rows
+
+    # -- Data versions -----------------------------------------------------
+
+    def data_versions(self, tables: Iterable[str] = RECORD_VERSION_TABLES) -> dict[str, int] | None:
+        """Give a small value per table that changes whenever the table does.
+
+        Every write method of this store, and every write of the wayfinding
+        butler, adds one to a counter named after the table inside the same
+        transaction as the write (see
+        `astrometricslib.drivers.bump_data_version`). An insert, an update in
+        place, a delete, and a row number used again all change the counter,
+        which row counts and largest row numbers could miss. Reading costs
+        one small query.
+
+        Parameters
+        ----------
+        tables : `~collections.abc.Iterable` [`str`], optional
+            Names of counters, normally table names in ``wayfinding.db``. A
+            counter never written counts as 0. Defaults to
+            `RECORD_VERSION_TABLES`.
+
+        Returns
+        -------
+        versions : `dict` [`str`, `int`] or `None`
+            The counter of each name, or `None` if the database could not be
+            read.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If a name is not a plain identifier.
+        """
+        names = list(tables)
+        for name in names:
+            if not name.isidentifier():
+                raise InvalidArgumentError(f"{name!r} is not a table name.")
+        counters = read_data_versions(self.db_path)
+        if counters is None:
+            logger.error("Could not read the versions of the control records.")
+            return None
+        return {name: counters.get(name, 0) for name in names}
+
+    def guiding_sample_count(self) -> int | None:
+        """Count the stored guiding samples.
+
+        Returns
+        -------
+        count : `int` or `None`
+            The number of rows, or `None` if the database could not be read.
+        """
+        connection = None
+        try:
+            connection = self._connect()
+            return int(connection.execute("SELECT COUNT(*) FROM guiding_samples").fetchone()[0])
+        except sqlite3.Error, StorageError:
+            logger.exception("Could not count the guiding samples.")
+            return None
+        finally:
+            if connection is not None:
+                connection.close()
 
     # -- Shared ------------------------------------------------------------
 

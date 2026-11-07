@@ -18,7 +18,13 @@ import math
 import numpy as np
 import pytest
 
-from astrometricslib.exceptions import ConflictError, HardwareError, InvalidArgumentError, NotFoundError
+from astrometricslib.exceptions import (
+    ConfigurationError,
+    ConflictError,
+    HardwareError,
+    InvalidArgumentError,
+    NotFoundError,
+)
 from astrometricslib.foundation.logging import ContextFilter
 from backend.routers import rpc_router
 from backend.services.rpc_protocol import RPCMethodNotFoundError, RPCRequest, serialize_rpc_result
@@ -234,3 +240,47 @@ async def test_the_request_id_tags_the_log_lines_of_the_call(
     assert caplog.records
     assert all(getattr(record, "request_id", None) == request_id for record in caplog.records)
     assert caplog.records[0].target_id == "M 99"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "error",
+    [ConfigurationError("Real host refused."), InvalidArgumentError("bad"), NotFoundError("gone")],
+)
+async def test_a_client_error_is_logged_as_one_warning_line(
+    registered_methods: dict, caplog: pytest.LogCaptureFixture, error: Exception
+) -> None:
+    """Log a client error at WARNING, without a traceback."""
+
+    def handler() -> None:
+        """Raise the error under test."""
+        raise error
+
+    registered_methods["test:client"] = handler
+    with caplog.at_level("DEBUG", logger="backend.routers.rpc_router"):
+        await rpc_router.handle_rpc(RPCRequest(method="test:client", id=5))
+    assert [record.levelname for record in caplog.records] == ["WARNING"]
+    assert caplog.records[0].exc_info is None
+
+
+@pytest.mark.anyio
+async def test_an_unexpected_error_is_logged_as_error_with_traceback(
+    registered_methods: dict, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Keep ERROR level and the traceback for an unexpected exception."""
+
+    def handler() -> None:
+        """Raise an unexpected error.
+
+        Raises
+        ------
+        RuntimeError
+            Always.
+        """
+        raise RuntimeError("boom")
+
+    registered_methods["test:boom"] = handler
+    with caplog.at_level("DEBUG", logger="backend.routers.rpc_router"):
+        await rpc_router.handle_rpc(RPCRequest(method="test:boom", id=6))
+    assert caplog.records[0].levelname == "ERROR"
+    assert caplog.records[0].exc_info is not None

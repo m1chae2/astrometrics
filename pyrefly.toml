@@ -11,6 +11,12 @@ preset = "basic"
 # that has not existed since the package was renamed to astrometricslib.
 search-path = [
     ".venv/lib/python3.14/site-packages",
+    # The TPM harness scripts are plain modules next to each other; their tests
+    # import them by name (build/tpm/test adds build/tpm to sys.path).
+    "build/tpm",
+    "build/tpm/test",
+    # real_snapshot.py imports the shared copy path guard from here by name.
+    "build/agent_tools",
 ]
 
 # build/documentation/ and documentation/conf.py hold Sphinx extension and

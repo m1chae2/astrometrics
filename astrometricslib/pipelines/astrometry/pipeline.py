@@ -48,6 +48,8 @@ class AstrometryPipeline:
         self.config = app_config
         self.drivers = drivers or Drivers()
         self.star_identifier = StarIdentifier(app_config, drivers=self.drivers)
+        # Whether the last `solve_wcs` refit its solution to cached Gaia stars.
+        self.last_solve_was_refit = False
 
     def prepare_image(
         self,
@@ -153,6 +155,60 @@ class AstrometryPipeline:
             gaia_fit_signal_reason=self.star_identifier.gaia_fit_signal_reason,
             astrometry_flags=list(self.star_identifier.astrometry_flags),
         )
+
+    def solve_wcs(
+        self,
+        image_or_path: AstrometricsImage | str,
+        target_ra: float | None = None,
+        target_dec: float | None = None,
+        refit_from_cache: bool = False,
+    ) -> Any | None:
+        """Find only the image's sky coordinates (its WCS), and nothing else.
+
+        This detects the stars and runs the plate solver, as `process` does,
+        then stops. It skips the refit to Gaia, the naming of stars from
+        SIMBAD and Gaia, the extended-source hint and the Gaia cache seeding,
+        so it asks no online catalog. It is for callers that need only a
+        place to put apertures. By default the solution is returned unrefined
+        (see `process` for the refined one). With `refit_from_cache`, it is
+        refit to Gaia when a complete cached download covers the field, using
+        the cache alone; `last_solve_was_refit` then says whether that
+        happened.
+        A field the solver cannot solve raises `PlateSolveFailedError`, as in
+        `process`.
+
+        Parameters
+        ----------
+        image_or_path : `AstrometricsImage` or `str`
+            The image to solve, or the file path to it.
+        target_ra, target_dec : `float`, optional
+            A hint for where the telescope was pointing, in degrees. Left
+            out, the image's FITS header supplies one.
+        refit_from_cache : `bool`, optional
+            If True, refit the solution to cached Gaia stars when a complete
+            download covers the field. Never sends a query.
+
+        Returns
+        -------
+        wcs : `astropy.wcs.WCS` or `None`
+            The solver's solution (refit if asked and possible), or `None`
+            when too few stars were found to try a solve.
+
+        """
+        # `PlateSolveFailedError` from the solver passes through.
+        image = self._load_image(image_or_path)
+        ra_hint, dec_hint = self._resolve_coordinate_hint(image, target_ra, target_dec)
+        _, wcs = self.star_identifier.process_image(
+            image,
+            attempt_plate_solving=True,
+            center_ra=ra_hint,
+            center_dec=dec_hint,
+            solve_only=True,
+            refit_from_cache=refit_from_cache,
+        )
+        refinement = self.star_identifier.wcs_refinement
+        self.last_solve_was_refit = bool(refinement is not None and refinement.applied)
+        return wcs
 
     def _load_image(self, image_or_path: AstrometricsImage | str) -> AstrometricsImage:
         """Load an image from a path, or pass a loaded image through.

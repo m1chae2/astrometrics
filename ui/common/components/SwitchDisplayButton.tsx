@@ -8,6 +8,7 @@
 
 import React from 'react';
 import { navigateToElement } from '../utils/displayCoordinator';
+import { Button } from './Button';
 
 /** Props for the SwitchDisplayButton component. */
 interface SwitchDisplayButtonProps {
@@ -41,8 +42,8 @@ export const SwitchDisplayButton: React.FC<SwitchDisplayButtonProps> = ({ target
   };
 
   return (
-    <button
-      className="btn btn--tiny"
+    <Button
+      size="small"
       onClick={handleClick}
       disabled={!selectedTarget}
       title={
@@ -52,6 +53,6 @@ export const SwitchDisplayButton: React.FC<SwitchDisplayButtonProps> = ({ target
       }
     >
       {targetDisplay}
-    </button>
+    </Button>
   );
 };

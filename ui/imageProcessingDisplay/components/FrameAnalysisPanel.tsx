@@ -1,6 +1,8 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { TabView } from '../../common/components/TabView';
 import { SectionPanel } from '../../common/components/SectionPanel';
+import { Tabs } from '../../common/components/Tabs';
+import { PopoverSelect } from '../../common/components/PopoverSelect';
 
 import { useCalibrationStats } from '../../common/hooks/useCalibrationStats';
 import { useTargetContext } from '../../common/context/TargetContext';
@@ -13,7 +15,6 @@ import { JobHistoryList } from './JobHistoryList';
 
 import { useImageProcessingContext } from '../context/ImageProcessingContext';
 import { fetchFrameStatsGrouped, refreshTarget, updateTargetById } from '../../common/services/targetService';
-import { ConfirmDialog } from '../../common/components/ConfirmDialog';
 import { GroupedFrameStat } from '../../common/types/backendTypes';
 import { chooseAnalysisSelection, chooseTemporalVariationSelection } from '../utils/analysisSelection';
 
@@ -30,8 +31,6 @@ interface FrameAnalysisPanelProps {
   // Control Props
   handleAddImages: () => void;
   setIsAddModalOpen: (open: boolean) => void;
-  openIngestModal: () => void;
-  remoteTargets: Set<string>;
   selectedFile: string | null;
   onShowHeader?: (path: string) => void;
 }
@@ -45,7 +44,7 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
   allFiles, filteredFiles, checkedFiles, stackedImage, stackedSpectralTarget, totalExposure,
   handleSelectFile,
   handleAddImages, setIsAddModalOpen,
-  openIngestModal, remoteTargets, selectedFile, onShowHeader
+  selectedFile, onShowHeader
 }) => {
   const {
     selectedTarget, commonName, catalogId,
@@ -57,15 +56,18 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
     const {
       analysisResults, isProcessing, logLines, cancelProcessingJob, clearLogs,
       startProcessing, isAnalyzing, startAnalysis,
-      jobHistory, loadingHistory, onSelectJob, onDismissJob, activeJobId,
-      openSiril
+      jobHistory, loadingHistory, onSelectJob, targetActiveJobs, activeJobId,
+      openSiril, requestJobHistory
     } = useImageProcessingContext();
 
   const { stats: calStats, loading: calLoading } = useCalibrationStats(reloadKey);
   const [activeAnalysisTab, setActiveAnalysisTab] = useState('data');
+  // The job history only shows on the Analysis tab, so it is read when that tab is first opened.
+  useEffect(() => {
+    if (activeAnalysisTab === 'analysis') requestJobHistory?.();
+  }, [activeAnalysisTab, requestJobHistory]);
   const [dataTabCamera, setDataTabCamera] = useState('All');
   const [lightStats, setLightStats] = useState<GroupedFrameStat[]>([]);
-  const [jobToDelete, setJobToDelete] = useState<string | null>(null);
 
   // Compute unique cameras for the Data tab dropdown
   const uniqueCameras = useMemo(() => {
@@ -148,20 +150,17 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
         title="Frame Analysis"
         className="image-processing-display__analysis-section frame-analysis-panel flex-fill"
         headerContent={
-          <div className="tab-view__header tab-view__header--inline" style={{ marginRight: '16px' }}>
-            <button
-              className={`tab-view__tab ${activeAnalysisTab === 'analysis' ? 'tab-view__tab--active' : ''}`}
-              onClick={() => setActiveAnalysisTab('analysis')}
-            >
-              Analysis
-            </button>
-            <button
-              className={`tab-view__tab ${activeAnalysisTab === 'data' ? 'tab-view__tab--active' : ''}`}
-              onClick={() => setActiveAnalysisTab('data')}
-            >
-              Data
-            </button>
-          </div>
+          <Tabs
+            className="frame-analysis-panel__tabs"
+            tabs={[
+              { id: 'analysis', label: 'Analysis' },
+              { id: 'data', label: 'Data' },
+            ]}
+            selectedId={activeAnalysisTab}
+            onChange={setActiveAnalysisTab}
+            ariaLabel="Frame Analysis views"
+            idPrefix="frame-analysis"
+          />
         }
       >
         <TabView
@@ -181,25 +180,13 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
                     onClear={clearLogs}
                   />
                   <JobHistoryList
+                    targetId={selectedTarget}
                     jobs={jobHistory}
+                    pinnedJobs={targetActiveJobs}
                     loading={loadingHistory}
                     onSelectJob={onSelectJob}
-                    onDismissJob={async (jobId) => setJobToDelete(jobId)}
                     activeJobId={activeJobId}
                   />
-                  {jobToDelete && (
-                    <ConfirmDialog
-                      open={!!jobToDelete}
-                      title="Dismiss Job"
-                      message="Are you sure you want to dismiss this job? This will permanently remove its record."
-                      onConfirm={async () => {
-                        await onDismissJob(jobToDelete);
-                        setJobToDelete(null);
-                      }}
-                      onCancel={() => setJobToDelete(null)}
-                      confirmLabel="Dismiss"
-                    />
-                  )}
                 </>
               )
             },
@@ -228,18 +215,14 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
                     selectedCamera={dataTabCamera}
                     cameraSelector={
                       <div className="data-tab-filter" style={{ margin: 0 }}>
-                        <select
-                          className="file-browser__camera-select"
-                          value={dataTabCamera}
-                          onChange={(e) => setDataTabCamera(e.target.value)}
-                        >
-                          <option value="All">All Cameras</option>
-                          {uniqueCameras.map(c => (
-                            <option key={c} value={c}>
-                              {c}
-                            </option>
-                          ))}
-                        </select>
+                        <PopoverSelect
+                          label="Camera"
+                          options={uniqueCameras.map((camera: string) => ({ id: camera, label: camera }))}
+                          selectedId={dataTabCamera === 'All' ? null : dataTabCamera}
+                          onSelect={(id) => setDataTabCamera(id ?? 'All')}
+                          emptyLabel="All Cameras"
+                          size="compact"
+                        />
                       </div>
                     }
                   />
@@ -278,8 +261,6 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
             ? () => startAnalysis(temporalVariationSelection.paths, temporalVariationSelection.filterType)
             : undefined}
           isAnalyzing={isAnalyzing}
-          onIngest={openIngestModal}
-          isIngestDisabled={!selectedTarget}
           onOpenSiril={() => {
             openSiril();
           }}

@@ -7,7 +7,7 @@
  */
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { LoadingSpinner } from '../../common/components/LoadingSpinner';
+import { Skeleton } from '../../common/components/Skeleton';
 import { fetchSetAsideFrames } from '../../common/services/imaging/stackReviewService';
 import type { SetAsideFrameRecord } from '../../common/types/backendTypes';
 import { formatExposureSeconds } from '../utils/stackFormatting';
@@ -66,11 +66,7 @@ export const SetAsideFramesList: React.FC<SetAsideFramesListProps> = ({ targetId
     });
 
     if (isLoading) {
-        return (
-            <div className="stack-summary--muted">
-                <LoadingSpinner size={12} /> Reading the set-aside frames...
-            </div>
-        );
+        return <Skeleton variant="list" lines={1} count={3} label="Reading the set-aside frames" />;
     }
     if (isError) {
         return (

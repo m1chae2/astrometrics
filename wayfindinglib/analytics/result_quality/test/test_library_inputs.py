@@ -298,3 +298,40 @@ def test_the_configured_location_wins_over_a_stored_profile_and_a_note_says_so()
 def test_a_stored_profile_is_used_only_when_the_configuration_has_no_location() -> None:
     """With no configured location, the stored profile is used as is."""
     assert stored_site(_butler(SITE), _located(None, None)) == SITE
+
+
+def test_the_sky_model_is_fitted_once_for_every_report_until_the_library_changes(
+    config: AppConfiguration, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two reports share one fit until a library write."""
+    import sqlite3
+
+    from astrometricslib.foundation.storage.data_versions import bump_data_version
+
+    monkeypatch.setattr(library_inputs, "_SKY_MODEL_CACHE", library_inputs.VersionedCache())
+    fits: list[str] = []
+
+    def counted_fit(self: LibraryInputs, setting: CaptureSetting, key: str) -> tuple[None, str]:
+        """Count the fit and give no model.
+
+        Returns
+        -------
+        outcome : `tuple`
+            No model and a reason.
+        """
+        fits.append(key)
+        return None, "made up"
+
+    monkeypatch.setattr(LibraryInputs, "_fit_sky_model", counted_fit)
+
+    LibraryInputs(None, _butler(SITE), config).sky_model_for(SETTING)
+    second = LibraryInputs(None, _butler(SITE), config)
+    assert second.sky_model_for(SETTING) == (None, "made up")
+    assert len(fits) == 1
+
+    database = sqlite3.connect(str(config.get_library_path()) + "/astrometrics.db")
+    bump_data_version(database, "quality")
+    database.commit()
+    database.close()
+    LibraryInputs(None, _butler(SITE), config).sky_model_for(SETTING)
+    assert len(fits) == 2

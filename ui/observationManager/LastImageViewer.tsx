@@ -3,12 +3,14 @@
  * @description Provides a live preview of the last image captured by the camera.
  */
 import React, { useState, useEffect, useCallback } from 'react';
+import { Button } from '../common/components/Button';
 import { SectionPanel } from '../common/components/SectionPanel';
 import { FitsRenderer } from '../common/fitsViewer/FitsRenderer';
 import { fetchLastImage } from '../common/services/imaging/imageService';
 import { socketClient } from '../common/utils/socketClient';
 import './observationManager.css';
 
+import { Skeleton } from '../common/components/Skeleton';
 export const LastImageViewer: React.FC = () => {
     const [imageData, setImageData] = useState<string | null>(null);
     const [isStretched, setIsStretched] = useState(true);
@@ -56,18 +58,19 @@ export const LastImageViewer: React.FC = () => {
             title="Last Image"
             className="last-image-viewer"
             headerContent={
-                <button
-                    className={`btn btn--tiny ${isStretched ? 'btn--primary' : 'btn--secondary'}`}
+                <Button
+                    size="small"
+                    variant={isStretched ? 'primary' : 'secondary'}
                     onClick={toggleStretch}
                     title={isStretched ? 'Switch to Linear View' : 'Switch to Auto-Stretched View'}
                 >
                     {isStretched ? 'Stretch' : 'Linear'}
-                </button>
+                </Button>
             }
         >
             <div className="last-image-viewer__container">
                 {loading && !imageData && (
-                    <div className="last-image-viewer__status">Loading...</div>
+                    <Skeleton variant="block" label="Loading the last image" />
                 )}
                 {!imageData && !loading && (
                     <div className="last-image-viewer__status">No image captured yet</div>

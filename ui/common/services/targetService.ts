@@ -33,13 +33,35 @@ export async function fetchTargetFiles(targetId: string): Promise<TargetFilesRes
     }
 }
 
+/** The grouped-frame requests running right now, so a second ask for the same data shares the first. */
+const frameStatsInFlight = new Map<string, Promise<GroupedFrameStat[]>>();
+
 /**
  * Fetches frame statistics grouped by filter and exposure.
  * @param targetId The identifier of the target.
  * @param camera Optional camera filter.
  * @return List of grouped frame statistics.
  */
-export async function fetchFrameStatsGrouped(targetId: string, camera?: string): Promise<GroupedFrameStat[]> {
+export function fetchFrameStatsGrouped(targetId: string, camera?: string): Promise<GroupedFrameStat[]> {
+    // Two panels ask for the same summary when a target opens. While one request is
+    // running, the second gets its answer instead of sending the same call again.
+    const requestKey = `${targetId}\u0000${camera ?? ''}`;
+    const running = frameStatsInFlight.get(requestKey);
+    if (running) return running;
+    const request = loadFrameStatsGrouped(targetId, camera).finally(() => {
+        frameStatsInFlight.delete(requestKey);
+    });
+    frameStatsInFlight.set(requestKey, request);
+    return request;
+}
+
+/**
+ * Sends the grouped-frame request itself. Use `fetchFrameStatsGrouped`.
+ * @param targetId The target identifier name.
+ * @param camera Optional camera filter.
+ * @return List of grouped frame statistics (empty after a failure, which is reported).
+ */
+async function loadFrameStatsGrouped(targetId: string, camera?: string): Promise<GroupedFrameStat[]> {
     try {
         const data = await callBackend("target:get_frames_grouped", { target_id: targetId, camera });
         if (data) {
@@ -54,6 +76,8 @@ export async function fetchFrameStatsGrouped(targetId: string, camera?: string):
 
 /**
  * Fetches target summaries or target details by unique identifier.
+ * The list is the light "summary" kind (every target, with an empty `frames`
+ * list); one named target is always the full record.
  * @param targetId The target identifier name.
  * @return List of target summary objects, or specific TargetObject, or null.
  */
@@ -63,7 +87,7 @@ export async function getTargets(targetId?: string): Promise<any> {
             const data = await callBackend("target:get_targets", { target_id: targetId });
             return data as TargetObject | null;
         } else {
-            const data = await callBackend("target:get_targets", {});
+            const data = await callBackend("target:get_targets", { detail: "summary" });
             return Array.isArray(data) ? data : [];
         }
     } catch (err: unknown) {

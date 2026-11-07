@@ -3,6 +3,7 @@
  * @description Component displaying active workspace variables (MATLAB-style Workspace viewer) plus pinned system objects.
  */
 import React from 'react';
+import { Button } from '../common/components/Button';
 
 export interface WorkspaceVariable {
   name: string;
@@ -43,15 +44,14 @@ export const WorkspaceTable: React.FC<WorkspaceTableProps> = ({
         </span>
         <div className="console-panel__actions">
           {onRefresh && (
-            <button
-              className="editor-btn"
-              style={{ padding: '2px 6px', fontSize: '11px' }}
+            <Button
+              variant="secondary"
+              size="small"
               onClick={onRefresh}
               title="Refresh Workspace"
-              type="button"
             >
               Refresh
-            </button>
+            </Button>
           )}
         </div>
       </div>

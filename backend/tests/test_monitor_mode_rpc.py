@@ -116,6 +116,7 @@ READ_ONLY_METHODS = frozenset({
     "observatory:get_equipment_configuration",
     "observatory:get_active_telescope",
     "observatory:list_cameras",
+    "observatory:get_source",
     "observatory:safety_status",
     "plan:get",
     "processing:stack_summary",
@@ -151,6 +152,7 @@ READ_ONLY_METHODS = frozenset({
     "system:introspection",
     "system:notifications",
     "system:pulse",
+    "system:static_mounts",
     "target:get",
     "target:get_camera_index",
     "target:get_files",
@@ -204,6 +206,9 @@ LOCAL_WRITE_METHODS = frozenset({
     "observatory:enter_controller_mode",
     "observatory:enter_monitoring_mode",
     "observatory:set_active_camera",
+    # Saves the observatory source choice and restarts the backend; no device
+    # command (a simulator source starts only local stand-ins).
+    "observatory:set_source",
     # Saves the telescope's safety limits to the config file; no device
     # command. The screen greys Apply while Ekos controls, but that is a
     # screen rule (user decision), not a backend one.

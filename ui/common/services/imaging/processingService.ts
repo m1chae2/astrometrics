@@ -122,16 +122,27 @@ const inFlightJobsRequests = new Map<string, Promise<ProcessingJob[]>>();
  *
  * @param {string} [targetId] - Restricts results to jobs for this target, if provided.
  * @param {string} [jobType] - Restricts results to jobs of this type, if provided.
+ * @param {{before?: string, limit?: number}} [paging] - Optional paging. `before` is a local
+ *   ISO time: only jobs created earlier than it come back. `limit` caps how many jobs return.
  * @returns {Promise<ProcessingJob[]>} The matching processing jobs.
  */
-export function fetchJobs(targetId?: string, jobType?: string): Promise<ProcessingJob[]> {
-    const key = `${targetId ?? ''}::${jobType ?? ''}`;
+export function fetchJobs(
+    targetId?: string,
+    jobType?: string,
+    paging?: { before?: string; limit?: number }
+): Promise<ProcessingJob[]> {
+    const key = `${targetId ?? ''}::${jobType ?? ''}::${paging?.before ?? ''}::${paging?.limit ?? ''}`;
     const inFlight = inFlightJobsRequests.get(key);
     if (inFlight) return inFlight;
 
     const request = (async () => {
         try {
-            const result = await callBackend('processing:list_jobs', { target_id: targetId, job_type: jobType });
+            const result = await callBackend('processing:list_jobs', {
+                target_id: targetId,
+                job_type: jobType,
+                ...(paging?.before ? { before: paging.before } : {}),
+                ...(paging?.limit ? { limit: paging.limit } : {}),
+            });
             return (result || []) as ProcessingJob[];
         } catch {
             return [];
@@ -142,18 +153,6 @@ export function fetchJobs(targetId?: string, jobType?: string): Promise<Processi
 
     inFlightJobsRequests.set(key, request);
     return request;
-}
-
-/**
- * Dismisses (deletes) a job record from history.
- */
-export async function dismissJob(jobId: string): Promise<boolean> {
-    try {
-        const result = await callBackend('processing:delete_job', { job_id: jobId });
-        return !!result;
-    } catch {
-        return false;
-    }
 }
 
 /**

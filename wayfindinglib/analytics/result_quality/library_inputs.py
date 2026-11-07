@@ -46,6 +46,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from astrometricslib import Target
+from astrometricslib.drivers import VersionedCache, get_library_data_version
 from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.reports import CaptureSetting, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.capture_history import normalize_name
@@ -76,6 +77,14 @@ from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.quality.efficiency import EfficiencyReference
 
 logger = logging.getLogger(__name__)
+
+SKY_MODEL_CACHE_MAXIMUM_ENTRIES = 16
+"""How many fitted sky models the cache keeps. A model is a few small tables,
+and a library has a few cameras, so 16 is plenty. Design estimate, register
+row WAY-D106."""
+
+_SKY_MODEL_CACHE = VersionedCache(maximum_entries=SKY_MODEL_CACHE_MAXIMUM_ENTRIES)
+"""The fitted sky models, by library, equipment key and site."""
 
 DEFAULT_SITE_PROFILE_ID = "default"
 """The id of the stored default site."""
@@ -517,7 +526,9 @@ class LibraryInputs:
             rows.
         """
         try:
-            listed = self.astrometrics.quality.set_aside_frames(target_id)
+            # A target already listed spares the library another listing.
+            known = self._targets.get(target_id) if self._targets else None
+            listed = self.astrometrics.quality.set_aside_frames(known or target_id)
         except (AstrometricsError, OSError, sqlite3.Error) as error:
             self.notes.append(f"The set-aside frames of {target_id} could not be listed: {error}")
             listed = []
@@ -787,31 +798,65 @@ class LibraryInputs:
         """
         key = baseline_key(setting)
         if key not in self._models:
-            samples = [
-                SkyRateSample(
-                    frame_id=observation.frame_id,
-                    night_id=observation.night_id,
-                    epoch_seconds=observation.start_epoch_seconds,
-                    ra_deg=observation.ra_deg,
-                    dec_deg=observation.dec_deg,
-                    sky_rate_e_per_s_per_px=observation.sky_rate_e_per_s_per_px,
-                )
-                for observation in self.camera_observations(setting.camera)
-                if baseline_key(observation.capture_setting) == key
-                and observation.set_aside_reason is None
-                and observation.night_id is not None
-                and observation.start_epoch_seconds is not None
-                and observation.ra_deg is not None
-                and observation.dec_deg is not None
-                and observation.sky_rate_e_per_s_per_px
-            ]
             site = self.site
             try:
-                outcome = fit_sky_model(samples, key, site.latitude_deg, site.longitude_deg, site.elevation_m)
-                self._models[key] = (outcome.model, outcome.reason)
-            except ValueError as error:
-                self._models[key] = (None, f"The sky model could not be fitted: {error}")
+                cache_key = (
+                    "sky_model",
+                    str(self.config.get_library_path()),
+                    key,
+                    site.latitude_deg,
+                    site.longitude_deg,
+                    site.elevation_m,
+                )
+            except AttributeError, OSError, TypeError, ValueError:
+                cache_key = None
+            # The fit reads every frame of the camera in the library, so it is
+            # the same for every target and is kept until the library changes.
+            version = None if cache_key is None else (lambda: get_library_data_version(self.config))
+            self._models[key] = _SKY_MODEL_CACHE.get_or_build(
+                cache_key, version, lambda: self._fit_sky_model(setting, key)
+            )
         return self._models[key]
+
+    def _fit_sky_model(self, setting: CaptureSetting, key: str) -> tuple[SkyModel | None, str | None]:
+        """Fit the sky model of an equipment key from the camera's frames.
+
+        Parameters
+        ----------
+        setting : `CaptureSetting`
+            A capture setting of the equipment, which names the camera.
+        key : `str`
+            The equipment key of `setting`.
+
+        Returns
+        -------
+        model, reason : `tuple`
+            The model, or ``None`` and the reason there is none.
+        """
+        samples = [
+            SkyRateSample(
+                frame_id=observation.frame_id,
+                night_id=observation.night_id,
+                epoch_seconds=observation.start_epoch_seconds,
+                ra_deg=observation.ra_deg,
+                dec_deg=observation.dec_deg,
+                sky_rate_e_per_s_per_px=observation.sky_rate_e_per_s_per_px,
+            )
+            for observation in self.camera_observations(setting.camera)
+            if baseline_key(observation.capture_setting) == key
+            and observation.set_aside_reason is None
+            and observation.night_id is not None
+            and observation.start_epoch_seconds is not None
+            and observation.ra_deg is not None
+            and observation.dec_deg is not None
+            and observation.sky_rate_e_per_s_per_px
+        ]
+        site = self.site
+        try:
+            outcome = fit_sky_model(samples, key, site.latitude_deg, site.longitude_deg, site.elevation_m)
+        except ValueError as error:
+            return None, f"The sky model could not be fitted: {error}"
+        return outcome.model, outcome.reason
 
     def all_sky_models(self) -> tuple[dict[str, SkyModel], list[str]]:
         """Fit a sky model for each piece of equipment in the library.

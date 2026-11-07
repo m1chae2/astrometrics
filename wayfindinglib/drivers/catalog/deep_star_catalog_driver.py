@@ -147,14 +147,48 @@ class DeepStarCatalogDriver(CatalogDriver):
             names the star library gives the same stars, so a star that is
             both in the library and in this catalog is only drawn once.
         """
+        objects, _ = self.query_region_with_status(ra_degrees, dec_degrees, radius_degrees, magnitude_limit)
+        return objects
+
+    def query_region_with_status(
+        self,
+        ra_degrees: float,
+        dec_degrees: float,
+        radius_degrees: float,
+        magnitude_limit: float | None = None,
+    ) -> tuple[list[StellarObject], bool]:
+        """Look up the downloaded stars and say whether the cap cut the list.
+
+        Asks the store for one star more than the cap. Getting that extra star
+        proves that at least one star was left out.
+
+        Parameters
+        ----------
+        ra_degrees : float
+            Center Right Ascension in degrees (ICRS).
+        dec_degrees : float
+            Center Declination in degrees (ICRS).
+        radius_degrees : float
+            Search radius in degrees.
+        magnitude_limit : float, optional
+            Faintest Gaia G magnitude wanted.
+
+        Returns
+        -------
+        objects : `list` [`StellarObject`]
+            The stars, brightest first, at most _MAXIMUM_STARS_PER_QUERY.
+        truncated : `bool`
+            True when fainter stars in the region were dropped by the cap.
+        """
         if self._star_source is None:
-            return []
+            return [], False
         limit = _NO_MAGNITUDE_LIMIT if magnitude_limit is None else magnitude_limit
         stars = self._star_source.find_deep_stars(
-            ra_degrees, dec_degrees, radius_degrees, limit, maximum_stars=_MAXIMUM_STARS_PER_QUERY
+            ra_degrees, dec_degrees, radius_degrees, limit, maximum_stars=_MAXIMUM_STARS_PER_QUERY + 1
         )
         if stars is None:
-            return []
+            return [], False
+        truncated = len(stars) > _MAXIMUM_STARS_PER_QUERY
         return [
             StellarObject(
                 id=f"Gaia DR3 {source_id}",
@@ -164,5 +198,5 @@ class DeepStarCatalogDriver(CatalogDriver):
                 magnitude=magnitude,
                 spectralType="",
             )
-            for source_id, star_ra, star_dec, magnitude in stars
-        ]
+            for source_id, star_ra, star_dec, magnitude in stars[:_MAXIMUM_STARS_PER_QUERY]
+        ], truncated

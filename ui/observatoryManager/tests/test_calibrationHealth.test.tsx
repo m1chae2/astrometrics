@@ -7,7 +7,7 @@
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { CalibrationSetHealth } from '../../common/types/backendTypes';
 
@@ -19,8 +19,18 @@ vi.mock('../../common/services/backendApi', () => ({
 vi.mock('../../common/components/IngestFramesModal', () => ({ IngestFramesModal: () => null }));
 vi.mock('../../common/hooks/useIngestionManager', () => ({ useIngestionManager: () => ({ isActive: false }) }));
 
+import { socketClient } from '../../common/utils/socketClient';
 import { CalibrationLibraryPanel, formatTemperature } from '../calibration/CalibrationLibraryPanel';
 import { healthByRowKey, healthWord, worstHealth } from '../calibration/calibrationHealth';
+
+/**
+ * Sends an action to every listener the socket client holds.
+ * @param action The event name.
+ * @param payload The event payload.
+ */
+function sendAction(action: string, payload: unknown): void {
+    (socketClient as unknown as { emit: (name: string, ...args: unknown[]) => void }).emit('action', action, payload);
+}
 
 const CAMERA = 'ZWO ASI533MM Pro';
 
@@ -98,7 +108,6 @@ async function answer(method: string, params: Record<string, unknown>): Promise<
         if (params.kind === 'bias') return [health('bias-a', 'good', 'No problem found.', { kind: 'bias' })];
         return [health('flat-a', 'warning', 'flats are faint', { kind: 'flat', telescope: 'Scope A' }), health('flat-a', 'good', 'No problem found.', { kind: 'flat', telescope: 'Scope B' })];
     }
-    if (method === 'calibration:measure_frames') return { jobId: 'job-1', status: 'running' };
     throw new Error(`unexpected ${method}`);
 }
 
@@ -157,7 +166,7 @@ describe('the Biases and Flats tables', () => {
     it('shows the Biases columns and its health', async () => {
         renderPanel();
         await screen.findByRole('table', { name: 'Darks' });
-        await userEvent.click(screen.getByRole('tab', { name: /Biases:/ }));
+        await userEvent.click(screen.getByRole('tab', { name: /^Biases/ }));
         const table = await screen.findByRole('table', { name: 'Biases' });
         expect(within(table).getAllByRole('columnheader').map((header) => header.textContent)).toEqual(['Gain', 'Offset', 'Count', 'Health']);
         await waitFor(() => expect(within(table).getByText('OK')).toBeTruthy());
@@ -168,7 +177,7 @@ describe('the Biases and Flats tables', () => {
     it('shows the worst health when two telescopes share a flat row', async () => {
         renderPanel();
         await screen.findByRole('table', { name: 'Darks' });
-        await userEvent.click(screen.getByRole('tab', { name: /Flats:/ }));
+        await userEvent.click(screen.getByRole('tab', { name: /^Flats/ }));
         const table = await screen.findByRole('table', { name: 'Flats' });
         expect(within(table).getAllByRole('columnheader').map((header) => header.textContent)).toEqual(['Filter', 'Gain', 'Offset', 'Count', 'Health']);
         await waitFor(() => expect(within(table).getByText('Warning')).toBeTruthy());
@@ -176,49 +185,28 @@ describe('the Biases and Flats tables', () => {
     });
 });
 
-describe('the Check sets button', () => {
-    /** On a dark or bias tab it starts the measuring job, and says so. */
-    it('starts the measuring job for the shown kind', async () => {
+describe('the measuring of new dark and bias frames', () => {
+    /** The backend measures by itself, so the panel has no Check sets button. */
+    it('has no Check sets button', async () => {
         renderPanel();
         await screen.findByRole('table', { name: 'Darks' });
-        await userEvent.click(screen.getByRole('button', { name: 'Check sets' }));
-        expect(callBackendMock).toHaveBeenCalledWith('calibration:measure_frames', { kind: 'dark', camera_id: CAMERA });
-        expect(await screen.findByText(/Measuring the frames in the background/)).toBeTruthy();
-    });
-
-    /** A job that finished at once reports its counts. */
-    it('reports the counts of a job that finished at once', async () => {
-        callBackendMock.mockImplementation((method: string, params: Record<string, unknown>) =>
-            method === 'calibration:measure_frames'
-                ? Promise.resolve({ jobId: 'j', result: { measuredCount: 0, unchangedCount: 69 } })
-                : answer(method, params),
-        );
-        renderPanel();
-        await screen.findByRole('table', { name: 'Darks' });
-        await userEvent.click(screen.getByRole('button', { name: 'Check sets' }));
-        expect(await screen.findByText('Measured 0 frames; 69 had not changed.')).toBeTruthy();
-    });
-
-    /** On the Flats tab it checks the flats again, and starts no job. */
-    it('checks the flats again on the Flats tab', async () => {
-        renderPanel();
-        await screen.findByRole('table', { name: 'Darks' });
-        await userEvent.click(screen.getByRole('tab', { name: /Flats:/ }));
-        await screen.findByRole('table', { name: 'Flats' });
-        await userEvent.click(screen.getByRole('button', { name: 'Check sets' }));
-        expect(await screen.findByText('Flats checked.')).toBeTruthy();
+        expect(screen.queryByRole('button', { name: 'Check sets' })).toBeNull();
         expect(callBackendMock).not.toHaveBeenCalledWith('calibration:measure_frames', expect.anything());
     });
 
-    /** A failed start is said in plain words. */
-    it('says so when the job could not be started', async () => {
-        callBackendMock.mockImplementation((method: string, params: Record<string, unknown>) =>
-            method === 'calibration:measure_frames' ? Promise.reject(new Error('down')) : answer(method, params),
-        );
+    /** The calibration:measured event makes the panel read the health again. */
+    it('reads the health again when the measuring ends', async () => {
         renderPanel();
         await screen.findByRole('table', { name: 'Darks' });
-        await userEvent.click(screen.getByRole('button', { name: 'Check sets' }));
-        expect(await screen.findByText('Could not start the check. Try again in a moment.')).toBeTruthy();
+        await waitFor(() => expect(callBackendMock).toHaveBeenCalledWith('calibration:assess', expect.anything()));
+        const assessCalls = () => callBackendMock.mock.calls.filter(([method]) => method === 'calibration:assess').length;
+        const before = assessCalls();
+
+        act(() => sendAction('quality:measured', {}));
+        expect(assessCalls()).toBe(before);
+
+        act(() => sendAction('calibration:measured', {}));
+        await waitFor(() => expect(assessCalls()).toBeGreaterThan(before));
     });
 });
 

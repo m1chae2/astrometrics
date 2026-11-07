@@ -1,8 +1,7 @@
 /**
  * @file CalibrationLibraryPanel.tsx
  * @description The calibration library, laid out for the narrow top-row panel.
- * Line 1: the camera picker, a small square refresh button and the "Check
- * sets" button. Line 2: the selected camera's Darks, Biases and Flats counts
+ * Line 1: the camera picker and a small square refresh button. Line 2: the selected camera's Darks, Biases and Flats counts
  * (from `camera_totals`), which are also the three tabs that pick the table.
  * "Ingest frames" is in the panel header, like the other panels' header
  * buttons. The table of the chosen kind is shown below and scrolls inside the
@@ -10,31 +9,36 @@
  * Count, Health) or Flats (Filter, Gain, Offset, Count, Health). The counts are
  * what the library reports (`calibration:query`), read every 10 seconds. The
  * Health column comes from a separate `calibration:assess` query, joined to the
- * rows by `row_key`, and is not part of that poll. "Check sets" starts the job
- * that measures the dark and bias frames (`calibration:measure_frames`), or
- * checks the flats again. Choosing a row shows the plain reason behind its
+ * rows by `row_key`, and is not part of that poll. The backend measures new
+ * dark and bias frames by itself after an ingest or a sync, and sends the
+ * `calibration:measured` event when it is done; this panel then reads the
+ * health again. Choosing a row shows the plain reason behind its
  * health. A quality statement can ask this panel to show a row ("Show in
  * calibration library"); the panel asks the library which rows match
  * (`detail: "match"`), switches to that camera and that kind's tab, scrolls to
  * and highlights those rows, or says "No calibration row matches".
+ * While the view shows a past night, "Ingest frames" is greyed with the
+ * reason, because it changes the live library. Reading and refreshing still work.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { SectionPanel } from '../../common/components/SectionPanel';
 import { IngestFramesModal } from '../../common/components/IngestFramesModal';
+import { PopoverSelect } from '../../common/components/PopoverSelect';
+import { Tabs } from '../../common/components/Tabs';
 import { QualityPanelState } from '../../common/components/quality/QualityPanelState';
 import { useIngestionManager } from '../../common/hooks/useIngestionManager';
+import { CALIBRATION_INGESTION_CHANNEL } from '../../common/context/IngestionJobsContext';
 import { callBackend } from '../../common/services/backendApi';
+import { socketClient } from '../../common/utils/socketClient';
+import type { CaptureSetting } from '../../common/types/backendTypes';
+import { useObservatoryNight } from '../ObservatoryNightContext';
 import { HealthChip, HealthDetail, healthByRowKey } from './calibrationHealth';
-import {
-    clearCalibrationRowRequest,
-    getCalibrationRowRequest,
-    subscribeToCalibrationRows,
-    type ShowCalibrationRowPayload,
-} from './calibrationRowRequestStore';
+import { consumeHandoff, usePendingHandoff } from '../../common/utils/displayHandoffStore';
 import '../../common/components/quality/quality.css';
 import '../observatoryManager.css';
+import { Button } from '../../common/components/Button';
 
 /** One row of a `calibration:query` list, as the library returns it. */
 type LibraryRow = Record<string, any>;
@@ -48,15 +52,13 @@ const CALIBRATION_POLL_INTERVAL_MS = 10000;
 /**
  * How long a health answer stays fresh, in milliseconds. Health is not polled:
  * the stored numbers change only when the measuring job runs, so it is read
- * again on a refresh, after "Check sets", or when this time has passed.
+ * again on a refresh, when the `calibration:measured` event arrives, or when
+ * this time has passed.
  */
 const CALIBRATION_HEALTH_STALE_MS = 60000;
 
 /** The columns of each table, after which come Count and Health. */
 const TABLE_TITLES: Record<CalibrationKind, string> = { dark: 'Darks', bias: 'Biases', flat: 'Flats' };
-
-/** What is said when the measuring job has been started and has not finished. */
-const MEASURING_MESSAGE = 'Measuring the frames in the background. Choose Refresh when it has finished.';
 
 /**
  * Formats a temperature slot.
@@ -79,22 +81,35 @@ export function formatExposure(seconds: number | null | undefined): string {
     return `${Number((seconds * 1000).toPrecision(3))} ms`;
 }
 
+/** What the `showCalibrationRow` hand-off carries (see `useStatementActions`). */
+interface ShowCalibrationRowPayload {
+    /** The frame type the statement's proposed action names, or null. */
+    calibrationKey: string | null;
+    /** The capture setting the statement is about, or null. */
+    captureSetting: CaptureSetting | null;
+    /** The rule that produced the statement. */
+    rule: string;
+}
+
 /**
  * Shows the calibration library as one table and answers "Show in calibration library".
  * @return The panel.
  */
 export const CalibrationLibraryPanel: React.FC = () => {
+    // The ingest button changes the live library, so a past night greys it.
+    const { isLive, liveOnlyReason } = useObservatoryNight();
     const [isIngestModalOpen, setIsIngestModalOpen] = useState(false);
     const [chosenCamera, setChosenCamera] = useState<string | null>(null);
     const [highlightedKeys, setHighlightedKeys] = useState<string[]>([]);
     const [noMatchMessage, setNoMatchMessage] = useState<string | null>(null);
     const [activeKind, setActiveKind] = useState<CalibrationKind>('dark');
     const [expandedKey, setExpandedKey] = useState<string | null>(null);
-    const [checkMessage, setCheckMessage] = useState<string | null>(null);
-    const [isChecking, setIsChecking] = useState(false);
     const rowElements = useRef<Map<string, HTMLTableRowElement>>(new Map());
-    const ingestionState = useIngestionManager('Calibration');
+    const ingestionState = useIngestionManager('Calibration', CALIBRATION_INGESTION_CHANNEL);
     const queryClient = useQueryClient();
+    // True while a read that the user (or an event such as a finished download) asked for runs.
+    // The 10 second poll is not one of these, so its quiet reads draw no moving bar.
+    const [requestedRefresh, setRequestedRefresh] = useState(false);
 
     const query = useQuery({
         queryKey: ['calibrationLibrary'],
@@ -127,33 +142,27 @@ export const CalibrationLibraryPanel: React.FC = () => {
     });
     const healthByKey = useMemo(() => healthByRowKey(healthQuery.data), [healthQuery.data]);
 
-    /** Starts the measuring job for the dark and bias frames, or checks the flats again. */
-    const checkSets = async () => {
-        setIsChecking(true);
-        setCheckMessage(null);
-        try {
-            if (activeKind === 'flat') {
-                await healthQuery.refetch();
-                setCheckMessage('Flats checked.');
-            } else {
-                const started = await callBackend('calibration:measure_frames', {
-                    kind: activeKind,
-                    camera_id: selectedCamera,
-                });
-                const result = started?.result;
-                setCheckMessage(
-                    result
-                        ? `Measured ${result.measuredCount} frames; ${result.unchangedCount} had not changed.`
-                        : MEASURING_MESSAGE,
-                );
-                await queryClient.invalidateQueries({ queryKey: ['calibrationHealth'] });
-            }
-        } catch {
-            setCheckMessage('Could not start the check. Try again in a moment.');
-        } finally {
-            setIsChecking(false);
-        }
-    };
+    // The backend measures new dark and bias frames after an ingest or a sync;
+    // when that ends, read the health (and the counts) again.
+    // A display paused while hidden hears no events, so the same reads also run
+    // each time this effect starts again after a pause.
+    const hasListenedRef = useRef(false);
+    useEffect(() => {
+        const refreshCalibration = () => {
+            void queryClient.invalidateQueries({ queryKey: ['calibrationHealth'] });
+            void queryClient.invalidateQueries({ queryKey: ['calibrationLibrary'] });
+        };
+        if (hasListenedRef.current) refreshCalibration();
+        hasListenedRef.current = true;
+        const onAction = (action: string) => {
+            if (action !== 'calibration:measured') return;
+            refreshCalibration();
+        };
+        socketClient.on('action', onAction);
+        return () => {
+            socketClient.off('action', onAction);
+        };
+    }, [queryClient]);
 
     /** Asks the library which rows a request matches, then shows them. */
     const showRequest = useCallback(
@@ -204,30 +213,19 @@ export const CalibrationLibraryPanel: React.FC = () => {
         if (first && typeof first.scrollIntoView === 'function') first.scrollIntoView({ block: 'center' });
     }, [highlightedKeys, selectedCamera]);
 
-    // Handle a request that arrived before this panel mounted or before the rows loaded.
+    // Handle a request that arrived while this panel was hidden, paused or not
+    // yet mounted, or before the rows loaded. The hand-off store keeps it.
+    const waitingRow = usePendingHandoff<ShowCalibrationRowPayload>('Observatory Manager', 'showCalibrationRow');
     useEffect(() => {
-        if (!query.isSuccess) return;
-        const waiting = getCalibrationRowRequest();
-        if (waiting) {
-            void showRequest(waiting);
-            clearCalibrationRowRequest();
-        }
-        return subscribeToCalibrationRows((request) => {
-            if (!request) return;
-            void showRequest(request);
-            clearCalibrationRowRequest();
-        });
-    }, [query.isSuccess, showRequest]);
-
-    const handleIngestComplete = () => {
-        setIsIngestModalOpen(false);
-        void query.refetch();
-        void queryClient.invalidateQueries({ queryKey: ['calibrationHealth'] });
-    };
+        if (!query.isSuccess || !waitingRow) return;
+        consumeHandoff(waitingRow);
+        if (waitingRow.payload) void showRequest(waitingRow.payload);
+    }, [query.isSuccess, waitingRow, showRequest]);
 
     /** Reads the counts and the health again. */
     const refreshAll = () => {
-        void query.refetch();
+        setRequestedRefresh(true);
+        void query.refetch().finally(() => setRequestedRefresh(false));
         void queryClient.invalidateQueries({ queryKey: ['calibrationHealth'] });
     };
 
@@ -270,7 +268,7 @@ export const CalibrationLibraryPanel: React.FC = () => {
 
     let body: React.ReactNode;
     if (query.isPending) {
-        body = <QualityPanelState state="loading" />;
+        body = <QualityPanelState state="loading" loadingShape="rows" subject="calibration library" />;
     } else if (query.isError) {
         body = <QualityPanelState state="error" subject="calibration library" onRetry={() => void query.refetch()} />;
     } else if (cameras.length === 0) {
@@ -319,15 +317,15 @@ export const CalibrationLibraryPanel: React.FC = () => {
                                                 <td className="data-table-cell-right">{row.count ?? 0}</td>
                                                 <td>
                                                     {health ? (
-                                                        <button
-                                                            type="button"
+                                                        <Button
+                                                            variant="ghost"
                                                             className="calibration-health-button"
                                                             aria-expanded={expanded}
                                                             aria-label={`Health of this set: ${health.status === 'good' ? 'OK' : health.status === 'warning' ? 'Warning' : 'Not checked'}. Show the reason.`}
                                                             onClick={() => setExpandedKey(expanded ? null : rowKey)}
                                                         >
                                                             <HealthChip health={health} />
-                                                        </button>
+                                                        </Button>
                                                     ) : (
                                                         <HealthChip health={undefined} />
                                                     )}
@@ -359,105 +357,79 @@ export const CalibrationLibraryPanel: React.FC = () => {
     return (
         <SectionPanel
             title="Calibration Library"
+            refreshing={(requestedRefresh || healthQuery.isFetching) && !query.isPending}
             className="calibration-panel"
             id="calibrationLibrary"
             headerContent={
-                <button
-                    type="button"
-                    className="btn btn--primary btn--tiny quality-button"
+                <Button
+                    variant="primary"
+                    size="small"
+                    disabled={!isLive}
+                    title={isLive ? undefined : liveOnlyReason}
                     onClick={() => setIsIngestModalOpen(true)}
                 >
                     {ingestionState.isActive ? 'Ingesting…' : 'Ingest frames'}
-                </button>
+                </Button>
             }
         >
             <div className="calibration-controls">
                 <div className="calibration-line">
                     <div className="calibration-camera-select">
-                        <label htmlFor="calibration-camera">Camera:</label>
-                        <select
-                            id="calibration-camera"
-                            className="dropdown"
-                            value={selectedCamera}
-                            onChange={(event) => setChosenCamera(event.target.value)}
+                        <span>Camera:</span>
+                        <PopoverSelect
+                            label="Camera"
+                            options={cameras.map((camera) => ({ id: camera, label: camera }))}
+                            selectedId={selectedCamera || null}
+                            onSelect={(id) => setChosenCamera(id ?? '')}
                             disabled={cameras.length === 0}
-                        >
-                            {cameras.map((camera) => (
-                                <option key={camera} value={camera}>{camera}</option>
-                            ))}
-                        </select>
+                            placeholder="No cameras"
+                            fill
+                        />
                     </div>
-                    <button
-                        type="button"
-                        className="btn btn--primary btn--square"
+                    <Button
+                        variant="primary"
+                        size="square"
+                        fit
                         onClick={refreshAll}
                         aria-label="Refresh calibration library"
                         title="Refresh calibration library"
                     >
                         ↻
-                    </button>
-                    <button
-                        type="button"
-                        className="btn btn--primary btn--tiny quality-button"
-                        onClick={() => void checkSets()}
-                        disabled={isChecking || cameras.length === 0}
-                        title={
-                            activeKind === 'flat'
-                                ? 'Check the flats again'
-                                : 'Measure the new or changed frames, so the sets can be checked'
-                        }
-                    >
-                        {isChecking ? 'Checking…' : 'Check sets'}
-                    </button>
+                    </Button>
                 </div>
                 {cameras.length > 0 && (
                     <div className="calibration-line">
-                        <div className="calibration-summary" role="tablist" aria-label="Frames for the selected camera">
-                            {(
-                                [
-                                    ['dark', 'Darks:', darkCount],
-                                    ['bias', 'Biases:', biasCount],
-                                    ['flat', 'Flats:', flatCount],
-                                ] as [CalibrationKind, string, number][]
-                            ).map(([kind, label, count]) => (
-                                <button
-                                    key={kind}
-                                    type="button"
-                                    role="tab"
-                                    aria-selected={activeKind === kind}
-                                    className={`calibration-summary-item calibration-tab${activeKind === kind ? ' calibration-tab--active' : ''}`}
-                                    onClick={() => {
-                                        setActiveKind(kind);
-                                        setExpandedKey(null);
-                                        setCheckMessage(null);
-                                    }}
-                                >
-                                    <span className="calibration-label">{label}</span>
-                                    <span className="calibration-value">{count}</span>
-                                </button>
-                            ))}
-                        </div>
+                        <Tabs
+                            tabs={[
+                                { id: 'dark', label: 'Darks', count: darkCount },
+                                { id: 'bias', label: 'Biases', count: biasCount },
+                                { id: 'flat', label: 'Flats', count: flatCount },
+                            ]}
+                            selectedId={activeKind}
+                            onChange={(kind) => {
+                                setActiveKind(kind as CalibrationKind);
+                                setExpandedKey(null);
+                            }}
+                            ariaLabel="Frames for the selected camera"
+                            idPrefix="calibration-kind"
+                            size="compact"
+                            className="calibration-kind-tabs"
+                        />
                     </div>
                 )}
             </div>
             {noMatchMessage && (
                 <div className="calibration-no-match" role="alert">
                     <span>{noMatchMessage}</span>
-                    <button type="button" className="btn btn--tiny quality-button" onClick={() => setNoMatchMessage(null)}>
+                    <Button size="small" fit onClick={() => setNoMatchMessage(null)}>
                         Dismiss
-                    </button>
-                </div>
-            )}
-            {checkMessage && (
-                <div className="calibration-check-message" role="status">
-                    {checkMessage}
+                    </Button>
                 </div>
             )}
             {body}
             <IngestFramesModal
                 isOpen={isIngestModalOpen}
                 onClose={() => setIsIngestModalOpen(false)}
-                onIngestComplete={handleIngestComplete}
                 ingestionState={ingestionState}
             />
         </SectionPanel>

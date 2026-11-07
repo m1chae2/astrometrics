@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 from astrometricslib import AppConfiguration
 from backend.services.infrastructure.fallback_static_files import FallbackStaticFiles
+from backend.services.infrastructure.static_mounts import static_mounts
 
 
 def mount_library_files(app: FastAPI, configuration: AppConfiguration) -> None:
@@ -31,17 +32,21 @@ def mount_library_files(app: FastAPI, configuration: AppConfiguration) -> None:
     configuration : `AppConfiguration`
         The configuration that names the folders.
     """
-    frames_path = configuration.get_frames_path()
-    stacks_path = configuration.get_stacks_path()
-    library_path = configuration.get_library_path()
-
-    if frames_path != library_path:
-        app.mount(
-            "/static/frames",
-            FallbackStaticFiles(
-                directory=str(frames_path),
-                fallback_directory=str(stacks_path) if stacks_path != frames_path else None,
-            ),
-            name="static_frames",
-        )
-    app.mount("/static", StaticFiles(directory=str(library_path)), name="static")
+    roots_by_prefix: dict[str, list[str]] = {}
+    for mount in static_mounts(configuration):
+        roots_by_prefix.setdefault(mount["urlPrefix"], []).append(mount["root"])
+    # The longer prefix goes first: a mount at "/static" would otherwise
+    # answer every "/static/frames/..." request.
+    for prefix in sorted(roots_by_prefix, key=len, reverse=True):
+        roots = roots_by_prefix[prefix]
+        if len(roots) == 1 and prefix == "/static":
+            app.mount(prefix, StaticFiles(directory=roots[0]), name="static")
+        else:
+            # The first root is the main folder; a second one is the
+            # fallback that serves what the first does not hold.
+            fallback = roots[1] if len(roots) > 1 else None
+            app.mount(
+                prefix,
+                FallbackStaticFiles(directory=roots[0], fallback_directory=fallback),
+                name="static_frames",
+            )

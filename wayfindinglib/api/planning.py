@@ -558,7 +558,9 @@ class ObservationPlanning:
         -------
         result : `SourceQueryResult`
             The sources, the number of stars found before the cut, and
-            whether the cut dropped any.
+            whether a cut dropped any. A catalog driver's own cap (the Gaia
+            driver stops at 20,000 stars) counts as a cut. The names of any
+            catalog drivers that failed are in ``failed_catalogs``.
 
         Raises
         ------
@@ -584,6 +586,8 @@ class ObservationPlanning:
                 "The magnitude limits only apply when source has 'stars', 'simbad' or 'catalogs'."
             )
         found: list[SkySource] = []
+        catalogs_cut_short = False
+        failed_catalogs: list[str] = []
         if sections & {"targets", "stars", "simbad"}:
             found.extend(
                 sky_sources.collect_sky_sources(
@@ -600,7 +604,7 @@ class ObservationPlanning:
                 )
             )
         if "catalogs" in sections:
-            from_catalogs = sky_sources.online_catalog_sources(
+            from_catalogs, catalogs_cut_short, failed_catalogs = sky_sources.online_catalog_sources(
                 self._sky_engine, ra_deg, dec_deg, radius_deg, list(catalog_drivers), magnitude_max
             )
             found.extend(
@@ -615,11 +619,12 @@ class ObservationPlanning:
         if limit is not None:
             limit = max(1, min(int(limit), MAXIMUM_SOURCES))
             stars.sort(key=lambda item: (item.magnitude is None, item.magnitude or 0.0))
-        truncated = limit is not None and total_stars > limit
+        truncated = catalogs_cut_short or (limit is not None and total_stars > limit)
         return SourceQueryResult(
             sources=[*targets, *(stars[:limit] if limit is not None else stars)],
             total_stars=total_stars,
             stars_truncated=truncated,
+            failed_catalogs=failed_catalogs,
         )
 
     def query_catalogs(self) -> list[CatalogDriverInfo]:
@@ -794,7 +799,9 @@ class ObservationPlanning:
     ) -> CalibrationAdvisory:
         """Say how many calibration frames of one kind the library holds.
 
-        The count is worked out on demand and never stored.
+        The count is worked out on demand from the calibration library's
+        own index of files, the same source the Calibration Library view
+        shows. It is never stored.
 
         Parameters
         ----------
@@ -823,12 +830,8 @@ class ObservationPlanning:
         """
         from wayfindinglib.tasks.planning_tasks.calibration_advisory_tasks import build_calibration_advisory
 
-        tolerance = None
-        if FrameType(frame_type) == FrameType.DARK and temperature_c is not None:
-            answer = self._astrometrics.processing.calibration.query(kind="dark")
-            tolerance = answer.dark_temperature_tolerance_c
         return build_calibration_advisory(
-            self._butler,
+            self._astrometrics.processing.calibration,
             camera_id,
             FrameType(frame_type),
             exposure_seconds,
@@ -837,7 +840,6 @@ class ObservationPlanning:
             offset=offset,
             binning=binning,
             sensor_temperature_c=temperature_c,
-            dark_temperature_tolerance_c=tolerance,
         )
 
     # -- Mosaics -------------------------------------------------------------

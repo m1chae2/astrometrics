@@ -5,8 +5,8 @@
   gap: 8px;
   padding: 24px 12px;
   text-align: center;
-  font-size: 12px;
-  color: var(--text-dim, #9aa5b5);
+  font-size: var(--section-label-size);
+  color: var(--text-dim, var(--text-dim));
 }
 
 .empty-state--error {

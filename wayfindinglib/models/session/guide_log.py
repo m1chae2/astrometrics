@@ -30,12 +30,18 @@ class GuideCalibration:
     started_at : `float`
         When the calibration began, in seconds since the Unix epoch.
     ra_rate_arcsec_per_second : `float` or `None`
-        Measured mount speed along RA while guiding, in arcseconds per
-        second. `None` if the log gave no value.
+        The guide speed the mount reports for RA (how fast a guide pulse
+        moves it), in arcseconds per second, as the log states it. It is
+        read from the log, not measured from the calibration steps, and it
+        has no cos(declination) factor. `None` if the log gave no value.
     dec_rate_arcsec_per_second : `float` or `None`
-        Measured mount speed along Dec, in arcseconds per second.
+        The guide speed the mount reports for Dec, in arcseconds per second.
     camera_angle_deg : `float` or `None`
-        Angle between the guide camera's x axis and the RA axis, in degrees.
+        The calibration angle PHD2 writes, in degrees, in PHD2's own
+        image-axis convention (the angle of the mount's west axis measured
+        in the guide image). It is not a sky position angle. Filled only
+        from PHD2's "West calibration complete" line; the Ekos guider does
+        not write one.
     """
 
     started_at: float
@@ -76,7 +82,9 @@ class GuidingSection:
     azimuth_degrees : `float` or `None`
         Azimuth when guiding began, in degrees.
     ra_rate_arcsec_per_second : `float` or `None`
-        Calibrated mount speed along RA, in arcseconds per second.
+        Calibrated mount speed along RA, in arcseconds per second. This is
+        the on-sky rate at the calibration declination, so it includes
+        cos(declination).
     dec_rate_arcsec_per_second : `float` or `None`
         Calibrated mount speed along Dec, in arcseconds per second.
     frames_total : `int`

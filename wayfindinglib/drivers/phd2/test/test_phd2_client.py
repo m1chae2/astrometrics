@@ -9,6 +9,8 @@ import json
 import socketserver
 import threading
 
+import pytest
+
 from wayfindinglib.drivers.phd2.phd2_client import PHD2Client
 
 
@@ -151,3 +153,42 @@ def test_events_splits_lines_that_arrive_in_pieces() -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_a_phd2_that_is_not_running_is_warned_about_once(caplog: pytest.LogCaptureFixture) -> None:
+    """Repeated failed connects log one warning, and the repeats stay at debug.
+
+    A PHD2 that is not running used to write a warning on every retry, and
+    those lines filled the log of any job that happened to be running.
+    """
+    import logging
+    import socket
+    import time
+
+    # Find a port nothing listens on: bind one, note it, and release it.
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.bind(("localhost", 0))
+    unused_port = probe.getsockname()[1]
+    probe.close()
+
+    stop_event = threading.Event()
+    client = PHD2Client(
+        host="localhost", port=unused_port, reconnect_cooldown_seconds=0.02, socket_timeout_seconds=0.05
+    )
+
+    def read() -> None:
+        """Read events until the stream ends."""
+        for _ in client.events(stop_event=stop_event):
+            pass
+
+    with caplog.at_level(logging.DEBUG, logger="wayfindinglib.drivers.phd2.phd2_client"):
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+        time.sleep(0.4)
+        stop_event.set()
+        reader.join(timeout=2)
+
+    warnings = [record for record in caplog.records if record.levelno == logging.WARNING]
+    repeats = [record for record in caplog.records if record.levelno == logging.DEBUG]
+    assert len(warnings) == 1
+    assert len(repeats) >= 2

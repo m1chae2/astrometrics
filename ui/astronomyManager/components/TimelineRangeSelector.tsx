@@ -4,6 +4,7 @@
  */
 
 import React from 'react';
+import { Slider } from '../../common/components/Slider';
 import '../styles/timeline.css';
 
 interface TimelineRangeSelectorProps {
@@ -84,8 +85,7 @@ export const TimelineRangeSelector: React.FC<TimelineRangeSelectorProps> = ({
         </div>
         {/* The two sliders sit on top of each other. When both handles are near
             the right end, the start handle goes on top so it can still be dragged left. */}
-        <input
-          type="range"
+        <Slider
           aria-label="Start of time range"
           min={0}
           max={lastIndex}
@@ -93,8 +93,7 @@ export const TimelineRangeSelector: React.FC<TimelineRangeSelectorProps> = ({
           onChange={handleStartChange}
           style={{ zIndex: startFraction > 0.5 ? 3 : 1 }}
         />
-        <input
-          type="range"
+        <Slider
           aria-label="End of time range"
           min={0}
           max={lastIndex}

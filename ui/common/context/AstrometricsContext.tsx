@@ -88,7 +88,7 @@ export const AstrometricsProvider: React.FC<AstrometricsProviderProps> = ({ chil
     const [processing, setProcessing] = useState<ProcessingJobPulse[]>([]);
     const [activeJobs, setActiveJobs] = useState<ProcessingJob[]>([]);
     const [health, setHealth] = useState<SystemHealth>(defaultHealthState);
-    const [connected, setConnected] = useState<boolean>(false);
+    const [connected, setConnected] = useState<boolean>(() => socketClient.isConnected());
     const [config, setConfig] = useState<Record<string, Record<string, any>>>({});
 
     const refetchConfig = useCallback(async () => {
@@ -115,6 +115,10 @@ export const AstrometricsProvider: React.FC<AstrometricsProviderProps> = ({ chil
 
         socketClient.on('connected', onConnected);
         socketClient.on('disconnected', onDisconnected);
+
+        // The socket may already be open (for example after a remount), in
+        // which case no 'connected' event will come. Read its state now.
+        setConnected(socketClient.isConnected());
 
         // Ensure active connection is run
         socketClient.connect();

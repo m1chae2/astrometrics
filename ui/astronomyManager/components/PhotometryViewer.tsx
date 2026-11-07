@@ -10,7 +10,9 @@ import '../styles/astronomyViewer.css';
 
 import { Spectrum } from '../../common/types/backendTypes';
 import { formatPeriod, isSignificantVerdict, selectLightCurveSeries } from '../../common/utils/starDisplayFormat';
+import { Tabs } from '../../common/components/Tabs';
 
+import { Skeleton } from '../../common/components/Skeleton';
 interface Props {
     astronomyData: Spectrum | null;
     loading: boolean;
@@ -119,7 +121,7 @@ export const PhotometryViewer: React.FC<Props> = ({
         return base;
     }, [isPhaseFolded, bestPeriodDays, lightCurveSeries]);
 
-    if (loading) return <div className="astronomy-viewer-loading">Loading photometry...</div>;
+    if (loading) return <Skeleton variant="chart" label="Loading the light curve" />;
     if (error) return <div className="astronomy-viewer-error">{error}</div>;
 
     const hasData = plotData.length > 0;
@@ -128,22 +130,16 @@ export const PhotometryViewer: React.FC<Props> = ({
         <div className="astronomy-viewer-root astronomy-viewer-root--full-height">
             <div className="astronomy-viewer__toolbar">
                 {bestPeriodDays > 0 && (
-                    <div className="astronomy-viewer__segmented-control">
-                        <button
-                            type="button"
-                            className={`segmented-btn ${!isPhaseFolded ? 'active' : ''}`}
-                            onClick={() => setIsPhaseFolded(false)}
-                        >
-                            Time Series
-                        </button>
-                        <button
-                            type="button"
-                            className={`segmented-btn ${isPhaseFolded ? 'active' : ''}`}
-                            onClick={() => setIsPhaseFolded(true)}
-                        >
-                            Phase-Folded ({formatPeriod(bestPeriodDays)})
-                        </button>
-                    </div>
+                    <Tabs
+                        idPrefix="photometry-plot"
+                        ariaLabel="Plot type"
+                        selectedId={isPhaseFolded ? 'phase' : 'time'}
+                        onChange={(plotId) => setIsPhaseFolded(plotId === 'phase')}
+                        tabs={[
+                            { id: 'time', label: 'Time Series' },
+                            { id: 'phase', label: `Phase-Folded (${formatPeriod(bestPeriodDays)})` },
+                        ]}
+                    />
                 )}
             </div>
 

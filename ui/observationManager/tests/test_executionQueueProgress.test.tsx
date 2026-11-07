@@ -105,7 +105,7 @@ describe('ExecutionQueue progress', () => {
         const { unmount } = render(
             <ExecutionQueue queue={queue} removeFromQueue={vi.fn()} onEdit={vi.fn()} reorderQueue={vi.fn()} isSessionLoading />
         );
-        expect(screen.getByText('Loading progress…')).toHaveAttribute('aria-busy', 'true');
+        expect(screen.getByText('Reading progress')).toHaveAttribute('aria-busy', 'true');
         unmount();
         renderQueue({ session: null, sessionError: 'boom', onRetrySession });
         expect(screen.getByRole('alert')).toHaveTextContent('Could not load progress.');

@@ -13,7 +13,6 @@ from astrometricslib._internal.drivers.camera_profile_store import camera_identi
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import AstrometricsError, ConflictError
-from astrometricslib.foundation.jobs.runner import get_current_job
 from astrometricslib.foundation.run_abandonment import raise_if_abandoned
 from astrometricslib.models.quality.gate_result import GateResult
 from astrometricslib.models.target import Target
@@ -25,6 +24,19 @@ from astrometricslib.pipelines.stacking.registration_records import (
     update_frame_registration_results,
 )
 from astrometricslib.pipelines.stacking.stack_run_context import StackRun
+from astrometricslib.pipelines.stacking.stage_progress import (
+    CHOOSE_FRAMES_STAGE,
+    PREPARE_STAGE,
+    PREVIEW_STAGE,
+    QUALITY_STAGE,
+    SCREEN_FRAMES_STAGE,
+    STACKING_STAGE,
+    SUMMARIZE_STAGE,
+    begin_stage,
+    finish_stages,
+    skip_remaining_stages,
+    track_stages,
+)
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 if TYPE_CHECKING:
@@ -32,25 +44,6 @@ if TYPE_CHECKING:
     from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
 
 logger = logging.getLogger(__name__)
-
-
-def _report_stage(progress_current: int, message: str) -> None:
-    """Tell the running job which step the stack has reached.
-
-    The step goes to the job's log and moves its progress bar, so a person
-    watching the job list can tell a slow stack from a stuck one. Does
-    nothing when the stack is not running as a tracked job.
-
-    Parameters
-    ----------
-    progress_current : `int`
-        How far along the stack is, out of 100.
-    message : `str`
-        A short description of the step.
-    """
-    job = get_current_job()
-    if job is not None:
-        job.stage(progress_current, message)
 
 
 def stack_frames(
@@ -215,18 +208,42 @@ def _stack_frames_guarded(
         measured_at,
         quality_recording,
     )
-    _choose_frames(run)  # run.target_frames
-    _check_frame_types(run)  # run.has_spectral
-    _name_output_file(run)  # run.stack_file
-    _screen_frames(run)  # run.target_frames, excluded_frames, gate_results, background_split
-    _prepare_stack(run)  # run.engine, stack_weight, expected_path, inputs_record
-    if _stack_is_unchanged(run):
-        return run.stacked_path
-    _run_stacking_engine(run)  # run.stacked_path, diagnostics
-    _trim_stack_edges(run)  # run.crop_offset, excluded_frames
-    summary = _summarize_stack(run)
-    if run.stacked_path:
-        _finish_made_stack(run, run.stacked_path, summary)
+    # Each `begin_stage` writes one "Stage N of M" line to the job's log and
+    # moves the job's progress (see `stage_progress.py`).
+    with track_stages():
+        begin_stage(CHOOSE_FRAMES_STAGE, "choosing the frames to stack")
+        _choose_frames(run)  # run.target_frames
+        _check_frame_types(run)  # run.has_spectral
+        _name_output_file(run)  # run.stack_file
+        begin_stage(
+            SCREEN_FRAMES_STAGE,
+            f"checking {len(run.target_frames)} frames before stacking (gain, clouds, trailing, sky)",
+        )
+        _screen_frames(run)  # run.target_frames, excluded_frames, gate_results, background_split
+        begin_stage(
+            PREPARE_STAGE, "preparing the stack settings and checking whether the stack is up to date"
+        )
+        _prepare_stack(run)  # run.engine, stack_weight, expected_path, inputs_record
+        if _stack_is_unchanged(run):
+            skip_remaining_stages("the stack is already up to date")
+            # An up-to-date stack made before the solution was saved still
+            # needs one for the viewer's star names.
+            _save_stack_plate_solution(run, run.stacked_path)
+            finish_stages()
+            return run.stacked_path
+        begin_stage(
+            STACKING_STAGE,
+            f"calibrating, aligning and stacking {len(run.target_frames)} frames in Siril",
+        )
+        _run_stacking_engine(run)  # run.stacked_path, diagnostics
+        begin_stage(SUMMARIZE_STAGE, "trimming the stack edges and summarizing the stack")
+        _trim_stack_edges(run)  # run.crop_offset, excluded_frames
+        summary = _summarize_stack(run)
+        if run.stacked_path:
+            _finish_made_stack(run, run.stacked_path, summary)
+        else:
+            skip_remaining_stages("Siril made no stack")
+        finish_stages()
     return run.stacked_path
 
 
@@ -264,8 +281,6 @@ def _choose_frames(run: StackRun) -> None:
     from astrometricslib.pipelines.stacking.pre_processing.camera_selection import ensure_single_camera
 
     ensure_single_camera(run.target_frames)
-
-    _report_stage(5, f"Checking {len(run.target_frames)} frames")
 
 
 def _check_frame_types(run: StackRun) -> None:
@@ -367,7 +382,7 @@ def _screen_frames(run: StackRun) -> None:
     run.excluded_frames = screening.excluded_frames
     run.gate_results = screening.gate_results
     run.background_split = screening.background_split
-    _report_stage(15, f"Frame checks done, {len(run.target_frames)} frames kept")
+    logger.info("Frame checks done: %d of %d frames kept.", len(run.target_frames), run.frames_submitted)
 
 
 def _prepare_stack(run: StackRun) -> None:
@@ -478,7 +493,6 @@ def _run_stacking_engine(run: StackRun) -> None:
     if run.engine is None:
         raise RuntimeError("The stack must be prepared before the stacking program runs.")
     run.staging = _archive_stack_before_restack(run.target.id, run.stack_file)
-    _report_stage(20, f"Calibrating, aligning and stacking {len(run.target_frames)} frames in Siril")
     try:
         run.stacked_path, run.diagnostics = run_stack(
             run.engine,
@@ -503,7 +517,7 @@ def _run_stacking_engine(run: StackRun) -> None:
         _finish_stack_archive(run.staging, run.stack_file, run.target.id, kept=False)
         raise
     _finish_stack_archive(run.staging, run.stack_file, run.target.id, kept=bool(run.stacked_path))
-    _report_stage(70, "Siril stack finished" if run.stacked_path else "Siril produced no stack")
+    logger.info("Siril stack finished." if run.stacked_path else "Siril produced no stack.")
 
 
 def _trim_stack_edges(run: StackRun) -> None:
@@ -619,10 +633,93 @@ def _finish_made_stack(run: StackRun, stacked_path: str, summary: StackQualitySu
     _point_target_at_stack(run, stacked_path)
     _record_provenance(run, stacked_path, summary)
     _save_registration_record(run, stacked_path, summary)
+    begin_stage(
+        QUALITY_STAGE,
+        "measuring the stack's quality (reads up to 16 flat, 24 light and 5 bias frames again)",
+    )
     _store_stack_quality(run, stacked_path, summary)
+    # Before the preview, so the new stretched FITS the preview writes copies
+    # the solution from the stack's header.
+    _save_stack_plate_solution(run, stacked_path)
+    begin_stage(PREVIEW_STAGE, "making the preview picture (GraXpert, Cosmic Clarity, star toning)")
     _make_preview(run, stacked_path)  # run.preview_path
     _save_stack_inputs(run, stacked_path)
     _log_finished_stack(run)
+
+
+def _save_stack_plate_solution(run: StackRun, stacked_path: str | None) -> None:
+    """Save the stack's plate solution in its header and its viewer copy.
+
+    The image viewer draws star names only on a plate-solved image, and no
+    later step of the app writes a solution into the stack. A new stack's
+    header holds at most the pointing the camera software was told to use,
+    which can be tens of pixels off. So a stack with no plate solution is
+    solved here, with the same no-network solve the noise step uses
+    (`_plate_solve_stack_wcs`: refit to Gaia only from a complete cached
+    download), and the solution is written with `write_wcs_to_fits_header`,
+    which marks it as plate-solved. A stack that already carries a plate
+    solution is not solved again.
+
+    The viewer shows the stack's stretched FITS (`processed_fits_path_for`),
+    which has the same pixel grid, so the solution is written there too when
+    that file exists, has the same size and has no solution yet.
+
+    This runs for a stack that was just made and for one that was up to date
+    and skipped, so an older stack gets its solution on the next run. A
+    failed solve is logged as a warning and never fails the stack. Spectral
+    stacks are skipped: they have no star field to solve.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run.
+    stacked_path : `str` or `None`
+        The stack, made or kept. Nothing happens without one.
+    """
+    if run.has_spectral or not stacked_path:
+        return
+    from astropy.wcs import WCS
+
+    from astrometricslib._internal.drivers.fits_access import read_header
+    from astrometricslib.pipelines.shared.session_identification import (
+        header_is_plate_solved,
+        write_wcs_to_fits_header,
+    )
+    from astrometricslib.pipelines.stacking.post_processing.stack_noise import _plate_solve_stack_wcs
+    from astrometricslib.utilities.stack_preview_path import processed_fits_path_for
+
+    try:
+        stack_header = read_header(stacked_path)
+    except (OSError, *DATA_ERRORS) as error:
+        logger.warning("Could not read the header of %s to check its plate solution: %s", stacked_path, error)
+        return
+    if header_is_plate_solved(stack_header):
+        wcs = WCS(stack_header).celestial
+    else:
+        wcs, reason, source = _plate_solve_stack_wcs(stacked_path, run.drivers)
+        if wcs is None:
+            logger.warning(
+                "The stack has no plate solution saved, so the viewer cannot name its stars: %s.", reason
+            )
+            return
+        write_wcs_to_fits_header(stacked_path, wcs)
+        logger.info("Saved the stack's plate solution in its header (%s).", source)
+
+    processed_path = processed_fits_path_for(stacked_path)
+    if not os.path.exists(processed_path):
+        return
+    try:
+        processed_header = read_header(processed_path)
+    except (OSError, *DATA_ERRORS) as error:
+        logger.warning("Could not read %s to add the plate solution: %s", processed_path, error)
+        return
+    same_grid = (processed_header.get("NAXIS1"), processed_header.get("NAXIS2")) == (
+        stack_header.get("NAXIS1"),
+        stack_header.get("NAXIS2"),
+    )
+    if same_grid and not header_is_plate_solved(processed_header):
+        write_wcs_to_fits_header(processed_path, wcs)
+        logger.info("Saved the plate solution in the viewer's copy %s.", os.path.basename(processed_path))
 
 
 def _point_target_at_stack(run: StackRun, stacked_path: str) -> None:
@@ -711,7 +808,7 @@ def _store_stack_quality(run: StackRun, stacked_path: str, summary: StackQuality
     A failure here never fails the stack. The flat-to-light match in it reads
     up to 16 flat, 24 light and 5 bias frames again from storage, which can
     take a while on a network mount (the job's time limit is in the
-    configuration), so the job's progress says so first.
+    configuration). The caller announces the step first.
 
     Parameters
     ----------
@@ -722,7 +819,6 @@ def _store_stack_quality(run: StackRun, stacked_path: str, summary: StackQuality
     summary : `StackQualitySummary`
         The stack's quality summary.
     """
-    _report_stage(75, "Measuring the stack's quality (reads up to 16 flat, 24 light and 5 bias frames again)")
     _record_stack_quality(
         summary,
         run.target.id,
@@ -761,7 +857,6 @@ def _make_preview(run: StackRun, stacked_path: str) -> None:
         write_stack_preview,
     )
 
-    _report_stage(80, "Making the preview picture (GraXpert, Cosmic Clarity, star toning)")
     skipped_steps: list[SkippedPreviewStep] = []
     run.preview_path = write_stack_preview(stacked_path, run.preview_settings, skipped_steps=skipped_steps)
     # A skipped step is a warning of this job, not only a line in the log.

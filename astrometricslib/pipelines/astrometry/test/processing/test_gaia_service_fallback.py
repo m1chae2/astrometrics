@@ -9,6 +9,7 @@ in the cache and flagged on the run, and that VizieR's columns are mapped to
 the archive's. They use fake services, so no network is needed.
 """
 
+import socket
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -17,12 +18,14 @@ from typing import Any
 
 import numpy as np
 import pytest
+import requests
 from astropy.table import Table
 
 from astrometricslib._internal.drivers import catalog_store, gaia_cone_driver
 from astrometricslib._internal.drivers.gaia_cone_driver import (
     query_gaia_cone_vizier as real_query_gaia_cone_vizier,
 )
+from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
@@ -182,16 +185,73 @@ def test_the_archive_answers_when_vizier_fails(services: dict[str, Any]) -> None
     assert table.meta["depth_reduced"] is False
 
 
-def test_a_shallower_answer_is_used_and_marked_when_both_fail_at_full_depth(services: dict[str, Any]) -> None:
-    """VizieR is asked one magnitude brighter, and the table says so."""
+def test_a_connection_failure_rules_out_the_brighter_limits(services: dict[str, Any]) -> None:
+    """A connection failure at G < 18 rules out G < 17 and G < 16."""
     services["answers"]["vizier", 17.0] = _stars()
 
     table = _fetch()
 
+    assert table is None
+    assert services["calls"] == [("vizier", 18.0), ("esa", 18.0)]
+
+
+def test_a_read_timeout_keeps_the_brighter_limits(
+    services: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A slow VizieR (reached, no answer in time) is asked again at G < 17."""
+    services["answers"]["vizier", 17.0] = _stars()
+    real_runner = star_identifier_module._run_with_daemon_thread_timeout
+
+    def slow_at_full_depth(query: Any, timeout_seconds: float) -> Any:
+        """Time out the first VizieR call, run every other call normally.
+
+        Parameters
+        ----------
+        query : `Callable`
+            The query to run.
+        timeout_seconds : `float`
+            The deadline, ignored here.
+
+        Returns
+        -------
+        table : `astropy.table.Table`
+            The query's answer.
+
+        Raises
+        ------
+        ExternalServiceError
+            For the first VizieR call.
+        """
+        if not services["calls"]:
+            services["calls"].append(("vizier", 18.0))
+            raise ExternalServiceError("Timed out")
+        return real_runner(query, timeout_seconds)
+
+    monkeypatch.setattr(star_identifier_module, "_run_with_daemon_thread_timeout", slow_at_full_depth)
+
+    table = _fetch()
+
     assert table is not None
-    assert services["calls"] == [("vizier", 18.0), ("esa", 18.0), ("vizier", 17.0)]
-    assert table.meta["magnitude_limit"] == pytest.approx(17.0)
+    assert services["calls"][0] == ("vizier", 18.0)
+    assert ("vizier", 17.0) in services["calls"]
     assert table.meta["depth_reduced"] is True
+    assert table.meta["gaia_service"] == "VizieR"
+
+
+def test_a_requests_read_timeout_is_not_a_connection_failure() -> None:
+    """Read timeouts keep the service; connect and DNS failures do not."""
+    is_failure = star_identifier_module._is_connection_failure
+
+    assert not is_failure(requests.exceptions.ReadTimeout("slow"))
+    assert not is_failure(TimeoutError("slow"))
+    assert not is_failure(ValueError("bad reply"))
+    assert is_failure(requests.exceptions.ConnectTimeout("no connect"))
+    assert is_failure(requests.exceptions.ConnectionError("refused"))
+    assert is_failure(ConnectionRefusedError("refused"))
+    assert is_failure(socket.gaierror("no such name"))
+    wrapped = OSError("wrapped")
+    wrapped.__cause__ = socket.gaierror("no such name")
+    assert is_failure(wrapped)
 
 
 def test_every_failure_gives_none_and_counts_once(services: dict[str, Any]) -> None:
@@ -199,21 +259,122 @@ def test_every_failure_gives_none_and_counts_once(services: dict[str, Any]) -> N
     table = _fetch()
 
     assert table is None
-    assert services["calls"] == [("vizier", 18.0), ("esa", 18.0), ("vizier", 17.0), ("vizier", 16.0)]
+    assert services["calls"] == [("vizier", 18.0), ("esa", 18.0)]
     statistics = star_identifier_module.get_gaia_query_statistics()
     assert statistics["attempted"] == 1
     assert statistics["failed"] == 1
+
+
+def test_later_fetches_in_the_same_run_skip_the_failed_services(
+    services: dict[str, Any], caplog: pytest.LogCaptureFixture
+) -> None:
+    """A second fetch makes no remote call, and each service warned once."""
+    with caplog.at_level("WARNING"):
+        _fetch()
+        services["calls"].clear()
+        assert _fetch() is None
+
+    assert services["calls"] == []
+    failure_warnings = [record for record in caplog.records if "Gaia test from" in record.getMessage()]
+    assert len(failure_warnings) == 2
+
+
+def test_a_new_run_tries_the_services_again(services: dict[str, Any]) -> None:
+    """Resetting the run's statistics clears the unreachable services."""
+    _fetch()
+    services["calls"].clear()
+    services["answers"]["vizier", 18.0] = _stars()
+
+    star_identifier_module.reset_gaia_query_statistics()
+    table = _fetch()
+
+    assert table is not None
+    assert services["calls"] == [("vizier", 18.0)]
+
+
+def test_a_working_network_asks_the_same_questions_as_before(services: dict[str, Any]) -> None:
+    """With VizieR down and the archive up, the order is unchanged."""
+    services["answers"]["esa", 18.0] = _stars()
+
+    _fetch()
+    services["calls"].clear()
+    star_identifier_module.reset_gaia_query_statistics()
+    services["answers"]["vizier", 18.0] = _stars()
+    _fetch()
+
+    assert services["calls"] == [("vizier", 18.0)]
+
+
+def _record_cached_download(config: Any, radius_deg: float, complete: bool) -> None:
+    """Put stars and a region record for the test field into the cache.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        Settings pointing at the test's cache folder.
+    radius_deg : `float`
+        The recorded download's radius.
+    complete : `bool`
+        If `False`, no region record is written, as for stars left by a
+        download that was never recorded.
+    """
+    stars = _stars()
+    catalog_store.insert_gaia_sources(
+        config,
+        [
+            (
+                str(row["source_id"]),
+                float(row["ra"]),
+                float(row["dec"]),
+                float(row["phot_g_mean_mag"]),
+                "x",
+                0.0,
+                0.0,
+            )
+            for row in stars
+        ],
+    )
+    if complete:
+        catalog_store.record_gaia_region(
+            config, CENTRE_RA_DEG, CENTRE_DEC_DEG, radius_deg, 18.0, row_limit_hit=False
+        )
+
+
+def test_a_cached_field_covering_the_cone_makes_no_remote_call(services: dict[str, Any], config: Any) -> None:
+    """A recorded download holding the whole cone is used; nothing is sent."""
+    _record_cached_download(config, radius_deg=0.6, complete=True)
+
+    table, coordinates = StarIdentifier._query_gaia_region(CENTRE_RA_DEG, CENTRE_DEC_DEG, RADIUS_DEG, 18.0)
+
+    assert table is not None and coordinates is not None
+    assert len(table) == 5
+    assert services["calls"] == []
+
+
+def test_stars_in_an_unrecorded_cache_are_not_used_when_every_service_fails(
+    services: dict[str, Any], config: Any
+) -> None:
+    """A cache with no complete download never stands in for the network."""
+    _record_cached_download(config, radius_deg=0.6, complete=False)
+
+    table, coordinates = StarIdentifier._query_gaia_region(CENTRE_RA_DEG, CENTRE_DEC_DEG, RADIUS_DEG, 18.0)
+
+    assert services["calls"] == [("vizier", 18.0), ("esa", 18.0)]
+    assert table is None and coordinates is None
 
 
 def test_the_cache_records_the_depth_fetched_not_the_depth_asked(
     services: dict[str, Any], config: Any
 ) -> None:
     """A G < 17 answer to a G < 18 request is not reused as complete to 18."""
-    services["answers"]["vizier", 17.0] = _stars()
+    shallower = _stars()
+    shallower.meta["magnitude_limit"] = 17.0
+    shallower.meta["row_limit_reached"] = False
 
-    table, coordinates = StarIdentifier._query_gaia_region(CENTRE_RA_DEG, CENTRE_DEC_DEG, RADIUS_DEG, 18.0)
+    StarIdentifier._cache_gaia_results(
+        config, shallower, region=(CENTRE_RA_DEG, CENTRE_DEC_DEG, RADIUS_DEG, 17.0)
+    )
 
-    assert table is not None and coordinates is not None
     assert catalog_store.is_gaia_region_complete(config, CENTRE_RA_DEG, CENTRE_DEC_DEG, RADIUS_DEG, 17.0)
     assert not catalog_store.is_gaia_region_complete(config, CENTRE_RA_DEG, CENTRE_DEC_DEG, RADIUS_DEG, 18.0)
 

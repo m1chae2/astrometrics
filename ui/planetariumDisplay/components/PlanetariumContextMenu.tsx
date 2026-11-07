@@ -15,6 +15,7 @@ import { emitToast } from '../../common/utils/emitToast';
 import { navigateToElement } from '../../common/utils/displayCoordinator';
 import { InfoButton } from '../../common/components/InfoButton';
 import { useCommandAvailability } from '../../common/hooks/useCommandAvailability';
+import { Button } from '../../common/components/Button';
 
 /**
  * Props for PlanetariumContextMenu.
@@ -113,11 +114,8 @@ export const PlanetariumContextMenu: React.FC<Props> = ({ source, x, y, telescop
     const raHours = source.ra / 15.0;
     const decDegrees = source.dec;
 
-    emitToast(`Slewing telescope to ${source.name || 'selected target'}...`, 'info');
     const success = await slewTelescope(raHours, decDegrees);
-    if (success) {
-      emitToast(`Slew initiated successfully`, 'success');
-    } else {
+    if (!success) {
       emitToast(`Slew failed. Check Safe Mode or hardware connection.`, 'error');
     }
     onClose();
@@ -145,24 +143,26 @@ export const PlanetariumContextMenu: React.FC<Props> = ({ source, x, y, telescop
       </div>
 
       {hasAnyData && (
-        <button
+        <Button
+          size="small"
           className="planetarium-context-menu__action"
           onClick={handleOpenInAstronomyManager}
         >
           Open in Astronomy Manager
-        </button>
+        </Button>
       )}
 
       {telescopeConnected && (
         <>
-          <button
+          <Button
+            size="small"
             className="planetarium-context-menu__action"
             onClick={handleSlewToPosition}
             disabled={slewDisabled}
             aria-disabled={slewDisabled}
           >
             Slew Telescope Here
-          </button>
+          </Button>
           {slewDisabled && <InfoButton label="Why unavailable?" text={availability.reason} />}
         </>
       )}

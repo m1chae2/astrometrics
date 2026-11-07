@@ -25,7 +25,7 @@ import os
 import re
 from datetime import UTC, datetime, timedelta, timezone
 
-from wayfindinglib.drivers.ekos.analyze_log_parser import _UTC_OFFSET_HOURS_BY_ABBREVIATION
+from wayfindinglib.drivers.ekos.analyze_log_parser import UTC_OFFSET_HOURS_BY_ABBREVIATION
 from wayfindinglib.models.session.live_session_status import DitherEvent
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,7 @@ def _line_to_epoch(time_text: str, zone_abbreviation: str) -> float | None:
         The instant in UTC seconds, or `None` if the zone or time is
         unreadable.
     """
-    offset_hours = _UTC_OFFSET_HOURS_BY_ABBREVIATION.get(zone_abbreviation)
+    offset_hours = UTC_OFFSET_HOURS_BY_ABBREVIATION.get(zone_abbreviation)
     if offset_hours is None:
         return None
     try:

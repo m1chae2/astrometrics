@@ -13,6 +13,7 @@ backend unless PyIndi runs in a process of its own.
 """
 
 import multiprocessing
+import os
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -87,7 +88,11 @@ class _DummySession:
 
 
 def _dummy_worker_main(
-    testing: bool, command_queue: multiprocessing.Queue, result_queue: multiprocessing.Queue, parent_pid: int
+    testing: bool,
+    command_queue: multiprocessing.Queue,
+    result_queue: multiprocessing.Queue,
+    parent_pid: int,
+    lifeline: Any = None,
 ) -> None:
     """Worker entry point used only by these tests.
 
@@ -96,7 +101,7 @@ def _dummy_worker_main(
     because `multiprocessing`'s "spawn" context re-imports the target by
     name in the child process.
     """
-    serve_requests(_DummySession(), command_queue, result_queue, parent_pid)
+    serve_requests(_DummySession(), command_queue, result_queue, parent_pid, lifeline)
 
 
 @pytest.fixture
@@ -318,3 +323,44 @@ def test_close_without_a_worker_does_nothing_and_can_repeat(
 
     wayfinder.control.close()
     wayfinder.control.close()
+
+
+def test_the_worker_exits_when_the_backend_closes_its_lifeline() -> None:
+    """Cutting the lifeline ends a worker whose parent id has not changed."""
+    client = IndiWorkerClient(worker_target=_dummy_worker_main)
+    client.call_sync("echo_after_delay", "start it", 0.0, timeout=10.0)
+    process = client._process
+    client._lifeline_writer.close()
+    process.join(timeout=10.0)
+    assert not process.is_alive()
+    client.stop()
+
+
+def test_the_lifeline_is_not_inherited_by_a_program_this_process_runs() -> None:
+    """The write end closes on exec, which is what ends a worker at restart."""
+    client = IndiWorkerClient(worker_target=_dummy_worker_main)
+    client.call_sync("echo_after_delay", "start it", 0.0, timeout=10.0)
+    try:
+        assert not os.get_inheritable(client._lifeline_writer.fileno())
+    finally:
+        client.stop()
+
+
+def test_the_worker_closes_the_session_callbacks_when_it_stops() -> None:
+    """The session ignores late updates from the moment the worker returns."""
+    from wayfindinglib.drivers.indi_worker import _close_session_callbacks
+
+    class _Session:
+        """A session that records that its callbacks were closed."""
+
+        closed = False
+
+        def close_callbacks(self) -> None:
+            """Record the call."""
+            self.closed = True
+
+    session = _Session()
+    _close_session_callbacks(session)
+    assert session.closed
+    _close_session_callbacks(None)
+    _close_session_callbacks(object())

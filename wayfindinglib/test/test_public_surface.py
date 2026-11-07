@@ -39,13 +39,31 @@ EXPECTED_EXPORTS = frozenset({
 EXPECTED_MODULE_NAMES = {
     "wayfindinglib.exceptions": frozenset({
         "DelegationPolicyValidationError",
+        "GuardError",
         "PlanRevisionConflictError",
+        "SimulationUnavailableError",
     }),
     "wayfindinglib.reports": frozenset({
         "DepthGoalState",
         "DepthLevel",
         "PackageStatus",
         "RunState",
+    }),
+    "wayfindinglib.simulation": frozenset({
+        "GuardError",
+        "SimulatedObservatory",
+        "SimulationKind",
+        "SimulationUnavailableError",
+        "check_offline_settings_update",
+        "check_settings_update",
+        "choose_free_port",
+        "list_nights",
+        "missing_programs",
+        "offline_environment",
+        "prepare_offline_world",
+        "read_library_copy_report",
+        "remove_library_copy",
+        "unavailable_reason",
     }),
 }
 """Names each public module of wayfindinglib offers (its `__all__`)."""
@@ -104,6 +122,7 @@ REVIEW_MEMBERS = frozenset({
     "get_live_session_status",
     "frame_guiding",
     "get_performance_envelope",
+    "invalidate_night",
 })
 """The public members of `ObservationReview`."""
 

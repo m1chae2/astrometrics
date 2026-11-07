@@ -16,11 +16,10 @@ the equipment without any step that updates stored limits.
 """
 
 import logging
-import math
 import sqlite3
 import statistics
-from collections.abc import Iterable
-from typing import Any
+from collections.abc import Callable, Iterable, Sequence
+from typing import Any, NamedTuple
 
 import numpy as np
 
@@ -215,21 +214,55 @@ def _night_samples(records: Any, night: str, windows: list[tuple[float, float]])
     ]
 
 
-def collect_baseline_values(
+class NightGuidingBaseline(NamedTuple):
+    """What one earlier night of guiding contributes to the baseline.
+
+    Attributes
+    ----------
+    night : `str`
+        The observing night.
+    snr : `float` or `None`
+        Median guide-star signal to noise ratio, if any sample has one.
+    star_mass : `float` or `None`
+        Median guide-star brightness in camera counts, if any sample has one.
+    rms : `float`
+        Robust guiding error per axis, in arcseconds.
+    cadence_seconds : `float`
+        Median time between guide samples.
+    lost_fraction : `float` or `None`
+        Share of guide frames lost, if the night has guiding runs.
+    total_errors : `numpy.ndarray`
+        The total guide error of every sample, in arcseconds. It lets the
+        share of excursions be counted for any limit without reading the
+        samples again.
+    """
+
+    night: str
+    snr: float | None
+    star_mass: float | None
+    rms: float
+    cadence_seconds: float
+    lost_fraction: float | None
+    total_errors: np.ndarray
+
+
+def collect_night_baselines(
     records: Any,
     session_contexts: Iterable[EkosSessionContext],
     equipment_fingerprint: str,
     guiding_runs: Iterable[GuidingRunSummary] = (),
-    before_night: str | None = None,
-) -> dict[str, list[float]]:
-    """Summarise each earlier session that used this equipment.
+) -> list[NightGuidingBaseline]:
+    """Reduce each night that used this equipment to its baseline values.
 
     For every observing night that has a session record with this
     equipment's fingerprint, takes the measured guide samples that fall
     inside those records' time spans and reduces them to one median guide
-    SNR, one guiding error and one share of lost frames. Sessions of other
-    equipment are not read at all, so a change of equipment starts with an
-    empty history.
+    SNR, one guiding error, one cadence and one share of lost frames. Nights
+    with too few samples are left out. Sessions of other equipment are not
+    read at all, so a change of equipment starts with an empty history.
+
+    The result does not depend on which night is being judged, so one call
+    serves every night and can be kept until the records change.
 
     Parameters
     ----------
@@ -242,10 +275,80 @@ def collect_baseline_values(
     guiding_runs : `Iterable` [`GuidingRunSummary`], optional
         Every recorded guiding run. They give each night's share of lost
         frames.
+
+    Returns
+    -------
+    nights : `list` [`NightGuidingBaseline`]
+        One entry per qualifying night, oldest first.
+    """
+    windows_by_night = _matching_windows_by_night(session_contexts, equipment_fingerprint)
+    runs = list(guiding_runs)
+    nights: list[NightGuidingBaseline] = []
+    for night, windows in sorted(windows_by_night.items()):
+        samples = _night_samples(records, night, windows)
+        if len(samples) < MINIMUM_SAMPLES_PER_SESSION:
+            continue
+        snr = [sample["snr"] for sample in samples if sample.get("snr") is not None]
+        _, ra_spread = robust_median_and_spread([sample["dra"] for sample in samples])
+        _, dec_spread = robust_median_and_spread([sample["ddec"] for sample in samples])
+        star_mass = [sample["star_mass"] for sample in samples if sample.get("star_mass")]
+        times = np.sort([sample["timestamp"] for sample in samples])
+        gaps = np.diff(times)
+        night_runs = [
+            run
+            for run in runs
+            if run.session_id == night and any(start <= run.started_at <= end for start, end in windows)
+        ]
+        frames_total = sum(run.frames_total for run in night_runs)
+        nights.append(
+            NightGuidingBaseline(
+                night=night,
+                snr=float(np.median(snr)) if snr else None,
+                star_mass=float(np.median(star_mass)) if star_mass else None,
+                rms=float(np.sqrt((ra_spread**2 + dec_spread**2) / 2.0)),
+                # A gap over a minute is a break between runs, not the cadence.
+                cadence_seconds=float(np.median(gaps[gaps < _MAXIMUM_CADENCE_GAP_SECONDS])),
+                lost_fraction=(sum(run.frames_lost for run in night_runs) / frames_total)
+                if frames_total
+                else None,
+                total_errors=np.hypot(
+                    [sample["dra"] for sample in samples], [sample["ddec"] for sample in samples]
+                ),
+            )
+        )
+    return nights
+
+
+def collect_baseline_values(
+    records: Any,
+    session_contexts: Iterable[EkosSessionContext],
+    equipment_fingerprint: str,
+    guiding_runs: Iterable[GuidingRunSummary] = (),
+    before_night: str | None = None,
+    night_baselines: Sequence[NightGuidingBaseline] | None = None,
+) -> dict[str, list[float]]:
+    """Summarise each earlier session that used this equipment.
+
+    Reduces each qualifying night with `collect_night_baselines` (unless the
+    caller already has them) and keeps the nights before `before_night`.
+
+    Parameters
+    ----------
+    records : `ControlRecordStore`
+        Source of the recorded guiding samples.
+    session_contexts : `Iterable` [`EkosSessionContext`]
+        Every recorded session.
+    equipment_fingerprint : `str`
+        The equipment in use now.
+    guiding_runs : `Iterable` [`GuidingRunSummary`], optional
+        Every recorded guiding run.
     before_night : `str` or `None`, optional
-        If given, only nights earlier than this one are read. Judging a night
+        If given, only nights earlier than this one are used. Judging a night
         against a history that includes that night, or later ones, would let
         a bad night make itself look normal.
+    night_baselines : `Sequence` [`NightGuidingBaseline`], optional
+        The result of `collect_night_baselines`, when the caller has kept it.
+        Worked out here when omitted.
 
     Returns
     -------
@@ -256,46 +359,17 @@ def collect_baseline_values(
         (median time between guide samples) and ``"guide_lost_fraction"``
         (share of guide frames lost), one value per qualifying night.
     """
-    windows_by_night = _matching_windows_by_night(session_contexts, equipment_fingerprint)
-    runs = list(guiding_runs)
-    snr_values: list[float] = []
-    star_mass_values: list[float] = []
-    rms_values: list[float] = []
-    cadence_values: list[float] = []
-    lost_fraction_values: list[float] = []
-    for night, windows in sorted(windows_by_night.items()):
-        if before_night is not None and night >= before_night:
-            continue
-        samples = _night_samples(records, night, windows)
-        if len(samples) < MINIMUM_SAMPLES_PER_SESSION:
-            continue
-        snr = [sample["snr"] for sample in samples if sample.get("snr") is not None]
-        _, ra_spread = robust_median_and_spread([sample["dra"] for sample in samples])
-        _, dec_spread = robust_median_and_spread([sample["ddec"] for sample in samples])
-        if snr:
-            snr_values.append(float(np.median(snr)))
-        star_mass = [sample["star_mass"] for sample in samples if sample.get("star_mass")]
-        if star_mass:
-            star_mass_values.append(float(np.median(star_mass)))
-        rms_values.append(float(np.sqrt((ra_spread**2 + dec_spread**2) / 2.0)))
-        times = np.sort([sample["timestamp"] for sample in samples])
-        gaps = np.diff(times)
-        # A gap over a minute is a break between runs, not the cadence.
-        cadence_values.append(float(np.median(gaps[gaps < _MAXIMUM_CADENCE_GAP_SECONDS])))
-        night_runs = [
-            run
-            for run in runs
-            if run.session_id == night and any(start <= run.started_at <= end for start, end in windows)
-        ]
-        frames_total = sum(run.frames_total for run in night_runs)
-        if frames_total:
-            lost_fraction_values.append(sum(run.frames_lost for run in night_runs) / frames_total)
+    if night_baselines is None:
+        night_baselines = collect_night_baselines(
+            records, session_contexts, equipment_fingerprint, guiding_runs
+        )
+    kept = [night for night in night_baselines if before_night is None or night.night < before_night]
     return {
-        "guide_snr": snr_values,
-        "guide_star_mass": star_mass_values,
-        "guiding_rms": rms_values,
-        "guide_cadence_seconds": cadence_values,
-        "guide_lost_fraction": lost_fraction_values,
+        "guide_snr": [night.snr for night in kept if night.snr is not None],
+        "guide_star_mass": [night.star_mass for night in kept if night.star_mass is not None],
+        "guiding_rms": [night.rms for night in kept],
+        "guide_cadence_seconds": [night.cadence_seconds for night in kept],
+        "guide_lost_fraction": [night.lost_fraction for night in kept if night.lost_fraction is not None],
     }
 
 
@@ -305,6 +379,7 @@ def collect_excursion_fraction_baseline(
     equipment_fingerprint: str,
     excursion_limit_arcsec: float,
     before_night: str | None = None,
+    night_baselines: Sequence[NightGuidingBaseline] | None = None,
 ) -> list[float]:
     """Find each earlier night's share of guide-error excursions.
 
@@ -323,28 +398,29 @@ def collect_excursion_fraction_baseline(
     excursion_limit_arcsec : `float`
         Total guide error above which a sample is an excursion.
     before_night : `str` or `None`, optional
-        If given, only nights earlier than this one are read.
+        If given, only nights earlier than this one are used.
+    night_baselines : `Sequence` [`NightGuidingBaseline`], optional
+        The result of `collect_night_baselines`, when the caller has kept it.
+        Worked out here when omitted. The runs do not matter here, so none
+        are read.
 
     Returns
     -------
     fractions : `list` [`float`]
         One share of excursions per qualifying night.
     """
-    fractions = []
-    for night, windows in sorted(_matching_windows_by_night(session_contexts, equipment_fingerprint).items()):
-        if before_night is not None and night >= before_night:
-            continue
-        samples = _night_samples(records, night, windows)
-        if len(samples) < MINIMUM_SAMPLES_PER_SESSION:
-            continue
-        excursions = sum(
-            1 for sample in samples if math.hypot(sample["dra"], sample["ddec"]) > excursion_limit_arcsec
-        )
-        fractions.append(excursions / len(samples))
-    return fractions
+    if night_baselines is None:
+        night_baselines = collect_night_baselines(records, session_contexts, equipment_fingerprint)
+    return [
+        float(np.count_nonzero(night.total_errors > excursion_limit_arcsec)) / len(night.total_errors)
+        for night in night_baselines
+        if before_night is None or night.night < before_night
+    ]
 
 
-def read_capture_frames(astrometrics: Any, telescope_name: str, camera_name: str) -> list[CaptureFrame]:
+def read_capture_frames(
+    astrometrics: Any, telescope_name: str, camera_name: str, targets: Sequence[Any] | None = None
+) -> list[CaptureFrame]:
     """Read the equipment's light frames, or none if they cannot be read.
 
     Parameters
@@ -355,6 +431,9 @@ def read_capture_frames(astrometrics: Any, telescope_name: str, camera_name: str
         Name of the imaging telescope.
     camera_name : `str`
         Name of the imaging camera.
+    targets : `Sequence` [`Target`], optional
+        The library's targets, when the caller has just listed them. The
+        library is asked for them when omitted.
 
     Returns
     -------
@@ -364,7 +443,7 @@ def read_capture_frames(astrometrics: Any, telescope_name: str, camera_name: str
         read.
     """
     try:
-        return collect_capture_frames(astrometrics, telescope_name, camera_name)
+        return collect_capture_frames(astrometrics, telescope_name, camera_name, targets)
     except (AstrometricsError, sqlite3.Error, *FITS_READ_ERRORS) as error:
         logger.warning("Could not read this equipment's frames from the frame library: %s", error)
         return []
@@ -381,6 +460,7 @@ def assemble_performance_envelope(
     runs: list[GuidingRunSummary] | None = None,
     capture_frames: list[CaptureFrame] | None = None,
     records: Any = None,
+    baseline_provider: Callable[[str], Sequence[NightGuidingBaseline]] | None = None,
 ) -> PerformanceEnvelope | None:
     """Work out the performance limits of the active equipment.
 
@@ -408,6 +488,11 @@ def assemble_performance_envelope(
         (several nights share one read). Read here when omitted.
     records : `ControlRecordStore`, optional
         The store of guiding samples. The butler's own store when omitted.
+    baseline_provider : `Callable`, optional
+        Called with the equipment fingerprint, gives the nights' baseline
+        values (`collect_night_baselines`). A caller that keeps them between
+        calls passes this, so the guiding samples are not read again. The
+        samples are read here when omitted.
 
     Returns
     -------
@@ -433,11 +518,20 @@ def assemble_performance_envelope(
     # The guide cycle is a property of the equipment, not of one night,
     # so it is read from every recorded night. The baseline limits use
     # only the nights before `before_night`.
-    every_night = collect_baseline_values(records, contexts, fingerprint, runs)
+    night_baselines = (
+        baseline_provider(fingerprint)
+        if baseline_provider is not None
+        else collect_night_baselines(records, contexts, fingerprint, runs)
+    )
+    every_night = collect_baseline_values(
+        records, contexts, fingerprint, runs, night_baselines=night_baselines
+    )
     baseline_values = (
         every_night
         if before_night is None
-        else collect_baseline_values(records, contexts, fingerprint, runs, before_night)
+        else collect_baseline_values(
+            records, contexts, fingerprint, runs, before_night, night_baselines=night_baselines
+        )
     )
 
     # Only frames long enough for guiding error to show in them say how
@@ -496,7 +590,7 @@ def assemble_performance_envelope(
     excursion_limit = envelope.value("guide_excursion_limit")
     if excursion_limit is not None:
         baseline_values["guide_excursion_fraction"] = collect_excursion_fraction_baseline(
-            records, contexts, fingerprint, excursion_limit, before_night
+            records, contexts, fingerprint, excursion_limit, before_night, night_baselines
         )
         envelope = derive(baseline_values)
     return envelope

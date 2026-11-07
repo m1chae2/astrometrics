@@ -28,7 +28,7 @@ export interface UseImageProcessingResult {
     loadingHistory: boolean;
     activeJobId: string | null;
     onSelectJob: (job: ProcessingJob) => void;
-    onDismissJob: (jobId: string) => Promise<void>;
+    targetActiveJobs: ProcessingJob[];
     openSiril: () => Promise<void>;
 }
 
@@ -37,12 +37,14 @@ export interface UseImageProcessingResult {
  * Orchestrates stacking and analysis jobs.
  * @param selectedTarget The ID of the currently selected target.
  * @param shouldFetch Whether to fetch data from the server.
+ * @param historyWanted Whether the job history is on screen; it is only read once it is.
  */
 export function useImageProcessing(
     selectedTarget: string,
-    shouldFetch: boolean = true
+    shouldFetch: boolean = true,
+    historyWanted: boolean = true
 ): UseImageProcessingResult {
-    const stacking = useStackingJob(selectedTarget, shouldFetch);
+    const stacking = useStackingJob(selectedTarget, shouldFetch, historyWanted);
     const analysis = useAnalysisJob(
         selectedTarget,
         shouldFetch,
@@ -67,7 +69,7 @@ export function useImageProcessing(
         loadingHistory: stacking.loadingHistory,
         activeJobId: stacking.activeJobId,
         onSelectJob: stacking.onSelectJob,
-        onDismissJob: stacking.onDismissJob,
+        targetActiveJobs: stacking.targetActiveJobs,
         openSiril: stacking.openSiril
     };
 }

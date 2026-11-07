@@ -1,3 +1,5 @@
+import { Checkbox } from '../../../common/components/Checkbox';
+import { TextInput } from '../../../common/components/TextInput';
 import { ConfigData } from '../utils/configUtils';
 
 interface AdvancedFormProps {
@@ -26,29 +28,20 @@ export const AdvancedForm: React.FC<AdvancedFormProps> = ({
             <h4>Local Astrometry Solver</h4>
             <label className="settings__field">
                 <span className="settings__label">Index Path</span>
-                <input
-                    className="settings__input"
-                    type="text"
+                <TextInput
                     value={String(configData[LOCAL_SOLVER_SECTION]?.['index_path'] ?? '')}
                     onChange={(e) => handleConfigChange(LOCAL_SOLVER_SECTION, 'index_path', e.target.value)}
                     disabled={loadingConfig}
                 />
             </label>
-            <label className="settings__field settings__field--row">
-                <input
-                    type="checkbox"
-                    checked={configData[LOCAL_SOLVER_SECTION]?.['autoindex'] === 'true'}
-                    onChange={(e) => handleConfigChange(LOCAL_SOLVER_SECTION, 'autoindex', e.target.checked ? 'true' : 'false')}
-                    className="settings__checkbox"
-                    disabled={loadingConfig}
-                />
-                <span>Autoindex</span>
-            </label>
+            <Checkbox
+                className="settings__field settings__field--row"
+                label="Autoindex"
+                checked={configData[LOCAL_SOLVER_SECTION]?.['autoindex'] === 'true'} onChange={(e) => handleConfigChange(LOCAL_SOLVER_SECTION, 'autoindex', e.target.checked ? 'true' : 'false')} disabled={loadingConfig}
+            />
             <label className="settings__field">
                 <span className="settings__label">CPU Limit (seconds)</span>
-                <input
-                    className="settings__input"
-                    type="text"
+                <TextInput
                     value={String(configData[LOCAL_SOLVER_SECTION]?.['cpulimit'] ?? '')}
                     onChange={(e) => handleConfigChange(LOCAL_SOLVER_SECTION, 'cpulimit', e.target.value)}
                     disabled={loadingConfig}
@@ -59,9 +52,7 @@ export const AdvancedForm: React.FC<AdvancedFormProps> = ({
                 <h4>Siril</h4>
                 <label className="settings__field">
                     <span className="settings__label">Stack Weight</span>
-                    <input
-                        className="settings__input"
-                        type="text"
+                    <TextInput
                         value={String(configData[SIRIL_SECTION]?.['stack_weight'] ?? '')}
                         onChange={(e) => handleConfigChange(SIRIL_SECTION, 'stack_weight', e.target.value)}
                         disabled={loadingConfig}
@@ -77,9 +68,7 @@ export const AdvancedForm: React.FC<AdvancedFormProps> = ({
                 <h4>Parallelism</h4>
                 <label className="settings__field">
                     <span className="settings__label">Target Workers</span>
-                    <input
-                        className="settings__input"
-                        type="text"
+                    <TextInput
                         value={String(configData[PARALLELISM_SECTION]?.['target_workers'] ?? '')}
                         onChange={(e) => handleConfigChange(PARALLELISM_SECTION, 'target_workers', e.target.value)}
                         disabled={loadingConfig}
@@ -87,9 +76,7 @@ export const AdvancedForm: React.FC<AdvancedFormProps> = ({
                 </label>
                 <label className="settings__field">
                     <span className="settings__label">Photometry Workers</span>
-                    <input
-                        className="settings__input"
-                        type="text"
+                    <TextInput
                         value={String(configData[PARALLELISM_SECTION]?.['photometry_workers'] ?? '')}
                         onChange={(e) => handleConfigChange(PARALLELISM_SECTION, 'photometry_workers', e.target.value)}
                         disabled={loadingConfig}
@@ -97,9 +84,7 @@ export const AdvancedForm: React.FC<AdvancedFormProps> = ({
                 </label>
                 <label className="settings__field">
                     <span className="settings__label">Worker Niceness</span>
-                    <input
-                        className="settings__input"
-                        type="text"
+                    <TextInput
                         value={String(configData[PARALLELISM_SECTION]?.['worker_niceness'] ?? '')}
                         onChange={(e) => handleConfigChange(PARALLELISM_SECTION, 'worker_niceness', e.target.value)}
                         disabled={loadingConfig}
@@ -107,9 +92,7 @@ export const AdvancedForm: React.FC<AdvancedFormProps> = ({
                 </label>
                 <label className="settings__field">
                     <span className="settings__label">Max Concurrent Jobs</span>
-                    <input
-                        className="settings__input"
-                        type="text"
+                    <TextInput
                         value={String(configData[PARALLELISM_SECTION]?.['max_concurrent_jobs'] ?? '')}
                         onChange={(e) => handleConfigChange(PARALLELISM_SECTION, 'max_concurrent_jobs', e.target.value)}
                         disabled={loadingConfig}

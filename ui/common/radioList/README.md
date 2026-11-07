@@ -6,7 +6,7 @@ This folder holds the list that lets you pick a target (a sky object such as M 3
 
 - `RadioListManager.tsx` — lays out one list panel: an optional filter panel on top, the search box, the list, and an optional panel of action buttons below. It takes the panel as the `topPanel` prop.
 - `RadioListFiltering.tsx` — the search box that sits above the list.
-- `TargetListFilterPanel.tsx` — the filter panel for the target list. It has two tabs and a sort switch.
+- `TargetListFilterPanel.tsx` — the filter panel for the target list. It has two tabs and a second compact tab strip for the sort order (A–Z or Newest).
 
 ## How the filters work
 

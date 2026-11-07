@@ -1,5 +1,6 @@
 import React from 'react';
-import '../../common/styles/button.css';
+import { Button } from '../../common/components/Button';
+import { useObservatoryNight } from '../ObservatoryNightContext';
 import './IndiPropertyItem.css';
 
 export interface IndiSwitchPropertyProps {
@@ -14,6 +15,8 @@ export interface IndiSwitchPropertyProps {
  * IndiSwitchProperty Component
  *
  * Handles rendering and toggling of INDI Switch properties.
+ * While the Observatory Manager shows a past night, the switches are greyed with the reason,
+ * because a toggle would change the live device.
  */
 export const IndiSwitchProperty: React.FC<IndiSwitchPropertyProps> = ({
     name,
@@ -22,6 +25,7 @@ export const IndiSwitchProperty: React.FC<IndiSwitchPropertyProps> = ({
     perm,
     onApply,
 }) => {
+    const { isLive, liveOnlyReason } = useObservatoryNight();
     const canEdit = perm !== 'ro';
     const safeName = name.replace(/\s+/g, '-');
     const elKeys = elements ? Object.keys(elements) : [];
@@ -34,15 +38,17 @@ export const IndiSwitchProperty: React.FC<IndiSwitchPropertyProps> = ({
                     const isOn = elements![el] === 'On' || elements![el] === true;
                     const safeEl = el.replace(/\s+/g, '-');
                     return (
-                        <button
+                        <Button
                             key={el}
                             id={`btn-switch-${safeName}-${safeEl}`}
-                            className={`btn indi-property__switch ${isOn ? 'indi-property__switch--active' : ''}`}
-                            onClick={() => canEdit && onApply(el, 'On')}
-                            type="button"
+                            variant={isOn ? 'primary' : 'secondary'}
+                            size="small"
+                            onClick={() => canEdit && isLive && onApply(el, 'On')}
+                            disabled={!isLive}
+                            title={isLive ? undefined : liveOnlyReason}
                         >
                             {el}
-                        </button>
+                        </Button>
                     );
                 })}
             </div>

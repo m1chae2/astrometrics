@@ -223,6 +223,7 @@ icon-debug.json
 siril.log
 backend/tests/*.fit
 backend/notifications.json
+backend/notifications.json.corrupt-*
 library/targets/TEST_TARGET.json
 
 # Gemini CLI settings: absolute paths, per-clone. Written by
@@ -231,3 +232,6 @@ library/targets/TEST_TARGET.json
 .import_linter_cache/
 
 .venv-win/
+
+# Technical performance measure runs (build/tpm/run_tpm.sh)
+build/tpm/results/

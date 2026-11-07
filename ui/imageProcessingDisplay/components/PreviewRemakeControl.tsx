@@ -7,7 +7,9 @@
  * the backend saved beside the stack, and the image viewer shows it.
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { LoadingSpinner } from '../../common/components/LoadingSpinner';
+import { UpdatingBar } from '../../common/components/Skeleton';
+import { NumberInput } from '../../common/components/NumberInput';
+import { PopoverSelect } from '../../common/components/PopoverSelect';
 import { emit as emitEvent } from '../../common/utils/eventBus';
 import {
     previewRemakeResultOf,
@@ -18,7 +20,9 @@ import {
 } from '../../common/services/imaging/stackReviewService';
 import type { PreviewRemakeResult, PreviewSettingsRecord } from '../../common/types/backendTypes';
 import { useReviewJob } from '../hooks/useReviewJob';
+import { Button } from '../../common/components/Button';
 
+import { Skeleton } from '../../common/components/Skeleton';
 /** A choice for one setting: use the app setting, or force it on or off for this run. */
 export type RunChoice = 'app' | 'on' | 'off';
 
@@ -30,6 +34,13 @@ interface PreviewRemakeControlProps {
     /** Called with the stack's path when the new picture is on display, so the viewer can open it. */
     onShowPicture?: (stackPath: string) => void;
 }
+
+/** The three choices the pickers offer for each setting. */
+const RUN_CHOICE_OPTIONS = [
+    { id: 'app', label: 'Use the app setting' },
+    { id: 'on', label: 'On' },
+    { id: 'off', label: 'Off' },
+];
 
 /**
  * Turns a run choice into the value the backend takes.
@@ -127,22 +138,18 @@ export const PreviewRemakeControl: React.FC<PreviewRemakeControlProps> = ({ targ
                 Your choices apply to this one run only and are not saved.
             </p>
             <div className="preview-remake__fields">
-                <label htmlFor={`${idPrefix}-denoise`}>Noise removal</label>
-                <select
-                    id={`${idPrefix}-denoise`}
-                    value={denoise}
-                    onChange={(event) => setDenoise(event.target.value as RunChoice)}
+                <span>Noise removal</span>
+                <PopoverSelect
+                    label="Noise removal"
+                    options={RUN_CHOICE_OPTIONS}
+                    selectedId={denoise}
+                    onSelect={(id) => setDenoise((id ?? 'app') as RunChoice)}
                     disabled={busy}
-                >
-                    <option value="app">Use the app setting</option>
-                    <option value="on">On</option>
-                    <option value="off">Off</option>
-                </select>
+                />
 
                 <label htmlFor={`${idPrefix}-strength`}>Noise removal strength</label>
-                <input
+                <NumberInput
                     id={`${idPrefix}-strength`}
-                    type="number"
                     min={0}
                     max={1}
                     step={0.05}
@@ -161,32 +168,30 @@ export const PreviewRemakeControl: React.FC<PreviewRemakeControlProps> = ({ targ
                     )}
                 </span>
 
-                <label htmlFor={`${idPrefix}-tone`}>Star toning</label>
-                <select
-                    id={`${idPrefix}-tone`}
-                    value={starToning}
-                    onChange={(event) => setStarToning(event.target.value as RunChoice)}
+                <span>Star toning</span>
+                <PopoverSelect
+                    label="Star toning"
+                    options={RUN_CHOICE_OPTIONS}
+                    selectedId={starToning}
+                    onSelect={(id) => setStarToning((id ?? 'app') as RunChoice)}
                     disabled={busy}
-                >
-                    <option value="app">Use the app setting</option>
-                    <option value="on">On</option>
-                    <option value="off">Off</option>
-                </select>
+                />
             </div>
 
-            <button
-                type="button"
-                className="btn btn--secondary btn--tiny"
+            <Button
+                variant="secondary"
+                size="small"
                 onClick={start}
                 disabled={busy || strengthInvalid}
             >
                 Make picture again
-            </button>
+            </Button>
 
             <div className="preview-remake__status" role="status" aria-live="polite">
                 {busy && (
                     <span>
-                        <LoadingSpinner size={12} /> Making the picture. This can take a minute.
+                        Making the picture. This can take a minute.
+                        <UpdatingBar label="Making the picture" inline />
                     </span>
                 )}
                 {result && (

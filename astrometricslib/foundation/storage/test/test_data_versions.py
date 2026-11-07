@@ -1,0 +1,179 @@
+"""Tests for the library's write counters (`data_versions`).
+
+Checks that the counters start at zero, count each kind on its own, are read
+without writing, are seen by a second connection (another program), and are
+bumped by every writer: the target and star Butler (`put`, `put_all`,
+`merge_and_record`, `delete_by_ids`), the quality store, and the target
+fixture writer.
+"""
+
+import sqlite3
+from datetime import UTC, datetime
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from astrometricslib._internal.drivers.catalog_access import CatalogAccess
+from astrometricslib._internal.drivers.local_database import save_target
+from astrometricslib._internal.drivers.quality_store import QualityStore
+from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.foundation.storage.data_versions import (
+    ALL_KINDS,
+    QUALITY_KIND,
+    STARS_KIND,
+    TARGETS_KIND,
+    bump_data_version,
+    get_library_data_version,
+    read_data_versions,
+)
+from astrometricslib.models.quality.measurement import (
+    MeasurementOrigin,
+    MeasurementStatus,
+    QualityMeasurement,
+    QualitySubject,
+    SubjectLevel,
+)
+from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.models.target import Target
+
+
+@pytest.fixture
+def config(tmp_path: Path) -> AppConfiguration:
+    """Give a configuration whose library is a temporary folder.
+
+    Returns
+    -------
+    config : `AppConfiguration`
+        The configuration.
+    """
+    library = tmp_path / "library"
+    library.mkdir()
+    configuration = AppConfiguration()
+    configuration.update_config({"Image Library": {"path": str(library)}})
+    return configuration
+
+
+def _counters(config: AppConfiguration) -> dict[str, int]:
+    """Read every counter of the test library.
+
+    Returns
+    -------
+    counters : `dict` [`str`, `int`]
+        Each kind with its count (0 when never written).
+    """
+    return dict(get_library_data_version(config))
+
+
+def test_a_library_that_was_never_written_reads_all_zero(config: AppConfiguration) -> None:
+    """A missing file and a missing table both mean no writes yet."""
+    assert _counters(config) == dict.fromkeys(ALL_KINDS, 0)
+    assert read_data_versions(str(Path(str(config.get_library_path())) / "astrometrics.db")) == {}
+
+
+def test_a_file_that_is_not_a_database_gives_an_unknown_version(tmp_path: Path) -> None:
+    """An unreadable file gives `None`, so a cache keeps nothing."""
+    broken = tmp_path / "astrometrics.db"
+    broken.write_bytes(b"not a database" * 100)
+
+    assert read_data_versions(str(broken)) is None
+    assert get_library_data_version(SimpleNamespace(get_library_path=lambda: tmp_path)) is None
+
+
+def test_the_counters_count_each_kind_on_their_own(tmp_path: Path) -> None:
+    """A bump adds one to its kind and leaves the others alone."""
+    database = tmp_path / "astrometrics.db"
+    connection = sqlite3.connect(database)
+    bump_data_version(connection, TARGETS_KIND)
+    bump_data_version(connection, TARGETS_KIND)
+    bump_data_version(connection, STARS_KIND)
+    connection.commit()
+    connection.close()
+
+    assert read_data_versions(str(database)) == {TARGETS_KIND: 2, STARS_KIND: 1}
+    config = SimpleNamespace(get_library_path=lambda: tmp_path)
+    assert get_library_data_version(config, (STARS_KIND, QUALITY_KIND)) == (
+        (QUALITY_KIND, 0),
+        (STARS_KIND, 1),
+    )
+
+
+def test_a_rolled_back_write_does_not_count(tmp_path: Path) -> None:
+    """The counter changes with the data, in the same transaction."""
+    database = tmp_path / "astrometrics.db"
+    connection = sqlite3.connect(database)
+    bump_data_version(connection, TARGETS_KIND)
+    connection.rollback()
+    connection.close()
+
+    assert not read_data_versions(str(database))
+
+
+def test_target_butler_writers_each_count_a_write(config: AppConfiguration) -> None:
+    """Each target write path bumps the targets counter."""
+    access = CatalogAccess(config=config)
+    other_program = CatalogAccess(config=config)
+
+    access.put([Target(id="M 1")], "target_catalog", {})
+    assert _counters(config)[TARGETS_KIND] == 1
+    access.put(Target(id="M 2"), "target_record", {})
+    assert _counters(config)[TARGETS_KIND] == 2
+    access.merge_and_record("target_catalog", [Target(id="M 3")], lambda _old, new: new)
+    assert other_program.get_dataset_version("target_catalog") == 3
+    access.delete_by_ids("target_catalog", ["M 3"])
+    assert other_program.get_dataset_version("target_catalog") == 4
+    # Nothing to merge or delete is not a write.
+    access.merge_and_record("target_catalog", [], lambda _old, new: new)
+    access.delete_by_ids("target_catalog", [])
+    assert other_program.get_dataset_version("target_catalog") == 4
+    assert _counters(config)[STARS_KIND] == 0
+
+
+def test_star_catalog_writers_count_in_the_stars_kind(config: AppConfiguration) -> None:
+    """A star write bumps the stars counter and not the targets counter."""
+    access = CatalogAccess(config=config)
+    access.put([StellarObject(id="Vega")], "stellar_catalog", {})
+    access.merge_and_record("stellar_catalog", [StellarObject(id="Altair")], lambda _old, new: new)
+    access.delete_by_ids("stellar_catalog", ["Vega"])
+
+    assert _counters(config)[STARS_KIND] == 3
+    assert _counters(config)[TARGETS_KIND] == 0
+
+
+def test_the_fixture_target_writer_counts_a_write(config: AppConfiguration) -> None:
+    """`save_target` (used by test libraries) bumps the targets counter."""
+    save_target(app_config=config, target=Target(id="M 1"))
+
+    assert _counters(config)[TARGETS_KIND] == 1
+
+
+def _measurement(value: float = 2.5) -> QualityMeasurement:
+    """Build a frame measurement.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        A measured star-width row.
+    """
+    return QualityMeasurement(
+        metric="frame.star_width_moffat_arcsec",
+        definition_version=1,
+        subject=QualitySubject(level=SubjectLevel.FRAME, subject_id="M31/f.fits", target_id="M31"),
+        status=MeasurementStatus.MEASURED,
+        value=value,
+        origin=MeasurementOrigin.MEASURED,
+        run_id="run-1",
+        measured_at=datetime(2026, 10, 1, 3, 0, tzinfo=UTC),
+    )
+
+
+def test_the_quality_store_counts_new_rows_but_not_repeats(config: AppConfiguration) -> None:
+    """New rows bump the quality counter; a repeat does not."""
+    store = QualityStore.from_configuration(config)
+
+    store.write_measurements([_measurement()])
+    assert _counters(config)[QUALITY_KIND] == 1
+    store.write_measurements([_measurement()])
+    assert _counters(config)[QUALITY_KIND] == 1
+    store.write_measurements([_measurement().model_copy(update={"run_id": "run-2"})])
+    assert _counters(config)[QUALITY_KIND] == 2

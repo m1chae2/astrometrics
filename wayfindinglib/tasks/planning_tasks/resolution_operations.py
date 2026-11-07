@@ -7,6 +7,7 @@ SIMBAD, and retrieves objects within a sky region for `SkyEngine`.
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib import StellarObject, Target
+from astrometricslib.drivers import OfflineModeError, require_online
 from astrometricslib.exceptions import ExternalServiceError, NotFoundError, ProcessingError
 from wayfindinglib._internal.errors import ONLINE_QUERY_ERRORS
 from wayfindinglib.drivers.catalog.simbad_catalog_driver import (
@@ -67,6 +68,12 @@ def resolve_target_coordinates(sky: SkyEngine, target_name: str) -> Target | Ste
             return star
 
     # 3. Fallback to SIMBAD query by name
+    try:
+        require_online("SIMBAD")
+    except OfflineModeError as offline_error:
+        raise ExternalServiceError(
+            f"Cannot resolve '{target_name}' via SIMBAD: {offline_error}"
+        ) from offline_error
     try:
         from astroquery.simbad import Simbad
     except ImportError as e:
@@ -294,6 +301,7 @@ def _query_visual_magnitude(object_name: str) -> float | None:
         The V magnitude, or `None` if SIMBAD has none or the query fails.
     """
     try:
+        require_online("SIMBAD")
         from astroquery.simbad import Simbad
 
         magnitude_client = Simbad()

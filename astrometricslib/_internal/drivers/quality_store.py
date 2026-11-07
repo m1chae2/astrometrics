@@ -8,8 +8,9 @@ so any field can be filtered or sorted with plain SQL.
 The table is append-only. A second write of the same run, metric, subject
 and channel is ignored (``ON CONFLICT ... DO NOTHING``, so any other
 constraint error still raises), never replaced, so re-running a job cannot
-change or duplicate what is already stored. Nothing in this module deletes
-rows. The view ``quality_measurements_latest`` gives the newest row for
+change or duplicate what is already stored. The only rows ever removed are
+those of a frame that was deleted (`QualityStore.delete_frame_measurements`).
+The view ``quality_measurements_latest`` gives the newest row for
 each subject, metric and channel; "newest" means the latest
 ``measured_at``, never the pipeline version.
 
@@ -1084,6 +1085,52 @@ class QualityStore:
                 cursor = connection.execute(_INSERT_MEASUREMENT_SQL, _measurement_to_values(measurement))
                 new_count += max(cursor.rowcount, 0)
         return new_count
+
+    def delete_frame_measurements(self, subject_ids: Sequence[str]) -> int:
+        """Remove every stored measurement of the given frames.
+
+        This is the one way rows leave the table. It is for a frame that was
+        deleted, so its numbers do not describe a file that is gone. Only
+        measurements at the frame level are removed, so a stack is never
+        touched. A frame's weight rows inside a subset stack (subject id
+        ``<frame id>#<label>``) go with the frame. A file or table that does
+        not exist yet is left alone and nothing is created.
+
+        Parameters
+        ----------
+        subject_ids : `Sequence` of `str`
+            The frames' subject ids. Empty ids are ignored.
+
+        Returns
+        -------
+        removed_count : `int`
+            How many rows were removed.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If more than `MAXIMUM_SUBJECT_IDS_PER_QUERY` ids are given.
+        """
+        wanted = sorted({subject_id for subject_id in subject_ids if subject_id})
+        if not wanted:
+            return 0
+        if len(wanted) > MAXIMUM_SUBJECT_IDS_PER_QUERY:
+            raise InvalidArgumentError(
+                f"At most {MAXIMUM_SUBJECT_IDS_PER_QUERY} subject ids can be forgotten in one call."
+            )
+        with self._read_connection() as connection:
+            if connection is None:
+                return 0
+        removed_count = 0
+        with self._write_transaction() as connection:
+            for subject_id in wanted:
+                cursor = connection.execute(
+                    "DELETE FROM quality_measurements WHERE subject_level = ? "
+                    "AND (subject_id = ? OR substr(subject_id, 1, length(?) + 1) = ? || '#')",
+                    (SubjectLevel.FRAME.value, subject_id, subject_id, subject_id),
+                )
+                removed_count += max(cursor.rowcount, 0)
+        return removed_count
 
     def query(
         self,

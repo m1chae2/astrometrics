@@ -20,6 +20,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
+from astrometricslib.drivers import OfflineModeError
 from astrometricslib.jobs import background_log_context
 
 logger = logging.getLogger(__name__)
@@ -134,7 +135,12 @@ class SshPortForward:
         self.local_port = local_port if local_port is not None else pick_free_local_port()
         self._command_for_port = command_for_port
         self._executable_finder = executable_finder
-        self._command = self._build_command()
+        try:
+            self._command = self._build_command()
+        except OfflineModeError:
+            # The launch sends nothing off this computer. The supervisor asks
+            # again and keeps waiting, quietly.
+            self._command = []
         self._process_launcher = process_launcher or subprocess.Popen
         self._restart_cooldown_seconds = restart_cooldown_seconds
         self._port_probe = port_probe
@@ -250,6 +256,10 @@ class SshPortForward:
                 process = self._process_launcher(
                     self._command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True
                 )
+            except OfflineModeError as offline_error:
+                logger.debug("The port forward waits: %s", offline_error)
+                self._stop_event.wait(self._restart_cooldown_seconds)
+                continue
             except OSError as launch_error:
                 self._report_failure(f"could not start ssh: {launch_error}")
                 self._stop_event.wait(self._restart_cooldown_seconds)

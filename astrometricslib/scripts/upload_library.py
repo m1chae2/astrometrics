@@ -50,6 +50,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from astrometricslib.foundation.config import get_configuration
+from astrometricslib.foundation.offline import network_is_offline
 from astrometricslib.foundation.paths import locks_directory, scratch_directory
 
 logger = logging.getLogger(__name__)
@@ -393,6 +394,9 @@ def main(argv: list[str] | None = None) -> int:
     """
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     arguments = _build_argument_parser().parse_args(argv)
+    if network_is_offline():
+        logger.info("Upload skipped: this launch sends nothing off the computer.")
+        return 2
     library_path = arguments.library or Path(get_configuration().get_frames_path())
     state_directory = arguments.state_directory or Path(scratch_directory()) / "upload"
     state_directory.mkdir(parents=True, exist_ok=True)

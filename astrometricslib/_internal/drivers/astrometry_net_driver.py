@@ -40,6 +40,7 @@ from astroquery.exceptions import TimeoutError as AstroqueryTimeoutError
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
 from astrometricslib._internal.drivers.interfaces.plate_solve_driver import PlateSolveDriver, PlateSolveHeader
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
+from astrometricslib.foundation.offline import OfflineModeError, require_online
 from astrometricslib.foundation.paths import scratch_directory
 from astrometricslib.foundation.run_abandonment import run_registered
 from astrometricslib.foundation.run_tally import RunTally, add_to_bound_tally, bind_tally
@@ -549,6 +550,25 @@ class AstrometryNetPlateSolveDriver(PlateSolveDriver):
             matched_star_count=matched_star_count,
         )
 
+    def _online_solver_is_usable(self) -> bool:
+        """Say whether the online solver may be asked.
+
+        Returns
+        -------
+        usable : `bool`
+            `False` without an API key, and `False` when this launch sends
+            nothing off the computer. Either way the caller gives up on the
+            online solve, which is the same as the solver being unavailable.
+        """
+        if not self.api_key:
+            return False
+        try:
+            require_online("The online plate solver")
+        except OfflineModeError as offline_error:
+            logger.debug("%s", offline_error)
+            return False
+        return True
+
     def _solve_online_sources(
         self,
         sources: list[dict[str, Any]],
@@ -564,7 +584,7 @@ class AstrometryNetPlateSolveDriver(PlateSolveDriver):
             The map metadata if it worked, or None if there isn't an
             API key or it failed.
         """
-        if not self.api_key:
+        if not self._online_solver_is_usable():
             return None
         x = [s.get("x_centroid", s.get("xcentroid")) for s in sources]
         y = [s.get("y_centroid", s.get("ycentroid")) for s in sources]
@@ -581,7 +601,7 @@ class AstrometryNetPlateSolveDriver(PlateSolveDriver):
         header : `astropy.io.fits.Header` or `None`
             The map metadata if it worked, or None.
         """
-        if not self.api_key:
+        if not self._online_solver_is_usable():
             return None
 
         # The online solver at astrometry.net only accepts black-and-white (2D)

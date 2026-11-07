@@ -107,13 +107,19 @@ class EquipmentService:
         """
         return _outcome_as_dict(self._observatory.safety.enter_monitoring_mode(evidence_note=evidence_note))
 
-    def enter_controller_mode(self, evidence_note: str = "") -> dict[str, dict[str, str]]:
+    def enter_controller_mode(
+        self, evidence_note: str = "", shadow_first: bool = False
+    ) -> dict[str, dict[str, str]]:
         """Let this app drive every capability it is allowed to drive.
 
         Parameters
         ----------
         evidence_note : `str`, optional
             Why the change was made, kept with the record.
+        shadow_first : `bool`, optional
+            Move the capabilities that need it to the shadowed state first,
+            so they can reach the authoritative one in the same call. The
+            rules for that step still apply. Defaults to `False`.
 
         Returns
         -------
@@ -121,7 +127,11 @@ class EquipmentService:
             ``{"applied": {capability: state}, "rejected": {capability:
             reason}}``.
         """
-        return _outcome_as_dict(self._observatory.safety.enter_controller_mode(evidence_note=evidence_note))
+        return _outcome_as_dict(
+            self._observatory.safety.enter_controller_mode(
+                evidence_note=evidence_note, shadow_first=shadow_first
+            )
+        )
 
 
 def _outcome_as_dict(outcome: Any) -> dict[str, dict[str, str]]:

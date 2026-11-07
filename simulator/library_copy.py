@@ -61,6 +61,7 @@ WAYFINDING_DATABASE = "wayfinding.db"
 PLAIN_FILES = ("calibration_frames.json",)
 #: Sections of the real settings that the simulator replaces with its own.
 DROPPED_SECTIONS = (
+    "Launch",
     "Image Library",
     "Wayfinding Library",
     "Observatory.Telescope",

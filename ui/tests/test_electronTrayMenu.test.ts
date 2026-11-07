@@ -118,11 +118,27 @@ describe('fetchTrayStatus', () => {
   it('reads status, observatory name and simulator label', async () => {
     const fetchImpl = fetchFor({
       'telescope:status': { connectionStatus: 'Connected', trackingStatus: 'Parked', ra: '1', dec: '2', altitude: '3', azimuth: '4' },
-      'observatory:get_source': { label: 'SIMULATOR' },
+      'observatory:get_source': { label: 'SIMULATOR', launch: { label: 'SIMULATOR', live_hardware: false, offline: true } },
       'observatory:get_active_telescope': { name: 'Dome' },
     });
     const status: any = await fetchTrayStatus({ fetchImpl, baseUrl: 'http://x' });
     expect(status).toMatchObject({ online: true, mount: 'Parked', observatoryName: 'Dome', simulator: true });
+  });
+
+  /** The flag comes from the launch report, not from the label text. */
+  it('uses the launch report for the simulator flag', async () => {
+    const base = { 'telescope:status': { connectionStatus: 'Connected' }, 'observatory:get_active_telescope': { name: 'Dome' } };
+    const ask = async (source: unknown): Promise<any> => fetchTrayStatus({
+      fetchImpl: fetchFor({ ...base, 'observatory:get_source': source as any }), baseUrl: 'http://x' });
+    // A label alone, or a null launch, is not a simulator.
+    expect((await ask({ label: 'SIMULATOR', launch: null })).simulator).toBe(false);
+    // A launch on live hardware is not a simulator.
+    expect((await ask({ label: '', launch: { label: 'LIVE', live_hardware: true } })).simulator).toBe(false);
+    // A test world on a real backend source (the TPM case) is flagged, with its own label.
+    const tpm: any = await ask({ source: 'real', label: '', launch: { label: 'TPM RUN', live_hardware: false } });
+    expect(tpm).toMatchObject({ simulator: true, simulatorLabel: 'TPM RUN' });
+    // A failed start is not shown as a simulator.
+    expect((await ask({ launch: { label: 'SIMULATOR FAILED', live_hardware: false }, failed: true })).simulator).toBe(false);
   });
 
   /** A refused connection gives the offline status and does not throw. */

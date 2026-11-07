@@ -557,6 +557,25 @@ DECISIONS = {
         "the user decided an AI may not change configuration.",
         "change-data",
     ),
+    "observatory_guiding_record_calibration": ToolDecision(
+        "withhold",
+        "Saves a guider calibration record to the database. It sends nothing to a device, but the delegation "
+        "rules trust the record, and the AI is read-only. Read the saved one with "
+        "observatory_guiding_status.",
+        "change-data",
+    ),
+    "observatory_imaging_record_focus_model": ToolDecision(
+        "withhold",
+        "Saves a focus model record to the database. It sends nothing to a device, but the delegation rules "
+        "trust the record, and the AI is read-only. Read the saved one with observatory_imaging_status.",
+        "change-data",
+    ),
+    "quality_forget": ToolDecision(
+        "withhold",
+        "Deletes the stored quality measurements of the given frames from the quality database. The AI is "
+        "read-only, so it reads the stored numbers with quality_query instead.",
+        "change-data",
+    ),
     # ---- Records: dropped ----
     # ---- No use, empty, or cannot be called through MCP ----
     # ---- Not wanted by the user ----

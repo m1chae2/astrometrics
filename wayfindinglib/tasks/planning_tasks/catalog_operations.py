@@ -18,6 +18,7 @@ import numpy as np
 from astropy.coordinates import SkyCoord
 
 from astrometricslib import Astrometrics, StellarObject, Target
+from astrometricslib.drivers import network_is_offline
 from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError
 from wayfindinglib._internal.errors import DATA_ERRORS, ONLINE_QUERY_ERRORS
 from wayfindinglib.drivers.catalog import (
@@ -371,6 +372,10 @@ def global_catalog(
         List of mapped Target and StellarObject instances from SIMBAD.
     """
     results: list[Target | StellarObject] = []
+
+    if network_is_offline():
+        logger.debug("The SIMBAD region search was skipped: this launch sends nothing off the computer.")
+        return results
 
     try:
         from astroquery.simbad import Simbad

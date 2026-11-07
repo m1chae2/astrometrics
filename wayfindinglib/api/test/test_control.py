@@ -1496,3 +1496,93 @@ def test_apply_configuration_tells_the_session_to_read_the_hostname_again(
     control.equipment.apply_configuration()
 
     driver.sync_configuration.assert_called_once_with()
+
+
+def test_record_calibration_saves_a_record_with_its_source_note(control: ObservatoryControl) -> None:
+    """A guider calibration made elsewhere is saved and read back whole."""
+    recorded = control.guiding.record_calibration(
+        calibration_id="phd2-1",
+        camera_id="CamA",
+        telescope_id="Rig A",
+        arcsec_per_pixel=2.0,
+        camera_angle_deg=12.5,
+        ra_rate_arcsec_per_sec=14.0,
+        dec_rate_arcsec_per_sec=13.0,
+        source_note="PHD2 calibration of 2026-11-01",
+    )
+
+    saved = {record.id: record for record in control._context.butler.get_all("guider_calibration")}
+    assert saved["phd2-1"] == recorded
+    assert saved["phd2-1"].source_note == "PHD2 calibration of 2026-11-01"
+    assert saved["phd2-1"].camera_angle_deg == pytest.approx(12.5)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"arcsec_per_pixel": 0.0},
+        {"camera_angle_deg": 200.0},
+        {"ra_rate_arcsec_per_sec": -1.0},
+        {"source_note": "  "},
+        {"calibration_id": ""},
+    ],
+)
+def test_record_calibration_refuses_invalid_values(control: ObservatoryControl, changes: dict) -> None:
+    """A value the record does not allow, or a missing note, saves nothing."""
+    arguments = {
+        "calibration_id": "bad",
+        "camera_id": "CamA",
+        "telescope_id": "Rig A",
+        "arcsec_per_pixel": 2.0,
+        "camera_angle_deg": 0.0,
+        "ra_rate_arcsec_per_sec": 10.0,
+        "dec_rate_arcsec_per_sec": 10.0,
+        "source_note": "test",
+        **changes,
+    }
+
+    with pytest.raises(InvalidArgumentError):
+        control.guiding.record_calibration(**arguments)
+
+    assert [r.id for r in control._context.butler.get_all("guider_calibration")] == []
+
+
+def test_record_focus_model_saves_a_record_with_filter_offsets(control: ObservatoryControl) -> None:
+    """A focus model made elsewhere is saved with its offsets and note."""
+    recorded = control.imaging.record_focus_model(
+        focus_model_id="focus-9",
+        camera_id="CamA",
+        telescope_id="Rig A",
+        backlash_steps=40,
+        approach_direction="inward",
+        thermal_coefficient_steps_per_c=-3.5,
+        filter_offsets={"L": 0, "Ha": 12},
+        source_note="Autofocus run of 2026-11-01",
+    )
+
+    saved = {record.id: record for record in control._context.butler.get_all("focus_model")}
+    assert saved["focus-9"] == recorded
+    assert saved["focus-9"].offset_for_filter("Ha") == 12
+    assert saved["focus-9"].source_note == "Autofocus run of 2026-11-01"
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [{"backlash_steps": -1}, {"approach_direction": "sideways"}, {"source_note": ""}],
+)
+def test_record_focus_model_refuses_invalid_values(control: ObservatoryControl, changes: dict) -> None:
+    """A value the record does not allow, or a missing note, saves nothing."""
+    arguments = {
+        "focus_model_id": "bad",
+        "camera_id": "CamA",
+        "telescope_id": "Rig A",
+        "backlash_steps": 0,
+        "approach_direction": "inward",
+        "source_note": "test",
+        **changes,
+    }
+
+    with pytest.raises(InvalidArgumentError):
+        control.imaging.record_focus_model(**arguments)
+
+    assert control._context.butler.get_all("focus_model") == []

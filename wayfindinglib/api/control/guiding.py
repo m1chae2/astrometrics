@@ -13,10 +13,11 @@ need `AUTOGUIDING` to be `AUTHORITATIVE`.
 """
 
 import threading
+from datetime import datetime
 from typing import Any
 
 from astrometricslib.exceptions import ConfigurationError, ExternalServiceError
-from wayfindinglib.api.control.context import ControlChild
+from wayfindinglib.api.control.context import ControlChild, require_text
 from wayfindinglib.models.control_status import GuidingStatus
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
 from wayfindinglib.models.session.control_results import GuideExposureResult
@@ -501,6 +502,80 @@ class GuidingControl(ControlChild):
         return guiding_log_ingestion.refit_and_persist_guiding_spectrum(
             context, context.records, session_id, limit
         )
+
+    def record_calibration(
+        self,
+        *,
+        calibration_id: str,
+        camera_id: str,
+        telescope_id: str,
+        arcsec_per_pixel: float,
+        camera_angle_deg: float,
+        ra_rate_arcsec_per_sec: float,
+        dec_rate_arcsec_per_sec: float,
+        source_note: str,
+        calibrated_at: datetime | None = None,
+    ) -> GuiderCalibration:
+        """Save a guider calibration that was measured elsewhere.
+
+        Use this when the numbers come from a tool outside this library, such
+        as PHD2's own calibration, or from a copy of an earlier record. The
+        record replaces any saved record with the same id, and the delegation
+        rules treat it like one measured here. Nothing is sent to a device.
+
+        Parameters
+        ----------
+        calibration_id : `str`
+            Id of the record. Saving the same id again replaces it.
+        camera_id, telescope_id : `str`
+            The equipment pairing the calibration belongs to.
+        arcsec_per_pixel : `float`
+            Guide camera plate scale. Must be above zero.
+        camera_angle_deg : `float`
+            Angle of the camera against the mount axes, from -180 to 180.
+        ra_rate_arcsec_per_sec, dec_rate_arcsec_per_sec : `float`
+            Speed of the mount along each axis for a guide pulse. Each must
+            be above zero.
+        source_note : `str`
+            Where the numbers came from. Required, so a record never has an
+            unknown origin.
+        calibrated_at : `~datetime.datetime`, optional
+            When the calibration was made. Now when omitted.
+
+        Returns
+        -------
+        calibration : `GuiderCalibration`
+            The saved record.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If a number is out of range, an id is empty, or `source_note`
+            is empty.
+        """
+        from pydantic import ValidationError
+
+        from astrometricslib.exceptions import InvalidArgumentError
+
+        require_text(source_note=source_note, calibration_id=calibration_id)
+        fields = {
+            "id": calibration_id,
+            "camera_id": camera_id,
+            "telescope_id": telescope_id,
+            "arcsec_per_pixel": arcsec_per_pixel,
+            "camera_angle_deg": camera_angle_deg,
+            "ra_rate_arcsec_per_sec": ra_rate_arcsec_per_sec,
+            "dec_rate_arcsec_per_sec": dec_rate_arcsec_per_sec,
+            "source_note": source_note,
+        }
+        if calibrated_at is not None:
+            fields["calibrated_at"] = calibrated_at
+        try:
+            calibration = GuiderCalibration(**fields)
+        except ValidationError as error:
+            raise InvalidArgumentError(f"The guider calibration is not valid: {error}") from error
+        self._save_calibration(calibration)
+        return calibration
 
     def _save_calibration(self, calibration: GuiderCalibration) -> None:
         """Save a measured guider calibration.

@@ -63,6 +63,7 @@ import numpy as np
 
 from astrometricslib._internal.drivers.interfaces.reddening_driver import ReddeningDriver, ReddeningEstimate
 from astrometricslib.foundation.errors import ExternalServiceError
+from astrometricslib.foundation.offline import network_is_offline, require_online
 from astrometricslib.utilities.exceptions import ONLINE_QUERY_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -291,6 +292,7 @@ def _run_gaia_query(adql_query: str) -> Any:
     result_table : `astropy.table.Table` or `None`
         The rows Gaia returned.
     """
+    require_online("the Gaia archive")
     from astroquery.gaia import Gaia
 
     return Gaia.launch_job(adql_query, dump_to_file=False).get_results()
@@ -442,6 +444,23 @@ class AstroqueryGaiaReddeningDriver(ReddeningDriver):
         self._consecutive_failures = 0
         self._unavailable_ids: set[int] = set()
 
+    def _refuse_when_offline(self) -> None:
+        """Refuse quietly when this launch sends nothing off the computer.
+
+        A driver given its own query function (a test's) is not refused,
+        because that function does not use the network.
+
+        Raises
+        ------
+        ExternalServiceError
+            If the launch is offline and the driver would ask the Gaia archive.
+        """
+        if self._run_query is _run_gaia_query and network_is_offline():
+            raise ExternalServiceError(
+                "Gaia reddening is not available: this launch sends nothing off the computer.",
+                details={"offline": True},
+            )
+
     def prefetch_reddening(self, gaia_source_ids: Iterable[int]) -> None:
         """Ask Gaia for many stars at once and keep every answer.
 
@@ -464,6 +483,7 @@ class AstroqueryGaiaReddeningDriver(ReddeningDriver):
             without a query.
         """
         wanted = sorted({_checked_source_id(source_id) for source_id in gaia_source_ids})
+        self._refuse_when_offline()
         with self._lock:
             # A new prefetch is a new try, so the earlier verdict is dropped.
             self._unavailable_ids.difference_update(wanted)
@@ -519,6 +539,7 @@ class AstroqueryGaiaReddeningDriver(ReddeningDriver):
         with self._lock:
             if source_id in self._cache:
                 return self._cache[source_id]
+            self._refuse_when_offline()
             if source_id in self._unavailable_ids:
                 raise ExternalServiceError(
                     "The Gaia reddening batch query for this run failed, so this star has no reddening."

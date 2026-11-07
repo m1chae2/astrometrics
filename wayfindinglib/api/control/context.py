@@ -59,7 +59,7 @@ if TYPE_CHECKING:
     from wayfindinglib.models.session.guiding_run import GuidingRunSummary
     from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis
 
-__all__ = ["ControlChild", "ControlContext"]
+__all__ = ["ControlChild", "ControlContext", "require_text"]
 
 logger = logging.getLogger(__name__)
 
@@ -907,6 +907,26 @@ class ControlContext:
             The run, keyed by its guide log's name and its place in it.
         """
         self.butler.put(run, "guiding_run", {"id": run.id})
+
+
+def require_text(**texts: str) -> None:
+    """Refuse a record whose required text is empty.
+
+    Parameters
+    ----------
+    **texts : `str`
+        Argument name and value pairs to check.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If a value is empty or only spaces.
+    """
+    from astrometricslib.exceptions import InvalidArgumentError
+
+    for name, value in texts.items():
+        if not value.strip():
+            raise InvalidArgumentError(f"{name} must not be empty.")
 
 
 class ControlChild:

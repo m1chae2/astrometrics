@@ -33,6 +33,7 @@ from typing import Any
 import astropy.units as u
 from astropy.table import Table
 
+from astrometricslib.foundation.offline import require_online
 from astrometricslib.models.known_variability import (
     NO_GAIA_MATCH,
     NOT_IN_VSX,
@@ -97,9 +98,16 @@ def run_crossmatch(xmatch_query: XMatchQuery, positions: Table, catalog: str) ->
     -------
     matches : `astropy.table.Table` or `None`
         One row per match, or `None` for an empty table of positions.
+
+    Notes
+    -----
+    When this launch sends nothing off the computer, `require_online` raises
+    `OfflineModeError`, a `ConnectionError`. Callers treat it as the service
+    being down.
     """
     if len(positions) == 0:
         return None
+    require_online("the CDS cross-match service")
     return xmatch_query(
         cat1=positions,
         cat2=catalog,

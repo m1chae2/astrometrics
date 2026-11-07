@@ -694,8 +694,10 @@ class TargetCatalog:
         paths : `list` [`str`]
             File paths to delete.
         target : `str` or `Target`, optional
-            Also remove the matching frame records from this target, and
-            save it.
+            Also remove the matching frame records from this target, save
+            it, and forget the stored quality measurements of the deleted
+            frames (`QualityRecords.forget`). Without a target the
+            measurements stay, because a frame is named by its target.
 
         Returns
         -------
@@ -703,10 +705,15 @@ class TargetCatalog:
             ``deleted`` (the paths removed) and ``failed`` (each path that
             could not be removed, with the reason).
         """
+        from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
         from astrometricslib.pipelines.shared import image_conversions
 
-        target_id = resolve_target(self, target).id if target is not None else None
-        outcome = image_conversions.delete_images(paths, self, target_id)
+        resolved = resolve_target(self, target) if target is not None else None
+        outcome = image_conversions.delete_images(paths, self, resolved.id if resolved is not None else None)
+        if resolved is not None and outcome["deleted"]:
+            QualityStore(quality_database_path(self._config)).delete_frame_measurements([
+                resolved.frame_subject_id(str(path)) for path in outcome["deleted"]
+            ])
         return ImageDeletionResult(
             deleted=[str(path) for path in outcome["deleted"]],
             failed=[

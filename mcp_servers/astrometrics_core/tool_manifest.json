@@ -156,6 +156,13 @@
       "interim_block": "",
       "note": "Built 2026-10-24. Reads the camera, telescope, filter, exposure, gain setting, offset and binning that stored quality measurements point at, by capture setting id. Writes nothing and creates no table."
     },
+    "quality_forget": {
+      "tool_class": "change-data",
+      "category": "image-processing",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Deletes the stored quality measurements of the given frames from the quality database. The AI is read-only, so it reads the stored numbers with quality_query instead."
+    },
     "quality_get_aperture_record": {
       "tool_class": "observe",
       "category": "image-processing",

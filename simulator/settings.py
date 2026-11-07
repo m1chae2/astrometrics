@@ -11,7 +11,94 @@ The app uses them when the simulator cannot start, so it never falls back to
 the real telescope.
 """
 
+import json
+import re
+from collections.abc import Iterable
 from pathlib import Path
+
+#: The launch identity of a simulated observatory (see
+#: `astrometricslib.foundation.launch_identity`): it shows the SIMULATOR chip,
+#: has no real devices, can be thrown away, sends nothing off the computer, and
+#: locks the keys that aim it at its stand-ins and its own folders.
+SIMULATED_LABEL = "SIMULATOR"
+#: The same for the offline world used when the simulator cannot start.
+OFFLINE_LABEL = "SIMULATOR FAILED"
+#: Settings a simulated observatory's settings page cannot change: where the
+#: stand-in telescope computer and PHD2 are, and where the libraries are.
+SIMULATED_LOCKED_KEYS = (
+    "Observatory.Telescope.hostname",
+    "Observatory.Telescope.indi_port",
+    "Observatory.Telescope.remote_pictures_path",
+    "Observatory.Telescope.allow_commands",
+    "Observatory.Guiding.phd2_port",
+    "Observatory.Guiding.phd2_location",
+    "Image Library.path",
+    "Image Library.frames_path",
+    "Image Library.stacks_path",
+    "Wayfinding Library.path",
+)
+
+
+def launch_section_text(
+    label: str,
+    live_hardware: bool,
+    disposable_library: bool,
+    offline: bool,
+    locked_keys: Iterable[str] = (),
+) -> str:
+    """Write a ``[Launch]`` section.
+
+    Parameters
+    ----------
+    label : `str`
+        The status chip text.
+    live_hardware, disposable_library, offline : `bool`
+        The three flags (see `astrometricslib.foundation.launch_identity`).
+    locked_keys : `~collections.abc.Iterable` [`str`], optional
+        The ``Section.key`` names the settings page cannot change.
+
+    Returns
+    -------
+    text : `str`
+        The section, ending in a blank line.
+    """
+    keys = ", ".join(json.dumps(key) for key in locked_keys)
+    return (
+        "[Launch]\n"
+        f"label = {json.dumps(label)}\n"
+        f"live_hardware = {str(live_hardware).lower()}\n"
+        f"disposable_library = {str(disposable_library).lower()}\n"
+        f"offline = {str(offline).lower()}\n"
+        f"locked_keys = [{keys}]\n\n"
+    )
+
+
+#: The ``[Launch]`` section of a simulated observatory.
+SIMULATED_LAUNCH_SETTINGS = launch_section_text(SIMULATED_LABEL, False, True, True, SIMULATED_LOCKED_KEYS)
+#: The ``[Launch]`` section of the offline world (the simulator failed).
+OFFLINE_LAUNCH_SETTINGS = launch_section_text(OFFLINE_LABEL, False, True, True)
+
+
+def with_launch_section(text: str, launch_text: str) -> str:
+    """Replace the ``[Launch]`` section of settings text, or add it.
+
+    Parameters
+    ----------
+    text : `str`
+        The settings in TOML.
+    launch_text : `str`
+        The new section, from `launch_section_text`.
+
+    Returns
+    -------
+    text : `str`
+        The settings with exactly one ``[Launch]`` section, the new one,
+        first.
+    """
+    blocks = re.split(r'(?m)^(?=\["?[A-Za-z])', text)
+    kept = [block for block in blocks if not re.match(r'\["?Launch"?\]\s*$', block.split("\n", 1)[0])]
+    return launch_text + "".join(kept)
+
 
 #: Settings for a simulated observatory. Every host is this computer. The
 #: INDI and PHD2 ports are the random ports of the stand-ins that were
@@ -153,7 +240,12 @@ def offline_config_text(root: Path) -> str:
     text : `str`
         The settings file text: no telescope, no PHD2, no downloads.
     """
-    return library_settings_text(root) + OFFLINE_TELESCOPE_SETTINGS + OTHER_EQUIPMENT_SETTINGS
+    return (
+        OFFLINE_LAUNCH_SETTINGS
+        + library_settings_text(root)
+        + OFFLINE_TELESCOPE_SETTINGS
+        + OTHER_EQUIPMENT_SETTINGS
+    )
 
 
 def simulator_config_text(root: Path, indi_port: int, phd2_port: int) -> str:
@@ -176,7 +268,8 @@ def simulator_config_text(root: Path, indi_port: int, phd2_port: int) -> str:
     """
     pictures = standin_home(root) / "Pictures"
     return (
-        library_settings_text(root)
+        SIMULATED_LAUNCH_SETTINGS
+        + library_settings_text(root)
         + SIMULATED_TELESCOPE_SETTINGS.format(indi_port=indi_port, phd2_port=phd2_port, pictures=pictures)
         + OTHER_EQUIPMENT_SETTINGS
     )

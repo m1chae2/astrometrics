@@ -12,6 +12,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from astrometricslib.drivers import network_is_offline
 from astrometricslib.exceptions import ConfigurationError, ExternalServiceError
 
 __all__ = ["connected_gsconnect_devices", "send_file_to_phone"]
@@ -44,7 +45,7 @@ def connected_gsconnect_devices() -> list[dict[str, str]]:
         ``name``. Empty if GSConnect is not running or `gdbus` is missing.
     """
     gdbus = shutil.which("gdbus")
-    if not gdbus:
+    if not gdbus or network_is_offline():
         return []
     command = [
         gdbus, "call", "--session", "--dest", GSCONNECT_BUS_NAME,
@@ -158,11 +159,21 @@ def send_file_to_phone(path: str) -> dict[str, str]:
         ``method`` (``"gsconnect"`` or ``"localsend"``) and, for GSConnect,
         the phone's ``device`` name.
 
+    Raises
+    ------
+    ConfigurationError
+        If the launch sends nothing off the computer, or if no phone is
+        connected and LocalSend is not installed.
+
     Notes
     -----
-    Raises `ConfigurationError` if no phone is connected and LocalSend is
-    not installed, and `ExternalServiceError` if the phone link fails.
+    The helpers raise `ExternalServiceError` if the phone link fails.
     """
+    if network_is_offline():
+        raise ConfigurationError(
+            "The phone link is not available: this launch sends nothing off the computer.",
+            details={"offline": True},
+        )
     devices = connected_gsconnect_devices()
     if devices:
         _send_with_gsconnect(path, devices[0])

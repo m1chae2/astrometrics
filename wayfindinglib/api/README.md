@@ -44,13 +44,13 @@ The rules:
 `ObservatoryControl` (`wayfinder.control`) commands and reads the devices. It has six children named by topic:
 
 - `mount`: slewing, parking, tracking and polar alignment.
-- `imaging`: the camera, the filter wheel and the focuser.
-- `guiding`: the guide loop and the guiding spectrum fit.
+- `imaging`: the camera, the filter wheel and the focuser. `record_focus_model` saves a focus model that was measured elsewhere.
+- `guiding`: the guide loop and the guiding spectrum fit. `record_calibration` saves a guider calibration that was measured elsewhere, such as PHD2's own.
 - `safety`: the safety status and the delegation mode.
 - `equipment`: device connection, the active telescope and camera, and the configuration.
 - `remote`: the telescope computer's frame and log transfer.
 
-Each of `mount`, `imaging`, `guiding`, `safety` and `equipment` has a `status` call with the same shape: it takes an optional `include` list of sections and returns a typed status. `mount.status` reads only the mount. `close` stops the INDI session (INDI is the protocol that talks to the devices) when a program is done.
+Each of `mount`, `imaging`, `guiding`, `safety` and `equipment` has a `status` call with the same shape: it takes an optional `include` list of sections and returns a typed status. `mount.status` reads only the mount. `record_calibration` and `record_focus_model` take the numbers as keyword arguments and a required `source_note`, check them as the saved records do (a bad value raises `InvalidArgumentError` and saves nothing), and send nothing to a device. The backend serves them as `observatory:record_guider_calibration` and `observatory:record_focus_model`. `safety.enter_controller_mode` takes `shadow_first` to move the corrections to the shadowed state first, and `observatory:enter_controller_mode` passes it on. `close` stops the INDI session (INDI is the protocol that talks to the devices) when a program is done.
 
 `Wayfinder` builds its own INDI session. Give `simulated=True` for the simulator, or leave it unset to use the simulator when `ASTROMETRICS_TESTING` is set. `separate_process=True` runs the session in a process of its own, which a program with a busy event loop needs. `open_port_forwards=True` lets the library open live SSH tunnels, such as the one to PHD2 on the observatory computer; it is off by default and only the backend turns it on. The driver properties on `control` are private.
 

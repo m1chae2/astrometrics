@@ -93,6 +93,13 @@
       "interim_block": "",
       "note": "Commanding a device (mount, cameras, focuser, filter wheel, enclosure) is out of scope. Reading from them and from the Pi is allowed."
     },
+    "observatory_guiding_record_calibration": {
+      "tool_class": "change-data",
+      "category": "observatory-status",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Saves a guider calibration record to the database. It sends nothing to a device, but the delegation rules trust the record, and the AI is read-only. Read the saved one with observatory_guiding_status."
+    },
     "observatory_guiding_refit_spectrum": {
       "tool_class": "change-data",
       "category": "observatory-status",
@@ -134,6 +141,13 @@
       "disposition": "drop",
       "interim_block": "",
       "note": "Commanding a device (mount, cameras, focuser, filter wheel, enclosure) is out of scope. Reading from them and from the Pi is allowed."
+    },
+    "observatory_imaging_record_focus_model": {
+      "tool_class": "change-data",
+      "category": "observatory-status",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Saves a focus model record to the database. It sends nothing to a device, but the delegation rules trust the record, and the AI is read-only. Read the saved one with observatory_imaging_status."
     },
     "observatory_imaging_set_filter": {
       "tool_class": "actuate",

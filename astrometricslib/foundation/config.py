@@ -16,6 +16,11 @@ import tomlkit
 
 from astrometricslib.foundation.camera_names import normalize_camera_name
 from astrometricslib.foundation.enums import FilterType
+from astrometricslib.foundation.launch_identity import (
+    LAUNCH_SECTION,
+    LaunchIdentity,
+    launch_identity_from_settings,
+)
 from astrometricslib.foundation.observatory_setups import ObservatorySetups, load_observatory_setups
 from astrometricslib.foundation.observatory_site import ObservatorySite, load_observatory_site
 from astrometricslib.foundation.paths import (
@@ -1348,6 +1353,22 @@ class AppConfiguration:
             longitude. No default site is substituted.
         """
         return load_observatory_site(self)
+
+    def get_launch_identity(self) -> LaunchIdentity | None:
+        """Return what the launcher says about this run, if it says anything.
+
+        Read from the ``[Launch]`` section (see
+        `astrometricslib.foundation.launch_identity`).
+
+        Returns
+        -------
+        identity : `LaunchIdentity` or `None`
+            The identity, or `None` when the config has no ``[Launch]``
+            section (an ordinary run).
+        """
+        if not self.app_config.has_section(LAUNCH_SECTION):
+            return None
+        return launch_identity_from_settings({LAUNCH_SECTION: self.app_config[LAUNCH_SECTION]})
 
     def get_camera_default_iso(self, camera_name: str | None) -> str | None:
         """Return the ISO or gain to assume for a camera whose header has none.

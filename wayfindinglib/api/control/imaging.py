@@ -9,8 +9,10 @@ or filter change needs `CAPTURE_ORCHESTRATION` to be `AUTHORITATIVE`; a
 focuser move needs `AUTOFOCUS`.
 """
 
+from datetime import datetime
+
 from astrometricslib.jobs import background_job, get_current_job, registered_job
-from wayfindinglib.api.control.context import ControlChild
+from wayfindinglib.api.control.context import ControlChild, require_text
 from wayfindinglib.models.control_status import ImagingStatus
 from wayfindinglib.models.equipment_and_site.focus_model import FocusModel
 from wayfindinglib.models.planning.observation_package import DitherConfig
@@ -159,6 +161,86 @@ class ImagingControl(ControlChild):
         from wayfindinglib.tasks.control_tasks import hardware_operations
 
         return hardware_operations.focus_move(self._context, steps)
+
+    def record_focus_model(
+        self,
+        *,
+        focus_model_id: str,
+        camera_id: str,
+        telescope_id: str,
+        backlash_steps: int,
+        approach_direction: str,
+        source_note: str,
+        thermal_coefficient_steps_per_c: float = 0.0,
+        filter_offsets: dict[str, int] | None = None,
+        calibrated_at: datetime | None = None,
+    ) -> FocusModel:
+        """Save a focus model that was measured elsewhere.
+
+        Use this when the numbers come from a focus run in another tool or
+        from a copy of an earlier record. The record replaces any saved
+        record with the same id, and the delegation rules treat it like one
+        fitted here. Nothing is sent to a device.
+
+        Parameters
+        ----------
+        focus_model_id : `str`
+            Id of the record. Saving the same id again replaces it.
+        camera_id, telescope_id : `str`
+            The equipment pairing the model belongs to.
+        backlash_steps : `int`
+            Focuser backlash in steps. Zero or more.
+        approach_direction : `str`
+            ``"inward"`` or ``"outward"``: the one direction every focus
+            move ends in.
+        source_note : `str`
+            Where the numbers came from. Required, so a record never has an
+            unknown origin.
+        thermal_coefficient_steps_per_c : `float`, optional
+            Focus shift in steps for each degree Celsius. Default 0.
+        filter_offsets : `dict` [`str`, `int`], optional
+            Focus offset in steps for each filter name.
+        calibrated_at : `~datetime.datetime`, optional
+            When the model was made. Now when omitted.
+
+        Returns
+        -------
+        focus_model : `FocusModel`
+            The saved record.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If a value is out of range or not recognized, an id is empty,
+            or `source_note` is empty.
+        """
+        from pydantic import ValidationError
+
+        from astrometricslib.exceptions import InvalidArgumentError
+        from wayfindinglib.models.equipment_and_site.focus_model import FilterFocusOffset
+
+        require_text(source_note=source_note, focus_model_id=focus_model_id)
+        fields = {
+            "id": focus_model_id,
+            "camera_id": camera_id,
+            "telescope_id": telescope_id,
+            "backlash_steps": backlash_steps,
+            "approach_direction": approach_direction,
+            "thermal_coefficient_steps_per_c": thermal_coefficient_steps_per_c,
+            "filter_offsets": [
+                FilterFocusOffset(filter=name, offset_steps=offset)
+                for name, offset in (filter_offsets or {}).items()
+            ],
+            "source_note": source_note,
+        }
+        if calibrated_at is not None:
+            fields["calibrated_at"] = calibrated_at
+        try:
+            focus_model = FocusModel(**fields)
+        except ValidationError as error:
+            raise InvalidArgumentError(f"The focus model is not valid: {error}") from error
+        self._save_focus_model(focus_model)
+        return focus_model
 
     def _save_focus_model(self, focus_model: FocusModel) -> None:
         """Save a measured focus model.

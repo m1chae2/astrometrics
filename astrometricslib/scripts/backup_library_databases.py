@@ -34,7 +34,8 @@ from pathlib import Path
 from typing import IO
 
 from astrometricslib._internal.drivers.local_database import snapshot_sqlite_database
-from astrometricslib.foundation.paths import backup_directory, data_directory, is_in_simulator_world
+from astrometricslib.foundation.launch_identity import read_launch_identity
+from astrometricslib.foundation.paths import backup_directory, data_directory
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +259,30 @@ def read_state(state_path: Path) -> dict:
         return {}
 
 
+def library_is_disposable(config_file_path: Path | None) -> bool:
+    """Say whether the settings file declares its library a throwaway.
+
+    The switch is ``disposable_library = true`` in the ``[Launch]`` section of
+    the settings file (see `astrometricslib.foundation.launch_identity`). It
+    is the one place a launch says what is disposable, so a backup needs no
+    second key and no guess from a folder name.
+
+    Parameters
+    ----------
+    config_file_path : `pathlib.Path` or `None`
+        The settings file being backed up, if there is one.
+
+    Returns
+    -------
+    disposable : `bool`
+        `True` when the library is declared disposable.
+    """
+    if config_file_path is None:
+        return False
+    identity = read_launch_identity(config_file_path)
+    return identity is not None and identity.disposable_library
+
+
 def _build_argument_parser() -> argparse.ArgumentParser:
     """Construct the command-line parser for this script.
 
@@ -309,10 +334,11 @@ def main(argv: list[str] | None = None) -> int:
         configuration = get_configuration()
         library_path = library_path or Path(str(configuration.get_library_path()))
         config_file_path = config_file_path or configuration.config_file_path
-    if is_in_simulator_world(library_path) or is_in_simulator_world(data_directory()):
-        # A simulated observatory's folder holds temporary copies. They are
-        # not worth a snapshot, and the snapshot would crowd out real ones.
-        logger.info("The library is a simulator's temporary copy; nothing to back up")
+    if library_is_disposable(config_file_path):
+        # A launch can say its library is a throwaway (a simulated observatory
+        # holds temporary copies). They are not worth a snapshot, and the
+        # snapshot would crowd out real ones.
+        logger.info("The launch says this library is disposable; nothing to back up")
         return 0
     # The observatory database, at wayfindinglib's default location.
     extra_database_paths = (Path(data_directory()) / WAYFINDING_DATABASE_RELATIVE_PATH,)

@@ -211,8 +211,36 @@ export interface ActionRegistry {
         response: BulkDelegationOutcome;
     };
     "observatory:enter_controller_mode": {
-        payload: { evidence_note?: string };
+        payload: { evidence_note?: string; shadow_first?: boolean };
         response: BulkDelegationOutcome;
+    };
+    "observatory:record_guider_calibration": {
+        payload: {
+            calibration_id: string;
+            camera_id: string;
+            telescope_id: string;
+            arcsec_per_pixel: number;
+            camera_angle_deg: number;
+            ra_rate_arcsec_per_sec: number;
+            dec_rate_arcsec_per_sec: number;
+            source_note: string;
+            calibrated_at?: string;
+        };
+        response: Record<string, unknown>;
+    };
+    "observatory:record_focus_model": {
+        payload: {
+            focus_model_id: string;
+            camera_id: string;
+            telescope_id: string;
+            backlash_steps: number;
+            approach_direction: "inward" | "outward";
+            source_note: string;
+            thermal_coefficient_steps_per_c?: number;
+            filter_offsets?: Record<string, number>;
+            calibrated_at?: string;
+        };
+        response: Record<string, unknown>;
     };
 
     // System

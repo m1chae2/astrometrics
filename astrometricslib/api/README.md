@@ -101,7 +101,7 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
 
 ### `quality.py`
 
-`QualityRecords` is reached as `astrometrics.quality`. It is the start of every quality read, whether the numbers were stored by an earlier run or are measured now. Nothing it does changes data.
+`QualityRecords` is reached as `astrometrics.quality`. It is the start of every quality read, whether the numbers were stored by an earlier run or are measured now. Only `record_frame_measurements` and `forget` change stored data.
 
 Stored reads:
 
@@ -113,6 +113,7 @@ Stored reads:
 
 Recorded reads:
 
+- `forget(subject_ids)` removes the stored measurements of frames that no longer exist, and returns how many it removed. It touches only frame measurements (a stack or run row is never removed), also removes a frame's weight rows inside subset stacks, ignores an id with no measurement, and creates no file in a library with no quality database. `targets.delete_images(paths, target=...)` calls it for the deleted frames of the target it is given, so deleting a frame, on a real night too, drops its numbers; without a `target` the numbers stay, because a frame is named by its target.
 - `record_frame_measurements(target)` measures a target's light frames and stores the numbers in the quality database (read them with `query`). It reads each frame once and measures the stars' width and stretch, the sky and its noise in electrons, the read noise and the temperatures. A value it cannot measure is stored as `not_measured` with the reason. A frame whose file has not changed since its last measurement is skipped, so a second call measures nothing again. A frame that fails, for any reason, is counted and tried again next time. It never moves or changes a frame file. Only one run measures a target at a time, and one run reads frames at a time; a second call for the same target returns at once with `already_running` set. A sync measures only the frames it added, at about 11 s per frame. It runs as a background job of type `quality` and returns a `FrameMeasurementSummary`. A sync that adds frames starts it by itself. See [frame measurement](../pipelines/stacking/README.md#frame-measurement). The star measurements are a design estimate (see [AST-17](../../documentation/library_design/validation/astrometry.md#ast-17)).
 
 Live checks:

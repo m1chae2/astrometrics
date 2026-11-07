@@ -5776,6 +5776,8 @@ export const RPC_METHODS = [
   "observatory:set_source",
   "observatory:enter_monitoring_mode",
   "observatory:enter_controller_mode",
+  "observatory:record_guider_calibration",
+  "observatory:record_focus_model",
   "ingestion:start",
   "ingestion:status",
   "ingestion:scan",

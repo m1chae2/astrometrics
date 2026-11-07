@@ -898,6 +898,31 @@ class QualityRecords:
                 stack_path, target_id, sections, compare_to, kind == "spectral", self._drivers
             )
 
+    def forget(self, subject_ids: list[str]) -> int:
+        """Remove the stored measurements of frames that no longer exist.
+
+        Use this after a frame file is deleted, so its numbers do not stay in
+        the quality database. `TargetCatalog.delete_images` calls it for the
+        frames of the target it is given. Only frame measurements are
+        removed: stacks and runs are never touched, and the measurements of
+        other frames are left as they are. A frame's weight rows inside a
+        subset stack go with the frame. An id with no stored measurement is
+        ignored, and a library with no quality database is left as it is.
+
+        Parameters
+        ----------
+        subject_ids : `list` [`str`]
+            The frames' subject ids, as `Target.frame_subject_id` gives them.
+
+        Returns
+        -------
+        removed_count : `int`
+            How many stored measurements were removed.
+        """
+        from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
+
+        return QualityStore(quality_database_path(self._config)).delete_frame_measurements(subject_ids)
+
     @background_job("quality", grace_period_seconds=20.0)
     def record_frame_measurements(
         self,

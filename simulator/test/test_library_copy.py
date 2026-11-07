@@ -12,6 +12,7 @@ mode unmounts and deletes only what the simulator made.
 import hashlib
 import shutil
 import sqlite3
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -325,3 +326,15 @@ def test_copy_report_sizes_match_the_files_on_disk(tmp_path: Path, monkeypatch: 
     assert report["bytes"]["astrometrics.db"] == library_copy.database_size(copy)
     assert report["bytes"]["astrometrics.db"] > 1_000_000
     assert report["bytes"]["astrometrics.db"] >= copy.stat().st_size
+
+
+def test_a_real_launch_section_is_dropped_so_the_simulators_own_stands_alone() -> None:
+    """A real ``[Launch]`` section does not double the simulator's."""
+    real = '[Launch]\nlabel = "REAL NIGHT"\n\n["Observatory.Camera"]\nmodels = "x"\n'
+    mine = '[Launch]\nlabel = "SIMULATOR"\n\n["Image Library"]\npath = "y"\n'
+
+    text = library_copy.world_settings_text(real, mine)
+
+    parsed = tomllib.loads(text)
+    assert parsed["Launch"]["label"] == "SIMULATOR"
+    assert parsed["Observatory.Camera"]["models"] == "x"

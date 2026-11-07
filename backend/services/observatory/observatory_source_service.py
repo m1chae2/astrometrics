@@ -8,7 +8,10 @@ Description: The source is the real telescope or a simulated sky
 * answers what the source is, for the settings control and the status header;
 * saves a new choice and starts the backend again so the next start uses the
   other world; and
-* refuses a settings save that would aim a simulator at a real device.
+* refuses a settings save that would aim a simulator at a real device; and
+* reports the launch identity (the ``[Launch]`` section of the settings the
+  backend started with) as ``launch``. The backend only reports it. It never
+  builds or removes anything because of it.
 
 It never starts a simulator process when the backend uses the real telescope.
 """
@@ -20,7 +23,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from astrometricslib import Target
+from astrometricslib import Target, get_configuration
+from astrometricslib.drivers import LaunchIdentity
 from astrometricslib.exceptions import ConfigurationError, InvalidArgumentError
 from backend import observatory_source
 from simulator import (
@@ -87,6 +91,8 @@ class ObservatorySourceService:
     restarter : `~collections.abc.Callable`, optional
         Starts the backend again. Default: `restart_backend`. It is called
         with the function that stops the backend's services first.
+    launch_reader : `~collections.abc.Callable`, optional
+        Gives the launch identity. Default: read it from the settings in use.
     """
 
     def __init__(
@@ -94,11 +100,13 @@ class ObservatorySourceService:
         observatory: SimulatedObservatory | None = None,
         environ: dict[str, str] | None = None,
         restarter: Callable[[Callable[[], None] | None], object] = observatory_source.restart_backend,
+        launch_reader: Callable[[], LaunchIdentity | None] | None = None,
     ) -> None:
         """Keep the pieces; nothing starts yet."""
         self._observatory = observatory
         self._environ = os.environ if environ is None else environ
         self._restarter = restarter
+        self._launch_reader = launch_reader or (lambda: get_configuration().get_launch_identity())
         self._start_error: str | None = None
         self._starting = False
         self._step = ""
@@ -295,7 +303,11 @@ class ObservatorySourceService:
             app), and ``failed`` and ``reason``. ``failed`` is `True` when
             the chosen simulator could not start and the app runs offline,
             with no telescope; ``reason`` says why. The label is then
-            ``SIMULATOR FAILED``.
+            ``SIMULATOR FAILED``. ``launch`` is the launch identity from the
+            ``[Launch]`` section of the settings in use: ``label`` (`str`),
+            ``live_hardware``, ``disposable_library`` and ``offline``
+            (`bool`), and ``locked_keys`` (`list` of ``Section.key`` `str`).
+            It is `None` when the settings have no ``[Launch]`` section.
         """
         choice = observatory_source.read_choice(self._environ)
         active = self.active_source
@@ -325,7 +337,19 @@ class ObservatorySourceService:
             "failed": failed or bool(self._start_error),
             "reason": error or "",
             "commands": self._commands,
+            "launch": self._launch_description(),
         }
+
+    def _launch_description(self) -> dict[str, Any] | None:
+        """Describe the launch identity for ``get_source``.
+
+        Returns
+        -------
+        launch : `dict` or `None`
+            `LaunchIdentity.as_dict`, or `None` without a ``[Launch]`` section.
+        """
+        identity = self._launch_reader()
+        return None if identity is None else identity.as_dict()
 
     def set_source(self, source: str) -> dict[str, Any]:
         """Save a new source and start the backend again.

@@ -4,6 +4,7 @@ import logging
 import socket
 import time
 
+from astrometricslib.drivers import OfflineModeError, require_local_host
 from wayfindinglib.drivers.host_resolver import KnownHostAddress
 
 logger = logging.getLogger(__name__)
@@ -93,6 +94,11 @@ class ConnectionManager:
             return self.last_responsive_value
 
         self.last_responsive_check = now
+        try:
+            require_local_host(self.known_address.hostname, "The INDI server")
+        except OfflineModeError:
+            self.last_responsive_value = False
+            return False
         address = self.known_address.resolve(self.port)
         if address is None:
             # Only the name lookup failed and no earlier address is known.
@@ -143,6 +149,12 @@ class ConnectionManager:
             `True` if the name resolved within `timeout`, or an earlier
             address is known for it.
         """
+        try:
+            require_local_host(host, "The INDI server")
+        except OfflineModeError:
+            # Nothing leaves this computer in this launch: a status.
+            self.connect_address = None
+            return False
         self.known_address.set_hostname(host)
         self.connect_address = self.known_address.resolve(port, timeout)
         return self.connect_address is not None

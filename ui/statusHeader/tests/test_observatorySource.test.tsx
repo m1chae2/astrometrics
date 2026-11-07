@@ -55,8 +55,10 @@ import {
  */
 function report(source: 'real' | 'simulated' | 'offline', overrides: Record<string, unknown> = {}) {
   const label = source === 'real' ? '' : 'SIMULATOR';
+  const launch = source === 'real' ? null
+    : { label, live_hardware: false, disposable_library: true, offline: true, locked_keys: [] };
   return {
-    source, chosen: source, label, restart_pending: false,
+    source, chosen: source, label, launch, restart_pending: false,
     starting: false, running: source !== 'real', error: null, missing_programs: [], ...overrides,
   };
 }
@@ -74,6 +76,33 @@ describe('Observatory source', () => {
     const { container } = render(<ObservatorySourceChip />);
     await waitFor(() => expect(getObservatorySource).toHaveBeenCalled());
     expect(container.textContent).toBe('');
+  });
+
+  /** The chip follows the launch report: a failed world, and a TPM run on a "real" source, both show. */
+  it('drives the chip from the launch report', async () => {
+    const cases: Array<[Record<string, unknown>, string | null]> = [
+      [{ launch: null }, null],
+      [{ launch: { label: 'LIVE', live_hardware: true, disposable_library: false, offline: false, locked_keys: [] } }, null],
+      [{ launch: { label: 'SIMULATOR FAILED', live_hardware: false, disposable_library: true, offline: true, locked_keys: [] } }, 'SIMULATOR FAILED'],
+      [{ launch: { label: 'TPM RUN', live_hardware: false, disposable_library: true, offline: true, locked_keys: [] } }, 'TPM RUN'],
+    ];
+    for (const [overrides, expected] of cases) {
+      vi.mocked(getObservatorySource).mockResolvedValue(report('real', overrides) as never);
+      const { container, unmount } = render(<ObservatorySourceChip />);
+      await waitFor(() => expect(getObservatorySource).toHaveBeenCalled());
+      if (expected) {
+        expect(await screen.findByText(expected)).toBeTruthy();
+        if (expected.includes('FAILED')) expect(container.querySelector('[data-status="error"]')).not.toBeNull();
+        else {
+          expect(container.querySelector('[data-status="warning"]')).not.toBeNull();
+          expect(container.querySelector('.header__source-chip')?.getAttribute('title')).toContain('Nothing leaves this computer');
+        }
+      } else {
+        expect(container.textContent).toBe('');
+      }
+      unmount();
+      vi.clearAllMocks();
+    }
   });
 
   it('shows only a SIMULATOR chip for simulator sources, never a replay date', async () => {

@@ -43,6 +43,7 @@ export const OFFLINE_STATUS = Object.freeze({
   azimuth: null,
   observatoryName: null,
   simulator: false,
+  simulatorLabel: null,
 });
 
 /**
@@ -97,6 +98,10 @@ export async function fetchTrayStatus(options = {}) {
     askBackend('observatory:get_source', options),
     askBackend('observatory:get_active_telescope', options),
   ]);
+  // The launch report says whether the app is off live hardware. A failed start is not shown as a simulator.
+  const launch = source && source.launch;
+  const simulator = Boolean(launch && launch.live_hardware === false) && !source.failed
+    && !/fail/i.test(String(launch.label || ''));
   return {
     online: true,
     mount: connected ? (telescope.trackingStatus || 'Ready') : 'Disconnected',
@@ -106,8 +111,8 @@ export async function fetchTrayStatus(options = {}) {
     altitude: connected ? (telescope.altitude ?? null) : null,
     azimuth: connected ? (telescope.azimuth ?? null) : null,
     observatoryName: equipment && typeof equipment.name === 'string' ? equipment.name : null,
-    simulator: Boolean(source && /simulator/i.test(String(source.label || source.source || '')))
-      && !(source && source.failed),
+    simulator,
+    simulatorLabel: simulator ? String(source.launch.label || 'SIMULATOR') : null,
   };
 }
 
@@ -124,7 +129,7 @@ export async function fetchTrayStatus(options = {}) {
  */
 export function buildTrayMenuTemplate(status, actions) {
   const name = status.observatoryName || 'Astrometrics';
-  const header = status.simulator ? `Observatory — ${name} (SIMULATOR)` : `Observatory — ${name}`;
+  const header = status.simulator ? `Observatory — ${name} (${status.simulatorLabel || 'SIMULATOR'})` : `Observatory — ${name}`;
   const hasPosition = status.ra != null && status.dec != null;
   const hasHorizon = status.altitude != null && status.azimuth != null;
   return [

@@ -139,9 +139,11 @@ CHILDREN = {
         "capture_image",
         "set_filter",
         "focus_move",
+        "record_focus_model",
     },
     "guiding": {
         "status",
+        "record_calibration",
         "expose",
         "refit_spectrum",
         "run_loop",

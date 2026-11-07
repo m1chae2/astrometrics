@@ -184,11 +184,13 @@ elif [ -z "$LIBRARY" ]; then
   LIBRARY=simulation
 fi
 MODE="$LIBRARY"
-# A simulation-mode run uses the app's simulated observatory, so its header should show the SIMULATOR chip
-# (flow.mjs checks). Off for now: the harness builds the simulator world itself, and the backend has no way yet to
-# learn that it runs one, so it reports the real telescope and shows no chip. Turn this on with the simulator
-# layer's "launch identity" (documentation/plans/SIMULATOR_FROM_REAL_DATA_PLAN.md).
-EXPECT_SIMULATOR_CHIP=0
+# A simulation-mode run uses the app's simulated observatory, so its header must show the SIMULATOR chip
+# (flow.mjs checks). The harness builds the simulator world with the simulator layer, which writes the launch identity
+# (the [Launch] section, label "SIMULATOR") into the settings file the backend starts with. The backend reports it in
+# observatory:get_source and the header draws the chip from its label. Other runs have no chip to look for.
+# Until the UI reads the identity (the UI part of phase L1 in documentation/plans/SIMULATOR_FROM_REAL_DATA_PLAN.md),
+# the chip shows only for the app's own simulator source.
+if [ "$LIBRARY" = "simulation" ]; then EXPECT_SIMULATOR_CHIP=1; else EXPECT_SIMULATOR_CHIP=0; fi
 if [ -z "$OBSERVATORY_PROFILE" ]; then
   if [ "$LIBRARY" = "simulation" ]; then OBSERVATORY_PROFILE=simulated; else OBSERVATORY_PROFILE=offline; fi
 fi

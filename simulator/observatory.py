@@ -55,11 +55,13 @@ from typing import Any
 
 from simulator import library_copy, observatory_guard
 from simulator.settings import (
+    SIMULATED_LAUNCH_SETTINGS,
     SIMULATED_TELESCOPE_SETTINGS,
     library_settings_text,
     offline_config_text,
     simulator_config_text,
     standin_home,
+    with_launch_section,
 )
 from wayfindinglib.exceptions import SimulationUnavailableError
 
@@ -493,12 +495,16 @@ class SimulatedObservatory:
         from astrometricslib.drivers import real_folders
 
         real = self.real_library or real_folders()
-        mine = library_settings_text(
-            self.root,
-            Path(self.copy_report.get("frames_path", self.root / "library" / "frames")),
-            Path(self.copy_report.get("stacks_path", self.root / "library" / "frames")),
-        ) + SIMULATED_TELESCOPE_SETTINGS.format(
-            indi_port=self.indi_port, phd2_port=self.phd2_port, pictures=self.standin_home / "Pictures"
+        mine = (
+            SIMULATED_LAUNCH_SETTINGS
+            + library_settings_text(
+                self.root,
+                Path(self.copy_report.get("frames_path", self.root / "library" / "frames")),
+                Path(self.copy_report.get("stacks_path", self.root / "library" / "frames")),
+            )
+            + SIMULATED_TELESCOPE_SETTINGS.format(
+                indi_port=self.indi_port, phd2_port=self.phd2_port, pictures=self.standin_home / "Pictures"
+            )
         )
         try:
             real_text = real.config_file.read_text(encoding="utf-8")
@@ -533,7 +539,7 @@ class SimulatedObservatory:
         )
         for section, key, value in wanted:
             text = _set_key(text, section, key, f'"{value}"')
-        self.config_path.write_text(text, encoding="utf-8")
+        self.config_path.write_text(with_launch_section(text, SIMULATED_LAUNCH_SETTINGS), encoding="utf-8")
 
     # ------------------------------------------------------------------
     # Processes

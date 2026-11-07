@@ -20,6 +20,14 @@ settings are read, so `backend.main_backend` calls it first. Changing the
 source later writes the choice file and starts the backend again (see
 `restart_backend`), which makes the next start use the other world.
 
+Restart contract. When a launcher runs the backend as its child, it sets
+``ASTROMETRICS_LAUNCHER`` (`LAUNCHER_VARIABLE`) in the backend's environment.
+Then `restart_backend` does not start the backend again by itself. After it
+has stopped the backend's services and child processes, it exits with the
+code `RESTART_EXIT_CODE` (75, ``EX_TEMPFAIL``: "try again"), and the launcher
+reads the saved choice and starts the world again. Any other exit code is a
+stop. Without the variable the backend starts itself again in place, as before.
+
 The real folders are remembered in ``ASTROMETRICS_REAL_*`` variables. One
 helper (`astrometricslib.drivers.real_folders`) finds them, before and after
 the move.
@@ -107,6 +115,13 @@ ADDED_VARIABLES = (
 
 #: Seconds the backend waits after answering before it starts again.
 RESTART_DELAY_SECONDS = 0.7
+
+#: Set by a launcher that runs the backend as its child. The backend then
+#: ends with `RESTART_EXIT_CODE` instead of starting itself again.
+LAUNCHER_VARIABLE = "ASTROMETRICS_LAUNCHER"
+#: The exit code that means "start me again with the saved choice" (75 is
+#: ``EX_TEMPFAIL`` in ``sysexits.h``). A launcher relaunches on this code only.
+RESTART_EXIT_CODE = 75
 
 
 @dataclass(frozen=True)
@@ -433,8 +448,15 @@ def restart_backend(
     shutdown: Callable[[], None] | None = None,
     execve: Callable[[str, list[str], dict[str, str]], None] = os.execve,
     delay_seconds: float = RESTART_DELAY_SECONDS,
+    exit_process: Callable[[int], None] = os._exit,
+    environ: dict[str, str] | None = None,
 ) -> threading.Thread:
     """Start this backend again, in place, soon after the reply is sent.
+
+    When a launcher runs the backend (``ASTROMETRICS_LAUNCHER`` is set), the
+    backend does not start itself again. It stops everything in the same
+    way, then ends with `RESTART_EXIT_CODE` and leaves the new start to the
+    launcher.
 
     The process keeps its id, its output and its environment (so Electron's
     manager and the run scripts do not notice), and the next start reads the
@@ -456,12 +478,19 @@ def restart_backend(
         Replaces the process image. Tests pass a recorder.
     delay_seconds : `float`, optional
         Seconds to wait first, so the reply goes out.
+    exit_process : `~collections.abc.Callable`, optional
+        Ends the process with an exit code, when a launcher is running the
+        backend. Tests pass a recorder.
+    environ : `dict` [`str`, `str`], optional
+        The environment that says whether a launcher is running the
+        backend. Default: the process environment.
 
     Returns
     -------
     thread : `threading.Thread`
         The thread that does the restart.
     """
+    launched_by_launcher = bool((os.environ if environ is None else environ).get(LAUNCHER_VARIABLE))
 
     def restart() -> None:
         """Wait for the reply to go out, stop everything, replace the image."""
@@ -473,13 +502,18 @@ def restart_backend(
                 logger.exception("Shutdown before the restart failed")
         ended = end_child_processes()
         logger.warning(
-            "Restarting the backend to change the observatory source (%d child processes ended).", ended
+            "%s the backend to change the observatory source (%d child processes ended).",
+            "Stopping for the launcher to start" if launched_by_launcher else "Restarting",
+            ended,
         )
         for stream in (sys.stdout, sys.stderr):
             try:
                 stream.flush()
             except OSError:
                 pass
+        if launched_by_launcher:
+            exit_process(RESTART_EXIT_CODE)
+            return
         close_inherited_descriptors()
         execve(sys.executable, [sys.executable, *sys.orig_argv[1:]], original_environment())
 

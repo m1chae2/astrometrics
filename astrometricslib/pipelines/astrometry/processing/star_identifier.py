@@ -42,6 +42,7 @@ from astrometricslib._internal.drivers.interfaces.plate_solve_driver import (
 from astrometricslib._internal.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ExternalServiceError
+from astrometricslib.foundation.offline import network_is_offline
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.post_processing.assess_match_quality import assess_match_quality
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_blob_width_from_data
@@ -365,6 +366,10 @@ def _fetch_gaia_cone(
         the table holds `row_limit` rows.
     """
     from astrometricslib._internal.drivers.gaia_cone_driver import query_gaia_cone_esa, query_gaia_cone_vizier
+
+    if network_is_offline():
+        logger.debug("Skipping Gaia %s: this launch sends nothing off the computer.", purpose)
+        return None
 
     attempts: list[tuple[str, float, Callable[[], Any], int]] = []
     for step in range(GAIA_DEPTH_STEPS_DOWN + 1):

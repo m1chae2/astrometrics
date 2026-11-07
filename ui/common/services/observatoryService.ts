@@ -36,8 +36,24 @@ export async function enterControllerMode(evidenceNote = ''): Promise<BulkDelega
 /** `offline` is a state, not a choice: the chosen simulator failed to start and the app has no telescope. */
 export type ObservatorySource = 'real' | 'simulated' | 'offline';
 
+/** How the backend was launched: the world it runs in, from the config's [Launch] section. */
+export interface ObservatoryLaunch {
+    /** The chip text, for example "SIMULATOR" or "SIMULATOR FAILED". */
+    label: string;
+    /** True when the app is on the real telescope hardware. */
+    live_hardware: boolean;
+    /** True when the library is a throwaway copy. */
+    disposable_library: boolean;
+    /** True when nothing leaves this computer. */
+    offline: boolean;
+    /** Config keys the app will not let the user change. */
+    locked_keys: string[];
+}
+
 /** What the backend reports about the observatory source. */
 export interface ObservatorySourceState {
+    /** How the backend was launched, or null when the config has no [Launch] section (a normal real setup). */
+    launch?: ObservatoryLaunch | null;
     /** The source this backend is running with. */
     source: ObservatorySource;
     /** The saved choice. It differs from `source` while a restart is pending. */
@@ -71,6 +87,15 @@ export interface ObservatorySourceState {
      * for the real telescope, and from older backends.
      */
     commands?: { allowed: string[]; off: Record<string, string>; error: string | null } | null;
+}
+
+/**
+ * Says whether the launch is not on live hardware, so the app shows a chip for it.
+ * @param state The backend's report.
+ * @return True when there is a launch and it is not on live hardware.
+ */
+export function isNotLiveLaunch(state: ObservatorySourceState | null | undefined): boolean {
+    return !!state?.launch && !state.launch.live_hardware;
 }
 
 /**

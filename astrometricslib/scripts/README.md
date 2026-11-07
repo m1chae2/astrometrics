@@ -69,6 +69,7 @@ Makes a safe local copy of the databases.
 - **One at a time.** A lock file (`.lock` in the backup folder) allows one backup at a time. A second run logs that another is running and exits at once.
 - **When it skips.** It does nothing when no source file changed since the last snapshot (`--force` overrides) and logs "Backup unchanged, skipped".
 - **What it keeps.** The newest 5 snapshots (`KEEP_SNAPSHOTS`, about 1.5 GB each). It deletes older ones after a good run, never the one it just made, and prints the space freed.
+- **Throwaway libraries.** A launch that sets `disposable_library = true` in the `[Launch]` section of the settings file (a simulator's temporary copy, for example) is skipped, with a log line. The switch is in the settings file the backup reads (`--config-path`), so the script needs no guess from a folder name. It reuses the launch identity instead of a second `[Backup]` key, because that section already says which libraries can be thrown away.
 - **Options.** `--dry-run` prints the actions only; `--backup-root` chooses another folder.
 - **When it runs.** `build/linux/install_backup_timer.sh` sets it up to run every 4 h. `run_backend.sh stop` also starts it in the background, because with the backend stopped the databases are quiet. That backup can never make `stop` fail or wait.
 

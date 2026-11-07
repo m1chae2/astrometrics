@@ -25,9 +25,11 @@ from the first source that has it:
    focuser with no backlash and no thermal model.
 
 Each record carries a ``source_note`` that says it is for the simulator and
-names the source. The function refuses to run unless the wayfinding library
-it would write to is inside the simulator's folder and is not one of the
-user's real folders. It only reads the library it is given.
+names the source. They are saved through the public
+``record_calibration`` and ``record_focus_model``. The function refuses to
+run unless the wayfinding library it would write to is inside the simulator's
+folder and is not one of the user's real folders. It only reads the library it
+is given.
 """
 
 import statistics
@@ -272,11 +274,31 @@ def record_simulated_calibrations(
             ),
             **names,
         )
-    control.guiding._save_calibration(calibration)
-    control.imaging._save_focus_model(focus_model)
+    saved_calibration = control.guiding.record_calibration(
+        calibration_id=calibration.id,
+        camera_id=calibration.camera_id,
+        telescope_id=calibration.telescope_id,
+        arcsec_per_pixel=calibration.arcsec_per_pixel,
+        camera_angle_deg=calibration.camera_angle_deg,
+        ra_rate_arcsec_per_sec=calibration.ra_rate_arcsec_per_sec,
+        dec_rate_arcsec_per_sec=calibration.dec_rate_arcsec_per_sec,
+        source_note=calibration.source_note,
+        calibrated_at=calibration.calibrated_at,
+    )
+    saved_focus_model = control.imaging.record_focus_model(
+        focus_model_id=focus_model.id,
+        camera_id=focus_model.camera_id,
+        telescope_id=focus_model.telescope_id,
+        backlash_steps=focus_model.backlash_steps,
+        approach_direction=focus_model.approach_direction.value,
+        source_note=focus_model.source_note,
+        thermal_coefficient_steps_per_c=focus_model.thermal_coefficient_steps_per_c,
+        filter_offsets={offset.filter: offset.offset_steps for offset in focus_model.filter_offsets},
+        calibrated_at=focus_model.calibrated_at,
+    )
     return SimulatedCalibrationReport(
-        guider_calibration=calibration,
-        focus_model=focus_model,
+        guider_calibration=saved_calibration,
+        focus_model=saved_focus_model,
         guider_source=guider_source,
         focus_source=focus_source,
     )

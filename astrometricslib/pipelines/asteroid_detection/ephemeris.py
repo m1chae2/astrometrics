@@ -20,6 +20,7 @@ from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from astropy.time import Time
 
+from astrometricslib.foundation.offline import OfflineModeError, require_online
 from astrometricslib.models.moving_object import (
     AsteroidDetectionCandidate,
     CascadeStage,
@@ -125,6 +126,12 @@ class EphemerisCrossMatcher:
             return self._answers[cache_key]
 
         if self._skybot_client is None:
+            try:
+                require_online("SkyBoT")
+            except OfflineModeError as offline_error:
+                # Nothing is asked, so it is neither an attempt nor a failure.
+                logger.debug("%s", offline_error)
+                return None
             from astroquery.imcce import Skybot
 
             client: Any = Skybot

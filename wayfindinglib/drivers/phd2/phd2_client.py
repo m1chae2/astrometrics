@@ -16,6 +16,8 @@ import time
 from collections.abc import Callable, Iterator
 from typing import Any
 
+from astrometricslib.drivers import require_local_host
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_PHD2_PORT = 4400
@@ -106,6 +108,7 @@ class PHD2Client:
             If the connection cannot be made, including a connect that
             takes longer than `socket_timeout_seconds`.
         """
+        require_local_host(self.host, "PHD2")
         sock = self._socket_factory()
         sock.settimeout(self._socket_timeout_seconds)
         try:

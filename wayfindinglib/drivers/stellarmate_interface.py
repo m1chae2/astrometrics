@@ -25,7 +25,13 @@ import threading
 import time
 from typing import Any
 
-from astrometricslib.drivers import require_mounted_storage, scratch_directory, stop_process_group
+from astrometricslib.drivers import (
+    OfflineModeError,
+    require_local_host,
+    require_mounted_storage,
+    scratch_directory,
+    stop_process_group,
+)
 from astrometricslib.exceptions import ConfigurationError, ExternalServiceError
 from wayfindinglib.drivers.host_resolver import KnownHostAddress
 from wayfindinglib.drivers.interfaces.remote_transfer_driver import RemoteTransferDriver
@@ -203,6 +209,21 @@ class StellarMateInterface(RemoteTransferDriver):
             ) from None
         return alias
 
+    def _require_host_reachable_from_here(self) -> None:
+        """Refuse another computer when the launch sends nothing off this one.
+
+        Raises
+        ------
+        ExternalServiceError
+            If the launch is offline and the host is not this computer. It is
+            the same error as an unreachable telescope computer, so callers
+            show it as a status.
+        """
+        try:
+            require_local_host(self.host_alias, "The telescope computer")
+        except OfflineModeError as offline_error:
+            raise ExternalServiceError(f"SSH/Command Failed: {offline_error}") from offline_error
+
     @property
     def driver_name(self) -> str:
         """Registry key for this driver."""
@@ -318,6 +339,7 @@ class StellarMateInterface(RemoteTransferDriver):
         `ConfigurationError`.
         """
         host_alias = self._checked_host_alias()
+        require_local_host(host_alias, "The telescope computer")
         options = [_SSH_CONNECT_TIMEOUT_OPTION, *_PORT_FORWARD_OPTIONS]
         option_tokens = [token for option in options for token in ("-o", option)]
         return [
@@ -380,6 +402,7 @@ class StellarMateInterface(RemoteTransferDriver):
         """
         if cmd_list and cmd_list[0] == "ssh":
             self._checked_host_alias()
+            self._require_host_reachable_from_here()
             cmd_list = cmd_list.copy()
             cmd_list.insert(1, "-o")
             cmd_list.insert(2, _SSH_CONNECT_TIMEOUT_OPTION)
@@ -728,6 +751,7 @@ class StellarMateInterface(RemoteTransferDriver):
         `ConfigurationError` before rsync starts.
         """
         self._checked_host_alias()
+        self._require_host_reachable_from_here()
         address_options = self._ssh_address_options()
         safety_options = [token for option in _RSYNC_SSH_OPTIONS for token in ("-o", option)]
         remote_shell = ["-e", " ".join(["ssh", *safety_options, *address_options])]

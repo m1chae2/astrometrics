@@ -9,13 +9,14 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 vi.mock('../services/backendApi', () => ({
-  callBackend: vi.fn().mockResolvedValue({ delegation_policy: { capability_delegations: [] } }),
+  callBackend: vi.fn(),
 }));
 vi.mock('../services/observatoryService', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../services/observatoryService')>()),
   getObservatorySource: vi.fn(),
 }));
 
+import { callBackend } from '../services/backendApi';
 import { getObservatorySource } from '../services/observatoryService';
 import {
   COMMANDS_OFF_TEXT,
@@ -32,11 +33,23 @@ import {
  */
 function report(source: 'real' | 'simulated' | 'offline', overrides: Record<string, unknown> = {}) {
   return {
-    source, chosen: source, label: '', restart_pending: false, starting: false, ready: true,
+    source, chosen: source, label: '',
+    launch: source === 'simulated' ? { label: 'SIMULATOR', live_hardware: false, disposable_library: true, offline: true, locked_keys: [] } : null, restart_pending: false, starting: false, ready: true,
     running: source !== 'real', error: null, missing_programs: [],
     commands: source === 'simulated' ? { allowed: ['OBSERVATORY_SAFETY', 'MOUNT_CONTROL'], off: { AUTOFOCUS: 'needs a focus model' }, error: null } : null,
     ...overrides,
   };
+}
+
+/**
+ * Sets the mount's delegation state that the backend's safety status reports.
+ *
+ * @param state The state, or null for an empty policy.
+ */
+function mountIs(state: string | null) {
+  vi.mocked(callBackend).mockResolvedValue({
+    delegation_policy: { capability_delegations: state ? [{ capability: 'MOUNT_CONTROL', state }] : [] },
+  } as never);
 }
 
 /**
@@ -53,7 +66,7 @@ function renderAvailability() {
 }
 
 describe('useCommandAvailability', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => { vi.clearAllMocks(); mountIs('AUTHORITATIVE'); });
 
   /** A ready simulator is commandable, and says where the commands go. */
   it('allows commands for a ready simulator', async () => {
@@ -66,12 +79,34 @@ describe('useCommandAvailability', () => {
 
   /** The real telescope keeps today's fail-safe answer and text. */
   it('keeps commands off for the real telescope', async () => {
+    mountIs('DELEGATED');
     vi.mocked(getObservatorySource).mockResolvedValue(report('real') as never);
     const { result } = renderAvailability();
     await waitFor(() => expect(result.current.isChecking).toBe(false));
     await waitFor(() => expect(getObservatorySource).toHaveBeenCalled());
     expect(result.current.canCommand).toBe(false);
     expect(result.current.reason).toBe(COMMANDS_OFF_TEXT);
+  });
+
+  /** The answer follows the policy, not the source: a delegated mount stays off even for a simulator, and an authoritative one is on. */
+  it('decides from the delegation policy', async () => {
+    mountIs('DELEGATED');
+    vi.mocked(getObservatorySource).mockResolvedValue(report('simulated') as never);
+    const off = renderAvailability();
+    await waitFor(() => expect(off.result.current.isChecking).toBe(false));
+    expect(off.result.current.canCommand).toBe(false);
+    off.unmount();
+    mountIs('AUTHORITATIVE');
+    vi.mocked(getObservatorySource).mockResolvedValue(report('real') as never);
+    const on = renderAvailability();
+    await waitFor(() => expect(on.result.current.canCommand).toBe(true));
+    // Unknown policy (no mount entry) is off with the existing text.
+    on.unmount();
+    mountIs(null);
+    const unknown = renderAvailability();
+    await waitFor(() => expect(unknown.result.current.isChecking).toBe(false));
+    expect(unknown.result.current.canCommand).toBe(false);
+    expect(unknown.result.current.reason).toBe(COMMANDS_OFF_TEXT);
   });
 
   /** A simulator that is still starting, or a source not yet known, is not commandable. */
@@ -90,6 +125,7 @@ describe('useCommandAvailability', () => {
   it('keeps commands off when the app could not take command of the simulator', async () => {
     vi.mocked(getObservatorySource).mockResolvedValue(
       report('simulated', { commands: { allowed: [], off: {}, error: 'RuntimeError: boom' } }) as never);
+    mountIs('DELEGATED');
     const { result } = renderAvailability();
     await waitFor(() => expect(getObservatorySource).toHaveBeenCalled());
     await waitFor(() => expect(result.current.reason).toContain('boom'));

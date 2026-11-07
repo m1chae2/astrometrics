@@ -336,3 +336,85 @@ def test_the_aperture_set_identity_row_is_read_back_through_the_public_query(
     ])
     rows = quality.query(metric="stacking.aperture_set_number", target_id="M13", library_only=True).rows
     assert [aperture_identity_from_number(row.value) for row in rows] == ["v3-156104df543d"]
+
+
+def _frame_measurement(
+    subject_id: str, run_id: str = "run-1", metric: str = "frame.star_width_moffat_arcsec"
+) -> QualityMeasurement:
+    """Build a measured measurement about one frame.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        A measurement whose subject is the given frame.
+    """
+    return _measurement(
+        run_id,
+        BASE_TIME,
+        metric=metric,
+        subject=QualitySubject(level=SubjectLevel.FRAME, subject_id=subject_id, target_id="M31"),
+    )
+
+
+def test_forget_removes_only_the_given_frames(quality: QualityRecords, tmp_path: Path) -> None:
+    """A forgotten frame loses its rows and subset weights; the rest stay."""
+    store = QualityStore(str(tmp_path / "astrometrics.db"))
+    store.write_measurements([
+        _frame_measurement("M31/a.fits"),
+        _frame_measurement("M31/a.fits", metric="frame.elongation"),
+        _frame_measurement("M31/a.fits#odd", run_id="run-2"),
+        _frame_measurement("M31/ab.fits"),
+        _frame_measurement("M31/b.fits"),
+        _measurement(
+            "run-1",
+            BASE_TIME,
+            subject=QualitySubject(level=SubjectLevel.STACK, subject_id="M31/a.fits", target_id="M31"),
+        ),
+    ])
+
+    assert quality.forget(["M31/a.fits", "M31/missing.fits", ""]) == 3
+
+    remaining = {
+        (row.subject.level.value, row.subject.subject_id) for row in quality.query(latest_only=False).rows
+    }
+    assert remaining == {("frame", "M31/ab.fits"), ("frame", "M31/b.fits"), ("stack", "M31/a.fits")}
+
+
+def test_forget_on_a_library_with_no_database_creates_nothing(
+    quality: QualityRecords, tmp_path: Path
+) -> None:
+    """Forgetting where nothing is stored is a no-op that creates no file."""
+    assert quality.forget(["M31/a.fits"]) == 0
+    assert quality.forget([]) == 0
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_deleting_a_targets_frames_forgets_their_measurements(tmp_path: Path) -> None:
+    """Deleting frames of a target drops the deleted frames' rows only."""
+    from unittest.mock import MagicMock
+
+    from astrometricslib.api.targets import TargetCatalog
+    from astrometricslib.models.target import FrameRecord, Target
+
+    frames = tmp_path / "frames" / "lights" / "M31" / "scope" / "cam"
+    frames.mkdir(parents=True)
+    gone, kept = frames / "gone.fits", frames / "kept.fits"
+    gone.write_bytes(b"x")
+    kept.write_bytes(b"x")
+    target = Target(id="M31", frames=[FrameRecord(path=str(gone)), FrameRecord(path=str(kept))])
+    storage = MagicMock()
+    storage.get.return_value = [target]
+    configuration = SimpleNamespace(get_library_path=lambda: tmp_path)
+    catalog = TargetCatalog(configuration, storage)
+    store = QualityStore(str(tmp_path / "astrometrics.db"))
+    store.write_measurements([
+        _frame_measurement(target.frame_subject_id(str(gone))),
+        _frame_measurement(target.frame_subject_id(str(kept))),
+    ])
+
+    result = catalog.delete_images([str(gone)], target="M31")
+
+    assert result.deleted == [str(gone)]
+    assert not gone.exists()
+    rows = QualityRecords(configuration, None).query(latest_only=False).rows
+    assert [row.subject.subject_id for row in rows] == ["M31/scope/cam/kept.fits"]

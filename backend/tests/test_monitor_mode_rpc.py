@@ -205,6 +205,8 @@ LOCAL_WRITE_METHODS = frozenset({
     "mosaic:create",
     "observatory:enter_controller_mode",
     "observatory:enter_monitoring_mode",
+    "observatory:record_focus_model",
+    "observatory:record_guider_calibration",
     "observatory:set_active_camera",
     # Saves the observatory source choice and restarts the backend; no device
     # command (a simulator source starts only local stand-ins).

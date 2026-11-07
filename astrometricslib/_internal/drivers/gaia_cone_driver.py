@@ -27,6 +27,8 @@ import numpy as np
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
 
+from astrometricslib.foundation.offline import require_online
+
 # The VizieR copy of Gaia DR3's main source table.
 GAIA_DR3_VIZIER_CATALOG = "I/355/gaiadr3"
 
@@ -80,6 +82,7 @@ def query_gaia_cone_vizier(
     Network and service errors are not caught here; they reach the caller
     as astroquery raised them.
     """
+    require_online("VizieR")
     from astroquery.vizier import Vizier
 
     vizier = Vizier(
@@ -140,6 +143,7 @@ def query_gaia_cone_esa(
     Network and service errors are not caught here; they reach the caller
     as astroquery raised them.
     """
+    require_online("the ESA Gaia archive")
     from astroquery.gaia import Gaia
 
     # The table is pinned (gaiadr3.gaia_source) rather than left to the

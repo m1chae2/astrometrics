@@ -136,6 +136,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "observatory:set_source": ("observatory_source_service", "set_source"),
     "observatory:enter_monitoring_mode": ("equipment_service", "enter_monitoring_mode"),
     "observatory:enter_controller_mode": ("equipment_service", "enter_controller_mode"),
+    "observatory:record_guider_calibration": ("wayfinder.control.guiding", "record_calibration"),
+    "observatory:record_focus_model": ("wayfinder.control.imaging", "record_focus_model"),
     # Ingestion of new frames
     "ingestion:start": ("ingestion_service", "start_ingestion_by_args"),
     "ingestion:status": ("ingestion_service", "get_ingestion_status"),

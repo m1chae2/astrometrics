@@ -355,8 +355,59 @@ def real_folders(environ: Mapping[str, str] | None = None) -> RealFolders:
     config_file = (
         Path(named_file) if named_file else config_home / "astrometrics" / "astrometrics.config.toml"
     )
+    named = library_folders(config_file, default_data_home=data_home)
+    return RealFolders(
+        config_home, data_home, config_file, named.library, named.frames, named.stacks, named.wayfinding
+    )
+
+
+@dataclass(frozen=True)
+class LibraryFolders:
+    """The library folders that one settings file names.
+
+    Attributes
+    ----------
+    config_file : `pathlib.Path`
+        The settings file that was read.
+    library, frames, stacks, wayfinding : `pathlib.Path`
+        The image library, its frames, the folder for stacks and other
+        derived files, and the wayfinding library, as the settings file names
+        them (or their defaults).
+    """
+
+    config_file: Path
+    library: Path
+    frames: Path
+    stacks: Path
+    wayfinding: Path
+
+
+def library_folders(
+    config_file: str | os.PathLike, default_data_home: str | os.PathLike | None = None
+) -> LibraryFolders:
+    """Find the library folders that one settings file names.
+
+    It reads the file (read only) and creates nothing. It does not look at
+    the environment, so it works for any settings file: the one in use, the
+    user's real one, or one that belongs to a throwaway library.
+
+    Parameters
+    ----------
+    config_file : `str` or `os.PathLike`
+        The settings file.
+    default_data_home : `str` or `os.PathLike`, optional
+        The folder whose ``astrometrics`` subfolder holds the libraries when
+        the file does not name them. Default: ``~/.local/share``.
+
+    Returns
+    -------
+    folders : `LibraryFolders`
+        The folders. A missing or damaged settings file gives the defaults.
+    """
+    path = Path(config_file)
+    data_home = Path(default_data_home) if default_data_home is not None else Path.home() / ".local" / "share"
     try:
-        settings = tomllib.loads(config_file.read_text(encoding="utf-8"))
+        settings = tomllib.loads(path.read_text(encoding="utf-8"))
     except OSError, ValueError:
         settings = {}
     library = _setting_path(settings, "Image Library", "path") or data_home / "astrometrics"
@@ -365,7 +416,7 @@ def real_folders(environ: Mapping[str, str] | None = None) -> RealFolders:
     wayfinding = (
         _setting_path(settings, "Wayfinding Library", "path") or data_home / "astrometrics" / "wayfinding"
     )
-    return RealFolders(config_home, data_home, config_file, library, frames, stacks, wayfinding)
+    return LibraryFolders(path, library, frames, stacks, wayfinding)
 
 
 def is_in_simulator_world(path: str | os.PathLike) -> bool:

@@ -33,6 +33,7 @@ from typing import Any
 
 import numpy as np
 
+from astrometricslib.drivers import require_online
 from astrometricslib.exceptions import AstrometricsError, ExternalServiceError, InvalidArgumentError
 from wayfindinglib._internal.errors import ONLINE_QUERY_ERRORS
 from wayfindinglib.drivers.catalog import deep_star_store
@@ -424,7 +425,14 @@ def _run_query(gaia: Any, query: str, timeout_seconds: float) -> Any:
     -------
     table : `astropy.table.Table`
         The result table.
+
+    Notes
+    -----
+    When this launch sends nothing off the computer, `require_online` raises
+    `OfflineModeError`, a `ConnectionError`. The callers count it as the
+    archive being down.
     """
+    require_online("the Gaia archive")
 
     def _submit_and_wait() -> Any:
         # Asynchronous, because a synchronous query is limited to 2000 rows.

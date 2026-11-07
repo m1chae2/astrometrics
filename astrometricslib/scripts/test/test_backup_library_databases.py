@@ -199,3 +199,51 @@ def test_restore_refuses_a_non_empty_destination(environment: dict, tmp_path: Pa
     ])  # fmt: skip
 
     assert code == 2
+
+
+def _config_path(environment: dict) -> Path:
+    """Find the settings file the fixture's arguments name.
+
+    Parameters
+    ----------
+    environment : `dict`
+        The fixture value.
+
+    Returns
+    -------
+    path : `pathlib.Path`
+        The settings file.
+    """
+    arguments = environment["arguments"]
+    return Path(arguments[arguments.index("--config-path") + 1])
+
+
+def test_a_library_the_launch_calls_disposable_is_not_backed_up(environment: dict) -> None:
+    """``disposable_library = true`` in ``[Launch]`` skips the backup."""
+    _config_path(environment).write_text("[Launch]\ndisposable_library = true\n")
+
+    assert backup.main(environment["arguments"]) == 0
+
+    assert _snapshots(environment) == []
+
+
+def test_a_launch_that_keeps_its_library_is_backed_up(environment: dict) -> None:
+    """``disposable_library = false`` (or no key) leaves the backup on."""
+    _config_path(environment).write_text('[Launch]\nlabel = "NIGHT"\ndisposable_library = false\n')
+
+    assert backup.main(environment["arguments"]) == 0
+
+    assert len(_snapshots(environment)) == 1
+
+
+def test_the_folder_name_no_longer_decides(environment: dict, tmp_path: Path) -> None:
+    """A folder named like a simulator's alone does not skip a backup."""
+    renamed = tmp_path / "astrometrics-simulator" / "library"
+    renamed.parent.mkdir()
+    environment["library"].rename(renamed)
+    arguments = [*environment["arguments"]]
+    arguments[arguments.index("--library-path") + 1] = str(renamed)
+
+    assert backup.main(arguments) == 0
+
+    assert len(_snapshots(environment)) == 1

@@ -20,7 +20,6 @@ Callers never import `wayfindinglib.tasks` directly.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from wayfindinglib.api.control.context import ControlContext
@@ -131,17 +130,6 @@ class ObservatoryControl:
         self.remote = RemoteControl(self._context)
         self.safety = SafetyControl(self._context)
         self.equipment = EquipmentControl(self._context)
-
-    @property
-    def library_path(self) -> Path:
-        """The folder of the wayfinding library this control records into.
-
-        Returns
-        -------
-        library_path : `pathlib.Path`
-            The folder that holds ``wayfinding.db``.
-        """
-        return self._context.butler.library_path
 
     def close(self) -> None:
         """Stop the background work control started, for good.

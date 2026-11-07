@@ -90,7 +90,7 @@ def _check_library_is_simulators(
         If the library folder is outside `simulator_root`, or is, holds, or
         is inside a real folder.
     """
-    library = Path(control.library_path).resolve()
+    library = Path(control._context.butler.library_path).resolve()
     root = simulator_root.resolve()
     if not library.is_relative_to(root):
         raise GuardError(f"The wayfinding library {library} is not inside the simulator folder {root}.")
@@ -156,7 +156,7 @@ def _guider_from_history(
     from astrometricslib.exceptions import ConfigurationError
 
     low, high = PLAUSIBLE_RATE_RANGE_ARCSEC_PER_SEC
-    runs = sorted(control.guiding.recorded_runs(), key=lambda run: run.started_at)
+    runs = sorted(control._context.butler.get_all("guiding_run"), key=lambda run: run.started_at)
     sensible = [
         run
         for run in runs
@@ -233,7 +233,7 @@ def record_simulated_calibrations(
     names = {"telescope_id": equipment.telescope.id, "camera_id": equipment.camera.id}
     identifier = f"simulator-{equipment.telescope.id}-{equipment.camera.id}"
 
-    real_calibration = _latest_real(control.guiding.recorded_calibrations())
+    real_calibration = _latest_real(control._context.butler.get_all("guider_calibration"))
     if real_calibration is not None:
         guider_source = f"real calibration of {_day(real_calibration.calibrated_at)}"
         calibration = real_calibration.model_copy(
@@ -253,7 +253,7 @@ def record_simulated_calibrations(
             **names,
         )
 
-    real_focus = _latest_real(control.imaging.recorded_focus_models())
+    real_focus = _latest_real(control._context.butler.get_all("focus_model"))
     if real_focus is not None:
         focus_source = f"real focus model of {_day(real_focus.calibrated_at)}"
         focus_model = real_focus.model_copy(
@@ -272,8 +272,8 @@ def record_simulated_calibrations(
             ),
             **names,
         )
-    control.guiding.record_calibration(calibration)
-    control.imaging.record_focus_model(focus_model)
+    control.guiding._save_calibration(calibration)
+    control.imaging._save_focus_model(focus_model)
     return SimulatedCalibrationReport(
         guider_calibration=calibration,
         focus_model=focus_model,

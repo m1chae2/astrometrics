@@ -502,41 +502,6 @@ class GuidingControl(ControlChild):
             context, context.records, session_id, limit
         )
 
-    def recorded_calibrations(self) -> list[GuiderCalibration]:
-        """List every guider calibration saved in the library.
-
-        Returns
-        -------
-        calibrations : `list` [`GuiderCalibration`]
-            Every saved calibration, for any equipment, in no set order.
-        """
-        return self._context.butler.get_all("guider_calibration")
-
-    def recorded_runs(self) -> list[GuidingRunSummary]:
-        """List every guiding run read from the guide logs.
-
-        Returns
-        -------
-        runs : `list` [`GuidingRunSummary`]
-            Every saved run, in no set order.
-        """
-        return self._context.butler.get_all("guiding_run")
-
-    def record_calibration(self, calibration: GuiderCalibration) -> None:
-        """Record a guider calibration made outside a calibration run.
-
-        A calibration run (`_run_calibration`) records its own result. This
-        is for a calibration that comes from somewhere else, such as the
-        simulated observatory's made-up one (`source_note` says so).
-
-        Parameters
-        ----------
-        calibration : `GuiderCalibration`
-            The calibration, keyed by its own id. It must name the active
-            telescope and camera to count as the active calibration.
-        """
-        self._save_calibration(calibration)
-
     def _save_calibration(self, calibration: GuiderCalibration) -> None:
         """Save a measured guider calibration.
 

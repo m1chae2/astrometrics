@@ -62,6 +62,7 @@ EXPECTED_MODULE_NAMES = {
         "offline_environment",
         "prepare_offline_world",
         "read_library_copy_report",
+        "record_simulated_calibrations",
         "remove_library_copy",
         "unavailable_reason",
     }),

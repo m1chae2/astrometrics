@@ -53,13 +53,7 @@ RESTART_EXIT_CODE = 75
 
 @dataclass(frozen=True)
 class SourceChoice:
-    """The saved choice.
-
-    Attributes
-    ----------
-    source : `str`
-        ``real`` or ``simulated``.
-    """
+    """The saved choice: ``source`` is ``real`` or ``simulated``."""
 
     source: str = REAL
 

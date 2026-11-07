@@ -28,14 +28,9 @@ __all__ = [
 class SavedCapture:
     """One exposure that Ekos finished and saved.
 
-    Attributes
-    ----------
-    file_path : `str`
-        Where Ekos saved the frame on the telescope computer.
-    completed_at : `float`
-        When the exposure finished, in seconds since the Unix epoch (UTC).
-    exposure_seconds : `float`
-        Exposure length, in seconds.
+    ``file_path`` is where Ekos saved the frame on the telescope computer,
+    ``completed_at`` is when the exposure finished, in seconds since the Unix
+    epoch (UTC), and ``exposure_seconds`` is the exposure length in seconds.
     """
 
     file_path: str

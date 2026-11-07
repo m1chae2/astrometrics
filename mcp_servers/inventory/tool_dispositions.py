@@ -460,6 +460,23 @@ DECISIONS = {
         "(no device needed), and with include=['live'] the guiding going on now and its RMS error.",
         "observe",
     ),
+    "observatory_guiding_query_calibrations": ToolDecision(
+        "keep",
+        "Lists every saved guider calibration, for all telescope and camera pairings (status reads only the "
+        "active one). No device needed.",
+        "observe",
+    ),
+    "observatory_imaging_query_focus_models": ToolDecision(
+        "keep",
+        "Lists every saved focus model, for all telescope and camera pairings (status reads only the active "
+        "one). No device needed.",
+        "observe",
+    ),
+    "observatory_guiding_query_runs": ToolDecision(
+        "drop",
+        "Returns every saved guiding run with no size bound. review_query with kind='guiding_runs' answers "
+        "the same question in a reply of bounded size.",
+    ),
     "observatory_safety_status": ToolDecision(
         "keep",
         "Reads the safety rules, a weather verdict, the enclosure, the delegation policy and the "

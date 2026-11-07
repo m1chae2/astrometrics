@@ -43,6 +43,11 @@ EXPECTED_MODULE_NAMES = {
         "PlanRevisionConflictError",
         "SimulationUnavailableError",
     }),
+    "wayfindinglib.logs": frozenset({
+        "SavedCapture",
+        "ekos_utc_offset_hours",
+        "read_ekos_captures",
+    }),
     "wayfindinglib.reports": frozenset({
         "DepthGoalState",
         "DepthLevel",
@@ -120,6 +125,14 @@ work rather than on a child. Nothing else may join this set without the same
 argument.
 """
 
+ROOT_READS = frozenset({"library_path"})
+"""Read-only properties on `control` itself, outside the operation count.
+
+`library_path` names the folder of the wayfinding library, so a program that
+writes records can check where they go. It reads one path and does nothing
+to the observatory.
+"""
+
 CHILDREN = {
     "mount": {
         "status",
@@ -139,10 +152,13 @@ CHILDREN = {
         "capture_image",
         "set_filter",
         "focus_move",
+        "query_focus_models",
         "record_focus_model",
     },
     "guiding": {
         "status",
+        "query_calibrations",
+        "query_runs",
         "record_calibration",
         "expose",
         "refit_spectrum",
@@ -246,8 +262,8 @@ def test_background_jobs_can_skip_registering_a_job() -> None:
 
 
 def test_control_root_holds_only_the_drivers_and_the_children(control: ObservatoryControl) -> None:
-    """The root offers only the children and `close`."""
-    assert _public_names(control) == ROOT_LIFECYCLE | set(CHILDREN)
+    """The root offers only the children, `close` and `library_path`."""
+    assert _public_names(control) == ROOT_LIFECYCLE | ROOT_READS | set(CHILDREN)
 
 
 @pytest.mark.parametrize("child", sorted(CHILDREN))

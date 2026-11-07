@@ -11,6 +11,9 @@ cache that uses them (`VersionedCache`), file locks and work folders, the
 checks for a mounted drive, the launch identity (`LaunchIdentity`,
 `read_launch_identity`) and the offline switch it carries (`require_online`,
 `require_local_host`), the folders a settings file names (`library_folders`),
+the observatory source choice a launcher shares with the app (`read_choice`,
+`write_choice`, `SourceChoice`, `RESTART_EXIT_CODE` and the launch variable
+names),
 and `stop_process_group`, which ends a program and the helpers it started.
 The private driver code (Siril, catalog
 access, camera profiles) lives in `astrometricslib._internal.drivers`.
@@ -29,7 +32,6 @@ from astrometricslib.foundation.offline import (
     require_online,
 )
 from astrometricslib.foundation.paths import (
-    SIMULATOR_FOLDER_NAME,
     LibraryFolders,
     is_path_inside,
     library_folders,
@@ -39,6 +41,22 @@ from astrometricslib.foundation.paths import (
     scratch_directory,
 )
 from astrometricslib.foundation.run_abandonment import stop_process_group
+from astrometricslib.foundation.source_choice import (
+    ACTIVE_SOURCE_VARIABLE,
+    CHOICE_FILE_NAME,
+    LAUNCH_ERROR_VARIABLE,
+    LAUNCHER_VARIABLE,
+    MISSING_PROGRAMS_VARIABLE,
+    OFFLINE,
+    REAL,
+    RESTART_EXIT_CODE,
+    SIMULATED,
+    SOURCES,
+    SourceChoice,
+    choice_file_path,
+    read_choice,
+    write_choice,
+)
 from astrometricslib.foundation.storage.butler import AbstractButler, Butler, DatasetSpec
 from astrometricslib.foundation.storage.data_versions import ALL_KINDS as LIBRARY_DATA_KINDS
 from astrometricslib.foundation.storage.data_versions import (
@@ -55,15 +73,26 @@ from astrometricslib.foundation.storage.process_locks import file_lock
 from astrometricslib.foundation.versioned_cache import VersionedCache
 
 __all__ = [
+    "ACTIVE_SOURCE_VARIABLE",
+    "CHOICE_FILE_NAME",
+    "LAUNCHER_VARIABLE",
+    "LAUNCH_ERROR_VARIABLE",
     "LIBRARY_DATA_KINDS",
-    "SIMULATOR_FOLDER_NAME",
+    "MISSING_PROGRAMS_VARIABLE",
+    "OFFLINE",
+    "REAL",
+    "RESTART_EXIT_CODE",
+    "SIMULATED",
+    "SOURCES",
     "AbstractButler",
     "Butler",
     "DatasetSpec",
     "LaunchIdentity",
     "LibraryFolders",
+    "SourceChoice",
     "VersionedCache",
     "bump_data_version",
+    "choice_file_path",
     "connect_db",
     "file_lock",
     "get_camera_data_versions",
@@ -76,6 +105,7 @@ __all__ = [
     "library_folders",
     "locks_directory",
     "network_is_offline",
+    "read_choice",
     "read_data_versions",
     "read_launch_identity",
     "real_folders",
@@ -85,4 +115,5 @@ __all__ = [
     "resolve_mounted_path",
     "scratch_directory",
     "stop_process_group",
+    "write_choice",
 ]

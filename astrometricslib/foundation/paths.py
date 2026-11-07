@@ -18,14 +18,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-#: Names of the variables in which a simulated observatory's launch keeps the
-#: user's real folders, after it has moved the ``XDG_*`` variables away.
+#: Names of the variables in which a launcher keeps the user's real folders,
+#: after it has moved the ``XDG_*`` variables to a world of its own.
 REAL_CONFIG_HOME_VARIABLE = "ASTROMETRICS_REAL_CONFIG_HOME"
 REAL_DATA_HOME_VARIABLE = "ASTROMETRICS_REAL_DATA_HOME"
 REAL_CONFIG_PATH_VARIABLE = "ASTROMETRICS_REAL_CONFIG_PATH"
-#: Name of the folder that holds a simulated observatory's whole world,
-#: beside the real data folder. Backups and library scans skip it.
-SIMULATOR_FOLDER_NAME = "astrometrics-simulator"
 
 
 def _cache_root() -> str:
@@ -320,8 +317,8 @@ def _setting_path(settings: Mapping, section: str, key: str) -> Path | None:
 def real_folders(environ: Mapping[str, str] | None = None) -> RealFolders:
     """Find the user's real settings file and library folders.
 
-    A simulator source moves the ``XDG_*`` variables and the settings path to
-    its own folder, and keeps the real ones in ``ASTROMETRICS_REAL_*``
+    A launcher may move the ``XDG_*`` variables and the settings path to a
+    world of its own, and keep the real ones in ``ASTROMETRICS_REAL_*``
     variables. This function honours those first, so it names the real
     folders both before and after the move. It reads the real settings file
     (read only) and creates nothing.
@@ -414,23 +411,3 @@ def library_folders(
         _setting_path(settings, "Wayfinding Library", "path") or data_home / "astrometrics" / "wayfinding"
     )
     return LibraryFolders(path, library, frames, stacks, wayfinding)
-
-
-def is_in_simulator_world(path: str | os.PathLike) -> bool:
-    """Say whether a path is inside a simulated observatory's folder.
-
-    Backups and library scans use this to leave the simulator's temporary
-    copies alone.
-
-    Parameters
-    ----------
-    path : `str` or `os.PathLike`
-        Any path.
-
-    Returns
-    -------
-    inside : `bool`
-        `True` if a folder named `SIMULATOR_FOLDER_NAME` is the path or one
-        of its parents.
-    """
-    return SIMULATOR_FOLDER_NAME in Path(os.path.abspath(path)).parts

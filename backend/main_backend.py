@@ -22,12 +22,6 @@ from typing import Any
 
 import uvicorn
 
-# The observatory source picks the data folders (real or simulator), so it
-# is applied before anything reads the settings.
-from backend.observatory_source import apply_launch_environment
-
-apply_launch_environment()
-
 # Suppress noisy Astropy FITS warnings
 # REQ: SYS-1.4: Maintain clean logs
 from astropy.utils.exceptions import AstropyDeprecationWarning, AstropyWarning

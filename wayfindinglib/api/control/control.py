@@ -20,6 +20,7 @@ Callers never import `wayfindinglib.tasks` directly.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from wayfindinglib.api.control.context import ControlContext
@@ -140,6 +141,21 @@ class ObservatoryControl:
         already running, and it is safe to call more than once.
         """
         self._context.close()
+
+    @property
+    def library_path(self) -> Path:
+        """The folder of the wayfinding library.
+
+        It holds ``wayfinding.db`` and the files kept next to it, such as
+        downloaded Ekos logs. A program that writes records can check that
+        this is the folder it means to write to. It is created when missing.
+
+        Returns
+        -------
+        path : `pathlib.Path`
+            The absolute path.
+        """
+        return self._context.butler.library_path
 
     @property
     def _driver(self) -> Any:

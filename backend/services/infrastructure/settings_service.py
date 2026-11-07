@@ -44,7 +44,6 @@ class SettingsService:
         self,
         config: Any,
         equipment: Any = None,
-        guard: Callable[[dict[str, Any]], None] | None = None,
         launch_reader: Callable[[], LaunchIdentity | None] | None = None,
     ) -> None:
         """Keep the configuration and the equipment control.
@@ -56,16 +55,12 @@ class SettingsService:
         equipment : `EquipmentControl`, optional
             The Wayfinder's ``control.equipment``. `None` when there is no
             hardware control.
-        guard : `~collections.abc.Callable`, optional
-            Called with the settings before they are saved. It raises to
-            refuse the save (the simulator source refuses real devices).
         launch_reader : `~collections.abc.Callable`, optional
             Gives the launch identity. Default: the configuration's own
             ``get_launch_identity``, or no identity if it has none.
         """
         reader = launch_reader or getattr(config, "get_launch_identity", None)
         self._launch_reader: Callable[[], LaunchIdentity | None] = reader or (lambda: None)
-        self._guard = guard
         self._config = config
         self._equipment = equipment
 
@@ -83,8 +78,6 @@ class SettingsService:
             Always `True`. A failed save raises instead.
         """
         self._refuse_locked_changes(config)
-        if self._guard is not None:
-            self._guard(config)
         self._config.update_config(config)
         if self._equipment is not None:
             self._equipment.apply_configuration()

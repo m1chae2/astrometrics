@@ -1586,3 +1586,40 @@ def test_record_focus_model_refuses_invalid_values(control: ObservatoryControl, 
         control.imaging.record_focus_model(**arguments)
 
     assert control._context.butler.get_all("focus_model") == []
+
+
+def test_the_query_reads_list_every_saved_record_oldest_first(control: ObservatoryControl) -> None:
+    """The three query reads list all pairings, not only the active one."""
+    assert control.guiding.query_calibrations() == []
+    assert control.guiding.query_runs() == []
+    assert control.imaging.query_focus_models() == []
+    for day, camera in ((3, "Cam B"), (1, "Cam A")):
+        control.guiding.record_calibration(
+            calibration_id=f"cal-{day}",
+            camera_id=camera,
+            telescope_id="Scope",
+            arcsec_per_pixel=3.0,
+            camera_angle_deg=0.0,
+            ra_rate_arcsec_per_sec=7.0,
+            dec_rate_arcsec_per_sec=7.0,
+            source_note="test",
+            calibrated_at=datetime(2026, 10, day, tzinfo=UTC),
+        )
+        control.imaging.record_focus_model(
+            focus_model_id=f"focus-{day}",
+            camera_id=camera,
+            telescope_id="Scope",
+            backlash_steps=10,
+            approach_direction="inward",
+            source_note="test",
+            calibrated_at=datetime(2026, 10, day, tzinfo=UTC),
+        )
+
+    assert [record.id for record in control.guiding.query_calibrations()] == ["cal-1", "cal-3"]
+    assert [record.id for record in control.imaging.query_focus_models()] == ["focus-1", "focus-3"]
+
+
+def test_library_path_is_the_configured_wayfinding_folder(control: ObservatoryControl) -> None:
+    """`library_path` names the folder that holds `wayfinding.db`."""
+    assert control.library_path == control._context.butler.library_path
+    assert control.library_path.is_dir()

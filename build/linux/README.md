@@ -6,15 +6,11 @@ Helper scripts for building, running and checking Astrometrics on Linux.
 
 Starts, stops and checks the Python backend. Run it with `help` to see every command.
 
-### Simulator launcher (flag)
+### The launcher
 
-```bash
-ASTROMETRICS_USE_LAUNCHER=1 build/linux/run_astrometrics.sh restart
-```
+`run_backend.sh` always starts `python -m simulator.launch`, in `start`, `launch`, `restart` and `foreground`. The launcher reads the Observatory source setting, builds the simulated world when you chose Simulated, runs the backend as its child and removes the world when the backend ends (see `simulator/README.md`). The backend has no world code of its own. Started any other way (`python -m backend.main_backend`, or by Electron without `SKIP_BACKEND`, as in the packaged app), it runs on the real telescope and refuses to change its source.
 
-With `ASTROMETRICS_USE_LAUNCHER=1`, `run_backend.sh` starts `python -m simulator.launch` in place of `backend.main_backend`, in `start`, `launch`, `restart` and `foreground`. The launcher reads the Observatory source setting, builds the simulated world when you chose Simulated, runs the backend as its child and removes the world when the backend ends (see `simulator/README.md`). The default is off, and then the backend builds its own world as before.
-
-The pid file `.run_pids/backend.pid` holds the launcher's pid, so `run_astrometrics.sh` finds a dead launcher the same way it finds a dead backend. `stop` sends SIGTERM to the launcher, which stops the backend, the stand-ins and the library copy before it exits. The script waits up to 60 seconds for that (10 seconds without the launcher) and waits up to 3 minutes for the first answer after a start, because the launcher builds the world first. The file `.run_pids/backend.launcher` records that the launcher was used, so a later `stop` waits long enough even without the variable. Switching Real and Simulated in the app makes the backend exit with code 75, and the launcher starts the next session.
+The pid file `.run_pids/backend.pid` holds the launcher's pid, so `run_astrometrics.sh` finds a dead launcher the same way it finds a dead backend. `stop` sends SIGTERM to the launcher, which stops the backend, the stand-ins and the library copy before it exits. The script waits up to 60 seconds for that and up to 3 minutes for the first answer after a start, because the launcher builds the world first. The file `.run_pids/backend.launcher` records that the pid file holds a launcher. Switching Real and Simulated in the app makes the backend exit with code 75, and the launcher starts the next session.
 
 ### dump
 

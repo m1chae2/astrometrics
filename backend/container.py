@@ -12,7 +12,6 @@ starts nothing.
 
 import logging
 import os
-from pathlib import Path
 
 from backend.services.analysis.analysis_orchestrator import AnalysisOrchestrator
 from backend.services.data.image_service import ImageService
@@ -130,8 +129,6 @@ class Container:
         Safe to call more than once, and safe on a container that was never
         initialized or only partly built.
         """
-        if self.observatory_source_service is not None:
-            self.observatory_source_service.stop()
         if self.maintenance_service is not None:
             self.maintenance_service.stop()
         if self.auto_download_service is not None:
@@ -143,37 +140,7 @@ class Container:
                 logger.exception("Could not stop the stacking programs at shutdown")
         if self.wayfinder is not None:
             self.wayfinder.control.close()
-        # Last: the databases of a simulator's library copy are deleted here,
-        # so nothing may still be writing to them.
-        if self.observatory_source_service is not None:
-            self.observatory_source_service.remove_library_copy()
         self.initialized = False
-
-    def _take_command_of_simulator(self, simulator_root: Path) -> object:
-        """Let the app command the simulator by the library's rules.
-
-        Records the simulator's made-up guider calibration and focus model,
-        then moves every capability to `AUTHORITATIVE`. The rules are not
-        relaxed: the records are what let autoguiding, autofocus and capture
-        pass them.
-
-        Parameters
-        ----------
-        simulator_root : `pathlib.Path`
-            The simulator's folder. The wayfinding library must be inside it.
-
-        Returns
-        -------
-        outcome : `BulkDelegationOutcome`
-            Which capabilities are on and why the others are not.
-        """
-        from simulator import record_simulated_calibrations
-
-        record_simulated_calibrations(self.wayfinder.control, simulator_root)
-        return self.wayfinder.control.safety.enter_controller_mode(
-            evidence_note="Simulator: commands reach only simulated devices on this computer.",
-            shadow_first=True,
-        )
 
     def _build_resources(self) -> None:
         """Construct and wire every service, then start maintenance."""
@@ -182,30 +149,17 @@ class Container:
 
         self.config_service = get_configuration()
 
-        # The observatory source: with a simulator source this starts the
-        # stand-in INDI server, PHD2 and driver; with the real telescope it
-        # does nothing.
-        from backend.observatory_source import active_observatory
+        # The observatory source: the backend only reports it and saves a new
+        # choice. A launcher, when one runs the backend, builds the world.
         from backend.services.observatory.observatory_source_service import ObservatorySourceService
 
-        simulator = active_observatory()
-        self.observatory_source_service = ObservatorySourceService(simulator)
-        # A simulator may be commanded: its devices are stand-ins on this
-        # computer. Once it is up, the app records the simulator's made-up
-        # guider calibration and focus model and takes command of every
-        # capability. The real telescope and the offline world have no
-        # simulator object, so this never runs for them.
-        if simulator is not None:
-            self.observatory_source_service.set_ready_hook(
-                lambda: self._take_command_of_simulator(simulator.root)
-            )
+        self.observatory_source_service = ObservatorySourceService()
 
         # 2. Initialize Data Services & Calibration
         from astrometricslib import Astrometrics
         from wayfindinglib import Wayfinder
 
         self.astrometrics = Astrometrics(self.config_service)
-        self.observatory_source_service.start(self.astrometrics)
         # The real INDI client runs in its own OS process, not here:
         # pyindi-client does not release the GIL during its blocking calls,
         # so running it in this process would freeze the whole backend
@@ -246,7 +200,6 @@ class Container:
         self.settings_service = SettingsService(
             self.config_service,
             equipment=self.wayfinder.control.equipment,
-            guard=self.observatory_source_service.check_settings_update,
         )
 
         # 4. Initialize Infrastructure Services

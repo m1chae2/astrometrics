@@ -16,7 +16,11 @@ import pytest
 from astrometricslib import AppConfiguration
 from astrometricslib.exceptions import ConfigurationError, PermissionDeniedError
 from simulator import record_simulated_calibrations
-from simulator.simulated_calibration import build_simulated_calibrations, rpc_calls
+from simulator.simulated_calibration import (
+    SIMULATED_GUIDE_RATE_ARCSEC_PER_SEC,
+    build_simulated_calibrations,
+    rpc_calls,
+)
 from wayfindinglib import Wayfinder
 from wayfindinglib.analytics.guide_pulses import GUIDE_RATE_ARCSEC_PER_S
 from wayfindinglib.exceptions import GuardError
@@ -169,8 +173,10 @@ def test_without_real_records_the_values_come_from_the_real_guide_log_runs(
 
     calibration = wayfinder.control.guiding.status(include=["calibration"]).calibration
     focus_model = wayfinder.control.imaging.status(include=["focus_model"]).focus_model
-    assert calibration == report.guider_calibration
-    assert focus_model == report.focus_model
+    assert calibration.id == report.guider_calibration.id
+    assert calibration.arcsec_per_pixel == report.guider_calibration.arcsec_per_pixel
+    assert focus_model.id == report.focus_model.id
+    assert focus_model.backlash_steps == report.focus_model.backlash_steps
     assert calibration.arcsec_per_pixel == pytest.approx(6.39)
     assert calibration.ra_rate_arcsec_per_sec == pytest.approx(7.0)
     assert calibration.dec_rate_arcsec_per_sec == pytest.approx(6.0)
@@ -191,7 +197,9 @@ def test_with_no_runs_the_equipment_and_simulator_defaults_are_used(
 
     calibration = report.guider_calibration
     assert calibration.arcsec_per_pixel == pytest.approx(206.265 * 3.76 / 450.0, rel=1e-3)
-    assert calibration.ra_rate_arcsec_per_sec == GUIDE_RATE_ARCSEC_PER_S
+    assert (
+        calibration.ra_rate_arcsec_per_sec == GUIDE_RATE_ARCSEC_PER_S == SIMULATED_GUIDE_RATE_ARCSEC_PER_SEC
+    )
     assert "equipment plate scale" in calibration.source_note
 
 

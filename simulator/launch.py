@@ -31,8 +31,8 @@ runs unaware of simulation. One session goes like this:
    and starts the next session. Any other code is a stop, and the launcher
    exits with it. SIGTERM or SIGINT stops the backend first, then cleans up.
 
-The backend's own start-up path (``apply_launch_environment``) still works
-when this launcher is not used. It is removed in phase L3.
+The backend has no world code of its own: without this launcher it runs on
+the real telescope and cannot change its source (phase L3).
 
 Usage::
 
@@ -55,13 +55,14 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from astrometricslib.drivers import SIMULATOR_FOLDER_NAME, real_folders
+from astrometricslib.drivers import MISSING_PROGRAMS_VARIABLE, real_folders
 from simulator.connection_guard import non_loopback_connections
 from simulator.library_copy import teardown as remove_library_copy
 from simulator.observatory import (
     SimulatedObservatory,
     SimulationKind,
     choose_free_port,
+    missing_programs,
     offline_environment,
     prepare_offline_world,
 )
@@ -95,6 +96,8 @@ __all__ = [
 
 logger = logging.getLogger("simulator.launch")
 
+#: Name of the simulator's folder, beside the real data folder.
+SIMULATOR_FOLDER_NAME = "astrometrics-simulator"
 #: Name of the lock file, inside the simulator folder.
 LOCK_FILE_NAME = "launcher.lock"
 #: Exit code when another launcher holds the lock (``EX_CANTCREAT``).
@@ -308,11 +311,10 @@ def build_world(root: Path, environ: dict[str, str]) -> World:
 def world_environment(base: dict[str, str], world: World, environ: dict[str, str]) -> dict[str, str]:
     """Give the backend's environment inside a world.
 
-    Mirrors what the backend's own start-up path sets, so the backend finds
-    its settings and folders, and still finds the real settings folder (for
-    the source choice) through the ``ASTROMETRICS_REAL_*`` variables.
-    ``ASTROMETRICS_SIMULATOR_PORTS` is left out on purpose: without it the
-    backend has no simulator object to start or stop.
+    The backend finds its settings and folders through this environment, and
+    still finds the real settings folder (for the source choice) through the
+    ``ASTROMETRICS_REAL_*`` variables. It also learns which programs the
+    simulator is missing, so the settings page can say so.
 
     Parameters
     ----------
@@ -345,6 +347,7 @@ def world_environment(base: dict[str, str], world: World, environ: dict[str, str
     if world.error:
         child[LAUNCH_ERROR_VARIABLE] = world.error
     child[LAUNCHER_VARIABLE] = "1"
+    child[MISSING_PROGRAMS_VARIABLE] = ",".join(missing_programs())
     return child
 
 
@@ -594,7 +597,11 @@ class Launcher:
                 remove_leftovers(self.root)
             finally:
                 release_world_lock(descriptor)
-        child_environment = {**self.environ, LAUNCHER_VARIABLE: "1"}
+        child_environment = {
+            **self.environ,
+            LAUNCHER_VARIABLE: "1",
+            MISSING_PROGRAMS_VARIABLE: ",".join(missing_programs()),
+        }
         child = self._start_backend(child_environment)
         return self._supervise(child, guard=False)
 
@@ -807,7 +814,9 @@ def main(argv: list[str] | None = None) -> int:
         "--port", type=int, default=None, help="The backend's port (default: ASTROMETRICS_PORT)."
     )
     arguments = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [launcher] %(levelname)s %(message)s")
+    logging.basicConfig(  # ruff: ignore[banned-api]
+        level=logging.INFO, format="%(asctime)s [launcher] %(levelname)s %(message)s"
+    )
     launcher = Launcher(root=arguments.root, port=arguments.port)
     install_signal_handlers(launcher)
     return launcher.run()

@@ -13,11 +13,12 @@ The library has a small public surface. Everything else is private.
 | `wayfindinglib` (the root, 7 names) | `Wayfinder`, the four sub-API classes `ObservatoryControl`, `ObservationPlanning`, `ObservationExecution` and `ObservationReview`, and the two records `ObservationSession` and `ObservationPackage`. |
 | `wayfindinglib.exceptions` | `DelegationPolicyValidationError` and `PlanRevisionConflictError`. The shared categories (`NotFoundError`, `InvalidArgumentError` and the rest) come from `astrometricslib.exceptions`. |
 | `wayfindinglib.reports` | The states and levels that results report: `RunState`, `PackageStatus`, `DepthGoalState` and `DepthLevel`. |
+| `wayfindinglib.logs` | Readers for the Ekos analyze log: `read_ekos_captures` (the frames a session saved, as `SavedCapture` records with UTC times) and `ekos_utc_offset_hours` (the offset of a zone name Ekos writes). They only read files. |
 | `wayfindinglib._internal` | Everything else, in the groups `planning`, `execution`, `review` and `control`. |
 
 The rules:
 
-- **Only `wayfindinglib` may import `_internal`.** The backend and the MCP servers use the root and the two public modules only. Tests of the libraries are the one exception.
+- **Only `wayfindinglib` may import `_internal`.** The backend, the MCP servers and the simulator use the root and the three public modules only. Tests of the libraries are the one exception.
 - **A result model is private, and its fields are not.** A call returns a Pydantic model (a Python class with typed, validated fields). A caller reads the fields by name and does not import the class. The API reference page lists the fields of each result without an import path.
 - **The library uses only public `astrometricslib` names.** It reaches the science library through the `Astrometrics` handle that `Wayfinder` holds.
 - **Calls take plain values.** A simple value is an argument. A group of options or a list of items is a dictionary, and the library checks it.
@@ -44,13 +45,13 @@ The rules:
 `ObservatoryControl` (`wayfinder.control`) commands and reads the devices. It has six children named by topic:
 
 - `mount`: slewing, parking, tracking and polar alignment.
-- `imaging`: the camera, the filter wheel and the focuser. `record_focus_model` saves a focus model that was measured elsewhere.
-- `guiding`: the guide loop and the guiding spectrum fit. `record_calibration` saves a guider calibration that was measured elsewhere, such as PHD2's own.
+- `imaging`: the camera, the filter wheel and the focuser. `query_focus_models` lists every saved focus model, and `record_focus_model` saves a focus model that was measured elsewhere.
+- `guiding`: the guide loop and the guiding spectrum fit. `query_calibrations` lists every saved guider calibration, `query_runs` lists the guiding runs read from the guide logs, and `record_calibration` saves a guider calibration that was measured elsewhere, such as PHD2's own.
 - `safety`: the safety status and the delegation mode.
 - `equipment`: device connection, the active telescope and camera, and the configuration.
 - `remote`: the telescope computer's frame and log transfer.
 
-Each of `mount`, `imaging`, `guiding`, `safety` and `equipment` has a `status` call with the same shape: it takes an optional `include` list of sections and returns a typed status. `mount.status` reads only the mount. `record_calibration` and `record_focus_model` take the numbers as keyword arguments and a required `source_note`, check them as the saved records do (a bad value raises `InvalidArgumentError` and saves nothing), and send nothing to a device. The backend serves them as `observatory:record_guider_calibration` and `observatory:record_focus_model`. `safety.enter_controller_mode` takes `shadow_first` to move the corrections to the shadowed state first, and `observatory:enter_controller_mode` passes it on. `close` stops the INDI session (INDI is the protocol that talks to the devices) when a program is done.
+Each of `mount`, `imaging`, `guiding`, `safety` and `equipment` has a `status` call with the same shape: it takes an optional `include` list of sections and returns a typed status. `mount.status` reads only the mount. `record_calibration` and `record_focus_model` take the numbers as keyword arguments and a required `source_note`, check them as the saved records do (a bad value raises `InvalidArgumentError` and saves nothing), and send nothing to a device. The backend serves them as `observatory:record_guider_calibration` and `observatory:record_focus_model`. `safety.enter_controller_mode` takes `shadow_first` to move the corrections to the shadowed state first, and `observatory:enter_controller_mode` passes it on. `library_path` names the folder of the wayfinding library, so a program that writes records can check where they go. `close` stops the INDI session (INDI is the protocol that talks to the devices) when a program is done.
 
 `Wayfinder` builds its own INDI session. Give `simulated=True` for the simulator, or leave it unset to use the simulator when `ASTROMETRICS_TESTING` is set. `separate_process=True` runs the session in a process of its own, which a program with a busy event loop needs. `open_port_forwards=True` lets the library open live SSH tunnels, such as the one to PHD2 on the observatory computer; it is off by default and only the backend turns it on. The driver properties on `control` are private.
 

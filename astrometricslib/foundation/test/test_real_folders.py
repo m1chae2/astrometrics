@@ -45,9 +45,3 @@ def test_the_real_variables_win_over_the_moved_folders(tmp_path: Path) -> None:
         tmp_path / "wf" in folders.protected_paths()
         or (tmp_path / "wf").resolve() in folders.protected_paths()
     )
-
-
-def test_a_folder_named_for_the_simulator_is_recognised() -> None:
-    """A simulator's temporary copy is recognised by its folder name."""
-    assert paths.is_in_simulator_world(f"/home/x/.local/share/{paths.SIMULATOR_FOLDER_NAME}/library")
-    assert not paths.is_in_simulator_world("/home/x/.local/share/astrometrics/library")

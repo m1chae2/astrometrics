@@ -236,12 +236,12 @@ def test_stage_refuses_the_folders_the_real_settings_name(
 
 
 def test_the_zone_table_and_the_log_parser_are_the_librarys(tmp_path: Path) -> None:
-    """The replay uses the library's own Ekos zone table and parser."""
-    from wayfindinglib.drivers.ekos import analyze_log_parser  # ruff: ignore[banned-api]
+    """The replay uses the library's own public Ekos zone table and reader."""
+    from wayfindinglib import logs
 
     assert not hasattr(night_replay, "ZONE_HOURS")
-    table = analyze_log_parser.UTC_OFFSET_HOURS_BY_ABBREVIATION
-    assert night_replay.UTC_OFFSET_HOURS_BY_ABBREVIATION is table
+    assert night_replay.ekos_utc_offset_hours is logs.ekos_utc_offset_hours
+    assert night_replay.read_ekos_captures is logs.read_ekos_captures
     path = tmp_path / "ekos-x.analyze"
     path.write_text("AnalyzeStartTime,2026-10-03 20:00:00.000,GMT\n")
     assert night_replay.parse_analyze(path)[1] == 0

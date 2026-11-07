@@ -26,6 +26,12 @@ Reports: ``wayfindinglib.reports``
 .. automodapi:: wayfindinglib.reports
    :no-inheritance-diagram:
 
+Ekos logs: ``wayfindinglib.logs``
+---------------------------------
+
+.. automodapi:: wayfindinglib.logs
+   :no-inheritance-diagram:
+
 Observatory control API
 -----------------------
 

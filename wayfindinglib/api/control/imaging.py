@@ -162,6 +162,22 @@ class ImagingControl(ControlChild):
 
         return hardware_operations.focus_move(self._context, steps)
 
+    def query_focus_models(self) -> list[FocusModel]:
+        """List every saved focus model, oldest first.
+
+        `status` reads only the focus model of the active equipment. This
+        reads them all, for every telescope and camera pairing, so a script
+        can compare models or pick the latest one. It only reads.
+
+        Returns
+        -------
+        focus_models : `list` [`FocusModel`]
+            The saved records in order of ``calibrated_at``. Empty when none
+            is saved.
+        """
+        records = self._context.butler.get_all("focus_model")
+        return sorted(records, key=lambda record: record.calibrated_at)
+
     def record_focus_model(
         self,
         *,

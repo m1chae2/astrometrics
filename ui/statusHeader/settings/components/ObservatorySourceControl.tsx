@@ -55,6 +55,7 @@ export const ObservatorySourceControl: React.FC<ObservatorySourceControlProps> =
     const disabledReason = (source: PickableSource): string | undefined => {
         if (source === active) return undefined;
         if (hasUnsavedChanges) return 'Save or revert your changes first';
+        if (state?.available === false && state.unavailable_reason) return state.unavailable_reason;
         if (source === 'simulated' && missing.length > 0) return `The simulator needs these programs: ${missing.join(', ')}`;
         return undefined;
     };

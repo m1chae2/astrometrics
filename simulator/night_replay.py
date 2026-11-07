@@ -56,11 +56,7 @@ from pathlib import Path
 from astrometricslib.drivers import real_folders
 from simulator.guide_log_replay import timed_lines
 from simulator.observatory_guard import real_protected_paths
-from wayfindinglib.drivers.ekos.analyze_log_parser import (
-    UTC_OFFSET_HOURS_BY_ABBREVIATION,
-    parse_ekos_analyze_log,
-)
-from wayfindinglib.models.session.ekos_session import EkosCapture
+from wayfindinglib.logs import SavedCapture, ekos_utc_offset_hours, read_ekos_captures
 
 #: The one fixed night (the date its guide log begins, local time).
 DEFAULT_NIGHT = "2026-10-03"
@@ -180,9 +176,9 @@ def list_nights(log_directory: Path | None = None, frames_directory: Path | None
     for night in candidates:
         names = set()
         for path in analyze_files[night]:
-            parsed = parse_ekos_analyze_log(str(path))
-            if parsed is not None:
-                names.update(Path(capture.file_path).name for capture in parsed[0].captures)
+            captures = read_ekos_captures(path)
+            if captures is not None:
+                names.update(Path(capture.file_path).name for capture in captures)
         count = sum(1 for name in names if name in library)
         if count:
             nights.append({"night": night, "frames": count})
@@ -220,9 +216,10 @@ def parse_analyze(path: Path) -> tuple[datetime, int, list[tuple[float | None, s
         if fields[0] == "AnalyzeStartTime":
             start_local = datetime.strptime(fields[1], "%Y-%m-%d %H:%M:%S.%f")
             zone = fields[2].strip().upper() if len(fields) > 2 else "UTC"
-            if zone not in UTC_OFFSET_HOURS_BY_ABBREVIATION:
+            offset_hours = ekos_utc_offset_hours(zone)
+            if offset_hours is None:
                 raise ValueError(f"Unknown time zone '{zone}' in {path.name}.")
-            zone_hours = UTC_OFFSET_HOURS_BY_ABBREVIATION[zone]
+            zone_hours = offset_hours
             rows.append((None, line))
             continue
         try:
@@ -253,14 +250,14 @@ def index_library_frames(frames_directory: Path) -> dict[str, list[Path]]:
     return by_name
 
 
-def captured_frames(captures: list[EkosCapture], library: dict[str, list[Path]]) -> list[CapturedFrame]:
+def captured_frames(captures: list[SavedCapture], library: dict[str, list[Path]]) -> list[CapturedFrame]:
     """Match the analyze log's saved frames with files in the library.
 
     Parameters
     ----------
-    captures : `list` [`EkosCapture`]
+    captures : `list` [`SavedCapture`]
         The captures the library's Ekos log parser read from the analyze
-        log (`parse_ekos_analyze_log`). Their times are already in UTC.
+        log (`read_ekos_captures`). Their times are already in UTC.
     library : `dict`
         Output of `index_library_frames`.
 
@@ -441,8 +438,7 @@ def build_plan(
     guide_path, analyze_path = guide_candidates[-1], analyze_candidates[-1]
     start_local, zone_hours, analyze_rows = parse_analyze(analyze_path)
     offset = timedelta(hours=zone_hours)
-    parsed = parse_ekos_analyze_log(str(analyze_path))
-    captures = parsed[0].captures if parsed is not None else []
+    captures = read_ekos_captures(analyze_path) or []
     all_frames = captured_frames(captures, index_library_frames(frames_root))
     if not all_frames:
         raise ValueError(f"No frame of the night {night} was found in the library under {frames_root}.")

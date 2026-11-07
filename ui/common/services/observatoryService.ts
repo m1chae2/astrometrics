@@ -81,6 +81,10 @@ export interface ObservatorySourceState {
     reason?: string;
     /** Programs the simulator needs that are not installed. */
     missing_programs: string[];
+    /** False when the source cannot be changed from this backend (no launcher runs it, or programs are missing). */
+    available?: boolean;
+    /** Why the source cannot be changed, or an empty text. */
+    unavailable_reason?: string;
     /**
      * For a simulator: which capabilities the app may command (`allowed`, names such as `MOUNT_CONTROL`), which stay
      * off with the reason for each (`off`), and why none could be taken (`error`). Null until the simulator is up,

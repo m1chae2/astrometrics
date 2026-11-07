@@ -43,7 +43,7 @@ Paths are relative to the repository root. Theory is in the architecture papers,
 - [Wayfinding analytics](wayfindinglib/analytics/README.md): frame counting, session progress and package suggestions for the observation packages.
 - [Wayfinding models](wayfindinglib/models/README.md): packages, framing, the suggestion log, session progress and camera noise.
 - [Wayfinding data access](wayfindinglib/data_access/README.md): the readers of equipment, policy and site, and the writer of safety limits.
-- [Wayfinding public API](wayfindinglib/api/README.md): `Wayfinder`, its four sub-APIs and the public modules (`exceptions`, `reports`). Reference, with the fields of each result: documentation/api/wayfindinglib.rst.
+- [Wayfinding public API](wayfindinglib/api/README.md): `Wayfinder`, its four sub-APIs and the public modules (`exceptions`, `reports`, `logs`). Reference, with the fields of each result: documentation/api/wayfindinglib.rst.
 
 ## Desktop app
 

@@ -51,15 +51,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from simulator.observatory_guard import real_protected_paths
-from wayfindinglib.analytics.guide_pulses import GUIDE_RATE_ARCSEC_PER_S
 from wayfindinglib.exceptions import GuardError
-from wayfindinglib.models.equipment_and_site.focus_model import ApproachDirection, FocusModel
-from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
 
 if TYPE_CHECKING:
-    from wayfindinglib.api.control.control import ObservatoryControl
+    from wayfindinglib import ObservatoryControl
 
 __all__ = [
+    "FocusModelValues",
+    "GuiderCalibrationValues",
     "SimulatedCalibrationReport",
     "build_simulated_calibrations",
     "record_simulated_calibrations",
@@ -68,6 +67,10 @@ __all__ = [
 
 #: The guide simulator's frames are not rotated against the mount axes.
 SIMULATED_CAMERA_ANGLE_DEG = 0.0
+#: The guide rate the simulated mount accepts: half the sidereal rate of
+#: 15.04 arcsec/s. The library's own guide rate is the same number (a test
+#: checks that they agree).
+SIMULATED_GUIDE_RATE_ARCSEC_PER_SEC = 7.52
 
 
 #: The speeds of one guide-log run count only between these (arcsec/s). Below
@@ -79,11 +82,48 @@ RECENT_RUN_COUNT = 20
 
 
 @dataclass(frozen=True)
+class GuiderCalibrationValues:
+    """The numbers of one guider calibration, as plain values.
+
+    These are the arguments of ``control.guiding.record_calibration``, so
+    the simulator needs no library model class.
+    """
+
+    id: str
+    camera_id: str
+    telescope_id: str
+    arcsec_per_pixel: float
+    camera_angle_deg: float
+    ra_rate_arcsec_per_sec: float
+    dec_rate_arcsec_per_sec: float
+    source_note: str
+    calibrated_at: datetime
+
+
+@dataclass(frozen=True)
+class FocusModelValues:
+    """The numbers of one focus model, as plain values.
+
+    These are the arguments of ``control.imaging.record_focus_model``.
+    """
+
+    id: str
+    camera_id: str
+    telescope_id: str
+    backlash_steps: int
+    approach_direction: str
+    thermal_coefficient_steps_per_c: float
+    filter_offsets: dict[str, int]
+    source_note: str
+    calibrated_at: datetime
+
+
+@dataclass(frozen=True)
 class SimulatedCalibrationReport:
     """What `record_simulated_calibrations` recorded."""
 
-    guider_calibration: GuiderCalibration
-    focus_model: FocusModel
+    guider_calibration: GuiderCalibrationValues
+    focus_model: FocusModelValues
     guider_source: str
     focus_source: str
 
@@ -108,7 +148,7 @@ def _check_library_is_simulators(
         If the library folder is outside `simulator_root`, or is, holds, or
         is inside a real folder.
     """
-    library = Path(control._context.butler.library_path).resolve()
+    library = Path(control.library_path).resolve()
     root = simulator_root.resolve()
     if not library.is_relative_to(root):
         raise GuardError(f"The wayfinding library {library} is not inside the simulator folder {root}.")
@@ -134,6 +174,66 @@ def _latest_real(records: list) -> object | None:
     """
     real = [record for record in records if not record.source_note.startswith("Simulator")]
     return max(real, key=lambda record: record.calibrated_at, default=None)
+
+
+def _calibration_values(record: object, **changes: object) -> GuiderCalibrationValues:
+    """Read the values of a saved guider calibration.
+
+    Parameters
+    ----------
+    record : `object`
+        A calibration from ``control.guiding.query_calibrations`` or
+        ``record_calibration``. Its fields are read, not its class.
+    **changes
+        Values to use instead of the record's.
+
+    Returns
+    -------
+    values : `GuiderCalibrationValues`
+        The record's values, with `changes` applied.
+    """
+    values = {
+        "id": record.id,
+        "camera_id": record.camera_id,
+        "telescope_id": record.telescope_id,
+        "arcsec_per_pixel": record.arcsec_per_pixel,
+        "camera_angle_deg": record.camera_angle_deg,
+        "ra_rate_arcsec_per_sec": record.ra_rate_arcsec_per_sec,
+        "dec_rate_arcsec_per_sec": record.dec_rate_arcsec_per_sec,
+        "source_note": record.source_note,
+        "calibrated_at": record.calibrated_at,
+    }
+    return GuiderCalibrationValues(**{**values, **changes})
+
+
+def _focus_model_values(record: object, **changes: object) -> FocusModelValues:
+    """Read the values of a saved focus model.
+
+    Parameters
+    ----------
+    record : `object`
+        A model from ``control.imaging.query_focus_models`` or
+        ``record_focus_model``. Its fields are read, not its class.
+    **changes
+        Values to use instead of the record's.
+
+    Returns
+    -------
+    values : `FocusModelValues`
+        The record's values, with `changes` applied.
+    """
+    values = {
+        "id": record.id,
+        "camera_id": record.camera_id,
+        "telescope_id": record.telescope_id,
+        "backlash_steps": record.backlash_steps,
+        "approach_direction": str(getattr(record.approach_direction, "value", record.approach_direction)),
+        "thermal_coefficient_steps_per_c": record.thermal_coefficient_steps_per_c,
+        "filter_offsets": {offset.filter: offset.offset_steps for offset in record.filter_offsets},
+        "source_note": record.source_note,
+        "calibrated_at": record.calibrated_at,
+    }
+    return FocusModelValues(**{**values, **changes})
 
 
 def _day(moment: datetime) -> str:
@@ -174,7 +274,7 @@ def _guider_from_history(
     from astrometricslib.exceptions import ConfigurationError
 
     low, high = PLAUSIBLE_RATE_RANGE_ARCSEC_PER_SEC
-    runs = sorted(control._context.butler.get_all("guiding_run"), key=lambda run: run.started_at)
+    runs = sorted(control.guiding.query_runs(), key=lambda run: run.started_at)
     sensible = [
         run
         for run in runs
@@ -199,7 +299,7 @@ def _guider_from_history(
         dec_rate = statistics.median(run.dec_rate_arcsec_per_second for run in sensible)
         rate_source = f"median speeds of the last {len(sensible)} sensible real guide-log runs"
     else:
-        ra_rate = dec_rate = GUIDE_RATE_ARCSEC_PER_S
+        ra_rate = dec_rate = SIMULATED_GUIDE_RATE_ARCSEC_PER_SEC
         rate_source = "simulator guide rate (no sensible real runs)"
     return plate_scale, ra_rate, dec_rate, f"{scale_source}, {rate_source}"
 
@@ -253,43 +353,46 @@ def build_simulated_calibrations(
     names = {"telescope_id": equipment.telescope.id, "camera_id": equipment.camera.id}
     identifier = f"simulator-{equipment.telescope.id}-{equipment.camera.id}"
 
-    real_calibration = _latest_real(control._context.butler.get_all("guider_calibration"))
+    real_calibration = _latest_real(control.guiding.query_calibrations())
     if real_calibration is not None:
         guider_source = f"real calibration of {_day(real_calibration.calibrated_at)}"
-        calibration = real_calibration.model_copy(
-            update={**names, "id": identifier, "source_note": f"Simulator: copied from {guider_source}."}
+        calibration = _calibration_values(
+            real_calibration, **names, id=identifier, source_note=f"Simulator: copied from {guider_source}."
         )
     else:
         plate_scale, ra_rate, dec_rate, guider_source = _guider_from_history(
             control, control.guiding.status(include=["plate_scale"]).plate_scale_arcsec_per_px
         )
-        calibration = GuiderCalibration(
+        calibration = GuiderCalibrationValues(
             id=identifier,
             arcsec_per_pixel=plate_scale,
             camera_angle_deg=SIMULATED_CAMERA_ANGLE_DEG,
             ra_rate_arcsec_per_sec=ra_rate,
             dec_rate_arcsec_per_sec=dec_rate,
             source_note=f"Simulator: derived from the {guider_source}; camera angle 0 (not recorded).",
+            calibrated_at=datetime.now(UTC),
             **names,
         )
 
-    real_focus = _latest_real(control._context.butler.get_all("focus_model"))
+    real_focus = _latest_real(control.imaging.query_focus_models())
     if real_focus is not None:
         focus_source = f"real focus model of {_day(real_focus.calibrated_at)}"
-        focus_model = real_focus.model_copy(
-            update={**names, "id": identifier, "source_note": f"Simulator: copied from {focus_source}."}
+        focus_model = _focus_model_values(
+            real_focus, **names, id=identifier, source_note=f"Simulator: copied from {focus_source}."
         )
     else:
         focus_source = "simulator focuser defaults"
-        focus_model = FocusModel(
+        focus_model = FocusModelValues(
             id=identifier,
             backlash_steps=0,
-            approach_direction=ApproachDirection.INWARD,
+            approach_direction="inward",
             thermal_coefficient_steps_per_c=0.0,
+            filter_offsets={},
             source_note=(
                 "Simulator: made-up focus model from the INDI focuser simulator's behavior "
                 "(no backlash, no thermal model); no real focus model is recorded."
             ),
+            calibrated_at=datetime.now(UTC),
             **names,
         )
     return SimulatedCalibrationReport(
@@ -339,12 +442,10 @@ def rpc_calls(report: SimulatedCalibrationReport) -> list[tuple[str, dict]]:
                 "camera_id": focus_model.camera_id,
                 "telescope_id": focus_model.telescope_id,
                 "backlash_steps": focus_model.backlash_steps,
-                "approach_direction": focus_model.approach_direction.value,
+                "approach_direction": focus_model.approach_direction,
                 "source_note": focus_model.source_note,
                 "thermal_coefficient_steps_per_c": focus_model.thermal_coefficient_steps_per_c,
-                "filter_offsets": {
-                    offset.filter: offset.offset_steps for offset in focus_model.filter_offsets
-                },
+                "filter_offsets": dict(focus_model.filter_offsets),
             },
         ),
     ]
@@ -400,15 +501,15 @@ def record_simulated_calibrations(
         camera_id=focus_model.camera_id,
         telescope_id=focus_model.telescope_id,
         backlash_steps=focus_model.backlash_steps,
-        approach_direction=focus_model.approach_direction.value,
+        approach_direction=focus_model.approach_direction,
         source_note=focus_model.source_note,
         thermal_coefficient_steps_per_c=focus_model.thermal_coefficient_steps_per_c,
-        filter_offsets={offset.filter: offset.offset_steps for offset in focus_model.filter_offsets},
+        filter_offsets=dict(focus_model.filter_offsets),
         calibrated_at=focus_model.calibrated_at,
     )
     return SimulatedCalibrationReport(
-        guider_calibration=saved_calibration,
-        focus_model=saved_focus_model,
+        guider_calibration=_calibration_values(saved_calibration),
+        focus_model=_focus_model_values(saved_focus_model),
         guider_source=report.guider_source,
         focus_source=report.focus_source,
     )

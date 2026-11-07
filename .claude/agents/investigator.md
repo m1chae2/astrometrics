@@ -27,7 +27,9 @@ tools:
   - mcp__astrometricslib-core__visualization_plot
   - mcp__astrometricslib-core__visualization_render_fits
   - mcp__wayfindinglib-core__observatory_equipment_status
+  - mcp__wayfindinglib-core__observatory_guiding_query_calibrations
   - mcp__wayfindinglib-core__observatory_guiding_status
+  - mcp__wayfindinglib-core__observatory_imaging_query_focus_models
   - mcp__wayfindinglib-core__observatory_remote_check_connection
   - mcp__wayfindinglib-core__observatory_remote_frame_status
   - mcp__wayfindinglib-core__observatory_remote_list

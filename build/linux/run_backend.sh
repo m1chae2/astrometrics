@@ -28,9 +28,11 @@ set -euo pipefail
 # kernel's out-of-memory killer.
 #   ./run_backend.sh help|--help|-h    - print this help text
 #
-# With ASTROMETRICS_USE_LAUNCHER=1 every command that starts the backend starts the
-# simulator launcher (python -m simulator.launch) instead, which runs the backend as its
-# child in the world the observatory source setting names (see simulator/README.md).
+# Every command that starts the backend starts the launcher (python -m simulator.launch),
+# which reads the observatory source choice, builds the world it names (none for the real
+# telescope) and runs the backend as its child (see simulator/README.md). The pid file
+# holds the launcher's pid, so `stop` stops the launcher, which stops the backend and takes
+# its world down.
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 # Console output goes to the user's log folder, not the project folder.
@@ -83,26 +85,14 @@ fi
 ## module lives in `backend/` so point the module to `backend.main_backend`.
 ## If you prefer installing and running the wheel from `dist/`, we can add
 ## an optional install step — currently this script runs the in-repo module.
-BACKEND_MODULE="backend.main_backend"
-# Set ASTROMETRICS_USE_LAUNCHER=1 to start the simulator launcher instead
-# (simulator/launch.py). The launcher reads the observatory source choice,
-# builds and guards the simulated world, runs the backend as its child, and
-# takes the world down when the backend ends. The pid file then holds the
-# launcher's pid, so `stop` stops the launcher, which stops the backend and
-# cleans up. Off by default.
+BACKEND_MODULE="simulator.launch"
+# The launcher marker records that the pid file holds a launcher, not a bare backend.
 LAUNCHER_MARKER="$PID_DIR/backend.launcher"
-if [ "${ASTROMETRICS_USE_LAUNCHER:-0}" = "1" ]; then
-  BACKEND_MODULE="simulator.launch"
-fi
-# Half-second polls to wait for a stop and for the first answer (so 20 polls = 10 s). The launcher also
-# builds a world before the backend starts and removes it after, so it needs
-# more time than the backend alone.
-STOP_WAIT_POLLS=20
-HEALTH_WAIT_POLLS=120
-if [ "$BACKEND_MODULE" = "simulator.launch" ] || [ -f "$LAUNCHER_MARKER" ]; then
-  STOP_WAIT_POLLS=120
-  HEALTH_WAIT_POLLS=360
-fi
+# Half-second polls to wait for a stop and for the first answer (so 120 polls = 60 s). The
+# launcher builds a world before the backend starts and removes it after, so it needs more
+# time than the backend alone.
+STOP_WAIT_POLLS=120
+HEALTH_WAIT_POLLS=360
 
 # Default bind host; can be overridden by passing --lan on the command line which
 # sets the bind host to 0.0.0.0 so the server is reachable on the local network.
@@ -207,11 +197,7 @@ launch_backend() {
   ASTROMETRICS_BIND_HOST="$BIND_HOST" nohup ${BACKEND_SCOPE_PREFIX[@]+"${BACKEND_SCOPE_PREFIX[@]}"} "$PYTHON" -u -m "$BACKEND_MODULE" >"$LOG_FILE" 2>&1 &
   backend_pid=$!
   echo "$backend_pid" > "$PID_FILE"
-  if [ "$BACKEND_MODULE" = "simulator.launch" ]; then
-    echo "launcher" > "$LAUNCHER_MARKER"
-  else
-    rm -f "$LAUNCHER_MARKER"
-  fi
+  echo "launcher" > "$LAUNCHER_MARKER"
 }
 
 wait_for_backend_healthy() {

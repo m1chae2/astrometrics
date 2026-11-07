@@ -234,7 +234,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "astrometricslib._internal".msg = "Private to astrometricslib. Use its public modules instead."
 "wayfindinglib.drivers".msg = "Internal. Use the `Wayfinder` API instead."
 "wayfindinglib.tasks".msg = "Internal. Use the `Wayfinder` API instead."
-"wayfindinglib.models".msg = "Internal. Import from `wayfindinglib` or its public modules (`exceptions`, `reports`) instead."
+"wayfindinglib.models".msg = "Internal. Import from `wayfindinglib` or its public modules (`exceptions`, `reports`, `logs`) instead."
 "wayfindinglib.analytics".msg = "Internal. Use the `Wayfinder` API instead."
 "wayfindinglib.session_analysis".msg = "Internal. Use the `Wayfinder` API instead."
 "wayfindinglib.data_access".msg = "Internal. Use the `Wayfinder` API instead."
@@ -320,7 +320,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "astrometricslib/**" = ["banned-api"]
 "backend/tests/**" = ["banned-api"] # a backend test may import a library's private names to set up a case
 "mcp_servers/**/test/**" = ["banned-api"] # so may an MCP server test
-"simulator/**" = ["banned-api"] # temporary until phase L3 of SIMULATOR_FROM_REAL_DATA_PLAN.md: the simulator still imports library internals
+"simulator/test/**" = ["banned-api"] # so may a simulator test
 "conftest.py" = ["banned-api"] # and the root test configuration
 "build/codegen/generate_types.py" = ["banned-api"] # TS codegen introspects the full model surface, not just the public API
 "build/tpm/seed_library.py" = ["banned-api"] # the seeder writes the private guiding stores directly, into a throwaway library
@@ -413,6 +413,29 @@ ignore_imports = [
 ]
 
 [[tool.importlinter.contracts]]
+name = "the simulator uses only the public API of astrometricslib and wayfindinglib"
+type = "forbidden"
+# The simulator is a layer around the app (decision D16 of
+# SIMULATOR_FROM_REAL_DATA_PLAN.md), so it sees the libraries as any other
+# program does. Its tests (`simulator.test`) may reach into the libraries to
+# set up a case.
+source_modules = ["simulator"]
+forbidden_modules = ["astrometricslib.*", "wayfindinglib.*"]
+allow_indirect_imports = true
+unmatched_ignore_imports_alerting = "none"
+ignore_imports = [
+    "simulator.** -> astrometricslib.exceptions",
+    "simulator.** -> astrometricslib.reports",
+    "simulator.** -> astrometricslib.jobs",
+    "simulator.** -> astrometricslib.drivers",
+    "simulator.** -> wayfindinglib.exceptions",
+    "simulator.** -> wayfindinglib.reports",
+    "simulator.** -> wayfindinglib.logs",
+    "simulator.test.** -> astrometricslib.**",
+    "simulator.test.** -> wayfindinglib.**",
+]
+
+[[tool.importlinter.contracts]]
 name = "a library script never imports another script"
 type = "independence"
 # Code that two scripts share belongs in the library. The script tests sit
@@ -433,6 +456,7 @@ ignore_imports = [
     "mcp_servers.** -> astrometricslib.drivers",
     "mcp_servers.** -> wayfindinglib.exceptions",
     "mcp_servers.** -> wayfindinglib.reports",
+    "mcp_servers.** -> wayfindinglib.logs",
     # A test may reach into the libraries to set up a case.
     "mcp_servers.**.test.** -> astrometricslib.**",
     "mcp_servers.**.test.** -> wayfindinglib.**",
@@ -465,6 +489,7 @@ ignore_imports = [
     "backend.** -> astrometricslib.drivers",
     "backend.** -> wayfindinglib.exceptions",
     "backend.** -> wayfindinglib.reports",
+    "backend.** -> wayfindinglib.logs",
 ]
 
 [[tool.importlinter.contracts]]
@@ -752,9 +777,3 @@ source_modules = [
 forbidden_modules = ["simulator"]
 allow_indirect_imports = true
 unmatched_ignore_imports_alerting = "none"
-# Temporary until phase L3 of SIMULATOR_FROM_REAL_DATA_PLAN.md: the backend
-# still builds the simulated world itself (its observatory source).
-ignore_imports = [
-    "backend.** -> simulator",
-    "backend.** -> simulator.**",
-]

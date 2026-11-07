@@ -31,13 +31,15 @@ The package root holds 7 names: `Wayfinder`, the four sub-API classes
 (`ObservatoryControl`, `ObservationPlanning`, `ObservationExecution` and
 `ObservationReview`), and the two records a script builds or reads most
 (`ObservationSession` and `ObservationPackage`).
-Two public modules hold the rest:
+Three public modules hold the rest:
 
 - `wayfindinglib.exceptions`: the errors that belong to this library. The
   shared categories (`NotFoundError`, `InvalidArgumentError` and the rest)
   come from `astrometricslib.exceptions`.
 - `wayfindinglib.reports`: the states and levels that results report
   (`RunState`, `PackageStatus`, `DepthGoalState` and `DepthLevel`).
+- `wayfindinglib.logs`: readers for the Ekos analyze log (`read_ekos_captures`,
+  `ekos_utc_offset_hours` and the `SavedCapture` record they return).
 
 Everything else is private. The result models that the calls return are
 private too: use their fields, as listed on the API reference page, and do

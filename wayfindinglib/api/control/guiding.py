@@ -503,6 +503,38 @@ class GuidingControl(ControlChild):
             context, context.records, session_id, limit
         )
 
+    def query_calibrations(self) -> list[GuiderCalibration]:
+        """List every saved guider calibration, oldest first.
+
+        `status` reads only the calibration of the active equipment. This
+        reads them all, for every telescope and camera pairing, so a script
+        can compare calibrations or pick the latest one. It only reads.
+
+        Returns
+        -------
+        calibrations : `list` [`GuiderCalibration`]
+            The saved records in order of ``calibrated_at``. Empty when none
+            is saved.
+        """
+        records = self._context.butler.get_all("guider_calibration")
+        return sorted(records, key=lambda record: record.calibrated_at)
+
+    def query_runs(self) -> list[GuidingRunSummary]:
+        """List every guiding run read from the guide logs, oldest first.
+
+        Each run is one continuous stretch of guiding, with the plate scale
+        and the calibrated mount speeds the guider used. They are saved
+        when a guide log is read (see `refit_spectrum`). It only reads.
+
+        Returns
+        -------
+        runs : `list` [`GuidingRunSummary`]
+            The saved runs in order of ``started_at``. Empty when none is
+            saved.
+        """
+        runs = self._context.butler.get_all("guiding_run")
+        return sorted(runs, key=lambda run: run.started_at)
+
     def record_calibration(
         self,
         *,

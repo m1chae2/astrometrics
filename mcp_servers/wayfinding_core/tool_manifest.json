@@ -93,6 +93,20 @@
       "interim_block": "",
       "note": "Commanding a device (mount, cameras, focuser, filter wheel, enclosure) is out of scope. Reading from them and from the Pi is allowed."
     },
+    "observatory_guiding_query_calibrations": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Lists every saved guider calibration, for all telescope and camera pairings (status reads only the active one). No device needed."
+    },
+    "observatory_guiding_query_runs": {
+      "tool_class": "unclassified",
+      "category": "observatory-status",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Returns every saved guiding run with no size bound. review_query with kind='guiding_runs' answers the same question in a reply of bounded size."
+    },
     "observatory_guiding_record_calibration": {
       "tool_class": "change-data",
       "category": "observatory-status",
@@ -141,6 +155,13 @@
       "disposition": "drop",
       "interim_block": "",
       "note": "Commanding a device (mount, cameras, focuser, filter wheel, enclosure) is out of scope. Reading from them and from the Pi is allowed."
+    },
+    "observatory_imaging_query_focus_models": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Lists every saved focus model, for all telescope and camera pairings (status reads only the active one). No device needed."
     },
     "observatory_imaging_record_focus_model": {
       "tool_class": "change-data",

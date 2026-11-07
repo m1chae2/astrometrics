@@ -81,15 +81,14 @@ that must be confirmed against the INDI 2.2.5 driver source before the phase tha
     (`ui/common/hooks/useCommandAvailability.ts`), and the Electron tray matches the word
     "simulator" in the source label.
   - The settings-save guard comes from `wayfindinglib.simulation`.
-- `_copy_settings_text` drops the real `Observatory.Telescope`, `Observatory.RemoteTransfer` and
-  `Observatory.Guiding` sections and puts in `SIMULATED_TELESCOPE_SETTINGS`, with a hard-coded
-  405 mm, f/5.4.
-- Nothing sets the INDI simulator properties. `exposure_driver` sets only connect, site, unpark,
-  track, upload and exposure, on one fixed target. No `gsc` program is installed, so the
-  simulators draw no stars.
-- The INDI processes inherit the user's environment, so the simulators load and save settings in
-  the user's `~/.indi` (on this computer it holds only simulator settings; the real devices'
-  settings live on the StellarMate).
+- `_copy_settings_text` keeps the real `Observatory.Telescope`, `Observatory.RemoteTransfer` and
+  `Observatory.Guiding` sections and changes only their endpoint keys (phase S0 built).
+- `exposure_driver` sets the sensor, focal length and gain and offset of the INDI simulators from
+  the world's settings (phase S0 built), and connect, site, unpark, track, upload and exposure, on
+  one fixed target. No `gsc` program is installed here, so the simulators draw no stars; the
+  launcher reports it as a note.
+- The INDI server runs with its own socket and its own `HOME` inside the world, so the simulators
+  no longer read or write the user's `~/.indi` (phase S0 built).
 - The TPM harness builds the simulator world itself (`build/tpm/simulation_library.py`,
   `observatory start --existing-world`) and runs the backend unaware of it, so the backend
   reports the real telescope and the SIMULATOR chip check is switched off for now.
@@ -151,7 +150,7 @@ them to these properties and clamps them to valid ranges.
 
 | What | INDI property | Source | Fallback |
 | :--- | :--- | :--- | :--- |
-| Focal length, aperture | Telescope `SCOPE_INFO` | Settings (`Observatory.Optic`, `Observatory.Setup`), not fitted | None needed |
+| Focal length, aperture | CCD and guide `SCOPE_INFO` (the telescope simulator has no `SCOPE_INFO` in INDI 2.2.5) | Settings (`Observatory.Optic`, `Observatory.Setup`), not fitted | None needed |
 | Sensor size and pixel size | CCD and guide `SIM_XRES`, `SIM_YRES`, `SIM_XSIZE`, `SIM_YSIZE` | Camera profile and settings, not fitted | None needed |
 | Camera identity | Frame headers `INSTRUME`, `GAIN`, `OFFSET` | Set to match the real camera profile, so simulator frames file under the right camera and bias | None needed |
 | Guide rate | Telescope `GUIDE_RATE_WE`, `GUIDE_RATE_NS` (fraction of sidereal: rate divided by 15.041, with the cos(Dec) convention of the calibration) | Recorded guider calibration, else the real mount's set rate | Mount default |

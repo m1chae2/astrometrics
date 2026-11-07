@@ -16,6 +16,7 @@ import pytest
 from astrometricslib.drivers import (
     ACTIVE_SOURCE_VARIABLE,
     LAUNCH_ERROR_VARIABLE,
+    LAUNCH_NOTES_VARIABLE,
     LAUNCHER_VARIABLE,
     MISSING_PROGRAMS_VARIABLE,
     OFFLINE,
@@ -231,3 +232,15 @@ def test_the_backend_knows_whether_a_launcher_runs_it() -> None:
     assert observatory_source.launched_by_launcher({LAUNCHER_VARIABLE: "1"})
     assert not observatory_source.launched_by_launcher({})
     assert not observatory_source.launched_by_launcher({LAUNCHER_VARIABLE: ""})
+
+
+def test_launch_notes_are_reported_and_never_block_a_source_change(environment: dict[str, str]) -> None:
+    """A note such as a missing star catalog never blocks a change."""
+    environment[LAUNCH_NOTES_VARIABLE] = "gsc (star catalog): stars are not drawn\n"
+    service = _service(environment)
+
+    state = service.get_source()
+
+    assert state["notes"] == ["gsc (star catalog): stars are not drawn"]
+    assert state["missing_programs"] == []
+    assert state["available"] is True

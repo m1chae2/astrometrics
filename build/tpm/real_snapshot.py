@@ -163,7 +163,7 @@ def prepare(sandbox: Path, mountpoint: Path | None = None) -> int:
         f'["Wayfinding Library"]\npath = "{sandbox / "wayfinding"}"\n'
         + OFFLINE_TELESCOPE_SETTINGS
         + "\n"
-        + library_copy.keep_sections(text),
+        + library_copy.keep_sections(text, library_copy.DROPPED_SECTIONS + library_copy.TELESCOPE_SECTIONS),
         encoding="utf-8",
     )
     repointed = 0

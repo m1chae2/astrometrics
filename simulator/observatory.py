@@ -37,6 +37,7 @@ started it ends. It writes the ports file once the stand-ins listen.
 
 import argparse
 import enum
+import hashlib
 import json
 import logging
 import os
@@ -55,8 +56,10 @@ from typing import Any
 
 from simulator import library_copy, observatory_guard
 from simulator.settings import (
+    FALLBACK_TELESCOPE_KEYS,
     SIMULATED_LAUNCH_SETTINGS,
-    SIMULATED_TELESCOPE_SETTINGS,
+    SIMULATOR_INSTRUMENT_NAME,
+    endpoint_keys,
     library_settings_text,
     offline_config_text,
     simulator_config_text,
@@ -87,6 +90,26 @@ INDI_DRIVERS = (
     "indi_simulator_wheel",
     "indi_simulator_guide",
 )
+#: The star catalog program the INDI camera simulators call to draw stars,
+#: and the environment variable that names its data folder.
+STAR_CATALOG_PROGRAM = "gsc"
+STAR_CATALOG_DATA_VARIABLE = "GSCDAT"
+#: Where the catalog's data may be installed, tried in this order when
+#: ``GSCDAT`` is not already set.
+STAR_CATALOG_DATA_FOLDERS = (
+    Path("/usr/share/gsc"),
+    Path("/usr/share/GSC"),
+    Path("/usr/local/share/gsc"),
+    Path("/usr/share/gsc-data"),
+)
+#: The text the launcher reports when the star catalog is missing. It is a
+#: status: the world starts, and the simulators draw no stars.
+STAR_CATALOG_MISSING_NOTE = "gsc (star catalog): stars are not drawn"
+#: The command that installs the star catalog (about 240 MB to download).
+STAR_CATALOG_INSTALL_COMMAND = "sudo apt install gsc"
+#: The most bytes of a Unix-socket name the INDI server can bind. Longer
+#: names get a short name made from the folder's path.
+INDI_SOCKET_NAME_LIMIT = 100
 #: The guide log the stand-in PHD2 plays in the simulated-sky kind.
 GUIDE_LOG_FIXTURE = Path(__file__).resolve().parent / "guide_log_sample.txt"
 #: The supervisor, run by path: it needs only the standard library.
@@ -238,6 +261,140 @@ def offline_environment(root: Path) -> dict[str, str]:
     }
 
 
+def indi_socket_name(root: Path) -> str:
+    """Give the name of the world's own INDI server socket.
+
+    ``indiserver -u NAME`` listens on a local (abstract) socket called NAME,
+    by default ``/tmp/indiserver``, so two servers on one computer clash. Each
+    world uses ``<root>/indiserver.sock`` instead. The name is not a file, and
+    the system allows only about 100 bytes, so a long folder name gets a
+    short name made from a hash of the folder.
+
+    Parameters
+    ----------
+    root : `pathlib.Path`
+        The simulator's root folder.
+
+    Returns
+    -------
+    name : `str`
+        The socket name for ``indiserver -u``.
+    """
+    name = str(root / "indiserver.sock")
+    if len(name.encode("utf-8")) <= INDI_SOCKET_NAME_LIMIT:
+        return name
+    return f"astrometrics-indi-{hashlib.sha256(str(root).encode('utf-8')).hexdigest()[:16]}"
+
+
+def indi_home(root: Path) -> Path:
+    """Give the home folder the INDI server and its drivers run with.
+
+    The drivers load and save their settings in ``<home>/.indi``. A folder
+    inside the world keeps them away from the user's own ``~/.indi``.
+
+    Parameters
+    ----------
+    root : `pathlib.Path`
+        The simulator's root folder.
+
+    Returns
+    -------
+    home : `pathlib.Path`
+        ``<root>/indi_home``.
+    """
+    return root / "indi_home"
+
+
+def star_catalog_data_folder(environ: Mapping[str, str] | None = None) -> Path | None:
+    """Find the star catalog's data folder.
+
+    Parameters
+    ----------
+    environ : `~collections.abc.Mapping`, optional
+        The environment. Default: the process environment.
+
+    Returns
+    -------
+    folder : `pathlib.Path` or `None`
+        The folder ``GSCDAT`` names, if it exists, else the first of
+        `STAR_CATALOG_DATA_FOLDERS` that exists, else `None`.
+    """
+    environment = os.environ if environ is None else environ
+    named = environment.get(STAR_CATALOG_DATA_VARIABLE)
+    if named and Path(named).is_dir():
+        return Path(named)
+    return next((folder for folder in STAR_CATALOG_DATA_FOLDERS if folder.is_dir()), None)
+
+
+def star_catalog_installed() -> bool:
+    """Say whether the star catalog program is on the PATH.
+
+    Returns
+    -------
+    installed : `bool`
+        `True` when ``gsc`` is found. Its package pulls in the data, so the
+        program is the test.
+    """
+    return shutil.which(STAR_CATALOG_PROGRAM) is not None
+
+
+def launch_notes() -> list[str]:
+    """List what the simulator lacks that does not stop it.
+
+    Returns
+    -------
+    notes : `list` [`str`]
+        One text per missing optional part, empty when all is present. Today
+        that is the star catalog: without it the simulated frames hold no
+        stars.
+    """
+    return [] if star_catalog_installed() else [STAR_CATALOG_MISSING_NOTE]
+
+
+def indiserver_environment(root: Path, environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Give the environment of the world's INDI server and its drivers.
+
+    ``HOME`` is the world's own folder, so the simulators never read or write
+    the user's ``~/.indi``. ``GSCDAT`` names the star catalog's data when it
+    is installed.
+
+    Parameters
+    ----------
+    root : `pathlib.Path`
+        The simulator's root folder.
+    environ : `~collections.abc.Mapping`, optional
+        The base environment. Default: the process environment.
+
+    Returns
+    -------
+    variables : `dict` [`str`, `str`]
+        Only the variables to add or replace.
+    """
+    variables = {"HOME": str(indi_home(root))}
+    data = star_catalog_data_folder(environ)
+    if data is not None and star_catalog_installed():
+        variables[STAR_CATALOG_DATA_VARIABLE] = str(data)
+    return variables
+
+
+def indiserver_command(root: Path, port: int) -> list[str]:
+    """Give the command that starts the world's INDI server.
+
+    Parameters
+    ----------
+    root : `pathlib.Path`
+        The simulator's root folder.
+    port : `int`
+        The TCP port the server listens on.
+
+    Returns
+    -------
+    command : `list` [`str`]
+        ``indiserver`` with the port, the world's own socket and the drivers.
+    """
+    return ["indiserver", "-p", str(port), "-u", indi_socket_name(root), *INDI_DRIVERS]
+
+
 def _make_folders(root: Path) -> None:
     """Make the folders every world needs and link the ``ssh`` stand-in.
 
@@ -247,6 +404,7 @@ def _make_folders(root: Path) -> None:
         The simulator's root folder.
     """
     (standin_home(root) / "Pictures").mkdir(parents=True, exist_ok=True)
+    (indi_home(root) / ".indi").mkdir(parents=True, exist_ok=True)
     bin_directory = root / "standin" / "bin"
     bin_directory.mkdir(parents=True, exist_ok=True)
     link = bin_directory / "ssh"
@@ -325,6 +483,76 @@ def _set_key(text: str, section: str, key: str, value: str) -> str:
     else:
         block = f"\n{line}{block}"
     return text[: header.end()] + block + text[end:]
+
+
+def with_camera_alias(text: str, alias: str) -> str:
+    """Add a name to the primary camera profile's aliases, in settings text.
+
+    The app files a frame under the camera whose profile name or alias equals
+    the frame's ``INSTRUME`` header. The INDI CCD simulator writes its own
+    device name there, so the world's copy of the primary camera's profile
+    lists that name as one more alias. The real settings are not touched.
+
+    Parameters
+    ----------
+    text : `str`
+        The world's settings in TOML.
+    alias : `str`
+        The name to add.
+
+    Returns
+    -------
+    changed : `str`
+        The settings with the alias added, or unchanged when the settings
+        name no primary camera, the camera has no profile section or the
+        alias is already there.
+    """
+    try:
+        settings = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return text
+    cameras = settings.get("Observatory.Camera", {})
+    primary = str(cameras.get("default_primary_camera", "")).strip()
+    section = f"Observatory.Camera.{primary}"
+    if not primary or section not in settings:
+        return text
+    aliases = [
+        name.strip() for name in str(settings[section].get("name_aliases", "")).split(",") if name.strip()
+    ]
+    if alias in aliases:
+        return text
+    return _set_key(text, section, "name_aliases", json.dumps(", ".join([*aliases, alias])))
+
+
+def with_stand_in_endpoints(text: str, indi_port: int, phd2_port: int, pictures: Path) -> str:
+    """Aim settings text at the stand-ins and keep every other key.
+
+    Parameters
+    ----------
+    text : `str`
+        The world's settings in TOML. A missing section or key is added.
+    indi_port, phd2_port : `int`
+        The ports of the stand-in INDI server and PHD2.
+    pictures : `pathlib.Path`
+        The stand-in telescope computer's picture folder.
+
+    Returns
+    -------
+    changed : `str`
+        The settings with only the endpoint keys set (see
+        `simulator.settings.endpoint_keys`), and the made-up focal length and
+        ratio added when the settings have none.
+    """
+    try:
+        telescope = tomllib.loads(text).get("Observatory.Telescope", {})
+    except tomllib.TOMLDecodeError:
+        telescope = {}
+    for key, value in FALLBACK_TELESCOPE_KEYS:
+        if key not in telescope:
+            text = _set_key(text, "Observatory.Telescope", key, json.dumps(value))
+    for section, key, value in endpoint_keys(indi_port, phd2_port, pictures):
+        text = _set_key(text, section, key, json.dumps(value))
+    return text
 
 
 class SimulatedObservatory:
@@ -488,30 +716,30 @@ class SimulatedObservatory:
         Returns
         -------
         text : `str`
-            The simulator's library and telescope sections, then the real
-            settings without the sections the simulator replaced. Without a
+            The simulator's launch and library sections, then the real
+            settings without the sections the simulator replaced. The real
+            ``Observatory.Telescope``, ``Observatory.RemoteTransfer`` and
+            ``Observatory.Guiding`` sections stay: only their endpoint keys
+            change (`with_stand_in_endpoints`). The primary camera's profile
+            gains the INDI simulator's instrument name as an alias. Without a
             real settings file, the made-up equipment is used.
         """
         from astrometricslib.drivers import real_folders
 
         real = self.real_library or real_folders()
-        mine = (
-            SIMULATED_LAUNCH_SETTINGS
-            + library_settings_text(
-                self.root,
-                Path(self.copy_report.get("frames_path", self.root / "library" / "frames")),
-                Path(self.copy_report.get("stacks_path", self.root / "library" / "frames")),
-            )
-            + SIMULATED_TELESCOPE_SETTINGS.format(
-                indi_port=self.indi_port, phd2_port=self.phd2_port, pictures=self.standin_home / "Pictures"
-            )
+        mine = SIMULATED_LAUNCH_SETTINGS + library_settings_text(
+            self.root,
+            Path(self.copy_report.get("frames_path", self.root / "library" / "frames")),
+            Path(self.copy_report.get("stacks_path", self.root / "library" / "frames")),
         )
         try:
             real_text = real.config_file.read_text(encoding="utf-8")
             tomllib.loads(real_text)
         except OSError, tomllib.TOMLDecodeError:
             return simulator_config_text(self.root, self.indi_port, self.phd2_port)
-        return library_copy.world_settings_text(real_text, mine)
+        text = library_copy.world_settings_text(real_text, mine)
+        text = with_stand_in_endpoints(text, self.indi_port, self.phd2_port, self.standin_home / "Pictures")
+        return with_camera_alias(text, SIMULATOR_INSTRUMENT_NAME)
 
     def _write_settings(self) -> None:
         """Write the settings file, or set the stand-in and library keys."""
@@ -531,14 +759,11 @@ class SimulatedObservatory:
             ("Image Library", "frames_path", frames),
             ("Image Library", "stacks_path", frames),
             ("Wayfinding Library", "path", self.root / "wayfinding"),
-            ("Observatory.Telescope", "hostname", "127.0.0.1"),
-            ("Observatory.Telescope", "indi_port", self.indi_port),
-            ("Observatory.Telescope", "remote_pictures_path", self.standin_home / "Pictures"),
-            ("Observatory.Guiding", "phd2_location", "local"),
-            ("Observatory.Guiding", "phd2_port", self.phd2_port),
         )
         for section, key, value in wanted:
             text = _set_key(text, section, key, f'"{value}"')
+        text = with_stand_in_endpoints(text, self.indi_port, self.phd2_port, self.standin_home / "Pictures")
+        text = with_camera_alias(text, SIMULATOR_INSTRUMENT_NAME)
         self.config_path.write_text(with_launch_section(text, SIMULATED_LAUNCH_SETTINGS), encoding="utf-8")
 
     # ------------------------------------------------------------------
@@ -592,7 +817,13 @@ class SimulatedObservatory:
             time.sleep(0.5)
         raise SimulationUnavailableError(f"The simulated telescope was not ready after {timeout:.0f} s.")
 
-    def _launch(self, name: str, command: list[str], log_name: str | None = None) -> None:
+    def _launch(
+        self,
+        name: str,
+        command: list[str],
+        log_name: str | None = None,
+        extra_environment: Mapping[str, str] | None = None,
+    ) -> None:
         """Start one stand-in under the supervisor.
 
         Parameters
@@ -603,6 +834,8 @@ class SimulatedObservatory:
             The command and arguments.
         log_name : `str`, optional
             The file under ``<root>/logs`` that gets its output.
+        extra_environment : `~collections.abc.Mapping`, optional
+            Variables for this process only (the INDI server's own ``HOME``).
         """
         logs = self.root / "logs"
         logs.mkdir(parents=True, exist_ok=True)
@@ -613,6 +846,7 @@ class SimulatedObservatory:
             "PYTHONPATH": f"{repository}{os.pathsep}{os.environ.get('PYTHONPATH', '')}",
         }
         environment.update(self.environment())
+        environment.update(extra_environment or {})
         process = subprocess.Popen(
             [sys.executable, str(SUPERVISOR_SCRIPT), "--", *command],
             stdout=log_file,
@@ -674,7 +908,12 @@ class SimulatedObservatory:
                 )
                 or SIMULATED_TARGET_NAME
             )
-        self._launch("indiserver", ["indiserver", "-p", str(self.indi_port), *INDI_DRIVERS], "indiserver.log")
+        self._launch(
+            "indiserver",
+            indiserver_command(self.root, self.indi_port),
+            "indiserver.log",
+            indiserver_environment(self.root),
+        )
         module = "simulator"
         phd2_command = [python, "-m", f"{module}.mock_phd2", "--port", str(self.phd2_port)]
         if self.kind is SimulationKind.REPLAY:
@@ -717,6 +956,7 @@ class SimulatedObservatory:
                     "--target", self.sky_target_name,
                     "--ra-hours", str(SIMULATED_TARGET_RA_HOURS),
                     "--dec-degrees", str(SIMULATED_TARGET_DEC_DEGREES),
+                    "--config", str(self.config_path),
                 ],
                 "driver.log",
             )  # fmt: skip

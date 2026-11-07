@@ -46,6 +46,11 @@ LAUNCH_ERROR_VARIABLE = "ASTROMETRICS_OBSERVATORY_SOURCE_ERROR"
 #: Comma-separated programs the launcher found missing for the simulated
 #: source. Empty or missing means none.
 MISSING_PROGRAMS_VARIABLE = "ASTROMETRICS_LAUNCH_MISSING_PROGRAMS"
+#: Newline-separated notes from the launcher about what the launch lacks and
+#: can do without (for example a missing optional program). They are
+#: statuses to show, not reasons to refuse a source. Empty or missing means
+#: none.
+LAUNCH_NOTES_VARIABLE = "ASTROMETRICS_LAUNCH_NOTES"
 #: The exit code that means "start me again with the saved choice" (75 is
 #: ``EX_TEMPFAIL`` in ``sysexits.h``). A launcher relaunches on this code only.
 RESTART_EXIT_CODE = 75

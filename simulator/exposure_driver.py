@@ -26,7 +26,7 @@ Usage::
         --standin <folder> --stats <out.json> \
         --guide-log simulator/guide_log_sample.txt \
         [--exposure-seconds 60] [--target "M 13"] \
-        [--ra-hours 16.695] [--dec-degrees 36.46]
+        [--ra-hours 16.695] [--dec-degrees 36.46] [--config <settings.toml>]
 
 The script stops on SIGTERM or SIGINT.
 """
@@ -42,6 +42,14 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from astropy.io import fits
+
+from simulator.device_settings import (
+    DeviceSetting,
+    device_settings_from_world,
+    load_world_settings,
+    matches,
+)
 from simulator.guide_log_replay import ReplayItem, load_replay_items, render_line, replay
 
 #: The devices of the INDI simulators and the property that connects each.
@@ -57,6 +65,49 @@ DEVICE_WAIT_SECONDS = 60
 #: Seconds past the exposure time to wait for the file before giving up on
 #: a frame.
 FRAME_GRACE_SECONDS = 60
+#: Seconds to wait for a simulator property to show the value just set.
+SETTING_WAIT_SECONDS = 5.0
+#: The longest wait for the simulated cooler to reach its setpoint, and how
+#: close (degrees C) counts as there.
+COOLING_WAIT_SECONDS = 180.0
+COOLING_TOLERANCE_C = 1.0
+#: Tries to set one property before giving up.
+SETTING_TRIES = 3
+
+
+#: The header key the camera simulator does not write.
+OFFSET_KEYWORD = "OFFSET"
+
+
+def stamp_offset(source: Path, destination: Path, offset: float | None) -> None:
+    """Move a frame into its final folder with the camera offset in its header.
+
+    The CCD simulator writes a ``GAIN`` header but no ``OFFSET``. The app
+    reads both to find the capture setting, so the offset the operator set
+    (``CCD_OFFSET``) is added. Only the header changes: the stored pixel
+    values are copied as they are, without scaling. The new file is written
+    next to the source (same folder, so the same file system), then renamed
+    over the destination in one step, so a transfer never sees a half-written
+    file. A frame that already has an ``OFFSET`` is moved as it is.
+
+    Parameters
+    ----------
+    source : `pathlib.Path`
+        The finished frame the camera wrote (a staging folder).
+    destination : `pathlib.Path`
+        Where the app will find it. Replaced if it exists.
+    offset : `float` or `None`
+        The offset to write. `None` moves the frame unchanged.
+    """
+    if offset is not None:
+        with fits.open(source, memmap=False, do_not_scale_image_data=True) as hdus:
+            if OFFSET_KEYWORD not in hdus[0].header:
+                value = int(offset) if float(offset).is_integer() else float(offset)
+                hdus[0].header[OFFSET_KEYWORD] = (value, "Camera offset set by the simulator operator")
+                temporary = source.with_name(f".{source.name}.stamping")
+                hdus.writeto(temporary, overwrite=True)
+                temporary.replace(source)
+    source.replace(destination)
 
 
 #: File written next to the statistics file when the simulators are connected.
@@ -82,6 +133,10 @@ class ExposureDriver:
         The target's folder name under the picture folder.
     ra_hours, dec_degrees : `float`
         Where to point the mount.
+    device_settings : `list` [`DeviceSetting`], optional
+        INDI properties to set on the simulators after they connect (the
+        real equipment's sensor, focal length and capture setting, see
+        `simulator.device_settings`). Default: none.
     """
 
     def __init__(
@@ -94,6 +149,7 @@ class ExposureDriver:
         target: str,
         ra_hours: float,
         dec_degrees: float,
+        device_settings: list[DeviceSetting] | None = None,
     ) -> None:
         """Keep the settings; nothing runs yet."""
         self.indi_port = indi_port
@@ -104,8 +160,12 @@ class ExposureDriver:
         self.target = target
         self.ra_hours = ra_hours
         self.dec_degrees = dec_degrees
+        self.device_settings = list(device_settings or [])
+        self.cooling_seconds: float | None = None
         self.stop_event = threading.Event()
         self.pictures_directory = standin / "Pictures" / target / "Light"
+        # The camera saves here first; `stamp_offset` moves each frame on.
+        self.staging_directory = standin / "camera_staging" / target / "Light"
         self.guide_log_directory = standin / ".local" / "share" / "kstars" / "guidelogs"
         self.frames: list[dict] = []
         self.guide_log_lines = 0
@@ -163,6 +223,39 @@ class ExposureDriver:
         line = result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
         return line.partition("=")[2]
 
+    def apply_device_settings(self) -> list[str]:
+        """Set the real equipment's properties on the connected simulators.
+
+        Each property is set and then read back. A resolution change makes
+        the camera simulator redefine its properties, which can undo a value
+        set at the same moment, so a value that did not take is set again.
+
+        Returns
+        -------
+        failed : `list` [`str`]
+            The ``device.property.element`` names that did not show the value
+            after the tries. Empty when all took. A failure is a status, not
+            an error: the simulators still run with their own values.
+        """
+        failed: list[str] = []
+        for setting in self.device_settings:
+            names = setting.read_back_names()
+            for _ in range(SETTING_TRIES):
+                self._set(setting.specification())
+                deadline = time.time() + SETTING_WAIT_SECONDS
+                while time.time() < deadline and not self.stop_event.is_set():
+                    if all(matches(value, self._get(name)) for name, value in names):
+                        break
+                    self.stop_event.wait(0.25)
+                else:
+                    continue
+                break
+            else:
+                failed.extend(name for name, value in names if not matches(value, self._get(name)))
+        for name in failed:
+            print(f"The simulator did not take the setting {name}.", file=sys.stderr)
+        return failed
+
     def write_stats(self) -> None:
         """Write the statistics file."""
         with self._lock:
@@ -172,6 +265,7 @@ class ExposureDriver:
                 "exposure_seconds": self.exposure_seconds,
                 "frames": list(self.frames),
                 "guide_log_lines_written": self.guide_log_lines,
+                "cooling_seconds": self.cooling_seconds,
             }
         temporary = self.stats_path.with_suffix(".tmp")
         temporary.write_text(json.dumps(stats, indent=2), encoding="utf-8")
@@ -207,6 +301,7 @@ class ExposureDriver:
             if self._get(f"{MOUNT}.EQUATORIAL_EOD_COORD.RA"):
                 break
             time.sleep(0.5)
+        self.apply_device_settings()
         self._set(f"{MOUNT}.GEOGRAPHIC_COORD.LAT;LONG;ELEV=45.76;249.26;1500")
         # The simulated mount starts parked. A parked mount ignores slews.
         self._set(f"{MOUNT}.TELESCOPE_PARK.UNPARK=On")
@@ -215,7 +310,7 @@ class ExposureDriver:
                 break
             time.sleep(0.5)
         self.point_mount(self.ra_hours, self.dec_degrees)
-        destination = upload_directory or self.pictures_directory
+        destination = upload_directory or self.staging_directory
         destination.mkdir(parents=True, exist_ok=True)
         prefix = re.sub(r"[^A-Za-z0-9]+", "_", self.target) + "_Light_XXX"
         self._set(
@@ -238,15 +333,77 @@ class ExposureDriver:
         self._set(f"{MOUNT}.ON_COORD_SET.TRACK=On")
         self._set(f"{MOUNT}.EQUATORIAL_EOD_COORD.RA;DEC={ra_hours};{dec_degrees}")
 
+    def camera_setpoint(self) -> float | None:
+        """Give the cooler setpoint the operator set on the camera simulator.
+
+        Returns
+        -------
+        temperature : `float` or `None`
+            The ``CCD_TEMPERATURE`` target in degrees C, or `None` when the
+            settings give none.
+        """
+        for setting in self.device_settings:
+            if setting.device == CAMERA and setting.property_name == "CCD_TEMPERATURE":
+                value = setting.elements[0][1]
+                return None if isinstance(value, str) else value
+        return None
+
+    def wait_for_cooling(self, timeout: float = COOLING_WAIT_SECONDS) -> float | None:
+        """Wait until the simulated sensor is near its setpoint.
+
+        The simulator cools about half a degree per second, so a frame taken
+        at once would carry the starting temperature in ``CCD-TEMP``.
+
+        Parameters
+        ----------
+        timeout : `float`, optional
+            The longest wait, in seconds.
+
+        Returns
+        -------
+        seconds : `float` or `None`
+            Seconds it took, or `None` when there is no setpoint or the sensor
+            did not get there in time (a status, logged to the error output).
+        """
+        target = self.camera_setpoint()
+        if target is None:
+            return None
+        started = time.time()
+        while time.time() - started < timeout and not self.stop_event.is_set():
+            current = self._get(f"{CAMERA}.CCD_TEMPERATURE.CCD_TEMPERATURE_VALUE")
+            try:
+                if abs(float(current) - target) <= COOLING_TOLERANCE_C:
+                    self.cooling_seconds = time.time() - started
+                    return self.cooling_seconds
+            except ValueError:
+                pass
+            self.stop_event.wait(1.0)
+        print(f"The simulated sensor did not reach {target} C in {timeout:.0f} s.", file=sys.stderr)
+        return None
+
+    def camera_offset(self) -> float | None:
+        """Give the offset the operator set on the camera simulator.
+
+        Returns
+        -------
+        offset : `float` or `None`
+            The value of the ``CCD_OFFSET`` setting, or `None` when the
+            settings have none.
+        """
+        for setting in self.device_settings:
+            if setting.device == CAMERA and setting.property_name == "CCD_OFFSET":
+                return setting.elements[0][1]
+        return None
+
     def _fits_files(self) -> set[str]:
-        """List the FITS files in the picture folder.
+        """List the FITS files in the camera's staging folder.
 
         Returns
         -------
         names : `set` [`str`]
             File names.
         """
-        return {path.name for path in self.pictures_directory.glob("*.fits")}
+        return {path.name for path in self.staging_directory.glob("*.fits")}
 
     def take_exposures(self) -> None:
         """Take exposures one after another until stopped."""
@@ -267,11 +424,15 @@ class ExposureDriver:
                     print("No frame appeared in time; trying the next exposure.", file=sys.stderr)
                 continue
             # The file is complete once its size stops changing.
-            path = self.pictures_directory / new_name
+            path = self.staging_directory / new_name
             size = -1
             while size != path.stat().st_size and not self.stop_event.is_set():
                 size = path.stat().st_size
                 self.stop_event.wait(0.3)
+            self.pictures_directory.mkdir(parents=True, exist_ok=True)
+            path_in_pictures = self.pictures_directory / new_name
+            stamp_offset(path, path_in_pictures, self.camera_offset())
+            path = path_in_pictures
             with self._lock:
                 self.frames.append({
                     "name": new_name,
@@ -315,6 +476,7 @@ class ExposureDriver:
         log_thread.start()
         stats_thread = threading.Thread(target=self._stats_loop, daemon=True, name="StatsWriter")
         stats_thread.start()
+        self.wait_for_cooling()
         self.take_exposures()
         self.write_stats()
         return 0
@@ -342,6 +504,12 @@ def main() -> int:
     parser.add_argument("--target", default="M 13")
     parser.add_argument("--ra-hours", type=float, default=16.695)
     parser.add_argument("--dec-degrees", type=float, default=36.46)
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="The world's settings file: the simulators take the real equipment's sensor and optics from it.",
+    )
     arguments = parser.parse_args()
     if arguments.indi_port in (5000, 7624):
         print(
@@ -358,6 +526,7 @@ def main() -> int:
         arguments.target,
         arguments.ra_hours,
         arguments.dec_degrees,
+        device_settings_from_world(load_world_settings(arguments.config)) if arguments.config else None,
     )
     signal.signal(signal.SIGTERM, lambda *_: driver.stop_event.set())
     signal.signal(signal.SIGINT, lambda *_: driver.stop_event.set())

@@ -428,12 +428,25 @@ def record(arguments: argparse.Namespace) -> int:
         fake_bin.mkdir()
         (fake_bin / "gsc").write_text(FAKE_GSC, encoding="utf-8")
         (fake_bin / "gsc").chmod(0o755)
+        # The simulators save their settings here, never in the user's ~/.indi.
+        indi_home = home / "indi_home"
+        (indi_home / ".indi").mkdir(parents=True)
         processes.append(
             subprocess.Popen(
-                ["indiserver", "-p", str(indi_port), "indi_simulator_telescope", "indi_simulator_guide"],
+                [
+                    "indiserver",
+                    *("-p", str(indi_port)),
+                    *("-u", str(home / "indiserver.sock")),
+                    "indi_simulator_telescope",
+                    "indi_simulator_guide",
+                ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+                env={
+                    **os.environ,
+                    "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                    "HOME": str(indi_home),
+                },
                 start_new_session=True,
             )
         )

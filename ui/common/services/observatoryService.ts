@@ -81,6 +81,8 @@ export interface ObservatorySourceState {
     reason?: string;
     /** Programs the simulator needs that are not installed. */
     missing_programs: string[];
+    /** Status notes from the launcher, such as an optional program that is missing. They never block a source change. Older backends leave it out. */
+    notes?: string[];
     /** False when the source cannot be changed from this backend (no launcher runs it, or programs are missing). */
     available?: boolean;
     /** Why the source cannot be changed, or an empty text. */

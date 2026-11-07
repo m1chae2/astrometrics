@@ -268,6 +268,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "simulator/exposure_driver.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "print"] # list-form indi_setprop and indi_getprop calls against 127.0.0.1 only; a command-line program
 "build/tpm/seal_guard.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"] # list-form call of `ss`, read only
 "simulator/observatory.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "print"] # list-form start of the stand-in processes, always through the supervisor; also a command-line program
+"simulator/test/test_world_setup.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"] # starts real indiserver processes and calls indi_setprop and indi_getprop in list form, on 127.0.0.1 only
 "simulator/test/test_observatory.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"] # runs the supervisor, `sleep` and `pgrep` in list form
 "simulator/library_copy.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path", "print", "hardcoded-sql-expression"] # table names come from the copy itself; list-form fuse-overlayfs and fusermount3; also a command-line program
 "simulator/connection_guard.py" = ["suspicious-subprocess-import", "start-process-with-partial-path"] # list-form call of `ss`, read only

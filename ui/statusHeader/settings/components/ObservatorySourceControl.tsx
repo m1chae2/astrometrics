@@ -87,6 +87,9 @@ export const ObservatorySourceControl: React.FC<ObservatorySourceControlProps> =
                 {sourceButton('simulated')}
             </div>
             {error && <div className="settings__help" role="alert">{error}</div>}
+            {active === 'simulated' && (state?.notes ?? []).map((note) => (
+                <div key={note} className="settings__help">{note}</div>
+            ))}
             <ConfirmDialog
                 open={asking !== null}
                 title={`Restart on ${asking ? SOURCE_WORDS[asking] : ''}?`}

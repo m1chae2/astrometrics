@@ -124,6 +124,44 @@ phd2_location = "local"
 phd2_port = "{phd2_port}"
 """
 
+#: The name the INDI CCD simulator writes into ``INSTRUME`` (its device name).
+#: The world's copy of the primary camera's profile lists it as an alias, so
+#: simulator frames file under the real camera (see `with_camera_alias`).
+SIMULATOR_INSTRUMENT_NAME = "CCD Simulator"
+#: Focal length and ratio of the made-up optic, used when the real settings
+#: have no ``Observatory.Telescope`` section (or lack these keys).
+FALLBACK_TELESCOPE_KEYS = (("focal_length_mm", "405"), ("focal_ratio", "5.4"))
+
+
+def endpoint_keys(indi_port: int, phd2_port: int, pictures: Path) -> tuple[tuple[str, str, str], ...]:
+    """List the settings that aim the app at the stand-ins.
+
+    These are the only telescope keys the world changes. Every other real
+    key (focal length, focal ratio, ...) stays as the user has it.
+
+    Parameters
+    ----------
+    indi_port, phd2_port : `int`
+        The ports of the stand-in INDI server and PHD2.
+    pictures : `pathlib.Path`
+        The stand-in telescope computer's picture folder.
+
+    Returns
+    -------
+    keys : `tuple` [`tuple` [`str`, `str`, `str`], ...]
+        ``(section, key, value)`` with plain text values.
+    """
+    return (
+        ("Observatory.Telescope", "hostname", "127.0.0.1"),
+        ("Observatory.Telescope", "indi_port", str(indi_port)),
+        ("Observatory.Telescope", "remote_pictures_path", str(pictures)),
+        ("Observatory.Telescope", "allow_commands", "true"),
+        ("Observatory.RemoteTransfer", "auto_download", "true"),
+        ("Observatory.Guiding", "phd2_location", "local"),
+        ("Observatory.Guiding", "phd2_port", str(phd2_port)),
+    )
+
+
 #: Settings that keep the app away from every telescope computer. The host is
 #: this computer and the INDI port is one nothing listens on, so a connection
 #: attempt fails at once. Automatic downloads are off, and PHD2 (the guiding
@@ -164,7 +202,7 @@ default_primary_camera = "ZWO ASI533MM Pro"
 
 ["Observatory.Camera.ZWO ASI533MM Pro"]
 name = "ZWO ASI533MM Pro"
-name_aliases = "ZWO CCD ASI533MM Pro"
+name_aliases = "ZWO CCD ASI533MM Pro, CCD Simulator"
 record_name = "ZWO ASI 533MM Pro"
 "pixel_size_μm" = "3.76"
 sensor_width_px = "3008"

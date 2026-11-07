@@ -141,10 +141,25 @@ def test_plan_gives_a_separate_stacks_folder_its_own_overlay(tmp_path: Path) -> 
     assert plan["stacks_path"] == tmp_path / "root" / "library" / "stacks_view"
 
 
-def test_settings_keep_the_real_equipment_and_drop_the_telescope() -> None:
-    """The real settings lose only the replaced sections."""
-    text = '["Observatory.Telescope"]\nhostname = "stellarmate.local"\n["Observatory.Camera"]\nmodels = "x"\n'
+def test_settings_keep_the_real_equipment_and_the_telescope_sections() -> None:
+    """The world keeps the real telescope and guiding sections."""
+    text = (
+        '["Observatory.Telescope"]\nfocal_length_mm = "405"\n'
+        '["Observatory.Guiding"]\nphd2_port = "4400"\n'
+        '["Image Library"]\npath = "/real"\n'
+        '["Observatory.Camera"]\nmodels = "x"\n'
+    )
     kept = library_copy.keep_sections(text)
+    assert "focal_length_mm" in kept
+    assert "Observatory.Guiding" in kept
+    assert "/real" not in kept
+    assert "Observatory.Camera" in kept
+
+
+def test_a_harness_with_its_own_telescope_drops_the_telescope_sections() -> None:
+    """The real-snapshot harness drops the telescope sections as well."""
+    text = '["Observatory.Telescope"]\nhostname = "stellarmate.local"\n["Observatory.Camera"]\nmodels = "x"\n'
+    kept = library_copy.keep_sections(text, library_copy.DROPPED_SECTIONS + library_copy.TELESCOPE_SECTIONS)
     assert "stellarmate" not in kept
     assert "Observatory.Camera" in kept
 

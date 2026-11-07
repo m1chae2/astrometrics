@@ -55,13 +55,14 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from astrometricslib.drivers import MISSING_PROGRAMS_VARIABLE, real_folders
+from astrometricslib.drivers import LAUNCH_NOTES_VARIABLE, MISSING_PROGRAMS_VARIABLE, real_folders
 from simulator.connection_guard import non_loopback_connections
 from simulator.library_copy import teardown as remove_library_copy
 from simulator.observatory import (
     SimulatedObservatory,
     SimulationKind,
     choose_free_port,
+    launch_notes,
     missing_programs,
     offline_environment,
     prepare_offline_world,
@@ -348,6 +349,7 @@ def world_environment(base: dict[str, str], world: World, environ: dict[str, str
         child[LAUNCH_ERROR_VARIABLE] = world.error
     child[LAUNCHER_VARIABLE] = "1"
     child[MISSING_PROGRAMS_VARIABLE] = ",".join(missing_programs())
+    child[LAUNCH_NOTES_VARIABLE] = "\n".join(launch_notes())
     return child
 
 
@@ -601,6 +603,7 @@ class Launcher:
             **self.environ,
             LAUNCHER_VARIABLE: "1",
             MISSING_PROGRAMS_VARIABLE: ",".join(missing_programs()),
+            LAUNCH_NOTES_VARIABLE: "\n".join(launch_notes()),
         }
         child = self._start_backend(child_environment)
         return self._supervise(child, guard=False)

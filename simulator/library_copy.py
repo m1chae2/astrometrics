@@ -60,14 +60,22 @@ WAYFINDING_DATABASE = "wayfinding.db"
 #: Small plain files the app reads from the library folder.
 PLAIN_FILES = ("calibration_frames.json",)
 #: Sections of the real settings that the simulator replaces with its own.
+#: The real ``Observatory.Telescope``, ``Observatory.RemoteTransfer`` and
+#: ``Observatory.Guiding`` sections are not here: the world keeps every real
+#: key (focal length, focal ratio, ...) and changes only the keys that name
+#: the stand-ins (`observatory.SimulatedObservatory`).
 DROPPED_SECTIONS = (
     "Launch",
     "Image Library",
     "Wayfinding Library",
+    "Processing.Astrometry.Online Solver",
+)
+#: The telescope sections a harness that writes its own (offline) telescope
+#: settings, such as the real-snapshot TPM, drops as well.
+TELESCOPE_SECTIONS = (
     "Observatory.Telescope",
     "Observatory.RemoteTransfer",
     "Observatory.Guiding",
-    "Processing.Astrometry.Online Solver",
 )
 #: Name of the report file in the simulator root.
 REPORT_FILE_NAME = "library_copy.json"
@@ -156,18 +164,22 @@ def plan_mounts(frames: Path, stacks: Path, root: Path) -> dict:
     return {"mounts": [main, second], "frames_path": mountpoint, "stacks_path": folders["stacks_mountpoint"]}
 
 
-def keep_sections(text: str) -> str:
+def keep_sections(text: str, dropped: tuple[str, ...] = DROPPED_SECTIONS) -> str:
     """Remove the replaced sections from the real settings text.
 
     Parameters
     ----------
     text : `str`
         The real settings file.
+    dropped : `tuple` [`str`, ...], optional
+        The section names to remove. Default: `DROPPED_SECTIONS`. A harness
+        that writes its own telescope settings passes
+        ``DROPPED_SECTIONS + TELESCOPE_SECTIONS``.
 
     Returns
     -------
     kept : `str`
-        The same text without the sections in `DROPPED_SECTIONS`. Arrays that
+        The same text without the sections in `dropped`. Arrays that
         span lines stay with their section, because only a line that starts
         with ``[`` and a name begins a section.
     """
@@ -175,7 +187,7 @@ def keep_sections(text: str) -> str:
     kept = []
     for block in blocks:
         header = re.match(r'\["?(.*?)"?\]\s*$', block.split("\n", 1)[0])
-        if header and header.group(1) in DROPPED_SECTIONS:
+        if header and header.group(1) in dropped:
             continue
         kept.append(block)
     return "".join(kept)

@@ -216,6 +216,19 @@ describe('Observatory source', () => {
     expect(simulated.getAttribute('title')).toContain('indiserver');
   });
 
+  /** A launcher note, such as a missing star catalog, shows as a status line while the simulator runs. */
+  it('shows the launcher notes only for the simulator', async () => {
+    const note = 'gsc (star catalog): stars are not drawn';
+    vi.mocked(getObservatorySource).mockResolvedValue(report('simulated', { notes: [note] }) as never);
+    const { unmount } = render(<ObservatorySourceControl />);
+    expect(await screen.findByText(note)).toBeTruthy();
+    unmount();
+    vi.mocked(getObservatorySource).mockResolvedValue(report('real', { notes: [note] }) as never);
+    render(<ObservatorySourceControl />);
+    await screen.findByRole('button', { name: 'SIMULATED' });
+    expect(screen.queryByText(note)).toBeNull();
+  });
+
   /** The backend is still starting when the app opens: the first question fails, a later one works. */
   it('shows the chip after the first question fails and a later one succeeds', async () => {
     vi.useFakeTimers();

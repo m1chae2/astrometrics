@@ -305,7 +305,9 @@ def test_simulated_frames_are_filed_under_the_name_the_app_downloads(
     )
     launched: dict[str, list[str]] = {}
     monkeypatch.setattr(
-        observatory, "_launch", lambda name, command, log_name=None: launched.update({name: command})
+        observatory,
+        "_launch",
+        lambda name, command, log_name=None, extra_environment=None: launched.update({name: command}),
     )
     monkeypatch.setattr(observatory, "_wait_listening", lambda ports: None)
 
@@ -327,7 +329,9 @@ def test_the_sky_keeps_the_default_target_when_the_library_has_none_near(
     _write_library_targets(observatory.root, [("M 31", "0h 42m", "+41 16")])
     launched: dict[str, list[str]] = {}
     monkeypatch.setattr(
-        observatory, "_launch", lambda name, command, log_name=None: launched.update({name: command})
+        observatory,
+        "_launch",
+        lambda name, command, log_name=None, extra_environment=None: launched.update({name: command}),
     )
     monkeypatch.setattr(observatory, "_wait_listening", lambda ports: None)
 

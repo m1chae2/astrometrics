@@ -23,6 +23,7 @@ from astrometricslib import get_configuration
 from astrometricslib.drivers import (
     ACTIVE_SOURCE_VARIABLE,
     LAUNCH_ERROR_VARIABLE,
+    LAUNCH_NOTES_VARIABLE,
     MISSING_PROGRAMS_VARIABLE,
     OFFLINE,
     REAL,
@@ -108,6 +109,17 @@ class ObservatorySourceService:
         """
         return [name for name in self._environ.get(MISSING_PROGRAMS_VARIABLE, "").split(",") if name]
 
+    def _launch_notes(self) -> list[str]:
+        """Give the notes the launcher passed about what the launch lacks.
+
+        Returns
+        -------
+        notes : `list` [`str`]
+            Status texts (for example a missing optional program). They never
+            stop a source change.
+        """
+        return [line for line in self._environ.get(LAUNCH_NOTES_VARIABLE, "").splitlines() if line.strip()]
+
     def _unavailable_reason(self) -> str | None:
         """Say why the source cannot change here, if it cannot.
 
@@ -140,7 +152,9 @@ class ObservatorySourceService:
             simulator could not start, from the launcher; empty otherwise),
             ``failed`` (`True` when it could not start and the backend runs
             offline), ``missing_programs`` (the simulator's programs the
-            launcher did not find), ``available`` and ``unavailable_reason``
+            launcher did not find), ``notes`` (the launcher's status notes,
+            for example an optional program that is missing; they never stop
+            a source change), ``available`` and ``unavailable_reason``
             (whether the source can change from here, and why not),
             ``library_copy`` (empty), ``commands`` (`None`) and ``launch``.
             ``launch`` is the launch identity from the ``[Launch]`` section
@@ -166,6 +180,7 @@ class ObservatorySourceService:
             "running": False,
             "error": error,
             "missing_programs": self._missing_programs(),
+            "notes": self._launch_notes(),
             "available": reason is None,
             "unavailable_reason": reason or "",
             "library_copy": {},

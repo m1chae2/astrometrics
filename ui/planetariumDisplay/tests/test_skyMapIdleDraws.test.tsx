@@ -92,7 +92,7 @@ describe('sky map draws', () => {
     runFrames(10);
     drawCount.value = 0;
     runFrames(600);
-    expect(drawCount.value).toBeLessThanOrEqual(1);
+    expect(drawCount.value).toBeLessThanOrEqual(2);
   });
 
   /** A wheel zoom draws while easing, then stops drawing once it settles. */
@@ -106,7 +106,8 @@ describe('sky map draws', () => {
     expect(afterSettle).toBeGreaterThan(5);
     expect(afterSettle).toBeLessThan(60);
     runFrames(600);
-    expect(drawCount.value - afterSettle).toBeLessThanOrEqual(1);
+    // Only the slow sidereal drift (one draw every few seconds at this zoom) is left.
+    expect(drawCount.value - afterSettle).toBeLessThanOrEqual(2);
   });
 
   /** A drag draws while the camera catches up with the pointer, then stops. */
@@ -121,7 +122,8 @@ describe('sky map draws', () => {
     const afterSettle = drawCount.value;
     expect(afterSettle).toBeGreaterThan(5);
     runFrames(600);
-    expect(drawCount.value - afterSettle).toBeLessThanOrEqual(1);
+    // Only the slow sidereal drift (one draw every few seconds at this zoom) is left.
+    expect(drawCount.value - afterSettle).toBeLessThanOrEqual(2);
   });
 
   /** A simulated date that moves every frame (time playback) draws every frame. */

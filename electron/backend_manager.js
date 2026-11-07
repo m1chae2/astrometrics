@@ -113,7 +113,7 @@ export class BackendManager {
    * spawned the backend or `SKIP_BACKEND` pointed it at one started elsewhere.
    *
    * Never blocks the app indefinitely: it gives up after `timeoutMs`, when a
-   * spawned backend has exited, when nothing has answered at all for
+   * spawned backend has exited (or the backend the start script launched has died), when nothing has answered at all for
    * `unreachableTimeoutMs` (no backend is running), or if the backend has no
    * `/api/ready` route (an older build). The reason for giving up is left in
    * `warmUpFailureReason` so the caller can tell a missing backend from a slow one.
@@ -121,14 +121,14 @@ export class BackendManager {
    * @param {{timeoutMs?: number, pollIntervalMs?: number, unreachableTimeoutMs?: number}} [options] - Polling limits.
    * @return {Promise<boolean>} True if the backend reported ready, false if it gave up waiting.
    */
-  async waitUntilWarm({ timeoutMs = 180000, pollIntervalMs = 500, unreachableTimeoutMs = 45000 } = {}) {
+  async waitUntilWarm({ timeoutMs = 180000, pollIntervalMs = 500, unreachableTimeoutMs = 120000 } = {}) {
     const readyUrl = backendReadyUrl();
     const deadline = Date.now() + timeoutMs;
     let lastAnsweredAt = Date.now();
     this.warmUpFailureReason = null;
 
     while (Date.now() < deadline) {
-      if (this.backendExited) {
+      if (this.backendExited || this._externalBackendHasDied()) {
         log.warn('Backend exited before finishing warm-up; not waiting any longer.');
         this.warmUpFailureReason = 'exited';
         return false;
@@ -159,6 +159,36 @@ export class BackendManager {
     log.warn(`Backend did not report ready within ${timeoutMs}ms; opening the window anyway.`);
     this.warmUpFailureReason = 'timeout';
     return false;
+  }
+
+  /**
+   * Tells whether a backend started by `run_astrometrics.sh` has since died.
+   *
+   * Under `SKIP_BACKEND` this manager spawned nothing, and Electron starts
+   * before the backend is listening, so a dead backend would otherwise look
+   * the same as a slow one until `unreachableTimeoutMs` ran out. The start
+   * script writes the backend's process id to `.run_pids/backend.pid` before it
+   * starts Electron, so a process id that no longer exists means the backend
+   * crashed during start-up. Without that file there is nothing to check.
+   *
+   * @private
+   * @return {boolean} True only when the file names a process that is gone.
+   */
+  _externalBackendHasDied() {
+    if (!process.env.SKIP_BACKEND || !this.app?.getAppPath) return false;
+    try {
+      const pidFile = path.join(this.app.getAppPath(), '.run_pids', 'backend.pid');
+      const pid = parseInt(fs.readFileSync(pidFile, 'utf8').trim(), 10);
+      if (!pid || Number.isNaN(pid)) return false;
+      try {
+        process.kill(pid, 0);
+        return false;
+      } catch (err) {
+        return err.code === 'ESRCH';
+      }
+    } catch {
+      return false;
+    }
   }
 
   /**

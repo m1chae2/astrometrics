@@ -23,6 +23,9 @@ from backend.services.data import stellar_service as stellar_service_module
 from backend.services.data.stellar_service import DEEP_CATALOG_INSTALL_COMMAND, StellarService
 from wayfindinglib._internal.planning import DeepCatalogStatus, SkySource
 
+_ONE_CLASS = [{"spectralClass": "G", "label": "Sun-like", "count": 2}]
+"""A non-empty class summary, since an empty answer is never cached."""
+
 
 def _service() -> StellarService:
     """Build a service over mock libraries.
@@ -120,7 +123,7 @@ def test_the_class_summary_and_a_class_listing_come_from_the_library() -> None:
 def test_whole_catalog_answers_are_cached_until_the_version_changes() -> None:
     """A repeat is served from memory; a catalog write forces a new answer."""
     service = _service()
-    service.astrometrics.stars.query.return_value = StarQueryResult(detail="class_counts", classes=[])
+    service.astrometrics.stars.query.return_value = StarQueryResult(detail="class_counts", classes=_ONE_CLASS)
     service.astrometrics.stars.dataset_version.return_value = 1
 
     service.get_spectral_class_summary()
@@ -136,7 +139,9 @@ def test_warming_the_cache_answers_the_first_requests() -> None:
     """After warm-up, target and class counts cost no library call."""
     service = _service()
     service.astrometrics.stars.query.return_value = StarQueryResult(
-        detail="target_counts", target_counts={}, classes=[]
+        detail="target_counts",
+        target_counts={"M 13": TargetStarCount(star_count=3)},
+        classes=_ONE_CLASS,
     )
 
     service.warm_catalog_summary_cache()
@@ -146,6 +151,24 @@ def test_warming_the_cache_answers_the_first_requests() -> None:
 
     assert calls_after_warmup == 2
     assert service.astrometrics.stars.query.call_count == 2
+
+
+def test_an_empty_answer_is_not_kept_or_announced() -> None:
+    """An empty catalog at start-up must not hide data that arrives later."""
+    service = _service()
+    socket_manager = MagicMock()
+    service.set_socket_manager(socket_manager)
+    service.astrometrics.stars.dataset_version.return_value = 1
+    service.astrometrics.stars.query.return_value = StarQueryResult(detail="target_counts", target_counts={})
+
+    assert service.get_target_data_availability() == {}
+    socket_manager.broadcast_ui_event_sync.assert_not_called()
+
+    service.astrometrics.stars.query.return_value = StarQueryResult(
+        detail="target_counts", target_counts={"M 13": TargetStarCount(star_count=3)}
+    )
+    assert service.get_target_data_availability()["M 13"]["starCount"] == 3
+    socket_manager.broadcast_ui_event_sync.assert_called_once()
 
 
 def test_simultaneous_requests_for_one_answer_share_one_scan() -> None:
@@ -165,7 +188,7 @@ def test_simultaneous_requests_for_one_answer_share_one_scan() -> None:
         """
         scan_started.set()
         release_scan.wait(timeout=5)
-        return StarQueryResult(detail="class_counts", classes=[])
+        return StarQueryResult(detail="class_counts", classes=_ONE_CLASS)
 
     service.astrometrics.stars.query.side_effect = slow_query
     answers: list[object] = []
@@ -186,7 +209,7 @@ def test_simultaneous_requests_for_one_answer_share_one_scan() -> None:
 def test_cached_answers_expire_after_the_fallback_window(mocker: MockerFixture) -> None:
     """A write the version counter missed is caught by the time limit."""
     service = _service()
-    service.astrometrics.stars.query.return_value = StarQueryResult(detail="class_counts", classes=[])
+    service.astrometrics.stars.query.return_value = StarQueryResult(detail="class_counts", classes=_ONE_CLASS)
     fake_time = [1000.0]
     mocker.patch.object(stellar_service_module.time, "monotonic", side_effect=lambda: fake_time[0])
 
@@ -201,7 +224,9 @@ def test_a_new_catalog_version_is_announced_once() -> None:
     """The first answer for a new version tells the app; cache hits do not."""
     service = _service()
     service.astrometrics.stars.query.return_value = StarQueryResult(
-        detail="class_counts", classes=[], target_counts={}
+        detail="class_counts",
+        classes=_ONE_CLASS,
+        target_counts={"M 13": TargetStarCount(star_count=3)},
     )
     socket_manager = MagicMock()
     service.set_socket_manager(socket_manager)

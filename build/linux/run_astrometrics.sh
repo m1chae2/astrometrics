@@ -319,7 +319,8 @@ start_electron_bg() {
 
     cd "$ROOT_DIR" || return 1
     astrometrics_slice_prefix electron
-    if command -v npx >/dev/null 2>&1; then
+    # The local launcher directly: `npx` adds about 0.25 s of its own start-up.
+    if [ -x node_modules/.bin/electron ]; then
         set +e
         if [ "${WATCH:-0}" = "1" ]; then
             echo "Starting Electron (watch mode) (logs: $LOG_DIR/electron.log)..."
@@ -327,32 +328,14 @@ start_electron_bg() {
             ELECTRON_RENDERER_URL="${VITE_URL}" SKIP_BACKEND=1 NODE_ENV=development ${ASTROMETRICS_SLICE_PREFIX[@]+"${ASTROMETRICS_SLICE_PREFIX[@]}"} node --watch-path=electron --watch-preserve-output node_modules/electron/cli.js . --remote-debugging-port=${ELECTRON_DEBUG_PORT} ${extra_args} ${OPEN_FILE:+"$OPEN_FILE"} >"$LOG_DIR/electron.log" 2>&1 &
         else
             echo "Starting Electron (logs: $LOG_DIR/electron.log)..."
-            ELECTRON_RENDERER_URL="${VITE_URL}" SKIP_BACKEND=1 NODE_ENV=development ${ASTROMETRICS_SLICE_PREFIX[@]+"${ASTROMETRICS_SLICE_PREFIX[@]}"} npx electron . --remote-debugging-port=${ELECTRON_DEBUG_PORT} ${extra_args} ${file_arg} >"$LOG_DIR/electron.log" 2>&1 &
+            ELECTRON_RENDERER_URL="${VITE_URL}" SKIP_BACKEND=1 NODE_ENV=development ${ASTROMETRICS_SLICE_PREFIX[@]+"${ASTROMETRICS_SLICE_PREFIX[@]}"} node_modules/.bin/electron . --remote-debugging-port=${ELECTRON_DEBUG_PORT} ${extra_args} ${file_arg} >"$LOG_DIR/electron.log" 2>&1 &
         fi
         local pid=$!
         set -e
         echo "$pid" > "$ELECTRON_PID_FILE"
     else
-        echo "npx not found." >&2
+        echo "node_modules/.bin/electron not found; run npm install." >&2
     fi
-}
-
-# wait_for_backend_alive: confirms the backend answers HTTP before Electron is
-# launched. Electron runs with SKIP_BACKEND=1, so with no backend behind it the
-# app would sit on the splash screen. Catalog warm-up is covered by the splash
-# itself, so this only waits for the server to start listening.
-wait_for_backend_alive() {
-  echo "Waiting for backend to answer..."
-  local tries=0
-  local max=120
-  while [ $tries -lt $max ]; do
-    if curl -s -o /dev/null --max-time 2 "$BACKEND_URL"; then return 0; fi
-    sleep 0.5
-    tries=$((tries+1))
-  done
-  echo "Backend is not answering at $BACKEND_URL."
-  tail -n 20 "$LOG_DIR/backend.log" 2>/dev/null
-  return 1
 }
 
 wait_for_vite() {
@@ -497,11 +480,8 @@ case "$CMD" in
         stop_what_this_run_started
         exit 1
     fi
-    if ! wait_for_backend_alive; then
-        echo "Backend is not running; not launching Electron."
-        stop_what_this_run_started
-        exit 1
-    fi
+    # No wait for the backend here: the splash polls /api/ready, and Electron
+    # reports a backend that died (see electron/backend_manager.js).
     start_electron_bg
     echo "Astrometrics started. The splash screen stays up until the backend is ready."
     ;;
@@ -541,10 +521,6 @@ case "$CMD" in
         exit 1
     fi
 
-    if ! wait_for_backend_alive; then
-        echo "Backend is not running; not launching Electron."
-        exit 1
-    fi
     start_electron_bg
 
     epid=$(cat "$ELECTRON_PID_FILE")

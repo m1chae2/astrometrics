@@ -447,6 +447,30 @@ def error_entries(errors: dict[str, list[dict] | None]) -> list[dict[str, object
     ]
 
 
+def simulator_chip_entries(flows: list[dict]) -> list[dict[str, object]]:
+    """Make the TPM that a simulated night is visibly marked.
+
+    Only a simulation-mode run calls this (a real-telescope or synthetic
+    offline run has no chip to look for, so it gets no entry).
+
+    Parameters
+    ----------
+    flows : `list` [`dict`]
+        The ``flow-metrics.json`` contents of the Chrome flow and, if it ran,
+        the Electron flow. Each has a ``sourceChip`` block from ``flow.mjs``.
+        A flow written before the block existed adds nothing.
+
+    Returns
+    -------
+    entries : `list` [`dict`]
+        ``simulator_chip_missing``: how many flows did not show the header's
+        ``SIMULATOR`` chip. It has no value when no flow checked.
+    """
+    checks = [flow["sourceChip"] for flow in flows if (flow.get("sourceChip") or {}).get("expected")]
+    missing = [] if not checks else [sum(1 for check in checks if not check.get("present"))]
+    return [entry("simulator_chip_missing", "count", missing, "last")]
+
+
 def describe_error(kind: str, record: dict) -> str:
     """Write one offending record as a line of text.
 
@@ -1245,6 +1269,8 @@ def main() -> int:
     tpms.extend(
         item for item in error_entries(errors) if not processing or item["name"] == "backend_error_log_lines"
     )
+    if arguments.mode == SIMULATION_MODE and not processing:
+        tpms.extend(simulator_chip_entries([flow, *([profile_flow] if electron_flow_file.exists() else [])]))
     observatory_metrics = (
         json.loads(Path(arguments.observatory_metrics).read_text()) if arguments.observatory_metrics else None
     )

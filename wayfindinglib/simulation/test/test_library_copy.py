@@ -160,6 +160,47 @@ def test_paths_are_rewritten_only_at_folder_boundaries(tmp_path: Path) -> None:
     assert rows == ["/library_old/a", "/new", "/new/a"]
 
 
+def test_paths_are_rewritten_in_every_text_column_and_other_values_stay(tmp_path: Path) -> None:
+    """One pass fixes every text column; numbers, blobs and NULL stay."""
+    database = tmp_path / "x.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "CREATE TABLE t (a TEXT, b TEXT, n INTEGER, raw BLOB, g TEXT GENERATED ALWAYS AS (a || '!'))"
+        )
+        connection.execute("INSERT INTO t (a, b, n, raw) VALUES ('/lib/x', '/lib', 7, X'2F6C6962')")
+        connection.execute("INSERT INTO t (a, b, n, raw) VALUES ('other', NULL, 8, NULL)")
+    changed = library_copy.rewrite_paths(database, [("/lib", "/new")])
+    with sqlite3.connect(database) as connection:
+        rows = connection.execute("SELECT a, b, n, raw FROM t ORDER BY n").fetchall()
+    assert rows == [("/new/x", "/new", 7, b"/lib"), ("other", None, 8, None)]
+    assert changed >= 1
+
+
+def test_paths_are_rewritten_when_a_table_cannot_be_updated_in_one_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A table the one-pass update refuses is rewritten by column."""
+    database = tmp_path / "x.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE t (a TEXT, b TEXT)")
+        connection.execute("INSERT INTO t VALUES ('/lib/a', '/lib/b')")
+
+    def refuse(*_arguments: object) -> int:
+        """Fail the way SQLite does for an update it cannot run.
+
+        Raises
+        ------
+        sqlite3.OperationalError
+            Always.
+        """
+        raise sqlite3.OperationalError("refused")
+
+    monkeypatch.setattr(library_copy, "_rewrite_table_in_one_pass", refuse)
+    library_copy.rewrite_paths(database, [("/lib", "/new")])
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT a, b FROM t").fetchall() == [("/new/a", "/new/b")]
+
+
 @pytest.mark.parametrize("nested", [True, False])
 def test_copy_mounts_the_library_and_leaves_the_real_one_alone(tmp_path: Path, nested: bool) -> None:
     """Frames and stacks show through, writes stay out of the real one."""
@@ -242,3 +283,45 @@ def test_backup_of_a_database_nobody_has_open_writes_nothing_beside_it(tmp_path:
     assert sorted(path.name for path in snapshot.iterdir()) == before
     with sqlite3.connect(tmp_path / "copy" / "a.db") as copied:
         assert copied.execute("SELECT x FROM t").fetchone()[0] == "in the wal"
+
+
+def test_copy_report_sizes_match_the_files_on_disk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The report's byte counts are the copies' final sizes, not early ones."""
+    library = tmp_path / "real_library"
+    wayfinding = tmp_path / "real_wayfinding"
+    library.mkdir()
+    wayfinding.mkdir()
+    connection = sqlite3.connect(library / "astrometrics.db")
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("CREATE TABLE t (x TEXT)")
+    connection.executemany("INSERT INTO t VALUES (?)", [("x" * 1000,)] * 2000)
+    connection.commit()
+    try:
+        # Make the size taken inside the backup stale (the report said 4096).
+        original = library_copy.backup_database
+
+        def stale_size(source: Path, destination: Path) -> int:
+            """Run the real backup but report the size of an empty page.
+
+            Parameters
+            ----------
+            source, destination : `pathlib.Path`
+                The database and its copy.
+
+            Returns
+            -------
+            size : `int`
+                A stale size of 4096 bytes.
+            """
+            original(source, destination)
+            return 4096
+
+        monkeypatch.setattr(library_copy, "backup_database", stale_size)
+        root = tmp_path / "simulator"
+        report = library_copy.copy_databases(root, library, wayfinding, [])
+    finally:
+        connection.close()
+    copy = root / "library" / "astrometrics.db"
+    assert report["bytes"]["astrometrics.db"] == library_copy.database_size(copy)
+    assert report["bytes"]["astrometrics.db"] > 1_000_000
+    assert report["bytes"]["astrometrics.db"] >= copy.stat().st_size

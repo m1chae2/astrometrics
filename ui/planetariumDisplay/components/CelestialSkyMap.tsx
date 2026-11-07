@@ -34,7 +34,9 @@ import { StarFieldRenderer } from '../webgl/StarFieldRenderer';
 import { perfEnd, perfStart } from '../utils/perfMarks';
 import { useTimeController } from '../hooks/useTimeController';
 import { useSkyMapInput } from '../hooks/useSkyMapInput';
+import { skyMovedEnoughToDraw } from '../utils/skyMotion';
 import { easePanStep } from '../utils/panEasing';
+import { trackingCameraStep, TrackingState } from '../utils/trackingView';
 import { FovNotifyGate, easeFovTowardTarget } from '../utils/zoomEasing';
 import { Button } from '../../common/components/Button';
 import { Slider } from '../../common/components/Slider';
@@ -117,11 +119,8 @@ interface Props {
 /** The speeds the time controller offers for the accelerated sky rotation. */
 const TIME_SPEED_OPTIONS = [1, 5, 25, 100, 1000].map((speed) => ({ id: String(speed), label: `${speed}x` }));
 
-// How many screen pixels the sky may turn (sidereal motion alone) before that drift is
-// worth a redraw. The sky turns about 0.25 degrees a minute, so at a wide field of view
-// an idle map redraws every several seconds, and at a tight zoom about once a second.
-// Time playback moves the sky much faster than this each frame, so it draws at full rate.
-const LST_REDRAW_EPSILON_PIXELS = 0.5;
+// The sky may turn SKY_MOTION_REDRAW_PIXELS on screen before the map draws again (utils/skyMotion.ts).
+// A wide view idles; a tight view draws often enough for smooth motion. Time playback draws every frame.
 
 /**
  * High-performance celestial sky map rendered on HTML5 Canvas.
@@ -283,10 +282,12 @@ export const CelestialSkyMap: React.FC<Props> = ({
   // Time & LST state
   const {
     timeOffsetMinutes, setTimeOffsetMinutes, timeOffsetMinutesRef,
-    isTimePlaying, setIsTimePlaying, timeSpeed, setTimeSpeed,
+    isTimePlaying, setIsTimePlaying, timeSpeed, setTimeSpeed, getOffsetMinutesAt,
   } = useTimeController();
   const [trackingMode, setTrackingMode] = useState<boolean>(false);
   const trackedCoords = useRef<{ ra: number; dec: number } | null>(null);
+  // Remembers whether the camera is locked on the tracked point (utils/trackingView.ts).
+  const trackingStateRef = useRef<TrackingState>({ lockedAnchor: null });
 
   // Sync tracked coordinates when center RA/Dec is set by parent
   useEffect(() => {
@@ -472,22 +473,37 @@ export const CelestialSkyMap: React.FC<Props> = ({
       }
 
       // 1. Advance tracking target position for current sidereal time
-      // In live mode the clock is read once per second (as the React state
-      // tick used to deliver it): the sky turns 0.001 degrees in 0.25 s, so
-      // an unrounded clock would redraw the whole canvas four times a second.
-      const liveNow = new Date(Math.floor(Date.now() / 1000) * 1000);
+      // The clock is read on every frame, so the sky turns smoothly. Playback offsets are carried
+      // forward between steps (useTimeController). Drawing is gated below by how far the sky moved.
       const currentFrameLST = calculateLST(
-        simulationDateRef.current ?? liveNow,
-        timeOffsetMinutesRef.current,
+        simulationDateRef.current ?? new Date(),
+        getOffsetMinutesAt(performance.now()),
         observerLon,
       );
       // Keeps click and key handlers on the current time when nothing re-renders.
       currentLSTRef.current = currentFrameLST;
 
+      // Tracking: the camera is anchored on an RA/Dec. Once it has arrived, it is set to that
+      // point's alt/az for this frame's own clock reading, so the stars do not move at all. Easing
+      // only carries it to a new point (see utils/trackingView.ts).
       if (trackingMode && trackedCoords.current) {
-        const targetAltAz = getAltAz(trackedCoords.current.ra, trackedCoords.current.dec, currentFrameLST, observerLat);
-        targetAzRef.current = targetAltAz.az;
-        targetAltRef.current = targetAltAz.alt;
+        const trackedCamera = trackingCameraStep(
+          trackedCoords.current,
+          currentFrameLST,
+          observerLat,
+          { altitude: centerAltRef.current, azimuth: centerAzRef.current },
+          pixelsPerDegree(canvas.width, canvas.height, localFOVRef.current),
+          trackingStateRef.current,
+        );
+        const cameraMoved =
+          trackedCamera.altitude !== centerAltRef.current || trackedCamera.azimuth !== centerAzRef.current;
+        centerAltRef.current = trackedCamera.altitude;
+        centerAzRef.current = trackedCamera.azimuth;
+        if (cameraMoved) throttledNotifyParentCenter(trackedCamera.altitude, trackedCamera.azimuth);
+        targetAltRef.current = trackedCamera.altitude;
+        targetAzRef.current = trackedCamera.azimuth;
+      } else {
+        trackingStateRef.current.lockedAnchor = null;
       }
 
       // 1b. Ease the zoom toward its target. The parent hears about the FOV only when the
@@ -535,18 +551,18 @@ export const CelestialSkyMap: React.FC<Props> = ({
       // sidereal time (beyond LST_REDRAW_EPSILON_PIXELS at the current zoom), canvas size, and
       // every overlay-relevant prop are all unchanged.
       const lastDrawn = lastDrawnFrameStateRef.current;
-      let lstDeltaDegrees = lastDrawn ? Math.abs(currentFrameLST - lastDrawn.lst) : Infinity;
-      if (lstDeltaDegrees > 180) lstDeltaDegrees = 360 - lstDeltaDegrees;
+      const framePixelsPerDegree = pixelsPerDegree(canvas.width, canvas.height, localFOVRef.current);
+      const skyMoved = skyMovedEnoughToDraw(currentFrameLST, lastDrawn ? lastDrawn.lst : null, framePixelsPerDegree);
 
-      const lstEpsilonDegrees =
-        LST_REDRAW_EPSILON_PIXELS / pixelsPerDegree(canvas.width, canvas.height, localFOVRef.current);
-
+      // While the camera is locked on a tracked point it turns with the sky, so it needs the same
+      // pixel tolerance as the sky itself. Otherwise it would force a draw on every frame.
+      const cameraTolerance = trackingMode && trackingStateRef.current.lockedAnchor ? 0.25 / framePixelsPerDegree : 0;
       const cameraChanged =
         !lastDrawn ||
-        centerAzRef.current !== lastDrawn.centerAz ||
-        centerAltRef.current !== lastDrawn.centerAlt ||
+        Math.abs(centerAzRef.current - lastDrawn.centerAz) > cameraTolerance ||
+        Math.abs(centerAltRef.current - lastDrawn.centerAlt) > cameraTolerance ||
         localFOVRef.current !== lastDrawn.fov ||
-        lstDeltaDegrees > lstEpsilonDegrees;
+        skyMoved;
 
       if (!overlayInputsChangedRef.current && !cameraChanged && !canvasSizeChanged) {
         animFrameId = requestAnimationFrame(renderLoop);
@@ -640,7 +656,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
     showAlignment, showTrackingRisk, alignmentTargets, trackingRisk, polarAlignment, selectedSessionId,
     framingPanels,
     simulationDate,
-    trackingMode, observerLat, observerLon, overlays
+    trackingMode, observerLat, observerLon, overlays, getOffsetMinutesAt
   ]);
 
   // Click handler to select sources. REQ: PLN-2.5

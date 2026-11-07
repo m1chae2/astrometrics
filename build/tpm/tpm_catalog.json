@@ -1590,6 +1590,35 @@
       }
     },
     {
+      "id": "simulator_chip_missing",
+      "name": "simulator_chip_missing",
+      "title": "Missing SIMULATOR chip",
+      "why": "A simulated night must always be visibly marked, so it is never mistaken for a real one.",
+      "unit": "count",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "Counts the display flows (Chrome, Electron) of a simulation-mode run whose header has no .header__source-chip once the app is ready. The flow waits up to 120 s, because the simulator may still be starting. A real-telescope or synthetic offline run has no chip to look for and gets no value.",
+      "statistic": "count",
+      "threshold": 0,
+      "objective": 0,
+      "threshold_status": "Confirmed",
+      "source": "user requirement 2026-11-07: a simulated night must always be visibly marked",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "confirmed": {
+        "date": "2026-11-07",
+        "by": "user requirement 2026-11-07",
+        "source": "A simulated night must always be visibly marked."
+      }
+    },
+    {
       "id": "desktop_notifications",
       "name": "desktop_notifications",
       "title": "Desktop notifications",

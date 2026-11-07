@@ -184,6 +184,9 @@ elif [ -z "$LIBRARY" ]; then
   LIBRARY=simulation
 fi
 MODE="$LIBRARY"
+# A simulation-mode run uses the app's simulated observatory, so its header must show the SIMULATOR chip (flow.mjs checks).
+EXPECT_SIMULATOR_CHIP=0
+[ "$LIBRARY" = "simulation" ] && EXPECT_SIMULATOR_CHIP=1
 if [ -z "$OBSERVATORY_PROFILE" ]; then
   if [ "$LIBRARY" = "simulation" ]; then OBSERVATORY_PROFILE=simulated; else OBSERVATORY_PROFILE=offline; fi
 fi
@@ -782,13 +785,14 @@ else
     node "$TPM_DIR/electron_run.mjs" --sandbox "$SANDBOX" --ui-url "http://127.0.0.1:$UI_PORT" \
       --backend-url "http://127.0.0.1:$BACKEND_PORT" --out "$RESULTS_DIR" --flow-out "$RESULTS_DIR" \
       --idle-minutes "$IDLE_MINUTES" --laps "$LAPS" --idle-seconds "$IDLE_SECONDS" \
-      --pan-seconds "$PAN_SECONDS" --ui-dist "$SANDBOX/dist" --visible "$VISIBLE" --ozone "$OZONE" --gpu "$GPU"
+      --pan-seconds "$PAN_SECONDS" --ui-dist "$SANDBOX/dist" --visible "$VISIBLE" --ozone "$OZONE" --gpu "$GPU" \
+      --expect-simulator-chip "$EXPECT_SIMULATOR_CHIP"
     ELECTRON_ARGUMENT=(--electron "$RESULTS_DIR/electron-metrics.jsonl")
   else
     echo "== Running the flow in $FLOW_TARGET ($LAPS laps, gpu: $FLOW_GPU)"
     node "$TPM_DIR/flow.mjs" --ui-url "http://127.0.0.1:$UI_PORT" --backend-url "http://127.0.0.1:$BACKEND_PORT" \
       --out "$RESULTS_DIR" --laps "$LAPS" --idle-seconds "$IDLE_SECONDS" --pan-seconds "$PAN_SECONDS" --gpu "$FLOW_GPU" \
-      --browser "$FLOW_TARGET"
+      --browser "$FLOW_TARGET" --expect-simulator-chip "$EXPECT_SIMULATOR_CHIP"
 
     if [ "$EXTRA_ELECTRON_LAP" = "1" ]; then
       if [ "$VISIBLE" = "1" ]; then
@@ -797,7 +801,8 @@ else
       echo "== Running the lap in Electron ($IDLE_MINUTES idle minutes first)"
       node "$TPM_DIR/electron_run.mjs" --sandbox "$SANDBOX" --ui-url "http://127.0.0.1:$UI_PORT" \
         --backend-url "http://127.0.0.1:$BACKEND_PORT" --out "$RESULTS_DIR" --idle-minutes "$IDLE_MINUTES" --laps "$LAPS" \
-        --pan-seconds "$PAN_SECONDS" --ui-dist "$SANDBOX/dist" --visible "$VISIBLE" --ozone "$OZONE" --gpu "$GPU"
+        --pan-seconds "$PAN_SECONDS" --ui-dist "$SANDBOX/dist" --visible "$VISIBLE" --ozone "$OZONE" --gpu "$GPU" \
+        --expect-simulator-chip "$EXPECT_SIMULATOR_CHIP"
       ELECTRON_ARGUMENT=(--electron "$RESULTS_DIR/electron-metrics.jsonl")
     fi
   fi

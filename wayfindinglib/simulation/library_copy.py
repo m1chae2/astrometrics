@@ -40,6 +40,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -219,6 +220,10 @@ def backup_database(source: Path, destination: Path) -> int:
         target = sqlite3.connect(destination)
         try:
             origin.backup(target)
+            # A copy of a write-ahead-log database can keep its pages in
+            # the -wal file until a checkpoint. Move them into the
+            # database file now, so its size is the copy's size.
+            target.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         finally:
             target.close()
             origin.close()
@@ -228,6 +233,23 @@ def backup_database(source: Path, destination: Path) -> int:
         if staged:
             origin_path.with_name(origin_path.name + "-shm").unlink(missing_ok=True)
     return destination.stat().st_size
+
+
+def database_size(database: Path) -> int:
+    """Measure a database copy on disk, ``-wal`` file included.
+
+    Parameters
+    ----------
+    database : `pathlib.Path`
+        The copy.
+
+    Returns
+    -------
+    size : `int`
+        Bytes of the database file plus its ``-wal`` file, if there is one.
+    """
+    wal = database.with_name(database.name + "-wal")
+    return database.stat().st_size + (wal.stat().st_size if wal.exists() else 0)
 
 
 def rewrite_paths(database: Path, replacements: Iterable[tuple[str, str]]) -> int:
@@ -269,6 +291,7 @@ def rewrite_paths(database: Path, replacements: Iterable[tuple[str, str]]) -> in
     changed = 0
     connection = sqlite3.connect(database)
     connection.create_function("_rewrite_paths", 1, rewrite, deterministic=True)
+    old_texts = [old for old, _ in pairs]
     try:
         tables = [
             row[0]
@@ -277,20 +300,97 @@ def rewrite_paths(database: Path, replacements: Iterable[tuple[str, str]]) -> in
             )
         ]
         for table in tables:
+            columns = [row[1] for row in connection.execute(f'PRAGMA table_info("{table}")')]
             try:
-                columns = [row[1] for row in connection.execute(f'PRAGMA table_info("{table}")')]
-                for column in columns:
-                    cursor = connection.execute(
-                        f'UPDATE "{table}" SET "{column}" = _rewrite_paths("{column}") '
-                        f"WHERE typeof(\"{column}\") = 'text' AND ({contains.format(column=column)})",
-                        [old for old, _ in pairs],
-                    )
-                    changed += max(cursor.rowcount, 0)
+                changed += _rewrite_table_in_one_pass(connection, table, columns, contains, old_texts)
             except sqlite3.Error:
-                logger.warning("Could not rewrite paths in the table %s of %s", table, database.name)
+                # A column the single pass cannot update (a generated one)
+                # must not skip the others: retry one column at a time.
+                changed += _rewrite_table_by_column(connection, table, columns, contains, old_texts)
         connection.commit()
     finally:
         connection.close()
+    return changed
+
+
+def _rewrite_table_in_one_pass(
+    connection: sqlite3.Connection, table: str, columns: list[str], contains: str, old_texts: list[str]
+) -> int:
+    """Rewrite the paths in every text column of one table with a single scan.
+
+    One scan per table is much faster than one scan per column, because a
+    large table with many columns is read from disk once instead of many
+    times. Only rows where some column holds an old prefix are written.
+
+    Parameters
+    ----------
+    connection : `sqlite3.Connection`
+        Connection to the database copy, with ``_rewrite_paths`` registered.
+    table : `str`
+        Table name.
+    columns : `list` [`str`]
+        Column names of the table.
+    contains : `str`
+        The test template for one column, see `rewrite_paths`.
+    old_texts : `list` [`str`]
+        The old prefixes, in the order of the template.
+
+    Returns
+    -------
+    rows : `int`
+        How many rows were changed.
+    """
+    if not columns:
+        return 0
+    tests = [f"(typeof(\"{column}\") = 'text' AND ({contains.format(column=column)}))" for column in columns]
+    assignments = [
+        f'"{column}" = CASE WHEN {test} THEN _rewrite_paths("{column}") ELSE "{column}" END'
+        for column, test in zip(columns, tests, strict=True)
+    ]
+    cursor = connection.execute(
+        f'UPDATE "{table}" SET {", ".join(assignments)} WHERE {" OR ".join(tests)}',
+        old_texts * (2 * len(columns)),
+    )
+    return max(cursor.rowcount, 0)
+
+
+def _rewrite_table_by_column(
+    connection: sqlite3.Connection, table: str, columns: list[str], contains: str, old_texts: list[str]
+) -> int:
+    """Rewrite the paths in one table, one column at a time.
+
+    The slow fallback for `_rewrite_table_in_one_pass`. A column that SQLite
+    refuses to update is skipped with a warning.
+
+    Parameters
+    ----------
+    connection : `sqlite3.Connection`
+        Connection to the database copy, with ``_rewrite_paths`` registered.
+    table : `str`
+        Table name.
+    columns : `list` [`str`]
+        Column names of the table.
+    contains : `str`
+        The test template for one column, see `rewrite_paths`.
+    old_texts : `list` [`str`]
+        The old prefixes, in the order of the template.
+
+    Returns
+    -------
+    rows : `int`
+        How many values were changed.
+    """
+    changed = 0
+    try:
+        for column in columns:
+            cursor = connection.execute(
+                f'UPDATE "{table}" SET "{column}" = _rewrite_paths("{column}") '
+                f"WHERE typeof(\"{column}\") = 'text' AND ({contains.format(column=column)})",
+                old_texts,
+            )
+            changed += max(cursor.rowcount, 0)
+    except sqlite3.Error:
+        logger.warning("Could not rewrite paths in the table %s", table)
     return changed
 
 
@@ -324,11 +424,32 @@ def copy_databases(
     present = [(source, destination) for source, destination in jobs if source.is_file()]
     if sum(source.stat().st_size for source, _ in present) > MAXIMUM_COPY_BYTES:
         raise SimulationUnavailableError("The real databases are too big to copy for the simulator.")
+
+    def copy_one(job: tuple[Path, Path]) -> tuple[str, int, int]:
+        """Back up one database, rewrite its paths and measure the copy.
+
+        Returns
+        -------
+        result : `tuple` [`str`, `int`, `int`]
+            The database name, its size and how many values were rewritten.
+        """
+        source, destination = job
+        backup_database(source, destination)
+        count = rewrite_paths(destination, replacements)
+        # Measure last: a size taken inside the backup can be stale
+        # (pages still in the -wal file).
+        return source.name, database_size(destination), count
+
+    # The databases are independent files and SQLite works without holding
+    # Python's global lock, so copying them side by side takes about as long as
+    # the biggest one instead of the sum (this is the start-up time of a
+    # simulated launch).
     sizes: dict[str, int] = {}
     rewritten = 0
-    for source, destination in present:
-        sizes[source.name] = backup_database(source, destination)
-        rewritten += rewrite_paths(destination, replacements)
+    with ThreadPoolExecutor(max_workers=max(1, len(present))) as pool:
+        for name, size, count in pool.map(copy_one, present):
+            sizes[name] = size
+            rewritten += count
     for name in PLAIN_FILES:
         if (library / name).is_file():
             shutil.copyfile(library / name, root / "library" / name)

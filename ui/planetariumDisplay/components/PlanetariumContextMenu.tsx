@@ -11,7 +11,6 @@
 import React, { useEffect, useRef } from 'react';
 import { PlanetariumSource } from '../../common/types/planetariumTypes';
 import { slewTelescope } from '../../common/services/telescope/motionService';
-import { emitToast } from '../../common/utils/emitToast';
 import { navigateToElement } from '../../common/utils/displayCoordinator';
 import { InfoButton } from '../../common/components/InfoButton';
 import { useCommandAvailability } from '../../common/hooks/useCommandAvailability';
@@ -114,10 +113,8 @@ export const PlanetariumContextMenu: React.FC<Props> = ({ source, x, y, telescop
     const raHours = source.ra / 15.0;
     const decDegrees = source.dec;
 
-    const success = await slewTelescope(raHours, decDegrees);
-    if (!success) {
-      emitToast(`Slew failed. Check Safe Mode or hardware connection.`, 'error');
-    }
+    // slewTelescope shows its own error, once, when the slew fails.
+    await slewTelescope(raHours, decDegrees);
     onClose();
   };
 

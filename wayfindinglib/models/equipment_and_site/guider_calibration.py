@@ -27,3 +27,6 @@ class GuiderCalibration(BaseModel):
     ra_rate_arcsec_per_sec: float = Field(..., gt=0.0)
     dec_rate_arcsec_per_sec: float = Field(..., gt=0.0)
     calibrated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    source_note: str = Field(
+        default="", description="Where the numbers came from; a simulator's made-up values say so here."
+    )

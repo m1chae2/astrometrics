@@ -98,4 +98,22 @@ describe('Planetarium while paused', () => {
     fireEvent.keyDown(window, { key: 'ArrowRight' });
     expect(pan.targetAzRef.current).toBeGreaterThan(100);
   });
+
+  /** While time plays, the offset read per frame grows smoothly between the 100 ms steps. */
+  it('carries the playback offset forward between steps', () => {
+    render(<SkyHooks />);
+    act(() => time().setIsTimePlaying(true));
+    const samples: number[] = [];
+    for (let frame = 0; frame < 6; frame += 1) {
+      act(() => {
+        vi.advanceTimersByTime(16);
+      });
+      samples.push(time().getOffsetMinutesAt(performance.now()));
+    }
+    for (let index = 1; index < samples.length; index += 1) {
+      expect(samples[index]).toBeGreaterThan(samples[index - 1]);
+    }
+    // 1x playback is 0.001 minutes per millisecond.
+    expect(samples[5] - samples[4]).toBeCloseTo(16 * 0.001, 4);
+  });
 });

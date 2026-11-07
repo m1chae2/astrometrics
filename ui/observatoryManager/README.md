@@ -8,7 +8,7 @@ Terms are defined in the [glossary](../../documentation/Glossary.md). This file 
 
 Ekos (the KStars imaging program) captures the frames for now, and this app only watches. The rule that blocks commands lives in `wayfindinglib`, which refuses a command to any capability that it handed to Ekos. The display adds a clear message on top of that rule:
 
-- `ui/common/hooks/useCommandAvailability.ts` (shared with the Observation Manager and the Planetarium) reads the delegation state (`observatory:safety_status`). Until the library says the app may command a capability, the answer is no.
+- `ui/common/hooks/useCommandAvailability.ts` (shared with the Observation Manager and the Planetarium) reads the delegation state (`observatory:safety_status`). Until the library says the app may command a capability, the answer is no. The one exception is the simulator: when `observatory:get_source` (read once, by the shared `useObservatorySourceQuery`) says the source is `simulated` and ready, commands are on, with the reason text "Simulator: commands go to the simulated devices on this computer." The real telescope, a starting simulator and an unknown source stay off.
 - `CommandGate.tsx` greys the controls that send commands and shows the reason when you hover over them. Its `WhyUnavailableButton` adds a Why unavailable? info button to the panel title, so keyboard and touch users can read the reason too.
 
 Controls that do not command a device, such as Add Target, stay on while Ekos is in control. They are greyed while a past night is shown (see below).

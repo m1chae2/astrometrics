@@ -31,7 +31,7 @@
  * Usage (normally started by run_tpm.sh with TPM_ELECTRON=1):
  *   node build/tpm/electron_run.mjs --sandbox <throwaway dir> --ui-url http://127.0.0.1:PORT \
  *        --backend-url http://127.0.0.1:PORT --out <results dir> [--idle-minutes 3] [--laps 3] \
- *        [--pan-seconds 6] [--idle-seconds 30] [--flow-out <dir>] [--ui-dist <built UI folder>] [--visible 0|1] [--ozone auto|x11|wayland] [--gpu auto|intel|nvidia]
+ *        [--pan-seconds 6] [--idle-seconds 30] [--flow-out <dir>] [--ui-dist <built UI folder>] [--visible 0|1] [--ozone auto|x11|wayland] [--gpu auto|intel|nvidia] [--expect-simulator-chip 0|1]
  */
 
 import { spawn, spawnSync } from 'node:child_process';
@@ -269,6 +269,7 @@ async function main() {
             '--idle-seconds', options['idle-seconds'] ?? '30',
             '--pan-seconds', options['pan-seconds'] ?? '6',
             '--gpu', gpuChoice,
+            '--expect-simulator-chip', options['expect-simulator-chip'] ?? '0',
             '--attach-url', `http://127.0.0.1:${debugPort}`,
         ];
         const flow = spawnSync('node', flowArguments, { stdio: 'inherit' });

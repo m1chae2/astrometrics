@@ -409,3 +409,227 @@ def test_settings_saves_in_simulator_mode_cannot_reach_the_real_telescope(
     assert simulated.save_config({"Observatory.Telescope": {"focal_length_mm": "500"}}) is True
     real = SettingsService(_Config(), guard=_service(environment).check_settings_update)
     assert real.save_config({"Observatory.Telescope": {"hostname": "stellarmate.local"}}) is True
+
+
+class _ReadyObservatory(_FakeObservatory):
+    """A fake simulator that is up as soon as it starts."""
+
+    def wait_ready(self) -> None:
+        """Return at once: the fake is ready."""
+
+    def pointed_targets(self) -> list:
+        """Name no targets.
+
+        Returns
+        -------
+        targets : `list`
+            Always empty.
+        """
+        return []
+
+
+def test_a_ready_simulator_puts_the_app_in_command_but_the_real_telescope_does_not(
+    environment: dict[str, str], tmp_path: Path
+) -> None:
+    """The ready hook runs for a started simulator, never for the real one."""
+    calls: list[str] = []
+    environment[source.ACTIVE_SOURCE_VARIABLE] = "simulated"
+    simulated = _service(environment, _ReadyObservatory(tmp_path))
+    simulated.set_ready_hook(lambda: calls.append("simulated"))
+    simulated._start_now(None)
+    assert calls == ["simulated"]
+    assert simulated.get_source()["ready"] is True
+
+    real = _service({source.ACTIVE_SOURCE_VARIABLE: "real"})
+    real.set_ready_hook(lambda: calls.append("real"))
+    real.start()
+    assert calls == ["simulated"]
+    assert real.get_source()["source"] == "real"
+
+
+def test_a_failing_ready_hook_does_not_fail_the_simulator(
+    environment: dict[str, str], tmp_path: Path
+) -> None:
+    """If the app cannot take command, the simulator is still ready."""
+    environment[source.ACTIVE_SOURCE_VARIABLE] = "simulated"
+    service = _service(environment, _ReadyObservatory(tmp_path))
+
+    def fail() -> None:
+        """Fail as a refused promotion would.
+
+        Raises
+        ------
+        RuntimeError
+            Always.
+        """
+        raise RuntimeError("not eligible")
+
+    service.set_ready_hook(fail)
+    service._start_now(None)
+    state = service.get_source()
+    assert state["ready"] is True
+    assert state["error"] is None
+
+
+def test_the_outcome_of_the_ready_hook_is_reported_with_reasons(
+    environment: dict[str, str], tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Allowed and rejected capabilities reach ``get_source`` and the log."""
+    from enum import StrEnum
+    from types import SimpleNamespace
+
+    class Capability(StrEnum):
+        """Stand-in capability names."""
+
+        MOUNT_CONTROL = "MOUNT_CONTROL"
+        AUTOFOCUS = "AUTOFOCUS"
+
+    environment[source.ACTIVE_SOURCE_VARIABLE] = "simulated"
+    service = _service(environment, _ReadyObservatory(tmp_path))
+    outcome = SimpleNamespace(
+        applied={Capability.MOUNT_CONTROL: "AUTHORITATIVE"},
+        rejected={Capability.AUTOFOCUS: "needs a FocusModel"},
+    )
+    service.set_ready_hook(lambda: outcome)
+    with caplog.at_level("INFO"):
+        service._start_now(None)
+    commands = service.get_source()["commands"]
+    assert commands == {
+        "allowed": ["MOUNT_CONTROL"],
+        "off": {"AUTOFOCUS": "needs a FocusModel"},
+        "error": None,
+    }
+    warnings = [record.getMessage() for record in caplog.records if record.levelname == "WARNING"]
+    assert warnings == ["Simulator commands stay off for: AUTOFOCUS (needs a FocusModel)."]
+
+
+def test_a_hook_failure_is_reported_as_an_error_and_the_real_source_has_no_commands(
+    environment: dict[str, str], tmp_path: Path
+) -> None:
+    """A failed take-over shows its error; real reports no commands."""
+    environment[source.ACTIVE_SOURCE_VARIABLE] = "simulated"
+    service = _service(environment, _ReadyObservatory(tmp_path))
+
+    def fail() -> None:
+        """Fail like a refused promotion.
+
+        Raises
+        ------
+        RuntimeError
+            Always.
+        """
+        raise RuntimeError("boom")
+
+    service.set_ready_hook(fail)
+    service._start_now(None)
+    assert service.get_source()["commands"]["error"] == "RuntimeError: boom"
+    assert _service({source.ACTIVE_SOURCE_VARIABLE: "real"}).get_source()["commands"] is None
+
+
+def _simulator_wayfinder(root: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Build a `Wayfinder` over temporary folders and a real-shaped policy.
+
+    Parameters
+    ----------
+    root : `pathlib.Path`
+        The stand-in simulator folder; the wayfinding library is inside it.
+    monkeypatch : `pytest.MonkeyPatch`
+        Points the settings file into `root`.
+
+    Returns
+    -------
+    wayfinder : `Wayfinder`
+        One telescope and camera are active; the policy has one row,
+        ``MOUNT_CONTROL`` ``DELEGATED``.
+    """
+    from astrometricslib import AppConfiguration
+    from wayfindinglib import Wayfinder
+    from wayfindinglib.models.policy.delegation import (
+        CapabilityDelegation,
+        DelegationPolicy,
+        DelegationState,
+        ObservatoryCapability,
+    )
+
+    monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: root / "astrometrics.config.toml")
+    config = AppConfiguration()
+    config.update_config({
+        "Wayfinding Library": {"path": str(root / "wayfinding")},
+        "Observatory.Telescope": {"models": "Rig A", "active_telescope": "Rig A"},
+        "Observatory.Telescope.Rig A": {"focal_length_mm": "450.0", "focal_ratio": "6.0"},
+        "Observatory.Camera": {"models": "CamA", "default_primary_camera": "CamA"},
+        "Observatory.Camera.CamA": {
+            "pixel_size_μm": "3.76",
+            "sensor_width_px": "6248",
+            "sensor_height_px": "4176",
+        },
+    })
+    wayfinder = Wayfinder(config)
+    policy = DelegationPolicy(
+        id="default",
+        capability_delegations=[
+            CapabilityDelegation(
+                capability=ObservatoryCapability.MOUNT_CONTROL, state=DelegationState.DELEGATED
+            )
+        ],
+    )
+    wayfinder.control._context.butler.put(policy, "delegation_policy", {"id": "default"})
+    return wayfinder
+
+
+def test_the_simulator_start_records_made_up_calibrations_and_commands_are_all_on(
+    environment: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The container's hook records the records; every command is on."""
+    from types import SimpleNamespace
+
+    from backend.container import Container
+    from wayfindinglib.models.policy.delegation import ObservatoryCapability
+
+    wayfinder = _simulator_wayfinder(tmp_path, monkeypatch)
+    container = SimpleNamespace(wayfinder=wayfinder)
+    environment[source.ACTIVE_SOURCE_VARIABLE] = "simulated"
+    service = _service(environment, _ReadyObservatory(tmp_path))
+    service.set_ready_hook(lambda: Container._take_command_of_simulator(container, tmp_path))
+    service._start_now(None)
+
+    commands = service.get_source()["commands"]
+    assert commands["off"] == {}
+    assert commands["error"] is None
+    assert len(commands["allowed"]) == len(ObservatoryCapability)
+    butler = wayfinder.control._context.butler
+    assert butler.get_all("guider_calibration")[0].source_note.startswith("Simulator")
+    assert butler.get_all("focus_model")[0].source_note.startswith("Simulator")
+
+
+@pytest.mark.parametrize("active_source", ["real", "offline"])
+def test_the_real_and_offline_sources_record_nothing_and_keep_the_policy(
+    environment: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, active_source: str
+) -> None:
+    """With no simulator there is no hook: no record, no policy change."""
+    wayfinder = _simulator_wayfinder(tmp_path, monkeypatch)
+    butler = wayfinder.control._context.butler
+    policy_before = butler.get("delegation_policy", {"id": "default"})
+    service = _service({**environment, source.ACTIVE_SOURCE_VARIABLE: active_source})
+    service.start()
+    assert service.get_source()["commands"] is None
+    assert butler.get_all("guider_calibration") == []
+    assert butler.get_all("focus_model") == []
+    assert butler.get("delegation_policy", {"id": "default"}) == policy_before
+
+
+def test_the_hook_refuses_a_library_that_is_not_the_simulators(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A wayfinding library outside the simulator folder is refused."""
+    from types import SimpleNamespace
+
+    from backend.container import Container
+    from wayfindinglib.exceptions import GuardError
+
+    wayfinder = _simulator_wayfinder(tmp_path, monkeypatch)
+    other_root = tmp_path / "another_folder"
+    other_root.mkdir()
+    with pytest.raises(GuardError):
+        Container._take_command_of_simulator(SimpleNamespace(wayfinder=wayfinder), other_root)
+    assert wayfinder.control._context.butler.get_all("guider_calibration") == []

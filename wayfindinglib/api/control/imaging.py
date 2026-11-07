@@ -160,6 +160,30 @@ class ImagingControl(ControlChild):
 
         return hardware_operations.focus_move(self._context, steps)
 
+    def recorded_focus_models(self) -> list[FocusModel]:
+        """List every focus model saved in the library.
+
+        Returns
+        -------
+        focus_models : `list` [`FocusModel`]
+            Every saved model, for any equipment, in no set order.
+        """
+        return self._context.butler.get_all("focus_model")
+
+    def record_focus_model(self, focus_model: FocusModel) -> None:
+        """Record a focus model made outside a focus run.
+
+        For a model that comes from somewhere else, such as the simulated
+        observatory's made-up one (`source_note` says so).
+
+        Parameters
+        ----------
+        focus_model : `FocusModel`
+            The model, keyed by its own id. It must name the active
+            telescope and camera to count as the active focus model.
+        """
+        self._save_focus_model(focus_model)
+
     def _save_focus_model(self, focus_model: FocusModel) -> None:
         """Save a measured focus model.
 

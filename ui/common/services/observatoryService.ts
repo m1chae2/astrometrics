@@ -65,6 +65,24 @@ export interface ObservatorySourceState {
     reason?: string;
     /** Programs the simulator needs that are not installed. */
     missing_programs: string[];
+    /**
+     * For a simulator: which capabilities the app may command (`allowed`, names such as `MOUNT_CONTROL`), which stay
+     * off with the reason for each (`off`), and why none could be taken (`error`). Null until the simulator is up,
+     * for the real telescope, and from older backends.
+     */
+    commands?: { allowed: string[]; off: Record<string, string>; error: string | null } | null;
+}
+
+/**
+ * Lists the simulator commands that stay off, in plain words, for a tooltip or a reason text.
+ * @param state The backend's report.
+ * @return A sentence such as "Still off: autofocus (needs a focus model).", or an empty text.
+ */
+export function describeCommandsStillOff(state: ObservatorySourceState | undefined): string {
+    const off = Object.entries(state?.commands?.off ?? {});
+    if (off.length === 0) return '';
+    const words = off.map(([name, reason]) => `${name.toLowerCase().replace(/_/g, ' ')} (${reason})`);
+    return `Still off: ${words.join('; ')}.`;
 }
 
 /**
@@ -72,7 +90,8 @@ export interface ObservatorySourceState {
  * @return The source state.
  */
 export async function getObservatorySource(): Promise<ObservatorySourceState> {
-    return callBackend('observatory:get_source', {});
+    // Quiet: the header asks again until the backend answers, and a backend that is still starting is a status.
+    return callBackend('observatory:get_source', {}, { silent: true, maxRetries: 0 });
 }
 
 /**

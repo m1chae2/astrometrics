@@ -161,6 +161,10 @@ class StellarService:
         Only one thread computes a given answer at a time; others asking for
         the same answer wait for it rather than starting a second scan.
 
+        An empty answer (no targets, no classes) is never kept, so a catalog
+        that was still empty at start-up cannot hide the data that arrives
+        later.
+
         The first answer computed for a new catalog version broadcasts a
         ``"catalog:changed"`` UI event (see `set_socket_manager`), so a
         connected client can refetch instead of polling on a timer.
@@ -210,6 +214,14 @@ class StellarService:
                         return answer
 
             answer = self._heavy_reads.run(("catalog_answer", key), compute)
+
+            if not answer:
+                # An empty answer is cheap to compute again and often wrong,
+                # because the library may not be filled yet (start-up, or a
+                # library copy swapped in). Keeping it would show "0 stars"
+                # for every target until the cache expires. Not keeping it
+                # also means the first real answer is announced.
+                return answer
 
             with self._catalog_answers_lock:
                 self._catalog_answers[key] = (now, current_version, answer)

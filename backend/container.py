@@ -12,6 +12,7 @@ starts nothing.
 
 import logging
 import os
+from pathlib import Path
 
 from backend.services.analysis.analysis_orchestrator import AnalysisOrchestrator
 from backend.services.data.image_service import ImageService
@@ -148,6 +149,32 @@ class Container:
             self.observatory_source_service.remove_library_copy()
         self.initialized = False
 
+    def _take_command_of_simulator(self, simulator_root: Path) -> object:
+        """Let the app command the simulator by the library's rules.
+
+        Records the simulator's made-up guider calibration and focus model,
+        then moves every capability to `AUTHORITATIVE`. The rules are not
+        relaxed: the records are what let autoguiding, autofocus and capture
+        pass them.
+
+        Parameters
+        ----------
+        simulator_root : `pathlib.Path`
+            The simulator's folder. The wayfinding library must be inside it.
+
+        Returns
+        -------
+        outcome : `BulkDelegationOutcome`
+            Which capabilities are on and why the others are not.
+        """
+        from wayfindinglib.simulation import record_simulated_calibrations
+
+        record_simulated_calibrations(self.wayfinder.control, simulator_root)
+        return self.wayfinder.control.safety.enter_controller_mode(
+            evidence_note="Simulator: commands reach only simulated devices on this computer.",
+            shadow_first=True,
+        )
+
     def _build_resources(self) -> None:
         """Construct and wire every service, then start maintenance."""
         # 1. Initialize Configuration
@@ -161,7 +188,17 @@ class Container:
         from backend.observatory_source import active_observatory
         from backend.services.observatory.observatory_source_service import ObservatorySourceService
 
-        self.observatory_source_service = ObservatorySourceService(active_observatory())
+        simulator = active_observatory()
+        self.observatory_source_service = ObservatorySourceService(simulator)
+        # A simulator may be commanded: its devices are stand-ins on this
+        # computer. Once it is up, the app records the simulator's made-up
+        # guider calibration and focus model and takes command of every
+        # capability. The real telescope and the offline world have no
+        # simulator object, so this never runs for them.
+        if simulator is not None:
+            self.observatory_source_service.set_ready_hook(
+                lambda: self._take_command_of_simulator(simulator.root)
+            )
 
         # 2. Initialize Data Services & Calibration
         from astrometricslib import Astrometrics

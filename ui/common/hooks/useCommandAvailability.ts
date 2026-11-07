@@ -3,13 +3,18 @@
  * @description Tells the Observatory Manager whether it may command a device.
  * The app never commands a device while Ekos captures. Until the library
  * returns, per capability, whether this app may command it, the answer is
- * always "no" (fail safe), and the reason is shown as visible text. The hook
+ * "no" (fail safe), and the reason is shown as visible text. The one exception
+ * is the simulator: when the backend says its observatory source is the
+ * simulator and it is ready, every command goes to simulated devices on this
+ * computer, so commands are on. The hook
  * also reads the delegation state of each capability (`observatory:safety_status`)
  * so the screen can show who is in control.
  */
 
 import { useQuery } from '@tanstack/react-query';
 import { callBackend } from '../services/backendApi';
+import { describeCommandsStillOff } from '../services/observatoryService';
+import { isObservatorySourceSettled, useObservatorySourceQuery } from '../queries/useObservatorySourceQuery';
 import type { CapabilityDelegation } from '../types/backendTypes';
 
 /** The text shown while the policy is loading or failed to load. */
@@ -18,6 +23,9 @@ export const CHECKING_CONTROL_TEXT = 'Checking whether Ekos is in control…';
 /** The text shown once the policy is known. Commands stay off until the library answers per capability. */
 export const COMMANDS_OFF_TEXT =
     'Equipment commands are off. Ekos controls the equipment; this app only watches. Commands return when the library reports which capabilities this app may command.';
+
+/** The text shown, when commands are on, to say where they go. */
+export const SIMULATOR_COMMANDS_TEXT = 'Simulator: commands go to the simulated devices on this computer.';
 
 /** What {@link useCommandAvailability} returns. */
 export interface CommandAvailability {
@@ -41,11 +49,20 @@ export function useCommandAvailability(): CommandAvailability {
         queryFn: () => callBackend('observatory:safety_status', {}),
         retry: false,
     });
+    const source = useObservatorySourceQuery();
+    // Only a simulator that is up may be commanded. While the source is unknown or starting, commands stay off.
+    // The backend lists the capabilities the app was given for the simulator; the mount must be among them.
+    const simulatorUp = source?.source === 'simulated' && isObservatorySourceSettled(source) && !source.failed;
+    const simulatorReady = simulatorUp && !!source?.commands?.allowed.includes('MOUNT_CONTROL');
     const isChecking = query.isPending || query.isError;
     return {
-        // Wave L adds a per-capability "can command" value; until then nothing is commandable.
-        canCommand: false,
-        reason: isChecking ? CHECKING_CONTROL_TEXT : COMMANDS_OFF_TEXT,
+        // Wave L adds a per-capability "can command" value; until then only the simulator is commandable.
+        canCommand: simulatorReady,
+        reason: simulatorReady
+            ? `${SIMULATOR_COMMANDS_TEXT} ${describeCommandsStillOff(source)}`.trim()
+            : simulatorUp
+                ? `The simulator is up, but the app has no command of it yet. ${source?.commands?.error ?? describeCommandsStillOff(source)}`.trim()
+                : isChecking ? CHECKING_CONTROL_TEXT : COMMANDS_OFF_TEXT,
         delegations: query.data?.delegation_policy?.capability_delegations ?? [],
         isChecking: query.isPending,
     };

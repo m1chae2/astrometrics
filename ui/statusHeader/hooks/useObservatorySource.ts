@@ -3,15 +3,22 @@
  * and switches the source (which restarts the backend).
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { setBackendRestarting } from '../../common/services/backendApi';
 import {
-    getObservatorySource,
+    OBSERVATORY_SOURCE_QUERY_KEY,
+    OBSERVATORY_SOURCE_RETRY_MS,
+    isObservatorySourceSettled,
+    useObservatorySourceQuery,
+} from '../../common/queries/useObservatorySourceQuery';
+import {
     setObservatorySource,
     waitForBackendRestart,
     ObservatorySource,
     ObservatorySourceState,
 } from '../../common/services/observatoryService';
+
+export { OBSERVATORY_SOURCE_QUERY_KEY, OBSERVATORY_SOURCE_RETRY_MS, isObservatorySourceSettled };
 
 /** What the hook offers the screens. */
 export interface ObservatorySourceControl {
@@ -32,18 +39,9 @@ export interface ObservatorySourceControl {
  * @return The state and the actions.
  */
 export function useObservatorySource(active = true): ObservatorySourceControl {
-    const [state, setState] = useState<ObservatorySourceState | null>(null);
+    const state = useObservatorySourceQuery(active) ?? null;
     const [switching, setSwitching] = useState(false);
     const [error, setError] = useState<string | null>(null);
-
-    useEffect(() => {
-        if (!active) return;
-        let cancelled = false;
-        getObservatorySource()
-            .then((value) => { if (!cancelled) setState(value ?? null); })
-            .catch(() => { /* The backend may be busy; the header chip and the setting simply stay empty. */ });
-        return () => { cancelled = true; };
-    }, [active]);
 
     const switchSource = useCallback(async (source: ObservatorySource) => {
         setError(null);

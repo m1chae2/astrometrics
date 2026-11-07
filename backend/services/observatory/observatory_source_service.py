@@ -105,6 +105,23 @@ class ObservatorySourceService:
         self._lock = threading.Lock()
         self._busy_probe: Callable[[], list[str]] = list
         self._shutdown_hook: Callable[[], None] | None = None
+        self._ready_hook: Callable[[], object] | None = None
+        self._commands: dict[str, Any] | None = None
+
+    def set_ready_hook(self, hook: Callable[[], object]) -> None:
+        """Say what to do once the simulator is up.
+
+        The hook runs only for a simulator that started (never for the real
+        telescope or the offline world, which have no simulator object). The
+        container uses it to let the app command the simulated devices.
+
+        Parameters
+        ----------
+        hook : `~collections.abc.Callable`
+            Called with no arguments. A failure is logged, and the simulator
+            still counts as ready.
+        """
+        self._ready_hook = hook
 
     def set_busy_probe(self, probe: Callable[[], list[str]]) -> None:
         """Say how to find out what the backend is busy with.
@@ -170,6 +187,7 @@ class ObservatorySourceService:
             self._step = "Seeding targets"
             if astrometrics is not None:
                 self._seed_targets(astrometrics)
+            self._run_ready_hook()
             self._step = "Ready"
         except Exception as error:  # the backend must keep running without the simulator
             logger.exception("SIMULATOR FAILED: the simulated observatory did not start")
@@ -177,6 +195,39 @@ class ObservatorySourceService:
             self._step = "Failed"
         finally:
             self._starting = False
+
+    def _run_ready_hook(self) -> None:
+        """Run the ready hook and record which commands it turned on.
+
+        The hook returns the library's outcome (``applied`` and
+        ``rejected``). Each rejected capability is logged once with its
+        reason, and the lists go to `get_source` as ``commands``. A failure
+        is logged and recorded as ``error``; the simulator stays ready.
+        """
+        if self._ready_hook is None:
+            return
+        try:
+            outcome = self._ready_hook()
+        except Exception as error:  # commands stay off; the night can still be watched
+            logger.warning("The simulator is up, but the app could not take command of it.", exc_info=True)
+            self._commands = {"allowed": [], "off": {}, "error": f"{type(error).__name__}: {error}"}
+            return
+        applied = getattr(outcome, "applied", None)
+        rejected = getattr(outcome, "rejected", None)
+        if applied is None or rejected is None:
+            return
+        allowed = sorted(getattr(capability, "value", str(capability)) for capability in applied)
+        off = {
+            getattr(capability, "value", str(capability)): str(reason)
+            for capability, reason in rejected.items()
+        }
+        self._commands = {"allowed": allowed, "off": off, "error": None}
+        logger.info("Simulator commands are on for: %s.", ", ".join(allowed) or "nothing")
+        if off:
+            logger.warning(
+                "Simulator commands stay off for: %s.",
+                "; ".join(f"{name} ({reason})" for name, reason in off.items()),
+            )
 
     def is_settled(self) -> bool:
         """Say whether the observatory source has finished starting.
@@ -232,6 +283,9 @@ class ObservatorySourceService:
         description : `dict`
             ``source`` (in force), ``chosen`` (saved),
             ``label`` (the status chip text, empty for the real telescope),
+            ``commands`` (for a simulator: ``allowed`` capabilities, ``off``
+            capabilities with the reason each stays off, and ``error``; `None`
+            until the simulator is up or for the real telescope),
             ``restart_pending``, ``starting`` (the simulator is still
             coming up), ``step`` (``Starting telescope``, ``Seeding targets``,
             ``Ready``, ``Failed`` or an empty text), ``ready`` (`True` when
@@ -270,6 +324,7 @@ class ObservatorySourceService:
             "library_copy": library_copy_report(self._environ),
             "failed": failed or bool(self._start_error),
             "reason": error or "",
+            "commands": self._commands,
         }
 
     def set_source(self, source: str) -> dict[str, Any]:

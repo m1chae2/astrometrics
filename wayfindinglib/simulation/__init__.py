@@ -36,6 +36,7 @@ if TYPE_CHECKING:
         check_offline_settings_update,
         check_settings_update,
     )
+    from wayfindinglib.simulation.simulated_calibration import record_simulated_calibrations
 
 #: Each public name and where it comes from: the module, and the name there.
 _LOCATIONS = {
@@ -50,6 +51,7 @@ _LOCATIONS = {
     "missing_programs": ("observatory", "missing_programs"),
     "offline_environment": ("observatory", "offline_environment"),
     "prepare_offline_world": ("observatory", "prepare_offline_world"),
+    "record_simulated_calibrations": ("simulated_calibration", "record_simulated_calibrations"),
     "read_library_copy_report": ("library_copy", "read_report"),
     "remove_library_copy": ("library_copy", "teardown"),
     "unavailable_reason": ("observatory", "unavailable_reason"),

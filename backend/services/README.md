@@ -9,7 +9,7 @@ Terms are defined in the [glossary](../../documentation/Glossary.md). This file 
 - `analysis/` runs the analysis jobs.
 - `data/` serves targets, stars, images and the deletion archive.
 - `infrastructure/` holds shared plumbing: settings, sockets, the scripting terminal, the handoff state and the safety guards.
-- `observatory/` serves the telescope, equipment, guiding, imaging, planning and the sequencer. `observatory_source_service.py` runs the Observatory source setting: with a simulator source it starts and stops the stand-in INDI server, PHD2 and driver of `wayfindinglib.simulation`, and a source change saves the choice and restarts the backend (see `backend/observatory_source.py`, which picks the simulator's separate data folders before the settings load).
+- `observatory/` serves the telescope, equipment, guiding, imaging, planning and the sequencer. `observatory_source_service.py` runs the Observatory source setting: with a simulator source it starts and stops the stand-in INDI server, PHD2 and driver of `wayfindinglib.simulation`, and, once the simulator is up, a ready hook (the container's `_take_command_of_simulator`) first records the simulator's guider calibration and focus model, then puts the app in controller mode so it can command the stand-in devices (never for the real telescope or the offline world), and a source change saves the choice and restarts the backend (see `backend/observatory_source.py`, which picks the simulator's separate data folders before the settings load).
 - `processing/` serves ingestion, stacking and image processing, jobs, the frame quality measurement run and the slow stack reviews (`stack_review_service.py`, which starts a preview remake or a stack comparison as a background job and answers with the result or the job to follow).
 
 ## Planning services (`observatory/`)
@@ -35,7 +35,7 @@ Every RPC call runs on one of a fixed set of worker threads. A slow whole-catalo
 - Only a few heavy reads run at the same time. A read that cannot get a place within a short wait fails at once with a retryable "busy, try again" conflict error.
 - Identical requests that arrive together share one computation. A later request waits for the answer of the one already running.
 
-The star catalog listings and counts use it (`data/stellar_service.py`). The numbers (reads at once, wait times) are constants at the top of the module. They are sized so that most of the workers stay free and so that a wait ends before the client's own time limit.
+The star catalog listings and counts use it (`data/stellar_service.py`). The numbers (reads at once, wait times) are constants at the top of the module. The per-target star counts and class counts are kept until the catalog changes, but an empty answer is never kept: the library may not have been filled yet at start-up, and a kept empty answer showed "0 stars" for every target until it expired. They are sized so that most of the workers stay free and so that a wait ends before the client's own time limit.
 
 ## Heavy lane for RPC methods
 

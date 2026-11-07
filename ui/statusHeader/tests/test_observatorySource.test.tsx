@@ -6,9 +6,23 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render as plainRender, screen, waitFor, fireEvent, act } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { socketClient } from '../../common/utils/socketClient';
+import { OBSERVATORY_SOURCE_RETRY_MS } from '../hooks/useObservatorySource';
 import { ObservatorySourceChip } from '../ObservatorySourceChip';
 import { ObservatorySourceControl } from '../settings/components/ObservatorySourceControl';
+
+/**
+ * Renders with a fresh query client, as the app does.
+ *
+ * @param ui The element.
+ * @return The render result.
+ */
+function render(ui: React.ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { refetchOnWindowFocus: false } } });
+  return plainRender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
 
 let telescopeValue: Record<string, unknown> = {};
 vi.mock('../../common/context/AstrometricsContext', () => ({
@@ -19,7 +33,8 @@ vi.mock('../../common/services/backendApi', () => ({
   setBackendRestarting: (...args: unknown[]) => setBackendRestartingMock(...args),
 }));
 
-vi.mock('../../common/services/observatoryService', () => ({
+vi.mock('../../common/services/observatoryService', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../common/services/observatoryService')>()),
   getObservatorySource: vi.fn(),
   setObservatorySource: vi.fn(),
   waitForBackendRestart: vi.fn(),
@@ -102,7 +117,9 @@ describe('Observatory source', () => {
   it('asks "Restart on Real?" when the simulator is active', async () => {
     vi.mocked(getObservatorySource).mockResolvedValue(report('simulated') as never);
     render(<ObservatorySourceControl />);
-    fireEvent.click(await screen.findByRole('button', { name: 'REAL' }));
+    const simulated = await screen.findByRole('button', { name: 'SIMULATED' });
+    await waitFor(() => expect(simulated.getAttribute('aria-pressed')).toBe('true'));
+    fireEvent.click(screen.getByRole('button', { name: 'REAL' }));
     expect(screen.getByRole('dialog', { name: 'Restart on Real?' })).toBeTruthy();
   });
 
@@ -130,6 +147,7 @@ describe('Observatory source', () => {
     vi.mocked(getObservatorySource).mockResolvedValue(report('real') as never);
     render(<ObservatorySourceControl hasUnsavedChanges />);
     const simulated = await screen.findByRole('button', { name: 'SIMULATED' });
+    await waitFor(() => expect(getObservatorySource).toHaveBeenCalled());
     expect((simulated as HTMLButtonElement).disabled).toBe(true);
     expect(simulated.getAttribute('title')).toBe('Save or revert your changes first');
     expect(screen.queryByText('Save or revert your changes first.')).toBeNull();
@@ -165,7 +183,86 @@ describe('Observatory source', () => {
     vi.mocked(getObservatorySource).mockResolvedValue(report('real', { missing_programs: ['indiserver'] }) as never);
     render(<ObservatorySourceControl />);
     const simulated = await screen.findByRole('button', { name: 'SIMULATED' });
-    expect((simulated as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() => expect((simulated as HTMLButtonElement).disabled).toBe(true));
     expect(simulated.getAttribute('title')).toContain('indiserver');
+  });
+
+  /** The backend is still starting when the app opens: the first question fails, a later one works. */
+  it('shows the chip after the first question fails and a later one succeeds', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getObservatorySource)
+        .mockRejectedValueOnce(new Error('Failed to fetch'))
+        .mockResolvedValue(report('simulated') as never);
+      render(<ObservatorySourceChip />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+      expect(screen.queryByText('SIMULATOR')).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(OBSERVATORY_SOURCE_RETRY_MS + 10); });
+      expect(screen.getByText('SIMULATOR')).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /** While the simulator starts, the chip says so (a status, not an error), then becomes SIMULATOR. */
+  it('shows SIMULATOR STARTING until the backend is ready, then SIMULATOR', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getObservatorySource)
+        .mockResolvedValueOnce(report('simulated', { starting: true, ready: false, step: 'Seeding targets' }) as never)
+        .mockResolvedValue(report('simulated', { ready: true }) as never);
+      const { container } = render(<ObservatorySourceChip />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+      expect(screen.getByText('SIMULATOR STARTING')).toBeTruthy();
+      expect(container.querySelector('[data-status="error"]')).toBeNull();
+      expect(container.querySelector('.header__source-chip')?.getAttribute('title')).toContain('Seeding targets');
+      await act(async () => { await vi.advanceTimersByTimeAsync(OBSERVATORY_SOURCE_RETRY_MS + 10); });
+      expect(screen.getByText('SIMULATOR')).toBeTruthy();
+      expect(screen.queryByText('SIMULATOR STARTING')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /** Once the answer is final, the header stops asking, so an idle app makes no repeat calls. */
+  it('does not ask again once the backend is ready', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getObservatorySource).mockResolvedValue(report('simulated', { ready: true }) as never);
+      render(<ObservatorySourceChip />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+      expect(screen.getByText('SIMULATOR')).toBeTruthy();
+      await act(async () => { await vi.advanceTimersByTimeAsync(OBSERVATORY_SOURCE_RETRY_MS * 10); });
+      expect(getObservatorySource).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /** The real telescope needs no chip and no polling either. */
+  it('does not ask again for the real telescope', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getObservatorySource).mockResolvedValue(report('real', { ready: true }) as never);
+      render(<ObservatorySourceChip />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(OBSERVATORY_SOURCE_RETRY_MS * 10); });
+      expect(getObservatorySource).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /** After the event socket drops and comes back, the backend may have restarted on another source: ask once more. */
+  it('asks again when the event socket reconnects after a break', async () => {
+    vi.mocked(getObservatorySource).mockResolvedValue(report('simulated', { ready: true }) as never);
+    render(<ObservatorySourceChip />);
+    expect(await screen.findByText('SIMULATOR')).toBeTruthy();
+    expect(getObservatorySource).toHaveBeenCalledTimes(1);
+    // A first connection is not a reconnect.
+    act(() => { socketClient.emit('connected'); });
+    expect(getObservatorySource).toHaveBeenCalledTimes(1);
+    act(() => { socketClient.emit('disconnected'); });
+    act(() => { socketClient.emit('connected'); });
+    await waitFor(() => expect(getObservatorySource).toHaveBeenCalledTimes(2));
   });
 });

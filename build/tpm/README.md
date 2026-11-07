@@ -317,7 +317,7 @@ Every `tpm.json` has an `info` block with `webgl` (the vendor and renderer strin
 
 ## Error TPMs
 
-The user's rule is "no errors in the web browser console" and no error notifications at start-up. Five TPMs count what breaks it. Each is a count with a Confirmed limit of 0 (confirmed as a user requirement on 2026-11-06), so one error fails the run. When a limit is breached, `compile_tpm.py` prints every offending message under `OFFENDERS for <TPM>`, and `tpm.json` keeps them in `info.errors`.
+The user's rule is "no errors in the web browser console" and no error notifications at start-up. Five TPMs count what breaks it. A sixth, `simulator_chip_missing`, is described at the end of this section. Each is a count with a Confirmed limit of 0 (confirmed as a user requirement on 2026-11-06), so one error fails the run. When a limit is breached, `compile_tpm.py` prints every offending message under `OFFENDERS for <TPM>`, and `tpm.json` keeps them in `info.errors`.
 
 | TPM | What it counts | Where it comes from |
 | --- | --- | --- |
@@ -326,6 +326,8 @@ The user's rule is "no errors in the web browser console" and no error notificat
 | `error_toasts` | In-app toasts of kind error or warning, with text and source. | A listener for the `astrometrics:toast` window event (`ui/common/utils/emitToast.ts`) that the flow installs before the app starts. |
 | `desktop_notifications` | Native notifications the page asked Electron to show, with title and body. | `electron/perf_metrics.js` listens next to the app's own `show-notification` handler when `ASTROMETRICS_PERF_METRICS` is set. It counts the requests before the app's cooldown and its checks. Only an Electron run measures it; a plain browser cannot send one, so a Chrome-only run leaves it empty. |
 | `backend_error_log_lines` | Lines at ERROR or CRITICAL level in the throwaway backend's `backend.log`, from the backend's start to its end, and the web server's own `ERROR:` lines. | `backend.log` in the results folder. Warnings and the lines of a traceback after its first line are not counted. |
+
+`simulator_chip_missing` guards the user's rule that a simulated night is always visibly marked (confirmed as a user requirement on 2026-11-07). In a simulation-mode run (`--library simulation`, which runs the app's simulated observatory), `flow.mjs` waits up to 120 seconds after the app is ready for the header's `.header__source-chip` element (the chip says `SIMULATOR STARTING`, then `SIMULATOR`) and records what it saw in the `sourceChip` block of `flow-metrics.json`. The TPM counts the flows that did not show the chip, and its Confirmed limit is 0. A run on the real telescope, or on the synthetic library with the offline profile, has no chip to look for: the flow records `expected: false` and the TPM is not produced. `run_tpm.sh` passes `--expect-simulator-chip 1` to the flow for the simulation library.
 
 A failed image load shows up twice, as a failed request and as the console error the browser prints for it. Counts add up over the Chrome flow, the Electron flow and the Electron start-up, so a run with a browser flow and `--electron` can show the same fault more than once. The limit is 0, so only the list matters. Toasts that the app shows before the flow attaches to the Electron window are not seen as toasts (an error toast also writes a console error, which the start-up watcher does see).
 

@@ -146,6 +146,7 @@ def produced_names(tmp_path_factory: pytest.TempPathFactory) -> tuple:
     )
     errors = compile_tpm.collect_errors([], {"consoleErrors": [], "failedRequests": [], "toasts": []}, [], [])
     tpms.extend(compile_tpm.error_entries(errors))
+    tpms.extend(compile_tpm.simulator_chip_entries([{"sourceChip": {"expected": True, "present": True}}]))
     tpms.extend(_resource_and_processing_entries())
     return [tpm["name"] for tpm in tpms], tpms
 
@@ -306,3 +307,22 @@ def test_budgets_json_agrees_with_catalog(catalog: dict) -> None:
             (sizes if item["kind"] == "resourceSizes" else counts).append(row)
     expected = [{"path": "/*", "timings": timings, "resourceSizes": sizes, "resourceCounts": counts}]
     assert json.loads((TPM_DIR / "budgets.json").read_text()) == expected
+
+
+def test_missing_simulator_chip_fails_a_simulation_run() -> None:
+    """A flow without the chip counts 1 and breaches the limit of 0."""
+    catalog = compile_tpm.load_catalog()
+    shown = {"sourceChip": {"expected": True, "present": True}}
+    hidden = {"sourceChip": {"expected": True, "present": False}}
+    for flows, expected in (([shown], 0.0), ([shown, hidden], 1.0)):
+        entries = compile_tpm.simulator_chip_entries(flows)
+        assert entries[0]["value"] == expected
+        compile_tpm.annotate(entries, catalog, {}, cold=False)
+        assert compile_tpm.breached_by_threshold(entries) == (["simulator_chip_missing"] if expected else [])
+
+
+def test_simulator_chip_is_not_applicable_without_a_simulated_observatory() -> None:
+    """A flow that expected no chip (real, offline) gives no value."""
+    flow = {"sourceChip": {"expected": False, "present": None}}
+    assert compile_tpm.simulator_chip_entries([flow])[0]["value"] is None
+    assert compile_tpm.simulator_chip_entries([{}])[0]["value"] is None

@@ -53,6 +53,12 @@ build/linux/run_astrometrics.sh status
 
 The group holds only what these scripts start. The MCP servers belong to the Claude Code session that started them, and each one exits when that session closes.
 
+## run_astrometrics.sh: start order
+
+`start` launches the backend in the background without waiting for it, starts Vite, and starts Electron as soon as Vite answers. The splash screen therefore appears within about a second, while the backend is still starting. The splash polls the backend's `/api/ready` route and stays up until the backend has finished its warm-up. A refused connection during that time is normal and is not logged as an error. If the backend dies while starting (its process id in `.run_pids/backend.pid` no longer exists), or nothing answers for two minutes, Electron shows a "backend not running" dialog with Retry and Quit. Electron is started from `node_modules/.bin/electron` directly, because `npx` adds a quarter of a second.
+
+When the saved observatory source is a simulator, the backend first copies the databases (about 1.5 GB). This copy, not Python imports, was most of the backend's start-up time (about 12 of 13 seconds). It now runs the four copies side by side. Importing the backend alone takes about 2 seconds.
+
 ## run_astrometrics.sh: graphics card
 
 On a laptop with an Intel and an NVIDIA card, `start` picks the card for the Electron window before Electron starts, because Chromium cannot switch cards while it runs. The choice comes from the environment variable `ASTROMETRICS_GPU`, then the `gpu` key in `[Frontend]` of `astrometrics.config.toml` (read only), then `auto`. The values are `auto`, `intel` and `nvidia`. `auto` means NVIDIA on AC power with the NVIDIA render offload driver present, and Intel on battery. Plugging in or unplugging while the app runs does not switch cards until the next start.

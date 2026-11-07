@@ -17,12 +17,14 @@ from pathlib import Path
 #: INDI and PHD2 ports are the random ports of the stand-ins that were
 #: started. The picture folder is inside the stand-in telescope computer's
 #: home folder. Automatic downloads are on, so finished frames and guide logs
-#: copy by themselves through the app's one transfer code.
+#: copy by themselves through the app's one transfer code. Commands are
+#: allowed: they reach only the simulated devices on this computer, so a
+#: slew, an exposure or a focus move can be tried without risk.
 SIMULATED_TELESCOPE_SETTINGS = """
 ["Observatory.Telescope"]
 hostname = "127.0.0.1"
 indi_port = "{indi_port}"
-allow_commands = "false"
+allow_commands = "true"
 focal_length_mm = "405"
 focal_ratio = "5.4"
 remote_pictures_path = "{pictures}"

@@ -712,6 +712,31 @@ async function measureHeap(page) {
     return (await page.metrics()).JSHeapUsedSize;
 }
 
+/** Longest wait for the SIMULATOR chip in the header, in milliseconds (the simulator copies the library first). */
+const SIMULATOR_CHIP_WAIT_MS = 120000;
+
+/**
+ * Checks that the header shows the SIMULATOR chip, when the run uses the simulated observatory.
+ *
+ * @param {import('puppeteer-core').Page} page - The page.
+ * @param {boolean} expected - True for a simulation-mode run, where the chip must appear.
+ * @return {Promise<{expected: boolean, present: boolean|null, waitedMs: number, text: string}>} What was seen.
+ *     `present` is null when no chip was expected (a real telescope or an offline run).
+ */
+async function checkSimulatorChip(page, expected) {
+    if (!expected) return { expected: false, present: null, waitedMs: 0, text: '' };
+    const started = Date.now();
+    let present = true;
+    try {
+        // The chip says SIMULATOR STARTING first, then SIMULATOR; either one counts as visibly marked.
+        await page.waitForFunction(() => !!document.querySelector('.header__source-chip'), { timeout: SIMULATOR_CHIP_WAIT_MS });
+    } catch {
+        present = false;
+    }
+    const text = await page.evaluate(() => document.querySelector('.header__source-chip')?.textContent?.trim() ?? '');
+    return { expected: true, present, waitedMs: Date.now() - started, text };
+}
+
 /**
  * Runs the whole flow and writes the report files.
  *
@@ -784,6 +809,9 @@ async function main() {
     }
     await page.waitForFunction(() => window.__tpm.find('.selectable-list__item') && window.__tpm.inFlight === 0, { timeout: 60000 });
     const timeToReadyMs = await page.evaluate(() => window.__tpm.readyAt);
+    // A simulated night must always be visibly marked. In a simulation-mode run the header chip has to appear;
+    // the simulator may still be starting when the app opens, so give it time.
+    const sourceChip = await checkSimulatorChip(page, options['expect-simulator-chip'] === '1');
     const loadWallMs = Date.now() - loadStarted;
     logStep('loaded; measuring the heap');
     const initialHeap = await bounded('heap measurement after load', 60000, measureHeap(page));
@@ -914,6 +942,7 @@ async function main() {
         uiUrl,
         backendUrl,
         timeToReadyMs,
+        sourceChip,
         loadWallMs,
         initialHeapBytes: initialHeap,
         gpu,

@@ -15,6 +15,14 @@ Terms are defined in the [glossary](../../documentation/Glossary.md). This file 
 - `webgl/`, `utils/` and `styles/` hold the star renderer, the projection and time helpers and the stylesheets.
 - `tests/` holds the Vitest tests.
 
+## Tracking view
+
+With tracking on (the `t` key, or a list pick that asks for it), the map follows one point of the sky, the picked object's RA and Dec. The camera eases to a new point once. After it arrives, the map sets the camera each frame from the same clock reading that draws the stars, so the stars stay still on screen while the horizon and the other alt-az overlays drift (`utils/trackingView.ts`). Only a different point makes the camera move again.
+
+## Smooth sky motion
+
+The map reads the clock on every animation frame, so the sky turns smoothly, even at a 0.1° view where one second of sky turning is about 15 arcseconds. While time plays, the offset is carried forward between the 100 ms playback steps (`hooks/useTimeController.ts`). Only the cheap projection runs on each frame. Catalog queries, visibility and labels do not. The map draws a frame again only when the sky has turned by more than a quarter of a pixel since the last draw (`utils/skyMotion.ts`). A wide view therefore idles (a draw every few seconds), and a tight view draws almost every frame. In tracking mode the camera turns with the sky, so it gets the same quarter-pixel tolerance.
+
 ## Package actions
 
 The Planetarium sends two things to the observation packages. Both work on the package of the chosen target (`hooks/useTargetPackage.ts`).
@@ -28,7 +36,7 @@ The Framing button opens a panel for the chosen target. You set Rows, Columns, O
 
 ## Device commands
 
-Slew Telescope Here, in the right-click menu, is a device command. It is greyed, with a Why unavailable? button, while Ekos controls the equipment (`ui/common/hooks/useCommandAvailability.ts`).
+Slew Telescope Here, in the right-click menu, is a device command. It is greyed, with a Why unavailable? button, while Ekos controls the equipment (`ui/common/hooks/useCommandAvailability.ts`). With the simulated observatory it is on, because the commands reach only simulated devices. A failed slew shows one error message.
 
 ## Shared time and target
 

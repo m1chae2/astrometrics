@@ -49,6 +49,9 @@ class FocusModel(BaseModel):
     thermal_coefficient_steps_per_c: float = Field(default=0.0)
     filter_offsets: list[FilterFocusOffset] = Field(default_factory=list)
     calibrated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    source_note: str = Field(
+        default="", description="Where the numbers came from; a simulator's made-up values say so here."
+    )
 
     @model_validator(mode="after")
     def _check_filter_offsets_unique(self) -> FocusModel:

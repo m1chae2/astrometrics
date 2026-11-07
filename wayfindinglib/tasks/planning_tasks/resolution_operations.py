@@ -7,8 +7,8 @@ SIMBAD, and retrieves objects within a sky region for `SkyEngine`.
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib import StellarObject, Target
-from astrometricslib.drivers import OfflineModeError, require_online
-from astrometricslib.exceptions import ExternalServiceError, NotFoundError, ProcessingError
+from astrometricslib.drivers import require_online
+from astrometricslib.exceptions import ExternalServiceError, NotFoundError, OfflineModeError, ProcessingError
 from wayfindinglib._internal.errors import ONLINE_QUERY_ERRORS
 from wayfindinglib.drivers.catalog.simbad_catalog_driver import (
     format_target_coordinates,

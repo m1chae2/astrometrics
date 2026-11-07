@@ -23,7 +23,6 @@ from astrometricslib.foundation.launch_identity import (
     read_launch_identity,
 )
 from astrometricslib.foundation.offline import (
-    OfflineModeError,
     is_loopback_host,
     network_is_offline,
     require_local_host,
@@ -63,7 +62,6 @@ __all__ = [
     "DatasetSpec",
     "LaunchIdentity",
     "LibraryFolders",
-    "OfflineModeError",
     "VersionedCache",
     "bump_data_version",
     "connect_db",

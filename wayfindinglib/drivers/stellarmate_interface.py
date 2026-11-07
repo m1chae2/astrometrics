@@ -26,13 +26,12 @@ import time
 from typing import Any
 
 from astrometricslib.drivers import (
-    OfflineModeError,
     require_local_host,
     require_mounted_storage,
     scratch_directory,
     stop_process_group,
 )
-from astrometricslib.exceptions import ConfigurationError, ExternalServiceError
+from astrometricslib.exceptions import ConfigurationError, ExternalServiceError, OfflineModeError
 from wayfindinglib.drivers.host_resolver import KnownHostAddress
 from wayfindinglib.drivers.interfaces.remote_transfer_driver import RemoteTransferDriver
 

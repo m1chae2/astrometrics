@@ -13,7 +13,6 @@ import pytest
 
 from astrometricslib.drivers import (
     LaunchIdentity,
-    OfflineModeError,
     is_loopback_host,
     launch_identity_from_settings,
     library_folders,
@@ -22,6 +21,7 @@ from astrometricslib.drivers import (
     require_local_host,
     require_online,
 )
+from astrometricslib.exceptions import OfflineModeError
 from astrometricslib.foundation import offline
 from astrometricslib.foundation.config import _TomlSectionedConfig
 

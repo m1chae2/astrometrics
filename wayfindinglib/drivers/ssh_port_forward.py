@@ -20,7 +20,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-from astrometricslib.drivers import OfflineModeError
+from astrometricslib.exceptions import OfflineModeError
 from astrometricslib.jobs import background_log_context
 
 logger = logging.getLogger(__name__)

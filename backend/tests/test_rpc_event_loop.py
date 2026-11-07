@@ -214,7 +214,11 @@ def test_heavy_methods_do_not_delay_a_light_call(
         await asyncio.gather(*heavy_calls)
         return elapsed
 
-    assert asyncio.run(scenario()) < 0.15
+    # The lane's job is checked exactly by `running["most"]`. The time
+    # limit catches the real regression, a light call queued in the lane
+    # behind twelve 0.2 s calls (about 1.2 s), and leaves room for a slow
+    # continuous-integration machine (0.18 s seen there).
+    assert asyncio.run(scenario()) < 0.5
     assert running["most"] <= rpc_router.HEAVY_LANE_SLOTS
 
 

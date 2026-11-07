@@ -125,7 +125,6 @@ EXPECTED_MODULE_NAMES = {
         "DatasetSpec",
         "LaunchIdentity",
         "LibraryFolders",
-        "OfflineModeError",
         "VersionedCache",
         "bump_data_version",
         "connect_db",

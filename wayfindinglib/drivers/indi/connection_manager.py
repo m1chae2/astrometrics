@@ -4,7 +4,8 @@ import logging
 import socket
 import time
 
-from astrometricslib.drivers import OfflineModeError, require_local_host
+from astrometricslib.drivers import require_local_host
+from astrometricslib.exceptions import OfflineModeError
 from wayfindinglib.drivers.host_resolver import KnownHostAddress
 
 logger = logging.getLogger(__name__)

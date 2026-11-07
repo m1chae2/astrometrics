@@ -365,14 +365,11 @@ def real_folders(environ: Mapping[str, str] | None = None) -> RealFolders:
 class LibraryFolders:
     """The library folders that one settings file names.
 
-    Attributes
-    ----------
-    config_file : `pathlib.Path`
-        The settings file that was read.
-    library, frames, stacks, wayfinding : `pathlib.Path`
-        The image library, its frames, the folder for stacks and other
-        derived files, and the wayfinding library, as the settings file names
-        them (or their defaults).
+    ``config_file`` is the settings file that was read. ``library``,
+    ``frames``, ``stacks`` and ``wayfinding`` are the image library, its
+    frames, the folder for stacks and other derived files, and the wayfinding
+    library, as the settings file names them (or their defaults). All are
+    `pathlib.Path` objects.
     """
 
     config_file: Path

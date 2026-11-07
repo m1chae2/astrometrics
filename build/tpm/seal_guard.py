@@ -10,8 +10,8 @@ second check on top of that namespace:
   processes it started) that go anywhere but this computer. The run aborts if
   there is one.
 
-The app does not need these checks, so they live with the harness. The
-checks of the simulator's settings are in
+The connection check itself lives in `simulator.connection_guard`, which
+the launcher also uses. The checks of the simulator's settings are in
 `simulator.observatory_guard`.
 
 Usage::
@@ -23,100 +23,19 @@ Each command exits 1 and prints the reason when a check fails.
 """
 
 import argparse
-import re
 import socket
-import subprocess
 import sys
 from pathlib import Path
 
-from simulator.observatory_guard import is_loopback_address
+from simulator.connection_guard import descendant_pids, non_loopback_connections, parse_ss_connections
 from wayfindinglib.exceptions import GuardError
 
-
-def descendant_pids(root_pid: int) -> set[int]:
-    """Return a process and all the processes it started.
-
-    Parameters
-    ----------
-    root_pid : `int`
-        The first process.
-
-    Returns
-    -------
-    pids : `set` [`int`]
-        `root_pid` and every descendant found in ``/proc``.
-    """
-    parent_of: dict[int, int] = {}
-    for entry in Path("/proc").iterdir():
-        if not entry.name.isdigit():
-            continue
-        try:
-            stat = (entry / "stat").read_text()
-        except OSError:
-            continue
-        # The command name sits in parentheses and may contain spaces.
-        after_name = stat.rsplit(")", 1)[1].split()
-        parent_of[int(entry.name)] = int(after_name[1])
-    found = {root_pid}
-    changed = True
-    while changed:
-        changed = False
-        for pid, parent in parent_of.items():
-            if parent in found and pid not in found:
-                found.add(pid)
-                changed = True
-    return found
-
-
-def parse_ss_connections(output: str, pids: set[int]) -> list[str]:
-    """Pick the connections of the given processes that leave this computer.
-
-    Parameters
-    ----------
-    output : `str`
-        The output of ``ss -H -tnp``.
-    pids : `set` [`int`]
-        The processes to look at.
-
-    Returns
-    -------
-    offending : `list` [`str`]
-        One text per connection whose peer address is not a loopback address.
-    """
-    offending = []
-    for line in output.splitlines():
-        parts = line.split()
-        if len(parts) < 5:
-            continue
-        peer = parts[4]
-        users = " ".join(parts[5:])
-        owner_pids = {int(number) for number in re.findall(r"pid=(\d+)", users)}
-        if not owner_pids & pids:
-            continue
-        peer_address = peer.rsplit(":", 1)[0]
-        if not is_loopback_address(peer_address):
-            offending.append(line.strip())
-    return offending
-
-
-def non_loopback_connections(root_pid: int) -> list[str]:
-    """List the TCP connections of a process tree that go beyond this computer.
-
-    Parameters
-    ----------
-    root_pid : `int`
-        The backend's process id.
-
-    Returns
-    -------
-    offending : `list` [`str`]
-        The ``ss`` lines of the offending connections, empty when all are
-        local.
-    """
-    output = subprocess.run(
-        ["ss", "-H", "-tnp"], capture_output=True, text=True, check=False, timeout=20
-    ).stdout
-    return parse_ss_connections(output, descendant_pids(root_pid))
+__all__ = [
+    "check_sealed",
+    "descendant_pids",
+    "non_loopback_connections",
+    "parse_ss_connections",
+]
 
 
 #: Public addresses a sealed run must not be able to reach (a public DNS

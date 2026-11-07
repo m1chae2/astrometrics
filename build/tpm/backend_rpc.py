@@ -13,8 +13,7 @@ Usage::
     targets = call_rpc(47123, "target:list", {})
 """
 
-import json
-import urllib.request
+from simulator.rpc_client import call_rpc as _call_rpc
 
 #: The real backend's port. The harness never calls it.
 REAL_BACKEND_PORT = 5000
@@ -22,6 +21,9 @@ REAL_BACKEND_PORT = 5000
 
 def call_rpc(port: int, method: str, params: dict, timeout: float = 60.0) -> object:
     """Call one method of the throwaway backend.
+
+    The call itself is `simulator.rpc_client.call_rpc`; this wrapper adds
+    the harness rule that the real backend's port is never called.
 
     Parameters
     ----------
@@ -46,16 +48,4 @@ def call_rpc(port: int, method: str, params: dict, timeout: float = 60.0) -> obj
     """
     if port == REAL_BACKEND_PORT:
         raise RuntimeError("Refusing to call port 5000: that is the real backend.")
-    body = json.dumps({"jsonrpc": "2.0", "method": method, "params": params, "id": 1}).encode()
-    request = urllib.request.Request(
-        f"http://127.0.0.1:{port}/api/rpc", data=body, headers={"Content-Type": "application/json"}
-    )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        reply = json.loads(response.read())
-    if "error" in reply:
-        raise RuntimeError(f"{method} failed: {reply['error']}")
-    result = reply.get("result")
-    # The backend wraps every result as {"status": ..., "data": ...}.
-    if isinstance(result, dict) and "data" in result and "status" in result:
-        return result["data"]
-    return result
+    return _call_rpc(port, method, params, timeout)

@@ -27,6 +27,10 @@ set -euo pipefail
 # ASTROMETRICS_BACKEND_MEMORY_HIGH, or "off"). `status` reports a kill by the
 # kernel's out-of-memory killer.
 #   ./run_backend.sh help|--help|-h    - print this help text
+#
+# With ASTROMETRICS_USE_LAUNCHER=1 every command that starts the backend starts the
+# simulator launcher (python -m simulator.launch) instead, which runs the backend as its
+# child in the world the observatory source setting names (see simulator/README.md).
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 # Console output goes to the user's log folder, not the project folder.
@@ -80,6 +84,25 @@ fi
 ## If you prefer installing and running the wheel from `dist/`, we can add
 ## an optional install step — currently this script runs the in-repo module.
 BACKEND_MODULE="backend.main_backend"
+# Set ASTROMETRICS_USE_LAUNCHER=1 to start the simulator launcher instead
+# (simulator/launch.py). The launcher reads the observatory source choice,
+# builds and guards the simulated world, runs the backend as its child, and
+# takes the world down when the backend ends. The pid file then holds the
+# launcher's pid, so `stop` stops the launcher, which stops the backend and
+# cleans up. Off by default.
+LAUNCHER_MARKER="$PID_DIR/backend.launcher"
+if [ "${ASTROMETRICS_USE_LAUNCHER:-0}" = "1" ]; then
+  BACKEND_MODULE="simulator.launch"
+fi
+# Half-second polls to wait for a stop and for the first answer (so 20 polls = 10 s). The launcher also
+# builds a world before the backend starts and removes it after, so it needs
+# more time than the backend alone.
+STOP_WAIT_POLLS=20
+HEALTH_WAIT_POLLS=120
+if [ "$BACKEND_MODULE" = "simulator.launch" ] || [ -f "$LAUNCHER_MARKER" ]; then
+  STOP_WAIT_POLLS=120
+  HEALTH_WAIT_POLLS=360
+fi
 
 # Default bind host; can be overridden by passing --lan on the command line which
 # sets the bind host to 0.0.0.0 so the server is reachable on the local network.
@@ -184,6 +207,11 @@ launch_backend() {
   ASTROMETRICS_BIND_HOST="$BIND_HOST" nohup ${BACKEND_SCOPE_PREFIX[@]+"${BACKEND_SCOPE_PREFIX[@]}"} "$PYTHON" -u -m "$BACKEND_MODULE" >"$LOG_FILE" 2>&1 &
   backend_pid=$!
   echo "$backend_pid" > "$PID_FILE"
+  if [ "$BACKEND_MODULE" = "simulator.launch" ]; then
+    echo "launcher" > "$LAUNCHER_MARKER"
+  else
+    rm -f "$LAUNCHER_MARKER"
+  fi
 }
 
 wait_for_backend_healthy() {
@@ -192,7 +220,7 @@ wait_for_backend_healthy() {
 
   # Health Check Loop
   echo "Waiting for backend to become healthy..."
-  for i in {1..120}; do
+  for ((i = 0; i < HEALTH_WAIT_POLLS; i++)); do
       # --max-time: an unresponsive-but-connectable backend would otherwise
       # hang this curl call indefinitely, which would also block the "did
       # the process die" check a few lines below from ever running again.
@@ -280,7 +308,7 @@ stop_backend() {
       # shutdown handshake. Polling for up to 10s instead gives that room
       # while still returning as soon as the process actually exits, so the
       # common (fast) case isn't slowed down.
-      for _ in $(seq 1 20); do
+      for _ in $(seq 1 "$STOP_WAIT_POLLS"); do
         kill -0 "$pid" >/dev/null 2>&1 || break
         sleep 0.5
       done
@@ -291,7 +319,7 @@ stop_backend() {
     else
       echo "Process $pid not running; removing stale pidfile."
     fi
-    rm -f "$PID_FILE"
+    rm -f "$PID_FILE" "$LAUNCHER_MARKER"
   fi
 
   # Clean up an orphaned app backend, but only the one that owns the app port.

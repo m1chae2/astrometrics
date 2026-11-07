@@ -28,6 +28,12 @@ code `RESTART_EXIT_CODE` (75, ``EX_TEMPFAIL``: "try again"), and the launcher
 reads the saved choice and starts the world again. Any other exit code is a
 stop. Without the variable the backend starts itself again in place, as before.
 
+Under a launcher the backend builds nothing: `apply_launch_environment`
+returns at once, `active_observatory` gives `None`, so the source service
+and the container's ready hook have no simulator to start, command or
+remove. The choice file helpers and the names shared with the launcher
+live in `simulator.source_choice` and are imported here.
+
 The real folders are remembered in ``ASTROMETRICS_REAL_*`` variables. One
 helper (`astrometricslib.drivers.real_folders`) finds them, before and after
 the move.
@@ -50,7 +56,6 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 
 import psutil
@@ -64,28 +69,57 @@ from simulator import (
     prepare_offline_world,
     remove_library_copy,
 )
+from simulator.source_choice import (
+    ACTIVE_PORTS_VARIABLE,
+    ACTIVE_ROOT_VARIABLE,
+    ACTIVE_SOURCE_VARIABLE,
+    CHOICE_FILE_NAME,
+    LAUNCH_ERROR_VARIABLE,
+    LAUNCHER_VARIABLE,
+    OFFLINE,
+    REAL,
+    REAL_CONFIG_HOME_VARIABLE,
+    REAL_CONFIG_PATH_VARIABLE,
+    REAL_DATA_HOME_VARIABLE,
+    RESTART_EXIT_CODE,
+    SIMULATED,
+    SOURCES,
+    SourceChoice,
+    choice_file_path,
+    read_choice,
+    write_choice,
+)
+
+__all__ = [
+    "ACTIVE_PORTS_VARIABLE",
+    "ACTIVE_ROOT_VARIABLE",
+    "ACTIVE_SOURCE_VARIABLE",
+    "CHOICE_FILE_NAME",
+    "LAUNCHER_VARIABLE",
+    "LAUNCH_ERROR_VARIABLE",
+    "OFFLINE",
+    "REAL",
+    "REAL_CONFIG_HOME_VARIABLE",
+    "REAL_CONFIG_PATH_VARIABLE",
+    "REAL_DATA_HOME_VARIABLE",
+    "RESTART_EXIT_CODE",
+    "SIMULATED",
+    "SOURCES",
+    "SourceChoice",
+    "active_observatory",
+    "apply_launch_environment",
+    "choice_file_path",
+    "close_inherited_descriptors",
+    "end_child_processes",
+    "original_environment",
+    "read_choice",
+    "remove_leftovers",
+    "restart_backend",
+    "world_is_pinned",
+    "write_choice",
+]
 
 logger = logging.getLogger(__name__)
-
-#: The two values of the setting.
-REAL = "real"
-SIMULATED = SimulationKind.SIMULATED_SKY.value
-SOURCES = (REAL, SIMULATED)
-#: The source in force when the simulator failed to start: no telescope at all.
-#: It is never a choice, only a state.
-OFFLINE = "offline"
-
-#: Name of the choice file, inside the real settings folder.
-CHOICE_FILE_NAME = "observatory_source.json"
-
-#: Variables the launch sets, so the running backend knows its world.
-ACTIVE_SOURCE_VARIABLE = "ASTROMETRICS_OBSERVATORY_SOURCE"
-ACTIVE_ROOT_VARIABLE = "ASTROMETRICS_SIMULATOR_ROOT"
-ACTIVE_PORTS_VARIABLE = "ASTROMETRICS_SIMULATOR_PORTS"
-LAUNCH_ERROR_VARIABLE = "ASTROMETRICS_OBSERVATORY_SOURCE_ERROR"
-REAL_CONFIG_HOME_VARIABLE = "ASTROMETRICS_REAL_CONFIG_HOME"
-REAL_DATA_HOME_VARIABLE = "ASTROMETRICS_REAL_DATA_HOME"
-REAL_CONFIG_PATH_VARIABLE = "ASTROMETRICS_REAL_CONFIG_PATH"
 
 #: Holds the values the launch replaced, so a restart can put them back.
 ORIGINALS_VARIABLE = "ASTROMETRICS_LAUNCH_ORIGINALS"
@@ -116,88 +150,6 @@ ADDED_VARIABLES = (
 #: Seconds the backend waits after answering before it starts again.
 RESTART_DELAY_SECONDS = 0.7
 
-#: Set by a launcher that runs the backend as its child. The backend then
-#: ends with `RESTART_EXIT_CODE` instead of starting itself again.
-LAUNCHER_VARIABLE = "ASTROMETRICS_LAUNCHER"
-#: The exit code that means "start me again with the saved choice" (75 is
-#: ``EX_TEMPFAIL`` in ``sysexits.h``). A launcher relaunches on this code only.
-RESTART_EXIT_CODE = 75
-
-
-@dataclass(frozen=True)
-class SourceChoice:
-    """The saved choice.
-
-    Attributes
-    ----------
-    source : `str`
-        ``real`` or ``simulated``.
-    """
-
-    source: str = REAL
-
-
-def choice_file_path(environ: dict[str, str] | None = None) -> Path:
-    """Give the path of the choice file.
-
-    Parameters
-    ----------
-    environ : `dict` [`str`, `str`], optional
-        The environment. Default: the process environment.
-
-    Returns
-    -------
-    path : `pathlib.Path`
-        ``<real settings folder>/astrometrics/observatory_source.json``.
-    """
-    return (
-        real_folders(os.environ if environ is None else environ).config_home
-        / "astrometrics"
-        / CHOICE_FILE_NAME
-    )
-
-
-def read_choice(environ: dict[str, str] | None = None) -> SourceChoice:
-    """Read the saved choice.
-
-    A missing or damaged file means the real telescope.
-
-    Parameters
-    ----------
-    environ : `dict` [`str`, `str`], optional
-        The environment. Default: the process environment.
-
-    Returns
-    -------
-    choice : `SourceChoice`
-        The saved choice.
-    """
-    try:
-        data = json.loads(choice_file_path(environ).read_text(encoding="utf-8"))
-    except OSError, ValueError:
-        return SourceChoice()
-    source = str(data.get("source", REAL)) if isinstance(data, dict) else REAL
-    if source not in SOURCES:
-        return SourceChoice()
-    return SourceChoice(source)
-
-
-def write_choice(choice: SourceChoice, environ: dict[str, str] | None = None) -> None:
-    """Save the choice.
-
-    Parameters
-    ----------
-    choice : `SourceChoice`
-        The choice to save.
-    environ : `dict` [`str`, `str`], optional
-        The environment. Default: the process environment.
-    """
-    path = choice_file_path(environ)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps({"source": choice.source}, indent=2), encoding="utf-8")
-    temporary.replace(path)
-
 
 def world_is_pinned(environ: dict[str, str]) -> bool:
     """Say whether a program has already chosen its own world.
@@ -218,6 +170,27 @@ def world_is_pinned(environ: dict[str, str]) -> bool:
         or bool(environ.get("ASTROMETRICS_CONFIG_PATH") or environ.get("ASTROMETRICS_CONFIG"))
         or ACTIVE_SOURCE_VARIABLE in environ
     )
+
+
+def launched_by_launcher(environ: dict[str, str]) -> bool:
+    """Say whether a launcher runs this backend as its child.
+
+    The launcher (`simulator.launch`) has already built the world and set
+    the environment. The backend then builds, starts and removes nothing
+    of its own, and a change of source ends the process with
+    `RESTART_EXIT_CODE`.
+
+    Parameters
+    ----------
+    environ : `dict` [`str`, `str`]
+        The environment.
+
+    Returns
+    -------
+    launched : `bool`
+        `True` when ``ASTROMETRICS_LAUNCHER`` is set.
+    """
+    return bool(environ.get(LAUNCHER_VARIABLE))
 
 
 def apply_launch_environment(environ: dict[str, str] | None = None) -> str:
@@ -243,7 +216,11 @@ def apply_launch_environment(environ: dict[str, str] | None = None) -> str:
         ``offline`` (the simulator failed).
     """
     environment = os.environ if environ is None else environ
-    if (environ is None and "pytest" in sys.modules) or world_is_pinned(environment):
+    if (
+        (environ is None and "pytest" in sys.modules)
+        or world_is_pinned(environment)
+        or launched_by_launcher(environment)
+    ):
         return environment.get(ACTIVE_SOURCE_VARIABLE, REAL)
     choice = read_choice(environment)
     folders = real_folders(environment)
@@ -347,10 +324,13 @@ def active_observatory(environ: dict[str, str] | None = None) -> SimulatedObserv
     Returns
     -------
     observatory : `SimulatedObservatory` or `None`
-        `None` when the process uses the real telescope.
+        `None` when the process uses the real telescope, or when a launcher
+        runs this backend (the launcher owns the world).
     """
     environment = os.environ if environ is None else environ
     source = environment.get(ACTIVE_SOURCE_VARIABLE, REAL)
+    if launched_by_launcher(environment):
+        return None  # the launcher owns the world; rebuilding it here would copy the library again
     if source != SIMULATED or ACTIVE_PORTS_VARIABLE not in environment:
         return None
     indi_port, phd2_port = (int(part) for part in environment[ACTIVE_PORTS_VARIABLE].split(","))
@@ -490,7 +470,7 @@ def restart_backend(
     thread : `threading.Thread`
         The thread that does the restart.
     """
-    launched_by_launcher = bool((os.environ if environ is None else environ).get(LAUNCHER_VARIABLE))
+    launched = launched_by_launcher(os.environ if environ is None else environ)
 
     def restart() -> None:
         """Wait for the reply to go out, stop everything, replace the image."""
@@ -503,7 +483,7 @@ def restart_backend(
         ended = end_child_processes()
         logger.warning(
             "%s the backend to change the observatory source (%d child processes ended).",
-            "Stopping for the launcher to start" if launched_by_launcher else "Restarting",
+            "Stopping for the launcher to start" if launched else "Restarting",
             ended,
         )
         for stream in (sys.stdout, sys.stderr):
@@ -511,7 +491,7 @@ def restart_backend(
                 stream.flush()
             except OSError:
                 pass
-        if launched_by_launcher:
+        if launched:
             exit_process(RESTART_EXIT_CODE)
             return
         close_inherited_descriptors()

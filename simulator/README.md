@@ -13,14 +13,34 @@ This folder holds a telescope that is "on" without a telescope. The app uses it 
 | `guide_log_replay.py`, `guide_log_sample.txt` | Turn a guide log into PHD2 events and paced log lines. |
 | `observatory_guard.py` | Refuses settings that point beyond this computer or at a real library folder. |
 | `simulated_calibration.py` | `record_simulated_calibrations` records a guider calibration and focus model for the simulator, from your real data, so the library's rules let capture, focus and guiding through. |
+| `launch.py` | The launcher: `python -m simulator.launch`. Builds the world, runs the backend as its child, plays the operator step, guards the connections and tears the world down. See "The launcher". |
+| `source_choice.py` | The saved observatory source choice (real or simulated) and the names the launcher and the backend share. |
+| `connection_guard.py` | Lists the TCP connections of a process and its children that go beyond this computer. The launcher and the TPM seal guard use it. |
+| `rpc_client.py` | Calls the backend's `/api/rpc` and `/api/ready` on 127.0.0.1. The launcher and the TPM scripts use it. |
 | `settings.py` | The settings text that points the app at the stand-ins, or at nothing (offline). |
 | `standin_ssh.sh` | An `ssh` stand-in that runs the command in the stand-in home folder. With `ASTROMETRICS_STANDIN_SSH_MODE=refuse` it refuses every connection. |
+
+## The launcher
+
+`python -m simulator.launch` starts the backend for you in the world the saved Observatory source names. `build/linux/run_backend.sh` runs it in place of the backend when `ASTROMETRICS_USE_LAUNCHER=1` (see `build/linux/README.md`). Without that variable, the backend builds its own world as before. Both ways work today, and the second goes away in phase L3 of the simulator plan.
+
+A session goes like this:
+
+1. **Choice.** The launcher reads `observatory_source.json` from your real settings folder (`source_choice.py`).
+2. **Real choice.** It runs the backend as a child with your environment, plus `ASTROMETRICS_LAUNCHER=1`. It builds no world. If no other launcher holds the simulator folder, it first removes what a crashed session left there.
+3. **Simulated choice.** It takes an exclusive, non-blocking `flock` on `<simulator folder>/launcher.lock` and holds it until the world is gone. If another process holds it, the launcher touches nothing, says so, and exits with code 73. Then it builds the world (`SimulatedObservatory.prepare`: the database copies and the overlay), starts the stand-ins and waits until they are up, works out the calibration records in a short process (`python -m simulator.simulated_calibration`) while nothing else uses the copy, and runs the backend with the world's `ASTROMETRICS_CONFIG`, `XDG_*` folders and `PATH` (the ssh stand-in). The backend also gets `ASTROMETRICS_OBSERVATORY_SOURCE=simulated`, `ASTROMETRICS_SIMULATOR_ROOT` and the `ASTROMETRICS_REAL_*` folders, so it still finds your real choice file. It does not get `ASTROMETRICS_SIMULATOR_PORTS`, so the backend has no simulator to start or stop.
+4. **Failure.** If the world cannot be built or started, the launcher builds the offline world (no telescope, a refusing `ssh`) in the same folder and runs the backend on it. The reason reaches the backend in `ASTROMETRICS_OBSERVATORY_SOURCE_ERROR`, so `observatory:get_source` reports `SIMULATOR FAILED` and the reason.
+5. **Operator step (decision D11).** When `/api/ready` answers, the launcher calls the backend's RPC methods in this order: `target:create` for the pointed target if the library lacks it, `observatory:record_guider_calibration`, `observatory:record_focus_model` and `observatory:enter_controller_mode` with `shadow_first=true`. Each log line starts with `OPERATOR STEP (D11)`, and the log lists the capabilities that are on and the ones that stay off with their reasons. A failed call is logged and the step goes on. The step runs only for a simulated world. It goes away when the app can command PHD2 and the camera itself.
+6. **Connection guard.** Every 5 seconds the launcher lists the TCP connections of the backend and its children. A connection to an address beyond this computer stops the backend, tears the world down and ends the launcher with code 70. A `--lan` backend with a phone connected would trigger it.
+7. **Ending.** When the backend exits, the launcher stops the stand-ins, removes the library copy, releases the lock and exits. Exit code 75 means "the Observatory source changed": the launcher reads the choice again and starts the next session, after the old world is gone. Any other code ends the launcher with that code. SIGTERM or SIGINT stops the backend first (SIGKILL after 30 s), then tears down, and exits with 0.
+
+Two limits. `observatory:get_source` shows `commands: null` and `running: false` under the launcher, because the backend does not know about the stand-ins; the log has the operator step's result. INDI servers share one local socket (`@/tmp/indiserver`), so a second simulator cannot start while another INDI server runs on the same computer; the launcher then falls back to the offline world.
 
 ## The library copy
 
 - The databases are copied at switch time and at every launch of the app in a simulator source, one thread per database, so the copy takes about as long as the biggest database. Each table is scanned once to fix its paths (the copy time is in `observatory:get_source`, `library_copy`). The report's `bytes` are the final sizes of the copies, measured after the paths are rewritten and the write-ahead log is merged into the file. Paths inside the copies that name your real frames or stacks folder point at the overlay.
 - The overlay's lower layer is your real folder (read only). Every write lands in `<root>/overlay/upper`. A stacks folder inside the library shares the library's overlay; a separate one gets its own.
-- Leaving the mode, or stopping the app, unmounts the overlay and deletes the upper layer and the copies, only inside the simulator folder. A start in Real mode removes what a crash left.
+- Leaving the mode, or stopping the app, unmounts the overlay and deletes the upper layer and the copies, only inside the simulator folder. A start in Real mode removes what a crash left (the backend does it, or the launcher when it is used).
 
 ## Safety
 
@@ -33,4 +53,4 @@ This folder holds a telescope that is "on" without a telescope. The app uses it 
 - If the simulator cannot start, the app runs offline: no telescope, no PHD2, no downloads. It never falls back to the real telescope.
 - Every process starts through `supervisor.py`, so none outlives the app, even after a crash. The harness starts them with the same program.
 
-For how the app switches source, read `backend/observatory_source.py`. For the harness, read `build/tpm/README.md`.
+For how the app switches source, read `backend/observatory_source.py` (the backend's own path) and `launch.py` (the launcher). For the harness, read `build/tpm/README.md`.

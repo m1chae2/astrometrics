@@ -30,9 +30,20 @@ names the source. They are saved through the public
 run unless the wayfinding library it would write to is inside the simulator's
 folder and is not one of the user's real folders. It only reads the library it
 is given.
+
+The launcher (`simulator.launch`) cannot call the library's methods on the
+running backend's own objects, and it must not write to the databases while
+the backend runs. So it works the values out first, with
+`build_simulated_calibrations` in a short-lived process before the backend
+starts (``python -m simulator.simulated_calibration --root R``), and then
+sends them to the running backend with the public RPC methods
+(`rpc_calls`).
 """
 
+import argparse
+import json
 import statistics
+import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -48,7 +59,12 @@ from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCal
 if TYPE_CHECKING:
     from wayfindinglib.api.control.control import ObservatoryControl
 
-__all__ = ["SimulatedCalibrationReport", "record_simulated_calibrations"]
+__all__ = [
+    "SimulatedCalibrationReport",
+    "build_simulated_calibrations",
+    "record_simulated_calibrations",
+    "rpc_calls",
+]
 
 #: The guide simulator's frames are not rotated against the mount axes.
 SIMULATED_CAMERA_ANGLE_DEG = 0.0
@@ -188,15 +204,17 @@ def _guider_from_history(
     return plate_scale, ra_rate, dec_rate, f"{scale_source}, {rate_source}"
 
 
-def record_simulated_calibrations(
+def build_simulated_calibrations(
     control: ObservatoryControl,
     simulator_root: Path,
     protected: Iterable[Path] | None = None,
 ) -> SimulatedCalibrationReport:
-    """Record a guider calibration and focus model for the simulator.
+    """Work out the guider calibration and focus model, and save nothing.
 
     The values follow the user's real telescope (see the module
-    description). The records are saved in the simulator's own library only.
+    description). This only reads the library, so the launcher can call it
+    before the backend starts and send the result to the running backend
+    through its RPC methods (`rpc_calls`).
 
     Parameters
     ----------
@@ -211,7 +229,7 @@ def record_simulated_calibrations(
     Returns
     -------
     report : `SimulatedCalibrationReport`
-        The two records, now saved, and where each came from.
+        The two records, not saved, and where each came from.
 
     Raises
     ------
@@ -274,6 +292,98 @@ def record_simulated_calibrations(
             ),
             **names,
         )
+    return SimulatedCalibrationReport(
+        guider_calibration=calibration,
+        focus_model=focus_model,
+        guider_source=guider_source,
+        focus_source=focus_source,
+    )
+
+
+def rpc_calls(report: SimulatedCalibrationReport) -> list[tuple[str, dict]]:
+    """Turn a report into the backend calls that record it.
+
+    Parameters
+    ----------
+    report : `SimulatedCalibrationReport`
+        From `build_simulated_calibrations`.
+
+    Returns
+    -------
+    calls : `list` [`tuple` [`str`, `dict`]]
+        ``(method, parameters)`` for ``observatory:record_guider_calibration``
+        and then ``observatory:record_focus_model``. Both values are plain
+        JSON. The record time is left out, so each record is dated when
+        it is saved; the real record's date is in its source note.
+    """
+    calibration = report.guider_calibration
+    focus_model = report.focus_model
+    return [
+        (
+            "observatory:record_guider_calibration",
+            {
+                "calibration_id": calibration.id,
+                "camera_id": calibration.camera_id,
+                "telescope_id": calibration.telescope_id,
+                "arcsec_per_pixel": calibration.arcsec_per_pixel,
+                "camera_angle_deg": calibration.camera_angle_deg,
+                "ra_rate_arcsec_per_sec": calibration.ra_rate_arcsec_per_sec,
+                "dec_rate_arcsec_per_sec": calibration.dec_rate_arcsec_per_sec,
+                "source_note": calibration.source_note,
+            },
+        ),
+        (
+            "observatory:record_focus_model",
+            {
+                "focus_model_id": focus_model.id,
+                "camera_id": focus_model.camera_id,
+                "telescope_id": focus_model.telescope_id,
+                "backlash_steps": focus_model.backlash_steps,
+                "approach_direction": focus_model.approach_direction.value,
+                "source_note": focus_model.source_note,
+                "thermal_coefficient_steps_per_c": focus_model.thermal_coefficient_steps_per_c,
+                "filter_offsets": {
+                    offset.filter: offset.offset_steps for offset in focus_model.filter_offsets
+                },
+            },
+        ),
+    ]
+
+
+def record_simulated_calibrations(
+    control: ObservatoryControl,
+    simulator_root: Path,
+    protected: Iterable[Path] | None = None,
+) -> SimulatedCalibrationReport:
+    """Record a guider calibration and focus model for the simulator.
+
+    The values come from `build_simulated_calibrations`. The records are
+    saved in the simulator's own library only, through the public
+    ``record_calibration`` and ``record_focus_model``. The backend's own
+    start-up path uses this; the launcher uses `rpc_calls` instead.
+
+    Parameters
+    ----------
+    control : `ObservatoryControl`
+        The simulator's control. Its wayfinding library must be inside
+        `simulator_root`.
+    simulator_root : `pathlib.Path`
+        The simulator's folder.
+    protected : `~collections.abc.Iterable` [`pathlib.Path`], optional
+        The user's real folders. Default: `real_protected_paths`.
+
+    Returns
+    -------
+    report : `SimulatedCalibrationReport`
+        The two records, now saved, and where each came from.
+
+    Notes
+    -----
+    Raises what `build_simulated_calibrations` raises.
+    """
+    report = build_simulated_calibrations(control, simulator_root, protected)
+    calibration = report.guider_calibration
+    focus_model = report.focus_model
     saved_calibration = control.guiding.record_calibration(
         calibration_id=calibration.id,
         camera_id=calibration.camera_id,
@@ -299,6 +409,55 @@ def record_simulated_calibrations(
     return SimulatedCalibrationReport(
         guider_calibration=saved_calibration,
         focus_model=saved_focus_model,
-        guider_source=guider_source,
-        focus_source=focus_source,
+        guider_source=report.guider_source,
+        focus_source=report.focus_source,
     )
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Print the calls that record the calibrations, for the launcher.
+
+    The launcher runs this in a short-lived process with the world's
+    settings in its environment, before the backend starts, so the library
+    copy is only read while nothing else uses it.
+
+    Parameters
+    ----------
+    argv : `list` [`str`], optional
+        The command line. Default: ``sys.argv[1:]``.
+
+    Returns
+    -------
+    status : `int`
+        0 and one JSON line on standard output: ``{"calls": [[method,
+        params], ...], "guider_source": ..., "focus_source": ...}``. 1 and
+        a message on standard error when the values cannot be worked out.
+    """
+    parser = argparse.ArgumentParser(description="Work out the simulator's calibration records.")
+    parser.add_argument("--root", type=Path, required=True, help="The simulator's folder.")
+    arguments = parser.parse_args(argv)
+    from astrometricslib import get_configuration
+    from astrometricslib.exceptions import ConfigurationError
+    from wayfindinglib import Wayfinder
+
+    wayfinder = Wayfinder(get_configuration())
+    try:
+        report = build_simulated_calibrations(wayfinder.control, arguments.root)
+    except (ConfigurationError, GuardError, OSError, ValueError) as error:
+        sys.stderr.write(f"{type(error).__name__}: {error}\n")
+        return 1
+    finally:
+        wayfinder.control.close()
+    sys.stdout.write(
+        json.dumps({
+            "calls": rpc_calls(report),
+            "guider_source": report.guider_source,
+            "focus_source": report.focus_source,
+        })
+        + "\n"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

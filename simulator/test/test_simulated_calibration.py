@@ -7,6 +7,7 @@ starting policy is like the user's real one: one row, ``MOUNT_CONTROL``
 ``backend/tests/test_observatory_source.py``.
 """
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -15,6 +16,7 @@ import pytest
 from astrometricslib import AppConfiguration
 from astrometricslib.exceptions import ConfigurationError, PermissionDeniedError
 from simulator import record_simulated_calibrations
+from simulator.simulated_calibration import build_simulated_calibrations, rpc_calls
 from wayfindinglib import Wayfinder
 from wayfindinglib.analytics.guide_pulses import GUIDE_RATE_ARCSEC_PER_S
 from wayfindinglib.exceptions import GuardError
@@ -292,3 +294,48 @@ def test_no_active_rig_is_a_configuration_error(tmp_path: Path, monkeypatch: pyt
 
     with pytest.raises(ConfigurationError):
         record_simulated_calibrations(wayfinder.control, tmp_path)
+
+
+def test_building_the_records_saves_nothing_and_the_rpc_calls_take_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The launcher's path: build first, then send the calls as RPCs."""
+    wayfinder = _make_wayfinder(tmp_path, monkeypatch)
+    control = wayfinder.control
+    report = build_simulated_calibrations(control, tmp_path)
+    assert control._context.butler.get_all("guider_calibration") == []
+    assert control._context.butler.get_all("focus_model") == []
+
+    calls = json.loads(json.dumps(rpc_calls(report)))  # plain JSON, as it crosses the process boundary
+    assert [method for method, _ in calls] == [
+        "observatory:record_guider_calibration",
+        "observatory:record_focus_model",
+    ]
+    control.guiding.record_calibration(**calls[0][1])
+    control.imaging.record_focus_model(**calls[1][1])
+    outcome = control.safety.enter_controller_mode(evidence_note="simulator", shadow_first=True)
+
+    assert outcome.rejected == {}
+    assert set(outcome.applied) == set(ObservatoryCapability)
+
+
+def test_the_command_line_prints_the_calls_for_the_launcher(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``python -m simulator.simulated_calibration`` prints one JSON line."""
+    import astrometricslib
+    from simulator import simulated_calibration
+
+    wayfinder = _make_wayfinder(tmp_path, monkeypatch)
+    monkeypatch.setattr(astrometricslib, "get_configuration", lambda: wayfinder.control._context.config)
+    monkeypatch.setattr("wayfindinglib.Wayfinder", lambda config: wayfinder)
+
+    assert simulated_calibration.main(["--root", str(tmp_path)]) == 0
+
+    printed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert [method for method, _ in printed["calls"]] == [
+        "observatory:record_guider_calibration",
+        "observatory:record_focus_model",
+    ]
+    assert printed["guider_source"]
+    assert printed["focus_source"]

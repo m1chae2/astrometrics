@@ -248,7 +248,7 @@ def _found(sources: list[SkySource]) -> SimpleNamespace:
     result : `types.SimpleNamespace`
         A stand-in result with the ``sources`` the service reads.
     """
-    return SimpleNamespace(sources=sources)
+    return SimpleNamespace(sources=sources, stars_truncated=False, failed_catalogs=[])
 
 
 def test_sky_map_sources_pass_the_limits_and_use_the_planetarium_keys() -> None:
@@ -308,9 +308,12 @@ def test_online_catalog_sources_pass_the_limiting_magnitude_to_the_drivers() -> 
     online = _sky_source("Gaia 1").model_copy(update={"is_global": True, "catalog_source": "deep_stars"})
     service.wayfinder.planning.query_sources.return_value = _found([online])
 
-    (source,) = service.get_online_catalog_sources(
+    answer = service.get_online_catalog_sources(
         ra=250.0, dec=36.0, radius=2.0, enabled_drivers=["deep_stars"], limiting_magnitude=14.0
     )
+    (source,) = answer["sources"]
+    assert answer["starsTruncated"] is False
+    assert answer["failedCatalogs"] == []
 
     service.wayfinder.planning.query_sources.assert_called_once_with(
         ra_deg=250.0,
@@ -323,6 +326,36 @@ def test_online_catalog_sources_pass_the_limiting_magnitude_to_the_drivers() -> 
     )
     assert source["catalogSource"] == "deep_stars"
     assert source["global"] is True
+
+
+def test_online_catalog_sources_report_when_a_driver_cut_the_answer_short() -> None:
+    """The map is told when the Gaia cap dropped stars."""
+    service = _service()
+    online = _sky_source("Gaia 1").model_copy(update={"is_global": True, "catalog_source": "deep_stars"})
+    service.wayfinder.planning.query_sources.return_value = SimpleNamespace(
+        sources=[online], stars_truncated=True, failed_catalogs=[]
+    )
+
+    answer = service.get_online_catalog_sources(
+        ra=250.0, dec=36.0, radius=2.0, enabled_drivers=["deep_stars"], limiting_magnitude=14.0
+    )
+
+    assert answer["starsTruncated"] is True
+
+
+def test_online_catalog_sources_name_the_drivers_that_failed() -> None:
+    """The map is told which catalog could not answer."""
+    service = _service()
+    service.wayfinder.planning.query_sources.return_value = SimpleNamespace(
+        sources=[], stars_truncated=False, failed_catalogs=["deep_stars"]
+    )
+
+    answer = service.get_online_catalog_sources(
+        ra=250.0, dec=36.0, radius=2.0, enabled_drivers=["deep_stars"], limiting_magnitude=14.0
+    )
+
+    assert answer["sources"] == []
+    assert answer["failedCatalogs"] == ["deep_stars"]
 
 
 def test_deep_catalog_status_adds_the_install_command() -> None:

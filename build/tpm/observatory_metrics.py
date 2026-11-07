@@ -77,11 +77,17 @@ def library_copies(sandbox: Path, names: list[str]) -> dict[str, Path]:
     Returns
     -------
     copies : `dict` [`str`, `pathlib.Path`]
-        The library path of each name that has a copy.
+        The library path of each name that has a copy. With a library copy
+        (the simulation mode) it is the path in the overlay's upper folder,
+        so a real file of the same name is not counted.
     """
     wanted = set(names)
     found: dict[str, Path] = {}
-    for path in (sandbox / "library" / "frames").rglob("*.fits"):
+    # A library copy shows the real files too, and one can share the new
+    # frame's name (M_13_Light_001.fits). Only the overlay's upper folder
+    # holds what the run wrote.
+    upper = sandbox / "overlay" / "upper"
+    for path in (upper if upper.is_dir() else sandbox / "library" / "frames").rglob("*.fits"):
         if path.name in wanted and path.name not in found:
             found[path.name] = path
     return found

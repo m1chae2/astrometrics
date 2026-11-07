@@ -247,12 +247,55 @@ def test_query_online_catalogs_passes_the_magnitude_limit_to_every_driver() -> N
     driver = MagicMock()
     driver.driver_name = "gaia"
     driver.maximum_query_radius_degrees = 90.0
-    driver.query_region.return_value = []
+    driver.query_region_with_status.return_value = ([], True)
     sky = SimpleNamespace(_catalog_driver_registry={"gaia": driver})
 
-    query_online_catalogs(sky, 250.0, 36.0, 2.0, ["gaia"], magnitude_limit=14.0)
+    tagged, truncated, failed = query_online_catalogs(sky, 250.0, 36.0, 2.0, ["gaia"], magnitude_limit=14.0)
 
-    driver.query_region.assert_called_once_with(250.0, 36.0, 2.0, magnitude_limit=14.0)
+    driver.query_region_with_status.assert_called_once_with(250.0, 36.0, 2.0, magnitude_limit=14.0)
+    assert tagged == []
+    assert truncated is True
+    assert failed == []
+
+
+def test_query_online_catalogs_reports_truncated_when_the_radius_is_clamped() -> None:
+    """A radius cut to the driver's maximum marks the answer as truncated."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from wayfindinglib.tasks.planning_tasks.catalog_operations import query_online_catalogs
+
+    driver = MagicMock()
+    driver.driver_name = "gaia"
+    driver.maximum_query_radius_degrees = 0.5
+    driver.query_region_with_status.return_value = ([], False)
+    sky = SimpleNamespace(_catalog_driver_registry={"gaia": driver})
+
+    _, truncated, _ = query_online_catalogs(sky, 250.0, 36.0, 2.0, ["gaia"])
+
+    assert driver.query_region_with_status.call_args.args[2] == pytest.approx(0.5)
+    assert truncated is True
+
+
+def test_query_online_catalogs_names_the_drivers_that_failed() -> None:
+    """A failing driver is named; the working driver still answers."""
+    from wayfindinglib.tasks.planning_tasks.catalog_operations import query_online_catalogs
+
+    broken = MagicMock()
+    broken.driver_name = "deep_stars"
+    broken.maximum_query_radius_degrees = 90.0
+    broken.query_region_with_status.side_effect = OSError("catalog file unreadable")
+    working = MagicMock()
+    working.driver_name = "hipparcos"
+    working.maximum_query_radius_degrees = 90.0
+    working.query_region_with_status.return_value = ([StellarObject(id="HIP 1", ra=1.0, dec=2.0)], False)
+    sky = SimpleNamespace(_catalog_driver_registry={"deep_stars": broken, "hipparcos": working})
+
+    tagged, truncated, failed = query_online_catalogs(sky, 1.0, 2.0, 0.5, ["deep_stars", "hipparcos"])
+
+    assert failed == ["deep_stars"]
+    assert [(name, star.id) for name, star in tagged] == [("hipparcos", "HIP 1")]
+    assert truncated is False
 
 
 def test_astrometrics_catalog_reads_only_the_stars_near_the_search_circle() -> None:

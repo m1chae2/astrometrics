@@ -18,9 +18,7 @@ import { BACKEND_ROUTES } from '../types/backendTypes';
  * @return The full address, without the session token.
  */
 function backendSocketUrl(path: string): string {
-    let base = getBackendBase();
-    if (!base) base = 'http://localhost:5000';
-    return base.replace(/^http/, 'ws').replace(/\/$/, '') + path;
+    return getBackendBase().replace(/^http/, 'ws').replace(/\/$/, '') + path;
 }
 
 class SocketClient extends EventEmitter {

@@ -146,7 +146,78 @@ def produced_names(tmp_path_factory: pytest.TempPathFactory) -> tuple:
     )
     errors = compile_tpm.collect_errors([], {"consoleErrors": [], "failedRequests": [], "toasts": []}, [], [])
     tpms.extend(compile_tpm.error_entries(errors))
+    tpms.extend(_resource_and_processing_entries())
     return [tpm["name"] for tpm in tpms], tpms
+
+
+def _resource_and_processing_entries() -> list[dict]:
+    """Run the resource, NVIDIA and processing code paths on made-up data.
+
+    Returns
+    -------
+    entries : `list` [`dict`]
+        The TPM entries those code paths make.
+    """
+    group = {
+        "cpu_s": 1.0,
+        "rss_kb": 1024.0,
+        "read_bytes": 0.0,
+        "write_bytes": 0.0,
+        "read_chars": 0.0,
+        "write_chars": 0.0,
+    }
+    samples = [
+        {
+            "t": 0.0,
+            "groups": {"backend": group, "siril": group},
+            "trees": {"backend": {"cpu_s": 0.0, "rss_kb": 1024.0, "peak_sum_kb": 1024.0}},
+        },
+        {
+            "t": 4.0,
+            "groups": {"backend": {**group, "read_bytes": 2.0**20}, "siril": group},
+            "trees": {"backend": {"cpu_s": 2.0, "rss_kb": 2048.0, "peak_sum_kb": 2048.0}},
+        },
+    ]
+    entries = compile_tpm.resource_entries(samples, [{"start": 0.0, "end": 4.0}])
+    entries.extend(
+        compile_tpm.nvidia_entries({
+            "utilization_percent_mean": 5.0,
+            "utilization_percent_peak": 9.0,
+            "memory_mb_peak": 300.0,
+        })
+    )
+    usage = {"cpu_s": 1.0, "peak_rss_mb": 10.0, "read_mb": 1.0, "write_mb": 2.0}
+    stages = [
+        {
+            "key": key,
+            "skipped": False,
+            "seconds": 1.0,
+            "usage": usage,
+            "nvidia": {"util_mean": 1.0, "memory_mb_peak": 2.0},
+        }
+        for key in (
+            "choose_frames",
+            "screen_frames",
+            "prepare",
+            "stacking",
+            "summarize",
+            "quality",
+            "preview",
+        )
+    ]
+    steps = [
+        {"step": step, "seconds": 2.0, "usage": usage}
+        for step in ("photometry", "frame_measurements", "stack_comparison")
+    ]
+    report = {
+        "plan": {"frame_count": 3},
+        "total_seconds": 9.0,
+        "failed_jobs": 0,
+        "stack": {"stages": stages},
+        "analysis": steps,
+    }
+    entries.extend(compile_tpm.processing_entries(report))
+    return entries
 
 
 def test_catalog_entries_are_complete(catalog: dict) -> None:

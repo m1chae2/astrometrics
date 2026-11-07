@@ -63,6 +63,8 @@ export const DepthGoalRow: React.FC<DepthGoalRowProps> = ({ targetId, refreshKey
         queryKey,
         queryFn: () => callBackend('advisory:depth_goal', { target: targetId as string }),
         enabled: isLibraryTarget,
+        // A finished stack or a saved goal changes the key or the cache, so 30 s is safe.
+        staleTime: 30_000,
     });
     const setLevel = useMutation({
         mutationFn: (level: DepthLevelChoice) =>

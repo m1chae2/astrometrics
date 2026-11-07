@@ -133,16 +133,20 @@ def test_catalogs_are_asked_without_reading_the_library(
 
     def fake_online(
         sky: object, ra: float, dec: float, radius: float, drivers: list[str], limit: float | None
-    ) -> list[SkySource]:
+    ) -> tuple[list[SkySource], bool, list[str]]:
         """Record the driver names and the magnitude limit.
 
         Returns
         -------
         sources : `list` [`SkySource`]
             One global star.
+        truncated : `bool`
+            True, as a driver that hit its cap would say.
+        failed_catalogs : `list` [`str`]
+            One failed driver name.
         """
         asked.append((drivers, limit))
-        return [sky_source("Gaia 1", magnitude=12.0)]
+        return [sky_source("Gaia 1", magnitude=12.0)], True, ["hipparcos"]
 
     monkeypatch.setattr(sky_sources, "online_catalog_sources", fake_online)
 
@@ -153,6 +157,8 @@ def test_catalogs_are_asked_without_reading_the_library(
     assert asked == [(["deep_stars"], 14.0)]
     assert library_sources == []
     assert [item.id for item in answer.sources] == ["Gaia 1"]
+    assert answer.stars_truncated is True
+    assert answer.failed_catalogs == ["hipparcos"]
 
 
 @pytest.mark.parametrize(

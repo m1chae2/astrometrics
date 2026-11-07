@@ -106,7 +106,12 @@ def filesystem_type(path: Path) -> str | None:
     return best_kind
 
 
-def walk_files(root: Path, suffixes: tuple[str, ...] | None = None, skip: Iterable[Path] = ()) -> list[Path]:
+def walk_files(
+    root: Path,
+    suffixes: tuple[str, ...] | None = None,
+    skip: Iterable[Path] = (),
+    skip_mounts: bool = False,
+) -> list[Path]:
     """List the regular files below a folder, without following links.
 
     Parameters
@@ -117,6 +122,10 @@ def walk_files(root: Path, suffixes: tuple[str, ...] | None = None, skip: Iterab
         Keep only files whose lower-case name ends with one of these.
     skip : iterable of `pathlib.Path`, optional
         Folders to leave out.
+    skip_mounts : `bool`, optional
+        `True` to leave out every folder that is a mount point below `root`.
+        The simulation mode mounts an overlay of the real library inside the
+        throwaway folder, and a walk must not enter it.
 
     Returns
     -------
@@ -128,7 +137,12 @@ def walk_files(root: Path, suffixes: tuple[str, ...] | None = None, skip: Iterab
     skipped = {str(item) for item in skip}
     found = []
     for folder, names, files in os.walk(root, followlinks=False):
-        names[:] = [name for name in names if os.path.join(folder, name) not in skipped]
+        names[:] = [
+            name
+            for name in names
+            if os.path.join(folder, name) not in skipped
+            and not (skip_mounts and os.path.ismount(os.path.join(folder, name)))
+        ]
         for name in files:
             if suffixes is None or name.lower().endswith(suffixes):
                 path = Path(folder) / name
@@ -216,7 +230,7 @@ def file_groups(
         files are left out. A file appears in one group only.
     """
     skip = [sandbox / folder for folder in SKIPPED_SANDBOX_FOLDERS]
-    sandbox_files = walk_files(sandbox, skip=skip)
+    sandbox_files = walk_files(sandbox, skip=skip, skip_mounts=True)
     catalog_root = sandbox / "xdg_cache" / "astrometrics" / "catalogs"
     build_root = sandbox / "dist"
     database_pattern = re.compile(r"\.(db|sqlite3?)(-wal|-shm)?$")

@@ -47,6 +47,7 @@ interface Window {
       onFullscreenChange: (callback: (isFullscreen: boolean) => void) => () => void;
     };
     backend: {
+      baseUrl?: string;
       ping: (targetUrl?: string) => Promise<{ ok: boolean; status: number; statusText: string }>;
     };
     dialog: {

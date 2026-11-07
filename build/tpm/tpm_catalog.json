@@ -209,6 +209,30 @@
       }
     },
     {
+      "id": "catalog_failures",
+      "name": "catalog_failures",
+      "title": "Star catalog read failures",
+      "why": "Every star catalog the Planetarium asks for should be readable, so the sky map is not missing stars.",
+      "unit": "count",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "Planetarium star-catalog calls (planetarium:get_catalog_sources) in the flow whose reply lists a driver in failedCatalogs. flow.mjs records failedCatalogs for each call; the value is the number of calls with a non-empty list. Not measured if no call carried the field.",
+      "statistic": "count",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. The user sets it. Added 2026-11-06 after a sandboxed bright-star driver returned no stars.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
       "id": "display_switch_p95",
       "name": "display_switch_p95",
       "title": "Display switch, slow cases",
@@ -1621,6 +1645,679 @@
         "date": "2026-11-06",
         "by": "user requirement 2026-11-06",
         "source": "I should be getting no errors in the web browser console, and no error notifications at start-up."
+      }
+    },
+    {
+      "id": "disk_read_mb",
+      "name": "disk_read_mb[{process_group}]",
+      "title": "Disk read per process group",
+      "why": "How much the app makes the disk read, group by group (backend, pool workers, INDI, Siril, GraXpert, denoise tools, Electron, browser).",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "process_group",
+        "process_groups": [
+          "backend",
+          "backend_workers",
+          "indi",
+          "siril",
+          "graxpert",
+          "denoise_tools",
+          "backend_other",
+          "electron",
+          "browser"
+        ]
+      },
+      "method": "Resource sampler (resource_usage.py): reads /proc/<pid>/io, stat and status of the backend and every process under it once a second. Sum of read_bytes (bytes the process caused to be read from storage) over every process of the group, last sample minus first. A process that ends between two samples keeps its last seen value, so the number is a lower bound for very short programs. rchar and wchar (bytes passed to read and write calls, file cache included) are kept in info.resources for information.",
+      "statistic": "sum",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "disk_write_mb",
+      "name": "disk_write_mb[{process_group}]",
+      "title": "Disk written per process group",
+      "why": "How much the app makes the disk write, group by group; it shows what hurts a drive or a slow network share.",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "process_group",
+        "process_groups": [
+          "backend",
+          "backend_workers",
+          "indi",
+          "siril",
+          "graxpert",
+          "denoise_tools",
+          "backend_other",
+          "electron",
+          "browser"
+        ]
+      },
+      "method": "Resource sampler (resource_usage.py): reads /proc/<pid>/io, stat and status of the backend and every process under it once a second. Sum of write_bytes over every process of the group, last sample minus first. Lower bound for very short programs.",
+      "statistic": "sum",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "disk_read_mb_per_lap",
+      "name": "disk_read_mb_per_lap[{process_group}]",
+      "title": "Disk read per lap",
+      "why": "How much the disk reads while the flow visits every display once.",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "process_group",
+        "process_groups": [
+          "backend",
+          "backend_workers",
+          "indi",
+          "siril",
+          "graxpert",
+          "denoise_tools",
+          "backend_other",
+          "electron",
+          "browser"
+        ]
+      },
+      "method": "Resource sampler (resource_usage.py): reads /proc/<pid>/io, stat and status of the backend and every process under it once a second. The read_bytes of the group in the wall-clock window of one lap of the flow (flow-metrics.json lapWindows), median over the laps. Only runs with the display flow.",
+      "statistic": "median",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "disk_write_mb_per_lap",
+      "name": "disk_write_mb_per_lap[{process_group}]",
+      "title": "Disk written per lap",
+      "why": "How much the disk writes while the flow visits every display once.",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "process_group",
+        "process_groups": [
+          "backend",
+          "backend_workers",
+          "indi",
+          "siril",
+          "graxpert",
+          "denoise_tools",
+          "backend_other",
+          "electron",
+          "browser"
+        ]
+      },
+      "method": "Resource sampler (resource_usage.py): reads /proc/<pid>/io, stat and status of the backend and every process under it once a second. The write_bytes of the group in the window of one lap, median over the laps. Only runs with the display flow.",
+      "statistic": "median",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "backend_tree_cpu_time",
+      "name": "backend_tree_cpu_time",
+      "title": "Backend process tree CPU time",
+      "why": "The backend starts many programs; its own CPU time alone hides most of the cost of a stack or an analysis.",
+      "unit": "s",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "Resource sampler. Sum over the live processes of the backend's tree of their own CPU time plus the CPU time of their finished, collected children (the kernel's cutime and cstime, so a child that ends between samples is still counted); last sample minus first.",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "backend_tree_peak_rss",
+      "name": "backend_tree_peak_rss",
+      "title": "Backend process tree peak memory",
+      "why": "The backend plus Siril, GraXpert and the pool workers share the computer's memory with KStars and the browser; only the sum shows an out-of-memory risk.",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "run"
+      },
+      "method": "Resource sampler. The largest sum of resident memory over all processes of the backend's tree in any one sample (once a second). A peak shorter than a second can be missed; info.resources.trees.backend.peak_sum_mb is the sum of every process's own peak (an upper bound).",
+      "statistic": "max",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "nvidia_util_percent_mean",
+      "name": "nvidia_util_percent_mean",
+      "title": "NVIDIA utilization, mean",
+      "why": "How busy the NVIDIA card is during the run; GraXpert and the denoise tools run on it.",
+      "unit": "%",
+      "better": "lower",
+      "scope": {
+        "per": "run",
+        "only_when": "an NVIDIA card is present"
+      },
+      "method": "nvidia-smi utilization.gpu every 2 seconds (setup_fingerprint.py nvidia-sample), mean over the run. Empty when there is no NVIDIA card. Reading nvidia-smi can keep the card awake.",
+      "statistic": "mean",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "informational": true
+    },
+    {
+      "id": "nvidia_util_percent_peak",
+      "name": "nvidia_util_percent_peak",
+      "title": "NVIDIA utilization, peak",
+      "why": "The busiest moment of the NVIDIA card.",
+      "unit": "%",
+      "better": "lower",
+      "scope": {
+        "per": "run",
+        "only_when": "an NVIDIA card is present"
+      },
+      "method": "Same samples, largest value.",
+      "statistic": "max",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "informational": true
+    },
+    {
+      "id": "nvidia_memory_mb_peak",
+      "name": "nvidia_memory_mb_peak",
+      "title": "NVIDIA memory in use, peak",
+      "why": "GPU memory the run needs, to check that the card's memory is enough. The value is what the whole card has in use (the desktop included), not only the run.",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "run",
+        "only_when": "an NVIDIA card is present"
+      },
+      "method": "nvidia-smi memory.used every 2 seconds, largest value.",
+      "statistic": "max",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "informational": true
+    },
+    {
+      "id": "processing_stage_seconds",
+      "name": "processing_stage_seconds[{stage}]",
+      "title": "Stacking stage wall time",
+      "why": "Where the minutes of a stack go; a change that slows one stage shows here before it shows in the total.",
+      "unit": "s",
+      "better": "lower",
+      "scope": {
+        "per": "stage",
+        "scenario": "processing",
+        "stages": [
+          "choose_frames",
+          "screen_frames",
+          "prepare",
+          "stacking",
+          "summarize",
+          "quality",
+          "preview"
+        ]
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. The stack job logs one line 'Stage N of M' at the start of each stage, with a time to the millisecond (processing:job_log_tail). A stage runs to the next stage's line; the last one to the end of the job. A skipped stage gives no TPM.",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "processing_stage_cpu_seconds",
+      "name": "processing_stage_cpu_seconds[{stage}]",
+      "title": "Stacking stage CPU time",
+      "why": "CPU the backend and its programs use in a stage (Siril's threads count).",
+      "unit": "s",
+      "better": "lower",
+      "scope": {
+        "per": "stage",
+        "scenario": "processing",
+        "stages": [
+          "choose_frames",
+          "screen_frames",
+          "prepare",
+          "stacking",
+          "summarize",
+          "quality",
+          "preview"
+        ]
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. CPU time of the backend's process tree inside the stage window, from the 0.5 s samples (resource_usage.py).",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "processing_stage_peak_rss_mb",
+      "name": "processing_stage_peak_rss_mb[{stage}]",
+      "title": "Stacking stage peak memory",
+      "why": "The memory a stage needs, backend and programs together.",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "stage",
+        "scenario": "processing",
+        "stages": [
+          "choose_frames",
+          "screen_frames",
+          "prepare",
+          "stacking",
+          "summarize",
+          "quality",
+          "preview"
+        ]
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. Largest sum of resident memory of the backend's process tree in the stage window (samples every 0.5 s, plus the sample before and after).",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "processing_stage_disk_read_mb",
+      "name": "processing_stage_disk_read_mb[{stage}]",
+      "title": "Stacking stage disk read",
+      "why": "How much a stage reads from storage (frames, calibration frames, catalogs).",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "stage",
+        "scenario": "processing",
+        "stages": [
+          "choose_frames",
+          "screen_frames",
+          "prepare",
+          "stacking",
+          "summarize",
+          "quality",
+          "preview"
+        ]
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. read_bytes of every process of the backend's tree in the stage window.",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "processing_stage_disk_write_mb",
+      "name": "processing_stage_disk_write_mb[{stage}]",
+      "title": "Stacking stage disk written",
+      "why": "How much a stage writes to storage (calibrated frames, the stack, pictures).",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "stage",
+        "scenario": "processing",
+        "stages": [
+          "choose_frames",
+          "screen_frames",
+          "prepare",
+          "stacking",
+          "summarize",
+          "quality",
+          "preview"
+        ]
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. write_bytes of every process of the backend's tree in the stage window.",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "processing_stage_nvidia_util_percent_mean",
+      "name": "processing_stage_nvidia_util_percent_mean[{stage}]",
+      "title": "Stacking stage NVIDIA utilization",
+      "why": "Which stage uses the NVIDIA card (the preview's GraXpert and denoise steps).",
+      "unit": "%",
+      "better": "lower",
+      "scope": {
+        "per": "stage",
+        "scenario": "processing",
+        "stages": [
+          "choose_frames",
+          "screen_frames",
+          "prepare",
+          "stacking",
+          "summarize",
+          "quality",
+          "preview"
+        ]
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. Mean of the nvidia-smi utilization rows (every 2 seconds) inside the stage window. Empty for a stage shorter than the sampling interval, or with no NVIDIA card.",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "informational": true
+    },
+    {
+      "id": "processing_stage_nvidia_memory_mb_peak",
+      "name": "processing_stage_nvidia_memory_mb_peak[{stage}]",
+      "title": "Stacking stage NVIDIA memory",
+      "why": "GPU memory a stage needs. The value is what the whole card has in use, not only the stage.",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "stage",
+        "scenario": "processing",
+        "stages": [
+          "choose_frames",
+          "screen_frames",
+          "prepare",
+          "stacking",
+          "summarize",
+          "quality",
+          "preview"
+        ]
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. Largest nvidia-smi memory.used row inside the stage window.",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "informational": true
+    },
+    {
+      "id": "processing_total_seconds",
+      "name": "processing_total_seconds",
+      "title": "Stack and analysis wall time",
+      "why": "How long the user waits from pressing Process to the end of the analysis for one target.",
+      "unit": "s",
+      "better": "lower",
+      "scope": {
+        "per": "run",
+        "scenario": "processing"
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. Stack job time (from the RPC call to the job's completion time) plus the time of every analysis step.",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "processing_frame_count",
+      "name": "processing_frame_count",
+      "title": "Frames in the stack input",
+      "why": "The input size of the run, so two runs can be told to have the same input. Fixed by the target and the camera.",
+      "unit": "frames",
+      "better": "higher",
+      "scope": {
+        "per": "run",
+        "scenario": "processing"
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. Frames of the chosen camera in target:get_files (spectroscopy frames left out), as sent to processing:stack. The hash of their paths is in info.processing.plan.paths_sha.",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "informational": true
+    },
+    {
+      "id": "processing_failed_jobs",
+      "name": "processing_failed_jobs",
+      "title": "Failed processing jobs",
+      "why": "A stack or analysis job that fails or times out makes every other number of the run meaningless.",
+      "unit": "count",
+      "better": "lower",
+      "scope": {
+        "per": "run",
+        "scenario": "processing"
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. The stack job counts if it did not complete; each analysis step counts if a job it started failed, was cancelled or timed out.",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      },
+      "informational": true
+    },
+    {
+      "id": "analysis_seconds",
+      "name": "analysis_seconds[{step}]",
+      "title": "Analysis step wall time",
+      "why": "How long each analysis the display offers takes after the stack: photometry (Analyze Target), frame measurements and the stack comparison.",
+      "unit": "s",
+      "better": "lower",
+      "scope": {
+        "per": "step",
+        "scenario": "processing",
+        "steps": [
+          "photometry",
+          "frame_measurements",
+          "stack_comparison"
+        ]
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. From the RPC call until every job it started has ended (processing:list_jobs for the target, new jobs only; the quality calls do not return their job's number).",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "analysis_cpu_seconds",
+      "name": "analysis_cpu_seconds[{step}]",
+      "title": "Analysis step CPU time",
+      "why": "CPU an analysis step uses, backend and pool workers together.",
+      "unit": "s",
+      "better": "lower",
+      "scope": {
+        "per": "step",
+        "scenario": "processing",
+        "steps": [
+          "photometry",
+          "frame_measurements",
+          "stack_comparison"
+        ]
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. CPU time of the backend's process tree inside the step window.",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
+      }
+    },
+    {
+      "id": "analysis_peak_rss_mb",
+      "name": "analysis_peak_rss_mb[{step}]",
+      "title": "Analysis step peak memory",
+      "why": "Memory an analysis step needs, pool workers included.",
+      "unit": "MB",
+      "better": "lower",
+      "scope": {
+        "per": "step",
+        "scenario": "processing",
+        "steps": [
+          "photometry",
+          "frame_measurements",
+          "stack_comparison"
+        ]
+      },
+      "method": "processing_run.py: the Image Processing display's own RPC calls (processing:stack, then the analysis steps), polled until the job ends. Largest sum of resident memory of the backend's process tree inside the step window.",
+      "statistic": "last",
+      "threshold": null,
+      "objective": null,
+      "threshold_status": "TBD",
+      "source": "No limit set yet. Needs a baseline run and a user need first.",
+      "reference_setup": {
+        "computer": "laptop, Intel i7-9750H",
+        "power": "on charger, balanced power profile",
+        "screen": "laptop panel only",
+        "graphics": "Intel",
+        "data": "synthetic test library"
       }
     }
   ],

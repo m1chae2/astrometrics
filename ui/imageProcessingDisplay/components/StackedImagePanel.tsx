@@ -63,14 +63,6 @@ export const StackedImagePanel: React.FC<StackedImagePanelProps> = ({
         }
     }, [path, spectralPath, targetId]);
 
-    if (!path && !spectralPath) {
-        return (
-            <div className="stacked-image-panel-container">
-                <DepthGoalRow targetId={targetId} refreshKey={depthGoalRefreshKey} />
-            </div>
-        );
-    }
-
     const formatExposure = (seconds: number) => {
         if (seconds >= 3600) {
             const hours = seconds / 3600;
@@ -127,11 +119,14 @@ export const StackedImagePanel: React.FC<StackedImagePanelProps> = ({
         );
     };
 
+    // One tree for every case. The slots keep their positions, so the depth
+    // goal row is not unmounted and mounted again when a stack path arrives.
+    const hasStack = Boolean(path || spectralPath);
     return (
         <div className="stacked-image-panel-container">
             {renderItem(path, "Final Stack")}
             {renderItem(spectralPath || "", "Spectral Stack")}
-            {effectiveExposure > 0 && (
+            {hasStack && effectiveExposure > 0 && (
                 <div className="stacked-image-panel__total">
                     <span className="stacked-image-panel__label">Total Exposure:</span>
                     <span className="stacked-image-panel__exposure-value">{formatExposure(effectiveExposure)}</span>

@@ -116,7 +116,33 @@ def _worker_main(
         # every request gets back a clear "no session" error.
         logger.exception("INDI worker failed to build its session")
 
-    serve_requests(session, command_queue, result_queue, parent_pid, lifeline)
+    try:
+        serve_requests(session, command_queue, result_queue, parent_pid, lifeline)
+    finally:
+        _close_session_callbacks(session)
+
+
+def _close_session_callbacks(session: Any) -> None:
+    """Make the session ignore late INDI updates before the worker exits.
+
+    The client library can send one last property update from its own
+    thread while the session object is being deleted. By then the object
+    has lost its attributes, so closing the callbacks first keeps that
+    update from running against a half-deleted object.
+
+    Parameters
+    ----------
+    session : `Any`
+        The worker's session, or `None` when it could not be built. A
+        session without ``close_callbacks`` (the simulator) is left alone.
+    """
+    close_callbacks = getattr(session, "close_callbacks", None)
+    if close_callbacks is None:
+        return
+    try:
+        close_callbacks()
+    except Exception:
+        logger.debug("Closing the INDI session's callbacks failed", exc_info=True)
 
 
 class RebuildingSession:

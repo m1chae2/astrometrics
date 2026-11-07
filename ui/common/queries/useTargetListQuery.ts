@@ -13,4 +13,4 @@ import { fetchTargetList } from '../services/targetService';
  * @returns {import('@tanstack/react-query').UseQueryResult} The target list query result.
  */
 export const useTargetListQuery = () =>
-    useQuery({ queryKey: ['targetList'], queryFn: fetchTargetList });
+    useQuery({ queryKey: ['targetList'], queryFn: fetchTargetList, refetchOnWindowFocus: false });

@@ -155,6 +155,14 @@ export const IngestionJobsProvider: React.FC<{ children: React.ReactNode }> = ({
                     emitEvent('terminal:log', `[Ingest] Failed to ensure target exists: ${error}`);
                 }
             }
+            // New frames change the target list, the camera summary and what the
+            // telescope still has to send. Those reads stay fresh for 30 s, so
+            // they are marked stale here. The target list and camera summary are
+            // not read here: forceReload() below makes the mounted list read them
+            // once. A list that is not on screen reads them when it is shown.
+            void queryClient.invalidateQueries({ queryKey: ['targetList'], refetchType: 'none' });
+            void queryClient.invalidateQueries({ queryKey: ['targetCameraIndex'], refetchType: 'none' });
+            void queryClient.invalidateQueries({ queryKey: ['remoteTargets'] });
             const actions = targetActionsRef.current;
             actions.forceReload();
             emitEvent('targetsUpdated');

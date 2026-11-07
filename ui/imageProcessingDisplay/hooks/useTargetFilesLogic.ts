@@ -72,12 +72,21 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
     }, []);
 
 
-    // Forget the stacked image only when the target really changes. When the display is
-    // shown again the files are read again below, and the old values stay until they arrive.
-    useOnValueChange(selectedTarget, () => {
+    // Forget the previous target's files while rendering, before any effect runs.
+    // A reset done in an effect would come one commit late, and in that commit the
+    // old stack path and the old picked file would be asked for again under the
+    // new target (including when a paused display is shown again after a switch).
+    // Showing the display again with the same target changes nothing here.
+    const [filesOwnerTarget, setFilesOwnerTarget] = useState(selectedTarget);
+    if (filesOwnerTarget !== selectedTarget) {
+        setFilesOwnerTarget(selectedTarget);
         setStackedImage(null);
         setStackedSpectralTarget(null);
-    });
+        setSelectedFile(null);
+        setAllFiles([]);
+        setExposureCounts({});
+        setTotalExposure(0);
+    }
 
     useEffect(() => {
         if (!selectedTarget || !shouldFetch) {

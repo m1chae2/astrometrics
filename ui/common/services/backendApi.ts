@@ -36,6 +36,7 @@ import {
 
 import {
     PlanetariumSource,
+    CatalogSourcesResult,
     PlanetariumTarget,
     ObserverLocation,
     ConstellationLineSegment
@@ -184,7 +185,7 @@ export interface ActionRegistry {
     "planetarium:get_targets": { payload: Record<string, never>; response: PlanetariumTarget[] };
     "planetarium:get_visibility": { payload: { objects: Array<{ id: string; type?: string }>; time?: string; end?: string; include?: string[] }; response: ObjectVisibility[] };
     "planetarium:get_observer_location": { payload: Record<string, never>; response: ObserverLocation };
-    "planetarium:get_catalog_sources": { payload: { ra: number; dec: number; radius: number; enabled_drivers: string[]; limiting_magnitude?: number }; response: PlanetariumSource[] };
+    "planetarium:get_catalog_sources": { payload: { ra: number; dec: number; radius: number; enabled_drivers: string[]; limiting_magnitude?: number }; response: CatalogSourcesResult };
     "planetarium:get_deep_catalog_status": { payload: Record<string, never>; response: DeepCatalogStatus };
     "planetarium:list_catalog_drivers": { payload: Record<string, never>; response: Array<{ driver_name: string; display_name: string; maximum_query_radius_degrees: number }> };
     "planetarium:get_constellation_lines": { payload: Record<string, never>; response: ConstellationLineSegment[] };
@@ -429,9 +430,21 @@ export type ActionRegistryMatchesBackend = MustBeTrue<SameKeys<keyof ActionRegis
 
 /**
  * Resolves the backend base URL according to defined priority rules.
+ *
+ * Priority: the address Electron's main process gave the preload bridge (it knows the real port),
+ * then the `backendUrl` override in local storage, then the `BACKEND_URL` and `VITE_BACKEND_URL`
+ * variables, then the default port.
  * @return The base URL without a trailing slash.
  */
 export function getBackendBase(): string {
+    // The address Electron's main process gave the preload script (from ASTROMETRICS_PORT).
+    try {
+        const electronBase = typeof window !== 'undefined' ? window.astrometrics?.backend?.baseUrl : '';
+        if (electronBase) return electronBase.replace(/\/$/, '');
+    } catch {
+        // Ignore errors reading the bridge.
+    }
+
     try {
         const stored =
             typeof window !== 'undefined'
@@ -462,6 +475,7 @@ export function getBackendBase(): string {
         return String(import.meta.env.VITE_BACKEND_URL).replace(/\/$/, '');
     }
 
+    // Plain browser or dev server with no Electron bridge: the backend's default port.
     return 'http://127.0.0.1:5000';
 }
 
@@ -690,6 +704,7 @@ async function executeRpcAttempt<A extends keyof ActionRegistry>(
             });
         }
 
+        backendReadySeen = true;
         if (body.result && body.result.status === 'success') {
             return body.result.data;
         }
@@ -722,6 +737,61 @@ export function setBackendRestarting(restarting: boolean): void {
     backendRestarting = restarting;
 }
 
+/** Longest the readiness gate waits for the backend to finish starting, in milliseconds. */
+export const BACKEND_READY_TIMEOUT_MS = 60000;
+
+/** Pause between readiness checks while the backend is still starting, in milliseconds. */
+const BACKEND_READY_POLL_MS = 500;
+
+/** The one readiness wait that every call made during start-up shares. */
+let backendReadyPromise: Promise<void> | null = null;
+
+/** True once the backend has answered `/api/ready` with success during this page load. */
+let backendReadySeen = false;
+
+/**
+ * Forgets that the backend was ready, so the next call waits again.
+ * Used by tests and after a deliberate backend restart.
+ */
+export function resetBackendReadiness(): void {
+    backendReadyPromise = null;
+    backendReadySeen = false;
+}
+
+/**
+ * Waits until the backend says it is ready (`/api/ready`), or until a timeout.
+ *
+ * Every call made while the app starts shares one wait, so nothing is sent
+ * before the backend can answer. It never rejects: after the timeout the call
+ * goes ahead and fails (or succeeds) on its own. Only the Electron app uses the
+ * gate, because only there does the window open before the backend is up.
+ *
+ * @returns {Promise<void>} Resolves when the backend is ready or the wait times out.
+ */
+export function waitForBackendReady(): Promise<void> {
+    if (backendReadySeen || typeof window === 'undefined' || !window.astrometrics?.backend?.baseUrl) {
+        return Promise.resolve();
+    }
+    if (!backendReadyPromise) {
+        backendReadyPromise = (async () => {
+            const deadline = Date.now() + BACKEND_READY_TIMEOUT_MS;
+            while (Date.now() < deadline) {
+                try {
+                    const response = await fetch(getBackendUrl(BACKEND_ROUTES.ready));
+                    if (response.ok) {
+                        backendReadySeen = true;
+                        return;
+                    }
+                } catch {
+                    // The backend is not listening yet; try again below.
+                }
+                await new Promise((resolve) => setTimeout(resolve, BACKEND_READY_POLL_MS));
+            }
+        })();
+    }
+    return backendReadyPromise;
+}
+
 /**
  * Handles retries with backoff for idempotent RPC calls.
  *
@@ -739,6 +809,8 @@ async function callBackendInternal<A extends keyof ActionRegistry>(
     const defaultTimeout = HEAVY_ACTIONS.has(action) ? EXTENDED_RPC_TIMEOUT_MS : DEFAULT_RPC_TIMEOUT_MS;
     const timeoutMs = options?.timeoutMs ?? defaultTimeout;
     const maxRetries = options?.maxRetries ?? (isIdempotent ? 1 : 0);
+
+    await waitForBackendReady();
 
     let attempt = 0;
     while (true) {
@@ -759,6 +831,8 @@ async function callBackendInternal<A extends keyof ActionRegistry>(
             // read that times out or cannot connect is a status (the connection chip shows it),
             // not an error. Only the throw below tells the caller.
             const isNetworkFailure = error?.name === 'TypeError' || /failed to fetch|networkerror|network request failed/i.test(String(error?.message ?? ''));
+            // A read that cannot connect is quiet (above). A user-requested action that fails still shows its error,
+            // even before the backend has first answered.
             const quiet = options?.silent || backendRestarting || (isIdempotent && (error?.didTimeout || isNetworkFailure));
 
             if (error?.didTimeout) {

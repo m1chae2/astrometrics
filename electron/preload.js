@@ -21,6 +21,17 @@ const { contextBridge, ipcRenderer } = require('electron');
 const hasCustomTitleBar = process.argv.includes('--astrometrics-frameless=true');
 
 /**
+ * The backend's base URL, built from the port the main process passed in
+ * `--astrometrics-backend-port` (taken from `ASTROMETRICS_PORT`). The renderer
+ * uses this one address for every backend call, so a backend on any port works.
+ * Empty when the flag is missing.
+ */
+const backendPortArgument = process.argv.find((argument) => argument.startsWith('--astrometrics-backend-port='));
+const backendBaseUrl = backendPortArgument
+	? `http://127.0.0.1:${backendPortArgument.split('=')[1]}`
+	: '';
+
+/**
  * Public API exposed to the renderer at window.astrometrics.
  * Provides access to restricted main-process functionality.
  */
@@ -297,6 +308,9 @@ const api = {
 		}
 	},
 	backend: {
+		/** The backend's base URL, or '' when the main process gave no port. */
+		baseUrl: backendBaseUrl,
+
 		/**
 		 * Get the session token required by the backend's WebSocket endpoints.
 		 * Supplied by the main process, which minted it and passed it to the

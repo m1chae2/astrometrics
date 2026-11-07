@@ -102,12 +102,12 @@ export const useTargetListLogic = (
     // Callers change reloadKey (e.g. after a new ingestion) to force a
     // refresh. Force a refetch on every change except the initial mount,
     // since the queries already fetch automatically on first use.
-    const isFirstReloadKeyRender = useRef(true);
+    // The effect also re-runs when a paused display is shown again, so it
+    // compares against the last key it saw and refetches only on a real change.
+    const lastReloadKeyRef = useRef(reloadKey);
     useEffect(() => {
-        if (isFirstReloadKeyRender.current) {
-            isFirstReloadKeyRender.current = false;
-            return;
-        }
+        if (lastReloadKeyRef.current === reloadKey) return;
+        lastReloadKeyRef.current = reloadKey;
         targetListQuery.refetch();
         astronomyListQuery.refetch();
         cameraIndexQuery.refetch();

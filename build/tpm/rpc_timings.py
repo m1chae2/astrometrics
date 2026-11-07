@@ -167,14 +167,16 @@ def summarize_command(arguments: argparse.Namespace) -> int:
     Parameters
     ----------
     arguments : `argparse.Namespace`
-        ``flow``, ``samples``, ``log`` and ``out``.
+        ``flow`` (optional: a processing run has none), ``samples``, ``log``
+        and ``out``.
 
     Returns
     -------
     status : `int`
         0 on success.
     """
-    flow = json.loads(Path(arguments.flow).read_text())
+    # A processing run has no browser flow, so no page round trips.
+    flow = json.loads(Path(arguments.flow).read_text()) if arguments.flow else {"rpc": []}
     by_method: dict[str, list[float]] = defaultdict(list)
     for call in flow["rpc"]:
         by_method[call["method"]].append(call["ms"])
@@ -229,7 +231,7 @@ def main() -> int:
     sample.add_argument("--port", type=int, required=True)
     sample.add_argument("--out", required=True)
     summarize = commands.add_parser("summarize")
-    summarize.add_argument("--flow", required=True)
+    summarize.add_argument("--flow")
     summarize.add_argument("--samples", required=True)
     summarize.add_argument("--log", required=True)
     summarize.add_argument("--out", required=True)

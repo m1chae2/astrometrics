@@ -36,7 +36,7 @@ Usage::
 
     .venv/bin/python build/tpm/compile_tpm.py <results folder> \
         [--electron metrics.jsonl] [--update-baseline] \
-        [--mode synthetic|real-snapshot] \
+        [--mode simulation|synthetic|real-snapshot] \
         [--observatory-profile offline|simulated] \
         [--observatory-metrics observatory-metrics.json] \
         [--data-size data-size.json] [--overlay-writes overlay-writes.json] \
@@ -51,10 +51,12 @@ baselines, and the cold-start TPMs (``cold_only`` in the catalog) are held to
 their limits. ``--after-reboot`` and ``--boot-age`` record how long the
 computer had been up. Every TPM carries ``cold`` (true or false).
 
-Only a synthetic run whose setup key has a baseline is compared. With another
-key the statuses are ``unmatched`` ("different setup, not compared"). A
-real-snapshot run is a trend, not a gate: its TPMs get the status ``trend``
-and it can never update the baseline. ``--migrate-legacy-baseline`` files an
+Only a simulation run (the default: a read-only copy of the real library and
+the simulated observatory) whose setup key has a baseline is compared. With
+another key the statuses are ``unmatched`` ("different setup, not compared").
+A synthetic run (the made-up library, for quick, headless and CI checks) and a
+real-snapshot run are a trend, not a gate: their TPMs get the status ``trend``
+and they can never update the baseline. ``--migrate-legacy-baseline`` files an
 old single baseline (no ``setups`` block) under this run's key, once.
 ``scaling.py`` reads the ``tpm.json`` files to plot the trend.
 """
@@ -68,9 +70,12 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 
+from resource_usage import BACKEND_GROUP, read_samples, summarize_run, window_usage
 from setup_fingerprint import classify_renderer, make_setup_key
 
 BASELINE_PATH = Path(__file__).with_name("tpm_baseline.json")
+#: The one library mode that is compared with a baseline.
+SIMULATION_MODE = "simulation"
 CATALOG_PATH = Path(__file__).with_name("tpm_catalog.json")
 #: Past this multiple of the baseline (plus the slack) a value is on watch.
 DEFAULT_WATCH_RATIO = 1.25
@@ -118,6 +123,38 @@ def percentile(values: list[float], fraction: float) -> float:
     position = (len(ordered) - 1) * fraction
     lower, upper = int(position), min(int(position) + 1, len(ordered) - 1)
     return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
+
+
+def catalog_request_summary(flow: dict[str, object]) -> dict[str, object]:
+    """Say what became of the Planetarium catalog requests.
+
+    A catalog request can leave no reply. The page cancels it when its
+    view changes, or sends no request because its cache holds the answer.
+    Then ``catalog_failures`` has nothing to measure, and this says so.
+
+    Parameters
+    ----------
+    flow : `dict`
+        The parsed ``flow-metrics.json``.
+
+    Returns
+    -------
+    summary : `dict`
+        Per method, the number of requests by outcome (``ok``, ``aborted``,
+        ``failed``, ``http-error``), and ``catalog_failures_measured``:
+        whether a ``planetarium:get_catalog_sources`` reply was read.
+    """
+    calls = flow.get("planetariumSources") or []
+    by_method: dict[str, dict[str, int]] = {}
+    for call in calls:
+        outcome = call.get("outcome") or "ok"
+        counts = by_method.setdefault(call["method"], {})
+        counts[outcome] = counts.get(outcome, 0) + 1
+    answered = any(
+        call["method"] == "planetarium:get_catalog_sources" and call.get("failedCatalogs") is not None
+        for call in calls
+    )
+    return {"by_method": by_method, "catalog_failures_measured": answered}
 
 
 def entry(name: str, unit: str, values: list[float], how: str = "median") -> dict[str, object]:
@@ -493,6 +530,119 @@ def observatory_entries(metrics: dict) -> list[dict[str, object]]:
     return entries
 
 
+def resource_entries(samples: list[dict], lap_windows: list[dict]) -> list[dict[str, object]]:
+    """Make the disk and process-tree TPMs from the resource sampler's file.
+
+    Parameters
+    ----------
+    samples : `list` [`dict`]
+        The samples from ``resource_usage.py sample`` (may be empty).
+    lap_windows : `list` [`dict`]
+        ``start`` and ``end`` (seconds since the epoch) of each lap of the
+        flow, from ``flow-metrics.json``.
+
+    Returns
+    -------
+    entries : `list` [`dict`]
+        ``disk_read_mb[<group>]`` and ``disk_write_mb[<group>]`` (storage
+        bytes of every process in a group over the run), the same per lap
+        (``..._per_lap``, the median over the laps), and the backend tree's
+        ``backend_tree_cpu_time`` and ``backend_tree_peak_rss``. The groups
+        are the ones that had a process (see ``resource_usage.py``).
+    """
+    summary = summarize_run(samples)
+    entries = []
+    for group, totals in summary["groups"].items():
+        entries.append(entry(f"disk_read_mb[{group}]", "MB", [totals["read_mb"]]))
+        entries.append(entry(f"disk_write_mb[{group}]", "MB", [totals["write_mb"]]))
+        reads, writes = [], []
+        for window in lap_windows:
+            usage = window_usage(samples, window["start"], window["end"], BACKEND_GROUP)["groups"].get(group)
+            if usage is not None:
+                reads.append(usage["read_mb"])
+                writes.append(usage["write_mb"])
+        entries.append(entry(f"disk_read_mb_per_lap[{group}]", "MB", reads))
+        entries.append(entry(f"disk_write_mb_per_lap[{group}]", "MB", writes))
+    backend_tree = summary["trees"].get(BACKEND_GROUP, {})
+    entries.append(entry("backend_tree_cpu_time", "s", [backend_tree.get("cpu_s")]))
+    entries.append(entry("backend_tree_peak_rss", "MB", [backend_tree.get("peak_rss_mb")]))
+    return entries
+
+
+def nvidia_entries(summary: dict | None) -> list[dict[str, object]]:
+    """Make the NVIDIA TPMs from the sampler's summary.
+
+    Parameters
+    ----------
+    summary : `dict` or `None`
+        The result of `nvidia_summary`, or `None` when there is no NVIDIA
+        card or no sample.
+
+    Returns
+    -------
+    entries : `list` [`dict`]
+        ``nvidia_util_percent_mean``, ``nvidia_util_percent_peak`` and
+        ``nvidia_memory_mb_peak``; with no card the values are empty. The
+        memory is what the whole card has in use (the desktop included),
+        not only the run.
+    """
+    summary = summary or {}
+    return [
+        entry("nvidia_util_percent_mean", "%", [summary.get("utilization_percent_mean")]),
+        entry("nvidia_util_percent_peak", "%", [summary.get("utilization_percent_peak")]),
+        entry("nvidia_memory_mb_peak", "MB", [summary.get("memory_mb_peak")]),
+    ]
+
+
+def processing_entries(report: dict) -> list[dict[str, object]]:
+    """Make the TPMs of a processing run (stack job and analysis).
+
+    Parameters
+    ----------
+    report : `dict`
+        The contents of ``processing-metrics.json`` (from
+        ``processing_run.py``).
+
+    Returns
+    -------
+    entries : `list` [`dict`]
+        ``processing_total_seconds`` (the stack job plus the analysis steps),
+        ``processing_frame_count``, ``processing_failed_jobs``; for each stage
+        that ran (not skipped) ``processing_stage_seconds[<stage>]`` and its
+        CPU seconds, peak memory, disk read and write and NVIDIA utilization
+        and memory; for each analysis step ``analysis_seconds[<step>]``,
+        ``analysis_cpu_seconds[<step>]`` and ``analysis_peak_rss_mb[<step>]``.
+        A NVIDIA value is empty for a stage shorter than the sampler's 2
+        seconds.
+    """
+    entries = [
+        entry("processing_total_seconds", "s", [report.get("total_seconds")]),
+        entry("processing_frame_count", "frames", [report["plan"]["frame_count"]], "last"),
+        entry("processing_failed_jobs", "count", [report.get("failed_jobs")], "last"),
+    ]
+    for stage in report["stack"].get("stages", []):
+        if stage.get("skipped"):
+            continue
+        key, usage, nvidia = stage["key"], stage["usage"], stage.get("nvidia") or {}
+        entries.extend([
+            entry(f"processing_stage_seconds[{key}]", "s", [stage["seconds"]]),
+            entry(f"processing_stage_cpu_seconds[{key}]", "s", [usage["cpu_s"]]),
+            entry(f"processing_stage_peak_rss_mb[{key}]", "MB", [usage["peak_rss_mb"]]),
+            entry(f"processing_stage_disk_read_mb[{key}]", "MB", [usage["read_mb"]]),
+            entry(f"processing_stage_disk_write_mb[{key}]", "MB", [usage["write_mb"]]),
+            entry(f"processing_stage_nvidia_util_percent_mean[{key}]", "%", [nvidia.get("util_mean")]),
+            entry(f"processing_stage_nvidia_memory_mb_peak[{key}]", "MB", [nvidia.get("memory_mb_peak")]),
+        ])
+    for step in report.get("analysis", []):
+        name = step["step"]
+        entries.extend([
+            entry(f"analysis_seconds[{name}]", "s", [step["seconds"]]),
+            entry(f"analysis_cpu_seconds[{name}]", "s", [step["usage"]["cpu_s"]]),
+            entry(f"analysis_peak_rss_mb[{name}]", "MB", [step["usage"]["peak_rss_mb"]]),
+        ])
+    return entries
+
+
 def build_tpms(flow: dict, backend: dict, electron_path: Path | None) -> list[dict[str, object]]:
     """Reduce all the raw measurements to the TPM list.
 
@@ -571,6 +721,11 @@ def build_tpms(flow: dict, backend: dict, electron_path: Path | None) -> list[di
     tpms.append(entry("request_count_load", "requests", [steps[0]["requestCount"]]))
 
     tpms.append(entry("planetarium_fps_panning", "fps", [row["fps"] for row in flow["planetarium"]]))
+    # Catalog calls whose reply lists a driver it could not read.
+    calls = flow.get("planetariumSources") or []
+    source_calls = [call for call in calls if call.get("failedCatalogs") is not None]
+    failing_calls = sum(1 for call in source_calls if call["failedCatalogs"])
+    tpms.append(entry("catalog_failures", "count", [failing_calls] if source_calls else [], "last"))
     tpms.extend(profile_entries(flow))
 
     heaps = [row["bytes"] / 1048576.0 for row in flow["heapAfterLap"]]
@@ -971,7 +1126,22 @@ def print_setup(setup: dict) -> None:
     print(f"  GPUs: {'; '.join(setup.get('gpus_present') or []) or 'unknown'}")
     print(f"  PRIME: {setup.get('prime_mode')}   session: {setup.get('session_type')}")
     print(f"  GPU requested: {setup.get('gpu_requested')}   used: {setup['gpu_used']}")
-    print(f"  WebGL renderer: {setup.get('gpu_renderer')}")
+    if setup.get("scenario") != "processing":
+        print(f"  WebGL renderer: {setup.get('gpu_renderer')}")
+    for tool, version in (setup.get("tool_versions") or {}).items():
+        print(f"  tool {tool}: {version}")
+    library = setup.get("library")
+    if library:
+        megabytes = sum((library.get("database_bytes") or {}).values()) / 1024**2
+        print(
+            f"  library ({library.get('library_mode')}): {library.get('targets')} targets,"
+            f" {library.get('measured_frames')} measured frames, {megabytes:.0f} MB of databases,"
+            f" copied in {library.get('copy_seconds')} s"
+        )
+    deep = setup.get("deep_catalog")
+    if deep:
+        kilobytes = deep.get("size_bytes", 0) / 1024
+        print(f"  deep-star catalog: {deep.get('star_count')} stars, {kilobytes:.0f} KB")
     nvidia = setup.get("nvidia")
     if nvidia:
         print(
@@ -998,8 +1168,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("results")
     parser.add_argument("--electron")
+    parser.add_argument(
+        "--flow-target",
+        choices=("electron", "electron-headless", "brave", "chrome"),
+        help="what the display flow ran in; it is part of the setup key (default: an older run, no target)",
+    )
     parser.add_argument("--update-baseline", action="store_true")
-    parser.add_argument("--mode", default="synthetic", choices=("synthetic", "real-snapshot"))
+    parser.add_argument(
+        "--mode", default=SIMULATION_MODE, choices=(SIMULATION_MODE, "synthetic", "real-snapshot")
+    )
     parser.add_argument("--observatory-profile", default="offline")
     parser.add_argument("--observatory-metrics")
     parser.add_argument("--data-size")
@@ -1011,31 +1188,63 @@ def main() -> int:
     parser.add_argument("--cold-report")
     parser.add_argument("--after-reboot", action="store_true")
     parser.add_argument("--boot-age", type=float)
+    parser.add_argument("--scenario", default="flow", choices=("flow", "processing"))
+    parser.add_argument("--processing-metrics")
     arguments = parser.parse_args()
-    if arguments.update_baseline and arguments.mode != "synthetic":
-        print("ERROR: only a synthetic run can update the baseline.", file=sys.stderr)
+    if arguments.update_baseline and arguments.mode != SIMULATION_MODE:
+        print("ERROR: only a simulation run can update the baseline.", file=sys.stderr)
         return 2
     results = Path(arguments.results)
-    flow = json.loads((results / "flow-metrics.json").read_text())
+    processing = arguments.scenario == "processing"
     electron_flow_file = results / "electron-flow" / "flow-metrics.json"
-    profile_flow = json.loads(electron_flow_file.read_text()) if electron_flow_file.exists() else flow
+    # The flow ran in Electron (the default target), or an extra Electron lap
+    # followed a browser flow.
+    profile_is_electron = (arguments.flow_target or "").startswith("electron") or electron_flow_file.exists()
     backend = json.loads((results / "backend-metrics.json").read_text())
-    tpms = build_tpms(flow, backend, Path(arguments.electron) if arguments.electron else None)
-    # The Planetarium profile comes from the Electron window when it ran.
-    tpms = [
-        tpm for tpm in tpms if tpm["name"] not in {item["name"] for item in profile_entries(profile_flow)}
+    if processing:
+        # No browser flow: the TPMs come from the backend, the resource samples
+        # and the processing record.
+        flow = {"laps": 0, "gpu": None}
+        profile_flow = flow
+        processing_report = json.loads(Path(arguments.processing_metrics).read_text())
+        tpms = [
+            entry("backend_peak_rss", "MB", [backend["backend_peak_rss_mb"]]),
+            entry("backend_cpu_time", "s", [backend["backend_cpu_seconds"]]),
+            *processing_entries(processing_report),
+        ]
+    else:
+        flow = json.loads((results / "flow-metrics.json").read_text())
+        profile_flow = json.loads(electron_flow_file.read_text()) if electron_flow_file.exists() else flow
+        tpms = build_tpms(flow, backend, Path(arguments.electron) if arguments.electron else None)
+        # The Planetarium profile comes from the Electron window when it ran.
+        tpms = [
+            tpm for tpm in tpms if tpm["name"] not in {item["name"] for item in profile_entries(profile_flow)}
+        ]
+        tpms.extend(profile_entries(profile_flow))
+        processing_report = None
+    # CPU, memory and disk use of the backend's process tree, and the NVIDIA
+    # card (every run).
+    lap_windows = [
+        window
+        for source in (flow, profile_flow if profile_flow is not flow else {})
+        for window in source.get("lapWindows", [])
     ]
-    tpms.extend(profile_entries(profile_flow))
+    resource_samples = read_samples(results / "resource-samples.jsonl")
+    tpms.extend(resource_entries(resource_samples, lap_windows))
+    nvidia = nvidia_summary(results / "nvidia-samples.jsonl")
+    tpms.extend(nvidia_entries(nvidia))
     electron_samples = Path(arguments.electron) if arguments.electron else None
     startup_file = results / "electron-startup-errors.json"
     errors = collect_errors(
-        [flow, *([profile_flow] if electron_flow_file.exists() else [])],
+        [] if processing else [flow, *([profile_flow] if electron_flow_file.exists() else [])],
         json.loads(startup_file.read_text()) if startup_file.exists() else None,
         notification_records(electron_samples),
         backend_error_lines(results / "backend.log"),
     )
     tpms = [tpm for tpm in tpms if tpm["name"] not in {item["name"] for item in error_entries(errors)}]
-    tpms.extend(error_entries(errors))
+    tpms.extend(
+        item for item in error_entries(errors) if not processing or item["name"] == "backend_error_log_lines"
+    )
     observatory_metrics = (
         json.loads(Path(arguments.observatory_metrics).read_text()) if arguments.observatory_metrics else None
     )
@@ -1052,9 +1261,17 @@ def main() -> int:
     context = run_facts(results, observatory_metrics)
     # The card that drew the profiled page (Electron if it ran).
     renderer = (profile_flow.get("gpu") or {}).get("renderer")
-    gpu_used = classify_renderer(renderer)
+    # A processing run has no page: the graphics card of the key is "none".
+    gpu_used = "none" if processing else classify_renderer(renderer)
     setup_key = make_setup_key(
-        fingerprint, gpu_used, arguments.mode, arguments.observatory_profile, arguments.cold
+        fingerprint,
+        gpu_used,
+        arguments.mode,
+        arguments.observatory_profile,
+        arguments.cold,
+        arguments.scenario,
+        fingerprint.get("tool_versions"),
+        arguments.flow_target,
     )
     baseline = load_baseline()
     if arguments.migrate_legacy_baseline and baseline.get("setups") is None and baseline.get("tpms"):
@@ -1063,9 +1280,9 @@ def main() -> int:
         print(f"Old baseline filed under setup key {setup_key} in {BASELINE_PATH}")
     setup_baseline, match = baseline_for_key(baseline, setup_key, arguments.observatory_profile)
     limits = (setup_baseline or {}).get("tpms", {})
-    comparable = arguments.mode == "synthetic" and setup_baseline is not None
+    comparable = arguments.mode == SIMULATION_MODE and setup_baseline is not None
     for tpm in tpms:
-        if arguments.mode != "synthetic":
+        if arguments.mode != SIMULATION_MODE:
             tpm["status"] = "trend"
         elif not comparable:
             tpm["status"] = "unmatched"
@@ -1081,15 +1298,17 @@ def main() -> int:
         "gpu_requested": arguments.gpu_requested,
         "gpu_used": gpu_used,
         "gpu_renderer": renderer,
-        "gpu_source": "electron window WebGL" if electron_flow_file.exists() else "Chrome flow WebGL",
+        "gpu_source": "electron window WebGL" if profile_is_electron else "Chrome flow WebGL",
+        "flow_target": arguments.flow_target,
         "mode": arguments.mode,
         "observatory_profile": arguments.observatory_profile,
         "cold": arguments.cold,
         "cold_source": cold_facts["cold_source"],
         "boot_age_seconds": cold_facts["boot_age_seconds"],
         "setup_key": setup_key,
-        "baseline_match": match if arguments.mode == "synthetic" else "trend",
-        "nvidia": nvidia_summary(results / "nvidia-samples.jsonl"),
+        "baseline_match": match if arguments.mode == SIMULATION_MODE else "trend",
+        "nvidia": nvidia,
+        "scenario": arguments.scenario,
     }
     info = {
         "setup": setup_info,
@@ -1097,7 +1316,8 @@ def main() -> int:
         "overlay_writes": json.loads(Path(arguments.overlay_writes).read_text())
         if arguments.overlay_writes
         else None,
-        "profile_source": "electron" if electron_flow_file.exists() else "chrome",
+        "profile_source": "electron" if profile_is_electron else "chrome",
+        "catalog_requests": catalog_request_summary(flow),
         # The card the profiled page really drew on: the Electron window's
         # WebGL when Electron ran, else the Chrome flow's. This (not the main
         # process's start-up report) is where the setup key's gpu field
@@ -1111,6 +1331,8 @@ def main() -> int:
             "source": setup_info["gpu_source"],
         },
         "errors": errors,
+        "resources": summarize_run(resource_samples),
+        "processing": processing_report,
         "cold_cache": cold_report,
         "webgl_electron_window": profile_flow.get("gpu"),
         "webgl": flow.get("gpu"),
@@ -1128,6 +1350,7 @@ def main() -> int:
                 "cold": arguments.cold,
                 "cold_source": cold_facts["cold_source"],
                 "setup_key": setup_key,
+                "scenario": arguments.scenario,
                 "laps": flow["laps"],
                 "info": info,
                 "tpms": tpms,
@@ -1144,7 +1367,9 @@ def main() -> int:
         f"boot age: {cold_facts['boot_age_seconds']} s"
     )
     print_setup(setup_info)
-    print(f"WebGL renderer (Chrome flow): {webgl.get('renderer')} ({verdict})")
+    if not processing:
+        flow_label = "Electron window" if profile_is_electron else "Chrome flow"
+        print(f"WebGL renderer ({flow_label}): {webgl.get('renderer')} ({verdict})")
     window = info["webgl_electron_window"] if electron_flow_file.exists() else None
     if window:
         window_verdict = {True: "hardware", False: "SOFTWARE", None: "unknown"}[window.get("hardware")]
@@ -1191,7 +1416,7 @@ def main() -> int:
         baseline["setups"][setup_key] = {
             "created": datetime.now(UTC).isoformat(),
             "observatory_profile": arguments.observatory_profile,
-            "setup": {**fingerprint, "gpu_used": gpu_used},
+            "setup": {**fingerprint, "gpu_used": gpu_used, "flow_target": arguments.flow_target},
             "status": "Design estimate: one run on one setup.",
             "tpms": new_limits,
         }

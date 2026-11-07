@@ -32,6 +32,7 @@ Usage (for the harness)::
 import argparse
 import json
 import logging
+import math
 import re
 import shutil
 import sqlite3
@@ -43,6 +44,7 @@ from pathlib import Path
 from typing import Any
 
 from astrometricslib.drivers import real_folders
+from astrometricslib.exceptions import AstrometricsError
 from wayfindinglib.exceptions import SimulationUnavailableError
 
 logger = logging.getLogger(__name__)
@@ -543,6 +545,69 @@ def prepare_library_copy(
     report["stacks_path"] = str(plan["stacks_path"])
     (root / REPORT_FILE_NAME).write_text(json.dumps(report, indent=2), encoding="utf-8")
     return report
+
+
+def nearest_target_name(
+    root: Path, ra_hours: float, dec_degrees: float, radius_degrees: float = 1.0
+) -> str | None:
+    """Give the id of the target the app takes a mount position for.
+
+    The app has no camera header to read a target name from, so it takes the
+    library target nearest the mount's position, within a degree (see
+    ``TelescopeService._infer_target_at_coordinates``), and downloads the
+    frames of that id (remote folders and library targets are keyed by id,
+    never by common name). The simulated telescope must file its frames
+    under the same id, or the download finds no folder. This repeats the
+    app's rule on the copy of the library: every target counts, with or
+    without frames.
+
+    Parameters
+    ----------
+    root : `pathlib.Path`
+        The simulator's root folder, holding ``library/astrometrics.db``.
+    ra_hours : `float`
+        Right ascension of the mount position, in hours.
+    dec_degrees : `float`
+        Declination of the mount position, in degrees.
+    radius_degrees : `float`, optional
+        The farthest a target may be, in degrees.
+
+    Returns
+    -------
+    target_id : `str` or `None`
+        The id, or `None` when the copy has no database or no target
+        within the radius.
+    """
+    database = root / "library" / "astrometrics.db"
+    if not database.is_file():
+        return None
+    try:
+        connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=10)
+        try:
+            rows = connection.execute("SELECT data_json FROM targets").fetchall()
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        return None
+    from astrometricslib import Target
+
+    mount_ra = math.radians(ra_hours * 15.0)
+    mount_dec = math.radians(dec_degrees)
+    best: tuple[float, str] | None = None
+    for (data_json,) in rows:
+        try:
+            target = Target.model_validate(json.loads(data_json))
+            target_ra = math.radians(target.ra_deg)
+            target_dec = math.radians(target.dec_deg)
+        except ValueError, TypeError, AstrometricsError:
+            continue
+        cosine = math.sin(mount_dec) * math.sin(target_dec) + math.cos(mount_dec) * math.cos(
+            target_dec
+        ) * math.cos(mount_ra - target_ra)
+        separation = math.degrees(math.acos(max(-1.0, min(1.0, cosine))))
+        if separation <= radius_degrees and (best is None or separation < best[0]):
+            best = (separation, target.id)
+    return best[1] if best else None
 
 
 def read_report(root: Path) -> dict:

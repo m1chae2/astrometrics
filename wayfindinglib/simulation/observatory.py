@@ -355,6 +355,11 @@ class SimulatedObservatory:
         `True` for the app: `prepare` copies the real databases and mounts
         an overlay of the real frames and stacks (see `library_copy`), and
         `stop` removes them. The real library is only read.
+    existing_world : `bool`, optional
+        `True` when the root folder was already built, for example by
+        `library_copy.prepare_library_copy` in another program. `start` then
+        only runs the safety checks: it does not copy the library, unmount
+        the overlay or write the settings file again.
     real_library : `object`, optional
         The real folders for the copy (from
         `astrometricslib.drivers.real_folders`). Default: found when
@@ -374,6 +379,7 @@ class SimulatedObservatory:
         auto_start_replay: bool = True,
         copy_library: bool = False,
         real_library: Any = None,
+        existing_world: bool = False,
     ) -> None:
         """Keep the settings; nothing runs yet."""
         self.root = root
@@ -387,6 +393,8 @@ class SimulatedObservatory:
         self.auto_start_replay = auto_start_replay
         self.copy_library = copy_library
         self.real_library = real_library
+        self.existing_world = existing_world
+        self.sky_target_name = SIMULATED_TARGET_NAME
         self.copy_report: dict = {}
         self.standin_home = standin_home(root)
         self.config_path = root / "astrometrics.config.toml"
@@ -433,6 +441,9 @@ class SimulatedObservatory:
             If a needed program is missing, the platform cannot run the
             simulator, or the guard refuses the settings.
         """
+        if self.existing_world:
+            self._check_existing_world()
+            return
         reason = unavailable_reason(self.copy_library)
         if reason:
             raise SimulationUnavailableError(reason)
@@ -447,6 +458,22 @@ class SimulatedObservatory:
         else:
             self._write_settings()
         try:
+            observatory_guard.check_settings(
+                self.config_path, self.indi_port, self.phd2_port, self.standin_home, self.root
+            )
+        except observatory_guard.GuardError as error:
+            raise SimulationUnavailableError(f"Refusing to start the simulator: {error}") from error
+
+    def _check_existing_world(self) -> None:
+        """Run the safety checks on a world that was built before.
+
+        Raises
+        ------
+        SimulationUnavailableError
+            If the root folder or the settings file fails the guard.
+        """
+        try:
+            observatory_guard.check_root(self.root)
             observatory_guard.check_settings(
                 self.config_path, self.indi_port, self.phd2_port, self.standin_home, self.root
             )
@@ -633,6 +660,14 @@ class SimulatedObservatory:
         stats.mkdir(parents=True, exist_ok=True)
         if self.kind is not SimulationKind.REPLAY:
             self.ready_marker.unlink(missing_ok=True)
+        if self.kind is SimulationKind.SIMULATED_SKY:
+            # The app files frames under the library target nearest the mount.
+            self.sky_target_name = (
+                library_copy.nearest_target_name(
+                    self.root, SIMULATED_TARGET_RA_HOURS, SIMULATED_TARGET_DEC_DEGREES
+                )
+                or SIMULATED_TARGET_NAME
+            )
         self._launch("indiserver", ["indiserver", "-p", str(self.indi_port), *INDI_DRIVERS], "indiserver.log")
         module = "wayfindinglib.simulation"
         phd2_command = [python, "-m", f"{module}.mock_phd2", "--port", str(self.phd2_port)]
@@ -673,6 +708,9 @@ class SimulatedObservatory:
                     "--guide-log", str(GUIDE_LOG_FIXTURE),
                     "--stats", str(stats / "driver_stats.json"),
                     "--exposure-seconds", str(self.exposure_seconds),
+                    "--target", self.sky_target_name,
+                    "--ra-hours", str(SIMULATED_TARGET_RA_HOURS),
+                    "--dec-degrees", str(SIMULATED_TARGET_DEC_DEGREES),
                 ],
                 "driver.log",
             )  # fmt: skip
@@ -768,11 +806,14 @@ class SimulatedObservatory:
         -------
         targets : `list` [`tuple`]
             ``(name, right ascension in hours, declination in degrees)``.
-            The simulated sky points at M 13. A replay lists the targets of
-            its staged frames, so call this after `start`.
+            The simulated sky points at the position of M 13, under the
+            name of the library target nearest it (see
+            `library_copy.nearest_target_name`; M 13 when the library has
+            none). A replay lists the targets of its staged frames, so call
+            this after `start`.
         """
         if self.kind is SimulationKind.SIMULATED_SKY:
-            return [(SIMULATED_TARGET_NAME, SIMULATED_TARGET_RA_HOURS, SIMULATED_TARGET_DEC_DEGREES)]
+            return [(self.sky_target_name, SIMULATED_TARGET_RA_HOURS, SIMULATED_TARGET_DEC_DEGREES)]
         try:
             plan = json.loads((self.root / "replay" / "plan.json").read_text(encoding="utf-8"))
         except OSError, ValueError:
@@ -847,6 +888,7 @@ def run_start(arguments: argparse.Namespace) -> int:
         arguments.exposure_seconds,
         replay_staged=arguments.replay_staged,
         auto_start_replay=not arguments.manual_replay_start,
+        existing_world=arguments.existing_world,
     )
     stopping = threading.Event()
     parent_pid = os.getppid()
@@ -933,6 +975,11 @@ def main() -> int:
         "--manual-replay-start", action="store_true", help="Wait for the start file instead of starting."
     )
     start.add_argument("--exposure-seconds", type=float, default=60.0)
+    start.add_argument(
+        "--existing-world",
+        action="store_true",
+        help="The root was already built (library copy and settings): only run the safety checks.",
+    )
     stop = commands.add_parser("stop", help="End the start command of a root folder.")
     stop.add_argument("--root", type=Path, required=True)
     arguments = parser.parse_args()

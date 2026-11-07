@@ -41,8 +41,11 @@ import os
 import sys
 import time
 import urllib.error
-import urllib.request
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from backend_rpc import call_rpc
 
 os.environ.setdefault("ASTROMETRICS_TESTING", "1")
 
@@ -140,25 +143,8 @@ def _rpc(port: int, method: str, params: dict) -> object:
     -------
     result : `object`
         The reply's ``result``.
-
-    Raises
-    ------
-    RuntimeError
-        If the backend answers with an error.
     """
-    body = json.dumps({"jsonrpc": "2.0", "method": method, "params": params, "id": 1}).encode()
-    request = urllib.request.Request(
-        f"http://127.0.0.1:{port}/api/rpc", data=body, headers={"Content-Type": "application/json"}
-    )
-    with urllib.request.urlopen(request, timeout=60) as response:
-        reply = json.loads(response.read())
-    if "error" in reply:
-        raise RuntimeError(f"{method} failed: {reply['error']}")
-    result = reply.get("result")
-    # The backend wraps every result as {"status": ..., "data": ...}.
-    if isinstance(result, dict) and "data" in result and "status" in result:
-        return result["data"]
-    return result
+    return call_rpc(port, method, params)
 
 
 def ingest(sandbox: Path, backend_port: int) -> dict:

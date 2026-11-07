@@ -4,6 +4,9 @@
  * The sky map draws only stars inside the view and brighter than its limiting
  * magnitude, so sources fetched for a larger, deeper query still serve a smaller,
  * shallower one. Zooming in therefore needs no new request.
+ *
+ * That holds only for a complete result. When the backend cut a result short, it
+ * lacks the faintest stars of its circle, so a smaller or shifted view needs its own request.
  */
 
 import { PlanetariumSource } from '../../common/types/planetariumTypes';
@@ -18,17 +21,21 @@ export interface SourceQueryShape {
   limitingMagnitude?: number;
   /** Whether stars without a catalog magnitude were requested. */
   includeUncataloged?: boolean;
+  /** True when the backend cut the result short, so it may lack the faintest stars in its circle. */
+  truncated?: boolean;
 }
 
 /**
  * Tells whether the sources fetched for `fetched` also cover the request `wanted`.
  *
- * @param {SourceQueryShape | null} fetched - The last completed request, or null if none.
+ * @param {SourceQueryShape | null} fetched - The last completed request, or null if none. A truncated
+ *   request covers nothing.
  * @param {SourceQueryShape} wanted - The request about to be sent.
  * @returns {boolean} True when `wanted` needs no new request.
  */
 export function isCoveredByFetched(fetched: SourceQueryShape | null, wanted: SourceQueryShape): boolean {
   if (!fetched) return false;
+  if (fetched.truncated) return false;
   if (angularSeparationDeg(wanted.ra, wanted.dec, fetched.ra, fetched.dec) + wanted.radius > fetched.radius) {
     return false;
   }

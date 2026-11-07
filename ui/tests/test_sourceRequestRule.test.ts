@@ -29,6 +29,18 @@ describe('isCoveredByFetched', () => {
     expect(isCoveredByFetched(fetched, { ...fetched, radius: 15, includeUncataloged: true })).toBe(false);
   });
 
+  it('requests a zoom-in when the fetched result was cut short', () => {
+    expect(isCoveredByFetched({ ...fetched, truncated: true }, { ...fetched, radius: 15 })).toBe(false);
+  });
+
+  it('requests even the same view again when the fetched result was cut short', () => {
+    expect(isCoveredByFetched({ ...fetched, truncated: true }, fetched)).toBe(false);
+  });
+
+  it('still skips a zoom-in when the fetched result is marked complete', () => {
+    expect(isCoveredByFetched({ ...fetched, truncated: false }, { ...fetched, radius: 15 })).toBe(true);
+  });
+
   it('requests when nothing was fetched yet', () => {
     expect(isCoveredByFetched(null, fetched)).toBe(false);
   });

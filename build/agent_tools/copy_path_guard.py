@@ -31,6 +31,8 @@ _MOUNT_ALIASES = ("/run/media", "/media")
 #: names read from the database's own table list and quotes them.
 _SELECT_TEMPLATE = "SELECT rowid, <column> FROM <table>"
 _UPDATE_TEMPLATE = "UPDATE <table> SET <column> = ? WHERE rowid = ?"
+#: Folder inside the copy that mirrors stale outside paths.
+_MIRROR_FOLDER = "outside"
 #: How many offenders are printed before the list is cut.
 _PRINT_LIMIT = 50
 
@@ -369,7 +371,9 @@ def read_config_value_in_section(config_file: str | os.PathLike, section: str, k
     in_section = False
     for line in Path(config_file).read_text().splitlines():
         if line.strip().startswith("["):
-            in_section = line.strip() == f"[{section}]"
+            # TOML allows a quoted name: ["Wayfinding Library"] is the
+            # same section.
+            in_section = line.strip()[1:-1].strip().strip('"') == section
             continue
         match = re.match(rf'^\s*{re.escape(key)}\s*=\s*"([^"]*)"', line)
         if in_section and match:
@@ -491,7 +495,30 @@ def _repoint_database(
         connection.close()
 
 
-def repoint(config_file: str | os.PathLike, scratch: str, real_data_folder: str | None = None) -> int:
+def mirror_path(text: str, scratch: str) -> str:
+    """Give the place inside the copy that stands in for an outside path.
+
+    Parameters
+    ----------
+    text : `str`
+        A stored absolute path outside the copy.
+    scratch : `str`
+        The folder that holds the copies.
+
+    Returns
+    -------
+    mirrored : `str`
+        ``<scratch>/outside/<text without its leading slash>``.
+    """
+    return os.path.join(scratch, _MIRROR_FOLDER, os.path.normpath(text).lstrip("/"))
+
+
+def repoint(
+    config_file: str | os.PathLike,
+    scratch: str,
+    real_data_folder: str | None = None,
+    mirror_outside: bool = False,
+) -> int:
     """Rewrite bad stored paths inside the COPY databases.
 
     Parameters
@@ -503,6 +530,12 @@ def repoint(config_file: str | os.PathLike, scratch: str, real_data_folder: str 
     real_data_folder : `str`, optional
         The real data folder. Defaults to ``$XDG_DATA_HOME/astrometrics`` or
         ``~/.local/share/astrometrics`` of the calling environment.
+    mirror_outside : `bool`, optional
+        If `True`, skip the stacks and data-folder rules and move every
+        stored path that is still outside the copy (and not under the
+        frames folder) to ``<scratch>/outside/<original path>``. Use it
+        after the known paths were already rewritten, so that a stale path,
+        such as an old stacks folder, cannot send a run outside the copy.
 
     Returns
     -------
@@ -538,7 +571,10 @@ def repoint(config_file: str | os.PathLike, scratch: str, real_data_folder: str 
         """
         nonlocal changed
         if _ABSOLUTE_PATH.match(text) and not is_allowed(text, scratch, frames):
-            new_text = _repoint_text(text, stacks, library, real_data_folder)
+            if mirror_outside:
+                new_text = mirror_path(text, scratch)
+            else:
+                new_text = _repoint_text(text, stacks, library, real_data_folder)
             if new_text is not None:
                 changed += 1
                 return new_text

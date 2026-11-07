@@ -244,8 +244,9 @@ class TelescopeService:
         Returns
         -------
         `str` | `None`
-            The matched target name, or None if coordinates are missing or no
-            target is within 1 degree separation.
+            The matched target's id (not its common name: remote folders, the
+            library and jobs are all keyed by id), or None if coordinates are
+            missing or no target is within 1 degree separation.
         """
         if not ra_str or not dec_str or ra_str in ("-", "Unknown", "00 00 00") or not self._target_service:
             return None
@@ -263,7 +264,7 @@ class TelescopeService:
             logger.debug("Target inference failed: %s", exc)
             return None
         rows = nearest.targets or []
-        return (rows[0].get("common_name") or rows[0]["id"]) if rows else None
+        return rows[0]["id"] if rows else None
 
     def connect(self) -> bool:
         """Connect to the telescope hardware via the high-level interface.

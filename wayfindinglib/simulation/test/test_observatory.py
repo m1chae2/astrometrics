@@ -245,3 +245,119 @@ def test_supervised_command_ends_when_its_parent_is_killed(tmp_path: Path) -> No
     finally:
         parent.kill()
         parent.wait()
+
+
+def _write_library_targets(
+    root: Path, targets: list[tuple[str, str, str]], common_names: dict[str, str] | None = None
+) -> None:
+    """Make a copy of the library database that holds the given targets.
+
+    Parameters
+    ----------
+    root : `pathlib.Path`
+        The simulator's root folder.
+    targets : `list` [`tuple` [`str`, `str`, `str`]]
+        ``(id, right ascension text, declination text)`` of each target.
+    common_names : `dict` [`str`, `str`], optional
+        Common name of each target id that has one.
+    """
+    import json
+    import sqlite3
+
+    from astrometricslib import Target
+
+    database = root / "library" / "astrometrics.db"
+    database.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(database)
+    connection.execute(
+        "CREATE TABLE targets (id TEXT PRIMARY KEY, name TEXT, ra TEXT, dec TEXT, data_json TEXT)"
+    )
+    for target_id, right_ascension, declination in targets:
+        extra = {"common_name": common_names[target_id]} if common_names and target_id in common_names else {}
+        target = Target(id=target_id, ra=right_ascension, dec=declination, **extra)
+        connection.execute(
+            "INSERT INTO targets VALUES (?, ?, ?, ?, ?)",
+            (target_id, "", right_ascension, declination, json.dumps(target.serialize())),
+        )
+    connection.commit()
+    connection.close()
+
+
+def test_simulated_frames_are_filed_under_the_name_the_app_downloads(
+    observatory: SimulatedObservatory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The exposure driver gets the name of the library target nearest the sky.
+
+    The app takes the library target nearest the mount and downloads the
+    folder named by its id, never by its common name. A target with id
+    "M 13" and the common name "Test Target Name" must make the stand-in
+    file its frames under "M 13", so the download finds them.
+    """
+    from wayfindinglib.simulation.exposure_driver import ExposureDriver
+
+    _write_library_targets(
+        observatory.root,
+        [
+            ("M 13", "16h 41m 41s", "+36 27 36"),
+            ("M 31", "0h 42m", "+41 16"),
+        ],
+        common_names={"M 13": "Test Target Name"},
+    )
+    launched: dict[str, list[str]] = {}
+    monkeypatch.setattr(
+        observatory, "_launch", lambda name, command, log_name=None: launched.update({name: command})
+    )
+    monkeypatch.setattr(observatory, "_wait_listening", lambda ports: None)
+
+    observatory._start_processes()
+
+    command = launched["driver"]
+    assert command[command.index("--target") + 1] == "M 13"
+    assert observatory.pointed_targets()[0][0] == "M 13"
+    driver = ExposureDriver(
+        1, observatory.standin_home, Path("log"), Path("stats"), 1.0, "M 13", 16.695, 36.46
+    )
+    assert driver.pictures_directory == observatory.standin_home / "Pictures" / "M 13" / "Light"
+
+
+def test_the_sky_keeps_the_default_target_when_the_library_has_none_near(
+    observatory: SimulatedObservatory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without a library target within a degree, the frames go under M 13."""
+    _write_library_targets(observatory.root, [("M 31", "0h 42m", "+41 16")])
+    launched: dict[str, list[str]] = {}
+    monkeypatch.setattr(
+        observatory, "_launch", lambda name, command, log_name=None: launched.update({name: command})
+    )
+    monkeypatch.setattr(observatory, "_wait_listening", lambda ports: None)
+
+    observatory._start_processes()
+
+    command = launched["driver"]
+    assert command[command.index("--target") + 1] == "M 13"
+
+
+def test_an_existing_world_is_checked_but_not_prepared_again(
+    observatory: SimulatedObservatory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With `existing_world`, start runs the guard and rewrites nothing."""
+    observatory.prepare()
+    existing = SimulatedObservatory(
+        observatory.root,
+        SimulationKind.SIMULATED_SKY,
+        observatory.indi_port,
+        observatory.phd2_port,
+        copy_library=True,
+        existing_world=True,
+    )
+    before = existing.config_path.read_text()
+    monkeypatch.setattr(
+        observatory_module.library_copy,
+        "prepare_library_copy",
+        lambda *a, **k: pytest.fail("the library copy must not be made again"),
+    )
+    existing.prepare()
+    assert existing.config_path.read_text() == before
+    existing.config_path.write_text(before + '\n["Notes"]\nreal = "192.168.50.188"\n')
+    with pytest.raises(SimulationUnavailableError, match=r"192\.168\.50\.188"):
+        existing.prepare()

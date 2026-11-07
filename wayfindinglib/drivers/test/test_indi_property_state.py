@@ -293,3 +293,19 @@ def test_updates_arriving_before_or_after_the_object_is_whole_are_ignored(
             interface.newSwitch(_Property())
             interface.newText(_Property())
     assert not [record for record in caplog.records if record.levelname == "ERROR"]
+
+
+def test_an_update_during_object_deletion_is_ignored_without_an_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An update after Python removed the attributes logs no ERROR.
+
+    Python clears an object's attributes before the client library's own
+    clean-up runs, and that clean-up can still send one update.
+    """
+    interface = _make_interface(None)
+    interface.__dict__.clear()
+    assert not interface._can_handle_callbacks()
+    with caplog.at_level("DEBUG"):
+        interface.newNumber(object())
+    assert not [record for record in caplog.records if record.levelname == "ERROR"]

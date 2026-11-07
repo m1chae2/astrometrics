@@ -24,8 +24,12 @@
  *   node build/tpm/flow.mjs --ui-url http://127.0.0.1:PORT --backend-url http://127.0.0.1:PORT \
  *        --out build/tpm/results/<timestamp> [--laps 3] [--idle-seconds 30] [--pan-seconds 6] [--zoom-seconds 4] [--attach-url http://127.0.0.1:CDP] [--gpu auto|intel|nvidia]
  *
- * With `--attach-url` the script attaches to an already running browser (the
- * Electron window started by `electron_run.mjs`) instead of launching Chrome.
+ * With `--attach-url` the script attaches (puppeteer.connect) to an already running app, the real Electron window
+ * started by `electron_run.mjs`, which is the default target of the harness. Without it the script launches a browser
+ * itself: `--browser brave|chrome` picks which (default: any Chromium found). On an attached Electron page the
+ * Lighthouse navigation audit of the load cannot run (the page is `app://`, not http), so the load is a timespan
+ * around a plain navigation; the browser-only audits are listed in README.md. Every other measurement is the same
+ * for both targets.
  *
  * After the laps it also records a Chrome DevTools trace of a fixed-length
  * Planetarium pan and zoom (`planetarium-trace.json`, summary in
@@ -87,16 +91,17 @@ function assertSandboxBackend(backendUrl) {
 /**
  * Finds a Chromium-based browser to launch.
  *
+ * @param {string} [name] - `brave`, `chrome` (Chrome or Chromium) or `any`. `CHROME_PATH` always wins.
  * @return {string} The path of the executable.
  */
-function findBrowser() {
-    const candidates = [
-        process.env.CHROME_PATH,
-        '/usr/bin/google-chrome',
-        '/usr/bin/google-chrome-stable',
-        '/usr/bin/chromium',
-        '/usr/bin/brave-browser',
-    ].filter(Boolean);
+function findBrowser(name = 'any') {
+    const byName = {
+        brave: ['/usr/bin/brave-browser', '/usr/bin/brave', '/opt/brave.com/brave/brave-browser'],
+        chrome: ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'],
+        any: ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/brave-browser'],
+    };
+    if (!byName[name]) throw new Error(`--browser must be brave or chrome, not ${name}.`);
+    const candidates = [process.env.CHROME_PATH, ...byName[name]].filter(Boolean);
     const found = candidates.find((candidate) => fs.existsSync(candidate));
     if (!found) throw new Error('No Chrome, Chromium or Brave found. Set CHROME_PATH to one.');
     return found;
@@ -107,6 +112,38 @@ function findBrowser() {
  * anything that sends them; if the page makes one anyway, the run fails.
  */
 const HARDWARE_RPC_PATTERN = /(slew|park|promot|capabilit|abort|set_tracking|jog|pulse|move|expose|capture_start|connect_device|focus_move)/i;
+
+/** When the flow started, for the step log. */
+const flowStartedAt = Date.now();
+
+/**
+ * Prints one line that names the step being started and the seconds since the flow began, so a stalled run shows
+ * where it stopped.
+ *
+ * @param {string} name - The step.
+ * @return {void}
+ */
+function logStep(name) {
+    console.log(`[flow +${((Date.now() - flowStartedAt) / 1000).toFixed(1)}s] ${name}`);
+}
+
+/**
+ * Waits for a promise, but fails the run with a clear message if it takes longer than a limit, so no wait can hang
+ * for ever.
+ *
+ * @param {string} name - What is awaited, for the message.
+ * @param {number} limitMs - The longest wait, in milliseconds.
+ * @param {Promise<T>} promise - The wait.
+ * @return {Promise<T>} The promise's value.
+ * @template T
+ */
+function bounded(name, limitMs, promise) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`The flow stalled: "${name}" took longer than ${limitMs / 1000} s.`)), limitMs);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 /** Waits a number of milliseconds. */
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -123,8 +160,16 @@ function pageRecorder() {
         inFlight: 0,
         rpc: [],
         layoutShift: 0,
+        // How many stars each Planetarium source call returned (what the sky map has to draw).
+        sourceCounts: [],
     };
     window.__tpm = recorder;
+    // Window focus and visibility events, with the step they fell in: React Query refetches stale data on
+    // `focus` and `visibilitychange`, so a refetch that follows one of these is not the display's own doing.
+    recorder.events = [];
+    for (const type of ['focus', 'blur', 'visibilitychange', 'online']) {
+        window.addEventListener(type, () => recorder.events.push({ type, at: performance.now(), phase: recorder.phase, state: document.visibilityState }), true);
+    }
     // Time to ready: the first moment a target list is on screen and no RPC call is waiting.
     // Measured here, inside the page, from the start of the navigation, so Lighthouse's own
     // wait for a quiet network does not count.
@@ -141,21 +186,70 @@ function pageRecorder() {
         const url = typeof input === 'string' ? input : (input.url ?? String(input));
         const isRpc = url.includes('/api/rpc');
         let method = '';
+        let parameters = '';
         if (isRpc) {
             try {
-                method = JSON.parse(init?.body ?? '{}').method ?? '';
+                const body = JSON.parse(init?.body ?? '{}');
+                method = body.method ?? '';
+                // Kept short: the parameters tell repeated calls (same method, same parameters) from different ones.
+                parameters = JSON.stringify(body.params ?? body.payload ?? {}).slice(0, 160);
             } catch {
                 method = '';
             }
             recorder.inFlight += 1;
         }
         const startedAt = performance.now();
+        let outcome = 'ok';
         try {
-            return await realFetch(input, init);
+            const response = await realFetch(input, init);
+            if (isRpc && /^planetarium:get_(sources|catalog_sources)$/.test(method)) {
+                // Count the stars in the reply (a clone, so the page still reads its own copy).
+                response
+                    .clone()
+                    .json()
+                    .then((body) => {
+                        // The reply is a JSON-RPC envelope; its result may hold the list or an object with `sources`.
+                        let payload = body?.result ?? body?.data ?? body;
+                        for (let depth = 0; depth < 3 && payload && !Array.isArray(payload) && !payload.sources; depth += 1) {
+                            payload = payload.result ?? payload.data ?? payload;
+                        }
+                        const list = Array.isArray(payload) ? payload : payload?.sources;
+                        recorder.sourceCounts.push({
+                            method,
+                            params: parameters,
+                            phase: recorder.phase,
+                            outcome: response.ok ? 'ok' : 'http-error',
+                            httpStatus: response.status,
+                            count: Array.isArray(list) ? list.length : null,
+                            bodyKeys: payload && typeof payload === 'object' ? Object.keys(payload).slice(0, 6) : [],
+                            // The star catalog drivers the backend could not read (null: the reply has no such field).
+                            failedCatalogs: Array.isArray(payload?.failedCatalogs) ? payload.failedCatalogs : null,
+                        });
+                    })
+                    .catch(() => {});
+            }
+            return response;
+        } catch (error) {
+            outcome = error?.name === 'AbortError' ? 'aborted' : 'failed';
+            // A source call that never got a reply (the page cancelled it, or the request failed) is recorded too, so
+            // it does not vanish from the list: a cancelled call carries no `failedCatalogs`, so it is not a failure.
+            if (isRpc && /^planetarium:get_(sources|catalog_sources)$/.test(method)) {
+                recorder.sourceCounts.push({
+                    method,
+                    params: parameters,
+                    phase: recorder.phase,
+                    outcome,
+                    httpStatus: null,
+                    count: null,
+                    bodyKeys: [],
+                    failedCatalogs: null,
+                });
+            }
+            throw error;
         } finally {
             if (isRpc) {
                 recorder.inFlight -= 1;
-                recorder.rpc.push({ method, phase: recorder.phase, at: startedAt, ms: performance.now() - startedAt });
+                recorder.rpc.push({ method, params: parameters, outcome, phase: recorder.phase, at: startedAt, ms: performance.now() - startedAt });
             }
         }
     };
@@ -319,7 +413,8 @@ async function timedClick(page, { selector, text = '', done, pick }) {
         const pending = page.evaluate((condition) => window.__tpm.timeNextPress(condition), done);
         await sleep(30);
         await page.mouse.click(target.x, target.y);
-        timing = await pending;
+        // A page that is not painting (a covered window) never settles; fail with a clear message instead of waiting.
+        timing = await bounded(`click ${selector} ${text}`, 60000, pending);
         if (!timing.noPress) break;
     }
     return picked ? { ...timing, picked } : timing;
@@ -460,7 +555,7 @@ async function exercisePlanetarium(page, zoomSeconds, actions) {
             await sleep(16);
         }
         await page.mouse.up();
-        fps = await framesPromise;
+        fps = await bounded('frame count while panning', 60000, framesPromise);
     }
     if (box && actions.has('zoom')) {
         // No animation-frame counting here: the sky map draws on demand, and a counting loop would ask the page for
@@ -556,7 +651,7 @@ async function profilePlanetarium(page, outputDirectory, seconds, zoomSeconds) {
         await sleep(16);
     }
     await page.mouse.up();
-    const animationFps = await framesPromise;
+    const animationFps = await bounded('frame count during the traced pan', 60000, framesPromise);
     await page.evaluate((name) => performance.mark(name), PAN_END_MARK);
     /** Reads the page's own timings recorded since the last read and clears them. */
     const takeMeasures = () =>
@@ -638,12 +733,14 @@ async function main() {
     const browser = options['attach-url']
         ? await puppeteer.connect({ browserURL: options['attach-url'], defaultViewport: null })
         : await puppeteer.launch({
-              executablePath: findBrowser(),
+              executablePath: findBrowser(options.browser ?? 'any'),
               headless: true,
               args: ['--no-sandbox', '--window-size=1440,900', '--disable-background-timer-throttling', ...gpuPlan.switches],
               env: gpuPlan.environment,
               defaultViewport: { width: 1440, height: 900 },
           });
+    // The resource sampler (resource_usage.py) follows the browser's processes through this file.
+    if (!options['attach-url']) fs.writeFileSync(path.join(outputDirectory, 'browser.pid'), String(browser.process().pid));
     const label = options['attach-url'] ? 'electron' : 'chrome';
     const page = options['attach-url'] ? (await browser.pages()).find((candidate) => candidate.url().startsWith(uiUrl)) ?? (await browser.pages())[0] : await browser.newPage();
     // The UI reaches the backend through the preview server, which forwards to the throwaway backend.
@@ -654,7 +751,8 @@ async function main() {
         } catch {
             // Storage can be blocked; the page then uses its default address, which the run would notice.
         }
-    }, uiUrl);
+    // A page opened from a file has no server to forward its calls, so it talks to the backend directly.
+    }, !/^https?:/.test(uiUrl) ? backendUrl : uiUrl);
     await page.evaluateOnNewDocument(pageRecorder);
     await page.evaluateOnNewDocument(installToastListener);
     const errorRecords = watchPage(page, label);
@@ -670,15 +768,25 @@ async function main() {
             budgets: JSON.parse(fs.readFileSync(path.join(import.meta.dirname, 'budgets.json'), 'utf8')),
         },
     };
+    logStep('start the Lighthouse flow');
     const flow = await startFlow(page, { name: 'Astrometrics UI lap', config: lighthouseConfig });
 
     // Step 1: load the app, and time how long until the first display is usable.
     const loadStarted = Date.now();
-    await flow.navigate(`${uiUrl.replace(/\/$/, '')}/index.html`, { name: 'Load app' });
+    if (!/^https?:/.test(uiUrl)) {
+        // Lighthouse accepts only http(s) addresses for a navigation, so the load of a file:// page (the Electron
+        // window, as the real app loads it) is a timespan around a plain navigation.
+        await flow.startTimespan({ name: 'Load app' });
+        await page.goto(`${uiUrl.replace(/\/$/, '')}/index.html`, { waitUntil: 'load' });
+        await flow.endTimespan();
+    } else {
+        await flow.navigate(`${uiUrl.replace(/\/$/, '')}/index.html`, { name: 'Load app' });
+    }
     await page.waitForFunction(() => window.__tpm.find('.selectable-list__item') && window.__tpm.inFlight === 0, { timeout: 60000 });
     const timeToReadyMs = await page.evaluate(() => window.__tpm.readyAt);
     const loadWallMs = Date.now() - loadStarted;
-    const initialHeap = await measureHeap(page);
+    logStep('loaded; measuring the heap');
+    const initialHeap = await bounded('heap measurement after load', 60000, measureHeap(page));
     const gpu = await probeWebGl(page);
     try {
         verifyRenderer(gpuChoice, gpu.renderer, options['attach-url'] ? 'the Electron window' : 'the Chrome flow');
@@ -690,16 +798,19 @@ async function main() {
     }
 
     const steps = lapSteps();
-    const measurements = { switches: [], interactions: [], planetarium: [], heapAfterLap: [], stepNames: [] };
+    const measurements = { switches: [], interactions: [], planetarium: [], heapAfterLap: [], stepNames: [], lapWindows: [] };
 
     for (let lap = 1; lap <= laps; lap += 1) {
+        // Wall-clock start and end of the lap (seconds since the epoch), for the disk-use-per-lap TPMs.
+        const lapStartedAt = Date.now() / 1000;
         for (const step of steps) {
             const stepName = `lap ${lap}: ${step.display}`;
             measurements.stepNames.push({ lap, display: step.display, stepName });
             await page.evaluate((phase) => {
                 window.__tpm.phase = phase;
             }, step.display);
-            await flow.startTimespan({ name: stepName });
+            logStep(stepName);
+            await bounded(`start timespan ${stepName}`, 120000, flow.startTimespan({ name: stepName }));
             const switched = await switchDisplay(page, step.display, step.modeIs);
             measurements.switches.push({ lap, display: step.display, ...switched });
             await sleep(400);
@@ -740,9 +851,10 @@ async function main() {
                     await sleep(250);
                 }
             }
-            await flow.endTimespan();
+            await bounded(`end timespan ${stepName}`, 180000, flow.endTimespan());
         }
-        measurements.heapAfterLap.push({ lap, bytes: await measureHeap(page) });
+        measurements.lapWindows.push({ lap, start: lapStartedAt, end: Date.now() / 1000 });
+        measurements.heapAfterLap.push({ lap, bytes: await bounded(`heap after lap ${lap}`, 60000, measureHeap(page)) });
     }
 
     // Planetarium pan profile: a fixed-length pan under a DevTools trace, outside any Lighthouse step.
@@ -752,25 +864,33 @@ async function main() {
     const planetariumStep = steps.find((step) => step.actions.some((action) => PLANETARIUM_ACTIONS.includes(action.action)));
     await switchDisplay(page, planetariumStep.display, planetariumStep.modeIs);
     await sleep(1500);
-    const planetariumProfile = await profilePlanetarium(page, outputDirectory, panSeconds, zoomSeconds);
+    await sleep(2500);
+    await page.screenshot({ path: path.join(outputDirectory, 'planetarium-sky.png') });
+    logStep('Planetarium trace profile');
+    const planetariumProfile = await bounded('Planetarium trace profile', 240000, profilePlanetarium(page, outputDirectory, panSeconds, zoomSeconds));
     fs.writeFileSync(path.join(outputDirectory, 'planetarium-profile.json'), JSON.stringify({ gpu, profile: planetariumProfile }, null, 2));
 
     // Idle: go back to the first display and count what the page polls on its own.
     await page.evaluate(() => {
         window.__tpm.phase = 'idle';
     });
-    await switchDisplay(page, 'Image Viewer', steps[0].modeIs);
+    logStep('idle: back to Image Viewer');
+    await bounded('switch back to Image Viewer', 60000, switchDisplay(page, 'Image Viewer', steps[0].modeIs));
+    logStep(`idle for ${idleSeconds} s`);
     const idleStart = await page.evaluate(() => performance.now());
     await sleep(idleSeconds * 1000);
     const idleEnd = await page.evaluate(() => performance.now());
 
-    const toasts = await readToasts(page, label);
-    const recorder = await page.evaluate(() => ({ rpc: window.__tpm.rpc, layoutShift: window.__tpm.layoutShift }));
+    logStep('read toasts and the recorder');
+    const toasts = await bounded('read toasts', 30000, readToasts(page, label));
+    const recorder = await page.evaluate(() => ({ sourceCounts: window.__tpm.sourceCounts, rpc: window.__tpm.rpc, events: window.__tpm.events, layoutShift: window.__tpm.layoutShift }));
     const idleCalls = recorder.rpc.filter((call) => call.at >= idleStart && call.at <= idleEnd);
 
     const unsafeRpc = [...new Set(recorder.rpc.map((call) => call.method).filter((method) => HARDWARE_RPC_PATTERN.test(method)))];
-    const flowResult = await flow.createFlowResult();
-    fs.writeFileSync(path.join(outputDirectory, 'flow-report.html'), await flow.generateReport());
+    logStep('Lighthouse createFlowResult');
+    const flowResult = await bounded('Lighthouse createFlowResult', 120000, flow.createFlowResult());
+    logStep('Lighthouse generateReport');
+    fs.writeFileSync(path.join(outputDirectory, 'flow-report.html'), await bounded('Lighthouse generateReport', 120000, flow.generateReport()));
     fs.writeFileSync(path.join(outputDirectory, 'flow-report.json'), JSON.stringify(flowResult, null, 2));
 
     const lighthouseSteps = flowResult.steps.map((step) => {
@@ -788,6 +908,8 @@ async function main() {
 
     const output = {
         generatedAt: new Date().toISOString(),
+        // What the page ran in: the real Electron app, or the named browser.
+        target: options['attach-url'] ? 'electron' : (options.browser ?? 'chrome'),
         laps,
         uiUrl,
         backendUrl,
@@ -798,12 +920,15 @@ async function main() {
         planetariumProfile,
         ...measurements,
         lighthouseSteps,
+        planetariumSources: recorder.sourceCounts,
         rpc: recorder.rpc,
+        events: recorder.events,
         idle: { seconds: (idleEnd - idleStart) / 1000, rpcCalls: idleCalls.length, methods: idleCalls.map((call) => call.method) },
         pageLayoutShift: recorder.layoutShift,
         unsafeRpc,
         errors: { ...errorRecords, toasts },
     };
+    logStep('write flow-metrics.json');
     fs.writeFileSync(path.join(outputDirectory, 'flow-metrics.json'), JSON.stringify(output, null, 2));
     if (options['attach-url']) await browser.disconnect();
     else await browser.close();

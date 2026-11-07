@@ -112,3 +112,7 @@ class SourceQueryResult(BaseModel):
     )
     total_stars: int = Field(..., description="How many stars were found, before any cut at the limit.")
     stars_truncated: bool = Field(..., description="True when the limit cut the star list short.")
+    failed_catalogs: list[str] = Field(
+        default_factory=list,
+        description="Names of the catalog drivers whose query failed. Empty when every driver answered.",
+    )

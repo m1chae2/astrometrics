@@ -2,7 +2,7 @@
 
 This folder measures how fast the Astrometrics app is and how many computer resources it uses. One run gives a list of numbers, the technical performance measures (TPMs). A run compares each number with a saved baseline, so you can see when a change makes the app slower or heavier.
 
-Status of the limits: Design estimate. The baseline comes from one run on one workstation, with headless Chrome and software graphics. The limits are starting points and have no validation-register entry. A baseline is only valid for the setup it was taken on (see "Setup and comparability").
+Status of the limits: Design estimate. The baseline comes from one run on one workstation, with headless Chrome and software graphics (before the real Electron app became the default target; Electron baselines start fresh, see "Setup and comparability"). The limits are starting points and have no validation-register entry. A baseline is only valid for the setup it was taken on (see "Setup and comparability").
 
 ## Safety rule
 
@@ -13,44 +13,81 @@ A run never touches your real app. It builds a throwaway world in a temporary fo
 - its own copy of the UI, served on another random port;
 - its own loopback-only network (see "The network seal"): nothing in the run can reach the network, and nothing outside can reach the run.
 
-The scripts stop before starting if the backend port is 5000 (the real backend's port), if a simulator port is 4400, 5000 or 7624 (the ports of a real PHD2, the real backend and the usual INDI server), if the backend is not on this computer, or if any library path points outside the throwaway folder or into `~/Astrometrics` or `~/.local/state/astrometrics`. The flow clicks only controls that select or show data. It fails the run if the page sends an RPC call (a request to the backend) that looks like a hardware command. The folder is deleted at the end.
+A processing run on real data uses another second lock (see "Processing runs"). The scripts stop before starting if the backend port is 5000 (the real backend's port), if a simulator port is 4400, 5000 or 7624 (the ports of a real PHD2, the real backend and the usual INDI server), if the backend is not on this computer, or if any library path points outside the throwaway folder or into `~/Astrometrics` or `~/.local/state/astrometrics`. The flow clicks only controls that select or show data. It fails the run if the page sends an RPC call (a request to the backend) that looks like a hardware command. The folder is deleted at the end.
 
 `ui/globalSetup.ts` starts its test backend the same way. `write_sandbox_config.py` repeats its settings file, with a few made-up equipment entries added.
 
-## Two modes
+## Library modes
 
 | Mode | Data | Compared with the baseline? |
 | --- | --- | --- |
-| `synthetic` (the default) | A small fake library that `seed_library.py` builds. The same every run. | Yes. It is the regression gate. |
-| `real-snapshot` | Copies of your real databases, plus a copy-on-write overlay of your real library. | No. Every TPM gets the status `trend`, and the run can never update the baseline. |
+| `simulation` (the default, `--library simulation`) | A read-only copy of your real library (your databases, targets, frames, stacks and catalogs) and the simulated observatory. The same world as the app's SIMULATED button. See "The simulation library". | Yes. It is the regression gate. |
+| `synthetic` (`--library synthetic`) | A small fake library that `seed_library.py` builds. The same every run. For quick, headless and CI checks. | No. Every TPM gets the status `trend`, and the run can never update the baseline. |
+| `real-snapshot` (`--real-snapshot`) | The older offline copy of your real databases and an overlay of your real library, not sealed. Kept for `--processing` on real data. | No. Same as synthetic. |
 
-Use the synthetic mode to catch a change that made the app slower. Use the real-snapshot mode to see how the app behaves on your real amount of data. Each `tpm.json` records its `mode`, its `observatory_profile` and a `data_size` block, so results are compared only within one mode and profile.
+A fourth kind of run, `--processing <target>` (see "Processing runs"), measures the stack and analysis jobs instead of the display flow. It uses the synthetic library or `--real-snapshot`, never `--library simulation`.
 
-The observatory profile says how the throwaway backend is connected to a telescope. `--observatory offline` (the default) names this computer as the telescope host and a port nothing listens on, turns automatic downloads off and sets PHD2 (the guiding program) to local on port 1, where nothing listens (so a real PHD2 on this computer, port 4400, is never touched). The backend never contacts your telescope computer, INDI or PHD2. `--observatory simulated` gives the backend a telescope that is "on", made only of local stand-ins (see "The simulated observatory"). `--observatory replay` uses the same stand-ins, but they play the last minutes of a real night, 2026-10-03, after the app has already downloaded the rest of that night (see "The replay observatory"). The baseline stores its profile and is used only for a run with the same profile, because the setup key includes it.
+Use the default mode to catch a change that made the app slower on your real amount of data. Use the synthetic mode when you want a fast check that needs none of your files. `--observatory offline`, `--observatory replay`, `--scale` and `--sky-catalog-copy` belong to the synthetic library, and the script refuses them with the default. Each `tpm.json` records its `mode`, its `observatory_profile` and a `data_size` block, so results are compared only within one mode and profile. The mode is part of the setup key, so the three modes never share a baseline. Baselines taken before this change were synthetic; take a new one with `--update-baseline`.
+
+The observatory profile says how the throwaway backend is connected to a telescope. `--observatory simulated` is the default with the simulation library. `--observatory offline` (the default with the synthetic library) names this computer as the telescope host and a port nothing listens on, turns automatic downloads off and sets PHD2 (the guiding program) to local on port 1, where nothing listens (so a real PHD2 on this computer, port 4400, is never touched). The backend never contacts your telescope computer, INDI or PHD2. `--observatory simulated` gives the backend a telescope that is "on", made only of local stand-ins (see "The simulated observatory"). `--observatory replay` uses the same stand-ins, but they play the last minutes of a real night, 2026-10-03, after the app has already downloaded the rest of that night (see "The replay observatory"). The baseline stores its profile and is used only for a run with the same profile, because the setup key includes it.
+
+## What the flow runs in
+
+The default target is the real Electron app, the one users run. `run_tpm.sh` builds the production UI, starts Electron with its own user-data folder, `ASTROMETRICS_UI_DIST` (so the window loads the UI from the private `app://` address, as the packaged app does) and a DevTools port on 127.0.0.1 only. `flow.mjs` attaches to the window with `puppeteer.connect` and runs the same displays and actions as before. `--browser brave|chrome` keeps the old flow, which launches a headless browser against the preview server. Use it for the web and phone client, and for the Lighthouse audits that need a normal page navigation.
+
+**What is measured where.**
+
+| Measurement | Electron (default) | Browser (`--browser`) |
+| --- | --- | --- |
+| Display switch and click times, time to ready, JavaScript heap, RPC calls per display, idle polling | Yes (the flow's own timing) | Yes |
+| Interaction to Next Paint and layout shift | Per Lighthouse timespan step, as in a browser; the whole-page layout shift also comes from a `PerformanceObserver` | Yes |
+| Total blocking time per step | Yes (Lighthouse timespans work on an attached page) | Yes |
+| Planetarium frame rate and the DevTools trace of the pan and zoom | Yes | Yes |
+| Console errors, failed requests, error toasts | Yes, from the flow and from the app's start-up and idle time | Yes, from the flow only |
+| Lighthouse navigation audit of the page load (the "Load app" navigation step: its resource summary and request count) | No. The page is `app://`, and Lighthouse navigates only to `http(s)`, so the load is a timespan around a plain navigation | Yes |
+| Electron process memory and CPU, native notifications, the main process's GPU report | Yes | Only with `--electron` |
+
+Lighthouse audits that rest on a navigation (for example the resource summary and the request count of the load) are therefore browser-only; the rest of the Lighthouse report still comes from the timespan steps.
+
+**No throttling.** `electron_run.mjs` sets `ASTROMETRICS_TPM_HARNESS=1`. Only then `electron/harness_mode.js` turns off `backgroundThrottling` for the app's windows and shows the main window without taking focus. It also passes `--disable-renderer-backgrounding`, `--disable-backgrounding-occluded-windows` and `--disable-background-timer-throttling` to Chromium. A normal start of the app does none of this.
+
+**The window.** The reference setup is the laptop panel alone, so a baseline run renders on the real panel with the real graphics card. The default run opens the Electron window on your real display with `showInactive()`, so it does not take the keyboard focus. Leave the window alone until it closes. It is not moved off screen or put behind other windows: a covered or off-screen window can be skipped by the window system's compositor, and then the frames you measure are not the frames a user sees. `--visible` is accepted and does nothing (it is the default).
+
+**`--headless`.** For quick smoke checks only (for example by an AI agent). Electron runs inside `xvfb-run`. `WAYLAND_DISPLAY` is removed and `--ozone-platform=x11` is forced, because Electron otherwise picks its Wayland backend from `WAYLAND_DISPLAY`, ignores xvfb's `DISPLAY` and opens the window on your real desktop (this happened in a first trial). The page then uses software graphics. The invisible screen and the window are 1920 x 1080 (`ASTROMETRICS_TPM_WINDOW_SIZE`, read by `electron/harness_mode.js`): at the app's own 1280 x 800 the header's session chip covers the display menu button while a camera exposes, and the flow could not switch displays. The setup key says `electron-headless`, so these results never share a baseline with a real-display run. Either way the WebGL renderer string is recorded in the setup record (`gpu_renderer` in `tpm.json`), so a result says what drew it.
+
+**The graphics card.** `--gpu auto|intel|nvidia` applies to Electron exactly as it does for the app (the launch plan comes from `electron/gpu_choice.js`), and the run stops if the window's WebGL renderer does not name the card asked for.
+
+## The Planetarium's stars
+
+An empty sky would make the sky-map frame-rate and frame-time TPMs meaningless, so every flow run (not a processing run) copies your deep-star (Gaia) catalog into the throwaway library before the backend starts (`copy_deep_catalog.py`). It finds the library folder in your real settings file (read only), opens the real `catalogs/deep_star_catalog.db` read only, and copies it with the SQLite backup call, so a write-ahead log cannot be half copied. Nothing is linked or opened in place. If the file is missing, the run prints one line and goes on with the stars the seeded library has. The star count and file size go into the setup record (`deep_catalog` in `setup-fingerprint.json` and `tpm.json`), so a baseline says what load it ran with. They are not part of the setup key. The bright stars come from the bundled Hipparcos extract; the flow records how many stars each Planetarium source call returned (`planetariumSources` in `flow-metrics.json`) and saves `planetarium-sky.png`, a screenshot of the sky map.
 
 ## Run it
 
-Install the Node packages once (`npm install`) and have a Chrome, Chromium or Brave browser. Set `CHROME_PATH` if the script cannot find one.
+Install the Node packages once (`npm install`). The flow runs in the real Electron app by default, in a window on your real display. Only `--headless` needs `xvfb-run` (package `xvfb`). For a browser run (`--browser`) have a Brave, Chrome or Chromium browser; set `CHROME_PATH` if the script cannot find one.
 
 ```bash
-build/tpm/run_tpm.sh                    # Chrome flow, 3 laps, 30 s idle
+build/tpm/run_tpm.sh                    # Electron app in a window on your display, 3 laps, 3 idle minutes first, 30 s idle at the end
 build/tpm/run_tpm.sh --laps 5           # more laps
-build/tpm/run_tpm.sh --electron         # also measure the Electron app (see below)
-build/tpm/run_tpm.sh --electron --visible --gpu intel --laps 3   # real window on the Intel graphics (leave the window alone)
-build/tpm/run_tpm.sh --electron --visible --gpu nvidia --laps 3  # the same on the NVIDIA card
-build/tpm/run_tpm.sh --gpu nvidia       # Chrome flow on the NVIDIA card (invisible)
+build/tpm/run_tpm.sh --headless --laps 1 --idle-minutes 0 --idle-seconds 5   # a quick smoke check, no window (never a baseline)
+build/tpm/run_tpm.sh --browser brave    # the browser flow instead (Brave; or --browser chrome)
+build/tpm/run_tpm.sh --browser brave --electron   # the browser flow, then a second lap in Electron
+build/tpm/run_tpm.sh --gpu intel --laps 3   # real Electron window on the Intel graphics (leave the window alone)
+build/tpm/run_tpm.sh --gpu nvidia --laps 3  # the same on the NVIDIA card
+build/tpm/run_tpm.sh --browser chrome --gpu nvidia    # browser flow on the NVIDIA card (invisible)
 build/tpm/run_tpm.sh --require-power-profile performance   # refuse unless that profile and AC power are active
 build/tpm/run_tpm.sh --cold             # drop the file cache first: a cold start (see "Cold start")
 build/tpm/run_tpm.sh --preflight        # only check that no upload, backup or real backend is running
 build/tpm/run_tpm.sh --update-baseline  # save this run as the new baseline
-build/tpm/run_tpm.sh --observatory simulated   # a telescope that is "on", all local simulators (see below)
-build/tpm/run_tpm.sh --observatory simulated --sim-exposure-seconds 20   # shorter simulated exposures
-build/tpm/run_tpm.sh --observatory replay    # the last minutes of the night of 2026-10-03, after an end-of-night preload
-build/tpm/run_tpm.sh --observatory replay --replay-speed 2   # twice as much night in the same minutes
-build/tpm/run_tpm.sh --scale 5          # synthetic library with 5 times the targets and frames
-build/tpm/run_tpm.sh --sky-catalog-copy # synthetic library, but with your star-catalog caches (see below)
-build/tpm/run_tpm.sh --real-snapshot    # your real data, read only (see below)
+build/tpm/run_tpm.sh                    # the default: a read-only copy of your real library and the simulated observatory
+build/tpm/run_tpm.sh --library synthetic   # the made-up library: quick, headless and CI checks, never a baseline
+build/tpm/run_tpm.sh --sim-exposure-seconds 20   # shorter simulated exposures
+build/tpm/run_tpm.sh --library synthetic --observatory replay    # the last minutes of the night of 2026-10-03, after an end-of-night preload
+build/tpm/run_tpm.sh --library synthetic --observatory replay --replay-speed 2   # twice as much night in the same minutes
+build/tpm/run_tpm.sh --library synthetic --scale 5   # synthetic library with 5 times the targets and frames
+build/tpm/run_tpm.sh --library synthetic --sky-catalog-copy   # synthetic library, but with your star-catalog caches (see below)
+build/tpm/run_tpm.sh --real-snapshot    # the older offline copy of your real data (see below)
 build/tpm/scaling.py                    # table of key TPMs against data size (use .venv/bin/python)
+build/tpm/run_tpm.sh --processing "M 31"   # a stack and analysis run instead of the display flow (see "Processing runs")
 ```
 
 The run takes about two minutes. It writes `build/tpm/results/<timestamp>/` (not tracked by git):
@@ -63,8 +100,12 @@ The run takes about two minutes. It writes `build/tpm/results/<timestamp>/` (not
 | `backend-metrics.json`, `backend-samples.jsonl` | Backend CPU seconds, peak memory and per-method RPC times. |
 | `observatory-metrics.json`, `observatory-sim-stats.json`, `observatory-phd2-stats.json`, `indiserver.log`, `mock_phd2.log`, `exposure_driver.log` | Only with `--observatory simulated` or `replay`: what the simulated observatory did (see below). The replay driver's log is also called `exposure_driver.log`. |
 | `replay-plan.json`, `replay-summary.json` | Only with `--observatory replay`: the plan (window, frames, every planned guide event and log line) and the facts that also go into `info.replay` of `tpm.json`. |
+| `resource-samples.jsonl` | Every second: CPU, memory and disk bytes of the backend, of every program under it (grouped), and of Electron and the browser when they run (see "Resource TPMs"). |
+| `processing-metrics.json`, `processing-plan.json`, `processing-job.log`, `real-library-check.json` | Only with `--processing`: the stack job's stages and the analysis steps with their resource use, the frames that went in, the stack job's log, and (real data) the before-and-after check of the real library. |
 | `backend.log` | The throwaway backend's log. |
-| `electron-metrics.jsonl` | Electron process samples, only with `--electron`. |
+| `electron-output.log` | Everything Electron printed (stdout and stderr), and a line when its process exits. Read it first when the run says Electron did not open its DevTools port. |
+| `electron-metrics.jsonl` | Electron process samples, when the run used Electron (the default target, or `--browser` with `--electron`). |
+| `electron-startup-errors.json` | Console errors, failed requests and toasts seen from Electron's start-up through its idle time. |
 | `cold-cache.json` | Only with `--cold`: the files and bytes dropped from the page cache, the time it took and the share of a sample still in memory before and after, per group. |
 | `setup-fingerprint.json`, `nvidia-samples.jsonl` | The setup facts taken at the start, and the NVIDIA card's state every 2 seconds (only if `nvidia-smi` exists). |
 
@@ -83,28 +124,53 @@ What the run records (in the `info.setup` block of `tpm.json`, and in the table 
 | AC or battery, power profile | `/sys/class/power_supply`, `powerprofilesctl get` |
 | Connected displays with resolution and refresh rate, docked yes or no | `xrandr` through XWayland, and `/sys/class/drm/*/status` (docked means an output that is not the laptop screen is connected) |
 | GPUs present, PRIME mode, session type | `lspci`, `prime-select query`, `XDG_SESSION_TYPE` |
-| GPU requested (`--gpu`), GPU used, WebGL renderer string | the WebGL renderer of the profiled page (the Electron window's own WebGL when `--electron` ran, otherwise the Chrome flow's); `info.gpu` holds requested, used, renderer and source. In Electron `electron_gpu` (`app.getGPUInfo`, the last report) is shown next to it. |
+| GPU requested (`--gpu`), GPU used, WebGL renderer string | the WebGL renderer of the profiled page (the Electron window's own WebGL when the flow ran in Electron, otherwise the browser flow's); `info.gpu` holds requested, used, renderer and source. In Electron `electron_gpu` (`app.getGPUInfo`, the last report) is shown next to it. |
 | NVIDIA state during the run | `nvidia-smi` every 2 seconds: peak and mean utilization and memory, power states seen |
+| External tool versions | Only with `--processing`: Siril and GraXpert from `--version`, Cosmic Clarity by file size and date (see "Processing runs") |
 | Mode, observatory profile | as before |
 
 Why these matter: the dock changes which screens the Intel graphics must drive, and a 120 Hz screen changes how many frames the page draws. The power profile and the CPU governor set how fast the CPU runs. The graphics card (Intel, NVIDIA or software) changes the Planetarium numbers the most. On battery the computer is slower still. Reading `nvidia-smi` can keep the NVIDIA card awake, so a run with `nvidia-smi` installed does not show a fully idle card.
 
-**The setup key.** A short hash (`setup_key`) of the CPU model, the displays with their resolutions, AC state, power profile, the kind of graphics card used (`nvidia`, `intel`, `amd` or `software`, from the WebGL renderer of the profiled window), the mode, the observatory profile and (only for a `--cold` run) the cold flag. Refresh rate, RAM and kernel are recorded but do not change the key. `tpm_baseline.json` holds one baseline per key under `setups`.
+**The setup key.** A short hash (`setup_key`) of the CPU model, the displays with their resolutions, AC state, power profile, the kind of graphics card used (`nvidia`, `intel`, `amd` or `software`, from the WebGL renderer of the profiled window), the mode, the observatory profile, the flow target (`electron`, `electron-headless`, `brave` or `chrome`) and (only for a `--cold` run) the cold flag. Refresh rate, RAM and kernel are recorded but do not change the key. `tpm_baseline.json` holds one baseline per key under `setups`. Because the flow target is in the key, an Electron baseline never mixes with a browser one, and baselines taken before the target was added (which have no target in their key) do not match any run now: take new ones. The processing scenario has no page, so its key (which holds the tool versions) does not include a target and means what it did.
 
 - A run whose key has a baseline is compared with it.
-- Any other run prints "DIFFERENT SETUP: no baseline for this setup key, not compared", and every TPM gets the status `unmatched` (a real-snapshot run still gets `trend`). Run `--update-baseline` to start the baseline for the new setup. It writes only that key's entry and leaves the others alone.
+- Any other run prints "DIFFERENT SETUP: no baseline for this setup key, not compared", and every TPM gets the status `unmatched` (a synthetic or real-snapshot run gets `trend`, because only a simulation run is compared). Run `--update-baseline` to start the baseline for the new setup. It writes only that key's entry and leaves the others alone.
 - The first file had one baseline and no keys. It was filed under the key of this workstation's setup (AC, balanced, docked with two screens, headless Chrome, software graphics). A file in the old format is still read and compared as before, with a note in the header.
 
-**Choosing the graphics card.** `--gpu auto|intel|nvidia`. With `--electron` it applies to the Electron window (and the Chrome flow stays on `auto`); without it, it applies to the Chrome flow.
+**Choosing the graphics card.** `--gpu auto|intel|nvidia`. It applies to the Electron window and to the browser flow. The Electron window loads the built UI from the private `app://` address, as the real app does; the browser flow uses the preview server over HTTP.
 
 - `auto`: today's behavior. The card is only recorded.
 - `nvidia`: sets the PRIME render offload variables (`__NV_PRIME_RENDER_OFFLOAD=1`, `__GLX_VENDOR_LIBRARY_NAME=nvidia`, `__VK_LAYER_NV_optimus=NVIDIA_only`) for the launched process and starts it with `--ozone-platform=x11 --use-gl=angle` plus an ANGLE backend. That is XWayland with ANGLE on the system graphics driver. The Chrome (Brave) flow uses `--use-angle=gl-egl` (the system OpenGL ES driver). Electron uses `--use-angle=gl` (desktop OpenGL through GLX), because Electron's own Chromium cannot find an EGL configuration on the NVIDIA card and quietly draws on Intel. Both choices come from `electron/gpu_choice.js`, the one place the app launcher and this harness share. (ANGLE's Vulkan backend gave no WebGL here, and without these switches headless Chrome uses software SwiftShader.)
 - `intel`: removes those variables, so the Intel graphics (the default card on this laptop) is used, with the same Chromium switches.
-- After the page loads, the WebGL renderer string must name the card asked for. If it does not (for example Intel when you asked for NVIDIA), the run fails with a `GPU CHECK FAILED` message instead of measuring the wrong card. An invisible Electron run (`xvfb-run`) has no graphics card, so `--gpu intel` or `--gpu nvidia` fails there; use `--visible`. A trial with headless Brave on this computer gave the Intel UHD 630 for `intel` and the GeForce GTX 1650 for `nvidia`. The visible Electron path (`--electron --visible --gpu nvidia`, Electron variant of the switches with PRIME offload) was verified on this computer: the Electron window's WebGL reported the GeForce GTX 1650. The run still checks the renderer every time. `flow.mjs` and `electron_run.mjs` import `electron/gpu_choice.js` directly.
+- After the page loads, the WebGL renderer string must name the card asked for. If it does not (for example Intel when you asked for NVIDIA), the run fails with a `GPU CHECK FAILED` message instead of measuring the wrong card. A `--headless` Electron run (`xvfb-run`) has no graphics card, so `--gpu intel` or `--gpu nvidia` fails there; use the default real-display run. A trial with headless Brave on this computer gave the Intel UHD 630 for `intel` and the GeForce GTX 1650 for `nvidia`. The visible Electron path (`--gpu nvidia` on the real display, Electron variant of the switches with PRIME offload) was verified on this computer: the Electron window's WebGL reported the GeForce GTX 1650. The run still checks the renderer every time. `flow.mjs` and `electron_run.mjs` import `electron/gpu_choice.js` directly.
 
 **Requiring a power profile.** `--require-power-profile <name>` refuses to start unless `powerprofilesctl get` prints that name and an AC adapter is online. It never changes the profile. To set it yourself: `powerprofilesctl set performance`.
 
-**Recommended fixed setup** for baselines: on AC power, power profile `performance`, docked with the same displays every time, the lid state the same, no other heavy program running, and one run per graphics choice. Take the baseline with `build/tpm/run_tpm.sh --require-power-profile performance --update-baseline`, and a second baseline with `--electron --visible --gpu intel` and another with `--gpu nvidia`.
+**Recommended fixed setup** for baselines: on AC power, power profile `performance`, docked with the same displays every time, the lid state the same, no other heavy program running, and one run per graphics choice. Take the baseline with `build/tpm/run_tpm.sh --require-power-profile performance --update-baseline`, and a second baseline with `--gpu intel` and another with `--gpu nvidia`.
+
+## The simulation library
+
+`catalog_failures` (TBD, no threshold) counts the Planetarium's `planetarium:get_catalog_sources` calls whose reply lists a driver in `failedCatalogs`. `flow.mjs` records `failedCatalogs` for each call under `planetariumSources`. A call to `planetarium:get_sources` has no such field and is not counted. With no call that carries the field, the TPM is not measured.
+
+`run_tpm.sh` (the default, `--library simulation`) uses the app's own code for the library part. It is the world the app's SIMULATED button builds (`wayfindinglib/simulation/library_copy.py` and `observatory.py`; `backend/observatory_source.py` calls them and restarts the backend, which the harness does not need to do). `simulation_library.py prepare` does, in order:
+
+1. **Databases.** `astrometrics.db`, `astrometrics_log.db`, `wayfinding.db` and the deep-star catalog are copied with SQLite's backup call, and the paths inside that name your real frames and stacks folders are rewritten to the mount point. Your real settings are copied except the library, telescope, guiding, transfer and solver sections. The harness then copies the deep-star catalog a second time with the backup call alone and replaces the app's copy. A catalog download that runs for hours can write the file while the app's code copies it as a plain file; the harness never does that. The catalog's star count grows while a download runs, so counts differ between runs.
+2. **Overlay.** `fuse-overlayfs` mounts your library (frames, stacks, previews) read only below, with the upper layer in the throwaway folder, at `<throwaway>/library/frames`.
+3. **Checks.** The app's guard refuses the world if any setting points beyond this computer or at a real folder.
+
+Your star-catalog caches under `~/.cache` are not copied (the app's simulated world does not copy them either), so the sky map draws the bundled bright stars and the deep-star catalog. The deep-star catalog is only what you have downloaded so far.
+
+**Why the copy is made outside the seal.** The overlay is a FUSE mount, and only an ordinary process can make it. So the outer `run_tpm.sh` makes the throwaway folder and the copy, then starts the sealed script as a child. The seal is `bwrap --unshare-net` as before. `bwrap` binds the folder that holds the throwaway folder, and the bind carries the mount along. The sealed backend then reads and writes the overlay as a normal folder. The real library is also bound read only in the seal (the whole computer is), so even a stray write to a real path fails. This was checked on this computer: a file read and a file written through the overlay from inside `bwrap --unshare-net --unshare-pid`, with `lo` as the only interface, and the write landed in the upper layer. The outer script unmounts the overlay (with the copy's own `teardown`) and deletes the folder only after that; it never deletes through a mount. If you kill the outer script with `kill -9`, the overlay stays mounted: run `fusermount3 -u <folder>/library/frames`.
+
+**Where the folder is.** The system lets `fusermount3` mount only under your home folder, `/tmp`, `/mnt`, `/media` and `/run/user`. With `--cold` and a memory-backed `/tmp`, this mode uses `~/.cache/astrometrics-tpm-runs` (a disk) instead of `/var/tmp`. Then the seal replaces its read-only `/tmp` with an empty private one (the host's display sockets and lock files show through), because Xvfb (headless Electron) must write a lock file in `/tmp`; without that, `--cold --headless` ended with "Electron did not open its DevTools port".
+
+**Proof that the real library is untouched.** The outer script lists every file of the real library (size and change time) before and after, and writes `real-library-check.json` into the results. Any difference fails the run: it prints an error and exits with 1, even if the flow itself passed. The one exception is a change to a database's `-shm` file (your own app touches it just by being open), which is listed as information only. The run itself cannot write there, so a difference most likely comes from your own app or an upload, but the run does not claim that. `overlay-writes.json` lists what the backend wrote into the overlay, so the real library is not in it.
+
+**Setup record.** The setup record (`setup-fingerprint.json`, `info.setup`) gets a `library` block (copy time, database sizes, targets, measured frames, deep-catalog stars) and the `deep_catalog` block. They are facts about the data, not part of the setup key. `info.data_size` also counts light frames in the overlay.
+
+**Cold runs.** `--cold` drops the page cache after the copy is made and before the flow, so the freshly copied databases are cold too. The walk that picks the files to drop skips mount points, so it never enters the overlay; the real stacks and previews are dropped through `--real-stacks` as before.
+
+**Stand-ins.** `simulation_library.py start` starts the INDI simulators, the stand-in PHD2 and the exposure driver in the world that is already built. The app's own `start` command prepares the world again, and that would unmount the overlay.
 
 ## The real-snapshot mode
 
@@ -176,6 +242,13 @@ The `data_size` block in `tpm.json` holds the counts the table uses.
 | `js_heap_growth_per_lap` | How much that memory grows from the first lap to the last, per lap. A value that stays above zero hints at a memory leak. | Lower |
 | `electron_<main,renderer,gpu>_peak_memory_mb`, `_mean_cpu_percent` | Memory and CPU of the Electron processes, from the file `electron/perf_metrics.js` writes. | Lower |
 | `backend_peak_rss`, `backend_cpu_time` | The backend's largest resident memory and the CPU seconds it used during the run. | Lower |
+| `backend_tree_cpu_time`, `backend_tree_peak_rss` | CPU seconds and peak resident memory of the backend and every program under it (pool workers, the INDI worker, Siril, GraXpert, the denoise tools). Unlike `backend_cpu_time` and `backend_peak_rss`, which count the backend process alone. See "Resource TPMs". | Lower |
+| `disk_read_mb[<group>]`, `disk_write_mb[<group>]` | Megabytes the kernel read from and wrote to storage for a process group over the run (`/proc/<pid>/io`). Groups: `backend`, `backend_workers`, `indi`, `siril`, `graxpert`, `denoise_tools`, `backend_other`, and `electron` and `browser` when they run. | Lower |
+| `disk_read_mb_per_lap[<group>]`, `disk_write_mb_per_lap[<group>]` | The same for one lap of the display flow (the median over the laps). | Lower |
+| `nvidia_util_percent_mean`, `nvidia_util_percent_peak`, `nvidia_memory_mb_peak` | How busy the NVIDIA card was, and the memory in use on the whole card (the desktop included), from `nvidia-smi` every 2 seconds. Empty without an NVIDIA card. | Lower |
+| `processing_total_seconds`, `processing_stage_seconds[<stage>]`, `analysis_seconds[<step>]` | Only with `--processing`. Wall time of the stack plus the analysis, of each stacking stage and of each analysis step (see "Processing runs"). | Lower |
+| `processing_stage_cpu_seconds`, `_peak_rss_mb`, `_disk_read_mb`, `_disk_write_mb`, `_nvidia_util_percent_mean`, `_nvidia_memory_mb_peak` (each `[<stage>]`), `analysis_cpu_seconds[<step>]`, `analysis_peak_rss_mb[<step>]` | Only with `--processing`. What the backend's process tree and the NVIDIA card used in that stage or step. | Lower |
+| `processing_frame_count`, `processing_failed_jobs` | Only with `--processing`. The number of frames stacked (the input size) and the number of jobs that failed or timed out. | information |
 | `rpc_count_load`, `rpc_count_per_visit[<display>]` | Backend calls at load, and per visit to each display. | Lower |
 | `rpc_p95[history:night_quality]`, `rpc_p95[target:get_targets]`, `rpc_p95[processing:stack_summary]` | Round-trip time of the night review, the target list and the stack summary. | Lower |
 | `idle_rpc_per_minute` | Backend calls per minute the page makes while nobody uses it. | Lower |
@@ -240,7 +313,7 @@ The old all-interval numbers are still in the profile as `frameMsP50` and `frame
 
 The star and overlay times come from `performance.measure` marks in `CelestialSkyMap.tsx` and `StarFieldRenderer.ts`. They record only while the flow sets `window.__ASTROMETRICS_PERF__` for the pan. Otherwise each mark is one property check. The trace cannot run during a Lighthouse step, so the pan runs between steps, and tracing slows the page a little. The untraced `fps_hw` comes from the ordinary pan inside the laps.
 
-Every `tpm.json` has an `info` block with `webgl` (the vendor and renderer strings the page reports, and whether they look like a real graphics card), `gpu` (the graphics card requested, the card used, the renderer and where it came from: the Electron window's WebGL when `--electron` ran, otherwise the Chrome flow's) and, with `--electron`, `electron_gpu` (what the Electron main process says about the GPU and its features, last report). The setup key's graphics field comes from `info.gpu`. A renderer name with `SwiftShader` or `llvmpipe` means software graphics. The TPMs added with the on-demand zoom measures have no baseline yet (status `new`). The profile comes from the Electron window when `--electron` ran, otherwise from the Chrome flow.
+Every `tpm.json` has an `info` block with `webgl` (the vendor and renderer strings the page reports, and whether they look like a real graphics card), `gpu` (the graphics card requested, the card used, the renderer and where it came from: the Electron window's WebGL when the flow ran in Electron, otherwise the browser flow's) and, when Electron ran, `electron_gpu` (what the Electron main process says about the GPU and its features, last report). The setup key's graphics field comes from `info.gpu`. A renderer name with `SwiftShader` or `llvmpipe` means software graphics. The TPMs added with the on-demand zoom measures have no baseline yet (status `new`). The profile comes from the Electron window when Electron ran, otherwise from the browser flow.
 
 ## Error TPMs
 
@@ -254,16 +327,16 @@ The user's rule is "no errors in the web browser console" and no error notificat
 | `desktop_notifications` | Native notifications the page asked Electron to show, with title and body. | `electron/perf_metrics.js` listens next to the app's own `show-notification` handler when `ASTROMETRICS_PERF_METRICS` is set. It counts the requests before the app's cooldown and its checks. Only an Electron run measures it; a plain browser cannot send one, so a Chrome-only run leaves it empty. |
 | `backend_error_log_lines` | Lines at ERROR or CRITICAL level in the throwaway backend's `backend.log`, from the backend's start to its end, and the web server's own `ERROR:` lines. | `backend.log` in the results folder. Warnings and the lines of a traceback after its first line are not counted. |
 
-A failed image load shows up twice, as a failed request and as the console error the browser prints for it. Counts add up over the Chrome flow, the Electron flow and the Electron start-up, so a run with `--electron` can show the same fault more than once. The limit is 0, so only the list matters. Toasts that the app shows before the flow attaches to the Electron window are not seen as toasts (an error toast also writes a console error, which the start-up watcher does see).
+A failed image load shows up twice, as a failed request and as the console error the browser prints for it. Counts add up over the Chrome flow, the Electron flow and the Electron start-up, so a run with a browser flow and `--electron` can show the same fault more than once. The limit is 0, so only the list matters. Toasts that the app shows before the flow attaches to the Electron window are not seen as toasts (an error toast also writes a console error, which the start-up watcher does see).
 
 ## Visible GPU profile
 
-The Chrome flow and the xvfb Electron run use software graphics. To measure on the real graphics card, run:
+The browser flow and the `--headless` Electron run use software graphics. To measure on the real graphics card, run:
 
 ```bash
-build/tpm/run_tpm.sh --electron --visible --idle-minutes 0 --laps 1
-build/tpm/run_tpm.sh --electron --visible --gpu intel --laps 3    # force the Intel graphics
-build/tpm/run_tpm.sh --electron --visible --gpu nvidia --laps 3   # force the NVIDIA card
+build/tpm/run_tpm.sh --idle-minutes 0 --laps 1
+build/tpm/run_tpm.sh --gpu intel --laps 3    # force the Intel graphics
+build/tpm/run_tpm.sh --gpu nvidia --laps 3   # force the NVIDIA card
 ```
 
 An Electron window opens on your real desktop for the run, so leave it alone until it closes. It uses its own user-data folder, lock and settings inside the throwaway folder, so it cannot touch your real app. It keeps `DISPLAY` and `WAYLAND_DISPLAY` from your session and passes `--ozone-platform-hint=auto`. Read the `webgl_electron_window` line in the printed header: if it still says software, try `--ozone x11` (XWayland) or `--ozone wayland`, or choose the card with `--gpu` (which replaces `--ozone`; see "Setup and comparability").
@@ -274,9 +347,9 @@ The fake library has one star, but the real Planetarium draws stars from the Gai
 
 ## Electron
 
-`run_tpm.sh --electron` starts the Electron app in `xvfb-run` (an invisible screen; `--visible` uses your real display instead) in development mode, pointed at the throwaway backend and the preview server. It sets `ASTROMETRICS_PERF_METRICS` to a file. When this variable is set, the main process also writes a `gpu_report` line (`app.getGPUFeatureStatus()` and `app.getGPUInfo('basic')`) at start-up and again 20 seconds later (the first one comes before the window has rendered and can show software features; `info.electron_gpu` is the last one, and the card that counts is the one the Electron window's WebGL reports), writes one `desktop_notification` line (title and body) each time the page sends the `show-notification` request, and samples `app.getAppMetrics()` every 2 seconds and appends one JSON line per process (time, process type, process id, CPU percent, working set and peak working set). The app does nothing when the variable is not set. The script lets the app idle for `--idle-minutes`, then runs the same flow in its window over the Chrome DevTools port.
+`run_tpm.sh` (Electron is the default target) starts the Electron app on your real display (`--headless` uses `xvfb-run` instead) in development mode, pointed at the throwaway backend, with the built UI served from `app://`. It sets `ASTROMETRICS_PERF_METRICS` to a file. When this variable is set, the main process also writes a `gpu_report` line (`app.getGPUFeatureStatus()` and `app.getGPUInfo('basic')`) at start-up and again 20 seconds later (the first one comes before the window has rendered and can show software features; `info.electron_gpu` is the last one, and the card that counts is the one the Electron window's WebGL reports), writes one `desktop_notification` line (title and body) each time the page sends the `show-notification` request, and samples `app.getAppMetrics()` every 2 seconds and appends one JSON line per process (time, process type, process id, CPU percent, working set and peak working set). The app does nothing when the variable is not set. The script lets the app idle for `--idle-minutes`, then runs the flow in its window over the Chrome DevTools port. With `--browser` and `--electron` this is a second lap whose files go to `electron-flow/`; as the default target its files go straight into the results folder.
 
-Electron's own folder, lock and desktop settings point inside the throwaway folder, so a running copy of the real app is not affected. The runner launches Electron itself with a DevTools port and drives it with the same Puppeteer code as the Chrome flow, instead of Playwright's `_electron` launcher, so one flow serves both. It needs `xvfb-run` (package `xvfb`).
+Electron's own folder, lock and desktop settings point inside the throwaway folder, so a running copy of the real app is not affected. The runner launches Electron itself with a DevTools port and drives it with the same Puppeteer code as the Chrome flow, instead of Playwright's `_electron` launcher, so one flow serves both. `--headless` needs `xvfb-run` (package `xvfb`).
 
 ## Cold start (`--cold`, `--after-reboot`)
 
@@ -338,8 +411,8 @@ build/tpm/run_tpm.sh --observatory replay --gpu nvidia
 build/tpm/run_tpm.sh --real-snapshot --cold --gpu nvidia
 
 # 5. The visible Electron window on the real graphics card (leave the window alone).
-build/tpm/run_tpm.sh --electron --visible --gpu nvidia --laps 3
-build/tpm/run_tpm.sh --electron --visible --gpu intel --laps 3
+build/tpm/run_tpm.sh --gpu nvidia --laps 3
+build/tpm/run_tpm.sh --gpu intel --laps 3
 ```
 
 Why this order: the first run after the reboot is the only one that is truly cold, so it goes first and is the only run that gets `--after-reboot`. Later `--cold` runs drop the cache by `fadvise` and can be compared with it. The cold run on NVIDIA has its own key; the warm NVIDIA and Intel runs have their own keys too (the graphics card is part of the key). A real-snapshot run is never compared and never updates the baseline.
@@ -355,6 +428,68 @@ The baseline never changes by itself. To accept a new normal (for example after 
 3. Run `build/tpm/run_tpm.sh --update-baseline` (on the setup you want the baseline for) and commit the new `tpm_baseline.json`.
 
 To change one limit only, edit its `watch_ratio`, `breach_ratio` or `slack` in the file.
+
+## Resource TPMs
+
+Every run measures what the backend and the programs it starts cost, not only the backend process. `resource_usage.py` reads `/proc` once a second (twice a second in a processing run) and follows the whole process tree under the backend. When they start, Electron (`electron.pid`) and the Chrome flow's browser (`browser.pid`) are followed too, as groups of their own.
+
+| Read from | What it gives |
+| --- | --- |
+| `/proc/<pid>/io` | `read_bytes` and `write_bytes`: bytes the kernel read from and wrote to storage for the process. These are the disk TPMs. `rchar` and `wchar` (bytes passed to read and write calls, file cache and pipes included) are kept in `info.resources` for information only. |
+| `/proc/<pid>/stat` | CPU time (`utime` plus `stime`), and the CPU time of the process's finished, collected children (`cutime` plus `cstime`). The start time tells a reused process number from the old one. |
+| `/proc/<pid>/status` | Resident memory now (`VmRSS`) and its peak (`VmHWM`). |
+
+**Groups.** A process is sorted into a group by its name and command line: `siril` (also the Flatpak and sandbox processes under it), `graxpert`, `denoise_tools` (Cosmic Clarity, StarNet), `indi`, `backend_workers` (pool workers, which are forks of the backend or `multiprocessing` processes), `backend_other` and `backend` (the root). A process the rules do not know takes its parent's group.
+
+**Children that end between two samples.** The disk and CPU counters grow only. A ledger keeps the last values seen for every process, so a finished child stays in its group's sum. The tree CPU time uses the kernel's own total instead: a parent's `cutime` and `cstime` already include its collected children, so the tree's CPU time is the sum, over the live processes, of their own time plus their collected children's time. Nothing a child did is lost or counted twice, even if it ended between samples. A child handed to `init` (its parent ended first) is followed while it lives and added from the ledger when it ends.
+
+**What can be missed.** The disk bytes a process moves after its last sample and before it ends are lost, so the disk numbers of a very short program (a Siril call of a second) are a lower bound. The peak memory is the largest sum over the samples: a peak shorter than the sampling interval can be missed (`info.resources.trees.backend.peak_sum_mb`, the sum of each process's own peak, is an upper bound). The numbers describe the kernel's accounting of storage requests, not the drive: a read answered from the file cache is not counted in `read_bytes`.
+
+**NVIDIA.** The `nvidia_*` TPMs reduce `nvidia-samples.jsonl` (utilization and memory from `nvidia-smi`, every 2 seconds). The memory is what the whole card has in use, so a desktop that draws on the card adds to it.
+
+**Intel graphics.** The load of the Intel graphics is not measured. Reading it needs `intel_gpu_top` or the `perf` counters of the i915 driver, and both need elevated permissions (root, or a changed `perf_event_paranoid` or capabilities). The harness makes no change to the system, so there is no TPM for it. The Intel card's use shows only indirectly, in the frame-rate TPMs of a run with `--gpu intel`.
+
+## Processing runs
+
+`run_tpm.sh --processing <target>` measures the heavy work of the app instead of the screens. It asks the throwaway backend, through the same RPC calls the Image Processing display uses, to stack a target's frames and then to analyze it, waits for each job, and records the time, CPU, memory, disk use and NVIDIA use of every stage. There is no browser and no Electron.
+
+```bash
+# The fixed comparison scenario: M 31, ZWO ASI 533MM Pro frames only.
+build/tpm/run_tpm.sh --processing "M 31" --processing-camera "ZWO ASI 533MM Pro"          # a small made-up library, a few minutes
+build/tpm/run_tpm.sh --real-snapshot --processing "M 31" --processing-camera "ZWO ASI 533MM Pro"   # your real frames, through the overlay
+build/tpm/run_tpm.sh --real-snapshot --processing "M 31" --processing-dry-run              # find the frames and check the files, start no job
+```
+
+**When to run it.** Before merging a change to stacking, quality measurement or analysis, and once a week on the real data to see the trend. Use the same target and camera every time, so the numbers can be compared (the number of frames and a hash of their paths are in `processing-plan.json` and `info.processing.plan`). `--processing-steps photometry,frame_measurements,stack_comparison` chooses the analysis steps (all three by default); `--processing-camera` chooses the camera.
+
+**What it runs.**
+
+1. `target:get_files` lists the target's frames. Frames of the chosen camera are kept (spectroscopy frames are left out) and sorted by path. The script stops with exit code 3 if there are none or a file is missing.
+2. `processing:stack` (the Process button) starts the stack job. The script polls `processing:get_job` every half second.
+3. The job log (`processing:job_log_tail`) holds a line `Stage N of 7: ...` at the start of each stage, with a time to the millisecond. A stage runs to the next stage's line; the last one to the end of the job. The stages are `choose_frames`, `screen_frames`, `prepare`, `stacking`, `summarize`, `quality` and `preview`. A skipped stage gives no TPM.
+4. The analysis steps then run one after another, each as a button of the display does: `photometry` (`analysis:analyze_image` on the new stack, the Analyze Target button), `frame_measurements` (`quality:record_frame_measurements`) and `stack_comparison` (`quality:measure_stack`). The last two do not return their job's number, so the script waits until every job that is new for the target has ended.
+5. For each window (stage or step) the CPU time, peak memory and disk bytes are cut out of the half-second samples, and the NVIDIA rows (every 2 seconds) inside the window are summarized. A window shorter than 2 seconds has no NVIDIA value.
+
+**The stack really runs.** The throwaway settings file sets `skip_unchanged_stacks_enabled = "false"`. Without it the app keeps a stack whose frames, settings and code are unchanged, and a second run would skip the stacking stage and measure nothing. The setting is in the throwaway file only.
+
+**Heavy-work slot.** A processing run takes one of the shared heavy-work slots first, with `heavy()` from `build/agent_tools/common.sh`, the same lock `check.sh` uses (`ASTROMETRICS_AGENT_SLOTS`, default 2, locks in `ASTROMETRICS_AGENT_LOCK_DIR`). It prints `[waiting for a heavy-work slot]` and starts when one is free. This holds for the made-up library too.
+
+**Throwaway folder in the home folder.** Siril runs in a Flatpak sandbox with its own `/tmp` and `/var/tmp`, and it shares the home folder. So a processing run puts its throwaway folder in `~/.cache/astrometrics-tpm-runs` (unless `TMPDIR` is set) and is not sealed (the seal's `bwrap` forbids the user namespace Flatpak needs). The offline profile still applies: no telescope host, PHD2 or INDI.
+
+**The made-up library.** `seed_library.py` normally draws a different random sky in every frame, which no stacker can register. With `TPM_STACKABLE_TARGET` set (the script sets it to the processing target) the six light frames of that target show the same 60 stars, moved by up to 4 pixels, with fresh noise. The calibration frames are the usual ones. The three program commands (Siril, GraXpert, Cosmic Clarity) are copied from your settings file, read only, so the made-up run uses the programs the real one uses. A made-up library is small (256 by 256 pixels, six frames), so its times say whether the whole pipeline works and give a regression signal for the fixed costs; the real data shows the scaling.
+
+**Tool versions.** The setup fingerprint records the version of each external tool: Siril and GraXpert from their `--version`, Cosmic Clarity (which has none) by the size and date of its program. For a processing run these versions are part of the setup key, so an upgrade of a tool starts a new baseline instead of looking like a regression of the app. (A display-flow run does not use these tools, and its key does not change.) The key also holds the scenario, so a processing run is never compared with a flow run.
+
+**Real data, safely.** A processing run on your real data works like `--real-snapshot` (copies of the three databases, the catalog caches, a copy-on-write overlay of the library) with these differences and checks:
+
+- The `bwrap` lock of the plain real-snapshot mode cannot be used: Siril runs through Flatpak, Flatpak makes a user namespace, and the system refuses that inside the `bwrap` one (`apparmor_restrict_unprivileged_userns`). Landlock, the other lock that needs no root, was tried and also fails, because it forbids the mounts Flatpak makes.
+- Instead, `prepare --mountpoint` rewrites every stored path that names the real library, in the database copies and in `calibration_frames.json`, to the overlay's mount point under `~/.cache/astrometrics-tpm-mounts`, and the settings name the mount point as the frames and stacks folders. The backend never sees a real path. All writes land in the overlay's upper folder (`overlay-writes.json` lists them) or in the throwaway folder.
+- `real_snapshot.py prepare` first rewrites the paths under the real library to the overlay, then moves any other stored path (for example an old stacks folder that no longer exists) to `<throwaway folder>/outside/<original path>`, using `copy_path_guard.repoint(..., mirror_outside=True)`. It prints how many it moved.
+- `real_snapshot.py guard` runs before the backend starts, with the check `build/agent_tools/realrun.sh` uses (`copy_path_guard.py`). It refuses the run if any absolute path stored in a database copy is outside the throwaway folder and the overlay, or the settings do not name the overlay.
+- `real_snapshot.py fingerprint` records the size and change time of every file of the real library (and of the three databases) before the backend starts, and again after it stops. `verify` writes `real-library-check.json` and fails the run if a file of the real library was added, removed or changed. A database that changed is listed but does not fail the run, because your own app may be running.
+- The result is a trend: every TPM has the status `trend`, and the run cannot update the baseline.
+
+Siril's own Flatpak data folder (`~/.var/app/org.siril.Siril`) is written by Siril as always; it is not part of the library.
 
 ## The replay observatory
 
@@ -388,13 +523,14 @@ The paths come from your real settings file (read only). Every file is copied in
 
 ## The network seal
 
-The simulated and replay profiles (and the offline profile, unless you pass `--no-seal`) run inside their own network. `run_tpm.sh` starts itself again under `bwrap --unshare-net --unshare-pid` (bubblewrap, the same tool the real-snapshot mode uses). The new network namespace has only a loopback interface. A network namespace has its own loopback, so everything that talks over 127.0.0.1 must be inside it, and it is: the script starts the backend, the INDI server and its simulators, the stand-in PHD2, the drivers, the UI server, the browser, Electron and `xvfb-run` as its own children. Nothing in the run can connect out, and nothing outside can connect in (your real PHD2, INDI server, StellarMate and backend are not reachable).
+The simulation library, the simulated and replay profiles (and the offline profile, unless you pass `--no-seal`) run inside their own network. `run_tpm.sh` starts itself again under `bwrap --unshare-net --unshare-pid` (bubblewrap, the same tool the real-snapshot mode uses). The new network namespace has only a loopback interface. A network namespace has its own loopback, so everything that talks over 127.0.0.1 must be inside it, and it is: the script starts the backend, the INDI server and its simulators, the stand-in PHD2, the drivers, the UI server, the browser, Electron and `xvfb-run` as its own children. Nothing in the run can connect out, and nothing outside can connect in (your real PHD2, INDI server, StellarMate and backend are not reachable).
 
 - The whole computer is bound read only (`bwrap --ro-bind / /`). Only the throwaway folder's parent (`TMPDIR`, which is `/var/tmp` for `--cold`), `build/tpm/results` and the display sockets (X11 and Wayland) are writable. `--unshare-pid` makes every process of the run end when the script ends.
 - `python build/tpm/seal_guard.py sealed` checks the seal at the start: the only interface in `/proc/net/dev` is `lo`, and a connection to 1.1.1.1 and 8.8.8.8 fails.
 - The older connection guard (the settings check and the `ss` check of the backend's connections) still runs as a second check.
 - Because nothing has a route out, anything the app asks of the internet (for example an online lookup) fails at once. The numbers of a sealed offline run can differ a little from an older, unsealed baseline for that reason.
-- A window on your display still works. The Wayland socket and the X11 socket are files, and they are reachable from the new namespace. `xrandr` ran from inside the seal during testing. A visible Electron window (`--electron --visible`) was not opened as part of testing the seal.
+- A window on your display still works. The Wayland socket and the X11 socket are files, and they are reachable from the new namespace. `xrandr` ran from inside the seal during testing. A real-display Electron window was not opened as part of testing the seal.
+- The simulation library is sealed like the others; its overlay is made before the seal (see "The simulation library").
 - The real-snapshot mode is not sealed. It has its own mounts and its own bwrap lock for the backend, and bubblewrap inside bubblewrap is not worth the risk for a mode that already cannot write to your library.
 - To look inside a running sealed run from another terminal, use `nsenter --preserve-credentials -U -n -t <pid of a process in the run> <command>`.
 

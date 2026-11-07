@@ -1443,14 +1443,19 @@ class IndiInterface(IndiClient):
         """Tell whether this interface still takes property updates.
 
         The client library calls back from its own thread, so an update can
-        arrive after the interface was closed (see `close_callbacks`).
+        arrive after the interface was closed (see `close_callbacks`), or
+        while Python is deleting the object. Python removes the object's
+        attributes before the client library's own clean-up runs, and that
+        clean-up can still send one last update.
 
         Returns
         -------
         ready : `bool`
-            `False` once the interface has been closed.
+            `False` once the interface has been closed, or when its runtime
+            state (see `_init_runtime_state`) does not exist (yet or any more).
         """
-        return not vars(self).get("_callbacks_closed", False)
+        state = vars(self)
+        return "_exposure_lock" in state and not state.get("_callbacks_closed", False)
 
     def close_callbacks(self) -> None:
         """Ignore every property update from now on.

@@ -827,7 +827,7 @@ class StellarService:
         radius: float,
         enabled_drivers: list[str],
         limiting_magnitude: float | None = None,
-    ) -> list[dict]:
+    ) -> dict[str, Any]:
         """List the stars the enabled online catalog drivers find in a region.
 
         Never reads or changes the library. Each source names the driver
@@ -850,8 +850,14 @@ class StellarService:
 
         Returns
         -------
-        sources : `list` [`dict`]
-            One `SkySource` per star, with the Planetarium's camelCase keys.
+        result : `dict`
+            ``sources`` is one `SkySource` per star, with the Planetarium's
+            camelCase keys. ``starsTruncated`` is true when a driver cut its
+            answer short (the Gaia driver stops at 20,000 stars), so fainter
+            stars in the region are missing and the map must ask again for a
+            different view instead of reusing this answer. ``failedCatalogs``
+            names the drivers that could not answer (empty when all did), so
+            an empty ``sources`` list is not mistaken for empty sky.
 
         REQ: PLN-3.1, PLN-3.2
         """
@@ -864,7 +870,11 @@ class StellarService:
             magnitude_max=limiting_magnitude,
             limit=None,
         )
-        return [source.model_dump(by_alias=True) for source in result.sources]
+        return {
+            "sources": [source.model_dump(by_alias=True) for source in result.sources],
+            "starsTruncated": bool(result.stars_truncated),
+            "failedCatalogs": list(result.failed_catalogs),
+        }
 
     def deep_catalog_status(self) -> dict:
         """Say how much of the downloaded deep-star catalog is installed.

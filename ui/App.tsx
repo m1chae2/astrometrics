@@ -37,13 +37,27 @@ import { Skeleton } from './common/components/Skeleton';
 // Single shared cache for all shared-resource queries (see ui/common/queries/),
 // so multiple views requesting the same data (e.g. the target list) share one
 // in-flight request and one cached result instead of each fetching independently.
-const queryClient = new QueryClient({
+/**
+ * Builds the app's query client with its shared freshness rules.
+ * Exported so tests can count requests under the same rules.
+ *
+ * @return A new query client.
+ */
+export const createAppQueryClient = (): QueryClient => new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 0,
+      // Data read in the last 30 seconds counts as fresh, so coming back to a
+      // display does not read it all again. Every action that changes data
+      // invalidates the queries it affects, and polls use refetchInterval,
+      // so a user's own change is never hidden by this.
+      staleTime: 30_000,
+      // Alt-tabbing back to the app does not refetch. Fresh data comes from
+      // polls, socket events and invalidation.
+      refetchOnWindowFocus: false,
     },
   },
 });
+const queryClient = createAppQueryClient();
 
 
 // Lazy load main display components with named export handling.

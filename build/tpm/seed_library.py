@@ -17,6 +17,12 @@ rows no public call can create (fixed times, made-up guiding samples). That
 is allowed because ``build/`` is outside the import-linter contracts; the
 ``banned-api`` exemption for this file in ``pyproject.toml`` says the same.
 
+Set ``TPM_STACKABLE_TARGET="M 31"`` (``run_tpm.sh --processing``) to make that
+target's light frames a stackable set: the same star field in every frame,
+shifted by a few pixels, with fresh noise. The ordinary frames show a
+different random sky each, which no stacker can register. Nothing else in the
+library changes.
+
 Set ``TPM_SCALE=N`` (``run_tpm.sh --scale N``) for a bigger library: N times
 as many targets (the three real ones plus made-up ones) and N times as many
 light frames per target, for a controlled scaling curve.
@@ -115,6 +121,41 @@ def make_image(rng: np.random.Generator, star_count: int = 40, exposure_scale: f
     return image.astype(np.float32)
 
 
+def make_stackable_image(frame_index: int, star_count: int = 60) -> np.ndarray:
+    """Make one frame of a set that a stacker can register.
+
+    Every frame shows the same stars (fixed by the seed), moved by a small
+    whole-pixel shift that depends on the frame number, on top of fresh sky
+    noise. This is what a real set of frames from one night looks like after
+    small tracking errors.
+
+    Parameters
+    ----------
+    frame_index : `int`
+        The frame's number. It sets the shift and the noise.
+    star_count : `int`, optional
+        How many stars the field has.
+
+    Returns
+    -------
+    image : `numpy.ndarray`
+        A float32 image, `FRAME_SIZE` pixels square.
+    """
+    size = FRAME_SIZE
+    field = np.random.default_rng([SEED, 31])
+    positions = field.uniform(20, size - 20, (star_count, 2))
+    peaks = field.uniform(1500, 9000, star_count)
+    frame_rng = np.random.default_rng([SEED, 31, frame_index])
+    shift = frame_rng.integers(-4, 5, 2)
+    y_grid, x_grid = np.mgrid[0:size, 0:size]
+    image = frame_rng.normal(500.0, 12.0, (size, size))
+    for (x_center, y_center), peak in zip(positions, peaks, strict=True):
+        image += peak * np.exp(
+            -((x_grid - x_center - shift[0]) ** 2 + (y_grid - y_center - shift[1]) ** 2) / (2 * 1.8**2)
+        )
+    return image.astype(np.float32)
+
+
 def write_fits(path: Path, image: np.ndarray, **header: object) -> None:
     """Write one FITS file with the given header cards.
 
@@ -167,6 +208,7 @@ def seed(sandbox: Path) -> dict[str, int]:
     frame_total = 0
 
     scale = max(1, int(os.environ.get("TPM_SCALE", "1")))
+    stackable_target = os.environ.get("TPM_STACKABLE_TARGET")
     extra_targets = tuple(
         (
             f"Synthetic {copy}-{number}",
@@ -190,7 +232,7 @@ def seed(sandbox: Path) -> dict[str, int]:
             )
             write_fits(
                 path,
-                make_image(rng),
+                make_stackable_image(index) if target_id == stackable_target else make_image(rng),
                 OBJECT=target_id,
                 FILTER="L",
                 INSTRUME=CAMERA,

@@ -102,6 +102,8 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
             }
         },
         enabled: Boolean(targetId),
+        // A finished stack changes `refreshKey`, so 30 s is safe.
+        staleTime: 30_000,
     });
 
     // The warnings come from the stacking job that made the stack. Without a job id, or when the

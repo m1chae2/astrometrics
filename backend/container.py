@@ -186,7 +186,7 @@ class Container:
         from astrometricslib.jobs import JobStore
 
         self.job_repository = JobStore(str(self.config_service.get_logs_db_path()))
-        self.job_service = JobService(self.job_repository)
+        self.job_service = JobService(self.job_repository, logs_folder=self.config_service.get_logs_path())
         self.maintenance_service = MaintenanceService(self.job_service)
         # Reuse the library's one calibration catalog, and load its index
         # from disk now (the first question builds and loads it).

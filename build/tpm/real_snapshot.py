@@ -14,11 +14,11 @@ the copying part:
   path outside the throwaway folder and the overlay (it uses the same check as
   ``build/agent_tools/realrun.sh``).
 * ``fingerprint`` and ``verify`` prove the real library was not touched. The
-  first walks the real image library folder and writes the size and change
-  time of every file (and of the three real databases) to a file. The second
-  walks it again after the run and lists every file that was added, removed
-  or changed. The databases are listed apart, because the user's own app may
-  change them while the run goes on.
+  first walks the real image library folder and the real logs folder and
+  writes the size and change time of every file (and of the three real
+  databases) to a file. The second walks it again after the run and lists
+  every file that was added, removed or changed. The databases are listed
+  apart, because the user's own app may change them while the run goes on.
 * ``get`` prints one value from ``real_snapshot.json`` (for the shell script).
 * ``overlay-report`` lists what the backend wrote into the overlay's upper
   folder (the only place a write can land) and its size.
@@ -181,6 +181,7 @@ def prepare(sandbox: Path, mountpoint: Path | None = None) -> int:
                 "real_stacks": str(real.stacks),
                 "real_database_folder": str(real.library),
                 "real_wayfinding_folder": str(real.wayfinding),
+                "real_logs_folder": str(real.logs),
                 "database_bytes": sizes,
                 "paths_rewritten": report["paths_rewritten"],
                 "paths_repointed_outside": repointed,
@@ -261,6 +262,33 @@ def guard(sandbox: Path) -> int:
     return 1 if offenders else 0
 
 
+def walk_folder(folder: Path) -> dict[str, list[int]]:
+    """Record the size and change time of every file under a folder.
+
+    Only directory entries and file status are read.
+
+    Parameters
+    ----------
+    folder : `pathlib.Path`
+        The folder to walk. A missing folder gives an empty record.
+
+    Returns
+    -------
+    files : `dict` [`str`, `list` [`int`]]
+        Each file's path to ``[size, change time in nanoseconds]``.
+    """
+    files = {}
+    for directory, _directories, names in os.walk(folder):
+        for name in names:
+            path = os.path.join(directory, name)
+            try:
+                status = os.stat(path, follow_symlinks=False)
+            except OSError:
+                continue
+            files[path] = [status.st_size, status.st_mtime_ns]
+    return files
+
+
 def fingerprint(sandbox: Path, out: Path) -> int:
     """Record the size and change time of the real library's files.
 
@@ -291,18 +319,13 @@ def fingerprint(sandbox: Path, out: Path) -> int:
         real_frames = Path(recorded["real_library"])
         real_database_folder = Path(recorded["real_database_folder"])
         real_wayfinding_folder = Path(recorded["real_wayfinding_folder"])
+        real_logs_folder = Path(recorded["real_logs_folder"]) if recorded.get("real_logs_folder") else None
     else:
         real = real_folders()
         real_frames, real_database_folder, real_wayfinding_folder = real.frames, real.library, real.wayfinding
-    files = {}
-    for folder, _directories, names in os.walk(real_frames):
-        for name in names:
-            path = os.path.join(folder, name)
-            try:
-                status = os.stat(path, follow_symlinks=False)
-            except OSError:
-                continue
-            files[path] = [status.st_size, status.st_mtime_ns]
+        real_logs_folder = real.logs
+    files = walk_folder(real_frames)
+    logs = walk_folder(real_logs_folder) if real_logs_folder is not None else {}
     databases = {}
     candidates = [real_database_folder / name for name in library_copy.LIBRARY_DATABASES[:2]]
     candidates.append(real_wayfinding_folder / library_copy.WAYFINDING_DATABASE)
@@ -313,8 +336,11 @@ def fingerprint(sandbox: Path, out: Path) -> int:
             except OSError:
                 continue
             databases[f"{path}{suffix}"] = [status.st_size, status.st_mtime_ns]
-    out.write_text(json.dumps({"files": files, "databases": databases}))
-    print(f"Real library fingerprint: {len(files)} files, {len(databases)} database files.")
+    out.write_text(json.dumps({"files": files, "databases": databases, "logs": logs}))
+    print(
+        f"Real library fingerprint: {len(files)} files, {len(databases)} database files, "
+        f"{len(logs)} log files."
+    )
     return 0
 
 
@@ -327,7 +353,8 @@ def verify(before: Path, after: Path, out: Path) -> int:
         Fingerprint files from `fingerprint`.
     out : `pathlib.Path`
         The JSON report: ``library_changes`` (``added``, ``removed``,
-        ``changed``), ``database_changes`` and ``ok``.
+        ``changed``), ``log_changes`` (the same for the real logs folder),
+        ``database_changes`` and ``ok``.
 
     Returns
     -------
@@ -355,29 +382,37 @@ def verify(before: Path, after: Path, out: Path) -> int:
 
     library = compare(first["files"], second["files"])
     databases = compare(first["databases"], second["databases"])
+    # The real logs folder. A fingerprint from before this check has no "logs".
+    logs = compare(first.get("logs", {}), second.get("logs", {}))
     # Database changes other than the shared-memory file are real changes.
     database_failures = {
         kind: [path for path in paths if not path.endswith("-shm")] for kind, paths in databases.items()
     }
-    ok = not any(library.values()) and not any(database_failures.values())
+    ok = not any(library.values()) and not any(database_failures.values()) and not any(logs.values())
     out.write_text(
         json.dumps(
             {
                 "ok": ok,
                 "library_changes": library,
+                "log_changes": logs,
                 "database_changes": databases,
                 "database_failures": database_failures,
             },
             indent=2,
         )
     )
-    differences = sum(len(paths) for paths in library.values()) + sum(
-        len(paths) for paths in database_failures.values()
+    differences = (
+        sum(len(paths) for paths in library.values())
+        + sum(len(paths) for paths in database_failures.values())
+        + sum(len(paths) for paths in logs.values())
     )
     print(f"Real library check: {len(second['files'])} files compared, {differences} difference(s).")
     for kind, paths in library.items():
         for path in paths[:20]:
             print(f"  REAL LIBRARY {kind}: {path}")
+    for kind, paths in logs.items():
+        for path in paths[:20]:
+            print(f"  REAL LOGS {kind}: {path}")
     for kind, paths in database_failures.items():
         for path in paths:
             print(f"  REAL DATABASE {kind}: {path}")

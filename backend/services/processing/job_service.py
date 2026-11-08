@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from astrometricslib.drivers import is_path_inside
 from astrometricslib.exceptions import ConflictError, NotFoundError
 from astrometricslib.jobs import JobStore, ProcessingJob
 
@@ -22,15 +23,35 @@ class JobService:
     Acts as a bridge between high-level services and the job store.
     """
 
-    def __init__(self, job_repository: JobStore) -> None:
+    def __init__(self, job_repository: JobStore, logs_folder: Path | None = None) -> None:
         """Keep the job store this service reads and writes.
 
         Parameters
         ----------
         job_repository : `JobStore`
             The logs database's job list.
+        logs_folder : `pathlib.Path`, optional
+            The folder this app run keeps job log files in. Only files inside
+            it are ever deleted. Default: the configured logs folder, looked
+            up when a log file is about to be deleted.
         """
         self.repository = job_repository
+        self._logs_folder = logs_folder
+
+    def _owned_logs_folder(self) -> Path:
+        """Give the one folder this service may delete job log files from.
+
+        Returns
+        -------
+        folder : `pathlib.Path`
+            The folder passed to the constructor, or the configured logs
+            folder.
+        """
+        if self._logs_folder is not None:
+            return self._logs_folder
+        from astrometricslib import get_configuration
+
+        return get_configuration().get_logs_path()
 
     def create_job(
         self,
@@ -193,23 +214,39 @@ class JobService:
         """
         job = self.get_job(job_id)
         if job and job.log_file_path:
-            # Ensure path is absolute for reliable deletion
-            path = Path(job.log_file_path)
-            if not path.is_absolute() and hasattr(self.repository, "db_path"):
-                # Try to resolve relative to project root
-                from astrometricslib import get_configuration
-
-                config = get_configuration()
-                path = config.get_project_root() / path
-
-            if path.exists():
-                try:
-                    os.remove(str(path))
-                    logger.info("Deleted log file for job %s: %s", job_id, path)
-                except OSError:
-                    logger.exception("Error removing log file %s", path)
+            self._delete_log_file(job_id, Path(job.log_file_path))
 
         return self.repository.delete_job(job_id)
+
+    def _delete_log_file(self, job_id: str, path: Path) -> None:
+        """Delete one job's log file, but only inside the folder this app owns.
+
+        A stored path outside that folder is left alone and logged at debug
+        level. The record can name a file this run does not own, for example
+        in a simulated world whose database was copied from the real one, and
+        skipping it is not a failure.
+
+        Parameters
+        ----------
+        job_id : `str`
+            The job the log file belongs to (for the log message).
+        path : `pathlib.Path`
+            The path stored in the job record.
+        """
+        if not path.is_absolute():
+            from astrometricslib import get_configuration
+
+            path = get_configuration().get_project_root() / path
+        folder = self._owned_logs_folder()
+        if not is_path_inside(str(folder.resolve()), str(path.resolve())):
+            logger.debug("Left the log file of job %s alone: %s is outside %s", job_id, path, folder)
+            return
+        if path.exists():
+            try:
+                os.remove(str(path))
+                logger.info("Deleted log file for job %s: %s", job_id, path)
+            except OSError:
+                logger.exception("Error removing log file %s", path)
 
     async def wait_for_job(
         self, job_id: str, timeout: int = 3600, poll_interval: float = 1.0

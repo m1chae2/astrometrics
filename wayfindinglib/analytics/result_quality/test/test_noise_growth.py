@@ -1332,3 +1332,35 @@ def test_star_width_weights_match_the_stackers_rule() -> None:
     assert sum(weights) / 3 == pytest.approx(1.0)
     assert weights[0] > weights[1] > weights[2]
     assert star_width_weights([]) is None
+
+
+def test_the_new_frame_supply_gives_the_frames_new_frames_makes() -> None:
+    """The supply gives the same frames as `_new_frames`, in any order."""
+    template = [
+        _frame(index, exposure=30.0 + index, sky=1.0 + index / 10, width=2.0 + index / 5)
+        for index in range(5)
+    ]
+    for exposure in (None, 45.0):
+        supply = ng._NewFrameSupply(template, exposure)
+        for count in (3, 12, 1, 12, 0, 7):
+            assert supply.first(count) == ng._new_frames(template, count, exposure)
+
+
+@pytest.mark.parametrize("mode", [WeightingMode.EQUAL, WeightingMode.NOISE, WeightingMode.WFWHM])
+@pytest.mark.parametrize("target_ratio", [0.9, 0.707, 0.4])
+def test_take_more_equals_a_scan_with_the_public_forecast(mode: WeightingMode, target_ratio: float) -> None:
+    """The count found is the smallest one a plain scan finds."""
+    existing = [
+        _frame(index, exposure=60.0, sky=0.5 + (index % 7) / 10, read=1.5, width=2.0 + (index % 5) / 4)
+        for index in range(40)
+    ]
+    template = existing[-12:]
+    current = ng.forecast_stack_noise(existing, mode)
+    expected = None
+    for count in range(1, 400):
+        forecast = ng.noise_ratio_after_adding(existing, template, count, mode)
+        if forecast is not None and forecast.noise / current.noise <= target_ratio:
+            expected = count
+            break
+    result = ng.frames_to_cut_noise(existing, template, mode, target_noise_ratio=target_ratio)
+    assert result.frames_needed == expected

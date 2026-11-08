@@ -580,6 +580,8 @@ else
 fi
 export XDG_DATA_HOME="$SANDBOX/xdg_data"
 export XDG_CACHE_HOME="$SANDBOX/xdg_cache"
+# Remember where the real run logs are before the state folder moves (the simulated world repoints job log paths away from them).
+export ASTROMETRICS_REAL_STATE_HOME="${ASTROMETRICS_REAL_STATE_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}}"
 export XDG_STATE_HOME="$SANDBOX/xdg_state"
 export XDG_CONFIG_HOME="$SANDBOX/xdg_config"
 mkdir -p "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME" "$XDG_CONFIG_HOME"

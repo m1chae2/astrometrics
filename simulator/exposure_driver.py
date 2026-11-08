@@ -69,7 +69,7 @@ FRAME_GRACE_SECONDS = 60
 SETTING_WAIT_SECONDS = 5.0
 #: The longest wait for the simulated cooler to reach its setpoint, and how
 #: close (degrees C) counts as there.
-COOLING_WAIT_SECONDS = 180.0
+COOLING_WAIT_SECONDS = 60.0
 COOLING_TOLERANCE_C = 1.0
 #: Tries to set one property before giving up.
 SETTING_TRIES = 3
@@ -77,6 +77,33 @@ SETTING_TRIES = 3
 
 #: The header key the camera simulator does not write.
 OFFSET_KEYWORD = "OFFSET"
+
+
+def unused_frame_name(name: str, directory: Path) -> str:
+    """Give a frame a file name that the picture folder does not have yet.
+
+    The camera numbers its files by looking at its own upload folder
+    (``..._Light_001.fits``). Frames leave that folder at once, so the camera
+    starts at 001 every time. The number is counted again here, on the
+    picture folder, so each frame keeps a name of its own.
+
+    Parameters
+    ----------
+    name : `str`
+        The name the camera gave, ending in ``_<number>.fits``.
+    directory : `pathlib.Path`
+        The picture folder.
+
+    Returns
+    -------
+    name : `str`
+        The same name with the lowest number that is free in `directory`.
+    """
+    stem = re.sub(r"_\d+\.fits$", "", name)
+    number = 1
+    while (directory / f"{stem}_{number:03d}.fits").exists():
+        number += 1
+    return f"{stem}_{number:03d}.fits"
 
 
 def stamp_offset(source: Path, destination: Path, offset: float | None) -> None:
@@ -312,6 +339,8 @@ class ExposureDriver:
         self.point_mount(self.ra_hours, self.dec_degrees)
         destination = upload_directory or self.staging_directory
         destination.mkdir(parents=True, exist_ok=True)
+        # The app lists this folder before the first frame arrives.
+        self.pictures_directory.mkdir(parents=True, exist_ok=True)
         prefix = re.sub(r"[^A-Za-z0-9]+", "_", self.target) + "_Light_XXX"
         self._set(
             f"{CAMERA}.UPLOAD_MODE.UPLOAD_LOCAL=On",
@@ -430,6 +459,7 @@ class ExposureDriver:
                 size = path.stat().st_size
                 self.stop_event.wait(0.3)
             self.pictures_directory.mkdir(parents=True, exist_ok=True)
+            new_name = unused_frame_name(new_name, self.pictures_directory)
             path_in_pictures = self.pictures_directory / new_name
             stamp_offset(path, path_in_pictures, self.camera_offset())
             path = path_in_pictures

@@ -522,10 +522,13 @@ class StellarService:
 
         Call this once during backend startup, so a user who opens the
         Astronomy Manager first does not wait for the per-target counts and
-        the class counts there.
+        the class counts there. It also looks up one id that no star has,
+        which builds the library's map of spelling-free star ids, so the
+        first Planetarium click on a star does not wait for it.
         """
         self.get_target_data_availability()
         self.get_spectral_class_summary()
+        self.get_object("warm-up: no such star")
 
     def get_target_data_availability(self) -> dict[str, dict[str, bool | int]]:
         """Say how many stars each target has, and what data they have.

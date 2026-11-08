@@ -52,6 +52,12 @@ empty. Only a write creates the file and brings the schema up to date.
 Times are stored as UTC with the offset ``+00:00``, so text order is time
 order. A naive time is refused.
 
+A read of the newest rows of one target (``target_id`` given, ``latest_only``
+true, and no other filter than the metric, level and subset label) is kept in
+memory, and the next read of the same question reads only what was written
+since (see `QualityStore.query`). The result is always the one a full read
+would give.
+
 Every database problem is raised as `StorageError`.
 """
 
@@ -59,8 +65,11 @@ import json
 import logging
 import os
 import sqlite3
+import threading
+from collections import OrderedDict
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
@@ -467,6 +476,24 @@ def _decode_row(row: sqlite3.Row) -> QualityMeasurement:
     )
 
 
+def _latest_key(measurement: QualityMeasurement) -> tuple[str, str, str, str]:
+    """Give the key the latest view picks one row for.
+
+    Parameters
+    ----------
+    measurement : `QualityMeasurement`
+        A measurement read back with its subject.
+
+    Returns
+    -------
+    key : `tuple` of `str`
+        The subject level, subject id, metric and channel (an empty channel
+        is the empty text, as the view sees it).
+    """
+    subject = measurement.subject
+    return (subject.level.value, subject.subject_id, measurement.metric, subject.channel or "")
+
+
 def quality_database_path(app_config: AppConfiguration | None = None) -> str:
     """Give the path of the database that holds the quality tables.
 
@@ -483,6 +510,60 @@ def quality_database_path(app_config: AppConfiguration | None = None) -> str:
     if app_config is None:
         app_config = get_configuration()
     return os.path.join(str(app_config.get_library_path()), "astrometrics.db")
+
+
+LATEST_READ_MINIMUM_ROWS = 300
+"""The fewest rows a read of the newest rows must give to be kept.
+
+A read of fewer rows takes a few milliseconds, so keeping it gains nothing.
+A target with a few hundred frames gives thousands of rows and reads in
+about 0.3 seconds. Design estimate, register row WAY-D107."""
+
+LATEST_READ_MAXIMUM_ENTRIES = 6
+"""How many reads of the newest rows are kept (the least recently used one is
+dropped first). One read of a target with 120 frames is about 4000 rows, a
+few megabytes. Design estimate, register row WAY-D107."""
+
+LATEST_READ_MAXIMUM_CHANGED_SUBJECTS = 500
+"""The most subjects written since a kept read that are read again one by one.
+With more, the whole question is read again. A frame job writes one subject
+for each frame, so a night of frames is far below this."""
+
+
+@dataclass(frozen=True)
+class _LatestRead:
+    """A kept read of the newest rows, and how far into the table it saw.
+
+    Attributes
+    ----------
+    schema_version : `int`
+        The schema version the rows were read under. A migration can change
+        rows in place, so a different version drops the read.
+    mark : `int`
+        The highest row number in the table when the rows were read.
+    rows_up_to_mark : `int`
+        How many rows (of any subject) had a row number up to `mark`. Fewer
+        now means a row was deleted.
+    mark_fingerprint : `tuple`
+        The run id, metric, subject id and time of the row numbered `mark`.
+        Another row there now means the table was emptied and filled again.
+    rows : `dict`
+        The newest rows by (level, subject id, metric, channel), each as
+        ``(time text, row number, measurement)``.
+    """
+
+    schema_version: int
+    mark: int
+    rows_up_to_mark: int
+    mark_fingerprint: tuple[Any, ...] | None
+    rows: dict[tuple[str, str, str, str], tuple[str, int, QualityMeasurement]]
+
+
+_LATEST_READS: OrderedDict[tuple[Any, ...], _LatestRead] = OrderedDict()
+"""The kept reads, by database path and question."""
+
+_LATEST_READS_LOCK = threading.Lock()
+"""Guards `_LATEST_READS`. It is held only to look up or store an entry."""
 
 
 MAXIMUM_SUBJECT_IDS_PER_QUERY = 20000
@@ -1259,13 +1340,214 @@ class QualityStore:
                     parameters.append(variant)
             elif variant is not None:
                 return []
-            # `source` and the conditions are fixed strings chosen above; every
-            # caller value travels as a bound parameter.
-            sql = (
-                f"SELECT m.* FROM {source} AS m "  # ruff: ignore[hardcoded-sql-expression]
-                "LEFT JOIN quality_capture_setting AS cs "
-                "ON cs.capture_setting_id = m.capture_setting_id "
-                f"{where} ORDER BY m.measured_at, m.row_id"
+            keepable = (
+                latest_only
+                and row_ids is None
+                and target_id is not None
+                and has_variant_column
+                and since is None
+                and observing_night_id is None
+                and job_id is None
+                and camera is None
+                and telescope is None
+                and subject_ids is None
+                and subject_id_prefix is None
             )
-            rows = connection.execute(sql, parameters).fetchall()
-        return [_row_to_measurement(row) for row in rows]
+            if keepable:
+                return self._query_latest_kept(
+                    connection,
+                    where,
+                    parameters,
+                    (self.db_path, metric, level, target_id, variant, library_only),
+                )
+            return self._read_measurements(connection, source, where, parameters)
+
+    @staticmethod
+    def _read_measurements(
+        connection: sqlite3.Connection, source: str, where: str, parameters: Sequence[Any]
+    ) -> list[QualityMeasurement]:
+        """Read and decode the rows a query selects, oldest first.
+
+        Parameters
+        ----------
+        connection : `sqlite3.Connection`
+            A read-only connection.
+        source : `str`
+            ``quality_measurements`` or ``quality_measurements_latest``.
+        where : `str`
+            The ``WHERE`` clause, or an empty string. Built from fixed text.
+        parameters : `Sequence`
+            The bound values of the clause.
+
+        Returns
+        -------
+        measurements : `list` of `QualityMeasurement`
+            The matching measurements, ordered by time, then row number.
+        """
+        # `source` and the conditions are fixed strings chosen by the caller;
+        # every caller value travels as a bound parameter.
+        sql = (
+            f"SELECT m.* FROM {source} AS m "  # ruff: ignore[hardcoded-sql-expression]
+            "LEFT JOIN quality_capture_setting AS cs "
+            "ON cs.capture_setting_id = m.capture_setting_id "
+            f"{where} ORDER BY m.measured_at, m.row_id"
+        )
+        return [_row_to_measurement(row) for row in connection.execute(sql, parameters).fetchall()]
+
+    def _query_latest_kept(
+        self,
+        connection: sqlite3.Connection,
+        where: str,
+        parameters: Sequence[Any],
+        question: tuple[Any, ...],
+    ) -> list[QualityMeasurement]:
+        """Read the newest rows of a question, reading only what is new.
+
+        The newest rows of one target come from a window query over the whole
+        table, which takes about 0.3 seconds for a library of 50000 rows
+        however few rows the target has. The table only grows by appending
+        (a row is never changed; only a deleted frame's rows are removed). So
+        a kept read is brought up to date like this, and the answer equals a
+        full read:
+
+        1. Check the table has not lost or swapped rows below the kept read's
+           mark (the count of rows up to the mark and the row numbered at the
+           mark are as they were). If they are not, read in full.
+        2. Find the subjects that have rows numbered above the mark, whatever
+           their target. Only they can have a different newest row.
+        3. Drop the kept rows of those subjects and read their newest rows
+           again with the question's own conditions.
+
+        Parameters
+        ----------
+        connection : `sqlite3.Connection`
+            A read-only connection.
+        where : `str`
+            The ``WHERE`` clause of the question over the latest view.
+        parameters : `Sequence`
+            The bound values of the clause.
+        question : `tuple`
+            What identifies the question in `_LATEST_READS`.
+
+        Returns
+        -------
+        measurements : `list` of `QualityMeasurement`
+            The matching newest rows, oldest first, as a full read gives them.
+            The caller owns them (they are copies of the kept rows).
+        """
+        connection.execute("BEGIN")
+        try:
+            schema_version = self._read_schema_version(connection)
+            top = connection.execute("SELECT MAX(row_id), COUNT(*) FROM quality_measurements").fetchone()
+            top_row, row_count = (int(top[0]), int(top[1])) if top[0] is not None else (0, 0)
+            with _LATEST_READS_LOCK:
+                kept = _LATEST_READS.get(question)
+                if kept is not None:
+                    _LATEST_READS.move_to_end(question)
+            rows = None
+            if kept is not None and kept.schema_version == schema_version and kept.mark <= top_row:
+                changed = self._changed_subjects(connection, kept)
+                if changed is not None:
+                    rows = dict(kept.rows)
+                    for key in [key for key in rows if key[1] in changed]:
+                        del rows[key]
+                    if changed:
+                        extra = f"m.subject_id IN ({', '.join('?' * len(changed))})"
+                        fresh = self._read_measurements(
+                            connection,
+                            "quality_measurements_latest",
+                            f"{where} AND {extra}" if where else f"WHERE {extra}",
+                            [*parameters, *sorted(changed)],
+                        )
+                        for measurement in fresh:
+                            rows[_latest_key(measurement)] = (
+                                _format_time(measurement.measured_at),
+                                measurement.row_id or 0,
+                                measurement,
+                            )
+            if rows is None:
+                fresh = self._read_measurements(connection, "quality_measurements_latest", where, parameters)
+                rows = {
+                    _latest_key(measurement): (
+                        _format_time(measurement.measured_at),
+                        measurement.row_id or 0,
+                        measurement,
+                    )
+                    for measurement in fresh
+                }
+            if len(rows) >= LATEST_READ_MINIMUM_ROWS:
+                entry = _LatestRead(
+                    schema_version=schema_version,
+                    mark=top_row,
+                    rows_up_to_mark=row_count,
+                    mark_fingerprint=self._fingerprint(connection, top_row),
+                    rows=rows,
+                )
+                with _LATEST_READS_LOCK:
+                    _LATEST_READS[question] = entry
+                    _LATEST_READS.move_to_end(question)
+                    while len(_LATEST_READS) > LATEST_READ_MAXIMUM_ENTRIES:
+                        _LATEST_READS.popitem(last=False)
+            else:
+                with _LATEST_READS_LOCK:
+                    _LATEST_READS.pop(question, None)
+        finally:
+            connection.rollback()
+        ordered = sorted(rows.values(), key=lambda item: (item[0], item[1]))
+        return [item[2].model_copy() for item in ordered]
+
+    @staticmethod
+    def _fingerprint(connection: sqlite3.Connection, row_id: int) -> tuple[Any, ...] | None:
+        """Describe one row so a later read can tell it was replaced.
+
+        Parameters
+        ----------
+        connection : `sqlite3.Connection`
+            A read-only connection.
+        row_id : `int`
+            The row number.
+
+        Returns
+        -------
+        fingerprint : `tuple` or `None`
+            The run id, metric, subject id and time of the row, or `None` when
+            there is no such row.
+        """
+        found = connection.execute(
+            "SELECT run_id, metric, subject_id, measured_at FROM quality_measurements WHERE row_id = ?",
+            (row_id,),
+        ).fetchone()
+        return None if found is None else tuple(found)
+
+    def _changed_subjects(self, connection: sqlite3.Connection, kept: _LatestRead) -> set[str] | None:
+        """Find the subjects written since a kept read, if the table only grew.
+
+        Parameters
+        ----------
+        connection : `sqlite3.Connection`
+            A read-only connection with a transaction open.
+        kept : `_LatestRead`
+            The kept read.
+
+        Returns
+        -------
+        subject_ids : `set` of `str` or `None`
+            The subjects with a row numbered above the kept read's mark. `None`
+            when the kept read cannot be brought up to date: a row below the
+            mark was deleted or replaced, or too many subjects changed.
+        """
+        counted = connection.execute(
+            "SELECT COUNT(*) FROM quality_measurements WHERE row_id <= ?", (kept.mark,)
+        ).fetchone()
+        if (
+            int(counted[0]) != kept.rows_up_to_mark
+            or self._fingerprint(connection, kept.mark) != kept.mark_fingerprint
+        ):
+            return None
+        found = connection.execute(
+            "SELECT DISTINCT subject_id FROM quality_measurements WHERE row_id > ? LIMIT ?",
+            (kept.mark, LATEST_READ_MAXIMUM_CHANGED_SUBJECTS + 1),
+        ).fetchall()
+        if len(found) > LATEST_READ_MAXIMUM_CHANGED_SUBJECTS:
+            return None
+        return {str(row[0]) for row in found}

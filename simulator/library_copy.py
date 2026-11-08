@@ -112,6 +112,23 @@ def overlay_folders(root: Path) -> dict[str, Path]:
     }
 
 
+def world_logs_folder(root: Path) -> Path:
+    """Name the folder where a world keeps its own job logs.
+
+    Parameters
+    ----------
+    root : `pathlib.Path`
+        The simulator's root folder.
+
+    Returns
+    -------
+    folder : `pathlib.Path`
+        ``<root>/xdg_state/astrometrics/logs``, which is the app's logs
+        folder when ``XDG_STATE_HOME`` is ``<root>/xdg_state``.
+    """
+    return root / "xdg_state" / "astrometrics" / "logs"
+
+
 def plan_mounts(frames: Path, stacks: Path, root: Path) -> dict:
     """Decide which real folders are overlaid, and where they appear.
 
@@ -614,6 +631,37 @@ def world_settings_text(real_text: str, library_and_telescope_text: str) -> str:
     return library_and_telescope_text.rstrip("\n") + "\n\n" + keep_sections(real_text)
 
 
+def database_replacements(real: Any, plan: dict, root: Path) -> list[tuple[str, str]]:
+    """List the folder prefixes to rewrite in the world's database copies.
+
+    The frames, stacks and library folders move to the world's own, and so
+    does the real logs folder: a stored job log path must never point at a
+    real file, because a clean-up of old jobs would delete it.
+
+    Parameters
+    ----------
+    real : `object`
+        The real folders (from `astrometricslib.drivers.real_folders`).
+    plan : `dict`
+        The mount plan from `plan_mounts`.
+    root : `pathlib.Path`
+        The simulator's root folder.
+
+    Returns
+    -------
+    replacements : `list` [`tuple` [`str`, `str`]]
+        ``(old, new)`` pairs for `rewrite_paths`.
+    """
+    replacements = [
+        (str(real.frames), str(plan["frames_path"])),
+        (str(real.stacks), str(plan["stacks_path"])),
+    ]
+    if real.library != real.frames:
+        replacements.append((str(real.library), str(root / "library")))
+    replacements.append((str(real.logs), str(world_logs_folder(root))))
+    return replacements
+
+
 def prepare_library_copy(
     root: Path, real_environment: dict[str, str] | None = None, real: Any = None
 ) -> dict:
@@ -650,12 +698,7 @@ def prepare_library_copy(
     plan = plan_mounts(real.frames, real.stacks, root)
     for mount in plan["mounts"]:
         mount["mountpoint"].mkdir(parents=True, exist_ok=True)
-    replacements = [
-        (str(real.frames), str(plan["frames_path"])),
-        (str(real.stacks), str(plan["stacks_path"])),
-    ]
-    if real.library != real.frames:
-        replacements.append((str(real.library), str(root / "library")))
+    replacements = database_replacements(real, plan, root)
     report = copy_databases(root, real.library, real.wayfinding, replacements)
     mounted = []
     try:

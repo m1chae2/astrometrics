@@ -40,6 +40,7 @@ from __future__ import annotations
 import logging
 import math
 import sqlite3
+import time
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -48,7 +49,7 @@ from typing import Any
 from astrometricslib import Target
 from astrometricslib.drivers import VersionedCache, get_camera_data_versions
 from astrometricslib.exceptions import AstrometricsError
-from astrometricslib.reports import CaptureSetting, QualityMeasurement, SubjectLevel
+from astrometricslib.reports import CaptureSetting, QualityMeasurement, SubjectLevel, observing_night_id
 from wayfindinglib.analytics.capture_history import normalize_name
 from wayfindinglib.analytics.result_quality.efficiency import (
     READ_NOISE_METRIC,
@@ -85,7 +86,9 @@ row WAY-D106."""
 
 _SKY_MODEL_CACHE = VersionedCache(maximum_entries=SKY_MODEL_CACHE_MAXIMUM_ENTRIES)
 """The fitted sky models, by library, equipment key and site. Each is kept
-until the measurements of its camera change (`get_camera_data_versions`)."""
+until the finished-night measurements of its camera change
+(`get_camera_data_versions` with ``finished_before_night``). A frame of the
+night in progress does not change them (register row WAY-D107)."""
 
 CAMERA_OBSERVATIONS_CACHE_MAXIMUM_ENTRIES = 8
 """How many cameras' frame observations the cache keeps. A library has a few
@@ -94,7 +97,8 @@ stay well under a few megabytes. Design estimate, register row WAY-D107."""
 
 _CAMERA_OBSERVATIONS_CACHE = VersionedCache(maximum_entries=CAMERA_OBSERVATIONS_CACHE_MAXIMUM_ENTRIES)
 """The frame observations of each camera, by library and camera. Each is
-kept until the measurements of its camera change."""
+kept until the finished-night measurements of its camera change; the night in
+progress is not read (register row WAY-D107)."""
 
 DEFAULT_SITE_PROFILE_ID = "default"
 """The id of the stored default site."""
@@ -486,6 +490,10 @@ class LibraryInputs:
         The configuration, for the telescopes and the site.
     known_site : `SiteProfile`, optional
         A site the caller already has. It is used instead of reading one.
+    now : `float`, optional
+        The moment that decides which observing night is not finished yet, as
+        seconds since the Unix epoch. Defaults to the present, read each time
+        it is needed.
 
     Attributes
     ----------
@@ -498,6 +506,7 @@ class LibraryInputs:
     config: Any
     known_site: SiteProfile | None = None
     notes: list[str] = field(default_factory=list)
+    now: float | None = None
     _targets: dict[str, Target] | None = field(default=None, init=False, repr=False)
     _observations: dict[str, list[FrameObservation]] = field(default_factory=dict, init=False, repr=False)
     _rows: dict[str, list[QualityMeasurement]] = field(default_factory=dict, init=False, repr=False)
@@ -505,6 +514,9 @@ class LibraryInputs:
         default_factory=dict, init=False, repr=False
     )
     _models: dict[str, tuple[SkyModel | None, str | None]] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _camera_versions: dict[tuple[str, str], tuple[str | int, ...] | None] = field(
         default_factory=dict, init=False, repr=False
     )
     _site: SiteProfile | None = field(default=None, init=False, repr=False)
@@ -594,8 +606,22 @@ class LibraryInputs:
         except AstrometricsError:
             return None
 
+    @property
+    def unfinished_night_id(self) -> str:
+        """Name the observing night that is not finished yet.
+
+        The camera-wide inputs (`camera_observations`, the efficiency
+        baseline and the sky model) read only the frames of nights before
+        this one, because they describe what the camera usually does and a
+        night in progress is not representative (register row WAY-D107).
+        """
+        return observing_night_id(time.time() if self.now is None else self.now)
+
     def camera_rows(self, camera: str) -> list[QualityMeasurement]:
         """Read the width, sky rate and read noise rows of a camera's frames.
+
+        Only finished nights are read. A frame of the night in progress
+        (`unfinished_night_id`) is left out. A row with no night is kept.
 
         Parameters
         ----------
@@ -618,11 +644,19 @@ class LibraryInputs:
                     )
                 except (AstrometricsError, sqlite3.Error) as error:
                     self.notes.append(f"The library's {metric} rows for {camera} could not be read: {error}")
-            self._rows[camera] = rows
+            unfinished = self.unfinished_night_id
+            self._rows[camera] = [
+                row
+                for row in rows
+                if row.subject.observing_night_id is None or row.subject.observing_night_id < unfinished
+            ]
         return self._rows[camera]
 
     def camera_observations(self, camera: str) -> list[FrameObservation]:
         """Build an observation for every library frame of a camera.
+
+        Only finished nights are read: frames of the night in progress
+        (`unfinished_night_id`) are left out.
 
         Parameters
         ----------
@@ -669,12 +703,20 @@ class LibraryInputs:
         Returns
         -------
         version : `tuple` or `None`
-            Changes when a measurement or calibration record of this camera
-            is written, and not when another camera's is (see
-            `get_camera_data_versions`). `None` when it cannot be read.
+            Changes when a measurement of a finished night or a calibration
+            record of this camera is written, and not when a frame of the
+            night in progress or another camera's record is (see
+            `get_camera_data_versions`). `None` when it cannot be read. It is
+            read once for each camera and night in the life of this object.
         """
-        versions = get_camera_data_versions(self.config, [camera])
-        return None if versions is None else versions[camera]
+        night = self.unfinished_night_id
+        key = (camera, night)
+        if key not in self._camera_versions:
+            # One object serves one report, so the version is read once for it,
+            # and the sky model and the camera's frames both use that reading.
+            versions = get_camera_data_versions(self.config, [camera], finished_before_night=night)
+            self._camera_versions[key] = None if versions is None else versions[camera]
+        return self._camera_versions[key]
 
     def _read_camera_observations(
         self, camera: str, *, keep_only_complete: bool = False

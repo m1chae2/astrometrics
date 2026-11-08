@@ -1351,7 +1351,8 @@ def _quality_statements_of_settings(
                     )
                 )
         frames, used, _problems = _stack_frames(setting_observations)
-        widths = [_width_row_value(target_rows.rows, observation.frame_id) for observation in used]
+        moffat_widths = _moffat_widths_by_frame(target_rows.rows)
+        widths = [moffat_widths.get(observation.frame_id) for observation in used]
         if frames and all(width is not None for width in widths):
             mode = predict_weighting_mode(
                 configured_weight,
@@ -1378,8 +1379,7 @@ def _quality_statements_of_settings(
                 tradeoff = None
                 if position is not None:
                     group_widths = [
-                        _width_row_value(target_rows.rows, frame.frame_id)
-                        for frame in run_groups.groups[position].frames
+                        moffat_widths.get(frame.frame_id) for frame in run_groups.groups[position].frames
                     ]
                     if all(width is not None for width in group_widths):
                         tradeoff = find_sharpness_tradeoff_in_groups(
@@ -1483,24 +1483,33 @@ def _add_fixed_pattern_accounts(
     return updated
 
 
-def _width_row_value(rows: Sequence[QualityMeasurement], frame_id: str) -> float | None:
-    """Read a frame's Moffat star width in arcseconds.
+def _moffat_widths_by_frame(rows: Sequence[QualityMeasurement]) -> dict[str, float | None]:
+    """Read every frame's Moffat star width in arcseconds, in one pass.
 
     Parameters
     ----------
     rows : `Sequence` [`QualityMeasurement`]
         The target's stored rows.
-    frame_id : `str`
-        The frame's subject id.
 
     Returns
     -------
-    width : `float` or `None`
-        The value of the newest ``frame.star_width_moffat_arcsec`` row of
-        the frame, or ``None`` when there is none or it was not measured.
+    widths : `dict` [`str`, `float` or `None`]
+        For each frame subject id that has a ``frame.star_width_moffat_arcsec``
+        row: the value of its newest such row (the first of equally new
+        rows), or ``None`` when that row has no value or its value is not
+        above zero. A frame with no such row is not in the dict.
     """
-    row = _newest([r for r in rows if r.subject.subject_id == frame_id], STAR_WIDTH_MOFFAT_ARCSEC_METRIC)
-    return float(row.value) if row is not None and row.value is not None and row.value > 0.0 else None
+    newest: dict[str, QualityMeasurement] = {}
+    for row in rows:
+        if row.metric != STAR_WIDTH_MOFFAT_ARCSEC_METRIC:
+            continue
+        held = newest.get(row.subject.subject_id)
+        if held is None or row.measured_at > held.measured_at:
+            newest[row.subject.subject_id] = row
+    return {
+        frame_id: float(row.value) if row.value is not None and row.value > 0.0 else None
+        for frame_id, row in newest.items()
+    }
 
 
 def _calibration_statements(
@@ -2068,6 +2077,63 @@ _TARGET_REPORT_CACHE = VersionedCache(maximum_entries=TARGET_REPORT_CACHE_MAXIMU
 """The built reports, each kept until the data behind it changes."""
 
 
+EKOS_CONTEXT_CACHE_MAXIMUM_ENTRIES = 4
+"""How many libraries' Ekos session records are kept. An app works on one
+library; a few more cover tests and a library switch. Design estimate,
+register row WAY-D107."""
+
+_EKOS_CONTEXT_CACHE = VersionedCache(maximum_entries=EKOS_CONTEXT_CACHE_MAXIMUM_ENTRIES)
+"""The Ekos session records of each library, kept until the table that holds
+them is written. Decoding them is the same work for every report and a new
+frame does not change it. The records are only read."""
+
+
+def _read_ekos_contexts(butler: Any, config: Any) -> list[Any]:
+    """Read the stored Ekos session records, or give the ones read before.
+
+    The records are kept until the ``ekos_session_contexts`` table is written
+    (its write counter changes). The list is shared between callers, so the
+    caller must not change it or its records.
+
+    Parameters
+    ----------
+    butler : `DiskButler`
+        The storage layer.
+    config : `AppConfiguration`
+        The configuration, for the library folder.
+
+    Returns
+    -------
+    contexts : `list` [`EkosSessionContext`]
+        The records.
+    """
+    try:
+        library = str(config.get_library_path())
+    except AttributeError, OSError, TypeError, ValueError:
+        return butler.get_all("ekos_session_context")
+
+    def version() -> Any:
+        """Work out the write counter of the Ekos session records.
+
+        Returns
+        -------
+        version : `Any`
+            The counter, or `None` when it cannot be read.
+        """
+        try:
+            found = butler.control_records.data_versions(("ekos_session_contexts",))
+        except AttributeError:
+            return None
+        return None if found is None else tuple(sorted(found.items()))
+
+    return _EKOS_CONTEXT_CACHE.get_or_build(
+        ("ekos_contexts", library),
+        version,
+        lambda: butler.get_all("ekos_session_context"),
+        copy_result=False,
+    )
+
+
 def _report_cache_key(target: Target, config: Any, target_noise_ratio: float) -> tuple | None:
     """Name the report for the cache.
 
@@ -2289,7 +2355,7 @@ def _build_target_dataset_report(
     # Summaries, one group of settings for each science goal.
     moonless = context.moonless_sky_rates(observations)
     weight_seconds = _weight_effective_seconds(rows, stack_setting_by_subject, target_rows.settings)
-    noise_history = read_noise_history(astrometrics)
+    noise_history = read_noise_history(astrometrics, config)
     noise_model_errors = noise_history.model_errors
     checks = _measured_noise_checks(
         rows,
@@ -2363,7 +2429,7 @@ def _build_target_dataset_report(
         seeing_limit_statements(observations, goal_for_setting, context.reference_for, star_width_evidence)
     )
     statements.extend(_guiding_exposure_statements(summaries, observations, butler, star_width_evidence))
-    contexts = butler.get_all("ekos_session_context")
+    contexts = _read_ekos_contexts(butler, config)
     # The checks come first: "take N more" waits for one that agreed (U1).
     forecast_checks: list[ForecastCheck] = (
         forecast_check(

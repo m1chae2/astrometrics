@@ -78,6 +78,7 @@ from simulator.source_choice import (
     REAL_CONFIG_HOME_VARIABLE,
     REAL_CONFIG_PATH_VARIABLE,
     REAL_DATA_HOME_VARIABLE,
+    REAL_STATE_HOME_VARIABLE,
     RESTART_EXIT_CODE,
     SIMULATED,
     read_choice,
@@ -336,6 +337,7 @@ def world_environment(base: dict[str, str], world: World, environ: dict[str, str
     child = dict(base)
     child[REAL_CONFIG_HOME_VARIABLE] = str(folders.config_home)
     child[REAL_DATA_HOME_VARIABLE] = str(folders.data_home)
+    child[REAL_STATE_HOME_VARIABLE] = str(folders.state_home)
     child[REAL_CONFIG_PATH_VARIABLE] = str(folders.config_file)
     for name in ("data", "cache", "state", "config"):
         (root / f"xdg_{name}").mkdir(parents=True, exist_ok=True)

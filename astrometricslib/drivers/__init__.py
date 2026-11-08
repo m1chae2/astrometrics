@@ -4,7 +4,8 @@ Description: Storage and file helpers that the backend, the MCP servers and
 `wayfindinglib` share: the data store (`Butler`, `AbstractButler`,
 `DatasetSpec`, `connect_db`), the library's write counters
 (`get_library_data_version`, `get_target_data_version`,
-`get_camera_data_versions`, `get_target_camera_names`, `LIBRARY_DATA_KINDS`,
+`get_camera_data_versions`, `get_stack_quality_data_version`,
+`get_target_camera_names`, `LIBRARY_DATA_KINDS`,
 and `bump_data_version` and `read_data_versions` for a database that keeps
 its own counters) and the
 cache that uses them (`VersionedCache`), file locks and work folders, the
@@ -64,6 +65,7 @@ from astrometricslib.foundation.storage.data_versions import (
     bump_data_version,
     get_camera_data_versions,
     get_library_data_version,
+    get_stack_quality_data_version,
     get_target_camera_names,
     get_target_data_version,
     read_data_versions,
@@ -99,6 +101,7 @@ __all__ = [
     "file_lock",
     "get_camera_data_versions",
     "get_library_data_version",
+    "get_stack_quality_data_version",
     "get_target_camera_names",
     "get_target_data_version",
     "is_loopback_host",

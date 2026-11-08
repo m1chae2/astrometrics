@@ -898,6 +898,11 @@ class SimulatedObservatory:
         python = sys.executable
         stats = self.root / "logs"
         stats.mkdir(parents=True, exist_ok=True)
+        # The app lists the picture folder before the first frame arrives, and
+        # the INDI server's home must exist (a world built by another program
+        # does not have them).
+        (self.standin_home / "Pictures").mkdir(parents=True, exist_ok=True)
+        (indi_home(self.root) / ".indi").mkdir(parents=True, exist_ok=True)
         if self.kind is not SimulationKind.REPLAY:
             self.ready_marker.unlink(missing_ok=True)
         if self.kind is SimulationKind.SIMULATED_SKY:

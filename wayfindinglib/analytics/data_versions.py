@@ -34,7 +34,12 @@ counters that any target's new frame changes. A frame of M 13 taken with
 another camera does not make the depth goal of M 31 build again; a frame of
 M 13 taken with the same camera does, because the forecast compares the
 target with the camera's other frames (the efficiency baseline, the sky
-model and the noise model pooled over targets).
+model and the noise model pooled over targets). Only once the night is over:
+the camera-wide part counts the frames of finished nights only, because it
+describes what the camera usually does and a night in progress is not
+representative. A new frame tonight changes the target's own part and leaves
+the camera part as it is; the camera part changes once, when the night
+rolls over.
 """
 
 from __future__ import annotations
@@ -42,6 +47,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib.drivers import (
@@ -50,6 +56,7 @@ from astrometricslib.drivers import (
     get_target_camera_names,
     get_target_data_version,
 )
+from astrometricslib.reports import observing_night_id
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
 from wayfindinglib.data_access.site_profile_reader import configured_observer_location
 from wayfindinglib.drivers.control_record_store import BULK_GUIDING_SAMPLES_KIND, RECORD_VERSION_TABLES
@@ -215,7 +222,9 @@ def report_data_version(config: Any, butler: Any) -> Hashable | None:
     return (context, library)
 
 
-def depth_goal_data_version(config: Any, butler: Any, target_id: str) -> Hashable | None:
+def depth_goal_data_version(
+    config: Any, butler: Any, target_id: str, now: float | None = None
+) -> Hashable | None:
     """Work out the version of the inputs of one target's depth goal.
 
     The depth goal reads the target's frames, stacks and measurements, the
@@ -228,6 +237,13 @@ def depth_goal_data_version(config: Any, butler: Any, target_id: str) -> Hashabl
     the data of each camera the target used (`get_camera_data_versions`). A
     new frame from another camera leaves the version as it is.
 
+    The camera part counts only the measurements of finished nights (the
+    camera-wide estimate describes the camera's usual performance, and a
+    night in progress is not representative; WAY-D107). A frame of the same
+    camera taken tonight leaves it as it is, and it changes once when the
+    night rolls over. The target's own part (`get_target_data_version`)
+    still sees tonight's frames.
+
     Parameters
     ----------
     config : `AppConfiguration`
@@ -236,6 +252,9 @@ def depth_goal_data_version(config: Any, butler: Any, target_id: str) -> Hashabl
         The record store. It gives the wayfinding records.
     target_id : `str`
         The target's id.
+    now : `float`, optional
+        The moment that decides which night is not finished, as seconds since
+        the Unix epoch. Defaults to the present.
 
     Returns
     -------
@@ -249,7 +268,9 @@ def depth_goal_data_version(config: Any, butler: Any, target_id: str) -> Hashabl
     cameras = get_target_camera_names(config, target_id)
     if context is None or target is None or cameras is None:
         return None
-    camera_versions = get_camera_data_versions(config, cameras)
+    camera_versions = get_camera_data_versions(
+        config, cameras, finished_before_night=observing_night_id(time.time() if now is None else now)
+    )
     if camera_versions is None:
         return None
     return (context, target, tuple(sorted(camera_versions.items())))

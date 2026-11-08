@@ -211,7 +211,7 @@ def get_target_data_version(config: AppConfiguration, target_id: str) -> tuple[s
 
 
 def get_camera_data_versions(
-    config: AppConfiguration, cameras: Sequence[str]
+    config: AppConfiguration, cameras: Sequence[str], finished_before_night: str | None = None
 ) -> dict[str, tuple[str | int, ...]] | None:
     """Give a value for each camera that changes whenever its measurements do.
 
@@ -224,24 +224,39 @@ def get_camera_data_versions(
     level (frame and stack), and the calibration records of its stacks. A
     measurement or calibration record of another camera does not change it.
 
+    With ``finished_before_night`` the version counts only the measurements
+    of finished nights: a measurement whose observing night is older than
+    that night, or that has no night (a stack row). A frame measured tonight
+    then leaves the version as it is, and the version changes once when the
+    night rolls over (the frames of that night start to count).
+
     Parameters
     ----------
     config : `AppConfiguration`
         The application settings. They give the library folder.
     cameras : `Sequence` [`str`]
         The camera names, as the capture settings store them.
+    finished_before_night : `str`, optional
+        The observing night that is not finished yet, as
+        `~astrometricslib.reports.observing_night_id` names it (the night
+        of now). Measurements of this night and later ones are not counted.
+        Defaults to counting every measurement.
 
     Returns
     -------
     versions : `dict` [`str`, `tuple`] or `None`
         For each camera: the count, the newest row number and the newest time
-        of its measurements, then the count and newest time of its
-        calibration records. A camera with no data gets zeros. `None` when
+        of its measurements (with ``finished_before_night``, also the newest
+        observing night among them, after the newest time), then the count and
+        newest time of its calibration records. A camera with no data gets
+        zeros. `None` when
         the database could not be read; the caller must not keep an answer
         then.
     """
     wanted = sorted(set(cameras))
-    empty: tuple[str | int, ...] = (0, 0, "", 0, "")
+    empty: tuple[str | int, ...] = (
+        (0, 0, "", 0, "") if finished_before_night is None else (0, 0, "", "", 0, "")
+    )
     path = _library_database_path(config)
     if path is None:
         return None
@@ -252,14 +267,26 @@ def get_camera_data_versions(
         connection = sqlite3.connect(f"file:{quote(path)}?mode=ro", uri=True, timeout=5.0)
         result: dict[str, tuple[str | int, ...]] = {}
         for camera in wanted:
-            measurements = _read_or_default(
-                connection,
-                "SELECT COUNT(*), COALESCE(MAX(m.row_id), 0), COALESCE(MAX(m.measured_at), '') "
-                "FROM quality_measurements m JOIN quality_capture_setting s "
-                "ON s.capture_setting_id = m.capture_setting_id WHERE s.camera = ?",
-                (camera,),
-                (0, 0, ""),
-            )
+            if finished_before_night is None:
+                measurements = _read_or_default(
+                    connection,
+                    "SELECT COUNT(*), COALESCE(MAX(m.row_id), 0), COALESCE(MAX(m.measured_at), '') "
+                    "FROM quality_measurements m JOIN quality_capture_setting s "
+                    "ON s.capture_setting_id = m.capture_setting_id WHERE s.camera = ?",
+                    (camera,),
+                    (0, 0, ""),
+                )
+            else:
+                measurements = _read_or_default(
+                    connection,
+                    "SELECT COUNT(*), COALESCE(MAX(m.row_id), 0), COALESCE(MAX(m.measured_at), ''), "
+                    "COALESCE(MAX(m.observing_night_id), '') "
+                    "FROM quality_measurements m JOIN quality_capture_setting s "
+                    "ON s.capture_setting_id = m.capture_setting_id WHERE s.camera = ? "
+                    "AND (m.observing_night_id IS NULL OR m.observing_night_id < ?)",
+                    (camera, finished_before_night),
+                    (0, 0, "", ""),
+                )
             identities = _read_or_default(
                 connection,
                 "SELECT COUNT(*), COALESCE(MAX(recorded_at), '') FROM quality_calibration_identity "
@@ -271,6 +298,60 @@ def get_camera_data_versions(
         return result
     except sqlite3.Error, OSError:
         logger.warning("Could not read the camera data versions from %s.", path, exc_info=True)
+        return None
+    finally:
+        if connection is not None:
+            connection.close()
+
+
+def get_stack_quality_data_version(config: AppConfiguration) -> tuple[str | int, ...] | None:
+    """Give a value that changes whenever the library's stack-level data do.
+
+    A result built from the stack-level quality rows of every target (the
+    noise model pooled over targets, the fixed-pattern history) does not read
+    frame rows. A new frame of any target writes frame rows only, so it leaves
+    this version as it is. A stack run writes stack rows, so it changes it.
+    The version also sees the calibration identity records and the capture
+    settings the stack rows point at.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application settings. They give the library folder.
+
+    Returns
+    -------
+    version : `tuple` [`str` or `int`, ...] or `None`
+        The count, newest row number and newest time of the stack-level
+        measurements, then the count and newest time of the calibration
+        identities, then the count of capture settings. `None` when the
+        database could not be read; the caller must not keep an answer then.
+    """
+    path = _library_database_path(config)
+    if path is None:
+        return None
+    if not os.path.isfile(path):
+        return (0, 0, "", 0, "", 0)
+    connection = None
+    try:
+        connection = sqlite3.connect(f"file:{quote(path)}?mode=ro", uri=True, timeout=5.0)
+        measurements = _read_or_default(
+            connection,
+            "SELECT COUNT(*), COALESCE(MAX(row_id), 0), COALESCE(MAX(measured_at), '') "
+            "FROM quality_measurements WHERE subject_level = 'stack'",
+            (),
+            (0, 0, ""),
+        )
+        identities = _read_or_default(
+            connection,
+            "SELECT COUNT(*), COALESCE(MAX(recorded_at), '') FROM quality_calibration_identity",
+            (),
+            (0, ""),
+        )
+        settings = _read_or_default(connection, "SELECT COUNT(*) FROM quality_capture_setting", (), (0,))
+        return (*measurements, *identities, *settings)
+    except sqlite3.Error, OSError:
+        logger.warning("Could not read the stack data version from %s.", path, exc_info=True)
         return None
     finally:
         if connection is not None:

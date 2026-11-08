@@ -833,6 +833,33 @@ class TakeMoreResult(BaseModel):
     possible_low_end_not_worthwhile: bool = False
 
 
+def _new_frame(template: Sequence[StackFrame], index: int, new_exposure_seconds: float | None) -> StackFrame:
+    """Make new frame number `index` by copying a template frame.
+
+    Parameters
+    ----------
+    template : `Sequence` [`StackFrame`]
+        Past frames of the same capture setting, in time order.
+    index : `int`
+        The new frame's number, counting from 0. It copies template frame
+        ``index mod len(template)``.
+    new_exposure_seconds : `float` or `None`
+        The exposure of the new frame. ``None`` keeps the template frame's
+        own exposure.
+
+    Returns
+    -------
+    frame : `StackFrame`
+        The new frame.
+    """
+    return template[index % len(template)].model_copy(
+        update={
+            "frame_id": f"new_{index}",
+            **({"exposure_seconds": new_exposure_seconds} if new_exposure_seconds else {}),
+        }
+    )
+
+
 def _new_frames(
     template: Sequence[StackFrame], count: int, new_exposure_seconds: float | None
 ) -> list[StackFrame]:
@@ -854,18 +881,47 @@ def _new_frames(
     frames : `list` [`StackFrame`]
         The new frames.
     """
-    frames = []
-    for index in range(count):
-        source = template[index % len(template)]
-        frames.append(
-            source.model_copy(
-                update={
-                    "frame_id": f"new_{index}",
-                    **({"exposure_seconds": new_exposure_seconds} if new_exposure_seconds else {}),
-                }
-            )
-        )
-    return frames
+    return [_new_frame(template, index, new_exposure_seconds) for index in range(count)]
+
+
+class _NewFrameSupply:
+    """Hand out the first `count` new frames, making each frame only once.
+
+    The "take N more" search asks for many counts (1, 2, 4, 8, ... and then
+    the bisection between two of them). New frame ``k`` is the same for every
+    count, and a frame is frozen, so the frames made for one count are the
+    start of the list for a larger one. This keeps the list and grows it.
+
+    Parameters
+    ----------
+    template : `Sequence` [`StackFrame`]
+        Past frames of the capture setting (see `_new_frames`).
+    new_exposure_seconds : `float` or `None`
+        The exposure of the new frames.
+    """
+
+    def __init__(self, template: Sequence[StackFrame], new_exposure_seconds: float | None) -> None:
+        """Start with no frames made."""
+        self._template = template
+        self._new_exposure_seconds = new_exposure_seconds
+        self._frames: list[StackFrame] = []
+
+    def first(self, count: int) -> list[StackFrame]:
+        """Give the first `count` new frames, the same as `_new_frames`.
+
+        Parameters
+        ----------
+        count : `int`
+            How many new frames.
+
+        Returns
+        -------
+        frames : `list` [`StackFrame`]
+            The new frames, in order.
+        """
+        while len(self._frames) < count:
+            self._frames.append(_new_frame(self._template, len(self._frames), self._new_exposure_seconds))
+        return self._frames[:count]
 
 
 def new_frames_like(
@@ -1034,6 +1090,11 @@ def frames_to_cut_noise(
             reason="There are no past frames of this setting to follow.",
         )
 
+    supply = _NewFrameSupply(template, new_exposure_seconds)
+    # The search asks for the same count again (with and without a possible
+    # fixed-pattern noise), and the forecast does not depend on the pattern.
+    forecasts: dict[int, NoiseForecast | None] = {}
+
     def ratio_for(count: int, pattern: StackFixedPatternNoise | None) -> float | None:
         """Give the predicted noise ratio after adding `count` frames.
 
@@ -1049,8 +1110,10 @@ def frames_to_cut_noise(
         ratio : `float` or `None`
             New noise over current noise.
         """
-        forecast = noise_ratio_after_adding(existing, template, count, mode, new_exposure_seconds)
-        return noise_ratio_with_fixed_pattern_noise(current, forecast, pattern)
+        if count not in forecasts:
+            forecast = forecast_stack_noise([*existing, *supply.first(count)], mode)
+            forecasts[count] = forecast if forecast.noise is not None else None
+        return noise_ratio_with_fixed_pattern_noise(current, forecasts[count], pattern)
 
     exposure = new_exposure_seconds or float(np.mean([frame.exposure_seconds for frame in template]))
     return _take_more_result_graded(
@@ -3348,6 +3411,7 @@ def frames_to_cut_noise_in_groups(
     }
     new_length = fold_exposure_lengths([exposure])[0]
     starts_new_group = new_length not in existing_lengths
+    supply = _NewFrameSupply(template, new_exposure_seconds)
     minimum_count = MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH if starts_new_group else 1
 
     def plan_for(count: int) -> GroupPlan:
@@ -3365,7 +3429,7 @@ def frames_to_cut_noise_in_groups(
         """
         return plan_group_stack(
             existing_groups,
-            _new_frames(template, count, new_exposure_seconds),
+            supply.first(count),
             electrons_per_adu=electrons_per_adu,
         )
 
@@ -3376,6 +3440,8 @@ def frames_to_cut_noise_in_groups(
             reason=first.reason,
             new_exposure_group=starts_new_group,
         )
+
+    supply = _NewFrameSupply(template, new_exposure_seconds)
 
     def ratio_for(count: int, pattern: StackFixedPatternNoise | None) -> float | None:
         """Give the predicted noise ratio after adding `count` frames.

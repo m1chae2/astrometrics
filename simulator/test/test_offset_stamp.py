@@ -7,13 +7,15 @@ that only the header changes, that the move is one rename, and that an
 existing ``OFFSET`` is left alone.
 """
 
+import json
+import time
 from pathlib import Path
 
 import numpy as np
 import pytest
 from astropy.io import fits
 
-from simulator.exposure_driver import ExposureDriver, stamp_offset
+from simulator.exposure_driver import ExposureDriver, stamp_offset, unused_frame_name
 
 
 def _write_frame(path: Path, extra: dict | None = None) -> np.ndarray:
@@ -116,3 +118,84 @@ def test_the_driver_stamps_the_offset_it_set(tmp_path: Path) -> None:
     assert driver.camera_offset() == pytest.approx(10.0)
     assert driver.staging_directory != driver.pictures_directory
     assert ExposureDriver(1, tmp_path, Path("l"), Path("s"), 1.0, "M 13", 0.0, 0.0).camera_offset() is None
+
+
+class _CameraDriver(ExposureDriver):
+    """A driver whose camera writes a tiny frame into the staging folder."""
+
+    def _set(self, *settings: str) -> None:
+        """Write a frame named 001 when an exposure is asked for.
+
+        Parameters
+        ----------
+        *settings : `str`
+            The INDI settings; only the exposure one is acted on.
+        """
+        if any("CCD_EXPOSURE" in text for text in settings):
+            self.staging_directory.mkdir(parents=True, exist_ok=True)
+            name = self.staging_directory / "M_13_Light_001.fits"
+            if not name.exists():
+                _write_frame(name)
+
+
+def _driver(tmp_path: Path) -> _CameraDriver:
+    """Build a driver with a camera that always numbers its frames 001.
+
+    Parameters
+    ----------
+    tmp_path : `pathlib.Path`
+        The stand-in home.
+
+    Returns
+    -------
+    driver : `_CameraDriver`
+        The driver, offset 10, exposures of 0.1 s.
+    """
+    from simulator.device_settings import DeviceSetting
+
+    settings = [DeviceSetting("CCD Simulator", "CCD_OFFSET", (("OFFSET", 10.0),))]
+    return _CameraDriver(1, tmp_path, Path("log"), tmp_path / "stats.json", 0.1, "M 13", 0.0, 0.0, settings)
+
+
+def test_each_frame_gets_its_own_name_and_is_recorded_when_it_appears(tmp_path: Path) -> None:
+    """Frames that the camera numbers 001 again are filed 001, 002, 003."""
+    import threading
+
+    driver = _driver(tmp_path)
+    worker = threading.Thread(target=driver.take_exposures)
+    worker.start()
+    try:
+        deadline = time.time() + 20
+        while time.time() < deadline and len(driver.frames) < 3:
+            time.sleep(0.1)
+    finally:
+        driver.stop_event.set()
+        worker.join(timeout=10)
+    names = [frame["name"] for frame in driver.frames]
+    assert names[:3] == ["M_13_Light_001.fits", "M_13_Light_002.fits", "M_13_Light_003.fits"]
+    for frame in driver.frames:
+        final = driver.pictures_directory / frame["name"]
+        assert final.is_file()
+        assert frame["appeared_at"] == pytest.approx(final.stat().st_mtime)
+        assert frame["appeared_at"] >= frame["exposure_started_at"]
+        assert fits.getheader(final)["OFFSET"] == 10
+    assert not list(driver.staging_directory.glob("*.fits"))
+    stats = json.loads((tmp_path / "stats.json").read_text())
+    assert [frame["name"] for frame in stats["frames"]][:3] == names[:3]
+
+
+def test_the_picture_folder_of_the_target_exists_before_the_first_frame(tmp_path: Path) -> None:
+    """Connecting makes the target's picture folder the app lists early."""
+    driver = _driver(tmp_path)
+    driver._get = lambda name: "On"  # type: ignore[method-assign]
+    assert driver.connect_devices()
+    assert driver.pictures_directory.is_dir()
+    assert driver.staging_directory.is_dir()
+
+
+def test_a_name_that_is_taken_gets_the_next_number(tmp_path: Path) -> None:
+    """The lowest free number is used."""
+    (tmp_path / "M_13_Light_001.fits").touch()
+    (tmp_path / "M_13_Light_003.fits").touch()
+    assert unused_frame_name("M_13_Light_001.fits", tmp_path) == "M_13_Light_002.fits"
+    assert unused_frame_name("Other_Light_007.fits", tmp_path) == "Other_Light_001.fits"

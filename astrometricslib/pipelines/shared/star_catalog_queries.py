@@ -18,6 +18,8 @@ The storage reads only what each question needs. Summary rows come from the
 indexed columns, so no full star record is loaded to list or count stars.
 """
 
+import threading
+import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -227,12 +229,80 @@ def summary_row(star: Any) -> dict[str, Any]:
     }
 
 
+_STAR_ID_INDEX_LOCK = threading.Lock()
+_STAR_ID_INDEXES: weakref.WeakKeyDictionary[Any, tuple[int, dict[str, str]]] = weakref.WeakKeyDictionary()
+"""For each catalog storage: the star catalog's write count and the map from
+a spelling-free id to the first stored id that has it."""
+
+
+def _spelling_free(star_id: str) -> str:
+    """Strip an id to what `find_star` compares.
+
+    That is the id without spaces, underscores or capital letters.
+
+    Parameters
+    ----------
+    star_id : `str`
+        A star id.
+
+    Returns
+    -------
+    key : `str`
+        The id in lower case without spaces and underscores.
+    """
+    return star_id.lower().replace(" ", "").replace("_", "")
+
+
+def _spelling_free_index(storage: Any) -> dict[str, str]:
+    """Give the map from spelling-free id to stored id.
+
+    The map is rebuilt only after a write to the star catalog.
+
+    Reading every star id takes about half a second in a library of a few
+    hundred thousand stars, and the Planetarium asks for one star every ten
+    seconds. The map is kept per storage, together with the star catalog's
+    write count (`get_dataset_version`), and is rebuilt when that count has
+    changed. A storage that cannot report the count gets a fresh map every
+    time, so it never answers from stale data.
+
+    Parameters
+    ----------
+    storage : `AbstractCatalogAccess`
+        The catalog storage.
+
+    Returns
+    -------
+    index : `dict` [`str`, `str`]
+        The first stored id for each spelling-free id, in the storage's order.
+    """
+    get_version = getattr(storage, "get_dataset_version", None)
+    version = get_version("stellar_catalog") if callable(get_version) else None
+    if not isinstance(version, int):
+        version = None
+    with _STAR_ID_INDEX_LOCK:
+        cached = _STAR_ID_INDEXES.get(storage) if version is not None else None
+        if cached is not None and cached[0] == version:
+            return cached[1]
+    index: dict[str, str] = {}
+    for candidate_id in storage.list_star_ids():
+        index.setdefault(_spelling_free(candidate_id), candidate_id)
+    if version is not None:
+        with _STAR_ID_INDEX_LOCK:
+            try:
+                _STAR_ID_INDEXES[storage] = (version, index)
+            except TypeError:  # a storage that cannot be weakly referenced is not cached
+                pass
+    return index
+
+
 def find_star(storage: Any, star_id: str) -> StellarObject | None:
     """Find one star by id, allowing small differences in spelling.
 
     An exact id is tried first, which is fast. If that fails, the ids are
-    compared ignoring spaces, underscores and capital letters. Only the id
-    column is read for that comparison, never the stars' full records.
+    compared ignoring spaces, underscores and capital letters, using a map
+    of the ids that is kept until the star catalog is next written to (see
+    `_spelling_free_index`). Only the id column is read to build it, never
+    the stars' full records.
 
     Parameters
     ----------
@@ -249,12 +319,11 @@ def find_star(storage: Any, star_id: str) -> StellarObject | None:
     exact = storage.get_by_ids("stellar_catalog", [star_id])
     if exact:
         return exact[0]
-    normalized = star_id.lower().replace(" ", "").replace("_", "")
-    for candidate_id in storage.list_star_ids():
-        if candidate_id.lower().replace(" ", "").replace("_", "") == normalized:
-            matches = storage.get_by_ids("stellar_catalog", [candidate_id])
-            return matches[0] if matches else None
-    return None
+    candidate_id = _spelling_free_index(storage).get(_spelling_free(star_id))
+    if candidate_id is None:
+        return None
+    matches = storage.get_by_ids("stellar_catalog", [candidate_id])
+    return matches[0] if matches else None
 
 
 def _find_all_by_name(storage: Any, name: str) -> list[StellarObject]:

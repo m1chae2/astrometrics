@@ -971,3 +971,44 @@ def test_tonight_advice_and_a_result_advisory_reach_the_task_functions(isolated_
     assert isinstance(ranking, TonightRanking)
     with pytest.raises(NotFoundError):
         review.get_advisory("result", target="M 81", object_id="no-such-star")
+
+
+@pytest.mark.parametrize(
+    ("latitude", "longitude", "ra_deg", "dec_deg", "expected_rise"),
+    [
+        (45.76, -110.74, 101.3, -16.7, None),
+        (45.76, -110.74, 37.9, 89.3, "Circumpolar"),
+        (45.76, -110.74, 187.0, -75.0, "Never Rises"),
+        (-33.9, 18.4, 101.3, -16.7, None),
+    ],
+)
+def test_get_visibility_for_one_moment_matches_a_direct_altitude_calculation(
+    isolated_butler: DiskButler,
+    latitude: float,
+    longitude: float,
+    ra_deg: float,
+    dec_deg: float,
+    expected_rise: str | None,
+) -> None:
+    """Altitude and azimuth equal a direct astropy transform."""
+    import astropy.units as u
+    from astropy.coordinates import AltAz, EarthLocation, SkyCoord
+    from astropy.time import Time
+
+    planning = _planning(isolated_butler)
+    engine = planning._sky_engine
+    engine.latitude, engine.longitude = latitude, longitude
+    engine.location = EarthLocation(
+        lat=latitude * u.deg, lon=longitude * u.deg, height=engine.elevation * u.m
+    )
+    moment = "2026-11-07T23:02:09Z"
+    point = {"id": "P", "ra_deg": ra_deg, "dec_deg": dec_deg}
+    entry = planning.get_visibility([point], time=moment, include=["meridian"]).objects[0]
+    expected = SkyCoord(ra=ra_deg * u.deg, dec=dec_deg * u.deg).transform_to(
+        AltAz(obstime=Time(moment), location=engine.location)
+    )
+    assert entry.altitude_deg == pytest.approx(expected.alt.deg, abs=1e-3)
+    assert entry.azimuth_deg == pytest.approx(expected.az.deg, abs=1e-3)
+    if expected_rise is not None:
+        assert entry.rise_utc == expected_rise
+        assert entry.set_utc == expected_rise

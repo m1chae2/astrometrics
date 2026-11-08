@@ -23,6 +23,7 @@ from pathlib import Path
 REAL_CONFIG_HOME_VARIABLE = "ASTROMETRICS_REAL_CONFIG_HOME"
 REAL_DATA_HOME_VARIABLE = "ASTROMETRICS_REAL_DATA_HOME"
 REAL_CONFIG_PATH_VARIABLE = "ASTROMETRICS_REAL_CONFIG_PATH"
+REAL_STATE_HOME_VARIABLE = "ASTROMETRICS_REAL_STATE_HOME"
 
 
 def _cache_root() -> str:
@@ -252,8 +253,9 @@ class RealFolders:
 
     Attributes
     ----------
-    config_home, data_home : `pathlib.Path`
-        The folders that hold ``astrometrics/`` for settings and for data.
+    config_home, data_home, state_home : `pathlib.Path`
+        The folders that hold ``astrometrics/`` for settings, for data and
+        for state (the run logs).
     config_file : `pathlib.Path`
         The real settings file.
     library, frames, stacks, wayfinding : `pathlib.Path`
@@ -269,6 +271,18 @@ class RealFolders:
     frames: Path
     stacks: Path
     wayfinding: Path
+    state_home: Path
+
+    @property
+    def logs(self) -> Path:
+        """Give the real folder of the job and run logs.
+
+        Returns
+        -------
+        logs : `pathlib.Path`
+            ``<state_home>/astrometrics/logs``. Nothing is created.
+        """
+        return self.state_home / "astrometrics" / "logs"
 
     def protected_paths(self) -> tuple[Path, ...]:
         """Give the folders that a simulator must never use or write in.
@@ -344,6 +358,11 @@ def real_folders(environ: Mapping[str, str] | None = None) -> RealFolders:
         or environment.get("XDG_DATA_HOME")
         or home / ".local" / "share"
     )
+    state_home = Path(
+        environment.get(REAL_STATE_HOME_VARIABLE)
+        or environment.get("XDG_STATE_HOME")
+        or home / ".local" / "state"
+    )
     named_file = (
         environment.get(REAL_CONFIG_PATH_VARIABLE)
         or environment.get("ASTROMETRICS_CONFIG_PATH")
@@ -354,7 +373,14 @@ def real_folders(environ: Mapping[str, str] | None = None) -> RealFolders:
     )
     named = library_folders(config_file, default_data_home=data_home)
     return RealFolders(
-        config_home, data_home, config_file, named.library, named.frames, named.stacks, named.wayfinding
+        config_home,
+        data_home,
+        config_file,
+        named.library,
+        named.frames,
+        named.stacks,
+        named.wayfinding,
+        state_home,
     )
 
 

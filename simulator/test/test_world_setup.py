@@ -525,3 +525,18 @@ def test_the_running_driver_files_frames_with_the_offset(
     assert driver.cooling_seconds is not None
     assert driver.cooling_seconds < 120
     assert not list(driver.staging_directory.glob("*.fits"))
+
+
+def test_the_picture_folder_exists_when_the_processes_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A prebuilt world still gets ``Pictures`` and the INDI home."""
+    observatory = _world(tmp_path, None, monkeypatch, copy_library=False)
+    observatory.prepare()
+    for folder in (observatory.standin_home / "Pictures", indi_home(observatory.root) / ".indi"):
+        folder.rmdir()
+    monkeypatch.setattr(observatory, "_launch", lambda *args, **kwargs: None)
+    monkeypatch.setattr(observatory, "_wait_listening", lambda ports: None)
+    observatory._start_processes()
+    assert (observatory.standin_home / "Pictures").is_dir()
+    assert (indi_home(observatory.root) / ".indi").is_dir()

@@ -26,6 +26,7 @@ from astrometricslib.foundation.storage.data_versions import (
     bump_data_version,
     get_camera_data_versions,
     get_library_data_version,
+    get_stack_quality_data_version,
     get_target_camera_names,
     get_target_data_version,
     read_data_versions,
@@ -267,6 +268,58 @@ def test_the_camera_version_sees_only_that_cameras_measurements(config: AppConfi
     assert after_a["CamB"] == after_b["CamB"]
 
 
+def _night_measurement(
+    store: QualityStore, camera: str, target: str, run_id: str, night: str
+) -> QualityMeasurement:
+    """Build a frame measurement of an observing night.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        The measurement, with the observing night set.
+    """
+    measurement = _camera_measurement(store, camera, target, run_id)
+    return measurement.model_copy(
+        update={"subject": measurement.subject.model_copy(update={"observing_night_id": night})}
+    )
+
+
+def test_the_finished_night_camera_version_ignores_the_night_in_progress(config: AppConfiguration) -> None:
+    """A frame tonight keeps the version; an old night changes it."""
+    store = QualityStore.from_configuration(config)
+    store.write_measurements([_night_measurement(store, "CamA", "M 31", "run-1", "2026-11-05")])
+
+    def version(tonight: str) -> tuple[str | int, ...]:
+        """Read CamA's finished-night version for a given tonight.
+
+        Returns
+        -------
+        version : `tuple`
+            The version.
+        """
+        found = get_camera_data_versions(config, ["CamA"], finished_before_night=tonight)
+        assert found is not None
+        return found["CamA"]
+
+    before = version("2026-11-07")
+    store.write_measurements([_night_measurement(store, "CamA", "M 13", "run-2", "2026-11-07")])
+    assert version("2026-11-07") == before
+    # The all-data version does see tonight's frame.
+    all_data = get_camera_data_versions(config, ["CamA"])
+    assert all_data is not None and all_data["CamA"][0] == 2
+
+    # A frame of a finished night is counted.
+    store.write_measurements([_night_measurement(store, "CamA", "M 13", "run-3", "2026-11-06")])
+    after_finished = version("2026-11-07")
+    assert after_finished != before
+
+    # When the night rolls over, tonight's frame starts to count, once.
+    rolled = version("2026-11-08")
+    assert rolled != after_finished
+    assert version("2026-11-08") == rolled
+    assert rolled[0] == 3
+
+
 def test_the_camera_version_sees_a_calibration_record_of_that_camera(config: AppConfiguration) -> None:
     """A camera's calibration record changes its version."""
     store = QualityStore.from_configuration(config)
@@ -303,3 +356,40 @@ def test_unreadable_camera_data_gives_no_version(config: AppConfiguration) -> No
     (Path(str(config.get_library_path())) / "astrometrics.db").write_text("not a database")
     assert get_camera_data_versions(config, ["CamA"]) is None
     assert get_target_camera_names(config, "M 31") is None
+
+
+def test_the_stack_version_ignores_frame_rows_and_sees_stack_rows(config: AppConfiguration) -> None:
+    """A frame row leaves the stack version; a stack row changes it."""
+    store = QualityStore.from_configuration(config)
+    store.write_measurements([_camera_measurement(store, "CamA", "M 31", "run-1")])
+    before = get_stack_quality_data_version(config)
+    assert before is not None
+    assert get_stack_quality_data_version(config) == before
+
+    store.write_measurements([_camera_measurement(store, "CamA", "M 13", "run-2")])
+    assert get_stack_quality_data_version(config) == before
+
+    stack_row = _camera_measurement(store, "CamA", "M 31", "run-3")
+    stack_row = stack_row.model_copy(
+        update={"subject": stack_row.subject.model_copy(update={"level": SubjectLevel.STACK})}
+    )
+    store.write_measurements([stack_row])
+    after = get_stack_quality_data_version(config)
+    assert after is not None
+    assert after != before
+
+
+def test_the_stack_version_sees_a_new_capture_setting(config: AppConfiguration) -> None:
+    """The settings the stack rows point at are part of the version."""
+    store = QualityStore.from_configuration(config)
+    store.write_measurements([_camera_measurement(store, "CamA", "M 31", "run-1")])
+    before = get_stack_quality_data_version(config)
+    store.get_or_create_capture_setting(CaptureSetting(camera="CamB"))
+    assert get_stack_quality_data_version(config) != before
+
+
+def test_the_stack_version_of_a_missing_library_is_empty(tmp_path: Path) -> None:
+    """No database file gives zeros."""
+    empty = AppConfiguration()
+    empty.update_config({"Image Library": {"path": str(tmp_path / "nothing")}})
+    assert get_stack_quality_data_version(empty) == (0, 0, "", 0, "", 0)

@@ -588,7 +588,9 @@ def test_a_version_that_cannot_be_read_keeps_nothing(
     assert len(cached.recorder.ratios) == 2
 
 
-def _write_camera_frame(config: AppConfiguration, target: str, camera: str, run_id: str) -> None:
+def _write_camera_frame(
+    config: AppConfiguration, target: str, camera: str, run_id: str, night: str | None = None
+) -> None:
     """Store one frame row of a target taken with a camera.
 
     Parameters
@@ -601,6 +603,8 @@ def _write_camera_frame(config: AppConfiguration, target: str, camera: str, run_
         The camera of the row's capture setting.
     run_id : `str`
         The run that wrote it.
+    night : `str`, optional
+        The observing night of the frame. Defaults to none.
     """
     from astrometricslib._internal.drivers.quality_store import QualityStore
 
@@ -614,6 +618,7 @@ def _write_camera_frame(config: AppConfiguration, target: str, camera: str, run_
                 level=SubjectLevel.FRAME,
                 subject_id=f"{target}/{run_id}.fits",
                 target_id=target,
+                observing_night_id=night,
                 capture_setting_id=setting_id,
             ),
             status=MeasurementStatus.MEASURED,
@@ -636,6 +641,64 @@ def test_a_frame_of_the_same_camera_from_another_target_builds_again(
     assert len(cached.recorder.ratios) == 2
     cached.ask()
     assert len(cached.recorder.ratios) == 2
+
+
+def test_a_same_camera_frame_tonight_keeps_the_camera_part(
+    cached: SimpleNamespace, forecast_status: dict
+) -> None:
+    """The camera-wide estimate counts finished nights only (WAY-D107)."""
+    import time
+
+    from astrometricslib.reports import observing_night_id
+
+    tonight = observing_night_id(time.time())
+    _write_camera_frame(cached.config, "NGC 7331", "CamA", "own", night="2020-01-01")
+    cached.ask()
+
+    # Another target's frame tonight, with the same camera: a cache hit.
+    _write_camera_frame(cached.config, "M 13", "CamA", "other-tonight", night=tonight)
+    cached.ask()
+    assert len(cached.recorder.ratios) == 1
+
+    # A frame of a finished night builds again, once.
+    _write_camera_frame(cached.config, "M 13", "CamA", "other-old", night="2020-01-02")
+    cached.ask()
+    assert len(cached.recorder.ratios) == 2
+    cached.ask()
+    assert len(cached.recorder.ratios) == 2
+
+    # The target's own part still sees tonight's frame.
+    _write_camera_frame(cached.config, "NGC 7331", "CamA", "own-tonight", night=tonight)
+    cached.ask()
+    assert len(cached.recorder.ratios) == 3
+
+
+def test_the_depth_goal_version_changes_once_when_the_night_rolls_over(
+    cached: SimpleNamespace, forecast_status: dict
+) -> None:
+    """Tonight's frames join the camera part after the night ends."""
+    import time
+
+    from astrometricslib.reports import observing_night_id
+    from wayfindinglib.analytics.data_versions import depth_goal_data_version
+
+    now = time.time()
+    _write_camera_frame(cached.config, "NGC 7331", "CamA", "own", night="2020-01-01")
+    _write_camera_frame(cached.config, "M 13", "CamA", "other", night=observing_night_id(now))
+
+    def version(moment: float) -> Any:
+        """Work out the depth goal version at a moment.
+
+        Returns
+        -------
+        version : `Any`
+            The version.
+        """
+        return depth_goal_data_version(cached.config, cached.butler, "NGC 7331", moment)
+
+    assert version(now) == version(now + 60.0)
+    assert version(now + 86400.0) != version(now)
+    assert version(now + 86400.0) == version(now + 86460.0)
 
 
 def test_a_frame_of_another_camera_keeps_the_answer(cached: SimpleNamespace, forecast_status: dict) -> None:

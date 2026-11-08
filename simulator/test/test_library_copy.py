@@ -353,3 +353,27 @@ def test_a_real_launch_section_is_dropped_so_the_simulators_own_stands_alone() -
     parsed = tomllib.loads(text)
     assert parsed["Launch"]["label"] == "SIMULATOR"
     assert parsed["Observatory.Camera"]["models"] == "x"
+
+
+def test_world_database_copy_repoints_job_log_paths_into_the_world(tmp_path: Path) -> None:
+    """A copied job record names a log in the world's folder."""
+    environment, library, _stacks = _make_real(tmp_path, True)
+    state_home = tmp_path / "state"
+    environment["ASTROMETRICS_REAL_STATE_HOME"] = str(state_home)
+    real = real_folders(environment)
+    real_log = real.logs / "stacking_M_27_20261031_083703.log"
+    real_log.parent.mkdir(parents=True)
+    real_log.write_text("real log")
+    with sqlite3.connect(library / "astrometrics_log.db") as connection:
+        connection.execute("CREATE TABLE jobs_with_log (id TEXT, log_file_path TEXT)")
+        connection.execute("INSERT INTO jobs_with_log VALUES ('j', ?)", (str(real_log),))
+    root = tmp_path / "simulator"
+    root.mkdir()
+    plan = library_copy.plan_mounts(real.frames, real.stacks, root)
+    replacements = library_copy.database_replacements(real, plan, root)
+    library_copy.copy_databases(root, library, library / "wayfinding", replacements)
+    with sqlite3.connect(root / "library" / "astrometrics_log.db") as connection:
+        stored = connection.execute("SELECT log_file_path FROM jobs_with_log").fetchone()[0]
+    assert stored == str(library_copy.world_logs_folder(root) / real_log.name)
+    assert not stored.startswith(str(real.logs))
+    assert real_log.read_text() == "real log"

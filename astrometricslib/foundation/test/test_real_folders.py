@@ -45,3 +45,12 @@ def test_the_real_variables_win_over_the_moved_folders(tmp_path: Path) -> None:
         tmp_path / "wf" in folders.protected_paths()
         or (tmp_path / "wf").resolve() in folders.protected_paths()
     )
+
+
+def test_real_logs_folder_follows_the_real_state_variable(tmp_path: Path) -> None:
+    """The real logs folder follows the real state variable, not XDG."""
+    folders = paths.real_folders({
+        paths.REAL_STATE_HOME_VARIABLE: str(tmp_path / "real_state"),
+        "XDG_STATE_HOME": str(tmp_path / "world_state"),
+    })
+    assert folders.logs == tmp_path / "real_state" / "astrometrics" / "logs"

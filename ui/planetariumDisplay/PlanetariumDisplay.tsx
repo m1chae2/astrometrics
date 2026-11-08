@@ -260,13 +260,14 @@ export const PlanetariumDisplay: React.FC = () => {
     };
 
     fetchDetails();
-    const interval = setInterval(fetchDetails, 10000);
+    // A chosen moment gives the same answer every time, so only live time is asked again.
+    const interval = isLiveTime ? setInterval(fetchDetails, 10000) : undefined;
     return () => {
       active = false;
       controller.abort();
-      clearInterval(interval);
+      if (interval !== undefined) clearInterval(interval);
     };
-  }, [selectedSource?.id, targetTimeIso]);
+  }, [selectedSource?.id, targetTimeIso, isLiveTime]);
 
   /**
    * Resolves the selected object ID to a PlanetariumSource and updates viewport center.

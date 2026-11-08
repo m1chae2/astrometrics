@@ -249,8 +249,9 @@ class QualityRecords:
             library_only=library_only,
         )
         registry = get_metric_registry()
+        registered = set(registry.names())
         for row in rows:
-            row.unit = registry.get(row.metric).unit if row.metric in registry.names() else None
+            row.unit = registry.get(row.metric).unit if row.metric in registered else None
         page = rows[offset:] if limit is None else rows[offset : offset + limit]
         return QualityQueryResult(
             rows=page,

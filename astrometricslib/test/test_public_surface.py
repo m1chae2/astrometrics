@@ -143,6 +143,7 @@ EXPECTED_MODULE_NAMES = {
         "file_lock",
         "get_camera_data_versions",
         "get_library_data_version",
+        "get_stack_quality_data_version",
         "get_target_camera_names",
         "get_target_data_version",
         "is_loopback_host",

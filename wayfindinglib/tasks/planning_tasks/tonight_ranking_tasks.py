@@ -823,7 +823,7 @@ def rank_tonight(
             return None
 
     # One library-wide read, not one per target (decision D17).
-    noise_history = read_noise_history(astrometrics)
+    noise_history = read_noise_history(astrometrics, config)
     noise_model_errors = noise_history.model_errors
     wanted = set(candidate_target_ids) if candidate_target_ids is not None else None
     skipped: dict[str, int] = defaultdict(int)

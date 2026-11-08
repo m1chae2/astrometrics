@@ -9,12 +9,13 @@ settings for PHD2.
 For every row the best candidate in the fallback order wins (decision D3):
 the newest real record, a fit to the recorded history, the performance
 envelope, then the simulator's own default. A row without any candidate falls
-back one step: where the plan says "zero" (periodic error, polar error and Dec
-backlash) the property is written as zero, where it says "simulator default"
-nothing is written and the INDI simulator keeps its own value. Each value is
-clamped to its property's range (`simulator.fit.ranges`), and the clamp is
-recorded. Conversions use the drivers' own formulas, inverted by hand
-(`simulator.fit.driver_model`), so there is no start-up loop of exposures.
+back one step: where the plan says "zero" (periodic error, polar error,
+go-to error and Dec backlash) the property is written as zero, where it
+says "simulator default" nothing is written and the INDI simulator keeps
+its own value. Each value is clamped to its property's range
+(`simulator.fit.ranges`), and the clamp is recorded. Conversions use the
+drivers' own formulas, inverted by hand (`simulator.fit.driver_model`), so
+there is no start-up loop of exposures.
 
 Two things the INDI simulators cannot do are recorded, not applied: the
 focus drift with temperature (no property couples focus to temperature) and
@@ -54,6 +55,32 @@ POLAR_DRIFT_MINUTES = 1.0
 GUIDE_RATE_UNIT_ARCSEC_PER_S = driver_model.SIDEREAL_GUIDE_RATE_ARCSEC_PER_S
 #: The unit of one arcminute in arcseconds.
 ARCSEC_PER_ARCMIN = 60.0
+#: The telescope simulator's ``MOUNT_MODEL`` terms are in ARCMINUTES.
+#: Measured live on 2026-11-08 (INDI 2.2.5): ``MM_IH`` = 1 moved the true
+#: pointing (``EQUATORIAL_PE``) by exactly 0.001111 h of right ascension, one
+#: arcminute of hour angle, and all zeros gave exactly zero offset. The
+#: older source read from disk (degrees, -5 to 5) does not apply.
+#: Arcseconds in one arcminute: see `ARCSEC_PER_ARCMIN`.
+#:
+#: Sign of each term: the term in arcminutes is the sign times the median
+#: first-attempt offset (solved minus commanded), as an angle on each axis, in
+#: arcminutes.
+#:
+#: * ``MM_IH`` is -1, MEASURED live on 2026-11-08: with ``MM_IH`` = +1 the true
+#:   right ascension was lower than the reported one (13.515409 h against
+#:   13.516520 h at M 51, declination unchanged), so solved minus commanded in
+#:   right ascension is minus ``MM_IH``.
+#: * ``MM_ID`` is +1, NOT MEASURED. Best derivation: the measured ``MM_IH``
+#:   behaves as true = reported + term (the opposite of the older source,
+#:   where the instrument is the observed position minus the term); the same
+#:   change for declination makes solved minus commanded in declination equal
+#:   to plus ``MM_ID``. The live check decides; a flip is one number here.
+MOUNT_MODEL_SIGNS = {"MM_IH": -1.0, "MM_ID": 1.0}
+#: The terms that are always written as zero: the app's pointing model is not
+#: used (its hour angle is computed from right ascension alone, so the polar
+#: and flexure terms are fitted against a made-up angle and the index and cone
+#: terms cancel each other), so only a constant offset is simulated.
+MOUNT_MODEL_ZERO_TERMS = ("MM_CH", "MM_NP", "MM_MA", "MM_ME")
 #: ``random() % (2 * scale * R) - scale * R`` is uniform on -R to R, whose
 #: standard deviation is R / sqrt(3) (``guide_simulator.cpp:580-589``).
 UNIFORM_RMS_FACTOR = math.sqrt(3.0)
@@ -76,6 +103,12 @@ DISPLAY_DECIMALS = {
     "SIM_PE_MAX": 1,
     "OFFSET": 0,
     "DEC_BACKLASH": 0,
+    "MM_IH": 3,
+    "MM_ID": 3,
+    "MM_CH": 3,
+    "MM_NP": 3,
+    "MM_MA": 3,
+    "MM_ME": 3,
 }
 
 
@@ -509,6 +542,65 @@ def _polar_error(measurements: Measurements, result: FitResult) -> None:
         )
 
 
+def _mount_model(measurements: Measurements, result: FitResult) -> None:
+    """Fit the telescope simulator's constant go-to offset (``MOUNT_MODEL``).
+
+    The median first-attempt offsets (`simulator.fit.measurements`) become
+    ``MM_IH`` (right ascension) and ``MM_ID`` (declination) in arcminutes,
+    signed by `MOUNT_MODEL_SIGNS`. The mount then points a little away from
+    the position it reports, so the app's alignment has something to
+    correct. The other four terms are always zero (`MOUNT_MODEL_ZERO_TERMS`).
+    With no usable measurement all six are zero.
+
+    Parameters
+    ----------
+    measurements : `Measurements`
+        The candidates.
+    result : `FitResult`
+        Receives the values.
+    """
+    candidate = _best(measurements, "mount_model")
+    requested = {"MM_IH": 0.0, "MM_ID": 0.0}
+    if candidate is not None:
+        requested["MM_IH"] = (
+            MOUNT_MODEL_SIGNS["MM_IH"] * candidate.values["ra_angle_median_arcsec"] / ARCSEC_PER_ARCMIN
+        )
+        requested["MM_ID"] = (
+            MOUNT_MODEL_SIGNS["MM_ID"] * candidate.values["dec_median_arcsec"] / ARCSEC_PER_ARCMIN
+        )
+    for element, value in requested.items():
+        result.values.append(
+            _make(
+                "mount_model",
+                "Go-to offset",
+                MOUNT,
+                "MOUNT_MODEL",
+                element,
+                value,
+                candidate,
+                "no measurement: zero"
+                if candidate is None
+                else f"median first-attempt offset in arcsec times {MOUNT_MODEL_SIGNS[element]:+g}, "
+                "divided by 60 (the property is in arcminutes)",
+                note="Too few first attempts for a go-to offset; set to zero." if candidate is None else "",
+            )
+        )
+    for element in MOUNT_MODEL_ZERO_TERMS:
+        result.values.append(
+            _make(
+                "mount_model",
+                "Go-to offset",
+                MOUNT,
+                "MOUNT_MODEL",
+                element,
+                0.0,
+                None,
+                "always zero: only a constant offset is simulated",
+                note="Not simulated: the app's pointing model is not used (see the plan).",
+            )
+        )
+
+
 def _backlash(measurements: Measurements, result: FitResult) -> None:
     """Fit the telescope simulator's Dec backlash.
 
@@ -849,6 +941,7 @@ def fit_values(measurements: Measurements, setup: WorldSetup) -> FitResult:
     _periodic_error(measurements, setup, result)
     _guiding_disturbance(measurements, setup, result)
     _polar_error(measurements, result)
+    _mount_model(measurements, result)
     _backlash(measurements, result)
     _controller(measurements, result)
     _seeing(measurements, setup, result)

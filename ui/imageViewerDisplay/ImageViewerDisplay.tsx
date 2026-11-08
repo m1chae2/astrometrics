@@ -37,10 +37,6 @@ export const ImageViewerDisplay: React.FC = () => {
     setCatalogId,
     commonName,
     setCommonName,
-    raShared,
-    setRaShared,
-    decShared,
-    setDecShared,
   } = useTargetContext();
 
   const { remoteTargets } = useRemoteStatusContext();
@@ -130,8 +126,6 @@ export const ImageViewerDisplay: React.FC = () => {
       selectedTarget={activeTarget}
       catalogId={catalogId}
       commonName={commonName}
-      ra={raShared}
-      dec={decShared}
       onCatalogIdChange={setCatalogId}
       onCommonNameChange={setCommonName}
       onSaveTarget={saveTarget}

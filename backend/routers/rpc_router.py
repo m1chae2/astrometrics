@@ -232,6 +232,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # Camera capture
     "imaging:capture": ("imaging_service", "capture_sequence"),
     "imaging:get_active_jobs": ("imaging_service", "get_active_capture_jobs"),
+    "imaging:stop_capture": ("imaging_service", "stop_capture"),
     # Images and FITS files
     "images:get_target_frame": ("image_service", "get_target_frame_by_id"),
     "images:get_light_frame_data": ("image_service", "get_light_frame_data_by_id"),

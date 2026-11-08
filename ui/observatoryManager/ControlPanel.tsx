@@ -18,9 +18,17 @@ export interface ControlPanelProps {
     onStopMove: (direction: string) => void;
     onSetSlewRate: (rate: number) => void;
     onStop: () => void;
-    onSetTracking: (enabled: boolean) => void;
-    onPark: () => void;
-    onUnpark: () => void;
+    onSetTracking: (enabled: boolean) => Promise<unknown> | void;
+    onPark: () => Promise<unknown> | void;
+    onUnpark: () => Promise<unknown> | void;
+    /** Starts the open-ended capture on the target the telescope points at. */
+    onStartCapture?: () => Promise<boolean> | boolean | void;
+    /** Stops the capture the app started. */
+    onStopCapture?: () => Promise<boolean> | boolean | void;
+    /** True while a capture job runs. */
+    isCapturing?: boolean;
+    /** The target the telescope points at, if any. */
+    captureTargetName?: string;
     guidingHistory: GuidingSample[];
     alignmentAttempts?: AlignmentAttempt[];
 
@@ -37,8 +45,10 @@ export interface ControlPanelProps {
     onGuidingGainChange?: (value: number) => void;
 
     // Alignment control
-    onStartAlignment?: () => void;
-    onStopAlignment?: () => void;
+    onStartAlignment?: () => Promise<unknown> | void;
+    onStopAlignment?: () => Promise<unknown> | void;
+    /** Why Start Alignment is greyed while no target is picked. Null or empty when it can run. */
+    startAlignmentBlockedReason?: string | null;
     isAligningActive?: boolean;
 
     /** True when the app may not command the equipment. The command controls are then greyed out. */
@@ -75,6 +85,10 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     onSetTracking,
     onPark,
     onUnpark,
+    onStartCapture,
+    onStopCapture,
+    isCapturing = false,
+    captureTargetName,
     guidingHistory,
     alignmentAttempts = [],
     accuracy,
@@ -87,6 +101,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     onGuidingGainChange,
     onStartAlignment,
     onStopAlignment,
+    startAlignmentBlockedReason,
     isAligningActive = false,
     commandsDisabled = false,
     commandsDisabledReason = '',
@@ -109,7 +124,12 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                     onUnpark={onUnpark}
                     onStartAlignment={onStartAlignment}
                     onStopAlignment={onStopAlignment}
+                    startAlignmentBlockedReason={startAlignmentBlockedReason}
                     isAligningActive={isAligningActive}
+                    onStartCapture={onStartCapture}
+                    onStopCapture={onStopCapture}
+                    isCapturing={isCapturing}
+                    captureTargetName={captureTargetName}
                     onStartMove={onStartMove}
                     onStopMove={onStopMove}
                     onSetSlewRate={onSetSlewRate}

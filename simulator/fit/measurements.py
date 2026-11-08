@@ -25,6 +25,7 @@ arcseconds on the sky unless a name says otherwise.
 
 import logging
 import math
+import statistics
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -66,6 +67,16 @@ SIDEREAL_HOURS_PER_DAY = 24.06570982441908
 SIDEREAL_HOURS_AT_J2000 = 18.697374558
 #: Unix time of 2000 January 1, 12:00 UT.
 J2000_EPOCH_SECONDS = 946_728_000.0
+#: The fewest first attempts a go-to offset is fitted from.
+GOTO_MINIMUM_ATTEMPTS = 5
+#: A gap longer than this between two solves of one target starts a new
+#: target session (the same rule as the library's grouping of attempts).
+GOTO_SESSION_GAP_SECONDS = 7200.0
+#: The night argument that reads every night.
+GOTO_SESSION_ID = "all"
+#: If the median offset is smaller than this fraction of the median error,
+#: the errors scatter in direction and the systematic part is small.
+GOTO_SYSTEMATIC_FRACTION = 0.5
 #: Calibrations whose note starts with this were made for a simulator, not
 #: measured on the real mount.
 SIMULATOR_NOTE_PREFIX = "Simulator"
@@ -413,6 +424,125 @@ def _polar(wayfinder: Wayfinder, measurements: Measurements) -> None:
     )
 
 
+def _median_absolute_deviation(values: list[float]) -> float:
+    """Give the median absolute deviation of a list of numbers.
+
+    Parameters
+    ----------
+    values : `list` [`float`]
+        The numbers (not empty).
+
+    Returns
+    -------
+    deviation : `float`
+        The median of the distances from the median.
+    """
+    centre = statistics.median(values)
+    return statistics.median(abs(value - centre) for value in values)
+
+
+def _first_attempts(attempts: list[Any]) -> list[Any]:
+    """Pick the first usable solve of each target session.
+
+    A target session is one target's solves with no gap above
+    `GOTO_SESSION_GAP_SECONDS`, so the same target on two nights counts
+    twice. The first solve is the error before any correction.
+
+    Parameters
+    ----------
+    attempts : `list`
+        Alignment attempts with ``target_name``, ``timestamp``,
+        ``delta_ra_arcsec``, ``delta_dec_arcsec`` and ``dec``.
+
+    Returns
+    -------
+    first : `list`
+        One attempt for each target session, in time order.
+    """
+    usable = [
+        attempt
+        for attempt in attempts
+        if attempt.delta_ra_arcsec is not None
+        and attempt.delta_dec_arcsec is not None
+        and attempt.dec is not None
+        and attempt.timestamp is not None
+        and attempt.status != "failed"
+    ]
+    last_seen: dict[str, float] = {}
+    first: list[Any] = []
+    for attempt in sorted(usable, key=lambda item: item.timestamp):
+        key = attempt.target_name or "unnamed"
+        previous = last_seen.get(key)
+        if previous is None or attempt.timestamp - previous > GOTO_SESSION_GAP_SECONDS:
+            first.append(attempt)
+        last_seen[key] = attempt.timestamp
+    return first
+
+
+def _mount_model(wayfinder: Wayfinder, measurements: Measurements) -> None:
+    """Collect the mount's constant go-to offset from first-frame errors.
+
+    Reads every recorded plate solve (all nights), keeps the first solve of
+    each target session (the error before any correction) and takes the
+    median signed offset on each axis: the systematic part of the go-to
+    error. ``delta_ra_arcsec`` is a distance on the sky (already scaled by
+    cos(dec)), so it is divided by cos(dec) of the solve to get the offset
+    in right ascension itself. The median absolute deviation, the count and
+    the typical error size go into the note. With fewer than
+    `GOTO_MINIMUM_ATTEMPTS` first solves it adds a note and no candidate.
+
+    Parameters
+    ----------
+    wayfinder : `Wayfinder`
+        The entry point.
+    measurements : `Measurements`
+        Receives the candidate.
+    """
+    records = wayfinder.review.query_alignment_records(session_id=GOTO_SESSION_ID)
+    first = _first_attempts(list(records.attempts))
+    if len(first) < GOTO_MINIMUM_ATTEMPTS:
+        measurements.notes.append(
+            f"Go-to error: {len(first)} first attempts recorded; at least {GOTO_MINIMUM_ATTEMPTS} are needed."
+        )
+        return
+    # Right ascension offset as an angle (arcsec): undo the record's cos(dec).
+    ra_angle = [item.delta_ra_arcsec / max(math.cos(math.radians(item.dec)), 1e-3) for item in first]
+    dec_offset = [item.delta_dec_arcsec for item in first]
+    sky_ra = [item.delta_ra_arcsec for item in first]
+    median_ra, median_dec = statistics.median(ra_angle), statistics.median(dec_offset)
+    typical = statistics.median(math.hypot(a, b) for a, b in zip(sky_ra, dec_offset, strict=True))
+    systematic = math.hypot(statistics.median(sky_ra), median_dec)
+    note = (
+        f"Median signed offset of {len(first)} first attempts (solved minus commanded): "
+        f"{median_ra:.0f} arcsec in right ascension (MAD {_median_absolute_deviation(ra_angle):.0f}), "
+        f"{median_dec:.0f} arcsec in declination (MAD {_median_absolute_deviation(dec_offset):.0f}); "
+        f"the typical error is {typical:.0f} arcsec. Only this constant offset is simulated; "
+        "the scatter around it is not."
+    )
+    if systematic < GOTO_SYSTEMATIC_FRACTION * typical:
+        note += " The systematic part is small next to the typical error: the errors scatter in direction."
+    nights = sorted({str(item.session_id) for item in first if item.session_id})
+    measurements.add(
+        "mount_model",
+        Candidate(
+            "history fit",
+            {
+                "ra_angle_median_arcsec": median_ra,
+                "dec_median_arcsec": median_dec,
+                "ra_angle_mad_arcsec": _median_absolute_deviation(ra_angle),
+                "dec_mad_arcsec": _median_absolute_deviation(dec_offset),
+                "typical_error_arcsec": typical,
+                "count": float(len(first)),
+            },
+            "wayfinder.review.query_alignment_records",
+            {"session_id": GOTO_SESSION_ID},
+            nights,
+            note,
+            nights[-1] if nights else None,
+        ),
+    )
+
+
 def _envelope(wayfinder: Wayfinder, measurements: Measurements) -> None:
     """Collect the median star width from the performance envelope.
 
@@ -587,6 +717,7 @@ def collect_measurements(
         ("unguided mount error", lambda: _mount_error(wayfinder, result)),
         ("Dec backlash", lambda: _backlash(wayfinder, result)),
         ("polar alignment", lambda: _polar(wayfinder, result)),
+        ("mount pointing model", lambda: _mount_model(wayfinder, result)),
         ("performance envelope", lambda: _envelope(wayfinder, result)),
         ("sky rate", lambda: _sky(wayfinder, result, moment, ra_deg, dec_deg, longitude_deg)),
         ("focus temperature slope", lambda: _focus(wayfinder, result)),

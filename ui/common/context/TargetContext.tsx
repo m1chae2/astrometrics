@@ -31,10 +31,6 @@ export interface TargetContextValue {
     setCatalogId: (val: string) => void;
     commonName: string;
     setCommonName: (val: string) => void;
-    raShared: string;
-    setRaShared: (val: string) => void;
-    decShared: string;
-    setDecShared: (val: string) => void;
 }
 
 const TargetContext = createContext<TargetContextValue | undefined>(undefined);
@@ -108,8 +104,6 @@ export const TargetProvider: React.FC<TargetProviderProps> = ({ children }) => {
     // Shared editing state
     const [catalogId, setCatalogId] = useState<string>('');
     const [commonName, setCommonName] = useState<string>('');
-    const [raShared, setRaShared] = useState<string>('');
-    const [decShared, setDecShared] = useState<string>('');
 
     const invalidate = useCallback((scope: InvalidationScope = 'all') => {
         if (scope === 'targets' || scope === 'all') {
@@ -174,11 +168,7 @@ export const TargetProvider: React.FC<TargetProviderProps> = ({ children }) => {
         catalogId,
         setCatalogId,
         commonName,
-        setCommonName,
-        raShared,
-        setRaShared,
-        decShared,
-        setDecShared
+        setCommonName
     };
 
     return (

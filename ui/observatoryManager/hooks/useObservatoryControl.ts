@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { parkTelescope, unparkTelescope, slewTelescope, abortTelescopeMotion, setTelescopeTracking, moveTelescope, setTelescopeSlewRate } from '../../common/services/telescope/motionService';
+import { parkTelescope, unparkTelescope, slewToTarget, abortTelescopeMotion, setTelescopeTracking, moveTelescope, setTelescopeSlewRate } from '../../common/services/telescope/motionService';
 import { captureGuideFrame } from '../../common/services/telescope/guidingService';
 import { startAlignment, stopAlignment } from '../../common/services/alignmentApi';
-import { createTarget } from '../../common/services/targetService';
+import { createTarget, fetchTargetObject } from '../../common/services/targetService';
+import { startOpenEndedCapture, stopCapture } from '../../common/services/imaging/captureService';
 import { emitToast } from '../../common/utils/emitToast';
 
 export const useObservatoryControl = (forceReload: () => void) => {
@@ -17,14 +18,12 @@ export const useObservatoryControl = (forceReload: () => void) => {
         forceReload();
     };
 
-    const handleSlewToTarget = async (raShared: string | null, decShared: string | null) => {
-        if (!raShared || !decShared) {
-            emitToast('Target has no coordinates', 'error');
-            return;
-        }
-
-        await slewTelescope(parseFloat(raShared), parseFloat(decShared));
-    };
+    /**
+     * Slews the mount to a library target. The backend looks up the target's coordinates.
+     * @param targetId The id of the selected target.
+     * @return True if the mount accepted the slew.
+     */
+    const handleSlewToTarget = async (targetId: string): Promise<boolean> => slewToTarget(targetId);
 
     const handleStop = async () => {
         await abortTelescopeMotion();
@@ -43,17 +42,24 @@ export const useObservatoryControl = (forceReload: () => void) => {
         await setTelescopeSlewRate(rate);
     };
 
-    const handleSetTracking = async (enabled: boolean) => {
-        await setTelescopeTracking(enabled);
-    };
+    /**
+     * Turns sidereal tracking on or off.
+     * @param enabled True to track.
+     * @return True if the mount accepted the command.
+     */
+    const handleSetTracking = async (enabled: boolean): Promise<boolean> => setTelescopeTracking(enabled);
 
-    const handlePark = async () => {
-        await parkTelescope();
-    };
+    /**
+     * Parks the mount.
+     * @return True if the mount accepted the command.
+     */
+    const handlePark = async (): Promise<boolean> => parkTelescope();
 
-    const handleUnpark = async () => {
-        await unparkTelescope();
-    };
+    /**
+     * Unparks the mount.
+     * @return True if the mount accepted the command.
+     */
+    const handleUnpark = async (): Promise<boolean> => unparkTelescope();
 
     const handleAddTarget = () => {
         setIsAddModalOpen(true);
@@ -64,18 +70,44 @@ export const useObservatoryControl = (forceReload: () => void) => {
         if (!captured) emitToast('Guide frame capture failed', 'error');
     };
 
-    const handleStartAlignment = async (raShared: string | null, decShared: string | null) => {
-        if (!raShared || !decShared) {
-            emitToast('Target has no coordinates', 'error');
-            return;
+    /**
+     * Starts alignment on a library target, using the target's own coordinates.
+     * @param targetId The id of the selected target.
+     * @return True if alignment started.
+     */
+    const handleStartAlignment = async (targetId: string): Promise<boolean> => {
+        const target = await fetchTargetObject(targetId);
+        if (!target?.ra || !target?.dec) {
+            emitToast(`${targetId} has no coordinates in the library, so alignment cannot start.`, 'error');
+            return false;
         }
-
-        await startAlignment(raShared, decShared);
+        return startAlignment(target.ra, target.dec);
     };
 
-    const handleStopAlignment = async () => {
-        await stopAlignment();
+    /**
+     * Stops alignment.
+     * @return True if alignment was stopped.
+     */
+    const handleStopAlignment = async (): Promise<boolean> => stopAlignment();
+
+    /**
+     * Starts the open-ended capture on the target the telescope points at.
+     * @param targetName The target the telescope points at, or undefined when it points at none.
+     * @return True if the capture started.
+     */
+    const handleStartCapture = async (targetName: string | undefined): Promise<boolean> => {
+        if (!targetName) {
+            emitToast('The telescope is not pointing at a target', 'error');
+            return false;
+        }
+        return (await startOpenEndedCapture(targetName)) !== null;
     };
+
+    /**
+     * Stops the capture the app started.
+     * @return True if a capture was stopped.
+     */
+    const handleStopCapture = async (): Promise<boolean> => stopCapture();
 
     return {
         isAddModalOpen,
@@ -97,7 +129,9 @@ export const useObservatoryControl = (forceReload: () => void) => {
             onAddTarget: handleAddTarget,
             onGuideCapture: handleGuideCapture,
             onStartAlignment: handleStartAlignment,
-            onStopAlignment: handleStopAlignment
+            onStopAlignment: handleStopAlignment,
+            onStartCapture: handleStartCapture,
+            onStopCapture: handleStopCapture
         }
     };
 };

@@ -25,12 +25,12 @@ vi.mock('../IndiStatusPanel', () => ({ IndiStatusPanel: () => <div>Devices</div>
 vi.mock('../../common/hooks/useTelescopeStatus', () => ({
     useTelescopeStatus: () => ({ trackingStatus: 'Idle', telemetry: { alignmentAttempts: [], guidingHistory: [] } }),
 }));
-vi.mock('../../common/context/AstrometricsContext', () => ({ useAstrometrics: () => ({ connected: true }) }));
+vi.mock('../../common/context/AstrometricsContext', () => ({ useAstrometrics: () => ({ connected: true, activeJobs: [] }) }));
 vi.mock('../../common/utils/appBootReadiness', () => ({ useReportModeReady: () => undefined }));
 vi.mock('../../common/context/TargetContext', () => ({
     useTargetContext: () => ({
         selectedTarget: null, pendingTarget: null, setPendingTarget: () => undefined,
-        reloadKey: 0, forceReload: () => undefined, raShared: '1', decShared: '2',
+        reloadKey: 0, forceReload: () => undefined,
     }),
 }));
 vi.mock('../../common/context/RemoteStatusContext', () => ({ useRemoteStatusContext: () => ({ remoteTargets: [] }) }));

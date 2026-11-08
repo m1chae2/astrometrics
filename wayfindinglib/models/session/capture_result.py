@@ -22,6 +22,9 @@ class CaptureResult(BaseModel):
         left where it was.
     dithers : `int`
         How many times the pointing was shifted between frames.
+    stopped : `bool`
+        `True` if the run was stopped before it took all its frames. The
+        frames already taken are kept.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -30,3 +33,4 @@ class CaptureResult(BaseModel):
     exposure_seconds: float = Field(..., gt=0.0, alias="exposureSeconds")
     filter_name: str | None = Field(default=None, alias="filterName")
     dithers: int = Field(default=0, ge=0, alias="dithers")
+    stopped: bool = Field(default=False, alias="stopped")

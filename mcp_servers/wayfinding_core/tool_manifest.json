@@ -177,6 +177,13 @@
       "interim_block": "The filters and focuser sections return [] and 0 because the MCP process has no hardware connection. Use app_status with the telescope section (focuser position, filter, pier side, tracking).",
       "note": "Reads the filter names, the focuser position and the saved focus model."
     },
+    "observatory_imaging_stop_capture": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Commanding a device (mount, cameras, focuser, filter wheel, enclosure) is out of scope. Reading from them and from the Pi is allowed."
+    },
     "observatory_mount_abort_motion": {
       "tool_class": "safe-stop",
       "category": "observatory-control",
@@ -190,6 +197,13 @@
       "disposition": "drop",
       "interim_block": "",
       "note": "Stops a centering run by aborting the mount, so it is dropped with the other hardware tools."
+    },
+    "observatory_mount_get_centering_exposure": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-08. Works out the plate-solve centering exposure from the library's zero point and star width, the camera profile, the sky model and the Gaia catalog. Reads only; nothing is stored and nothing moves. The first call may fit the sky model and be slow."
     },
     "observatory_mount_get_polar_alignment": {
       "tool_class": "unclassified",

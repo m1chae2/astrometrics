@@ -453,6 +453,7 @@ def build_world(
             or (fitted_controller_settings(results_path) if fitted else None),
             backend_port=backend_port,
             fitted_settings_path=results_path if fitted else None,
+            capture_by_app=True,
         )
         runner.start()
         runner.wait_ready()

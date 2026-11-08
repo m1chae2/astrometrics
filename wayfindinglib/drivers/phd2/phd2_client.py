@@ -99,6 +99,21 @@ class PHD2Client:
         self._last_connection_attempt = 0.0
         # True after a failed connect has been logged, so repeats stay quiet.
         self._connect_failure_reported = False
+        # True while `events` holds an open connection to PHD2.
+        self._event_stream_open = False
+
+    @property
+    def is_connected(self) -> bool:
+        """Say whether the event stream holds an open connection to PHD2.
+
+        Returns
+        -------
+        connected : `bool`
+            `True` from the moment `events` connects until the connection
+            drops or the stream stops. It reads a flag; it sends nothing to
+            PHD2.
+        """
+        return self._event_stream_open
 
     def _can_attempt_connect(self) -> bool:
         """Return whether the reconnect cooldown has elapsed.
@@ -198,6 +213,7 @@ class PHD2Client:
                 logger.info("PHD2 connection to %s:%s restored", self.host, self.port)
                 self._connect_failure_reported = False
 
+            self._event_stream_open = True
             try:
                 pending = b""
                 while not stopped():
@@ -226,6 +242,7 @@ class PHD2Client:
             except OSError as read_error:
                 logger.warning("PHD2 connection to %s:%s dropped: %s", self.host, self.port, read_error)
             finally:
+                self._event_stream_open = False
                 sock.close()
 
     def open_session(self, timeout_seconds: float = 10.0) -> PHD2Session:

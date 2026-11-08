@@ -33,12 +33,12 @@ vi.mock('../../common/hooks/useTelescopeStatus', () => ({
         },
     }),
 }));
-vi.mock('../../common/context/AstrometricsContext', () => ({ useAstrometrics: () => ({ connected: true }) }));
+vi.mock('../../common/context/AstrometricsContext', () => ({ useAstrometrics: () => ({ connected: true, activeJobs: [] }) }));
 vi.mock('../../common/utils/appBootReadiness', () => ({ useReportModeReady: () => undefined }));
 vi.mock('../../common/context/TargetContext', () => ({
     useTargetContext: () => ({
         selectedTarget: 'M_13', pendingTarget: 'M_13', setPendingTarget: () => undefined, setSelectedTarget: () => undefined,
-        reloadKey: 0, forceReload: () => undefined, raShared: '1', decShared: '2',
+        reloadKey: 0, forceReload: () => undefined,
     }),
 }));
 vi.mock('../../common/context/RemoteStatusContext', () => ({ useRemoteStatusContext: () => ({ remoteTargets: new Set() }) }));

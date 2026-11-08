@@ -161,6 +161,7 @@ def test_phd2_falls_back_on_the_mounts_pulses(mount: dict) -> None:
     """With nothing from PHD2, the mount's pulses are read instead."""
     phd2 = MagicMock()
     phd2.drain_guiding_samples.return_value = []
+    phd2.is_reachable.return_value = False
     context = _context(
         Phd2GuidingDriver(phd2, fallback=IndiGuidingDriver(_session([{"time": 1.0, "pulse_n": 100.0}])))
     )

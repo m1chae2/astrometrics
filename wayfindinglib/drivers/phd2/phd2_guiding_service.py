@@ -111,6 +111,17 @@ class PHD2GuidingService:
         """
         return self._thread is not None and self._thread.is_alive()
 
+    def is_reachable(self) -> bool:
+        """Say whether the event connection to PHD2 is open right now.
+
+        Returns
+        -------
+        reachable : `bool`
+            `True` while the reader holds an open connection to PHD2. It
+            reads the client's flag and sends nothing to PHD2.
+        """
+        return bool(self._client.is_connected)
+
     def stop(self, timeout_seconds: float = 2.0) -> bool:
         """Stop the background PHD2 event-reading thread and wait for it.
 

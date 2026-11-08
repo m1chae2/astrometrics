@@ -89,6 +89,60 @@ class IndiCameraDriver(CameraDriver):
             return await asyncio.to_thread(self._session.guide_expose, exposure_seconds, gain)
         return await asyncio.to_thread(self._session.capture_image, exposure_seconds)
 
+    async def abort_exposure(self) -> bool:
+        """Cancel the exposure this camera is taking.
+
+        Sets the camera's ``CCD_ABORT_EXPOSURE`` switch
+        (`IndiInterface.abort_main_exposure` or `abort_guide_exposure`).
+
+        Returns
+        -------
+        success : `bool`
+            `True` if the abort command was sent.
+        """
+        if self._role == "guide":
+            return await asyncio.to_thread(self._session.abort_guide_exposure)
+        return await asyncio.to_thread(self._session.abort_main_exposure)
+
+    async def set_image_reception(self, enabled: bool) -> bool:
+        """Turn the receiving of this camera's images on or off.
+
+        Only the main camera supports it
+        (`IndiInterface.set_main_image_reception`); the guide camera returns
+        `False`.
+
+        Parameters
+        ----------
+        enabled : `bool`
+            `True` to receive images, `False` to stop.
+
+        Returns
+        -------
+        success : `bool`
+            `True` if the request was sent.
+        """
+        if self._role == "guide":
+            return False
+        return await asyncio.to_thread(self._session.set_main_image_reception, enabled)
+
+    async def wait_for_new_image(self, timeout_seconds: float) -> Any:
+        """Wait for a frame that arrives after reception was turned on.
+
+        Parameters
+        ----------
+        timeout_seconds : `float`
+            How long to wait, in seconds.
+
+        Returns
+        -------
+        image : `bytes` or `None`
+            The new frame's raw data, or `None` if none arrived in time
+            (always `None` for the guide camera).
+        """
+        if self._role == "guide":
+            return None
+        return await asyncio.to_thread(self._session.wait_for_new_main_image, timeout_seconds)
+
     async def get_last_image(self) -> Any:
         """Retrieve the last image this camera sent.
 

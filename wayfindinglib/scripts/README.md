@@ -15,6 +15,11 @@ Terms are defined in the [glossary](../../documentation/Glossary.md). This docum
   - It is read-only. It writes only the file given with `--report` and nothing to any database. Run it on the data copy with `build/agent_tools/realrun.sh`, not on the real library. `--target ID` (repeatable) limits the run.
   - Its tests, on made-up summaries and statements, are in `test/test_shadow_compare_verdicts.py`.
 
+## Checks on the models
+
+- `check_centering_exposure.py` tests the centering exposure model (`control.mount.get_centering_exposure`). For one target it takes real light frames, predicts the catalog star count of each from the frame's exposure, time and pointing, detects the stars in the frame with a 5-sigma star finder, and prints the ratio of the two. The medians and the share within a factor of 2 go in the validation register (row WAY-D122).
+  - It reads frames and writes nothing. Run it on the data copy with `build/agent_tools/realrun.sh`, not on the real library. Its tests, on made-up numbers, are in `test/test_check_centering_exposure.py`.
+
 ## Catalog and reference data
 
 - `build_deep_star_catalog.py` downloads the Gaia DR3 stars the Planetarium draws, once, to this computer.

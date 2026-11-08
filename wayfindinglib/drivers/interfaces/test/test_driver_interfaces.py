@@ -74,6 +74,41 @@ def test_indi_camera_driver_conforms_to_camera_driver() -> None:
     assert driver.role == "guide"
 
 
+@pytest.mark.anyio
+async def test_indi_camera_driver_aborts_the_camera_of_its_role() -> None:
+    """Each driver aborts the camera of its own role."""
+    calls: list[str] = []
+
+    class _Session:
+        """A stand-in session that records which camera was aborted."""
+
+        def abort_main_exposure(self) -> bool:
+            """Record a main-camera abort.
+
+            Returns
+            -------
+            sent : `bool`
+                Always `True`.
+            """
+            calls.append("main")
+            return True
+
+        def abort_guide_exposure(self) -> bool:
+            """Record a guide-camera abort.
+
+            Returns
+            -------
+            sent : `bool`
+                Always `True`.
+            """
+            calls.append("guide")
+            return True
+
+    assert await IndiCameraDriver(session=_Session(), role="main").abort_exposure() is True
+    assert await IndiCameraDriver(session=_Session(), role="guide").abort_exposure() is True
+    assert calls == ["main", "guide"]
+
+
 def test_indi_focuser_driver_conforms_to_focuser_driver() -> None:
     """Verify `IndiFocuserDriver` implements every `FocuserDriver` method."""
     driver = IndiFocuserDriver(session=object())

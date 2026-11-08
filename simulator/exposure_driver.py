@@ -10,7 +10,11 @@ computer:
    then follows the mount: when the world gives a backend port, each frame
    is filed under the library target nearest the mount's position (within a
    degree, the app's own rule), so a slew from the app changes the folder.
-2. It takes one exposure after another on the simulated camera. The camera
+2. In ``driver`` capture mode (the default, used by the TPM harness) it takes
+   one exposure after another on the simulated camera, and never while the
+   mount is slewing. In ``app`` capture mode (the launcher's interactive
+   session) it takes none: the app starts the exposures (Start Capture), and
+   the driver only files each finished frame. The camera
    saves each FITS file straight into a folder that stands in for the
    telescope computer's picture folder (``<standin>/Pictures/<target>/Light``).
    The frames match the real telescope's geometry and capture labels, not its
@@ -36,7 +40,7 @@ Usage::
         --standin <folder> --stats <out.json> \
         [--guide-log simulator/guide_log_sample.txt] \
         [--backend-port N] [--fitted-settings <fit_settings.json>] \
-        [--exposure-seconds 60] [--target "M 13"] \
+        [--exposure-seconds 60] [--target "M 13"] [--capture driver|app] \
         [--ra-hours 16.695] [--dec-degrees 36.46] [--config <settings.toml>]
 
 The script stops on SIGTERM or SIGINT.
@@ -96,6 +100,21 @@ COOLING_WAIT_SECONDS = 60.0
 COOLING_TOLERANCE_C = 1.0
 #: Tries to set one property before giving up.
 SETTING_TRIES = 3
+#: Who starts the exposures. The ``driver`` takes them itself (the TPM
+#: harness). The ``app`` does (Start Capture in the app), and the driver only
+#: files the frames that appear.
+CAPTURE_DRIVER = "driver"
+CAPTURE_APP = "app"
+CAPTURE_MODES = (CAPTURE_DRIVER, CAPTURE_APP)
+#: Seconds between two looks at an idle camera in ``app`` mode.
+WATCH_POLL_SECONDS = 0.5
+#: Seconds between two checks of the mount's position while idle in ``app``
+#: mode, so the file name prefix is right before the app's next exposure.
+IDLE_FOLLOW_SECONDS = 2.0
+#: The longest wait (seconds) for a slew to end before an exposure.
+SLEW_WAIT_SECONDS = 300.0
+#: The pseudo-element ``indi_getprop`` gives for a property's state.
+STATE_ELEMENT = "_STATE"
 
 
 #: How far (degrees) the mount must move before the target is looked up again.
@@ -342,6 +361,9 @@ class ExposureDriver:
         or `None` when none is within a degree. It may raise `RuntimeError`
         or `OSError` (a status: the current target is kept). Default: none,
         so the target stays fixed.
+    capture : `str`, optional
+        ``driver`` (default): the driver starts every exposure. ``app``: the
+        app starts them, and the driver only files the frames that appear.
     """
 
     def __init__(
@@ -357,8 +379,18 @@ class ExposureDriver:
         device_settings: list[DeviceSetting] | None = None,
         frame_source: FrameSource | None = None,
         find_target: Callable[[float, float], str | None] | None = None,
+        capture: str = CAPTURE_DRIVER,
     ) -> None:
-        """Keep the settings; nothing runs yet."""
+        """Keep the settings; nothing runs yet.
+
+        Raises
+        ------
+        ValueError
+            If `capture` is not one of `CAPTURE_MODES`.
+        """
+        if capture not in CAPTURE_MODES:
+            raise ValueError(f"capture must be one of {CAPTURE_MODES}, not {capture!r}.")
+        self.capture = capture
         self.indi_port = indi_port
         self.standin = standin
         self.guide_log = guide_log
@@ -565,7 +597,7 @@ class ExposureDriver:
         # The app lists this folder before the first frame arrives.
         self.pictures_directory.mkdir(parents=True, exist_ok=True)
         self._set(
-            f"{CAMERA}.UPLOAD_MODE.UPLOAD_LOCAL=On",
+            f"{CAMERA}.UPLOAD_MODE.UPLOAD_BOTH=On",
             f"{CAMERA}.UPLOAD_SETTINGS.UPLOAD_DIR={destination}",
             f"{CAMERA}.UPLOAD_SETTINGS.UPLOAD_PREFIX={upload_prefix(self.target)}",
         )
@@ -740,9 +772,122 @@ class ExposureDriver:
         self._set(f"{CAMERA}.UPLOAD_SETTINGS.UPLOAD_PREFIX={upload_prefix(target)}")
         print(f"The mount moved: frames are now filed under {target}.", flush=True)
 
-    def take_exposures(self) -> None:
-        """Take exposures one after another until stopped."""
+    def mount_is_slewing(self) -> bool:
+        """Say whether the simulated mount is still moving to a position.
+
+        The state of ``EQUATORIAL_EOD_COORD`` is ``Busy`` during a slew. If
+        the state cannot be read, the position is read twice, a second
+        apart: a mount that moved is slewing. A mount that does not answer
+        counts as not slewing, so the driver never waits for it forever.
+
+        Returns
+        -------
+        slewing : `bool`
+            `True` while the mount moves.
+        """
+        state = self._get(f"{MOUNT}.EQUATORIAL_EOD_COORD.{STATE_ELEMENT}")
+        if state:
+            return state == "Busy"
+        first = self.mount_position()
+        if first is None:
+            return False
+        self.stop_event.wait(1.0)
+        return self.mount_position() != first
+
+    def wait_for_slew_to_end(self, timeout: float = SLEW_WAIT_SECONDS) -> bool:
+        """Wait until the mount has stopped slewing.
+
+        A frame taken during a slew shows no fixed place in the sky and was
+        once filed under a position name.
+
+        Parameters
+        ----------
+        timeout : `float`, optional
+            The longest wait, in seconds.
+
+        Returns
+        -------
+        settled : `bool`
+            `True` when the mount is not slewing. `False` on a timeout or a
+            stop (a status, logged on a timeout).
+        """
+        deadline = time.time() + timeout
         while not self.stop_event.is_set():
+            if not self.mount_is_slewing():
+                return True
+            if time.time() >= deadline:
+                print(f"The mount was still slewing after {timeout:.0f} s; exposing anyway.", file=sys.stderr)
+                return False
+            self.stop_event.wait(1.0)
+        return False
+
+    def file_frame(self, name: str, started: float | None) -> None:
+        """File one finished frame from the staging folder and record it.
+
+        Both capture modes use this. It waits until the file stops growing,
+        gives it a name the picture folder does not have, delivers a real
+        frame in its place where one matches (else stamps the simulator's
+        frame), and adds the frame to the statistics.
+
+        Parameters
+        ----------
+        name : `str`
+            The file's name in the staging folder.
+        started : `float` or `None`
+            When the exposure began (seconds since the epoch). `None` (the
+            app started it): the file's time minus its ``EXPTIME`` header
+            value, else minus the driver's exposure time.
+        """
+        path = self.staging_directory / name
+        # The file is complete once its size stops changing.
+        size = -1
+        while size != path.stat().st_size and not self.stop_event.is_set():
+            size = path.stat().st_size
+            self.stop_event.wait(0.3)
+        if started is None:
+            started = path.stat().st_mtime - self._exposure_time(path)
+        self.pictures_directory.mkdir(parents=True, exist_ok=True)
+        new_name = unused_frame_name(name, self.pictures_directory)
+        path_in_pictures = self.pictures_directory / new_name
+        if self.deliver_real_frame(path, path_in_pictures):
+            # The real frame took the simulator frame's place.
+            path.unlink(missing_ok=True)
+        else:
+            stamp_offset(path, path_in_pictures, self.camera_offset(), mark_synthetic=True)
+        with self._lock:
+            self.frames.append({
+                "name": new_name,
+                "appeared_at": path_in_pictures.stat().st_mtime,
+                "exposure_started_at": started,
+                "size_bytes": path_in_pictures.stat().st_size,
+            })
+        self.write_stats()
+
+    def _exposure_time(self, path: Path) -> float:
+        """Read a frame's exposure time.
+
+        Parameters
+        ----------
+        path : `pathlib.Path`
+            A finished FITS file.
+
+        Returns
+        -------
+        seconds : `float`
+            The ``EXPTIME`` header value, else the driver's exposure time.
+        """
+        try:
+            return float(fits.getheader(path, memmap=False)["EXPTIME"])
+        except OSError, KeyError, ValueError, TypeError:
+            return self.exposure_seconds
+
+    def take_exposures(self) -> None:
+        """Take exposures one after another until stopped (``driver`` mode).
+
+        An exposure starts only when the mount is not slewing.
+        """
+        while not self.stop_event.is_set():
+            self.wait_for_slew_to_end()
             self.follow_mount()
             before = self._fits_files()
             started = time.time()
@@ -759,29 +904,30 @@ class ExposureDriver:
                 if not self.stop_event.is_set():
                     print("No frame appeared in time; trying the next exposure.", file=sys.stderr)
                 continue
-            # The file is complete once its size stops changing.
-            path = self.staging_directory / new_name
-            size = -1
-            while size != path.stat().st_size and not self.stop_event.is_set():
-                size = path.stat().st_size
-                self.stop_event.wait(0.3)
-            self.pictures_directory.mkdir(parents=True, exist_ok=True)
-            new_name = unused_frame_name(new_name, self.pictures_directory)
-            path_in_pictures = self.pictures_directory / new_name
-            if self.deliver_real_frame(path, path_in_pictures):
-                # The real frame took the simulator frame's place.
-                path.unlink(missing_ok=True)
-            else:
-                stamp_offset(path, path_in_pictures, self.camera_offset(), mark_synthetic=True)
-            path = path_in_pictures
-            with self._lock:
-                self.frames.append({
-                    "name": new_name,
-                    "appeared_at": path.stat().st_mtime,
-                    "exposure_started_at": started,
-                    "size_bytes": path.stat().st_size,
-                })
-            self.write_stats()
+            self.file_frame(new_name, started)
+
+    def watch_for_frames(self) -> None:
+        """File the frames the app takes, until stopped (``app`` mode).
+
+        The driver sets no exposure. Each finished FITS file in the staging
+        folder is filed after `follow_mount`, so its folder matches where the
+        mount points. While idle, `follow_mount` runs every
+        `IDLE_FOLLOW_SECONDS`, so the next frame's name prefix is right
+        before the app starts its exposure. `follow_mount` skips small moves,
+        so this is cheap.
+        """
+        last_follow = time.monotonic()
+        while not self.stop_event.is_set():
+            names = sorted(self._fits_files())
+            if names:
+                self.follow_mount()
+                self.file_frame(names[0], None)
+                last_follow = time.monotonic()
+                continue
+            if time.monotonic() - last_follow >= IDLE_FOLLOW_SECONDS:
+                self.follow_mount()
+                last_follow = time.monotonic()
+            self.stop_event.wait(WATCH_POLL_SECONDS)
 
     def current_filter_name(self) -> str | None:
         """Read the name of the filter in the simulated wheel's current slot.
@@ -841,7 +987,7 @@ class ExposureDriver:
             replay(items, write, self.stop_event.is_set, self.stop_event.wait, loop=False)
 
     def run(self) -> int:
-        """Connect, then take exposures and write the guide log until stopped.
+        """Connect, then take or file exposures until stopped.
 
         Returns
         -------
@@ -860,7 +1006,10 @@ class ExposureDriver:
         stats_thread = threading.Thread(target=self._stats_loop, daemon=True, name="StatsWriter")
         stats_thread.start()
         self.wait_for_cooling()
-        self.take_exposures()
+        if self.capture == CAPTURE_APP:
+            self.watch_for_frames()
+        else:
+            self.take_exposures()
         self.write_stats()
         return 0
 
@@ -890,6 +1039,12 @@ def main() -> int:
     parser.add_argument("--stats", type=Path, required=True)
     parser.add_argument("--exposure-seconds", type=float, default=60.0)
     parser.add_argument("--target", default="M 13")
+    parser.add_argument(
+        "--capture",
+        choices=CAPTURE_MODES,
+        default=CAPTURE_DRIVER,
+        help="Who takes the exposures: the driver (default, TPM harness) or the app (interactive).",
+    )
     parser.add_argument("--ra-hours", type=float, default=16.695)
     parser.add_argument("--dec-degrees", type=float, default=36.46)
     parser.add_argument(
@@ -953,6 +1108,7 @@ def main() -> int:
         or None,
         frame_source,
         find_target,
+        arguments.capture,
     )
     signal.signal(signal.SIGTERM, lambda *_: driver.stop_event.set())
     signal.signal(signal.SIGINT, lambda *_: driver.stop_event.set())

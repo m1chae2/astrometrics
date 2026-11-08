@@ -49,7 +49,6 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
   const {
     selectedTarget, commonName, catalogId,
     setPendingTarget, forceReload,
-    raShared, decShared,
     reloadKey
   } = useTargetContext();
 
@@ -239,8 +238,6 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
           catalogId={catalogId}
           setPendingTarget={setPendingTarget}
           setReloadKey={forceReload}
-          ra={raShared}
-          dec={decShared}
           onProcess={filteredFiles.length > 0 ? () => {
             const filesToProcess = checkedFiles.size > 0
               ? Array.from(checkedFiles)

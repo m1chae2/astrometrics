@@ -371,6 +371,7 @@ export interface ActionRegistry {
     // a call typed against it failed on a missing target_id.
     "imaging:capture": { payload: { target_id: string; exposure_seconds: number; count: number; image_type?: string; filter_name?: string; delay_seconds?: number; dither?: boolean }; response: string };
     "imaging:get_active_jobs": { payload: Record<string, never>; response: ProcessingJob[] };
+    "imaging:stop_capture": { payload: Record<string, never>; response: boolean };
 
     // Images
     "images:get_target_frame": { payload: { target_id: string; iso: string; exposure: string; index?: number }; response: string };

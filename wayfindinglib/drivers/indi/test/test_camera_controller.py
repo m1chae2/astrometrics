@@ -84,3 +84,126 @@ def test_get_last_image_returns_none_with_no_blob() -> None:
     controller = CameraController(client=None)
 
     assert controller.get_last_image(device) is None
+
+
+class _FakeSwitchElement:
+    """A fake INDI switch element with a settable state."""
+
+    def __init__(self) -> None:
+        self.s = 0
+
+
+class _FakeAbortDevice:
+    """A fake INDI camera with a ``CCD_ABORT_EXPOSURE`` switch."""
+
+    def __init__(self, has_switch: bool = True) -> None:
+        self.switch = [_FakeSwitchElement()] if has_switch else None
+
+    def getSwitch(self, name: str) -> list | None:  # ruff: ignore[invalid-function-name]
+        """Return the abort switch for its INDI name.
+
+        Returns
+        -------
+        switch : `list` or `None`
+            The switch vector, or `None` for any other name or no switch.
+        """
+        return self.switch if name == "CCD_ABORT_EXPOSURE" else None
+
+
+class _RecordingClient:
+    """A fake INDI client that records the switches sent."""
+
+    def __init__(self) -> None:
+        self.sent: list = []
+
+    def sendNewSwitch(self, switch: list) -> None:  # ruff: ignore[invalid-function-name]
+        """Record a switch vector."""
+        self.sent.append(switch)
+
+
+def test_abort_turns_on_the_abort_switch_and_sends_it() -> None:
+    """The camera's ``CCD_ABORT_EXPOSURE`` switch is turned on and sent."""
+    client = _RecordingClient()
+    device = _FakeAbortDevice()
+
+    assert CameraController(client=client).abort(device) is True
+
+    assert client.sent == [device.switch]
+    assert device.switch[0].s == 1
+
+
+def test_abort_sends_nothing_without_a_camera_or_a_switch() -> None:
+    """No camera, or a camera with no abort switch, sends nothing."""
+    client = _RecordingClient()
+    controller = CameraController(client=client)
+
+    assert controller.abort(None) is False
+    assert controller.abort(_FakeAbortDevice(has_switch=False)) is False
+    assert client.sent == []
+
+
+class _FakeClient:
+    """A fake INDI client that records BLOB modes and counts images."""
+
+    def __init__(self) -> None:
+        self.image_arrivals = 0
+        self.modes: list[tuple[int, str, str]] = []
+
+    def setBLOBMode(self, mode: int, device_name: str, property_name: str) -> None:  # ruff: ignore[invalid-function-name]
+        """Record a BLOB mode request."""
+        self.modes.append((mode, device_name, property_name))
+
+
+class _NamedDevice(_FakeDevice):
+    """A fake camera with a device name and a frame."""
+
+    def getDeviceName(self) -> str:  # ruff: ignore[invalid-function-name]
+        """Return the device name.
+
+        Returns
+        -------
+        name : `str`
+            The fake camera's name.
+        """
+        return "CCD Simulator"
+
+
+def test_image_reception_sets_the_blob_mode_for_ccd1() -> None:
+    """Turning reception on asks for BLOBs; off sets them to never."""
+    from wayfindinglib.drivers.indi.pyindi_compatibility import PyIndi
+
+    client = _FakeClient()
+    controller = CameraController(client=client)
+    device = _NamedDevice({})
+
+    assert controller.set_image_reception(device, True) is True
+    assert controller.set_image_reception(device, False) is True
+    assert controller.set_image_reception(None, True) is False
+    assert client.modes == [
+        (PyIndi.B_ALSO, "CCD Simulator", "CCD1"),
+        (PyIndi.B_NEVER, "CCD Simulator", "CCD1"),
+    ]
+
+
+def test_wait_for_new_image_ignores_a_frame_from_before_reception() -> None:
+    """A frame held in CCD1 from before reception is not returned."""
+    client = _FakeClient()
+    client.image_arrivals = 3
+    controller = CameraController(client=client)
+    device = _NamedDevice({"CCD1": _FakeBlobVector([_FakeBlobElement(b"old")])})
+    controller.set_image_reception(device, True)
+
+    assert controller.wait_for_new_image(device, 0.2) is None
+
+
+def test_wait_for_new_image_returns_the_frame_that_arrives() -> None:
+    """A frame that arrives after reception was enabled is returned."""
+    import threading
+
+    client = _FakeClient()
+    controller = CameraController(client=client)
+    device = _NamedDevice({"CCD1": _FakeBlobVector([_FakeBlobElement(b"new")])})
+    controller.set_image_reception(device, True)
+    threading.Timer(0.15, lambda: setattr(client, "image_arrivals", 1)).start()
+
+    assert controller.wait_for_new_image(device, 3.0) == b"new"

@@ -70,6 +70,7 @@ SAMPLE_ARGUMENTS = {
     "observatory_imaging_capture_image": {"exposure_seconds": 1.0, "register_job": False},
     "observatory_imaging_focus_move": {"steps": 10},
     "observatory_imaging_set_filter": {"filter_name": "L"},
+    "observatory_imaging_stop_capture": {},
     "observatory_mount_abort_motion": {},
     "observatory_mount_cancel_centering": {"run_is_active": True},
     "observatory_mount_manual_move": {"direction": "north"},

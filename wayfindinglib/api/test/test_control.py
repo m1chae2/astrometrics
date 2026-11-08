@@ -1158,6 +1158,50 @@ def test_focuser_and_filter_wheel_end_to_end_against_simulator(control: Observat
     assert "Luminance" in control.imaging.status(include=["filters"]).filter_names
 
 
+def test_stop_capture_ends_a_running_capture_against_simulator(control: ObservatoryControl) -> None:
+    """`control.imaging.stop_capture` ends a long run started by the app.
+
+    The run is on a thread with 30 s exposures. The stop must return at
+    once, the run must end as stopped, and a second stop must do nothing.
+    """
+    import threading
+    import time
+
+    from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
+    from wayfindinglib.models.policy.delegation import CapabilityDelegation, DelegationPolicy
+
+    control._driver = SimulatorIndiInterface(config=control._context.config)
+    control._context.butler.put(
+        DelegationPolicy(
+            id="default",
+            capability_delegations=[
+                CapabilityDelegation(
+                    capability=ObservatoryCapability.CAPTURE_ORCHESTRATION,
+                    state=DelegationState.AUTHORITATIVE,
+                ),
+            ],
+        ),
+        "delegation_policy",
+        {"id": "default"},
+    )
+    assert control.imaging.stop_capture() is False
+    results: list = []
+    thread = threading.Thread(
+        target=lambda: results.append(control.imaging.capture_image(30.0, count=5, register_job=False))
+    )
+    thread.start()
+    deadline = time.monotonic() + 5.0
+    while not control._context.capture_runs.is_running() and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    assert control.imaging.stop_capture() is True
+    thread.join(timeout=5.0)
+
+    assert not thread.is_alive()
+    assert results[0].stopped is True
+    assert control.imaging.stop_capture() is False
+
+
 def test_focuser_and_filter_wheel_commands_refused_when_not_authoritative(
     control: ObservatoryControl,
 ) -> None:

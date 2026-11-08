@@ -23,7 +23,12 @@ import pytest
 from simulator import device_settings
 from simulator.device_settings import DeviceSetting, matches, merge_device_settings
 from simulator.fit import driver_model
-from simulator.fit.fitting import FitResult, fit_values
+from simulator.fit.fitting import (
+    MOUNT_MODEL_SIGNS,
+    MOUNT_MODEL_ZERO_TERMS,
+    FitResult,
+    fit_values,
+)
 from simulator.fit.measurements import (
     GUIDING_RUN_LIMITS,
     J2000_EPOCH_SECONDS,
@@ -592,6 +597,50 @@ class _Reply(SimpleNamespace):
     """A review reply with the fields the fit reads."""
 
 
+def _attempt(
+    target: str,
+    minutes: float,
+    delta_ra: float,
+    delta_dec: float,
+    dec: float = 60.0,
+    night: str = "2026-10-03",
+) -> SimpleNamespace:
+    """Build one alignment attempt with the fields the fit reads.
+
+    Returns
+    -------
+    attempt : `~types.SimpleNamespace`
+        A solved attempt, ``minutes`` after a fixed start.
+    """
+    return SimpleNamespace(
+        target_name=target,
+        timestamp=1_790_000_000.0 + 60.0 * minutes,
+        delta_ra_arcsec=delta_ra,
+        delta_dec_arcsec=delta_dec,
+        dec=dec,
+        status="warning",
+        session_id=night,
+    )
+
+
+def _goto_attempts() -> list[SimpleNamespace]:
+    """Make six first attempts (one per target) and two corrected repeats.
+
+    The first attempts have on-sky right ascension offsets near 600 arcsec at
+    dec 60 (so 1200 arcsec as an angle) and declination offsets near -300.
+
+    Returns
+    -------
+    attempts : `list` [`~types.SimpleNamespace`]
+        The attempts, repeats included.
+    """
+    firsts = [(f"T{i}", 100.0 * i, 600.0 + 10 * (i - 3), -300.0 + 5 * (i - 3)) for i in range(1, 7)]
+    attempts = [_attempt(name, minute, ra, dec) for name, minute, ra, dec in firsts]
+    attempts.append(_attempt("T1", 105.0, 2.0, 1.0))
+    attempts.append(_attempt("T2", 205.0, -3.0, 2.0))
+    return attempts
+
+
 def _fake_wayfinder(**overrides: Any) -> SimpleNamespace:
     """Build a stand-in for the Wayfinder whose calls return fixed answers.
 
@@ -637,6 +686,7 @@ def _fake_wayfinder(**overrides: Any) -> SimpleNamespace:
             coefficient_steps_per_c=-14.0, nights_used=["2026-10-03"], message="", pairs_used=9
         ),
     }
+    answers["records"] = SimpleNamespace(attempts=_goto_attempts())
     answers.update(overrides)
     calls: list[str] = []
 
@@ -657,6 +707,7 @@ def _fake_wayfinder(**overrides: Any) -> SimpleNamespace:
     mount = SimpleNamespace(get_polar_alignment=lambda: record("get_polar_alignment", answers["polar"]))
     review = SimpleNamespace(
         query=lambda **kwargs: record(f"query:{kwargs}", answers["query"]),
+        query_alignment_records=lambda **kwargs: record(f"records:{kwargs}", answers["records"]),
         measure_unguided_mount_error=lambda: record("measure_unguided_mount_error", answers["mount_error"]),
         measure_guiding_spectrum=lambda: record("measure_guiding_spectrum", answers["spectrum"]),
         get_performance_envelope=lambda: record("get_performance_envelope", answers["envelope"]),
@@ -852,3 +903,106 @@ def test_world_setup_reads_the_camera_profiles() -> None:
     assert setup.main.clip_ceiling_adu == pytest.approx(65532.0)
     assert setup.guide.gain == driver_model.GUIDE_DEFAULT_GAIN
     assert setup.guide.read_noise_adu is None
+
+
+# ----------------------------------------------------------------------
+# Go-to error (MOUNT_MODEL)
+# ----------------------------------------------------------------------
+
+MOUNT_MODEL = "MOUNT_MODEL"
+"""The telescope simulator's pointing-model property."""
+
+
+def test_goto_offset_is_the_median_of_first_attempts_only() -> None:
+    """Repeats are ignored; right ascension is divided by cos(dec)."""
+    measurements = collect_measurements(_fake_wayfinder(), 0.0, 0.0)
+    candidate = measurements.candidates["mount_model"][0]
+    assert candidate.call == "wayfinder.review.query_alignment_records"
+    assert candidate.parameters == {"session_id": "all"}
+    assert candidate.values["count"] == pytest.approx(6.0)
+    # Median sky offset 605 arcsec (even count) over cos(60 degrees) = 0.5.
+    assert candidate.values["ra_angle_median_arcsec"] == pytest.approx(1210.0)
+    assert candidate.values["dec_median_arcsec"] == pytest.approx(-297.5)
+    assert candidate.values["ra_angle_mad_arcsec"] > 0.0
+    assert "6 first attempts" in candidate.note and "MAD" in candidate.note
+    assert "scatter in direction" not in candidate.note
+
+
+def test_goto_offset_becomes_arcminutes_with_the_named_signs() -> None:
+    """IH is minus the right ascension offset; ID is plus the declination."""
+    candidate = _candidate("history fit", {"ra_angle_median_arcsec": 1200.0, "dec_median_arcsec": -300.0})
+    result = fit_values(_measurements(mount_model=candidate), _setup())
+    assert _written(result, MOUNT, MOUNT_MODEL, "MM_IH") == pytest.approx(-20.0 * -MOUNT_MODEL_SIGNS["MM_IH"])
+    assert _written(result, MOUNT, MOUNT_MODEL, "MM_IH") == pytest.approx(-20.0)
+    assert _written(result, MOUNT, MOUNT_MODEL, "MM_ID") == pytest.approx(-5.0 * MOUNT_MODEL_SIGNS["MM_ID"])
+    for element in MOUNT_MODEL_ZERO_TERMS:
+        assert _written(result, MOUNT, MOUNT_MODEL, element) == pytest.approx(0.0)
+    entry = next(v for v in result.values if v.element == "MM_IH")
+    assert entry.unit == "arcmin"
+
+
+def test_a_scattered_set_says_the_systematic_part_is_small() -> None:
+    """Errors in all directions leave a small median and a note saying so."""
+    angles = [0, 60, 120, 180, 240, 300]
+    attempts = [
+        _attempt(
+            f"T{i}",
+            100.0 * i,
+            600.0 * math.cos(math.radians(angle)),
+            600.0 * math.sin(math.radians(angle)),
+        )
+        for i, angle in enumerate(angles)
+    ]
+    wayfinder = _fake_wayfinder(records=SimpleNamespace(attempts=attempts))
+    candidate = collect_measurements(wayfinder, 0.0, 0.0).candidates["mount_model"][0]
+    assert "scatter in direction" in candidate.note
+
+
+def test_a_target_seen_after_a_long_gap_counts_again() -> None:
+    """The same target on a later night is a second first attempt."""
+    attempts = [
+        _attempt("T", 0.0, 100.0, 0.0),
+        _attempt("T", 5.0, 1.0, 0.0),
+        _attempt("T", 1500.0, 90.0, 0.0),
+    ]
+    from simulator.fit.measurements import _first_attempts
+
+    assert [item.delta_ra_arcsec for item in _first_attempts(attempts)] == [100.0, 90.0]
+
+
+def test_too_few_first_attempts_write_zeros_and_a_note() -> None:
+    """Four first attempts are not enough: all six terms are zero."""
+    wayfinder = _fake_wayfinder(records=SimpleNamespace(attempts=_goto_attempts()[:4]))
+    measurements = collect_measurements(wayfinder, 0.0, 0.0)
+    assert "mount_model" not in measurements.candidates
+    assert any("Go-to error: 4 first attempts" in note for note in measurements.notes)
+    result = fit_values(measurements, _setup())
+    for element in ("MM_IH", "MM_ID", *MOUNT_MODEL_ZERO_TERMS):
+        assert _written(result, MOUNT, MOUNT_MODEL, element) == pytest.approx(0.0)
+    entry = next(v for v in result.values if v.element == "MM_IH")
+    assert entry.source_kind == "simulator default"
+    assert "set to zero" in entry.note
+
+
+def test_a_huge_offset_is_clamped_and_says_so() -> None:
+    """Beyond 120 arcmin the value is clamped."""
+    candidate = _candidate("history fit", {"ra_angle_median_arcsec": 90_000.0, "dec_median_arcsec": 0.0})
+    result = fit_values(_measurements(mount_model=candidate), _setup())
+    assert _written(result, MOUNT, MOUNT_MODEL, "MM_IH") == pytest.approx(-120.0)
+    assert next(v for v in result.values if v.element == "MM_IH").clamp_note is not None
+
+
+def test_the_mount_model_survives_the_results_file(tmp_path: Path) -> None:
+    """All six terms round-trip into one device setting."""
+    path = tmp_path / RESULTS_FILE_NAME
+    candidate = _candidate("history fit", {"ra_angle_median_arcsec": 1200.0, "dec_median_arcsec": -300.0})
+    result = fit_values(_measurements(mount_model=candidate), _setup())
+    write_results(path, result, fingerprint_library_copy(tmp_path))
+    settings = [s for s in fitted_device_settings(path) if s.property_name == MOUNT_MODEL]
+    assert len(settings) == 1
+    elements = dict(settings[0].elements)
+    assert set(elements) == {"MM_IH", "MM_ID", "MM_CH", "MM_NP", "MM_MA", "MM_ME"}
+    assert elements["MM_ID"] == pytest.approx(-5.0)
+    assert settings[0].read_back_decimals == 3
+    merged = merge_device_settings([], settings)
+    assert merged[0].specification().startswith("Telescope Simulator.MOUNT_MODEL.")

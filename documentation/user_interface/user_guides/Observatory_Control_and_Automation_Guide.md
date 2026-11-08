@@ -75,7 +75,7 @@ The app handles basic telescope control and simple capture queues. Full automate
 1. Open the Observatory Manager.
 2. If the status header reads Parked, click UNPARK on the Controls tab of the Telescope Control panel.
 3. Select the target in the Target List.
-4. Click Slew to Target. A message tells you if the target has no coordinates.
+4. Click Slew to Target. The button is greyed, with a reason on hover, until you pick a target in the list.
 5. Watch RA and DEC in the status header move toward the target.
 6. When the mount stops, click Tracking ON on the Controls tab of the Telescope Control panel.
 

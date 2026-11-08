@@ -37,6 +37,7 @@ from astrometricslib.exceptions import (
     NotFoundError,
     PermissionDeniedError,
 )
+from wayfindinglib.analytics.frame_counting import normalize_filter
 from wayfindinglib.astronomy.coordinate_transforms import current_epoch_to_icrs, icrs_to_current_epoch
 from wayfindinglib.data_access.safety_policy_reader import get_safety_rule_set
 from wayfindinglib.data_access.site_profile_reader import configured_observer_location
@@ -427,7 +428,9 @@ def resolve_destination(context: ControlContext, destination: str | Target | Sky
 def slew(context: ControlContext, position: SkyPosition) -> bool:
     """Slew the mount to a sky position.
 
-    Requires `MOUNT_CONTROL` to be `AUTHORITATIVE`.
+    Requires `MOUNT_CONTROL` to be `AUTHORITATIVE`. If this app has a
+    capture run going, it is stopped and its exposure aborted first (see
+    `stop_own_capture`).
 
     Parameters
     ----------
@@ -443,6 +446,7 @@ def slew(context: ControlContext, position: SkyPosition) -> bool:
         `True` if the slew command was accepted.
     """
     _require_authoritative(context, ObservatoryCapability.MOUNT_CONTROL)
+    stop_own_capture(context)
     return _run_sync(context.mount_driver.slew(*_mount_frame_position(position)))
 
 
@@ -473,6 +477,9 @@ def sync_mount(context: ControlContext, position: SkyPosition) -> bool:
 def park(context: ControlContext) -> bool:
     """Park the mount. Requires `MOUNT_CONTROL` to be `AUTHORITATIVE`.
 
+    If this app has a capture run going, it is stopped and its exposure
+    aborted first (see `stop_own_capture`).
+
     Parameters
     ----------
     context : `ControlContext`
@@ -484,6 +491,7 @@ def park(context: ControlContext) -> bool:
         `True` if the park command was accepted.
     """
     _require_authoritative(context, ObservatoryCapability.MOUNT_CONTROL)
+    stop_own_capture(context)
     return _run_sync(context.mount_driver.park())
 
 
@@ -665,6 +673,8 @@ def set_filter(context: ControlContext, filter_name: str) -> bool:
 
     known_filters = _run_sync(context.filter_wheel_driver.get_names())
     resolved_name = _run_sync(context.filter_wheel_driver.resolve_name(filter_name))
+    if known_filters and not resolved_name:
+        resolved_name = _equivalent_filter_name(filter_name, known_filters)
 
     if known_filters and not resolved_name:
         raise NotFoundError(f"Filter '{filter_name}' not recognized. Available: {known_filters}")
@@ -674,6 +684,32 @@ def set_filter(context: ControlContext, filter_name: str) -> bool:
     if not success:
         raise HardwareError(f"Filter change to '{final_name}' failed at hardware level")
     return True
+
+
+def _equivalent_filter_name(filter_name: str, known_filters: list[str]) -> str | None:
+    """Find the wheel slot that names the same filter in another spelling.
+
+    The wheel driver matches a short name to a long one ("L" to
+    "Luminance"). This covers the other direction ("Luminance" to a slot
+    called "L"), using the library's one rule for filter spellings.
+
+    Parameters
+    ----------
+    filter_name : `str`
+        The requested filter.
+    known_filters : `list` [`str`]
+        The names the wheel reports.
+
+    Returns
+    -------
+    name : `str` or `None`
+        The wheel's own name for the filter, or `None` if no slot matches.
+    """
+    wanted = normalize_filter(filter_name)
+    for known_filter in known_filters:
+        if known_filter and normalize_filter(known_filter) == wanted:
+            return known_filter
+    return None
 
 
 def focus_move(context: ControlContext, steps: int) -> bool:
@@ -783,6 +819,82 @@ def capture_image(context: ControlContext, exposure_seconds: float) -> Any:
     """
     _require_authoritative(context, ObservatoryCapability.CAPTURE_ORCHESTRATION)
     return _run_sync(context.camera_driver.expose(exposure_seconds))
+
+
+def abort_exposure(context: ControlContext) -> bool:
+    """Cancel the exposure the main camera is taking.
+
+    No authority check: callers use it only to end a run this app
+    started (`stop_own_capture`, and a run that sees its own stop flag).
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the camera driver.
+
+    Returns
+    -------
+    success : `bool`
+        `True` if the abort command was sent.
+    """
+    return _run_sync(context.camera_driver.abort_exposure())
+
+
+def stop_own_capture(context: ControlContext) -> bool:
+    """Stop the capture run this app started, and abort its exposure.
+
+    The run is asked to stop first, then the camera is told to abort. If
+    this app has no run going, nothing is sent to the camera: a run started
+    by another program (Ekos, for example) is never touched. A camera that
+    cannot abort is logged, not raised, so a slew or park that called this
+    still goes ahead; the run has already been told to stop and takes no
+    more frames.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the list of runs and the camera driver.
+
+    Returns
+    -------
+    stopped : `bool`
+        `True` if a run was going and was asked to stop, `False` if none
+        was going.
+    """
+    if not context.capture_runs.request_stop():
+        return False
+    try:
+        abort_exposure(context)
+    except Exception:  # a failed abort must not block the move that called this
+        logger.warning("The camera did not accept the abort for the stopped capture run.", exc_info=True)
+    return True
+
+
+def stop_capture(context: ControlContext) -> bool:
+    """Stop the capture run this app started. Requires `CAPTURE_ORCHESTRATION`.
+
+    Monitor mode refuses a stop too, whether or not a run is going (the
+    same rule as `cancel_centering`, decision U4 of 2026-10-24), so the
+    check comes before anything else.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the list of runs, the camera driver and the policy.
+
+    Returns
+    -------
+    stopped : `bool`
+        `True` if a run was stopped, `False` if none was going (then
+        nothing is sent to the camera).
+
+    Notes
+    -----
+    Raises `PermissionDeniedError` unless `CAPTURE_ORCHESTRATION` is
+    `AUTHORITATIVE`.
+    """
+    _require_authoritative(context, ObservatoryCapability.CAPTURE_ORCHESTRATION)
+    return stop_own_capture(context)
 
 
 def guide_expose(context: ControlContext, exposure_seconds: float, gain: float | None = None) -> Any:

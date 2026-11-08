@@ -5844,6 +5844,7 @@ export const RPC_METHODS = [
   "planetarium:get_constellation_lines",
   "imaging:capture",
   "imaging:get_active_jobs",
+  "imaging:stop_capture",
   "images:get_target_frame",
   "images:get_light_frame_data",
   "images:convert_fits",

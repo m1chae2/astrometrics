@@ -6,9 +6,13 @@ tests replace the device commands with recorders and check: the filter is
 set once before the first frame; each frame is exposed; dithers follow
 the cadence and pattern, with a pulse length from the plate scale; bad
 arguments and a camera that does not start are refused; and the progress
-of a running job moves.
+of a running job moves. A stop request ends the run cleanly: between
+frames, or during the wait for an exposure (which also aborts it), and
+the frames already taken are kept.
 """
 
+import threading
+import time
 from types import SimpleNamespace
 from typing import Any
 
@@ -18,6 +22,7 @@ from astrometricslib.exceptions import ConfigurationError, HardwareError, Invali
 from wayfindinglib.analytics.guide_pulses import GUIDE_RATE_ARCSEC_PER_S
 from wayfindinglib.models.planning.observation_package import DitherConfig
 from wayfindinglib.tasks.control_tasks import hardware_operations, imaging_capture
+from wayfindinglib.tasks.control_tasks.capture_runs import CaptureRuns
 
 
 @pytest.fixture
@@ -43,7 +48,10 @@ def commands(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Any]]:
         "pulse",
         lambda context, direction, duration_ms: recorded.append(("pulse", (direction, duration_ms))) or True,
     )
-    monkeypatch.setattr(imaging_capture, "time", SimpleNamespace(sleep=lambda seconds: None))
+    monkeypatch.setattr(
+        hardware_operations, "abort_exposure", lambda context: recorded.append(("abort", None)) or True
+    )
+    monkeypatch.setattr(imaging_capture, "_wait_or_stop", lambda stop_flag, seconds: stop_flag.is_set())
     return recorded
 
 
@@ -61,8 +69,12 @@ def _context(plate_scale_arcsec_per_px: float | None = 2.0) -> SimpleNamespace:
         The active telescope and camera lookups.
     """
     if plate_scale_arcsec_per_px is None:
-        return SimpleNamespace(active_telescope=lambda: None, active_camera=lambda: None)
-    return SimpleNamespace(active_telescope=lambda: "telescope", active_camera=lambda: "camera")
+        return SimpleNamespace(
+            active_telescope=lambda: None, active_camera=lambda: None, capture_runs=CaptureRuns()
+        )
+    return SimpleNamespace(
+        active_telescope=lambda: "telescope", active_camera=lambda: "camera", capture_runs=CaptureRuns()
+    )
 
 
 @pytest.fixture
@@ -156,3 +168,102 @@ def test_a_running_job_sees_each_frame(monkeypatch: pytest.MonkeyPatch, commands
     imaging_capture.capture_frames(_context(), 1.0, count=2, filter_name="L")
 
     assert stages == [(0, "Selecting filter L"), (0, "Capturing frame 1/2"), (50, "Capturing frame 2/2")]
+
+
+def test_a_stop_during_an_exposure_aborts_it_and_keeps_the_frames_taken(
+    monkeypatch: pytest.MonkeyPatch, commands: list
+) -> None:
+    """Stopping frame 2 keeps frame 1 and aborts the exposure."""
+    context = _context()
+    exposures = []
+
+    def expose(_context: Any, seconds: float) -> bool:
+        """Record the exposure and request the stop during the second one.
+
+        Returns
+        -------
+        started : `bool`
+            Always `True`.
+        """
+        exposures.append(seconds)
+        commands.append(("expose", seconds))
+        if len(exposures) == 2:
+            context.capture_runs.request_stop()
+        return True
+
+    monkeypatch.setattr(hardware_operations, "capture_image", expose)
+
+    result = imaging_capture.capture_frames(context, 60.0, count=10)
+
+    assert result.stopped is True
+    assert result.frames_captured == 1
+    assert commands == [("expose", 60.0), ("expose", 60.0), ("abort", None)]
+    assert not context.capture_runs.is_running()
+
+
+def test_a_stop_between_frames_takes_no_further_exposure(
+    monkeypatch: pytest.MonkeyPatch, commands: list
+) -> None:
+    """A stop after a frame ends the run with no abort or new exposure."""
+    context = _context()
+
+    def wait_then_stop(stop_flag: threading.Event, seconds: float) -> bool:
+        """Finish the exposure normally, then let the stop arrive.
+
+        Returns
+        -------
+        stopped : `bool`
+            Always `False`: this wait itself was not cut short.
+        """
+        context.capture_runs.request_stop()
+        return False
+
+    monkeypatch.setattr(imaging_capture, "_wait_or_stop", wait_then_stop)
+
+    result = imaging_capture.capture_frames(context, 60.0, count=10)
+
+    assert result.stopped is True
+    assert result.frames_captured == 1
+    assert commands == [("expose", 60.0)]
+
+
+def test_a_stopped_run_says_so_in_its_job(monkeypatch: pytest.MonkeyPatch, commands: list) -> None:
+    """The job log gets a "stopped after N frames" line."""
+    context = _context()
+    messages: list[str] = []
+    job = SimpleNamespace(stage=lambda progress, message: None, info=messages.append)
+    monkeypatch.setattr(imaging_capture, "get_current_job", lambda: job)
+    monkeypatch.setattr(
+        hardware_operations,
+        "capture_image",
+        lambda _context, seconds: context.capture_runs.request_stop() or True,
+    )
+
+    result = imaging_capture.capture_frames(context, 60.0, count=3)
+
+    assert result.frames_captured == 0
+    assert messages == ["Capture stopped after 0 frames"]
+
+
+def test_a_real_stop_ends_a_long_wait_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A stop from another thread does not wait out a 60 s exposure."""
+    context = _context()
+    aborted: list[bool] = []
+    monkeypatch.setattr(hardware_operations, "capture_image", lambda context, seconds: True)
+    monkeypatch.setattr(hardware_operations, "abort_exposure", lambda context: aborted.append(True) or True)
+    results: list[Any] = []
+    thread = threading.Thread(target=lambda: results.append(imaging_capture.capture_frames(context, 60.0, 5)))
+
+    thread.start()
+    deadline = time.monotonic() + 5.0
+    while not context.capture_runs.is_running() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    started = time.monotonic()
+    context.capture_runs.request_stop()
+    thread.join(timeout=5.0)
+
+    assert not thread.is_alive()
+    assert time.monotonic() - started < 5.0
+    assert results[0].stopped is True
+    assert results[0].frames_captured == 0
+    assert aborted == [True]

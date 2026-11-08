@@ -93,6 +93,10 @@ class PyIndiStub:
 
         pass
 
+    B_NEVER = 0
+    B_ALSO = 1
+    B_ONLY = 2
+
     ISS_ON = 1
     ISS_OFF = 0
 

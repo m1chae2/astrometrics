@@ -622,6 +622,12 @@ class SimulatedObservatory:
     controller_settings : `~collections.abc.Mapping` [`str`, `float`], optional
         Guide controller settings for the real PHD2's profile (see
         `phd2_launch.CONTROLLER_SETTING_KEYS`). Default: PHD2's own defaults.
+    capture_by_app : `bool`, optional
+        `True` for an interactive session (the launcher): the app starts the
+        exposures (Start Capture), the exposure driver only files the frames
+        (``--capture app``), and `start` empties the stand-in picture and
+        staging folders first, so the session starts like a new night.
+        `False` (default, the TPM harness) keeps the driver's own loop.
     """
 
     def __init__(
@@ -642,9 +648,11 @@ class SimulatedObservatory:
         controller_settings: Mapping[str, float] | None = None,
         backend_port: int | None = None,
         fitted_settings_path: Path | None = None,
+        capture_by_app: bool = False,
     ) -> None:
         """Keep the settings; nothing runs yet."""
         self.root = root
+        self.capture_by_app = capture_by_app
         self.kind = kind
         self.indi_port = indi_port
         self.phd2_port = phd2_port
@@ -950,6 +958,8 @@ class SimulatedObservatory:
         (indi_home(self.root) / ".indi").mkdir(parents=True, exist_ok=True)
         if self.kind is not SimulationKind.REPLAY:
             self.ready_marker.unlink(missing_ok=True)
+        if self.capture_by_app:
+            self.start_fresh_night()
         if self.kind is SimulationKind.SIMULATED_SKY:
             # The app files frames under the library target nearest the mount.
             self.sky_target_name = (
@@ -1013,10 +1023,41 @@ class SimulatedObservatory:
                     "--ra-hours", str(SIMULATED_TARGET_RA_HOURS),
                     "--dec-degrees", str(SIMULATED_TARGET_DEC_DEGREES),
                     "--config", str(self.config_path),
+                    "--capture", "app" if self.capture_by_app else "driver",
                     *self._driver_optional_arguments(),
                 ],
                 "driver.log",
             )  # fmt: skip
+
+    def start_fresh_night(self) -> None:
+        """Empty the stand-in picture folder and the camera's staging folder.
+
+        An interactive session starts like a new night. The library copy is
+        rebuilt at every start, so frames left by an earlier session would
+        be downloaded and measured again for nothing. Only the contents go;
+        the folders stay. A folder that resolves outside the world is
+        refused, and so is a link inside them that points outside (a link is
+        removed, never followed). The TPM harness does not call this.
+
+        Raises
+        ------
+        SimulationUnavailableError
+            If a folder is not inside the world's root.
+        """
+        world = self.root.resolve()
+        for folder in (self.standin_home / "Pictures", self.standin_home / "camera_staging"):
+            if not folder.is_dir():
+                continue
+            if not folder.resolve().is_relative_to(world) or folder.resolve() == world:
+                raise SimulationUnavailableError(
+                    f"Refusing to empty {folder}: it is outside the world {world}."
+                )
+            for entry in folder.iterdir():
+                if entry.is_symlink() or entry.is_file():
+                    entry.unlink()
+                else:
+                    shutil.rmtree(entry)
+        (self.standin_home / "Pictures").mkdir(parents=True, exist_ok=True)
 
     def _driver_optional_arguments(self) -> list[str]:
         """Give the exposure driver's arguments that are not always there.
@@ -1076,6 +1117,23 @@ class SimulatedObservatory:
             pass
         return focal_length, pixel_size
 
+    def _guide_rate_arcsec_per_sec(self) -> float:
+        """Give the right ascension guide rate of the simulated mount.
+
+        Returns
+        -------
+        rate : `float`
+            The fitted ``GUIDE_RATE_WE`` (a fraction of 15 arcseconds per
+            second) times 15 when the fit wrote its file, else the mount
+            simulator's default of 7.5.
+        """
+        fraction = None
+        if self.fitted_settings_path is not None:
+            from simulator.fit.results import fitted_guide_rate_fraction
+
+            fraction = fitted_guide_rate_fraction(self.fitted_settings_path)
+        return float((fraction or {}).get("GUIDE_RATE_WE", 0.5)) * phd2_launch.SIDEREAL_ARCSEC_PER_SEC
+
     def _start_real_phd2(self) -> str | None:
         """Write PHD2's profile and start the real PHD2 in the world.
 
@@ -1108,6 +1166,8 @@ class SimulatedObservatory:
                 self.controller_settings,
                 focal_length,
                 pixel_size,
+                self._guide_rate_arcsec_per_sec(),
+                SIMULATED_TARGET_DEC_DEGREES,
             )
         except ValueError as error:
             return str(error)

@@ -1,9 +1,9 @@
 """Purpose: `control.imaging`, the main camera, filter wheel and focuser.
 
 Description: Takes exposures with the main camera (with a filter change
-and dithering between frames), turns the filter wheel, moves the
-focuser, and fits a focus curve. `status` reads the
-filter names and the filter in the beam, the focuser position, the
+and dithering between frames), stops the run the app started, turns the
+filter wheel, moves the focuser, and fits a focus curve. `status` reads
+the filter names and the filter in the beam, the focuser position, the
 camera's temperature and activity, and the saved focus model. A capture
 or filter change needs `CAPTURE_ORCHESTRATION` to be `AUTHORITATIVE`; a
 focuser move needs `AUTOFOCUS`.
@@ -117,7 +117,8 @@ class ImagingControl(ControlChild):
         -------
         result : `CaptureResult`
             How many frames were taken, with which filter, and how many
-            dithers.
+            dithers. ``stopped`` is `True` if `stop_capture` (or a slew or
+            park) ended the run early.
 
         Notes
         -----
@@ -141,6 +142,30 @@ class ImagingControl(ControlChild):
                 dither=dither,
                 delay_seconds=delay_seconds,
             )
+
+    def stop_capture(self) -> bool:
+        """Stop the capture run this app started, and abort its exposure.
+
+        The run ends cleanly after the frame it is on is dropped; the frames
+        already taken are kept, and the run's result has ``stopped`` set.
+        Only a run started by this app is stopped, and only its exposure is
+        aborted. When this app has no run going, nothing is sent to the
+        camera, so a run started by another program (Ekos, for example) is
+        never touched. A slew or park does the same before it moves.
+
+        Returns
+        -------
+        stopped : `bool`
+            `True` if a run was stopped, `False` if none was going.
+
+        Notes
+        -----
+        Raises `PermissionDeniedError` unless `CAPTURE_ORCHESTRATION` is
+        `AUTHORITATIVE`, even when no run is going.
+        """
+        from wayfindinglib.tasks.control_tasks import hardware_operations
+
+        return hardware_operations.stop_capture(self._context)
 
     def set_filter(self, filter_name: str) -> bool:
         """Turn the filter wheel to a filter.

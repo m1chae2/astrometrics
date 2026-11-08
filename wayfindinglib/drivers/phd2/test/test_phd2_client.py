@@ -373,3 +373,33 @@ def test_opening_a_session_with_no_phd2_raises_an_os_error() -> None:
     probe.close()
     with pytest.raises(OSError):
         PHD2Client(host="localhost", port=unused_port).open_session(timeout_seconds=0.5)
+
+
+def test_is_connected_follows_the_event_connection() -> None:
+    """The client is connected only while the stream is open."""
+
+    class Hold(socketserver.BaseRequestHandler):
+        """Keep the connection open until the client closes it."""
+
+        def handle(self) -> None:
+            """Wait for the client to hang up."""
+            self.request.recv(1)
+
+    server, port = _start_test_server(Hold)
+    client = PHD2Client(port=port, reconnect_cooldown_seconds=0.05, socket_timeout_seconds=0.1)
+    stop = threading.Event()
+    assert client.is_connected is False
+    thread = threading.Thread(target=lambda: list(client.events(stop_event=stop)), daemon=True)
+    thread.start()
+    try:
+        for _ in range(100):
+            if client.is_connected:
+                break
+            stop.wait(0.05)
+        assert client.is_connected is True
+    finally:
+        stop.set()
+        thread.join(timeout=3)
+        server.shutdown()
+        server.server_close()
+    assert client.is_connected is False

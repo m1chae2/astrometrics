@@ -14,6 +14,7 @@ from typing import Any
 from astrometricslib import Target
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.control_status import MountControlStatus
+from wayfindinglib.models.session.centering_exposure import CenteringExposure
 from wayfindinglib.models.session.correction_result import PointingCorrection
 from wayfindinglib.models.session.telemetry import (
     ExternalAlignmentPoll,
@@ -93,7 +94,8 @@ class MountControl(ControlChild):
         """Slew the mount to a library target or a sky position.
 
         With ``center=True`` the mount is then centered by plate solving:
-        take a short frame, solve it, and if the pointing error is above
+        take a short frame (its exposure comes from
+        `get_centering_exposure`), solve it, and if the pointing error is above
         `tolerance_arcsec`, sync the mount to the solved position and slew
         again. Each round is recorded as an alignment attempt (see
         `review.query(kind="alignment")`). `abort_motion` stops
@@ -146,6 +148,50 @@ class MountControl(ControlChild):
             tolerance_arcsec=tolerance_arcsec,
             max_iterations=max_iterations,
             target_name=target_name,
+        )
+
+    def get_centering_exposure(
+        self,
+        destination: str | Target | SkyPosition,
+        epoch_seconds: float | None = None,
+        filter_name: str | None = None,
+    ) -> CenteringExposure:
+        """Work out how long a centering frame should be, without taking one.
+
+        `slew` with ``center=True`` calls this itself. It reads the library's
+        own measurements of the active telescope and camera (the Gaia G zero
+        point and the star width of recent frames), the camera profile's
+        gain and read noise, the predicted sky background for the pointing,
+        and the downloaded Gaia star catalog. It finds the shortest exposure
+        (from 1 to 30 s) at which enough catalog stars are bright enough to
+        be detected for a plate solve. When an input is missing it gives
+        the fixed ``alignment_exposure_seconds`` setting and says which one.
+        It moves nothing and stores nothing.
+
+        Parameters
+        ----------
+        destination : `str`, `Target` or `SkyPosition`
+            Where the telescope will point, as for `slew`.
+        epoch_seconds : `float`, optional
+            When the frame will be taken, in seconds since the Unix epoch.
+            Now when omitted.
+        filter_name : `str`, optional
+            Use this filter's measurements. The filter with the most
+            frames when omitted.
+
+        Returns
+        -------
+        choice : `CenteringExposure`
+            ``exposure_seconds``, ``source`` (``"computed"`` or
+            ``"fallback"``), ``reason``, the limiting magnitude and expected
+            star count, ``catalog_is_lower_bound``, every number used, and
+            ``trials`` (what each candidate exposure would show).
+        """
+        from wayfindinglib.tasks.control_tasks import centering_exposure, hardware_operations
+
+        position = hardware_operations.resolve_destination(self._context, destination)
+        return centering_exposure.choose_centering_exposure(
+            self._context, position, epoch_seconds=epoch_seconds, filter_name=filter_name
         )
 
     def _sync(self, position: SkyPosition | dict[str, float]) -> bool:

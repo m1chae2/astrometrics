@@ -16,10 +16,6 @@ export interface ImageDetailsManagerProps {
   setPendingTarget?: (v: string) => void;
   /** Optional callback for triggering a reload of parent state. */
   setReloadKey?: (n: number | ((n: number) => number)) => void;
-  /** RA coordinate string. */
-  ra?: string;
-  /** DEC coordinate string. */
-  dec?: string;
   /** Callback to start a processing operation. */
   onProcess?: () => void;
   /** Callback to cancel a processing operation. */
@@ -63,8 +59,6 @@ export const ImageDetailsManager: React.FC<ImageDetailsManagerProps> = ({
   catalogId,
   setPendingTarget,
   setReloadKey,
-  ra,
-  dec,
   onProcess,
   onCancel,
   onAddImages,

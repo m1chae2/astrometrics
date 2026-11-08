@@ -12,7 +12,7 @@ Terms are in the [glossary](../Glossary.md).
 
 This paper indexes the code; theory stays in [Wayfinding_Library_Architecture.md](Wayfinding_Library_Architecture.md). Module paths are relative to `wayfindinglib/` unless a path starts with another folder.
 
-The package root is the one supported entry point. It loads its names on first use, so importing it loads no hardware code. Its 8 names are `Wayfinder` (sub-APIs `control`, `planning`, `execution`, `review`), the four sub-API classes, `ObservationSession`, `ObservationPackage` and `FrameEndDetector`. `exceptions.py` and `reports.py` are public. The rest is private.
+The package root is the one supported entry point. It loads names on first use, so importing it loads no hardware code. Its 8 names are `Wayfinder` (sub-APIs `control`, `planning`, `execution`, `review`), the four sub-API classes, `ObservationSession`, `ObservationPackage` and `FrameEndDetector`. `exceptions.py` and `reports.py` are public. The rest is private.
 
 <!-- impl: wayfindinglib.Wayfinder -->
 <!-- impl: wayfindinglib.api.control.control.ObservatoryControl -->
@@ -64,7 +64,7 @@ Each command in `tasks/control_tasks/hardware_operations.py` starts with `_requi
 | `PLATE_SOLVE_ALIGNMENT` | `sync_mount` |
 | `AUTOGUIDING` | `pulse`, `guide_expose` |
 | `AUTOFOCUS` | `focus_move` |
-| `CAPTURE_ORCHESTRATION` | `set_filter`, `capture_image` |
+| `CAPTURE_ORCHESTRATION` | `set_filter`, `capture_image`, `stop_capture` |
 | `OBSERVATORY_SAFETY` | `open_enclosure`, `close_enclosure` |
 
 `tasks/control_tasks/capability_promotion.py` holds `apply_promotion_decision`, `summarize_divergence_evidence` (Architecture Equation (2)) and `set_all_capabilities`.
@@ -119,7 +119,7 @@ The phase is the combination of states `DelegationPolicy` holds, not a type. `Co
 
 - **Equipment catalog.** `data_access/equipment_catalog_reader.py` builds the `EquipmentCatalog`. `equipment_activation.py` validates an id before recording the active choice. `EquipmentConfiguration` uses `PLATE_SCALE_CONSTANT` (206.265, Architecture Equation (1)).
 - **Site.** `data_access/site_profile_reader.py` reads `[Observatory.Location]`, falls back to `FALLBACK_SITE` (Denver: 39.7392, -104.9903, 1600 m) with a warning, and seeds the default `SiteProfile`. Control uses `hardware_operations.observer_location` (mount first), so the rule holds for planning only.
-- **Storage.** `drivers/butler.py` holds `DiskButler`, the one storage path: `AbstractButler` from `astrometricslib`, one table per dataset type in `wayfinding.db`. `ControlRecordStore` keeps `alignment_attempts`, `guiding_samples` and `polar_alignments`. An alignment attempt from a frame names it in `source_frame`, so the same frame brought in or solved again updates its one row; `remove_repeated_alignment_attempts` reports, and with `apply=True` deletes, rows stored twice.
+- **Storage.** `drivers/butler.py` holds `DiskButler`, the one storage path: `AbstractButler` from `astrometricslib`, one table per dataset type in `wayfinding.db`. `ControlRecordStore` keeps `alignment_attempts`, `guiding_samples` and `polar_alignments`. An alignment attempt from a frame names it in `source_frame`, so the same frame brought in or solved again updates one row; `remove_repeated_alignment_attempts` reports, and with `apply=True` deletes, rows stored twice.
 
 <!-- impl: wayfindinglib.data_access.equipment_catalog_reader.get_equipment_catalog -->
 <!-- impl: wayfindinglib.tasks.control_tasks.equipment_activation.set_active_telescope -->
@@ -253,7 +253,7 @@ All in `tasks/control_tasks/` unless noted.
 - **Guiding (Equations (6) and (7)).** `guiding_correction.py`: `compute_guiding_correction` (`GuidingCorrection`), with `_signed_pulse_ms` and the feed-forward terms.
 - **Focus (Equations (8) and (9)).** `focus_correction.py`: `sample_focus_curve`, `compute_focus_correction` returning a `FocusCorrection`.
 - **Calibration.** `guider_calibration_tasks.py`, `focus_model_tasks.py`, `calibration_routines.py` (`run_guider_calibration`, `run_backlash_calibration`; `GuiderCalibrationSteps`).
-- **Centering.** `centering.py`: `center_on`, behind `slew(center=True)`.
+- **Centering.** `centering.py` (`center_on`, behind `slew(center=True)`) and `centering_exposure.py`.
 
 <!-- impl: wayfindinglib.models.session.correction_result.PointingCorrection -->
 <!-- impl: wayfindinglib.models.session.correction_result.GuidingCorrection -->
@@ -261,6 +261,7 @@ All in `tasks/control_tasks/` unless noted.
 <!-- impl: wayfindinglib.tasks.control_tasks.guider_calibration_tasks -->
 <!-- impl: wayfindinglib.tasks.control_tasks.focus_model_tasks -->
 <!-- impl: wayfindinglib.tasks.control_tasks.calibration_routines.GuiderCalibrationSteps -->
+<!-- impl: wayfindinglib.tasks.control_tasks.centering_exposure -->
 
 **Table 7.** Correction settings, all in `CorrectionConfig` (`models/session/correction_config.py`).
 
@@ -384,7 +385,7 @@ All in `tasks/control_tasks/` unless noted.
 | Fewest frames behind a star width; sessions behind a baseline | 20; 5 | `MINIMUM_IMAGE_QUALITY_SAMPLES`, `MINIMUM_BASELINE_SESSIONS` | One night of one target; a spread of fewer than five values is unstable. |
 | Fewest samples for a session; for a run's error | 100; 20 | `MINIMUM_SAMPLES_PER_SESSION`, `MINIMUM_SAMPLES_PER_RUN` | About six minutes of guiding. |
 | Guide-scale agreement | 2% | `GUIDE_SCALE_AGREEMENT_FRACTION` | Above log rounding, below a real optics change. |
-| Excursion size | larger of 5 × the guiding-error limit and one guide pixel | `EXCURSION_SIGMA_MULTIPLE` | A 5σ event is very rare for Gaussian noise. |
+| Excursion size | larger of 5 × the guiding-error limit and one guide pixel | `EXCURSION_SIGMA_MULTIPLE` | A 5σ event is rare for Gaussian noise. |
 | Percentile for fraction limits | 90th (nearest rank) | `BASELINE_FRACTION_PERCENTILE` | Most nights have none. |
 | Shortest run for a Dec correction rate | 600 s | `MINIMUM_RUN_SECONDS_FOR_CORRECTION_RATE` | Longer than a worm period (8 to 10 min); not measured. |
 | Guide-star brightness limit | earlier-night median × exp(-3 × robust log spread) | `guide_star_mass_low_limit` | Same rule as the SNR limit. |

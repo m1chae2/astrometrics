@@ -43,6 +43,9 @@ import { Button } from '../common/components/Button';
  */
 const normalizeTargetId = (targetId: string): string => targetId.replace(/[_\s]/g, '').toLowerCase();
 
+/** Why Slew to Target and Start Alignment are greyed while no target is picked. */
+const NO_TARGET_REASON = 'Pick a target in the list first.';
+
 /** The two tabs of the Targets panel. List comes first and is the one shown at the start. */
 const TARGET_PANEL_TABS: TabDefinition[] = [
     { id: 'list', label: 'List' },
@@ -69,8 +72,6 @@ export const ObservatoryManager: React.FC = () => {
         setPendingTarget,
         reloadKey,
         forceReload,
-        raShared,
-        decShared,
         setSelectedTarget,
     } = useTargetContext();
 
@@ -116,7 +117,10 @@ export const ObservatoryManager: React.FC = () => {
     // actual websocket handshake with the backend, so it's a genuine
     // "this view now has a real data source" signal rather than firing the
     // instant the component mounts.
-    const { connected } = useAstrometrics();
+    // A capture job in the shared job list means a capture is running. That list is the app's one
+    // poll of job progress, so this adds no polling of its own.
+    const { connected, activeJobs } = useAstrometrics();
+    const isCapturing = activeJobs.some((job) => job.jobType === 'capture');
     useReportModeReady('Observatory Manager', connected);
 
     // Custom hook for control logic
@@ -129,6 +133,16 @@ export const ObservatoryManager: React.FC = () => {
         setGuidingGain,
         handlers
     } = useObservatoryControl(forceReload);
+
+    /**
+     * Selects a target when the user clicks it in the list. Download Frames, Slew to Target and
+     * Start Alignment all use the selected target, so both the selected and the pending id change.
+     * @param targetId The id of the clicked target.
+     */
+    const handleTargetSelect = React.useCallback((targetId: string) => {
+        setSelectedTarget(targetId);
+        setPendingTarget(targetId);
+    }, [setSelectedTarget, setPendingTarget]);
 
     // The "Download Frames" window copies frames from the telescope to the library.
     // It starts on the target the user has picked in the list.
@@ -158,6 +172,7 @@ export const ObservatoryManager: React.FC = () => {
         alignment: gateFor(ObservatoryCapability.PLATE_SOLVE_ALIGNMENT),
         guiding: gateFor(ObservatoryCapability.AUTOGUIDING),
         focuser: gateFor(ObservatoryCapability.AUTOFOCUS),
+        capture: gateFor(ObservatoryCapability.CAPTURE_ORCHESTRATION),
     };
 
     // The targets imaged on the chosen night, and the list the panel shows for it.
@@ -236,7 +251,7 @@ export const ObservatoryManager: React.FC = () => {
                         items={nightItems}
                         selectedId={selectedTarget}
                         pendingId={pendingTarget}
-                        onSelect={setPendingTarget}
+                        onSelect={handleTargetSelect}
                         isLoading={isLoading}
                         loadingMessage="Loading targets"
                         emptyMessage={isLive ? 'No targets in the catalog.' : `No targets were imaged on the night of ${nightDate}.`}
@@ -271,8 +286,9 @@ export const ObservatoryManager: React.FC = () => {
                         <CommandGate disabled={commandsDisabled} reason={commandsDisabledReason}>
                             <Button
                                 variant="primary"
-                                disabled={commandsDisabled}
-                                onClick={() => { void handlers.onSlewToTarget(raShared, decShared); }}
+                                disabled={commandsDisabled || !selectedTarget}
+                                title={selectedTarget ? undefined : NO_TARGET_REASON}
+                                onClick={() => { if (selectedTarget) void handlers.onSlewToTarget(selectedTarget); }}
                             >
                                 Slew to Target
                             </Button>
@@ -294,13 +310,18 @@ export const ObservatoryManager: React.FC = () => {
             onSetTracking={handlers.onSetTracking}
             onPark={handlers.onPark}
             onUnpark={handlers.onUnpark}
+            onStartCapture={() => handlers.onStartCapture(telemetry.targetName)}
+            onStopCapture={handlers.onStopCapture}
+            isCapturing={isCapturing}
+            captureTargetName={telemetry.targetName}
             guidingHistory={telemetry.guidingHistory || []}
             guidingExposure={guidingExposure}
             guidingGain={guidingGain}
             onGuidingExposureChange={setGuidingExposure}
             onGuidingGainChange={setGuidingGain}
             alignmentAttempts={telemetry.alignmentAttempts || []}
-            onStartAlignment={() => handlers.onStartAlignment(raShared, decShared)}
+            onStartAlignment={() => selectedTarget ? handlers.onStartAlignment(selectedTarget) : undefined}
+            startAlignmentBlockedReason={selectedTarget ? null : NO_TARGET_REASON}
             onStopAlignment={handlers.onStopAlignment}
             isAligningActive={telemetry.alignmentActive}
             commandsDisabled={commandsDisabled}

@@ -265,6 +265,36 @@ class _SimulatedCameraController:
         """
         return True
 
+    def abort(self, device: object) -> bool:
+        """Report success: the simulator has no exposure to cancel.
+
+        Returns
+        -------
+        success : `bool`
+            Always `True`.
+        """
+        return True
+
+    def set_image_reception(self, device: object, enabled: bool) -> bool:
+        """Report success: the simulator sends no images to turn on or off.
+
+        Returns
+        -------
+        success : `bool`
+            Always `True`.
+        """
+        return True
+
+    def wait_for_new_image(self, device: object, timeout_seconds: float) -> None:
+        """Return None at once: the simulator has no real camera image data.
+
+        Returns
+        -------
+        image : `None`
+            Always `None`.
+        """
+        return None
+
     def get_last_image(self, device: object) -> None:
         """Return None: the simulator has no real camera image data.
 

@@ -53,6 +53,7 @@ SERVICE_COMMANDS: dict[str, dict[str, Any]] = {
     "guiding:capture_frame": {"exposure": 1.0},
     "imaging:capture": {"target_id": "M 81", "exposure_seconds": 1.0, "count": 1},
     "guiding:stop": {},
+    "imaging:stop_capture": {},
     "telescope:alignment_stop": {},
 }
 """RPC methods whose service calls a library command and reports a refusal

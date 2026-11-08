@@ -452,7 +452,7 @@ def test_the_simulators_take_the_real_sensor_optics_and_capture_setting(
         pictures = root / "frames"
         pictures.mkdir()
         driver._set(
-            "CCD Simulator.UPLOAD_MODE.UPLOAD_LOCAL=On",
+            "CCD Simulator.UPLOAD_MODE.UPLOAD_BOTH=On",
             f"CCD Simulator.UPLOAD_SETTINGS.UPLOAD_DIR={pictures}",
             "CCD Simulator.UPLOAD_SETTINGS.UPLOAD_PREFIX=t_XXX",
         )

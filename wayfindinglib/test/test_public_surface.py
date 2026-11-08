@@ -145,6 +145,7 @@ CHILDREN = {
         "status",
         "poll_external_alignment",
         "get_polar_alignment",
+        "get_centering_exposure",
         "slew",
         "park",
         "unpark",
@@ -157,6 +158,7 @@ CHILDREN = {
     "imaging": {
         "status",
         "capture_image",
+        "stop_capture",
         "set_filter",
         "focus_move",
         "query_focus_models",

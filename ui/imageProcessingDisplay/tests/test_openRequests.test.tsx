@@ -24,7 +24,7 @@ vi.mock('../../common/context/TargetContext', () => ({
     useTargetContext: () => ({
         selectedTarget: 'M 81', pendingTarget: 'M 81', setPendingTarget: () => undefined,
         setSelectedTarget: () => undefined, reloadKey: 0, framesReloadKey: 0, forceReload: () => undefined,
-        invalidate: () => undefined, raShared: '1', decShared: '2', commonName: '', catalogId: '',
+        invalidate: () => undefined, commonName: '', catalogId: '',
     }),
 }));
 vi.mock('../../common/context/RemoteStatusContext', () => ({ useRemoteStatusContext: () => ({ remoteTargets: new Set() }) }));

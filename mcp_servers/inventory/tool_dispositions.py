@@ -472,6 +472,13 @@ DECISIONS = {
         "own frames. Reads only; nothing is stored. The first call fits the model and is slow.",
         "observe",
     ),
+    "observatory_mount_get_centering_exposure": ToolDecision(
+        "keep",
+        "Built 2026-11-08. Works out the plate-solve centering exposure from the library's zero point and "
+        "star width, the camera profile, the sky model and the Gaia catalog. Reads only; nothing is "
+        "stored and nothing moves. The first call may fit the sky model and be slow.",
+        "observe",
+    ),
     "observatory_remote_check_connection": ToolDecision("keep", "A small network probe.", "observe"),
     # ---- Status reads of the control children ----
     "observatory_mount_status": ToolDecision(
@@ -688,6 +695,7 @@ DECISIONS = {
             "observatory_imaging_capture_image",
             "observatory_imaging_focus_move",
             "observatory_imaging_set_filter",
+            "observatory_imaging_stop_capture",
             "observatory_mount_manual_move",
             "observatory_mount_park",
             "observatory_mount_set_slew_rate",

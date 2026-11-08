@@ -2,8 +2,8 @@
  * @file TelescopeControlPanel.tsx
  * @description The Telescope Control panel. It holds everything that starts
  * alignment, tracking, guiding or parking, together with the limits that can
- * stop them, on three tabs: "Mount" (the alignment, tracking and park
- * buttons), "Manual" (the Telescope direction pad and slew speed, and the Focuser) and "Limits" (four
+ * stop them, on three tabs: "Mount" (the alignment, tracking, park and
+ * capture buttons), "Manual" (the Telescope direction pad and slew speed, and the Focuser) and "Limits" (four
  * short sections: Alignment and Guiding settings, then the Altitude and Hour
  * angle limits with one shared form and Apply button). One "Why unavailable?"
  * button in the header explains why the controls are greyed, and every tab
@@ -31,6 +31,9 @@ const TELESCOPE_CONTROL_TABS: TabDefinition[] = [
 /** Prefix that keeps the tab element ids unique on the page. */
 const TELESCOPE_CONTROL_TABS_ID_PREFIX = 'telescope-control';
 
+/** Why Start Capture is greyed while the telescope points at no target. */
+const NO_CAPTURE_TARGET_REASON = 'The telescope is not pointing at a target. Slew to a target first.';
+
 /** Whether one capability may be commanded, and the reason when it may not. */
 export interface CapabilityGate {
     /** True when the app may not command this capability. */
@@ -49,17 +52,31 @@ export interface TelescopeCapabilityGates {
     guiding?: CapabilityGate;
     /** Focuser: the focus buttons. */
     focuser?: CapabilityGate;
+    /** Capture: the Start Capture and Stop Capture buttons. */
+    capture?: CapabilityGate;
 }
 
 export interface TelescopeControlPanelProps {
     isTracking: boolean;
     isParked: boolean;
-    onSetTracking: (enabled: boolean) => void;
-    onPark: () => void;
-    onUnpark: () => void;
-    onStartAlignment?: () => void;
-    onStopAlignment?: () => void;
+    onSetTracking: (enabled: boolean) => Promise<unknown> | void;
+    onPark: () => Promise<unknown> | void;
+    onUnpark: () => Promise<unknown> | void;
+    onStartAlignment?: () => Promise<unknown> | void;
+    onStopAlignment?: () => Promise<unknown> | void;
+    /** Why Start Alignment is greyed while no target is picked. Null or empty when it can run. */
+    startAlignmentBlockedReason?: string | null;
     isAligningActive?: boolean;
+
+    // Capture (Start Capture and Stop Capture on the Mount tab)
+    /** Starts the open-ended capture on the target the telescope points at. */
+    onStartCapture?: () => Promise<boolean> | boolean | void;
+    /** Stops the capture the app started. */
+    onStopCapture?: () => Promise<boolean> | boolean | void;
+    /** True while a capture job runs. */
+    isCapturing?: boolean;
+    /** The target the telescope points at, if any. Start Capture needs one. */
+    captureTargetName?: string;
 
     // Manual slew (the direction pad on the Manual tab)
     onStartMove: (direction: string) => void;
@@ -100,7 +117,12 @@ export const TelescopeControlPanel: React.FC<TelescopeControlPanelProps> = ({
     onUnpark,
     onStartAlignment,
     onStopAlignment,
+    startAlignmentBlockedReason,
     isAligningActive = false,
+    onStartCapture,
+    onStopCapture,
+    isCapturing = false,
+    captureTargetName,
     onStartMove,
     onStopMove,
     onSetSlewRate,
@@ -123,8 +145,9 @@ export const TelescopeControlPanel: React.FC<TelescopeControlPanelProps> = ({
     const alignmentGate = capabilityGates.alignment ?? panelGate;
     const guidingGate = capabilityGates.guiding ?? panelGate;
     const focuserGate = capabilityGates.focuser ?? panelGate;
+    const captureGate = capabilityGates.capture ?? panelGate;
     // The header button explains the global reason whenever any group is greyed.
-    const anyGroupDisabled = [mountGate, alignmentGate, guidingGate, focuserGate].some((gate) => gate.disabled);
+    const anyGroupDisabled = [mountGate, alignmentGate, guidingGate, focuserGate, captureGate].some((gate) => gate.disabled);
     const [selectedTab, setSelectedTab] = useState('controls');
     // The slew rate lives here, so the slider keeps it when the Manual tab is closed and opened.
     const [slewRate, setSlewRate] = useState<number>(DEFAULT_SLEW_RATE);
@@ -182,8 +205,8 @@ export const TelescopeControlPanel: React.FC<TelescopeControlPanelProps> = ({
             />
             <TabPanel idPrefix={TELESCOPE_CONTROL_TABS_ID_PREFIX} tabId="controls" selected={selectedTab === 'controls'}>
                 <CommandGate
-                    disabled={mountGate.disabled || alignmentGate.disabled}
-                    reason={mountGate.disabled ? mountGate.reason : alignmentGate.reason}
+                    disabled={mountGate.disabled || alignmentGate.disabled || captureGate.disabled}
+                    reason={[mountGate, alignmentGate, captureGate].find((gate) => gate.disabled)?.reason ?? ''}
                 >
                     <TelescopeControl
                         disabled={mountGate.disabled}
@@ -195,7 +218,13 @@ export const TelescopeControlPanel: React.FC<TelescopeControlPanelProps> = ({
                         onUnpark={onUnpark}
                         onStartAlignment={onStartAlignment}
                         onStopAlignment={onStopAlignment}
+                        startAlignmentBlockedReason={startAlignmentBlockedReason}
                         isAligningActive={isAligningActive}
+                        captureDisabled={captureGate.disabled}
+                        isCapturing={isCapturing}
+                        onStartCapture={onStartCapture}
+                        onStopCapture={onStopCapture}
+                        startCaptureBlockedReason={captureTargetName ? null : NO_CAPTURE_TARGET_REASON}
                     />
                 </CommandGate>
             </TabPanel>

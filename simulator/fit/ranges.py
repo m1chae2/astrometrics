@@ -139,6 +139,14 @@ PROPERTY_RANGES: dict[tuple[str, str, str], PropertyRange] = {
         _range(MOUNT, "GUIDE_RATE", "GUIDE_RATE_WE", "fraction of 15 arcsec/s", 0, 1, f"{_SCOPE}:121"),
         _range(MOUNT, "GUIDE_RATE", "GUIDE_RATE_NS", "fraction of 15 arcsec/s", 0, 1, f"{_SCOPE}:122"),
         _range(MOUNT, "DEC_BACKLASH", "DEC_BACKLASH", "ms", 0, 5000, f"{_SCOPE}:114"),
+        # Arcminutes, measured live on 2026-11-08 (INDI 2.2.5): MM_IH = 1
+        # moved the true pointing by exactly 1 arcmin of hour angle, and
+        # +-60 was accepted unclamped. The older source declares -5 to 5,
+        # which does not apply; 120 is a safe bound (2 degrees).
+        *(
+            _range(MOUNT, "MOUNT_MODEL", name, "arcmin", -120, 120, "measured live 2026-11-08")
+            for name in ("MM_IH", "MM_ID", "MM_CH", "MM_NP", "MM_MA", "MM_ME")
+        ),
     )
 }
 

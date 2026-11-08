@@ -23,7 +23,7 @@ vi.mock('../IndiStatusPanel', () => ({ IndiStatusPanel: () => <div>Devices</div>
 vi.mock('../../common/hooks/useTelescopeStatus', () => ({
     useTelescopeStatus: () => ({ trackingStatus: 'Idle', telemetry: { alignmentAttempts: [] } }),
 }));
-vi.mock('../../common/context/AstrometricsContext', () => ({ useAstrometrics: () => ({ connected: true }) }));
+vi.mock('../../common/context/AstrometricsContext', () => ({ useAstrometrics: () => ({ connected: true, activeJobs: [] }) }));
 vi.mock('../../common/utils/appBootReadiness', () => ({ useReportModeReady: () => undefined }));
 
 import { CameraProfilesPanel } from '../equipment/CameraProfilesPanel';

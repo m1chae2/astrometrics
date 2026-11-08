@@ -117,9 +117,37 @@ class IndiClient(PyIndi.BaseClient):
     is never invoked.
     """
 
+    _image_arrivals = 0
+    """How many image (BLOB) updates this client has received."""
+
+    _image_arrivals_lock = threading.Lock()
+    """Guards `_image_arrivals`, which the client thread writes."""
+
     def __init__(self) -> None:
         """Initialize the INDI client."""
         super().__init__()
+
+    @property
+    def image_arrivals(self) -> int:
+        """Count the image (BLOB) updates received so far.
+
+        A caller notes the count before an exposure and later compares it
+        to see whether a new image has arrived.
+        """
+        return self._image_arrivals
+
+    def _count_image_arrival(self) -> None:
+        """Add one to the count of received images."""
+        with self._image_arrivals_lock:
+            self._image_arrivals += 1
+
+    def newBLOB(self, blob: Any) -> None:
+        """Count an image sent by a device.
+
+        PyIndi calls this on a 1.x client library. On a 2.x library the
+        image arrives through `updateProperty` instead.
+        """
+        self._count_image_arrival()
 
     def newDevice(self, device: PyIndi.BaseDevice) -> None:
         """Handle a new INDI device.
@@ -169,6 +197,9 @@ class IndiClient(PyIndi.BaseClient):
             The property whose value the server just changed.
         """
         property_type = property.getType()
+        if property_type == getattr(PyIndi, "INDI_BLOB", None):
+            self._count_image_arrival()
+            return
         for dispatch_type, callback_name, wrapper_class in _INDI_PROPERTY_TYPE_DISPATCH:
             if property_type == dispatch_type:
                 getattr(self, callback_name)(wrapper_class(property))
@@ -2103,6 +2134,44 @@ class IndiInterface(IndiClient):
         """
         return self.camera_controller.get_last_image(self._find_main_camera_device())
 
+    def set_main_image_reception(self, enabled: bool) -> bool:
+        """Turn on or off the receiving of images from the main camera.
+
+        An INDI client gets no image data unless it asks for it. This
+        setting belongs to this connection only, so it never changes what
+        other clients such as Ekos or PHD2 receive.
+
+        Parameters
+        ----------
+        enabled : `bool`
+            `True` to receive the camera's images, `False` to stop.
+
+        Returns
+        -------
+        success : `bool`
+            `True` if the request was sent, `False` if there is no main
+            camera.
+        """
+        return self.camera_controller.set_image_reception(self._find_main_camera_device(), enabled)
+
+    def wait_for_new_main_image(self, timeout_seconds: float) -> bytes | None:
+        """Wait for a new image from the main camera and return it.
+
+        Only an image that arrives after `set_main_image_reception`
+        turned reception on counts, so an older frame is never returned.
+
+        Parameters
+        ----------
+        timeout_seconds : `float`
+            How long to wait, in seconds.
+
+        Returns
+        -------
+        data : `bytes` or `None`
+            The new frame's raw data, or `None` if none arrived in time.
+        """
+        return self.camera_controller.wait_for_new_image(self._find_main_camera_device(), timeout_seconds)
+
     def _find_main_camera_device(self) -> PyIndi.BaseDevice | None:
         """Heuristic to find the main imaging camera.
 
@@ -2125,6 +2194,30 @@ class IndiInterface(IndiClient):
         """
         device = self._find_main_camera_device()
         return self.camera_controller.expose(device, exposure_seconds)
+
+    def abort_main_exposure(self) -> bool:
+        """Cancel the exposure the main camera is taking.
+
+        Returns
+        -------
+        success : `bool`
+            `True` if the abort command was sent, `False` if there is no
+            main camera or it cannot abort.
+        """
+        device = self._find_main_camera_device()
+        return self.camera_controller.abort(device)
+
+    def abort_guide_exposure(self) -> bool:
+        """Cancel the exposure the guide camera is taking.
+
+        Returns
+        -------
+        success : `bool`
+            `True` if the abort command was sent, `False` if there is no
+            guide camera or it cannot abort.
+        """
+        device = self._find_guide_camera_device()
+        return self.camera_controller.abort(device)
 
     def move(self, direction: str, start: bool = True) -> bool:
         """Start or stops manual movement in a direction.

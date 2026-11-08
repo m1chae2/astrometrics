@@ -253,3 +253,34 @@ def test_the_focal_length_is_a_whole_number_because_phd2_reads_an_integer() -> N
     """121.05 mm is written as 121, or the pixel scale is unspecified."""
     text, _ = phd2_launch.profile_text(2, 4500, None, 121.05, 3.75)
     assert "\nfocalLength=121\n" in text
+
+
+def test_the_calibration_step_reaches_the_distance_in_about_twelve_steps() -> None:
+    """At the fitted rate the step crosses 25 pixels in about 12 steps."""
+    step = phd2_launch.calibration_step_milliseconds(3.172, 6.39, 36.46)
+    assert step % 50 == 0
+    moved_per_step = 3.172 * step / 1000.0 / 6.39 * 0.8043  # pixels, with the declination factor
+    steps_needed = 25 / moved_per_step
+    assert 10 <= steps_needed <= 13
+    assert steps_needed < 60
+
+
+def test_the_calibration_step_follows_phd2s_formula() -> None:
+    """The step is distance x scale / rate / steps / cos(dec), up to 50 ms."""
+    assert phd2_launch.calibration_step_milliseconds(7.5, 6.39, 0.0) == 1800
+    assert phd2_launch.calibration_step_milliseconds(7.5, 6.39, 36.46) == 2250
+    with pytest.raises(ValueError):
+        phd2_launch.calibration_step_milliseconds(0.0, 6.39, 0.0)
+
+
+def test_the_profile_holds_the_calibration_step() -> None:
+    """The profile names PHD2's calibration step key given a guide rate."""
+    text, _ = phd2_launch.profile_text(2, 7624, None, 121.05, 3.75, 3.172, 36.46)
+    parser = configparser.ConfigParser()
+    parser.optionxform = str  # type: ignore[assignment,method-assign]
+    parser.read_string(text.split("[profile]", 1)[1].replace("[profile]", ""))
+    assert int(parser["profile/1/scope"]["CalibrationDuration"]) == phd2_launch.calibration_step_milliseconds(
+        3.172, 206.265 * 3.75 / 121, 36.46
+    )
+    without, _ = phd2_launch.profile_text(2, 7624)
+    assert "CalibrationDuration" not in without

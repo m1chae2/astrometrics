@@ -167,6 +167,7 @@ them to these properties and clamps them to valid ranges.
 | Periodic error | CCD `SIM_PEMAX`, `SIM_PEPERIOD`; guide `SIM_PE_MAX`, `SIM_PE_PERIOD` (zero to peak, divided by cos(Dec); the two cameras run their own phase, which cannot be set; the main camera's period is limited to 60 s, so a longer period is clamped and the amplitude scaled to keep the peak speed) | The core's measured unguided mount error (section 4), not the guiding spectrum's peak to peak, which measures what guiding left | Zero |
 | Random and slow guiding disturbance | Guide `SIM_RA_RAND`, `SIM_DEC_RAND`, `SIM_RA_DRIFT`, `SIM_DEC_DRIFT` | The same measurement's residual terms: the median signed drift, and the frame-to-frame jitter (median step divided by the square root of 2) as a uniform term of half-width jitter times the square root of 3 | Simulator default |
 | Polar error | CCD and guide `SIM_POLAR`, `SIM_POLARDRIFT` | The newest polar alignment record (one today: 34'25", 2026-10-03), labeled as a single measurement. Not the pointing model's ME and MA | Zero |
+| Go-to offset (mount model) | Telescope `MOUNT_MODEL` elements `MM_IH` (right ascension) and `MM_ID` (declination), in arcminutes (measured live 2026-11-08: `MM_IH` = 1 moved the true pointing by 1 arcmin of hour angle; 60 accepted unclamped, the fit clamps at 120). `MM_CH`, `MM_NP`, `MM_MA`, `MM_ME` are always 0. The mount then points where `EQUATORIAL_PE` says and reports where `EQUATORIAL_EOD_COORD` says | `review.query_alignment_records(session_id="all")`: the first solve of each target session, on all nights; the median signed offset per axis (solved minus commanded), right ascension divided by cos(dec), with the count and the median absolute deviation recorded. Only this constant offset is simulated, not the scatter. The app's pointing model is not used: its hour angle is computed as (RA x 3) mod 360 - 180 instead of sidereal time minus RA, so its polar and flexure terms are fitted against a made-up angle and its index and cone terms cancel (a library bug, to be an issue of its own). The `MM_IH` sign is measured (positive `MM_IH` lowers the true right ascension); the `MM_ID` sign is by analogy and not yet measured. `SIM_POLAR` comes only from the polar record, so no polar error is counted twice | Zero for all terms, with a note (fewer than 5 first attempts) |
 | Dec backlash | Telescope `DEC_BACKLASH` (ms) | `dec_backlash_estimate_ms` | Zero |
 | Guide controller | PHD2 profile | The parsed PHD2 controller settings of the newest run (section 4) | PHD2 defaults |
 | Seeing, main camera | CCD `SIM_SEEING` | The envelope median star width, converted with the driver's own profile formula (checked by closure, see the status). Applied only after the focuser reports a position, because the driver ignores seeing until then | Simulator default |
@@ -302,6 +303,12 @@ run list too large to send is asked for again with fewer runs.
 Acceptance: after start, each property equals the value in the results file; a value without
 data falls back one step; a new night changes the values at the next start.
 
+The go-to offset is part of S3: the median first-attempt pointing offset of the user's recorded
+plate solves becomes `MM_IH` and `MM_ID` (section 5), so a slew lands a little off the commanded
+position and the app's alignment has something to correct. The scatter of the errors is not
+simulated. Status: built and tested with synthetic records; the `MM_IH` sign and the arcminute
+unit were measured live on 2026-11-08, the `MM_ID` sign is not yet measured.
+
 Tests: each conversion with synthetic measurements; the fallback order; the closure calibration
 of seeing and sky glow; a live test that reads the properties back.
 
@@ -331,6 +338,12 @@ of seeing and sky glow; a live test that reads the properties back.
   `ORIGIN` is left alone, and a separate keyword marks the frame as simulated.
 - The app downloads, ingests, measures and stacks it as a new frame. Time-dependent results land
   only in the throwaway library (D15).
+- Who takes the exposures: in the launcher's interactive session the driver takes none
+  (`--capture app`). The app's Start Capture sets `CCD_EXPOSURE` on the same camera, which changes
+  no upload setting, and the driver files each frame that appears, as above. The TPM harness and
+  the replay keep the driver's own loop (`--capture driver`), which now waits for a slew to end
+  before each exposure. Each interactive start empties the stand-in picture and camera staging
+  folders, so the session starts like a new night.
 
 Acceptance: a capture of a known target yields one real frame in the simulator's library,
 through the normal download; the library never holds two copies or two sets of measurements; a
@@ -476,7 +489,7 @@ programs before folding in.
 | The fit reads the copy, not the real databases | Architect, software engineer | S3 wording |
 | The telescope simulator has no periodic error; properties per device | Software engineer, astronomer | Section 5 per property |
 | The guiding spectrum measures guided residual, not periodic error | Astronomer | Section 5, core measurement (section 4) |
-| ME and MA are not polar terms | Astronomer | Section 5 polar alignment record |
+| ME and MA are not polar terms | Astronomer | Section 5 polar alignment record; the go-to row does not use the app's pointing model at all (its hour angle is wrong), so ME and MA are 0 and never feed `SIM_POLAR` |
 | Seeing and sky units do not map directly | Astronomer | Section 5 closure calibration |
 | Noise missing; no shot noise | Astronomer | Section 5 noise row and validity note |
 | Focus drift in the wrong units | Astronomer | Section 5 steps per °C |

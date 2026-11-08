@@ -31,6 +31,7 @@ simulator's folder. The module opens no connection of its own beyond looking
 at which local ports are free.
 """
 
+import math
 import os
 import shutil
 import socket
@@ -47,6 +48,7 @@ __all__ = [
     "MOUNT_DEVICE",
     "UNSET_VARIABLES",
     "Phd2Instance",
+    "calibration_step_milliseconds",
     "choose_instance",
     "command_prefix",
     "config_file_name",
@@ -82,6 +84,27 @@ MOUNT_DEVICE = "Telescope Simulator"
 #: none. The values are those of the contract recording.
 DEFAULT_GUIDE_FOCAL_LENGTH_MM = 400.0
 DEFAULT_GUIDE_PIXEL_SIZE_UM = 3.75
+#: How far the guide star must travel in each calibration direction, in
+#: pixels. PHD2's calibration distance default
+#: (``CalstepDialog::DEFAULT_DISTANCE``).
+CALIBRATION_DISTANCE_PIXELS = 25
+#: The number of calibration steps aimed for in each direction. PHD2's
+#: calibration step calculator default (``CalstepDialog::DEFAULT_STEPS``). It
+#: leaves room under PHD2's limit of 60 steps per direction.
+CALIBRATION_TARGET_STEPS = 12
+#: The fewest and most steps the calculator accepts (``MIN_STEPS``,
+#: ``MAX_STEPS``).
+CALIBRATION_MIN_STEPS = 6
+CALIBRATION_MAX_STEPS = 60
+#: The calculator rounds the step up to a multiple of this many milliseconds.
+CALIBRATION_STEP_ROUNDING_MILLISECONDS = 50
+#: The calculator limits the declination it uses to this many degrees.
+CALIBRATION_MAX_DECLINATION_DEGREES = 60.0
+#: Sidereal rate in arcseconds per second (PHD2 uses 15 in the same formula).
+SIDEREAL_ARCSEC_PER_SEC = 15.0
+#: The guide rate (arcseconds per second) assumed when the caller gives none:
+#: the mount simulator's default ``GUIDE_RATE`` of half sidereal.
+DEFAULT_GUIDE_RATE_ARCSEC_PER_SEC = 7.5
 #: Guide exposure when no controller settings say otherwise (PHD2's default).
 DEFAULT_EXPOSURE_MS = 1000
 #: The keys of the guide controller settings, with the range each accepts.
@@ -127,6 +150,72 @@ class Phd2Instance:
     indi_port: int
     home: Path
     exposure_milliseconds: int = DEFAULT_EXPOSURE_MS
+
+
+def calibration_step_milliseconds(
+    guide_rate_arcsec_per_sec: float,
+    pixel_scale_arcsec_per_pixel: float,
+    declination_degrees: float,
+    distance_pixels: float = CALIBRATION_DISTANCE_PIXELS,
+    target_steps: int = CALIBRATION_TARGET_STEPS,
+) -> int:
+    """Compute the calibration step the way PHD2's step calculator does.
+
+    PHD2 calibrates by pulsing the mount in one direction, step after step,
+    until the guide star has moved the calibration distance. It gives up after
+    60 steps ("star did not move enough"). With PHD2's default step of 750 ms
+    and a slow guide rate, 60 steps are not enough, so the step must fit the
+    guide rate. This is the formula of PHD2's
+    ``CalstepDialog::GetCalibrationStepSize`` (``src/calstep_dialog.cpp`` in
+    the PHD2 source)::
+
+        total_seconds = distance * pixel_scale / guide_rate
+        step = total_seconds / steps / cos(declination)
+        step = min(step, total_seconds / 6)       # keep at least 6 steps
+        step rounded up to a multiple of 50 ms
+
+    The default aim is 12 steps (PHD2's own default; it is about the number
+    PHD2 documents as working "fine for most setups"), so calibration ends
+    well before the 60-step limit even when the real motion is somewhat
+    slower than the guide rate says. The calculator treats the guide rate as a
+    fraction of sidereal; this function takes arcseconds per second, which is
+    that fraction times 15.
+
+    Parameters
+    ----------
+    guide_rate_arcsec_per_sec : `float`
+        The mount's guide rate in arcseconds per second.
+    pixel_scale_arcsec_per_pixel : `float`
+        The guide camera's pixel scale.
+    declination_degrees : `float`
+        The declination calibration happens at. Limited to plus or minus 60
+        degrees, as in PHD2's calculator.
+    distance_pixels : `float`, optional
+        The calibration distance. Default 25 pixels.
+    target_steps : `int`, optional
+        The number of steps aimed for. Limited to 6 to 60.
+
+    Returns
+    -------
+    step_milliseconds : `int`
+        The calibration step, a multiple of 50 ms.
+
+    Raises
+    ------
+    ValueError
+        If the guide rate or the pixel scale is not positive.
+    """
+    if guide_rate_arcsec_per_sec <= 0 or pixel_scale_arcsec_per_pixel <= 0:
+        raise ValueError("The guide rate and the pixel scale must be positive.")
+    steps = min(max(int(target_steps), CALIBRATION_MIN_STEPS), CALIBRATION_MAX_STEPS)
+    declination = min(
+        max(declination_degrees, -CALIBRATION_MAX_DECLINATION_DEGREES), CALIBRATION_MAX_DECLINATION_DEGREES
+    )
+    total_seconds = distance_pixels * pixel_scale_arcsec_per_pixel / guide_rate_arcsec_per_sec
+    pulse = total_seconds / steps * 1000.0 / math.cos(math.radians(declination))
+    pulse = min(pulse, total_seconds / CALIBRATION_MIN_STEPS * 1000.0)
+    rounding = CALIBRATION_STEP_ROUNDING_MILLISECONDS
+    return int(math.ceil(pulse / rounding) * rounding)
 
 
 def event_port(instance: int) -> int:
@@ -424,6 +513,8 @@ def profile_text(
     controller_settings: Mapping[str, float] | None = None,
     guide_focal_length_mm: float = DEFAULT_GUIDE_FOCAL_LENGTH_MM,
     guide_pixel_size_um: float = DEFAULT_GUIDE_PIXEL_SIZE_UM,
+    guide_rate_arcsec_per_sec: float | None = None,
+    declination_degrees: float = 0.0,
 ) -> tuple[str, int]:
     """Write PHD2's settings file for the simulated observatory.
 
@@ -444,6 +535,13 @@ def profile_text(
         focal length as a whole number of millimeters (``GetInt``: a value
         such as 121.05 is refused and the pixel scale is "unspecified", so
         the guide log has no arcseconds), so it is rounded here.
+    guide_rate_arcsec_per_sec : `float`, optional
+        The mount's guide rate. When given, the profile's calibration step
+        (``/profile/1/scope/CalibrationDuration``) is computed from it with
+        `calibration_step_milliseconds`, so calibration can reach its distance
+        in about 12 steps. When `None`, PHD2's default step (750 ms) stays.
+    declination_degrees : `float`, optional
+        The declination the world points at, for the calibration step.
 
     Returns
     -------
@@ -453,6 +551,11 @@ def profile_text(
         The guide exposure written into it.
     """
     algorithms, milliseconds = controller_settings_text(controller_settings)
+    calibration_line = ""
+    if guide_rate_arcsec_per_sec is not None:
+        pixel_scale = 206.265 * guide_pixel_size_um / round(guide_focal_length_mm)
+        step = calibration_step_milliseconds(guide_rate_arcsec_per_sec, pixel_scale, declination_degrees)
+        calibration_line = f"CalibrationDuration={step}\n"
     text = f"""ConfigVersion=2001
 LoggingMode=1
 currentProfile=1
@@ -469,7 +572,7 @@ pixelsize={guide_pixel_size_um:g}
 [profile/1/scope]
 LastMenuChoice=INDI Mount
 LastAuxMenuChoice=None
-[profile/1/stepguider]
+{calibration_line}[profile/1/stepguider]
 LastMenuChoice=None
 [profile/1/rotator]
 LastMenuChoice=None
@@ -491,6 +594,8 @@ def write_profile(
     controller_settings: Mapping[str, float] | None = None,
     guide_focal_length_mm: float = DEFAULT_GUIDE_FOCAL_LENGTH_MM,
     guide_pixel_size_um: float = DEFAULT_GUIDE_PIXEL_SIZE_UM,
+    guide_rate_arcsec_per_sec: float | None = None,
+    declination_degrees: float = 0.0,
 ) -> Phd2Instance:
     """Write PHD2's settings file in the stand-in home, before PHD2 starts.
 
@@ -508,6 +613,10 @@ def write_profile(
         The guide controller settings (see `controller_settings_text`).
     guide_focal_length_mm, guide_pixel_size_um : `float`, optional
         The guide scope and the guide camera's pixel size.
+    guide_rate_arcsec_per_sec : `float`, optional
+        The mount's guide rate, for the calibration step (see `profile_text`).
+    declination_degrees : `float`, optional
+        The declination the world points at.
 
     Returns
     -------
@@ -519,7 +628,13 @@ def write_profile(
     """
     require_world_home(home, root)
     text, milliseconds = profile_text(
-        instance, indi_port, controller_settings, guide_focal_length_mm, guide_pixel_size_um
+        instance,
+        indi_port,
+        controller_settings,
+        guide_focal_length_mm,
+        guide_pixel_size_um,
+        guide_rate_arcsec_per_sec,
+        declination_degrees,
     )
     home.mkdir(parents=True, exist_ok=True)
     (home / config_file_name(instance)).write_text(text, encoding="utf-8")

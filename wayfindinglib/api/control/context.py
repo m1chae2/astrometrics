@@ -31,6 +31,7 @@ from wayfindinglib.data_access.delegation_policy_reader import get_delegation_po
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.session.correction_config import CorrectionConfig
+from wayfindinglib.tasks.control_tasks.capture_runs import CaptureRuns
 from wayfindinglib.tasks.control_tasks.live_guiding import LiveGuidingMonitor
 from wayfindinglib.tasks.control_tasks.safety_monitor import SafetyMonitor
 
@@ -115,6 +116,7 @@ class ControlContext:
         self.correction_config = correction_config or CorrectionConfig()
         self.safety_monitor = SafetyMonitor()
         self.live_guiding = LiveGuidingMonitor()
+        self.capture_runs = CaptureRuns()
         self._astrometrics = astrometrics
         self._records: ControlRecordStore | None = None
         self._driver = driver

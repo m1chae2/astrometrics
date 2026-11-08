@@ -18,10 +18,6 @@ export interface TargetDetailsManagerProps {
   catalogId?: string;
   /** Conversational name for the target (e.g., Andromeda Galaxy). */
   commonName?: string;
-  /** Right Ascension of the target, shared from the context. */
-  ra?: string;
-  /** Declination of the target, shared from the context. */
-  dec?: string;
   /** Callback fired when the catalog ID is edited. */
   onCatalogIdChange?: (value: string) => void;
   /** Callback fired when the common name is edited. */
@@ -43,8 +39,6 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
   selectedTarget,
   catalogId,
   commonName,
-  ra: propRa,
-  dec: propDec,
   onCatalogIdChange,
   onCommonNameChange,
   onSaveTarget,
@@ -237,8 +231,8 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
           telescope={telescope}
           expTime={expTime}
           filterGroups={filterGroups}
-          ra={propRa || ra}
-          dec={propDec || dec}
+          ra={ra}
+          dec={dec}
           onCatalogIdChange={onCatalogIdChange}
           onCommonNameChange={onCommonNameChange}
         />

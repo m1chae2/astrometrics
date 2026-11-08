@@ -255,6 +255,7 @@ RPC_METHODS: tuple[str, ...] = (
     # Camera capture
     "imaging:capture",
     "imaging:get_active_jobs",
+    "imaging:stop_capture",
     # Images and FITS files
     "images:get_target_frame",
     "images:get_light_frame_data",

@@ -287,7 +287,7 @@ CLASSIFICATION_RULES = (
     # Hardware.
     _rule(
         r"^observatory_(mount_(slew|sync|park|unpark|set_tracking|manual_move|set_slew_rate|run_.+)"
-        r"|imaging_(capture_image|set_filter|focus_move)|guiding_(pulse|expose|run_.+)"
+        r"|imaging_(capture_image|stop_capture|set_filter|focus_move)|guiding_(pulse|expose|run_.+)"
         r"|safety_(open|close)_enclosure|equipment_(connect|disconnect|set_device_property))$",
         "actuate",
         "high",

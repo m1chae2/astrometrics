@@ -490,3 +490,12 @@ def test_calibration_frames_json_is_rewritten_and_repointed(tmp_path: Path) -> N
     final = json.loads((root / "library" / "calibration_frames.json").read_text())
     assert all(path.startswith(str(root.resolve())) for path in final["darks"] + final["old"])
     assert not path_guard.outside_paths(*library_copy.world_path_files(root), str(root))
+
+
+def test_nearest_target_id_picks_the_closest_within_the_radius() -> None:
+    """The closest target inside a degree wins; none inside gives None."""
+    targets = [("far", 100.0, 0.0), ("near", 250.5, 36.5), ("nearer", 250.42, 36.46)]
+    assert library_copy.nearest_target_id(targets, 16.695, 36.46) == "nearer"
+    assert library_copy.nearest_target_id(targets, 3.0, -50.0) is None
+    assert library_copy.nearest_target_id([], 1.0, 1.0) is None
+    assert library_copy.nearest_target_id(targets, 16.695, 36.46, radius_degrees=0.0001) is None

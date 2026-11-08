@@ -314,7 +314,8 @@ of seeing and sky glow; a live test that reads the properties back.
   Otherwise it keeps the simulator's frame. SPEC frames are delivered like any other. The camera
   is compared by the library's own camera name, and a filter by the library filter it stands for
   (`L` and `Luminance` are one filter). Frames a camera simulator drew are never treated as real.
-- The simulated sky always points at M 13. The user's real M 13 frames were taken at offset 0,
+- The simulated sky starts at M 13, and the driver then follows the mount to the nearest library
+  target within a degree, the app's own rule. The user's real M 13 frames were taken at offset 0,
   while the camera profile now sets offset 10, so a capture there keeps the simulator's frame,
   as the full capture-setting rule requires. The live delivery check of 2026-11-08 used an
   offset 0 capture.

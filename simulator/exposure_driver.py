@@ -6,7 +6,10 @@ computer:
 
 1. It connects the INDI simulators (mount, camera, focuser, filter wheel,
    guide camera) of the local INDI server and points the mount at a target
-   (M 13 by default, which is in the seeded library).
+   (M 13 by default, which is in the seeded library). It starts there and
+   then follows the mount: when the world gives a backend port, each frame
+   is filed under the library target nearest the mount's position (within a
+   degree, the app's own rule), so a slew from the app changes the folder.
 2. It takes one exposure after another on the simulated camera. The camera
    saves each FITS file straight into a folder that stands in for the
    telescope computer's picture folder (``<standin>/Pictures/<target>/Light``).
@@ -41,17 +44,21 @@ The script stops on SIGTERM or SIGINT.
 
 import argparse
 import json
+import math
 import re
 import signal
 import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
 from astropy.io import fits
 
+from astrometricslib import Target
+from astrometricslib.exceptions import AstrometricsError
 from simulator.device_settings import (
     DeviceSetting,
     device_settings_from_world,
@@ -62,6 +69,7 @@ from simulator.device_settings import (
 from simulator.fit.results import fitted_device_settings
 from simulator.frame_source import FrameSource
 from simulator.guide_log_replay import ReplayItem, load_replay_items, render_line, replay
+from simulator.library_copy import nearest_target_id
 from simulator.rpc_client import call_rpc
 
 #: The devices of the INDI simulators and the property that connects each.
@@ -88,6 +96,137 @@ COOLING_WAIT_SECONDS = 60.0
 COOLING_TOLERANCE_C = 1.0
 #: Tries to set one property before giving up.
 SETTING_TRIES = 3
+
+
+#: How far (degrees) the mount must move before the target is looked up again.
+MOUNT_MOVE_THRESHOLD_DEGREES = 0.05
+#: How long (seconds) the list of library targets is reused. A lookup that
+#: finds nothing asks again sooner (`TARGET_RETRY_SECONDS`), so a target the
+#: user just added is found.
+TARGET_LIST_SECONDS = 300.0
+TARGET_RETRY_SECONDS = 30.0
+
+
+def position_name(ra_hours: float, dec_degrees: float) -> str:
+    """Name a sky position in text that is safe as a folder name.
+
+    The name is used when no library target is near the mount, for example
+    ``RA 16h41m Dec +36d28m``. It is rounded to the minute.
+
+    Parameters
+    ----------
+    ra_hours : `float`
+        Right ascension in hours.
+    dec_degrees : `float`
+        Declination in degrees.
+
+    Returns
+    -------
+    name : `str`
+        The position as text.
+    """
+    ra_minutes = round((ra_hours % 24.0) * 60.0) % 1440
+    dec_minutes = round(abs(dec_degrees) * 60.0)
+    sign = "-" if dec_degrees < 0 else "+"
+    return (
+        f"RA {ra_minutes // 60:02d}h{ra_minutes % 60:02d}m "
+        f"Dec {sign}{dec_minutes // 60:02d}d{dec_minutes % 60:02d}m"
+    )
+
+
+def upload_prefix(target: str) -> str:
+    """Build the camera's file name prefix for a target.
+
+    Parameters
+    ----------
+    target : `str`
+        The target's folder name.
+
+    Returns
+    -------
+    prefix : `str`
+        The prefix, with letters and digits only (other runs become ``_``).
+    """
+    return re.sub(r"[^A-Za-z0-9]+", "_", target) + "_Light_XXX"
+
+
+class BackendTargetFinder:
+    """Finds the library target the app would pick for a mount position.
+
+    It asks the running backend for the target list (the driver must not open
+    the library database while the backend runs) and keeps the list for a
+    while, so a frame does not cost a full listing.
+
+    Parameters
+    ----------
+    fetch_targets : `~collections.abc.Callable`
+        Returns the backend's targets as ``target:get_targets`` gives them
+        (the position is text, such as ``16h 41m 42s``; each entry is read
+        through the library's `Target` model, as `library_copy` does). It
+        may raise `RuntimeError` or `OSError`.
+    clock : `~collections.abc.Callable`, optional
+        Returns the time in seconds (for tests).
+    """
+
+    def __init__(
+        self,
+        fetch_targets: Callable[[], object],
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        """Keep the fetch function; nothing is fetched yet."""
+        self._fetch_targets = fetch_targets
+        self._clock = clock
+        self._targets: list[tuple[str, float, float]] = []
+        self._fetched_at: float | None = None
+
+    def _refresh(self) -> None:
+        """Fetch the target list again.
+
+        An unreachable backend raises `OSError` (from the fetch function).
+
+        Raises
+        ------
+        RuntimeError
+            If the reply is not a list.
+        """
+        reply = self._fetch_targets()
+        if not isinstance(reply, list):
+            raise RuntimeError("target:get_targets did not return a list.")
+        targets: list[tuple[str, float, float]] = []
+        for entry in reply:
+            try:
+                target = Target.model_validate(entry)
+                targets.append((target.id, float(target.ra_deg), float(target.dec_deg)))
+            except ValueError, TypeError, AstrometricsError:
+                continue
+        self._targets = targets
+        self._fetched_at = self._clock()
+
+    def __call__(self, ra_hours: float, dec_degrees: float) -> str | None:
+        """Find the target nearest a position, within a degree.
+
+        Parameters
+        ----------
+        ra_hours : `float`
+            Right ascension in hours.
+        dec_degrees : `float`
+            Declination in degrees.
+
+        Returns
+        -------
+        target_id : `str` or `None`
+            The id, or `None` when no target is within a degree.
+
+        The call raises `RuntimeError` or `OSError` when the backend's list
+        cannot be had (see `_refresh`).
+        """
+        if self._fetched_at is None or self._clock() - self._fetched_at > TARGET_LIST_SECONDS:
+            self._refresh()
+        found = nearest_target_id(self._targets, ra_hours, dec_degrees)
+        if found is None and self._clock() - (self._fetched_at or 0.0) > TARGET_RETRY_SECONDS:
+            self._refresh()
+            found = nearest_target_id(self._targets, ra_hours, dec_degrees)
+        return found
 
 
 #: The header key the camera simulator does not write.
@@ -197,6 +336,12 @@ class ExposureDriver:
         Delivers a real frame in place of the simulator's own when the
         mount points at a target the user has imaged. Default: none, so
         every frame is the simulator's.
+    find_target : `~collections.abc.Callable`, optional
+        Takes the mount's right ascension (hours) and declination (degrees)
+        and returns the id of the library target the app would pick for it,
+        or `None` when none is within a degree. It may raise `RuntimeError`
+        or `OSError` (a status: the current target is kept). Default: none,
+        so the target stays fixed.
     """
 
     def __init__(
@@ -211,6 +356,7 @@ class ExposureDriver:
         dec_degrees: float,
         device_settings: list[DeviceSetting] | None = None,
         frame_source: FrameSource | None = None,
+        find_target: Callable[[float, float], str | None] | None = None,
     ) -> None:
         """Keep the settings; nothing runs yet."""
         self.indi_port = indi_port
@@ -223,6 +369,9 @@ class ExposureDriver:
         self.dec_degrees = dec_degrees
         self.device_settings = list(device_settings or [])
         self.frame_source = frame_source
+        self.find_target = find_target
+        self._resolved_position: tuple[float, float] | None = None
+        self._lookup_failure_reported = False
         self.cooling_seconds: float | None = None
         self.stop_event = threading.Event()
         self.pictures_directory = standin / "Pictures" / target / "Light"
@@ -415,11 +564,10 @@ class ExposureDriver:
         destination.mkdir(parents=True, exist_ok=True)
         # The app lists this folder before the first frame arrives.
         self.pictures_directory.mkdir(parents=True, exist_ok=True)
-        prefix = re.sub(r"[^A-Za-z0-9]+", "_", self.target) + "_Light_XXX"
         self._set(
             f"{CAMERA}.UPLOAD_MODE.UPLOAD_LOCAL=On",
             f"{CAMERA}.UPLOAD_SETTINGS.UPLOAD_DIR={destination}",
-            f"{CAMERA}.UPLOAD_SETTINGS.UPLOAD_PREFIX={prefix}",
+            f"{CAMERA}.UPLOAD_SETTINGS.UPLOAD_PREFIX={upload_prefix(self.target)}",
         )
         return True
 
@@ -513,9 +661,89 @@ class ExposureDriver:
         """
         return {path.name for path in self.staging_directory.glob("*.fits")}
 
+    def mount_position(self) -> tuple[float, float] | None:
+        """Read where the simulated mount points.
+
+        Returns
+        -------
+        position : `tuple` [`float`, `float`] or `None`
+            Right ascension (hours) and declination (degrees), or `None` when
+            the mount does not answer or gives text that is not a number.
+        """
+        try:
+            ra_hours = float(self._get(f"{MOUNT}.EQUATORIAL_EOD_COORD.RA"))
+            dec_degrees = float(self._get(f"{MOUNT}.EQUATORIAL_EOD_COORD.DEC"))
+        except ValueError:
+            return None
+        if not (math.isfinite(ra_hours) and math.isfinite(dec_degrees)):
+            return None
+        return ra_hours, dec_degrees
+
+    def follow_mount(self) -> bool:
+        """Switch to the target the app would pick for the mount's position.
+
+        Does nothing without `find_target`, when the mount cannot be read, or
+        when the mount moved less than `MOUNT_MOVE_THRESHOLD_DEGREES` since
+        the last lookup. When no library target is within a degree, the frame
+        is filed under a name built from the position (`position_name`). A
+        failed lookup is a status: one line to the error output, once, and
+        the current target stays.
+
+        Returns
+        -------
+        changed : `bool`
+            `True` when the target changed.
+        """
+        if self.find_target is None:
+            return False
+        position = self.mount_position()
+        if position is None:
+            return False
+        if self._resolved_position is not None:
+            ra_hours, dec_degrees = position
+            last_ra, last_dec = self._resolved_position
+            # Small-angle separation is enough for a threshold this small.
+            offset = math.hypot(
+                (ra_hours - last_ra) * 15.0 * math.cos(math.radians(dec_degrees)), dec_degrees - last_dec
+            )
+            if offset < MOUNT_MOVE_THRESHOLD_DEGREES:
+                return False
+        try:
+            found = self.find_target(*position)
+        except (RuntimeError, OSError, ValueError) as error:
+            if not self._lookup_failure_reported:
+                self._lookup_failure_reported = True
+                print(f"The target lookup failed ({error}); keeping {self.target}.", file=sys.stderr)
+            return False
+        self._lookup_failure_reported = False
+        self._resolved_position = position
+        name = found or position_name(*position)
+        if name == self.target:
+            return False
+        self.switch_target(name)
+        return True
+
+    def switch_target(self, target: str) -> None:
+        """File the next frames under another target.
+
+        The camera keeps saving into its staging folder; only the picture
+        folder and the file name prefix change.
+
+        Parameters
+        ----------
+        target : `str`
+            The new target's folder name.
+        """
+        self.target = target
+        self.pictures_directory = self.standin / "Pictures" / target / "Light"
+        self.pictures_directory.mkdir(parents=True, exist_ok=True)
+        self._set(f"{CAMERA}.UPLOAD_SETTINGS.UPLOAD_PREFIX={upload_prefix(target)}")
+        print(f"The mount moved: frames are now filed under {target}.", flush=True)
+
     def take_exposures(self) -> None:
         """Take exposures one after another until stopped."""
         while not self.stop_event.is_set():
+            self.follow_mount()
             before = self._fits_files()
             started = time.time()
             self._set(f"{CAMERA}.CCD_EXPOSURE.CCD_EXPOSURE_VALUE={self.exposure_seconds}")
@@ -573,8 +801,9 @@ class ExposureDriver:
     def deliver_real_frame(self, simulated: Path, destination: Path) -> bool:
         """Put a real frame at `destination` if the target has a match.
 
-        The mount points at `target` (the library target the world chose),
-        so that is the target whose real frames are used.
+        The mount points at `target` (the library target the world chose, or
+        the one nearest the mount after it moved), so that is the target whose
+        real frames are used.
 
         Parameters
         ----------
@@ -693,8 +922,12 @@ def main() -> int:
         return 1
     world = load_world_settings(arguments.config) if arguments.config else None
     frame_source = None
+    find_target = None
     if arguments.backend_port is not None:
         backend_port = arguments.backend_port
+        find_target = BackendTargetFinder(
+            lambda: call_rpc(backend_port, "target:get_targets", {"detail": "summary"})
+        )
         frame_source = FrameSource(
             lambda method, params: call_rpc(backend_port, method, params),
             arguments.standin / "frame_source_cache",
@@ -719,6 +952,7 @@ def main() -> int:
         )
         or None,
         frame_source,
+        find_target,
     )
     signal.signal(signal.SIGTERM, lambda *_: driver.stop_event.set())
     signal.signal(signal.SIGINT, lambda *_: driver.stop_event.set())

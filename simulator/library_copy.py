@@ -820,6 +820,51 @@ def prepare_library_copy(
     return report
 
 
+def nearest_target_id(
+    targets: Iterable[tuple[str, float, float]],
+    ra_hours: float,
+    dec_degrees: float,
+    radius_degrees: float = 1.0,
+) -> str | None:
+    """Pick the target nearest a mount position, within a radius.
+
+    This is the app's rule (``TelescopeService._infer_target_at_coordinates``)
+    without the database: the great-circle separation between the mount and
+    each target, and the smallest one within the radius wins.
+
+    Parameters
+    ----------
+    targets : `~collections.abc.Iterable` [`tuple` [`str`, `float`, `float`]]
+        The library's targets as (id, right ascension in degrees,
+        declination in degrees).
+    ra_hours : `float`
+        Right ascension of the mount position, in hours.
+    dec_degrees : `float`
+        Declination of the mount position, in degrees.
+    radius_degrees : `float`, optional
+        The farthest a target may be, in degrees.
+
+    Returns
+    -------
+    target_id : `str` or `None`
+        The id of the nearest target, or `None` when none is within the
+        radius.
+    """
+    mount_ra = math.radians(ra_hours * 15.0)
+    mount_dec = math.radians(dec_degrees)
+    best: tuple[float, str] | None = None
+    for target_id, ra_deg, dec_deg in targets:
+        target_ra = math.radians(ra_deg)
+        target_dec = math.radians(dec_deg)
+        cosine = math.sin(mount_dec) * math.sin(target_dec) + math.cos(mount_dec) * math.cos(
+            target_dec
+        ) * math.cos(mount_ra - target_ra)
+        separation = math.degrees(math.acos(max(-1.0, min(1.0, cosine))))
+        if separation <= radius_degrees and (best is None or separation < best[0]):
+            best = (separation, target_id)
+    return best[1] if best else None
+
+
 def nearest_target_name(
     root: Path, ra_hours: float, dec_degrees: float, radius_degrees: float = 1.0
 ) -> str | None:
@@ -864,23 +909,14 @@ def nearest_target_name(
         return None
     from astrometricslib import Target
 
-    mount_ra = math.radians(ra_hours * 15.0)
-    mount_dec = math.radians(dec_degrees)
-    best: tuple[float, str] | None = None
+    targets: list[tuple[str, float, float]] = []
     for (data_json,) in rows:
         try:
             target = Target.model_validate(json.loads(data_json))
-            target_ra = math.radians(target.ra_deg)
-            target_dec = math.radians(target.dec_deg)
+            targets.append((target.id, float(target.ra_deg), float(target.dec_deg)))
         except ValueError, TypeError, AstrometricsError:
             continue
-        cosine = math.sin(mount_dec) * math.sin(target_dec) + math.cos(mount_dec) * math.cos(
-            target_dec
-        ) * math.cos(mount_ra - target_ra)
-        separation = math.degrees(math.acos(max(-1.0, min(1.0, cosine))))
-        if separation <= radius_degrees and (best is None or separation < best[0]):
-            best = (separation, target.id)
-    return best[1] if best else None
+    return nearest_target_id(targets, ra_hours, dec_degrees, radius_degrees)
 
 
 def read_report(root: Path) -> dict:

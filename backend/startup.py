@@ -10,7 +10,9 @@ functions. They:
   `sky_catalog_warmup_finished`, and the desktop shell keeps its splash
   screen up until it is set;
 * build the three most recent night reviews once the screens are ready, so
-  the Observatory Manager opens at once (`warm_night_reviews`).
+  the Observatory Manager opens at once (`warm_night_reviews`);
+* build the depth goal status of the targets most likely to be opened first,
+  so the first Image Processing visit finds it kept (`warm_depth_goals`).
 """
 
 import asyncio
@@ -151,3 +153,92 @@ def warm_night_reviews(night_count: int = NIGHT_REVIEW_WARMUP_COUNT) -> None:
             logger.info("Night reviews warmed in %.1fs", time.monotonic() - started_at)
         except Exception:
             logger.exception("Night review warm-up failed; the first Observatory Manager open will be slow")
+
+
+DEPTH_GOAL_WARMUP_COUNT = 3
+"""How many targets `warm_depth_goals` prepares.
+
+Design estimate WAY-D108 (see ``validation/wayfinding.md``): the target the
+telescope points at, plus the most recently imaged targets. The Image
+Processing screen opens on the most recently imaged target that has a
+picture, and the user usually looks at that one or the one before. One cold
+build takes 1 to 2 s on the real library, so three targets keep the
+background work to a few seconds.
+"""
+
+
+def _depth_goal_warmup_targets(count: int) -> list[str]:
+    """Choose the targets whose depth goal is most likely to be read first.
+
+    The target the telescope points at comes first (when the telemetry loop
+    already knows it). The others are the targets with a picture, newest
+    imaged first, which is how the Image Processing screen chooses the target
+    it opens on. A target appears once.
+
+    Parameters
+    ----------
+    count : `int`
+        The most targets to return.
+
+    Returns
+    -------
+    targets : `list` [`str`]
+        Target ids, at most ``count``, in the order to build them.
+    """
+    chosen: list[str] = []
+    telescope_state = container.astrometrics_service.get_state().get("telescope", {})
+    pointed_at = telescope_state.get("targetName")
+    if pointed_at:
+        chosen.append(str(pointed_at))
+
+    imaged_at = container.target_service.get_camera_index()["targets"]
+    with_picture = {
+        str(target.id)
+        for target in container.target_service.get_targets(detail="summary")
+        if target.stacking.processed_image or target.stacking.stacked_image
+    }
+    newest_first = sorted(
+        (target_id for target_id in imaged_at if target_id in with_picture),
+        key=lambda target_id: imaged_at[target_id]["lastFrameTime"] or float("-inf"),
+        reverse=True,
+    )
+    for target_id in newest_first:
+        if target_id not in chosen:
+            chosen.append(target_id)
+    return chosen[:count]
+
+
+def warm_depth_goals(target_count: int = DEPTH_GOAL_WARMUP_COUNT) -> None:
+    """Build the depth goal status of the likely first targets, one at a time.
+
+    This runs after the other warm-ups, so it never competes with them. It
+    calls the same function as the ``advisory:depth_goal`` request, so the
+    first request for one of these targets finds the status kept. It only
+    reads. A target that fails, or a library with no targets, is logged at
+    debug level and skipped, since the only cost is a slower first visit.
+
+    Parameters
+    ----------
+    target_count : `int`, optional
+        The most targets to build. Defaults to `DEPTH_GOAL_WARMUP_COUNT`.
+    """
+    with background_log_context("depth-goal-warmup"):
+        started_at = time.monotonic()
+        try:
+            targets = _depth_goal_warmup_targets(target_count)
+        except Exception:
+            logger.debug("Depth goal warm-up could not choose targets", exc_info=True)
+            return
+        built = 0
+        for target_id in targets:
+            try:
+                container.advisory_service.get_depth_goal(target_id)
+                built += 1
+            except Exception:
+                logger.debug("Depth goal warm-up skipped %s", target_id, exc_info=True)
+        logger.info(
+            "Depth goals warmed for %d of %d targets in %.1fs",
+            built,
+            len(targets),
+            time.monotonic() - started_at,
+        )

@@ -7,6 +7,8 @@ and source filters, keeps one row per alignment attempt when the same
 attempt is recorded again, and removes repeated rows only on request.
 """
 
+import json
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -519,3 +521,31 @@ def test_stores_opened_together_on_a_new_database_all_work(tmp_path: Any) -> Non
 
     assert errors == []
     assert all(version is not None for version in versions)
+
+
+def test_recorded_session_nights_is_empty_before_any_session_is_stored(store: ControlRecordStore) -> None:
+    """A database with no session tables has no nights, and is not an error."""
+    assert store.recorded_session_nights() == (frozenset(), frozenset())
+
+
+def test_recorded_session_nights_reads_only_the_session_ids(store: ControlRecordStore) -> None:
+    """The nights come from the session ids in the stored JSON."""
+    connection = sqlite3.connect(store.db_path)
+    connection.execute("CREATE TABLE ekos_session_contexts (id TEXT PRIMARY KEY, data_json TEXT)")
+    connection.execute("CREATE TABLE guiding_runs (id TEXT PRIMARY KEY, data_json TEXT)")
+    for index, night in enumerate(["2026-10-01", "2026-10-01", "2026-10-03"]):
+        connection.execute(
+            "INSERT INTO ekos_session_contexts (id, data_json) VALUES (?, ?)",
+            (f"row-{index}", json.dumps({"sessionId": night, "other": [1, 2, 3]})),
+        )
+    connection.execute(
+        "INSERT INTO guiding_runs (id, data_json) VALUES (?, ?)",
+        ("row-0", json.dumps({"sessionId": "2026-10-02"})),
+    )
+    connection.commit()
+    connection.close()
+
+    assert store.recorded_session_nights() == (
+        frozenset({"2026-10-01", "2026-10-03"}),
+        frozenset({"2026-10-02"}),
+    )

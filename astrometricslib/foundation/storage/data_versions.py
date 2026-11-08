@@ -26,7 +26,7 @@ import hashlib
 import logging
 import os
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
@@ -352,6 +352,122 @@ def get_stack_quality_data_version(config: AppConfiguration) -> tuple[str | int,
         return (*measurements, *identities, *settings)
     except sqlite3.Error, OSError:
         logger.warning("Could not read the stack data version from %s.", path, exc_info=True)
+        return None
+    finally:
+        if connection is not None:
+            connection.close()
+
+
+def get_frame_metric_signs(
+    config: AppConfiguration, metric: str, subject_groups: Sequence[Collection[str]]
+) -> tuple[tuple[int, int, int], ...] | None:
+    """Give a value for each group of frames that changes when its rows do.
+
+    A result that reads one metric of the frames (for example whether each
+    frame has a background level) changes when a row of that metric is added
+    to or removed from one of the frames it reads. The frames are given in
+    groups, so a result that keeps the part about older frames can ignore the
+    rows of the frames being taken tonight. A row of a frame in no group is
+    not counted.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application settings. They give the library folder.
+    metric : `str`
+        The metric's name, for example ``"frame.background_level_adu"``.
+    subject_groups : `~collections.abc.Sequence`
+        The subject ids (see `Target.frame_subject_id`) of each group, each
+        group a collection of `str`.
+
+    Returns
+    -------
+    signs : `tuple` [`tuple` [`int`, `int`, `int`], ...] or `None`
+        For each group: the count of its rows, the largest row number and
+        the sum of the row numbers. The sum catches a row replaced by a
+        newer one when the count stays the same. All zeros when there is no
+        database. `None` when the database could not be read; the caller
+        must not keep an answer then.
+    """
+    path = _library_database_path(config)
+    if path is None:
+        return None
+    groups = [frozenset(group) if not isinstance(group, frozenset) else group for group in subject_groups]
+    if not os.path.isfile(path):
+        return ((0, 0, 0),) * len(groups)
+    connection = None
+    try:
+        connection = sqlite3.connect(f"file:{quote(path)}?mode=ro", uri=True, timeout=5.0)
+        try:
+            rows = connection.execute(
+                "SELECT subject_id, row_id FROM quality_measurements "
+                "WHERE metric = ? AND subject_level = 'frame'",
+                (metric,),
+            ).fetchall()
+        except sqlite3.OperationalError as error:
+            if "no such table" not in str(error):
+                logger.warning("Could not read the frame metric signs from %s.", path, exc_info=True)
+                return None
+            rows = []
+        row_ids: list[list[int]] = [[] for _ in groups]
+        for subject_id, row_id in rows:
+            for group, ids in zip(groups, row_ids, strict=True):
+                if subject_id in group:
+                    ids.append(row_id)
+        return tuple((len(ids), max(ids, default=0), sum(ids)) for ids in row_ids)
+    except sqlite3.Error, OSError:
+        logger.warning("Could not read the frame metric signs from %s.", path, exc_info=True)
+        return None
+    finally:
+        if connection is not None:
+            connection.close()
+
+
+def get_target_document_signs(config: AppConfiguration) -> dict[str, tuple[int, str]] | None:
+    """Give a value for each target that changes whenever its document does.
+
+    A result built from every target's frame records can keep the part about
+    a target as long as the target's stored document is the same. This reads
+    each document once, in one query, and gives its size and a short hash.
+    It reads the whole table but decodes nothing, which takes a few
+    milliseconds for a library of 56 targets.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application settings. They give the library folder.
+
+    Returns
+    -------
+    signs : `dict` [`str`, `tuple` [`int`, `str`]] or `None`
+        For each target id, the size and the hash of its stored document.
+        Empty when there is no database or no targets table. `None` when the
+        database could not be read; the caller must not keep an answer then.
+    """
+    path = _library_database_path(config)
+    if path is None:
+        return None
+    if not os.path.isfile(path):
+        return {}
+    connection = None
+    try:
+        connection = sqlite3.connect(f"file:{quote(path)}?mode=ro", uri=True, timeout=5.0)
+        try:
+            rows = connection.execute("SELECT id, data_json FROM targets").fetchall()
+        except sqlite3.OperationalError as error:
+            if "no such table" not in str(error):
+                logger.warning("Could not read the target document signs from %s.", path, exc_info=True)
+                return None
+            rows = []
+        return {
+            str(target_id): (
+                len(text or ""),
+                hashlib.blake2b((text or "").encode("utf-8"), digest_size=16).hexdigest(),
+            )
+            for target_id, text in rows
+        }
+    except sqlite3.Error, OSError:
+        logger.warning("Could not read the target document signs from %s.", path, exc_info=True)
         return None
     finally:
         if connection is not None:

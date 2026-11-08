@@ -18,6 +18,7 @@ import pytest
 from astrometricslib.drivers import VersionedCache
 from astrometricslib.foundation.storage.data_versions import bump_data_version
 from wayfindinglib import ObservatoryControl
+from wayfindinglib.analytics import night_index
 from wayfindinglib.analytics.test.night_quality_helpers import (
     REVIEWED,
     STAR,
@@ -35,18 +36,21 @@ def _no_guiding(monkeypatch: pytest.MonkeyPatch) -> None:
     """Replace the guiding analysis, which has its own tests, by no data."""
     monkeypatch.setattr(night_analysis, "guiding_night_analysis", lambda context, night_id, **_: None)
     monkeypatch.setattr(night_analysis, "capture_library", lambda *args, **kwargs: [])
+    monkeypatch.setattr(night_index, "read_night_frames", lambda context: [])
+    monkeypatch.setattr(night_index, "subjects_with_background", lambda context, target_ids: frozenset())
 
 
 @pytest.fixture
 def builds(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
-    """Count the real builds of a night review and of the nights list.
+    """Count the real builds of a night review and of the nights list parts.
 
     Returns
     -------
     counts : `dict` [`str`, `int`]
-        ``night_quality`` and ``nights`` build counts.
+        ``night_quality`` builds, ``nights`` builds of the finished nights
+        and ``tonight`` builds of the night in progress.
     """
-    counts = {"night_quality": 0, "nights": 0}
+    counts = {"night_quality": 0, "nights": 0, "tonight": 0}
     real_review, real_list = night_quality_task.review_night_quality, night_history._build_night_list
 
     def counted_review(*args: Any, **kwargs: Any) -> Any:
@@ -68,7 +72,7 @@ def builds(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
         nights : `list`
             The listed nights.
         """
-        counts["nights"] += 1
+        counts["nights" if kwargs["finished"] else "tonight"] += 1
         return real_list(*args, **kwargs)
 
     monkeypatch.setattr(night_quality_task, "review_night_quality", counted_review)
@@ -198,7 +202,7 @@ def test_invalidate_night_forgets_that_night(review: ObservationReview, builds: 
     forgotten = review.invalidate_night(REVIEWED)
     _ask(review)
 
-    assert forgotten == 2  # the night and the list of nights
+    assert forgotten == 4  # the night, and the index and two parts of the list of nights
     assert builds["night_quality"] == 2
     assert (
         other.get_or_build((night_quality_task.NIGHT_QUALITY_CACHE_KEY, "2020-01-01"), "v", lambda: "x")

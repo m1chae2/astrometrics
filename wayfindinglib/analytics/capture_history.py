@@ -23,7 +23,7 @@ missing; remeasuring the frames brings it back (decision S13 of issue #95).
 import re
 import statistics
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from typing import Any
 
 from astrometricslib.reports import MeasurementStatus, observing_night_id
@@ -123,7 +123,9 @@ def _positive(value: float | None) -> float | None:
     return value if value is not None and value > 0 else None
 
 
-def read_frame_measurements(astrometrics: Any) -> dict[str, dict[str, tuple[float, int | None]]]:
+def read_frame_measurements(
+    astrometrics: Any, metrics: Mapping[str, int] | None = None, target_id: str | None = None
+) -> dict[str, dict[str, tuple[float, int | None]]]:
     """Read the stored frame measurements the capture analysis uses.
 
     Only the newest row of each frame and metric is read, only for the
@@ -135,6 +137,11 @@ def read_frame_measurements(astrometrics: Any) -> dict[str, dict[str, tuple[floa
     ----------
     astrometrics : `Any`
         The science library's high-level interface (``Astrometrics``).
+    metrics : `~collections.abc.Mapping` [`str`, `int`], optional
+        The metrics to read, each with its pinned definition version.
+        `PINNED_FRAME_METRICS` when omitted.
+    target_id : `str`, optional
+        Read only this target's frames. Every target's when omitted.
 
     Returns
     -------
@@ -145,8 +152,10 @@ def read_frame_measurements(astrometrics: Any) -> dict[str, dict[str, tuple[floa
         and the row id of the stored measurement it came from.
     """
     by_frame: dict[str, dict[str, tuple[float, int | None]]] = defaultdict(dict)
-    for metric, version in PINNED_FRAME_METRICS.items():
-        for row in astrometrics.quality.query(metric=metric, level="frame", latest_only=True).rows:
+    for metric, version in (PINNED_FRAME_METRICS if metrics is None else metrics).items():
+        for row in astrometrics.quality.query(
+            metric=metric, level="frame", target_id=target_id, latest_only=True
+        ).rows:
             if row.definition_version != version:
                 continue
             if row.subject.channel is not None or row.status == MeasurementStatus.NOT_MEASURED:
@@ -154,6 +163,45 @@ def read_frame_measurements(astrometrics: Any) -> dict[str, dict[str, tuple[floa
             if row.value is not None:
                 by_frame[row.subject.subject_id][metric] = (row.value, row.row_id)
     return by_frame
+
+
+def equipment_light_frames(
+    astrometrics: Any, telescope_name: str, camera_name: str, targets: Sequence[Any] | None = None
+) -> Iterator[tuple[Any, Any]]:
+    """Walk the light frames taken with this telescope and camera.
+
+    Parameters
+    ----------
+    astrometrics : `Any`
+        The science library's high-level interface (``Astrometrics``).
+    telescope_name : `str`
+        Name of the imaging telescope.
+    camera_name : `str`
+        Name of the imaging camera, in any spelling its profile knows.
+    targets : `Sequence` [`Target`], optional
+        The library's targets, when the caller has just listed them.
+
+    Yields
+    ------
+    target : `Target`
+        The target the frame belongs to.
+    frame : `FrameRecord`
+        A light frame of the equipment that has a capture time. Output of
+        post-processing recorded as a light frame is left out.
+    """
+    camera_spellings = equipment_spellings(astrometrics, camera_name)
+    telescope_spelling = normalize_name(telescope_name)
+    for target in astrometrics.targets.list() if targets is None else targets:
+        for frame in target.frames:
+            if not str(frame.role).upper().endswith("LIGHT") or frame.timestamp is None:
+                continue
+            if _PROCESSED_FILE_MARKER in frame.path.rsplit("/", 1)[-1].lower():
+                continue
+            if normalize_name(frame.camera) not in camera_spellings:
+                continue
+            if normalize_name(frame.telescope) != telescope_spelling:
+                continue
+            yield target, frame
 
 
 def collect_capture_frames(
@@ -179,50 +227,37 @@ def collect_capture_frames(
         A measurement the frame lacks (or has only at another definition
         version) stays `None`.
     """
-    camera_spellings = equipment_spellings(astrometrics, camera_name)
-    telescope_spelling = normalize_name(telescope_name)
     stored = read_frame_measurements(astrometrics)
     frames = []
-    for target in astrometrics.targets.list() if targets is None else targets:
-        for frame in target.frames:
-            if not str(frame.role).upper().endswith("LIGHT") or frame.timestamp is None:
-                continue
-            if _PROCESSED_FILE_MARKER in frame.path.rsplit("/", 1)[-1].lower():
-                continue
-            if normalize_name(frame.camera) not in camera_spellings:
-                continue
-            if normalize_name(frame.telescope) != telescope_spelling:
-                continue
-            values = stored.get(target.frame_subject_id(frame), {})
-            pixel_scale = _positive(frame.pixel_scale_arcsec)
-            elongation = values.get(STAR_ELONGATION_METRIC)
-            frames.append(
-                CaptureFrame(
-                    path=frame.path,
-                    target_id=target.id,
-                    timestamp=float(frame.timestamp),
-                    exposure_seconds=float(frame.exposure or 0.0),
-                    filter_name=str(getattr(frame.filter, "value", frame.filter)),
-                    is_spectral=frame.is_spectral,
-                    sensor_temperature_c=frame.sensor_temperature_c,
-                    saturated_pixel_fraction=values.get(SATURATED_FRACTION_METRIC, (None, None))[0],
-                    background_adu=values.get(BACKGROUND_METRIC, (None, None))[0],
-                    star_width_arcsec=_positive(values.get(STAR_WIDTH_METRIC, (None, None))[0]),
-                    # The elongation is long axis over short axis (at least 1),
-                    # and roundness is its inverse (at most 1).
-                    roundness=1.0 / elongation[0]
-                    if elongation is not None and elongation[0] >= 1.0
-                    else None,
-                    altitude_degrees=frame.altitude_degrees,
-                    azimuth_degrees=frame.azimuth_degrees,
-                    pier_side=frame.pier_side,
-                    pixel_scale_arcsec=pixel_scale,
-                    binning=frame.binning or 1,
-                    measurement_rows={
-                        metric: row_id for metric, (_, row_id) in values.items() if row_id is not None
-                    },
-                )
+    for target, frame in equipment_light_frames(astrometrics, telescope_name, camera_name, targets):
+        values = stored.get(target.frame_subject_id(frame), {})
+        pixel_scale = _positive(frame.pixel_scale_arcsec)
+        elongation = values.get(STAR_ELONGATION_METRIC)
+        frames.append(
+            CaptureFrame(
+                path=frame.path,
+                target_id=target.id,
+                timestamp=float(frame.timestamp),
+                exposure_seconds=float(frame.exposure or 0.0),
+                filter_name=str(getattr(frame.filter, "value", frame.filter)),
+                is_spectral=frame.is_spectral,
+                sensor_temperature_c=frame.sensor_temperature_c,
+                saturated_pixel_fraction=values.get(SATURATED_FRACTION_METRIC, (None, None))[0],
+                background_adu=values.get(BACKGROUND_METRIC, (None, None))[0],
+                star_width_arcsec=_positive(values.get(STAR_WIDTH_METRIC, (None, None))[0]),
+                # The elongation is long axis over short axis (at least 1),
+                # and roundness is its inverse (at most 1).
+                roundness=1.0 / elongation[0] if elongation is not None and elongation[0] >= 1.0 else None,
+                altitude_degrees=frame.altitude_degrees,
+                azimuth_degrees=frame.azimuth_degrees,
+                pier_side=frame.pier_side,
+                pixel_scale_arcsec=pixel_scale,
+                binning=frame.binning or 1,
+                measurement_rows={
+                    metric: row_id for metric, (_, row_id) in values.items() if row_id is not None
+                },
             )
+        )
     frames.sort(key=lambda frame: frame.timestamp)
     return frames
 

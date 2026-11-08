@@ -26,6 +26,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
 from astrometricslib.drivers import VersionedCache
+from wayfindinglib.analytics.night_index import TargetFrameMemo
 from wayfindinglib.data_access.delegation_policy_reader import get_delegation_policy
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
 from wayfindinglib.drivers.butler import DiskButler
@@ -153,6 +154,8 @@ class ControlContext:
         self._guiding_driver_lock = threading.Lock()
         self.review_cache = VersionedCache()
         """Results of the slow night reviews, kept until their data changes."""
+        self.night_frame_memo = TargetFrameMemo()
+        """Each target's frames in their nights, for the list of nights."""
         self._indi_diagnostics: IndiDiagnostics | None = None
         self.motion_stop = threading.Event()
         """Set by `control.mount.abort_motion` to stop a centering loop."""

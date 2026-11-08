@@ -32,6 +32,7 @@ An *observation package* is the plan for one target: exposure rows (a count, a f
 - The alignment attempts those modules read are kept by the control record store (`drivers/control_record_store.py`). An attempt that came from a frame names that frame in `source_frame`. Bringing in or solving the same frame again then updates its one row instead of adding a second.
 - `performance_envelope.py` and `envelope_assembly.py` build the performance envelope: the range of results the equipment has reached on earlier nights. `envelope_assembly.py` reads only guide samples whose source is in `MEASURED_GUIDING_SAMPLE_SOURCES` (`models/session/telemetry.py`): the PHD2 guide log, PHD2 live, the Ekos guide log and the Ekos analyze log. A sample that is a pulse estimate or unverified never counts, because the envelope is built from measured drift only.
 - `pointing_model.py` fits the mount's pointing error.
+- `night_index.py` and `data_versions.py` keep the list of nights in two parts, so a new frame tonight does not rebuild the finished nights. `night_index.py` finds which night and target each frame belongs to, and which nights have an Ekos record or a guiding run. It reads again only the targets whose stored document changed. `data_versions.py` gives each part its own version: the finished nights are versioned by their own frames, sessions and sky rows, and the night in progress by its own. Evidence: [WAY-D102](../../documentation/library_design/validation/wayfinding.md#design-estimates).
 
 ## Measures that these modules produce
 

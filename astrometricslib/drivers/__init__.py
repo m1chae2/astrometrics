@@ -4,8 +4,10 @@ Description: Storage and file helpers that the backend, the MCP servers and
 `wayfindinglib` share: the data store (`Butler`, `AbstractButler`,
 `DatasetSpec`, `connect_db`), the library's write counters
 (`get_library_data_version`, `get_target_data_version`,
-`get_camera_data_versions`, `get_stack_quality_data_version`,
-`get_target_camera_names`, `LIBRARY_DATA_KINDS`,
+`get_camera_data_versions`, `get_frame_metric_signs`,
+`get_stack_quality_data_version`,
+`get_target_camera_names`, `get_target_document_signs`,
+`LIBRARY_DATA_KINDS`,
 and `bump_data_version` and `read_data_versions` for a database that keeps
 its own counters) and the
 cache that uses them (`VersionedCache`), file locks and work folders, the
@@ -64,10 +66,12 @@ from astrometricslib.foundation.storage.data_versions import ALL_KINDS as LIBRAR
 from astrometricslib.foundation.storage.data_versions import (
     bump_data_version,
     get_camera_data_versions,
+    get_frame_metric_signs,
     get_library_data_version,
     get_stack_quality_data_version,
     get_target_camera_names,
     get_target_data_version,
+    get_target_document_signs,
     read_data_versions,
 )
 from astrometricslib.foundation.storage.local_database import connect_db
@@ -100,10 +104,12 @@ __all__ = [
     "connect_db",
     "file_lock",
     "get_camera_data_versions",
+    "get_frame_metric_signs",
     "get_library_data_version",
     "get_stack_quality_data_version",
     "get_target_camera_names",
     "get_target_data_version",
+    "get_target_document_signs",
     "is_loopback_host",
     "is_path_inside",
     "launch_identity_from_settings",

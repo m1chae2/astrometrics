@@ -839,6 +839,43 @@ class ControlRecordStore:
             return None
         return {name: counters.get(name, 0) for name in names}
 
+    def recorded_session_nights(self) -> tuple[frozenset[str], frozenset[str]] | None:
+        """Name the nights that have an Ekos session record or a guiding run.
+
+        Only the ``sessionId`` of each stored record is read, inside the
+        database, so the records are not decoded into models. The list of
+        nights needs nothing else from them.
+
+        Returns
+        -------
+        nights : `tuple` [`frozenset` [`str`], `frozenset` [`str`]] or `None`
+            The session ids of the Ekos session records, then those of the
+            guiding runs. `None` if the database could not be read.
+        """
+        connection = None
+        try:
+            connection = self._connect()
+            result = []
+            for statement in (
+                "SELECT json_extract(data_json, '$.sessionId') FROM ekos_session_contexts",
+                "SELECT json_extract(data_json, '$.sessionId') FROM guiding_runs",
+            ):
+                try:
+                    rows = connection.execute(statement).fetchall()
+                except sqlite3.OperationalError as error:
+                    if "no such table" not in str(error):
+                        logger.exception("Could not read the nights of the recorded sessions.")
+                        return None
+                    rows = []
+                result.append(frozenset(str(row[0]) for row in rows if row[0] is not None))
+            return result[0], result[1]
+        except sqlite3.Error, StorageError:
+            logger.exception("Could not read the nights of the recorded sessions.")
+            return None
+        finally:
+            if connection is not None:
+                connection.close()
+
     def guiding_sample_count(self) -> int | None:
         """Count the stored guiding samples.
 

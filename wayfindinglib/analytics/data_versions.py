@@ -40,6 +40,14 @@ describes what the camera usually does and a night in progress is not
 representative. A new frame tonight changes the target's own part and leaves
 the camera part as it is; the camera part changes once, when the night
 rolls over.
+
+The list of nights (`nights_data_versions`) is kept in two parts, so a new
+frame tonight does not rebuild the entries of finished nights. The version of
+the finished nights is the digest of their own frames and sessions and the
+stored sky background rows of their frames. The version
+of the night in progress holds tonight's frames, sessions and background
+rows. Both include the equipment and configuration signs. A change of the
+equipment or the configuration rebuilds both parts.
 """
 
 from __future__ import annotations
@@ -52,17 +60,21 @@ from typing import TYPE_CHECKING, Any
 
 from astrometricslib.drivers import (
     get_camera_data_versions,
+    get_frame_metric_signs,
     get_library_data_version,
     get_target_camera_names,
     get_target_data_version,
 )
 from astrometricslib.reports import observing_night_id
+from wayfindinglib.analytics.capture_history import BACKGROUND_METRIC
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
 from wayfindinglib.data_access.site_profile_reader import configured_observer_location
 from wayfindinglib.drivers.control_record_store import BULK_GUIDING_SAMPLES_KIND, RECORD_VERSION_TABLES
 
 if TYPE_CHECKING:
     from collections.abc import Hashable
+
+    from wayfindinglib.analytics.night_index import NightIndex
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +91,10 @@ It does not read the observation sessions, so they are not listed.
 
 NIGHT_LIST_TABLES = ("guiding_runs", "ekos_session_contexts")
 """The ``wayfinding.db`` tables the list of nights reads; all writes count."""
+
+NIGHT_LIST_LIBRARY_KINDS = ("targets",)
+"""The science library data the list of nights reads: the target documents,
+which hold the frame records."""
 
 REPORT_COARSE_TABLE = "guiding_samples"
 """The table written every few seconds during a night, counted coarsely."""
@@ -276,42 +292,114 @@ def depth_goal_data_version(
     return (context, target, tuple(sorted(camera_versions.items())))
 
 
-def nights_data_version(context: Any) -> Hashable | None:
-    """Work out the version of every input of the list of nights.
+def nights_index_version(context: Any, tonight: str, signs: Hashable) -> Hashable | None:
+    """Work out the version of the inputs of the index of the nights.
 
-    The list of nights reads the Ekos sessions, the guiding runs and the
-    frame library. It does not read the guiding samples, which a live night
-    adds to every few seconds. So, unlike `review_data_version`, this
-    version does not watch them, and live guiding does not make the list
-    rebuild on every request.
+    The index (`NightIndex`) is built from the frames in the target
+    documents, the Ekos session records and the guiding runs, so it watches
+    the counters of those, the active equipment, the configuration and the
+    night in progress. It does not watch the guiding samples.
 
     Parameters
     ----------
     context : `ControlContext`
         Supplies the configuration (``config``) and the record store
         (``records``).
+    tonight : `str`
+        The night in progress.
+    signs : `~collections.abc.Hashable`
+        The equipment and configuration signs (`nights_context_signs`).
 
     Returns
     -------
     version : `~collections.abc.Hashable` or `None`
-        A value that is equal for two calls only when no input of the list
+        A value that is equal for two calls only when none of those inputs
         has visibly changed between them. `None` when it cannot be worked
         out, in which case the caller must not keep a result.
     """
     try:
         wayfinding = context.records.data_versions(NIGHT_LIST_TABLES)
-        library = get_library_data_version(context.config)
-        if wayfinding is None or library is None:
+        targets = get_library_data_version(context.config, NIGHT_LIST_LIBRARY_KINDS)
+        if wayfinding is None or targets is None:
+            return None
+        return (tuple(sorted(wayfinding.items())), targets, tonight, signs)
+    except Exception:
+        # A version that cannot be worked out only means no result is kept.
+        logger.exception("Could not work out the data version of the index of the nights.")
+        return None
+
+
+def nights_context_signs(config: Any) -> Hashable:
+    """Describe the equipment and configuration the list of nights reads.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application settings.
+
+    Returns
+    -------
+    signs : `~collections.abc.Hashable`
+        The active equipment and site, then the fingerprint of the
+        configuration sections. Changing either changes the list.
+    """
+    return (equipment_signs(config), config_signs(config))
+
+
+def nights_data_versions(
+    context: Any, index: NightIndex, signs: Hashable
+) -> tuple[Hashable, Hashable] | None:
+    """Work out the versions of the two parts of the list of nights.
+
+    The list reads the frames, the Ekos session records, the guiding runs
+    and each frame's stored sky background. It does not read the guiding
+    samples, which a live night adds every few seconds. It is kept in two
+    parts, and each has its own version:
+
+    - The finished nights: the digest of their frames and sessions
+      (`NightIndex.finished_digest`) and the stored background rows of their
+      frames. A frame, a session or a measurement
+      added tonight leaves this version as it is. A change that touches a
+      finished night (a restack that moves or removes a frame, an old night
+      ingested late, a measurement added to an old frame) changes it. It
+      also changes once, when the night rolls over.
+    - The night in progress: its frames and sessions
+      (`NightIndex.tonight_signature`) and the stored background rows of its
+      frames.
+
+    Both include the active equipment, the configured site and the
+    configuration signs.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the configuration (``config``).
+    index : `NightIndex`
+        The nights' frames and sessions.
+    signs : `~collections.abc.Hashable`
+        The equipment and configuration signs (`nights_context_signs`).
+
+    Returns
+    -------
+    versions : `tuple` or `None`
+        Two `~collections.abc.Hashable` values: the finished nights'
+        version, then the night in progress's. `None`
+        when they cannot be worked out, in which case the caller must not
+        keep a result.
+    """
+    try:
+        background = get_frame_metric_signs(
+            context.config, BACKGROUND_METRIC, (index.finished_subject_ids, index.tonight_subject_ids)
+        )
+        if background is None:
             return None
         return (
-            tuple(sorted(wayfinding.items())),
-            library,
-            equipment_signs(context.config),
-            config_signs(context.config),
+            (index.finished_digest, background[0], signs),
+            (index.tonight_signature, background[1], signs),
         )
     except Exception:
         # A version that cannot be worked out only means no result is kept.
-        logger.exception("Could not work out the data version of the list of nights.")
+        logger.exception("Could not work out the data versions of the list of nights.")
         return None
 
 

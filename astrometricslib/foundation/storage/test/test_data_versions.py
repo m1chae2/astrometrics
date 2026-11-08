@@ -25,6 +25,7 @@ from astrometricslib.foundation.storage.data_versions import (
     TARGETS_KIND,
     bump_data_version,
     get_camera_data_versions,
+    get_frame_metric_signs,
     get_library_data_version,
     get_stack_quality_data_version,
     get_target_camera_names,
@@ -393,3 +394,37 @@ def test_the_stack_version_of_a_missing_library_is_empty(tmp_path: Path) -> None
     empty = AppConfiguration()
     empty.update_config({"Image Library": {"path": str(tmp_path / "nothing")}})
     assert get_stack_quality_data_version(empty) == (0, 0, "", 0, "", 0)
+
+
+def test_the_frame_metric_signs_follow_the_rows_of_each_group(config: AppConfiguration) -> None:
+    """A row of a named frame changes its own group's signs only."""
+    store = QualityStore.from_configuration(config)
+    metric = _measurement().metric
+    groups = [{"M 31/a.fits"}, {"M 31/b.fits"}]
+    assert get_frame_metric_signs(config, metric, groups) == ((0, 0, 0), (0, 0, 0))
+
+    first = _camera_measurement(store, "CamA", "M 31", "run-1")
+    store.write_measurements([
+        first.model_copy(update={"subject": first.subject.model_copy(update={"subject_id": "M 31/a.fits"})})
+    ])
+    after_a = get_frame_metric_signs(config, metric, groups)
+    assert after_a is not None
+    assert after_a[0][0] == 1
+    assert after_a[1] == (0, 0, 0)
+
+    second = _camera_measurement(store, "CamA", "M 31", "run-2")
+    store.write_measurements([
+        second.model_copy(update={"subject": second.subject.model_copy(update={"subject_id": "M 31/b.fits"})})
+    ])
+    after_b = get_frame_metric_signs(config, metric, groups)
+    assert after_b is not None
+    assert after_b[0] == after_a[0]
+    assert after_b[1][0] == 1
+
+    # A row of a frame in no group is not counted.
+    third = _camera_measurement(store, "CamA", "M 31", "run-3")
+    store.write_measurements([
+        third.model_copy(update={"subject": third.subject.model_copy(update={"subject_id": "M 31/c.fits"})})
+    ])
+    assert get_frame_metric_signs(config, metric, groups) == after_b
+    assert get_frame_metric_signs(config, "frame.other_metric", groups) == ((0, 0, 0), (0, 0, 0))

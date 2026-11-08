@@ -68,6 +68,16 @@ repos:
         entry: ./build/codegen/generate-types.sh
         language: system
         pass_filenames: false
+      - id: generate-client-configs
+        name: Generate MCP Client Configs
+        # Rewrites the AI clients' MCP settings and the investigator agent
+        # from the tool manifests. A tracked file it changes fails the commit;
+        # stage the new file and commit again. It runs in write mode, not
+        # --check, because the Gemini and local files are not tracked.
+        entry: .venv/bin/python build/mcp/generate_client_configs.py
+        language: system
+        pass_filenames: false
+        files: ^(mcp_servers/.*tool_manifest\.json|ui/mcp/tool_manifest\.json|mcp_servers/common/profile\.py|build/mcp/generate_client_configs\.py)$
       - id: type-check
         name: TypeScript Type Check
         entry: npm run type-check

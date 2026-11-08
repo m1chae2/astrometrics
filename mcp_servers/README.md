@@ -31,7 +31,7 @@ The rules fail closed:
 
 Only tools marked `keep` are offered. A call to any other tool is refused, and the refusal quotes the decision's note, for example "Replaced by target_query".
 
-Do not edit `tool_manifest.json` by hand. `python -m mcp_servers.inventory --write-runtime-manifests` writes it from the reviewed decisions. `inventory/test/test_served_tools.py` fails when a committed manifest differs from a fresh run.
+Do not edit `tool_manifest.json` by hand. `python -m mcp_servers.inventory --write-runtime-manifests` writes it from the reviewed decisions. `inventory/test/test_served_tools.py` fails when a committed manifest differs from a fresh run. The AI clients' settings and the investigator agent (`.claude/agents/investigator.md`) list the allowed tools too: `build/mcp/generate_client_configs.py` writes them from the manifests. A pre-commit hook runs it whenever a manifest changes, and the commit fails until you stage the files it rewrote.
 
 ## How a tool call reaches a method
 

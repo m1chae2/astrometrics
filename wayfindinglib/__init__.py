@@ -27,10 +27,11 @@ settings by itself::
 
 What to import from where
 -------------------------
-The package root holds 7 names: `Wayfinder`, the four sub-API classes
+The package root holds 8 names: `Wayfinder`, the four sub-API classes
 (`ObservatoryControl`, `ObservationPlanning`, `ObservationExecution` and
-`ObservationReview`), and the two records a script builds or reads most
-(`ObservationSession` and `ObservationPackage`).
+`ObservationReview`), the two records a script builds or reads most
+(`ObservationSession` and `ObservationPackage`), and `FrameEndDetector`,
+which says when a camera frame has ended from the camera status text.
 Three public modules hold the rest:
 
 - `wayfindinglib.exceptions`: the errors that belong to this library. The
@@ -79,6 +80,7 @@ if TYPE_CHECKING:
     from wayfindinglib.api.review import ObservationReview
     from wayfindinglib.models.planning.observation_package import ObservationPackage
     from wayfindinglib.models.session.observation_session import ObservationSession
+    from wayfindinglib.tasks.control_tasks.frame_end_detection import FrameEndDetector
 
 try:
     # Single source of truth is pyproject.toml; both libraries ship from the
@@ -94,6 +96,7 @@ _LAZY_EXPORTS = {
     "ObservationReview": "wayfindinglib.api.review",
     "ObservationPackage": "wayfindinglib.models.planning.observation_package",
     "ObservationSession": "wayfindinglib.models.session.observation_session",
+    "FrameEndDetector": "wayfindinglib.tasks.control_tasks.frame_end_detection",
 }
 """Export name -> the module that defines it."""
 

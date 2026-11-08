@@ -18,9 +18,12 @@ functions.
 
 ## Status
 
-Status on 2026-11-07: decisions D1 to D24 are made, and the two plan reviews and the review of
-pull request 151 are folded in (appendices A to C). Phases L0 to L3 and S0 are built. Items marked "verify" depend on INDI driver behavior
-that must be confirmed against the INDI 2.2.5 driver source before the phase that uses them.
+Status on 2026-11-08: decisions D1 to D24 are made, and the two plan reviews and the review of
+pull request 151 are folded in (appendices A to C). Phases L0 to L3 and S0 to S4 are built; S1
+and S5 are in issue 160. The "verify" items of section 5 were checked against the INDI 2.2.5
+driver source, and the table gives what was found. One change from the plan: S3 converts each
+measurement by inverting the driver's own formulas instead of a closure run at every start. A
+live closure check on 2026-11-07 agreed within 4 % for sky glow and 9 % for star width.
 
 ## 1. Goal
 
@@ -160,18 +163,18 @@ them to these properties and clamps them to valid ranges.
 | Focal length, aperture | CCD and guide `SCOPE_INFO` (the telescope simulator has no `SCOPE_INFO` in INDI 2.2.5) | Settings (`Observatory.Optic`, `Observatory.Setup`), not fitted | None needed |
 | Sensor size and pixel size | CCD and guide `SIM_XRES`, `SIM_YRES`, `SIM_XSIZE`, `SIM_YSIZE` | Camera profile and settings, not fitted | None needed |
 | Camera identity | Frame headers `INSTRUME`, `GAIN`, `OFFSET` | Set to match the real camera profile, so simulator frames file under the right camera and bias | None needed |
-| Guide rate | Telescope `GUIDE_RATE_WE`, `GUIDE_RATE_NS` (fraction of sidereal: rate divided by 15.041, with the cos(Dec) convention of the calibration) | Recorded guider calibration, else the real mount's set rate | Mount default |
-| Periodic error | CCD `SIM_PEMAX`, `SIM_PEPERIOD`; guide `SIM_PE_MAX`, `SIM_PE_PERIOD` (amplitude = peak to peak / 2, same phase on both, verify) | The core's measured unguided mount error (section 4), not the guiding spectrum's peak to peak, which measures what guiding left | Zero |
-| Random and slow guiding disturbance | Guide `SIM_RA_RAND`, `SIM_DEC_RAND`, `SIM_RA_DRIFT`, `SIM_DEC_DRIFT` | The same measurement's residual terms | Simulator default |
+| Guide rate | Telescope `GUIDE_RATE_WE`, `GUIDE_RATE_NS` (fraction of sidereal: the driver's unit is 15.0 arcsec per second, with the cos(Dec) convention of the calibration) | Recorded guider calibration, else the real mount's set rate | Mount default |
+| Periodic error | CCD `SIM_PEMAX`, `SIM_PEPERIOD`; guide `SIM_PE_MAX`, `SIM_PE_PERIOD` (zero to peak, divided by cos(Dec); the two cameras run their own phase, which cannot be set; the main camera's period is limited to 60 s, so a longer period is clamped and the amplitude scaled to keep the peak speed) | The core's measured unguided mount error (section 4), not the guiding spectrum's peak to peak, which measures what guiding left | Zero |
+| Random and slow guiding disturbance | Guide `SIM_RA_RAND`, `SIM_DEC_RAND`, `SIM_RA_DRIFT`, `SIM_DEC_DRIFT` | The same measurement's residual terms: the median signed drift, and the frame-to-frame jitter (median step divided by the square root of 2) as a uniform term of half-width jitter times the square root of 3 | Simulator default |
 | Polar error | CCD and guide `SIM_POLAR`, `SIM_POLARDRIFT` | The newest polar alignment record (one today: 34'25", 2026-10-03), labeled as a single measurement. Not the pointing model's ME and MA | Zero |
 | Dec backlash | Telescope `DEC_BACKLASH` (ms) | `dec_backlash_estimate_ms` | Zero |
 | Guide controller | PHD2 profile | The parsed PHD2 controller settings of the newest run (section 4) | PHD2 defaults |
-| Seeing, main camera | CCD `SIM_SEEING` | Calibrated by closure: the value at which the core's unstored folder measurement gives the target `star_width_moffat_px`. The target is the night's seeing (S5) or the envelope median | Simulator default |
-| Seeing, guide camera | Guide `SIM_SEEING` | Its own closure on guide frames (the guide star is undersampled at 6.39 arcsec per pixel, so its width is not taken from the main camera) | Simulator default |
-| Sky glow | CCD and guide `SIM_SKYGLOW` (magnitudes) | Calibrated by closure to the target sky rate in ADU per second through the camera gain, with the simulator's own pedestal measured from simulator bias frames. Target from the core's sky-rate prediction | Simulator default |
-| Noise, bias, maximum value | CCD `SIM_NOISE`, `SIM_MAXVAL`; guide `SIM_BIAS` | Camera profile (read noise 4.82 ADU, clip ceiling); `SIM_NOISE` from the driver's noise distribution (verify) | Simulator default |
-| Focus temperature behavior | CCD `SIM_FOCUS_POSITION`, `SIM_FOCUS_MAX` (verify) | The core's focus temperature fit in steps per °C, with the defocus curve matched to the real V-curve slope | No drift |
-| Download time | Stand-in transfer delay | `capture_overheads` download time, applied in the stand-in telescope computer's transfer | Not delayed |
+| Seeing, main camera | CCD `SIM_SEEING` | The envelope median star width, converted with the driver's own profile formula (checked by closure, see the status). Applied only after the focuser reports a position, because the driver ignores seeing until then | Simulator default |
+| Seeing, guide camera | Guide `SIM_SEEING` | Its own closure on guide frames (the guide star is undersampled at 6.39 arcsec per pixel, so its width is not taken from the main camera). Until that closure is built, the width is the main camera's sky width but never under a star 3.5 pixels wide, because real PHD2 rejects a narrower star as a hot pixel (live run 2026-11-07: 2.4 pixels failed, 3.5 pixels gave a half-flux diameter of 2.2 pixels and a signal-to-noise ratio of 62) | Star 3.5 pixels wide |
+| Sky glow | CCD and guide `SIM_SKYGLOW` (magnitudes) | The core's sky-rate prediction in ADU per second, converted with the driver's flux formula. When the target is below the horizon at the start, the prediction is made on the meridian at the target's declination. The guide camera keeps its default: no guide-camera sky is measured, and the main camera's rate does not transfer | Simulator default |
+| Noise, bias, maximum value | CCD `SIM_NOISE`, `SIM_MAXVAL`; guide `SIM_BIAS` | Camera profile (read noise 4.82 ADU, clip ceiling). The driver adds uniform noise from 0 to N-1, so N is the nearest whole number to the square root of (12 times the read noise squared plus 1), and the pedestal is the bias less (N-1)/2 | Simulator default |
+| Focus temperature behavior | CCD `SIM_FOCUS_POSITION`, `SIM_FOCUS_MAX` (verify) | The core's focus temperature fit in steps per °C, recorded only: the driver's best focus is a fixed number and the focuser's temperature is only a reading, so nothing can be set | No drift |
+| Download time | Stand-in transfer delay | `capture_overheads` download time, recorded only: the stand-in transfer has no delay option yet | Not delayed |
 | Dither settle | PHD2 setting | Guide controller row | PHD2 default |
 | Slew time, cooler response | No INDI property | Later tickets (section 9) | Not settable |
 
@@ -293,7 +296,8 @@ from the real databases at this start; the real folders are never opened), conve
 section 5, clamps it, and writes the properties with the operator's `indi_setprop` helper after
 each device's `CONNECTION` is On, before the backend starts. It writes one results file: for
 each value, the public call and its parameters, the night IDs used, the source note and date, a
-fingerprint of the library copy, and any clamping. Replies marked `truncated` are refused.
+fingerprint of the library copy, and any clamping. Replies marked `truncated` are not used: a
+run list too large to send is asked for again with fewer runs.
 
 Acceptance: after start, each property equals the value in the results file; a value without
 data falls back one step; a new night changes the values at the next start.
@@ -307,7 +311,13 @@ of seeing and sky glow; a live test that reads the properties back.
   the mount points at a target that has real light frames with the same camera, filter and full
   capture setting (gain, offset, binning, preferring the requested exposure), it takes the next
   of them, in the order they were taken, starting again at the first when all were used.
-  Otherwise it keeps the simulator's frame. SPEC frames are delivered like any other.
+  Otherwise it keeps the simulator's frame. SPEC frames are delivered like any other. The camera
+  is compared by the library's own camera name, and a filter by the library filter it stands for
+  (`L` and `Luminance` are one filter). Frames a camera simulator drew are never treated as real.
+- The simulated sky always points at M 13. The user's real M 13 frames were taken at offset 0,
+  while the camera profile now sets offset 10, so a capture there keeps the simulator's frame,
+  as the full capture-setting rule requires. The live delivery check of 2026-11-08 used an
+  offset 0 capture.
 - No second copy: before delivering a frame it calls the backend's `images:delete` for it (which
   writes a whiteout in the overlay, leaving the real file untouched, and removes the frame's
   record) and `quality.forget` for its measurements. It never opens the library while the
@@ -386,11 +396,11 @@ By decision D9:
 | :--- | :--- | :--- |
 | L0 to L3. The layer | Yes: the Real and Simulated switch, the chip and command rights change how they work | `150-ux-clean-up` |
 | S0. Set-up fixes | Yes: real stars and real settings in simulation | `150-ux-clean-up` |
-| S1. Integration test bed in CI | No (tests only) | Its own issue |
+| S1. Integration test bed in CI | No (tests only) | Its own issue (#160) |
 | S2. Real PHD2 | Yes: guiding in simulation comes from real PHD2 | `150-ux-clean-up` |
 | S3. Fitted settings | Yes: the simulator behaves like the user's telescope | `150-ux-clean-up` |
 | S4. Real frames | Yes: processing workflows run on real data in simulation | `150-ux-clean-up` |
-| S5. Validation | No (a script and a register entry) | Its own issue |
+| S5. Validation | No (a script and a register entry) | Its own issue (#160) |
 
 ## 9. Later tickets: changes to the app's features
 

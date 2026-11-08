@@ -132,6 +132,8 @@ def _summarize_run(
     run : `GuidingRunSummary`
         The facts about the run that the samples alone cannot show.
     """
+    controller = section.controller
+    ra_axis, dec_axis = controller.ra_axis, controller.dec_axis
     return GuidingRunSummary(
         id=f"{file_name}#{run_index}",
         session_id=observing_night_id(section.started_at),
@@ -151,6 +153,17 @@ def _summarize_run(
         altitude_degrees=section.altitude_degrees,
         azimuth_degrees=section.azimuth_degrees,
         pier_side=section.pier_side,
+        guide_exposure_seconds=controller.exposure_seconds,
+        ra_algorithm=ra_axis.algorithm if ra_axis else None,
+        dec_algorithm=dec_axis.algorithm if dec_axis else None,
+        ra_aggressiveness=ra_axis.aggressiveness if ra_axis else None,
+        dec_aggressiveness=dec_axis.aggressiveness if dec_axis else None,
+        ra_hysteresis=ra_axis.hysteresis if ra_axis else None,
+        dec_hysteresis=dec_axis.hysteresis if dec_axis else None,
+        ra_minimum_move_px=ra_axis.minimum_move_px if ra_axis else None,
+        dec_minimum_move_px=dec_axis.minimum_move_px if dec_axis else None,
+        maximum_ra_duration_ms=controller.maximum_ra_duration_ms,
+        maximum_dec_duration_ms=controller.maximum_dec_duration_ms,
     )
 
 

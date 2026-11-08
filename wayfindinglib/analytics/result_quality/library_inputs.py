@@ -42,7 +42,7 @@ import math
 import sqlite3
 import time
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -925,13 +925,19 @@ class LibraryInputs:
             )
         return notes
 
-    def sky_model_for(self, setting: CaptureSetting) -> tuple[SkyModel | None, str | None]:
+    def sky_model_for(
+        self, setting: CaptureSetting, exclude_nights: Collection[str] = ()
+    ) -> tuple[SkyModel | None, str | None]:
         """Fit the sky model of a capture setting's equipment key.
 
         Parameters
         ----------
         setting : `CaptureSetting`
             The capture setting.
+        exclude_nights : `Collection` [`str`], optional
+            Nights whose frames are left out of the fit, for a leave-one-out
+            check. A model fitted without nights is kept apart from the
+            model fitted with every night.
 
         Returns
         -------
@@ -939,13 +945,15 @@ class LibraryInputs:
             The model, or ``None`` and the reason there is none.
         """
         key = baseline_key(setting)
-        if key not in self._models:
+        excluded = tuple(sorted(set(exclude_nights)))
+        model_key = key if not excluded else f"{key}|without:{','.join(excluded)}"
+        if model_key not in self._models:
             site = self.site
             try:
                 cache_key = (
                     "sky_model",
                     str(self.config.get_library_path()),
-                    key,
+                    model_key,
                     site.latitude_deg,
                     site.longitude_deg,
                     site.elevation_m,
@@ -955,12 +963,25 @@ class LibraryInputs:
             # The fit reads every frame of the camera in the library, so it is
             # the same for every target and is kept until its camera changes.
             version = None if cache_key is None else (lambda: self.camera_data_version(setting.camera))
-            self._models[key] = _SKY_MODEL_CACHE.get_or_build(
-                cache_key, version, lambda: self._fit_sky_model(setting, key)
-            )
-        return self._models[key]
 
-    def _fit_sky_model(self, setting: CaptureSetting, key: str) -> tuple[SkyModel | None, str | None]:
+            def fit() -> tuple[SkyModel | None, str | None]:
+                """Fit the model, leaving out the nights asked for.
+
+                Returns
+                -------
+                model, reason : `tuple`
+                    The model, or ``None`` and the reason there is none.
+                """
+                if not excluded:
+                    return self._fit_sky_model(setting, key)
+                return self._fit_sky_model(setting, key, frozenset(excluded))
+
+            self._models[model_key] = _SKY_MODEL_CACHE.get_or_build(cache_key, version, fit)
+        return self._models[model_key]
+
+    def _fit_sky_model(
+        self, setting: CaptureSetting, key: str, exclude_nights: frozenset[str] = frozenset()
+    ) -> tuple[SkyModel | None, str | None]:
         """Fit the sky model of an equipment key from the camera's frames.
 
         Parameters
@@ -969,6 +990,8 @@ class LibraryInputs:
             A capture setting of the equipment, which names the camera.
         key : `str`
             The equipment key of `setting`.
+        exclude_nights : `frozenset` [`str`], optional
+            Nights to leave out of the fit.
 
         Returns
         -------
@@ -988,6 +1011,7 @@ class LibraryInputs:
             if baseline_key(observation.capture_setting) == key
             and observation.set_aside_reason is None
             and observation.night_id is not None
+            and observation.night_id not in exclude_nights
             and observation.start_epoch_seconds is not None
             and observation.ra_deg is not None
             and observation.dec_deg is not None

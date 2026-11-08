@@ -54,14 +54,19 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 
 from astrometricslib.drivers import OFFLINE_VARIABLE
+from simulator import phd2_launch
 from simulator.connection_guard import non_loopback_connections
+from simulator.fit.results import RESULTS_FILE_NAME, fitted_controller_settings
+from simulator.guiding_operator import GuidingOutcome, offline_identity, run_guiding_step
 from simulator.library_copy import teardown as remove_library_copy
 from simulator.observatory import (
+    GuiderKind,
     SimulatedObservatory,
     SimulationKind,
     choose_free_port,
@@ -93,12 +98,14 @@ from simulator.source_choice import (
 __all__ = [
     "GUARD_EXIT_CODE",
     "GUARD_FAILURE_LIMIT",
+    "GUIDER_VARIABLE",
     "LOCKED_EXIT_CODE",
     "OFFLINE_VARIABLE",
     "Launcher",
     "World",
     "acquire_world_lock",
     "build_world",
+    "choose_guider",
     "install_signal_handlers",
     "main",
     "run_operator_step",
@@ -106,6 +113,9 @@ __all__ = [
 
 logger = logging.getLogger("simulator.launch")
 
+#: Environment variable that chooses who plays PHD2: ``mock`` (the stand-in)
+#: or ``phd2`` (the real program). Unset: the real PHD2 when it can run.
+GUIDER_VARIABLE = "ASTROMETRICS_SIMULATOR_GUIDER"
 #: Name of the simulator's folder, beside the real data folder.
 SIMULATOR_FOLDER_NAME = "astrometrics-simulator"
 #: Name of the lock file, inside the simulator folder.
@@ -128,6 +138,9 @@ POLL_SECONDS = 0.25
 READY_TIMEOUT_SECONDS = 600.0
 #: Seconds the calibration step may take.
 CALIBRATION_TIMEOUT_SECONDS = 300.0
+#: Seconds the fit step (S3) may take. It opens the library copy, so the first
+#: load of the star catalog dominates.
+FIT_TIMEOUT_SECONDS = 600.0
 #: The note the operator step keeps with the change of control mode.
 OPERATOR_EVIDENCE_NOTE = "Simulator: commands reach only simulated devices on this computer."
 
@@ -160,6 +173,13 @@ class World:
     remove_copy : `~collections.abc.Callable`
         Unmounts the overlay and deletes the copies; gives `True` when
         nothing is left.
+    guider : `str`
+        ``phd2`` when the real PHD2 plays PHD2, else ``mock``.
+    phd2 : `~simulator.phd2_launch.Phd2Instance` or `None`
+        The real PHD2 that was started (the guiding step talks to it).
+    notes : `list` [`str`]
+        Statuses about parts that are missing or replaced (not errors). They
+        reach the settings page through the launch notes.
     """
 
     root: Path
@@ -170,6 +190,9 @@ class World:
     pointed_targets: Callable[[], list[tuple[str, float, float]]] = list
     stop_standins: Callable[[], None] = lambda: None
     remove_copy: Callable[[], bool] = lambda: True
+    guider: str = GuiderKind.MOCK.value
+    phd2: phd2_launch.Phd2Instance | None = None
+    notes: list[str] = field(default_factory=list)
 
 
 def acquire_world_lock(root: Path) -> int | None:
@@ -263,7 +286,105 @@ def _offline_world(root: Path, error: str) -> World:
     return World(root=folder, source=NO_TELESCOPE, config_path=config_path, variables=variables, error=error)
 
 
-def build_world(root: Path, environ: dict[str, str]) -> World:
+def choose_guider(environ: dict[str, str]) -> tuple[GuiderKind, int | None, list[str]]:
+    """Decide who plays PHD2 in the world, and on which port.
+
+    The real PHD2 plays when it is installed, has a display and a free
+    instance, unless ``ASTROMETRICS_SIMULATOR_GUIDER=mock`` asks for the
+    stand-in. When it cannot play, the stand-in does, and the reason is a
+    note (a status, not an error).
+
+    Parameters
+    ----------
+    environ : `dict` [`str`, `str`]
+        The launcher's environment.
+
+    Returns
+    -------
+    guider : `GuiderKind`
+        Who plays PHD2.
+    port : `int` or `None`
+        The real PHD2's event port, or `None` for the stand-in (any free
+        port will do).
+    notes : `list` [`str`]
+        Statuses to report.
+    """
+    wanted = environ.get(GUIDER_VARIABLE, "").strip().lower()
+    if wanted == GuiderKind.MOCK.value:
+        return GuiderKind.MOCK, None, []
+    note = phd2_launch.phd2_missing_note(environ)
+    if note is not None:
+        return GuiderKind.MOCK, None, [note]
+    instance = phd2_launch.choose_instance()
+    if instance is None:
+        return GuiderKind.MOCK, None, [f"{phd2_launch.PHD2_MISSING_NOTE} (no free PHD2 instance number)"]
+    visible = phd2_launch.display_note(environ)
+    return GuiderKind.PHD2, phd2_launch.event_port(instance), [visible] if visible else []
+
+
+def run_fit_process(
+    root: Path, config_path: Path, variables: dict[str, str], environ: dict[str, str]
+) -> str | None:
+    """Fit the simulators to the recorded nights, in a short-lived process.
+
+    Runs ``python -m simulator.fit`` with the world's settings and folders in
+    its environment, so it reads the world's library copy and never the real
+    folders (the same way as `work_out_calibrations`). It runs after the copy
+    is built and before the stand-ins start, so the copy is only read while
+    nothing else uses it. A failure is a status: the simulators keep their own
+    values and the launch note says why.
+
+    Parameters
+    ----------
+    root : `pathlib.Path`
+        The simulator folder; ``fit_results.json`` is written here.
+    config_path : `pathlib.Path`
+        The world's settings file.
+    variables : `dict` [`str`, `str`]
+        The variables the world adds to the backend's environment.
+    environ : `dict` [`str`, `str`]
+        The launcher's environment (it names the real folders).
+
+    Returns
+    -------
+    note : `str` or `None`
+        `None` when the results file was written. Otherwise a short status
+        for the launch notes.
+    """
+    stub = World(root=root, source=SIMULATED, config_path=config_path, variables=variables)
+    environment = world_environment(environ, stub, environ)
+    environment["PYTHONPATH"] = f"{REPOSITORY}{os.pathsep}{environment.get('PYTHONPATH', '')}"
+    command = [sys.executable, "-m", "simulator.fit", "--root", str(root), "--config", str(config_path)]
+    try:
+        completed = subprocess.run(
+            command,
+            env=environment,
+            cwd=REPOSITORY,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=FIT_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        logger.warning("Fit step: the fit did not run: %s", error)
+        return f"Fitted settings: not applied ({type(error).__name__})"
+    if completed.returncode != 0:
+        reason = completed.stderr.strip().splitlines()[-1] if completed.stderr.strip() else "exit code"
+        logger.warning("Fit step: the fit failed: %s", completed.stderr.strip() or completed.returncode)
+        return f"Fitted settings: not applied ({reason})"
+    logger.info(
+        "Fit step: %s", completed.stdout.strip().splitlines()[-1] if completed.stdout.strip() else "done"
+    )
+    return None
+
+
+def build_world(
+    root: Path,
+    environ: dict[str, str],
+    controller_settings: Mapping[str, float] | None = None,
+    backend_port: int | None = None,
+    fitter: Callable[[Path, Path, dict[str, str], dict[str, str]], str | None] = run_fit_process,
+) -> World:
     """Build the simulated world and start its stand-ins.
 
     Builds the databases copy and the overlay with
@@ -277,6 +398,18 @@ def build_world(root: Path, environ: dict[str, str]) -> World:
         The simulator folder (locked by the caller).
     environ : `dict` [`str`, `str`]
         The environment, which names the real folders.
+    controller_settings : `~collections.abc.Mapping` [`str`, `float`], optional
+        Guide controller settings for the real PHD2's profile (see
+        `simulator.phd2_launch.CONTROLLER_SETTING_KEYS`). Default: the fit's
+        (from the newest PHD2 run in the library copy), else PHD2's own.
+    backend_port : `int`, optional
+        The port the backend will listen on. The exposure driver uses it to
+        deliver real frames (S4). Default: none, so every frame is the
+        simulator's.
+    fitter : `~collections.abc.Callable`, optional
+        ``fitter(root, config_path, variables, environ)`` runs the fit and
+        gives a status note, or `None` when ``fit_results.json`` was written.
+        Default: `run_fit_process`.
 
     Returns
     -------
@@ -285,7 +418,8 @@ def build_world(root: Path, environ: dict[str, str]) -> World:
         the reason in ``error``.
     """
     folders = real_folders(environ)
-    indi_port, phd2_port = choose_free_port(), choose_free_port()
+    guider, guider_port, notes = choose_guider(environ)
+    indi_port, phd2_port = choose_free_port(), guider_port or choose_free_port()
     runner: SimulatedObservatory | None = None
     try:
         builder = SimulatedObservatory(
@@ -295,11 +429,30 @@ def build_world(root: Path, environ: dict[str, str]) -> World:
             phd2_port,
             copy_library=True,
             real_library=folders,
+            guider=guider,
+            controller_settings=controller_settings,
         )
         builder.prepare()
+        # Fit the simulators to the recorded nights on the library copy, while
+        # nothing else uses it. A failure is a note; the defaults stay.
+        results_path = root / RESULTS_FILE_NAME
+        results_path.unlink(missing_ok=True)
+        fit_note = fitter(root, builder.config_path, builder.environment(), environ)
+        if fit_note is not None:
+            notes.append(fit_note)
+        fitted = results_path.is_file()
         # The world is built; the runner only starts the stand-ins in it.
         runner = SimulatedObservatory(
-            root, SimulationKind.SIMULATED_SKY, indi_port, phd2_port, existing_world=True
+            root,
+            SimulationKind.SIMULATED_SKY,
+            indi_port,
+            phd2_port,
+            existing_world=True,
+            guider=guider,
+            controller_settings=controller_settings
+            or (fitted_controller_settings(results_path) if fitted else None),
+            backend_port=backend_port,
+            fitted_settings_path=results_path if fitted else None,
         )
         runner.start()
         runner.wait_ready()
@@ -318,6 +471,9 @@ def build_world(root: Path, environ: dict[str, str]) -> World:
         pointed_targets=running.pointed_targets,
         stop_standins=running.stop,
         remove_copy=lambda: remove_library_copy(root),
+        guider=GuiderKind.PHD2.value if running.phd2 is not None else GuiderKind.MOCK.value,
+        phd2=running.phd2,
+        notes=[*notes, *running.notes],
     )
 
 
@@ -364,7 +520,7 @@ def world_environment(base: dict[str, str], world: World, environ: dict[str, str
     # Backstop: the library itself refuses online lookups and downloads.
     child[OFFLINE_VARIABLE] = "1"
     child[MISSING_PROGRAMS_VARIABLE] = ",".join(missing_programs())
-    child[LAUNCH_NOTES_VARIABLE] = "\n".join(launch_notes())
+    child[LAUNCH_NOTES_VARIABLE] = "\n".join([*launch_notes(), *world.notes])
     return child
 
 
@@ -486,6 +642,9 @@ def work_out_calibrations(world: World, environment: dict[str, str]) -> list[tup
         ``(method, parameters)`` of the two record methods; empty on failure.
     """
     command = [sys.executable, "-m", "simulator.simulated_calibration", "--root", str(world.root)]
+    results_path = world.root / RESULTS_FILE_NAME
+    if results_path.is_file():
+        command += ["--fit-results", str(results_path)]
     try:
         completed = subprocess.run(
             command,
@@ -538,6 +697,12 @@ class Launcher:
     operator : `~collections.abc.Callable`, optional
         The operator step: ``operator(port, calls, targets)``. Default:
         `run_operator_step`.
+    guiding_operator : `~collections.abc.Callable`, optional
+        The guiding step for the real PHD2: ``guiding_operator(phd2,
+        should_stop)`` gives a `GuidingOutcome`. Default: `run_guiding_step`.
+    controller_settings : `~collections.abc.Mapping` [`str`, `float`], optional
+        Guide controller settings for the real PHD2's profile (see
+        `simulator.phd2_launch.CONTROLLER_SETTING_KEYS`). Default: PHD2's own.
     ready_check : `~collections.abc.Callable`, optional
         ``ready_check(port)`` says whether the backend answers ``/api/ready``.
     connection_check : `~collections.abc.Callable`, optional
@@ -555,6 +720,8 @@ class Launcher:
         world_builder: Callable[[Path, dict[str, str]], World] = build_world,
         calibration_runner: Callable[[World, dict[str, str]], list[tuple[str, dict]]] = work_out_calibrations,
         operator: Callable[..., dict] = run_operator_step,
+        guiding_operator: Callable[..., GuidingOutcome] = run_guiding_step,
+        controller_settings: Mapping[str, float] | None = None,
         ready_check: Callable[[int], bool] = backend_is_ready,
         connection_check: Callable[[int], list[str]] = non_loopback_connections,
         guard_interval: float = GUARD_INTERVAL_SECONDS,
@@ -564,9 +731,15 @@ class Launcher:
         self.root = root or real_folders(self.environ).data_home / SIMULATOR_FOLDER_NAME
         self.port = port or int(self.environ.get("ASTROMETRICS_PORT", "5000"))
         self.backend_command = backend_command or [sys.executable, "-u", "-m", "backend.main_backend"]
+        if world_builder is build_world:
+            world_builder = partial(
+                build_world, controller_settings=controller_settings, backend_port=self.port
+            )
         self.world_builder = world_builder
         self.calibration_runner = calibration_runner
         self.operator = operator
+        self.guiding_operator = guiding_operator
+        self.guiding_outcome: GuidingOutcome | None = None
         self.ready_check = ready_check
         self.connection_check = connection_check
         self.guard_interval = guard_interval
@@ -785,10 +958,26 @@ class Launcher:
         else:
             logger.warning("OPERATOR STEP (D11): the backend was not ready in time; no operator step.")
             return
+        # These steps run in the launcher's own process, not in the backend
+        # child, so they get the world's offline identity here: nothing below
+        # may read the user's real settings.
         try:
-            self.operator_outcome = self.operator(self.port, calls, world.pointed_targets())
+            with offline_identity(world.config_path):
+                self.operator_outcome = self.operator(self.port, calls, world.pointed_targets())
         except Exception:  # the app stays usable for watching; the log says what failed
             logger.exception("OPERATOR STEP (D11) failed")
+        if world.phd2 is None:
+            return
+        # Guiding comes last: the settings are written, the app has taken
+        # command and the mount tracks. It runs once; the app owns guiding
+        # after that (for example after a slew).
+        try:
+            with offline_identity(world.config_path):
+                self.guiding_outcome = self.guiding_operator(
+                    world.phd2, lambda: child.poll() is not None or self.stop_requested.is_set()
+                )
+        except Exception:  # a status, not a crash: the app runs without guiding
+            logger.warning("OPERATOR STEP (D11): guiding failed.", exc_info=True)
 
     def _tear_down(self, world: World) -> None:
         """Stop the stand-ins and remove the library copy.

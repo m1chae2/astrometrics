@@ -264,6 +264,7 @@ SUB_API_MEMBERS = {
         "get_aperture_record",
         "capture_settings",
         "forget",
+        "measure_folder",
         "measure_frames",
         "measure_stack",
         "metrics",

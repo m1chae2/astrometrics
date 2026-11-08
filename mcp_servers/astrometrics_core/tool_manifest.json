@@ -170,6 +170,13 @@
       "interim_block": "",
       "note": "Reads a file from any path and returns every aperture, which can overflow the reply. Scripts and wayfindinglib use it."
     },
+    "quality_measure_folder": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-07. Measures a folder of FITS files with the stored frame metric set (star width, sky rate, background, saturation) and returns the numbers. Nothing is stored or moved. About 12 seconds a frame, so the limit defaults to 20. It reads any folder path it is given, as quality_measure_frames does with folder_path; it only reads."
+    },
     "quality_measure_frames": {
       "tool_class": "compute",
       "category": "image-processing",

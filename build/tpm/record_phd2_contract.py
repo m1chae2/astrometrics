@@ -39,12 +39,17 @@ import socket
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 from datetime import datetime
 from pathlib import Path
 
 TPM_DIR = Path(__file__).resolve().parent
+# Run as a script, this file's folder is on the path, not the repository's.
+sys.path.insert(0, str(TPM_DIR.parents[1]))
+
+from simulator import phd2_launch  # ruff: ignore[module-import-not-at-top-of-file]
+from wayfindinglib.drivers import PHD2Client, PHD2Session  # ruff: ignore[module-import-not-at-top-of-file]
+
 FIXTURES_DIR = TPM_DIR.parents[1] / "simulator" / "test" / "fixtures"
 EVENTS_FIXTURE = FIXTURES_DIR / "phd2_contract_events.jsonl"
 GUIDE_LOG_FIXTURE = FIXTURES_DIR / "phd2_contract_guide_log.txt"
@@ -54,10 +59,8 @@ EVENT_PORT = 4400
 #: Marks the process that already runs inside the sealed network.
 SEALED_MARKER = "PHD2_CONTRACT_SEALED"
 #: The INDI simulator devices PHD2 is pointed at.
-CAMERA_DEVICE = "Guide Simulator"
-MOUNT_DEVICE = "Telescope Simulator"
-#: Guide camera exposure in milliseconds.
-EXPOSURE_MS = 1000
+CAMERA_DEVICE = phd2_launch.GUIDE_CAMERA_DEVICE
+MOUNT_DEVICE = phd2_launch.MOUNT_DEVICE
 
 #: A stand-in for the `gsc` star catalog program the INDI camera simulators
 #: call for the stars of a field. Without it the simulated guide camera
@@ -89,153 +92,6 @@ for i in range(int((dec - radius) / cell) - 1, int((dec + radius) / cell) + 2):
         if count >= 3000:
             sys.exit(0)
 """
-
-
-def profile_settings(indi_port: int) -> str:
-    """Return the text of a PHD2 settings file with an INDI camera and mount.
-
-    Parameters
-    ----------
-    indi_port : `int`
-        The port of the local indiserver.
-
-    Returns
-    -------
-    text : `str`
-        The content of ``.PHDGuidingV2`` for the throwaway home folder.
-    """
-    return f"""ConfigVersion=2001
-LoggingMode=1
-currentProfile=1
-ServerMode=1
-[profile]
-[profile/1]
-name=TPM contract
-ExposureDurationMs={EXPOSURE_MS}
-[profile/1/frame]
-focalLength=400
-[profile/1/camera]
-LastMenuChoice=INDI Camera
-pixelsize=3.75
-[profile/1/scope]
-LastMenuChoice=INDI Mount
-LastAuxMenuChoice=None
-[profile/1/stepguider]
-LastMenuChoice=None
-[profile/1/rotator]
-LastMenuChoice=None
-[profile/1/indi]
-INDIhost=127.0.0.1
-INDIport={indi_port}
-INDIcam={CAMERA_DEVICE}
-INDIcam_ccd=CCD1
-INDImount={MOUNT_DEVICE}
-"""
-
-
-class Phd2Session:
-    """One connection to PHD2's event server: records events, sends requests.
-
-    Parameters
-    ----------
-    port : `int`
-        The event server port.
-    """
-
-    def __init__(self, port: int) -> None:
-        """Connect to PHD2 and start the reader thread."""
-        self._socket = socket.create_connection(("127.0.0.1", port), timeout=10)
-        self._socket.settimeout(None)
-        self.events: list[dict] = []
-        self._responses: dict[int, dict] = {}
-        self._condition = threading.Condition()
-        self._next_id = 1
-        threading.Thread(target=self._read_loop, daemon=True, name="Phd2Reader").start()
-
-    def _read_loop(self) -> None:
-        """Split the stream into lines; file each as an event or an answer."""
-        buffer = b""
-        while True:
-            try:
-                chunk = self._socket.recv(65536)
-            except OSError:
-                return
-            if not chunk:
-                return
-            buffer += chunk
-            while b"\n" in buffer:
-                line, buffer = buffer.split(b"\n", 1)
-                if not line.strip():
-                    continue
-                message = json.loads(line)
-                with self._condition:
-                    if "Event" in message:
-                        self.events.append(message)
-                    elif "id" in message:
-                        self._responses[message["id"]] = message
-                    self._condition.notify_all()
-
-    def call(self, method: str, params: object = None, timeout: float = 60.0) -> dict:
-        """Send one JSON-RPC request and wait for its answer.
-
-        Parameters
-        ----------
-        method : `str`
-            The PHD2 method name.
-        params : `object`, optional
-            The ``params`` value.
-        timeout : `float`, optional
-            Seconds to wait for the answer.
-
-        Returns
-        -------
-        response : `dict`
-            The answer. Its ``error`` key is set when PHD2 refused.
-        """
-        request_id = self._next_id
-        self._next_id += 1
-        request: dict = {"method": method, "id": request_id}
-        if params is not None:
-            request["params"] = params
-        self._socket.sendall((json.dumps(request) + "\r\n").encode())
-        deadline = time.time() + timeout
-        with self._condition:
-            while request_id not in self._responses:
-                remaining = deadline - time.time()
-                if remaining <= 0:
-                    return {"error": {"message": f"no answer to {method} in {timeout} s"}}
-                self._condition.wait(remaining)
-            return self._responses.pop(request_id)
-
-    def wait_for(self, event_name: str, after: int, timeout: float, **match: object) -> dict | None:
-        """Wait for an event that arrives after the first `after` events.
-
-        Parameters
-        ----------
-        event_name : `str`
-            The ``Event`` value to wait for.
-        after : `int`
-            Only events at this index or later count.
-        timeout : `float`
-            Seconds to wait.
-        **match : `object`
-            Extra fields that must equal these values.
-
-        Returns
-        -------
-        event : `dict` or `None`
-            The event, or `None` on timeout.
-        """
-        deadline = time.time() + timeout
-        with self._condition:
-            while True:
-                for event in self.events[after:]:
-                    if event["Event"] == event_name and all(event.get(k) == v for k, v in match.items()):
-                        return event
-                remaining = deadline - time.time()
-                if remaining <= 0:
-                    return None
-                self._condition.wait(min(remaining, 1.0))
 
 
 def free_port() -> int:
@@ -321,13 +177,13 @@ def prepare_simulators(indi_port: int) -> None:
     raise RuntimeError("The simulated mount did not arrive at the field.")
 
 
-def drive(session: Phd2Session, guide_seconds: float) -> list[str]:
+def drive(session: PHD2Session, guide_seconds: float) -> list[str]:
     """Drive PHD2 through one guiding session and return notes.
 
     Parameters
     ----------
-    session : `Phd2Session`
-        The connection to PHD2.
+    session : `PHD2Session`
+        The connection to PHD2, from the library's one PHD2 client.
     guide_seconds : `float`
         Seconds to guide before the dither.
 
@@ -338,50 +194,34 @@ def drive(session: Phd2Session, guide_seconds: float) -> list[str]:
     """
     notes: list[str] = []
 
-    def step(name: str, response: dict) -> dict:
-        """Log one answer and stop the run on an error.
+    def note(text: str) -> None:
+        """Keep one line and print it."""
+        notes.append(text)
+        print(text, flush=True)
 
-        Returns
-        -------
-        response : `dict`
-            The answer, unchanged.
-
-        Raises
-        ------
-        RuntimeError
-            If PHD2 answered with an error.
-        """
-        notes.append(f"{name}: {json.dumps(response)[:200]}")
-        print(notes[-1], flush=True)
-        if "error" in response:
-            raise RuntimeError(notes[-1])
-        return response
-
-    step("set_exposure", session.call("set_exposure", [EXPOSURE_MS]))
-    step("set_connected", session.call("set_connected", [True], timeout=120))
-    step("get_current_equipment", session.call("get_current_equipment"))
-    mark = len(session.events)
-    step("loop", session.call("loop"))
-    session.wait_for("LoopingExposures", mark, 30)
+    session.set_exposure(phd2_launch.DEFAULT_EXPOSURE_MS)
+    note(f"set_exposure: {phd2_launch.DEFAULT_EXPOSURE_MS} ms")
+    session.set_connected(True)
+    note(f"get_current_equipment: {json.dumps(session.get_current_equipment())[:200]}")
+    mark = session.event_count
+    session.loop()
+    note("loop")
+    session.wait_for_event("LoopingExposures", mark, 30)
     time.sleep(3)
-    step("find_star", session.call("find_star", timeout=60))
-    mark = len(session.events)
-    step(
-        "guide",
-        session.call("guide", [{"pixels": 1.5, "time": 6, "timeout": 120}, True], timeout=30),
-    )
-    finished = session.wait_for("SettleDone", mark, 400)
-    notes.append(f"first settle: {finished}")
-    print(notes[-1], flush=True)
+    note(f"find_star: {session.find_star()}")
+    mark = session.event_count
+    session.guide(settle_pixels=1.5, settle_seconds=6, settle_timeout_seconds=120)
+    note("guide")
+    note(f"first settle: {session.wait_for_event('SettleDone', mark, 400)}")
     time.sleep(guide_seconds)
-    mark = len(session.events)
-    step("dither", session.call("dither", [3, False, {"pixels": 1.5, "time": 6, "timeout": 60}], timeout=30))
-    finished = session.wait_for("SettleDone", mark, 90)
-    notes.append(f"dither settle: {finished}")
-    print(notes[-1], flush=True)
+    mark = session.event_count
+    session.dither(3, False, settle_pixels=1.5, settle_seconds=6, settle_timeout_seconds=60)
+    note("dither")
+    note(f"dither settle: {session.wait_for_event('SettleDone', mark, 90)}")
     time.sleep(15)
-    step("stop_capture", session.call("stop_capture", timeout=30))
-    session.wait_for("AppState", mark, 20, State="Stopped")
+    session.stop_capture()
+    note("stop_capture")
+    session.wait_for_event("AppState", mark, 20, State="Stopped")
     return notes
 
 
@@ -454,7 +294,7 @@ def record(arguments: argparse.Namespace) -> int:
             print("ERROR: indiserver did not start.", file=sys.stderr)
             return 1
         prepare_simulators(indi_port)
-        (home / ".PHDGuidingV2").write_text(profile_settings(indi_port), encoding="utf-8")
+        phd2_launch.write_profile(home, home, 1, indi_port)
         environment = {**os.environ, "HOME": str(home)}
         processes.append(
             subprocess.Popen(
@@ -468,13 +308,13 @@ def record(arguments: argparse.Namespace) -> int:
         if not wait_for_port(EVENT_PORT, 60):
             print("ERROR: PHD2 did not start.", file=sys.stderr)
             return 1
-        session = Phd2Session(EVENT_PORT)
+        session = PHD2Client(host="127.0.0.1", port=EVENT_PORT).open_session(timeout_seconds=10)
         try:
             drive(session, arguments.guide_seconds)
         finally:
-            session.call("shutdown", timeout=10)
+            session.shutdown()
             time.sleep(3)
-        write_fixtures(arguments, session.events, home)
+        write_fixtures(arguments, session.events_since(0), home)
         return 0
     finally:
         for process in processes:

@@ -4,10 +4,11 @@ Description: The app's UI sends every request to ``POST /api/rpc`` as a
 JSON-RPC 2.0 message, and the backend wraps each result as
 ``{"status": ..., "data": ...}``. The launcher uses this one function for
 the operator step (it records the calibrations and enters controller mode
-after the backend answers), and the TPM harness scripts share it through
-``build/tpm/backend_rpc.py``. It reaches ``127.0.0.1`` only, and it
-ignores the proxy variables. The route takes no session token (only the
-WebSockets do), so none is sent.
+after the backend answers) and the real-frame source (`frame_source`, which
+lists a target's frames and deletes a delivered one). The TPM harness
+scripts share it through ``build/tpm/backend_rpc.py``. It reaches
+``127.0.0.1`` only, and it ignores the proxy variables. The route takes
+no session token (only the WebSockets do), so none is sent.
 """
 
 import json

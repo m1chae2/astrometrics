@@ -12,7 +12,7 @@ Terms are in the [glossary](../Glossary.md).
 
 This paper indexes the code; theory stays in [Wayfinding_Library_Architecture.md](Wayfinding_Library_Architecture.md). Module paths are relative to `wayfindinglib/` unless a path starts with another folder.
 
-The package root is the one supported entry point. It loads its names on first use, so importing it loads no hardware code. Its 7 names are `Wayfinder` (sub-APIs `control`, `planning`, `execution`, `review`), the four sub-API classes, `ObservationSession` and `ObservationPackage`. `exceptions.py` and `reports.py` are public. The rest is private.
+The package root is the one supported entry point. It loads its names on first use, so importing it loads no hardware code. Its 8 names are `Wayfinder` (sub-APIs `control`, `planning`, `execution`, `review`), the four sub-API classes, `ObservationSession`, `ObservationPackage` and `FrameEndDetector`. `exceptions.py` and `reports.py` are public. The rest is private.
 
 <!-- impl: wayfindinglib.Wayfinder -->
 <!-- impl: wayfindinglib.api.control.control.ObservatoryControl -->
@@ -317,6 +317,22 @@ All in `tasks/control_tasks/` unless noted.
 ### 6.7 Mount-mechanical models and bulk modes
 
 `guiding_log_ingestion.py` (`fetch_and_ingest_new_guide_logs`) stores the periodic-error and backlash analysis as standing mount state. `pointing_log_ingestion.py` fits a session pointing model and never stores it. `analyze_guiding_telemetry` (`analytics/guiding_spectrum.py`) runs Lomb-Scargle on each guiding stretch. Bulk modes: Section 2.3.
+
+<!-- impl: wayfindinglib.analytics.unguided_mount_error.measure_run -->
+<!-- impl: wayfindinglib.analytics.unguided_mount_error.reconstruct_unguided_error -->
+<!-- impl: wayfindinglib.tasks.control_tasks.mount_error_tasks.measure_unguided_mount_error -->
+<!-- impl: wayfindinglib.tasks.control_tasks.mount_error_tasks.measure_guiding_spectrum -->
+<!-- impl: wayfindinglib.tasks.control_tasks.focus_model_tasks.measure_focus_temperature_coefficient -->
+<!-- impl: wayfindinglib.tasks.control_tasks.sky_rate_tasks.get_sky_rate_prediction -->
+<!-- impl: wayfindinglib.drivers.phd2.guide_log_parser.parse_guide_log_file -->
+
+<!-- impl: wayfindinglib.analytics.unguided_mount_error.MINIMUM_PERIOD_SECONDS -->
+<!-- impl: wayfindinglib.analytics.unguided_mount_error.MAXIMUM_PERIOD_SECONDS -->
+<!-- impl: wayfindinglib.analytics.unguided_mount_error.MINIMUM_FIT_SAMPLES -->
+<!-- impl: wayfindinglib.analytics.unguided_mount_error.MINIMUM_AMPLITUDE_SIGNIFICANCE -->
+<!-- impl: wayfindinglib.tasks.control_tasks.focus_model_tasks.MINIMUM_FOCUS_PAIRS -->
+<!-- impl: wayfindinglib.tasks.control_tasks.focus_model_tasks.MINIMUM_TEMPERATURE_SPAN_C -->
+<!-- impl: wayfindinglib.tasks.control_tasks.focus_model_tasks.MINIMUM_FILTER_SHARE_PAIRS -->
 
 <!-- impl: wayfindinglib.tasks.control_tasks.guiding_log_ingestion.fetch_and_ingest_new_guide_logs -->
 <!-- impl: wayfindinglib.analytics.guiding_spectrum.SEGMENT_BREAK_SECONDS -->

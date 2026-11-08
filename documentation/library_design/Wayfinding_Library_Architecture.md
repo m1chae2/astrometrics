@@ -592,6 +592,8 @@ Closing the enclosure checks the mount's position against the configured clearan
 
 The standing mount-mechanical model feeds a stored periodic-error and backlash model forward into the guiding correction (Equation (7)). The model comes from the guide error left after the guider's own corrections, so it is a cross-night fact about the mount. The analysis splits the guide samples into continuous stretches, analyzes each with its true time stamps using a Lomb-Scargle periodogram, and combines them. Peaks slower than any plausible gear period count as slow drift.
 
+Adding the running total of the guider's pulses back to each measured error rebuilds the mount's unguided error. A fitted sine and line give its periodic error and drift.
+
 The pointing correction takes a session-scoped fitted model instead. The classic geometric pointing model splits plate-solve offsets across the sky into physical mount terms, such as index errors, polar axis misalignment, cone error and tube flexure. Evaluating the fit forward predicts the systematic error at a position (Equation (5)). The polar-misalignment terms describe tonight's setup, not the mount, so they are never fed forward to a later session.
 
 Three routines build these models from deliberate runs: a guider calibration that sends a known pulse on each axis, a backlash calibration that reverses declination in small steps, and a polar-alignment assistant that fits tonight's model from the plate solves so far. The caller supplies each routine's hardware step.

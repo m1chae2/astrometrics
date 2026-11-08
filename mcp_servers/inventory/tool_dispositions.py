@@ -198,6 +198,13 @@ DECISIONS = {
         "the spectrum, a predicted peak at another exposure, a summary by exposure and pier side); it "
         "replaces quality_check_spectral_frames.",
     ),
+    "quality_measure_folder": ToolDecision(
+        "keep",
+        "Built 2026-11-07. Measures a folder of FITS files with the stored frame metric set (star width, "
+        "sky rate, background, saturation) and returns the numbers. Nothing is stored or moved. About "
+        "12 seconds a frame, so the limit defaults to 20. It reads any folder path it is given, as "
+        "quality_measure_frames does with folder_path; it only reads.",
+    ),
     "review_get_live_session_status": ToolDecision(
         "keep",
         "Served 2026-10-03. refresh=true copies the newest Ekos and KStars logs into a local folder, "
@@ -440,6 +447,30 @@ DECISIONS = {
     ),
     "review_get_performance_envelope": ToolDecision(
         "keep", "Slow: reads every session and target twice.", "observe"
+    ),
+    "review_measure_unguided_mount_error": ToolDecision(
+        "keep",
+        "Built 2026-11-07. Reads the recorded guide samples and guiding runs and fits the mount's own "
+        "error (periodic error, drift, jitter). Nothing is stored or sent. Slow on a long history.",
+        "observe",
+    ),
+    "review_measure_guiding_spectrum": ToolDecision(
+        "keep",
+        "Built 2026-11-07. The guiding spectrum worked out from the recorded samples, with nights "
+        "optionally left out. Unlike observatory_guiding_refit_spectrum it stores nothing.",
+        "observe",
+    ),
+    "review_measure_focus_temperature_coefficient": ToolDecision(
+        "keep",
+        "Built 2026-11-07. Fits the focus-versus-temperature slope on recorded autofocus runs and "
+        "frame headers. Reads only; nothing is stored. Slow when it reads every frame record.",
+        "observe",
+    ),
+    "review_get_sky_rate_prediction": ToolDecision(
+        "keep",
+        "Built 2026-11-07. Predicts the sky background rate from the sky model fitted to the library's "
+        "own frames. Reads only; nothing is stored. The first call fits the model and is slow.",
+        "observe",
     ),
     "observatory_remote_check_connection": ToolDecision("keep", "A small network probe.", "observe"),
     # ---- Status reads of the control children ----

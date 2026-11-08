@@ -25,7 +25,12 @@ PUBLIC_LIBRARY_MODULES = {
         "astrometricslib.jobs",
         "astrometricslib.drivers",
     ),
-    "wayfindinglib": ("wayfindinglib", "wayfindinglib.exceptions", "wayfindinglib.reports"),
+    "wayfindinglib": (
+        "wayfindinglib",
+        "wayfindinglib.exceptions",
+        "wayfindinglib.reports",
+        "wayfindinglib.drivers",
+    ),
 }
 """For each library, the root and its public modules."""
 

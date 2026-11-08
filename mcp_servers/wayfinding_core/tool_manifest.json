@@ -562,6 +562,34 @@
       "interim_block": "",
       "note": "Slow: reads every session and target twice."
     },
+    "review_get_sky_rate_prediction": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-07. Predicts the sky background rate from the sky model fitted to the library's own frames. Reads only; nothing is stored. The first call fits the model and is slow."
+    },
+    "review_measure_focus_temperature_coefficient": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-07. Fits the focus-versus-temperature slope on recorded autofocus runs and frame headers. Reads only; nothing is stored. Slow when it reads every frame record."
+    },
+    "review_measure_guiding_spectrum": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-07. The guiding spectrum worked out from the recorded samples, with nights optionally left out. Unlike observatory_guiding_refit_spectrum it stores nothing."
+    },
+    "review_measure_unguided_mount_error": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-07. Reads the recorded guide samples and guiding runs and fits the mount's own error (periodic error, drift, jitter). Nothing is stored or sent. Slow on a long history."
+    },
     "review_query": {
       "tool_class": "compute",
       "category": "observatory-status",

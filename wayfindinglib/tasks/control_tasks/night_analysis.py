@@ -28,7 +28,7 @@ from wayfindinglib.analytics.envelope_assembly import (
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Collection, Sequence
 
     from astrometricslib import Target
     from wayfindinglib.api.control.context import ControlContext
@@ -106,6 +106,7 @@ def performance_envelope(
     runs: list[GuidingRunSummary],
     library_cache: LibraryCache,
     targets: Sequence[Target] | None = None,
+    exclude_nights: Collection[str] | None = None,
 ) -> PerformanceEnvelope | None:
     """Work out the performance limits of the active equipment.
 
@@ -131,6 +132,8 @@ def performance_envelope(
         Shares frame reads between calls.
     targets : `Sequence` [`Target`], optional
         The library's targets, when the caller has just listed them.
+    exclude_nights : `Collection` [`str`], optional
+        Nights to leave out of every source of the limits.
 
     Returns
     -------
@@ -158,6 +161,7 @@ def performance_envelope(
         capture_frames=capture_library(context, telescope.name, camera.name, library_cache, targets),
         records=context.records,
         baseline_provider=_night_baseline_provider(context, contexts, runs),
+        exclude_nights=exclude_nights,
     )
 
 

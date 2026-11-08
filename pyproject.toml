@@ -231,7 +231,21 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "astrometricslib.foundation".msg = "Internal. Import from `astrometricslib` or its public modules (`exceptions`, `reports`, `jobs`, `drivers`) instead."
 "astrometricslib.visualization".msg = "Internal. Use `Astrometrics.visualization` instead."
 "astrometricslib._internal".msg = "Private to astrometricslib. Use its public modules instead."
-"wayfindinglib.drivers".msg = "Internal. Use the `Wayfinder` API instead."
+# `wayfindinglib.drivers` itself is public (the PHD2 client); everything below it is not.
+"wayfindinglib.drivers.butler".msg = "Internal. Use the `Wayfinder` API or `wayfindinglib.drivers` (the PHD2 client) instead."
+"wayfindinglib.drivers.catalog".msg = "Internal. Use the `Wayfinder` API or `wayfindinglib.drivers` (the PHD2 client) instead."
+"wayfindinglib.drivers.control_record_store".msg = "Internal. Use the `Wayfinder` API or `wayfindinglib.drivers` (the PHD2 client) instead."
+"wayfindinglib.drivers.ekos".msg = "Internal. Use the `Wayfinder` API or `wayfindinglib.drivers` (the PHD2 client) instead."
+"wayfindinglib.drivers.host_resolver".msg = "Internal. Use the `Wayfinder` API or `wayfindinglib.drivers` (the PHD2 client) instead."
+"wayfindinglib.drivers.indi".msg = "Internal. Use the `Wayfinder` API or `wayfindinglib.drivers` (the PHD2 client) instead."
+"wayfindinglib.drivers.indi_interface".msg = "Internal. Use the `Wayfinder` API or `wayfindinglib.drivers` (the PHD2 client) instead."
+"wayfindinglib.drivers.indi_worker".msg = "Internal. Use the `Wayfinder` API or `wayfindinglib.drivers` (the PHD2 client) instead."
+"wayfindinglib.drivers.interfaces".msg = "Internal. Use the `Wayfinder` API or `wayfindinglib.drivers` (the PHD2 client) instead."
+"wayfindinglib.drivers.phd2".msg = "Internal. Use the `Wayfinder` API or `wayfindinglib.drivers` (the PHD2 client) instead."
+"wayfindinglib.drivers.protocols".msg = "Internal. Use the `Wayfinder` API or `wayfindinglib.drivers` (the PHD2 client) instead."
+"wayfindinglib.drivers.simulators".msg = "Internal. Use the `Wayfinder` API or `wayfindinglib.drivers` (the PHD2 client) instead."
+"wayfindinglib.drivers.ssh_port_forward".msg = "Internal. Use the `Wayfinder` API or `wayfindinglib.drivers` (the PHD2 client) instead."
+"wayfindinglib.drivers.stellarmate_interface".msg = "Internal. Use the `Wayfinder` API or `wayfindinglib.drivers` (the PHD2 client) instead."
 "wayfindinglib.tasks".msg = "Internal. Use the `Wayfinder` API instead."
 "wayfindinglib.models".msg = "Internal. Import from `wayfindinglib` or its public modules (`exceptions`, `reports`, `logs`) instead."
 "wayfindinglib.analytics".msg = "Internal. Use the `Wayfinder` API instead."
@@ -264,9 +278,12 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "build/tpm/setup_fingerprint.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"] # list-form args only; reads power, display and GPU facts
 "build/tpm/record_phd2_contract.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"] # list-form calls of bwrap, indiserver, xvfb-run, PHD2 and indi_setprop, inside a sealed network
 "simulator/test/test_phd2_contract.py" = ["print"] # with `-s` it reports what real PHD2 sends beyond the stand-in
+"simulator/guiding_operator.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"] # list-form indi_getprop call against 127.0.0.1 only, read only
 "simulator/exposure_driver.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "print"] # list-form indi_setprop and indi_getprop calls against 127.0.0.1 only; a command-line program
 "build/tpm/seal_guard.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"] # list-form call of `ss`, read only
 "simulator/observatory.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "print"] # list-form start of the stand-in processes, always through the supervisor; also a command-line program
+"simulator/test/test_phd2_live.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path", "print"] # starts real indiserver and PHD2 processes in list form, in a temporary world; with `-s` it reports the guiding outcome
+"simulator/test/test_fit_live.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path", "print"] # reads INDI properties with indi_getprop in list form (127.0.0.1 only) from a temporary world; with `-s` it reports the closure numbers
 "simulator/test/test_world_setup.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"] # starts real indiserver processes and calls indi_setprop and indi_getprop in list form, on 127.0.0.1 only
 "simulator/test/test_observatory.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"] # runs the supervisor, `sleep` and `pgrep` in list form
 "simulator/library_copy.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path", "print", "hardcoded-sql-expression"] # table names come from the copy itself; list-form fuse-overlayfs and fusermount3; also a command-line program
@@ -312,6 +329,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "astrometricslib/__init__.py" = ["non-empty-init-module"] # Astrometrics facade class is intentionally defined here
 "simulator/__init__.py" = ["non-empty-init-module"] # loads its public names on first use, so `python -m` can run a module
 "wayfindinglib/__init__.py" = ["non-empty-init-module"] # Wayfinder facade class is intentionally defined here
+"wayfindinglib/drivers/__init__.py" = ["non-empty-init-module"] # loads the PHD2 client on first use, so planning imports no driver code
 # Each library, its tests and its scripts/ may import that library's own
 # internals. wayfindinglib (scripts/ included) may use only astrometricslib's
 # public API; import-linter checks that, since a per-file ignore here cannot
@@ -428,6 +446,7 @@ ignore_imports = [
     "simulator.** -> astrometricslib.reports",
     "simulator.** -> astrometricslib.jobs",
     "simulator.** -> astrometricslib.drivers",
+    "simulator.** -> wayfindinglib.drivers",
     "simulator.** -> wayfindinglib.exceptions",
     "simulator.** -> wayfindinglib.reports",
     "simulator.** -> wayfindinglib.logs",
@@ -472,6 +491,7 @@ ignore_imports = [
     "mcp_servers.** -> astrometricslib.reports",
     "mcp_servers.** -> astrometricslib.jobs",
     "mcp_servers.** -> astrometricslib.drivers",
+    "mcp_servers.** -> wayfindinglib.drivers",
     "mcp_servers.** -> wayfindinglib.exceptions",
     "mcp_servers.** -> wayfindinglib.reports",
     "mcp_servers.** -> wayfindinglib.logs",
@@ -505,6 +525,7 @@ ignore_imports = [
     "backend.** -> astrometricslib.reports",
     "backend.** -> astrometricslib.jobs",
     "backend.** -> astrometricslib.drivers",
+    "backend.** -> wayfindinglib.drivers",
     "backend.** -> wayfindinglib.exceptions",
     "backend.** -> wayfindinglib.reports",
     "backend.** -> wayfindinglib.logs",

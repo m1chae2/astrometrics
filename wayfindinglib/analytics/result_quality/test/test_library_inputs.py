@@ -359,7 +359,9 @@ def test_the_sky_model_is_fitted_once_for_every_report_until_its_camera_changes(
     monkeypatch.setattr(library_inputs, "_SKY_MODEL_CACHE", library_inputs.VersionedCache())
     fits: list[str] = []
 
-    def counted_fit(self: LibraryInputs, setting: CaptureSetting, key: str) -> tuple[None, str]:
+    def counted_fit(
+        self: LibraryInputs, setting: CaptureSetting, key: str, exclude_nights: frozenset[str] = frozenset()
+    ) -> tuple[None, str]:
         """Count the fit and give no model.
 
         Returns
@@ -386,6 +388,36 @@ def test_the_sky_model_is_fitted_once_for_every_report_until_its_camera_changes(
     _write_camera_row(config, SETTING.camera, "run-2", target_id="Other", observing_night_id="2020-01-01")
     LibraryInputs(None, _butler(SITE), config).sky_model_for(SETTING)
     assert len(fits) == 2
+
+
+def test_a_sky_model_without_chosen_nights_is_fitted_and_kept_apart(
+    config: AppConfiguration, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Leaving nights out refits without them; the full fit is kept."""
+    monkeypatch.setattr(library_inputs, "_SKY_MODEL_CACHE", library_inputs.VersionedCache())
+    fits: list[frozenset[str]] = []
+
+    def counted_fit(
+        self: LibraryInputs, setting: CaptureSetting, key: str, exclude_nights: frozenset[str] = frozenset()
+    ) -> tuple[None, str]:
+        """Note which nights the fit left out and give no model.
+
+        Returns
+        -------
+        outcome : `tuple`
+            No model and a reason.
+        """
+        fits.append(exclude_nights)
+        return None, "made up"
+
+    monkeypatch.setattr(LibraryInputs, "_fit_sky_model", counted_fit)
+
+    inputs = LibraryInputs(None, _butler(SITE), config)
+    inputs.sky_model_for(SETTING)
+    inputs.sky_model_for(SETTING, ["2026-09-24"])
+    inputs.sky_model_for(SETTING, ["2026-09-24"])
+    inputs.sky_model_for(SETTING)
+    assert fits == [frozenset(), frozenset({"2026-09-24"})]
 
 
 def test_the_camera_observations_are_read_once_until_their_camera_changes(

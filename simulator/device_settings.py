@@ -53,16 +53,35 @@ import logging
 import math
 import tomllib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
+
+from simulator.fit import driver_model
 
 LOGGER = logging.getLogger(__name__)
 MAIN_CAMERA = "CCD Simulator"
 GUIDE_CAMERA = "Guide Simulator"
+#: Arcseconds per pixel for a 1 micrometer pixel behind a 1 millimeter focal
+#: length (206265 arcseconds per radian, divided by 1000 for the units).
+PIXEL_SCALE_CONSTANT = 206.265
+#: The guide simulator's largest ``SIM_SEEING`` (`simulator.fit.ranges`).
+GUIDE_SEEING_MAXIMUM = 20.0
 #: The focal length (mm) and focal ratio used when the settings give none.
 FALLBACK_FOCAL_LENGTH_MM = 405.0
 FALLBACK_FOCAL_RATIO = 5.4
+#: The narrowest star the guide camera simulator draws, in pixels (full width
+#: at half maximum). The simulator draws a Gaussian star from the seeing
+#: alone, so with 6.4 arcsec pixels a real-sky seeing of 3 to 4 arcsec gives
+#: a star under one pixel wide, which PHD2 treats as a hot pixel (it filters
+#: single pixels out and rejects stars with a half-flux diameter under 1.5
+#: pixels). A real guide scope spreads a star over several pixels with its
+#: optics and focus. Measured in a live run on 2026-11-07 (real PHD2, real
+#: GSC stars, 6.39 arcsec per pixel): 2.4 pixels gave "Star lost - low HFD"
+#: during calibration; 3.5 pixels gave a half-flux diameter of 2.2 pixels and
+#: a signal-to-noise ratio of 62, and PHD2 calibrated and guided. Design
+#: estimate: simulator plan S4, guide seeing row.
+GUIDE_MINIMUM_STAR_FWHM_PIXELS = 3.5
 #: How close a read-back value must be to the value that was set, relative.
 READ_BACK_TOLERANCE = 1e-3
 
@@ -86,6 +105,11 @@ class DeviceSetting:
         The value to write in the frame header when it differs from the value
         sent. Used by ``CCD_OFFSET``: the simulator is sent a pedestal in ADU,
         while the header keeps the camera's offset setting.
+    read_back_decimals : `int` or `None`, optional
+        The decimals the server echoes the value with (its INDI number
+        format, such as ``%4.1f``). The server shows the rounded value, so the
+        read-back is compared at this precision. `None` (default) compares at
+        `READ_BACK_TOLERANCE`.
     """
 
     device: str
@@ -93,6 +117,7 @@ class DeviceSetting:
     elements: tuple[tuple[str, float | str], ...]
     check: bool = True
     header_value: float | None = None
+    read_back_decimals: int | None = None
 
     def specification(self) -> str:
         """Write the setting the way ``indi_setprop`` takes it.
@@ -272,6 +297,52 @@ FILTER_WHEEL_SLOTS = 8
 FILTER_WHEEL = "Filter Simulator"
 
 
+def guide_star_seeing_floor(pixel_scale_arcsec: float | None) -> float | None:
+    """Give the smallest guide camera ``SIM_SEEING`` that PHD2 can use.
+
+    Parameters
+    ----------
+    pixel_scale_arcsec : `float` or `None`
+        The guide camera's pixel scale, in arcseconds per pixel.
+
+    Returns
+    -------
+    seeing : `float` or `None`
+        ``SIM_SEEING`` that draws a star `GUIDE_MINIMUM_STAR_FWHM_PIXELS`
+        wide, kept inside the property's range. `None` when the scale is not
+        known.
+    """
+    if pixel_scale_arcsec is None or pixel_scale_arcsec <= 0:
+        return None
+    fwhm = GUIDE_MINIMUM_STAR_FWHM_PIXELS * pixel_scale_arcsec
+    return min(driver_model.guide_fwhm_to_seeing(fwhm), GUIDE_SEEING_MAXIMUM)
+
+
+def guide_pixel_scale(settings: Mapping[str, Any]) -> float | None:
+    """Work out the guide camera's pixel scale from the world's settings.
+
+    Parameters
+    ----------
+    settings : `~collections.abc.Mapping`
+        The parsed settings of the world.
+
+    Returns
+    -------
+    scale : `float` or `None`
+        Arcseconds per pixel: 206.265 times the pixel size (micrometers)
+        over the active guide scope's focal length (millimeters). `None`
+        when either is missing.
+    """
+    secondary = _camera_profile(settings, "default_secondary_camera")
+    scopes = settings.get("Observatory.GuideScope", {})
+    scope = settings.get(f"Observatory.GuideScope.{scopes.get('active_guide_scope', '')}", {})
+    focal_length = _number(scope.get("focal_length_mm"))
+    pixel_size = _number(secondary.get("pixel_size_\u03bcm"))
+    if not focal_length or not pixel_size:
+        return None
+    return PIXEL_SCALE_CONSTANT * pixel_size / focal_length
+
+
 def real_filter_names(settings: Mapping[str, Any]) -> list[str]:
     """Read the filter names from the settings, as the app does.
 
@@ -386,6 +457,11 @@ def device_settings_from_world(settings: Mapping[str, Any]) -> list[DeviceSettin
                 GUIDE_CAMERA, "SCOPE_INFO", (("FOCAL_LENGTH", guide_length), ("APERTURE", guide_aperture))
             )
         )
+    seeing_floor = guide_star_seeing_floor(guide_pixel_scale(settings))
+    if seeing_floor is not None:
+        # Without a fit the guide simulator would keep its default star width,
+        # which is under two pixels wide here; the fit replaces this value.
+        result.append(DeviceSetting(GUIDE_CAMERA, "SIMULATOR_SETTINGS", (("SIM_SEEING", seeing_floor),)))
     capture = _capture_setting(primary)
     if capture is not None:
         result.append(DeviceSetting(MAIN_CAMERA, "CCD_GAIN", (("GAIN", capture[0]),)))
@@ -412,7 +488,50 @@ def device_settings_from_world(settings: Mapping[str, Any]) -> list[DeviceSettin
     return result
 
 
-def matches(expected: float | str, found: str) -> bool:
+def merge_device_settings(base: list[DeviceSetting], fitted: list[DeviceSetting]) -> list[DeviceSetting]:
+    """Add the fitted properties to the geometry settings.
+
+    A fitted setting whose elements are all in a setting of `base` (the same
+    device and property) replaces those elements in place and keeps the base
+    setting's other fields, such as ``header_value``. This is how the fitted
+    camera pedestal replaces the geometry step's pedestal. Every other fitted
+    setting is added after the geometry settings, as a call of its own, so a
+    resolution change never undoes it.
+
+    Parameters
+    ----------
+    base : `list` [`DeviceSetting`]
+        The geometry settings (`device_settings_from_world`).
+    fitted : `list` [`DeviceSetting`]
+        The fitted settings (`simulator.fit.results.fitted_device_settings`).
+
+    Returns
+    -------
+    merged : `list` [`DeviceSetting`]
+        The base settings, changed where a fitted setting overrides one,
+        followed by the fitted settings that were added.
+    """
+    merged = list(base)
+    for setting in fitted:
+        names = {name for name, _ in setting.elements}
+        for index, existing in enumerate(merged):
+            if (existing.device, existing.property_name) == (
+                setting.device,
+                setting.property_name,
+            ) and names <= {name for name, _ in existing.elements}:
+                replaced = dict(setting.elements)
+                merged[index] = replace(
+                    existing,
+                    elements=tuple((name, replaced.get(name, value)) for name, value in existing.elements),
+                    read_back_decimals=setting.read_back_decimals,
+                )
+                break
+        else:
+            merged.append(setting)
+    return merged
+
+
+def matches(expected: float | str, found: str, decimals: int | None = None) -> bool:
     """Say whether a value read back from the server equals what was set.
 
     Parameters
@@ -421,11 +540,15 @@ def matches(expected: float | str, found: str) -> bool:
         The value that was set.
     found : `str`
         The text ``indi_getprop`` printed.
+    decimals : `int`, optional
+        The decimals the server rounds the value to. When given, the numbers
+        agree if they differ by no more than half a unit of the last decimal.
 
     Returns
     -------
     same : `bool`
-        `True` when the numbers agree within `READ_BACK_TOLERANCE`.
+        `True` when the numbers agree within `READ_BACK_TOLERANCE`, or within
+        the rounding of `decimals`.
     """
     if isinstance(expected, str):
         return found == expected
@@ -433,4 +556,6 @@ def matches(expected: float | str, found: str) -> bool:
         value = float(found)
     except ValueError:
         return False
+    if decimals is not None:
+        return abs(value - expected) <= 0.5 * 10.0**-decimals + 1e-9
     return abs(value - expected) <= READ_BACK_TOLERANCE * max(1.0, abs(expected))

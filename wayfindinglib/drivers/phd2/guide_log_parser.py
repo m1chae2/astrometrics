@@ -34,6 +34,11 @@ Two details of the format matter for correctness:
   the guide image, measured by PHD2 from its own x axis and y axis). It is
   stored as read. Do not compare it with a sky position angle or with the
   Ekos angle until the two conventions are checked against each other.
+* PHD2's header also states the guide controller: the exposure, the guide
+  algorithm of each axis (``X`` is right ascension, ``Y`` is declination)
+  with its aggressiveness, hysteresis and minimum move, and the longest
+  pulses. They are read into each section's ``controller``. The Ekos
+  guider writes none of these lines, so its sections leave them `None`.
 * Correction directions are single letters (``W``, ``E``, ``N``, ``S``).
   Pulses are returned signed: east and north positive, west and south
   negative.
@@ -46,7 +51,12 @@ import re
 from datetime import datetime
 from typing import Any
 
-from wayfindinglib.models.session.guide_log import GuideCalibration, GuidingSection, ParsedGuideLog
+from wayfindinglib.models.session.guide_log import (
+    GuideAxisSettings,
+    GuideCalibration,
+    GuidingSection,
+    ParsedGuideLog,
+)
 from wayfindinglib.models.session.telemetry import GuidingSampleSource
 
 logger = logging.getLogger(__name__)
@@ -78,6 +88,13 @@ _POINTING_FIELDS = {
     "azimuth_degrees": re.compile(r"\bAz = (-?[\d.]+) deg"),
 }
 _PIER_SIDE = re.compile(r"Pier side = (East|West)")
+_EXPOSURE_LINE = re.compile(r"(?:^|, )Exposure = (?P<milliseconds>[\d.]+) ms")
+_ALGORITHM_LINE = re.compile(r"^(?P<axis>X|Y|RA|Dec) guide algorithm = (?P<name>[^,]+)(?P<rest>.*)$")
+_ALGORITHM_PARAMETER = re.compile(r"(?P<name>Aggress\w*|Hysteresis|Minimum move) = (?P<value>-?[\d.]+)")
+_MAXIMUM_DURATIONS_LINE = re.compile(
+    r"Max RA duration = (?P<ra>[\d.]+), Max DEC duration = (?P<dec>[\d.]+)", re.IGNORECASE
+)
+_PERCENT_THRESHOLD = 1.0
 _EAST_OR_NORTH = {"E", "EAST", "N", "NORTH"}
 
 
@@ -105,6 +122,62 @@ def _read_pointing(line: str, section: GuidingSection) -> None:
     pier_match = _PIER_SIDE.search(line)
     if pier_match:
         section.pier_side = pier_match.group(1)
+
+
+def _as_fraction(value: float) -> float:
+    """Read a PHD2 setting that older versions wrote as a percent.
+
+    Returns
+    -------
+    fraction : `float`
+        `value` if it is at most 1, otherwise `value` divided by 100.
+    """
+    return value / 100.0 if value > _PERCENT_THRESHOLD else value
+
+
+def _read_controller_line(line: str, section: GuidingSection) -> bool:
+    """Fill a section's controller settings from one header line.
+
+    Parameters
+    ----------
+    line : `str`
+        One stripped line of the section header.
+    section : `GuidingSection`
+        The section being read; its ``controller`` is updated.
+
+    Returns
+    -------
+    used : `bool`
+        `True` if the line was an exposure, algorithm or pulse-limit line.
+    """
+    controller = section.controller
+    algorithm = _ALGORITHM_LINE.match(line)
+    if algorithm:
+        settings = GuideAxisSettings(algorithm=algorithm.group("name").strip())
+        for parameter in _ALGORITHM_PARAMETER.finditer(algorithm.group("rest")):
+            value = float(parameter.group("value"))
+            name = parameter.group("name")
+            if name.startswith("Aggress"):
+                settings.aggressiveness = _as_fraction(value)
+            elif name == "Hysteresis":
+                settings.hysteresis = _as_fraction(value)
+            else:
+                settings.minimum_move_px = value
+        if algorithm.group("axis") in ("X", "RA"):
+            controller.ra_axis = settings
+        else:
+            controller.dec_axis = settings
+        return True
+    limits = _MAXIMUM_DURATIONS_LINE.search(line)
+    if limits:
+        controller.maximum_ra_duration_ms = float(limits.group("ra"))
+        controller.maximum_dec_duration_ms = float(limits.group("dec"))
+        return True
+    exposure = _EXPOSURE_LINE.search(line)
+    if exposure:
+        controller.exposure_seconds = float(exposure.group("milliseconds")) / 1000.0
+        return True
+    return False
 
 
 def _signed_pulse_ms(duration_text: str, direction_text: str) -> float:
@@ -242,6 +315,9 @@ def parse_guide_log_file(
             continue
 
         if section is None:
+            continue
+
+        if _read_controller_line(line, section):
             continue
 
         scale_line = _PIXEL_SCALE_LINE.match(line)

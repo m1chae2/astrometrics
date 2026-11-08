@@ -513,6 +513,9 @@ def test_build_world_falls_back_to_the_offline_world(tmp_path: Path, monkeypatch
 def test_live_world_starts_stand_ins_and_is_removed(tmp_path: Path) -> None:
     """A real world in a temporary folder is built, then removed."""
     rig = Rig(tmp_path, "wait", SIMULATED)
+    # The stand-in guider keeps this test from opening a PHD2 window on the
+    # user's display (the live PHD2 test is in test_phd2_live.py).
+    rig.environ[launch.GUIDER_VARIABLE] = "mock"
     launcher = rig.launcher(world_builder=launch.build_world, calibration_runner=lambda w, e: [])
     outcome: list[int] = []
     thread = threading.Thread(target=lambda: outcome.append(launcher.run()))
@@ -589,3 +592,179 @@ def test_the_simulated_backend_child_gets_the_offline_backstop_flag(tmp_path: Pa
     rig = Rig(tmp_path, "exit:0", SIMULATED)
     assert rig.launcher().run() == 0
     assert rig.starts()[0]["environment"]["ASTROMETRICS_OFFLINE"] == "1"
+
+
+def _world_with_phd2(rig: Rig, root: Path, environ: dict[str, str]) -> World:
+    """Give the fake world a real-PHD2 record and a launch note.
+
+    Returns
+    -------
+    world : `World`
+        The fake world, with ``phd2`` and ``notes`` set.
+    """
+    from simulator.phd2_launch import Phd2Instance
+
+    world = rig.world(root, environ)
+    world.guider = "phd2"
+    world.phd2 = Phd2Instance(2, 4401, "Astrometrics simulator 2", 4500, root)
+    world.notes = ["a launch note"]
+    return world
+
+
+def test_guiding_follows_the_operator_step_for_the_real_phd2(tmp_path: Path) -> None:
+    """The guiding step runs once after the operator, with the PHD2 record."""
+    rig = Rig(tmp_path, "wait", SIMULATED)
+    order: list[str] = []
+    seen: list[tuple] = []
+
+    def guiding(phd2: object, should_stop: Callable[[], bool]) -> object:
+        """Note the call and report guiding.
+
+        Returns
+        -------
+        outcome : `GuidingOutcome`
+            A made-up outcome.
+        """
+        from simulator.guiding_operator import GUIDING, GuidingOutcome
+
+        order.append("guiding")
+        seen.append((phd2, should_stop()))
+        return GuidingOutcome(GUIDING, "ok")
+
+    launcher = rig.launcher(
+        world_builder=lambda root, environ: _world_with_phd2(rig, root, environ),
+        operator=lambda *args: order.append("operator") or {},
+        guiding_operator=guiding,
+    )
+    thread = threading.Thread(target=launcher.run)
+    thread.start()
+    assert wait_for(lambda: bool(seen))
+    launcher.request_stop()
+    thread.join(timeout=30)
+    assert order == ["operator", "guiding"]
+    assert seen[0][0].event_port == 4401
+    assert launcher.guiding_outcome is not None
+    assert launcher.guiding_outcome.status == "guiding"
+
+
+def test_the_operator_steps_run_with_the_worlds_offline_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both operator steps run offline with the world's settings."""
+    monkeypatch.delenv("ASTROMETRICS_OFFLINE", raising=False)
+    monkeypatch.setenv("ASTROMETRICS_CONFIG", "/real/settings.toml")
+    rig = Rig(tmp_path, "wait", SIMULATED)
+    seen: dict[str, dict[str, str | None]] = {}
+
+    def look(step: str) -> None:
+        """Note the identity variables as the step sees them."""
+        seen[step] = {
+            name: os.environ.get(name)
+            for name in ("ASTROMETRICS_OFFLINE", "ASTROMETRICS_CONFIG", "ASTROMETRICS_CONFIG_PATH")
+        }
+
+    def guiding(phd2: object, should_stop: Callable[[], bool]) -> object:
+        """Note the identity and report guiding.
+
+        Returns
+        -------
+        outcome : `GuidingOutcome`
+            A made-up outcome.
+        """
+        from simulator.guiding_operator import GUIDING, GuidingOutcome
+
+        look("guiding")
+        return GuidingOutcome(GUIDING, "ok")
+
+    holder: dict[str, World] = {}
+
+    def build(root: Path, environ: dict[str, str]) -> World:
+        """Build the fake world and keep it.
+
+        Returns
+        -------
+        world : `World`
+            The fake world with a PHD2 record.
+        """
+        holder["world"] = _world_with_phd2(rig, root, environ)
+        return holder["world"]
+
+    launcher = rig.launcher(
+        world_builder=build,
+        operator=lambda *args: look("operator") or {},
+        guiding_operator=guiding,
+    )
+    thread = threading.Thread(target=launcher.run)
+    thread.start()
+    assert wait_for(lambda: "guiding" in seen)
+    launcher.request_stop()
+    thread.join(timeout=30)
+    expected = str(holder["world"].config_path)
+    for step in ("operator", "guiding"):
+        assert seen[step]["ASTROMETRICS_OFFLINE"] == "1"
+        assert seen[step]["ASTROMETRICS_CONFIG"] == expected
+        assert seen[step]["ASTROMETRICS_CONFIG_PATH"] == expected
+    assert "ASTROMETRICS_OFFLINE" not in os.environ
+    assert os.environ["ASTROMETRICS_CONFIG"] == "/real/settings.toml"
+
+
+def test_the_stand_in_guider_gets_no_guiding_step(tmp_path: Path) -> None:
+    """A world without a real PHD2 is not guided by the operator."""
+    rig = Rig(tmp_path, "wait", SIMULATED)
+    operated: list[int] = []
+    guided: list[int] = []
+    launcher = rig.launcher(
+        operator=lambda *args: operated.append(1) or {},
+        guiding_operator=lambda *args: guided.append(1),
+    )
+    thread = threading.Thread(target=launcher.run)
+    thread.start()
+    assert wait_for(lambda: bool(operated))
+    time.sleep(0.3)
+    launcher.request_stop()
+    thread.join(timeout=30)
+    assert guided == []
+
+
+def test_a_guiding_step_that_raises_does_not_stop_the_session(tmp_path: Path) -> None:
+    """A crash in the guiding step is a warning, and the app keeps running."""
+    rig = Rig(tmp_path, "wait", SIMULATED)
+    called: list[int] = []
+
+    def broken(phd2: object, should_stop: Callable[[], bool]) -> object:
+        """Fail like a bug in the step.
+
+        Raises
+        ------
+        RuntimeError
+            Always.
+        """
+        called.append(1)
+        raise RuntimeError("boom")
+
+    launcher = rig.launcher(
+        world_builder=lambda root, environ: _world_with_phd2(rig, root, environ),
+        guiding_operator=broken,
+    )
+    thread = threading.Thread(target=launcher.run)
+    thread.start()
+    assert wait_for(lambda: bool(called))
+    launcher.request_stop()
+    thread.join(timeout=30)
+    assert launcher.guiding_outcome is None
+
+
+def test_the_worlds_notes_reach_the_backend_as_launch_notes(tmp_path: Path) -> None:
+    """A note from the world (such as a fallback guider) is passed on."""
+    rig = Rig(tmp_path, "wait", SIMULATED)
+    launcher = rig.launcher(
+        world_builder=lambda root, environ: _world_with_phd2(rig, root, environ),
+        guiding_operator=lambda *args: None,
+    )
+    thread = threading.Thread(target=launcher.run)
+    thread.start()
+    assert wait_for(rig.record.exists)
+    launcher.request_stop()
+    thread.join(timeout=30)
+    notes = rig.starts()[0]["environment"][launch.LAUNCH_NOTES_VARIABLE]
+    assert "a launch note" in notes.splitlines()

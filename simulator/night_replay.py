@@ -385,6 +385,22 @@ def _refuse_real_folder(path: Path) -> None:
             )
 
 
+def refuse_real_folder(path: Path) -> None:
+    """Refuse a path inside, or around, the user's real folders.
+
+    This is the public name for the check `copy_frame` makes, so other
+    simulator modules (the real-frame source) can test a destination before
+    they change anything.
+
+    Parameters
+    ----------
+    path : `pathlib.Path`
+        The path to write. A `RuntimeError` is raised if it is inside one of
+        the real folders, or holds one.
+    """
+    _refuse_real_folder(path)
+
+
 def build_plan(
     night: str = DEFAULT_NIGHT,
     speed: float = 1.0,
@@ -554,10 +570,12 @@ def copy_frame(source: Path, destination: Path) -> None:
     source : `pathlib.Path`
         The real frame (read only).
     destination : `pathlib.Path`
-        Where the stamped copy goes.
+        Where the stamped copy goes. A `RuntimeError` is raised, and nothing
+        is written, if it is inside or around one of the user's real folders.
     """
     from astropy.io import fits
 
+    _refuse_real_folder(destination)
     shutil.copyfile(source, destination)
     with fits.open(destination, mode="update", memmap=False) as hdul:
         hdul[0].header[SIMULATOR_STAMP_KEYWORD] = (SIMULATOR_STAMP_VALUE, SIMULATOR_STAMP_COMMENT)

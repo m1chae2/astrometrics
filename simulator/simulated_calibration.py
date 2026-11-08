@@ -64,6 +64,7 @@ __all__ = [
     "GuiderCalibrationValues",
     "SimulatedCalibrationReport",
     "build_simulated_calibrations",
+    "check_library_is_simulators",
     "record_simulated_calibrations",
     "rpc_calls",
 ]
@@ -76,6 +77,9 @@ SIMULATED_CAMERA_ANGLE_DEG = 0.0
 #: 15.04 arcsec/s. The library's own guide rate is the same number (a test
 #: checks that they agree).
 SIMULATED_GUIDE_RATE_ARCSEC_PER_SEC = 7.52
+#: The mount simulator moves at 15 arcsec/s for one unit of ``GUIDE_RATE``
+#: (INDI 2.2.5 ``scopesim_helper.cpp:127``).
+SIMULATED_GUIDE_RATE_UNIT_ARCSEC_PER_SEC = 15.0
 
 
 @dataclass(frozen=True)
@@ -125,7 +129,7 @@ class SimulatedCalibrationReport:
     focus_source: str
 
 
-def _check_library_is_simulators(
+def check_library_is_simulators(
     control: ObservatoryControl, simulator_root: Path, protected: Iterable[Path] | None
 ) -> None:
     """Refuse a wayfinding library that is not the simulator's own.
@@ -246,6 +250,7 @@ def _day(moment: datetime) -> str:
 
 def _simulator_guider(
     plate_scale_from_equipment: float | None,
+    guide_rate_fraction: dict[str, float] | None = None,
 ) -> tuple[float, float, float, float, str]:
     """Give the guider numbers of the INDI simulators.
 
@@ -253,6 +258,10 @@ def _simulator_guider(
     ----------
     plate_scale_from_equipment : `float` or `None`
         The active guide train's plate scale, in arcseconds per pixel.
+    guide_rate_fraction : `dict` [`str`, `float`], optional
+        The fitted ``GUIDE_RATE_WE`` and ``GUIDE_RATE_NS`` of the simulated
+        mount (fractions of 15 arcsec/s, see `simulator.fit`). Default: the
+        simulator's own 0.5 on both axes.
 
     Returns
     -------
@@ -273,24 +282,25 @@ def _simulator_guider(
         raise ConfigurationError(
             "The guide camera's plate scale is not known, so no calibration can be made."
         )
+    ra_rate = dec_rate = SIMULATED_GUIDE_RATE_ARCSEC_PER_SEC
+    rate_text = f"guide rate {SIMULATED_GUIDE_RATE_ARCSEC_PER_SEC:g} arcsec/s on both axes"
+    if guide_rate_fraction:
+        unit = SIMULATED_GUIDE_RATE_UNIT_ARCSEC_PER_SEC
+        ra_rate = guide_rate_fraction.get("GUIDE_RATE_WE", 0.5) * unit
+        dec_rate = guide_rate_fraction.get("GUIDE_RATE_NS", 0.5) * unit
+        rate_text = f"fitted guide rate {ra_rate:g} / {dec_rate:g} arcsec/s (fit_results.json)"
     source = (
         "guide simulator's own values: equipment plate scale, "
-        f"camera angle {SIMULATED_CAMERA_ANGLE_DEG:g} deg (SIM_ROTATION), "
-        f"guide rate {SIMULATED_GUIDE_RATE_ARCSEC_PER_SEC:g} arcsec/s on both axes"
+        f"camera angle {SIMULATED_CAMERA_ANGLE_DEG:g} deg (SIM_ROTATION), {rate_text}"
     )
-    return (
-        plate_scale_from_equipment,
-        SIMULATED_CAMERA_ANGLE_DEG,
-        SIMULATED_GUIDE_RATE_ARCSEC_PER_SEC,
-        SIMULATED_GUIDE_RATE_ARCSEC_PER_SEC,
-        source,
-    )
+    return (plate_scale_from_equipment, SIMULATED_CAMERA_ANGLE_DEG, ra_rate, dec_rate, source)
 
 
 def build_simulated_calibrations(
     control: ObservatoryControl,
     simulator_root: Path,
     protected: Iterable[Path] | None = None,
+    guide_rate_fraction: dict[str, float] | None = None,
 ) -> SimulatedCalibrationReport:
     """Work out the guider calibration and focus model, and save nothing.
 
@@ -309,6 +319,10 @@ def build_simulated_calibrations(
         The simulator's folder.
     protected : `~collections.abc.Iterable` [`pathlib.Path`], optional
         The user's real folders. Default: `real_protected_paths`.
+    guide_rate_fraction : `dict` [`str`, `float`], optional
+        The fitted guide rates of the simulated mount (see `simulator.fit`),
+        so the recorded calibration matches the mount. Default: the
+        simulator's own rate.
 
     Returns
     -------
@@ -328,7 +342,7 @@ def build_simulated_calibrations(
     """
     from astrometricslib.exceptions import ConfigurationError
 
-    _check_library_is_simulators(control, simulator_root, protected)
+    check_library_is_simulators(control, simulator_root, protected)
     equipment = control.equipment.status(include=["telescope", "camera"])
     if equipment.telescope is None or equipment.camera is None:
         raise ConfigurationError(
@@ -338,7 +352,7 @@ def build_simulated_calibrations(
     identifier = f"simulator-{equipment.telescope.id}-{equipment.camera.id}"
 
     plate_scale, angle, ra_rate, dec_rate, guider_source = _simulator_guider(
-        control.guiding.status(include=["plate_scale"]).plate_scale_arcsec_per_px
+        control.guiding.status(include=["plate_scale"]).plate_scale_arcsec_per_px, guide_rate_fraction
     )
     calibration = GuiderCalibrationValues(
         id=identifier,
@@ -518,6 +532,12 @@ def main(argv: list[str] | None = None) -> int:
     """
     parser = argparse.ArgumentParser(description="Work out the simulator's calibration records.")
     parser.add_argument("--root", type=Path, required=True, help="The simulator's folder.")
+    parser.add_argument(
+        "--fit-results",
+        type=Path,
+        default=None,
+        help="The fit's results file; its guide rates become the calibration's.",
+    )
     arguments = parser.parse_args(argv)
     from astrometricslib import get_configuration
     from astrometricslib.exceptions import ConfigurationError
@@ -525,7 +545,10 @@ def main(argv: list[str] | None = None) -> int:
 
     wayfinder = Wayfinder(get_configuration())
     try:
-        report = build_simulated_calibrations(wayfinder.control, arguments.root)
+        from simulator.fit.results import fitted_guide_rate_fraction
+
+        fraction = fitted_guide_rate_fraction(arguments.fit_results) if arguments.fit_results else None
+        report = build_simulated_calibrations(wayfinder.control, arguments.root, guide_rate_fraction=fraction)
     except (ConfigurationError, GuardError, OSError, ValueError) as error:
         sys.stderr.write(f"{type(error).__name__}: {error}\n")
         return 1

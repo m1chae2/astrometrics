@@ -12,9 +12,12 @@ from pathlib import Path
 import pytest
 
 from simulator.device_settings import (
+    GUIDE_MINIMUM_STAR_FWHM_PIXELS,
     DeviceSetting,
     camera_setpoint,
     device_settings_from_world,
+    guide_pixel_scale,
+    guide_star_seeing_floor,
     load_world_settings,
     matches,
     real_filter_names,
@@ -73,6 +76,7 @@ def test_the_cameras_optics_and_capture_setting_come_from_the_real_settings() ->
         "Guide Simulator.SIMULATOR_SETTINGS.SIM_XRES;SIM_YRES;SIM_XSIZE;SIM_YSIZE=1280;960;3.75;3.75",
         "CCD Simulator.SCOPE_INFO.FOCAL_LENGTH;APERTURE=405;75",
         "Guide Simulator.SCOPE_INFO.FOCAL_LENGTH;APERTURE=121.05;32",
+        "Guide Simulator.SIMULATOR_SETTINGS.SIM_SEEING=15.89210227",
         "CCD Simulator.CCD_GAIN.GAIN=0",
         "CCD Simulator.CCD_OFFSET.OFFSET=394.85",
     ]
@@ -253,3 +257,20 @@ def test_the_driver_waits_for_the_sensor_to_reach_the_setpoint(monkeypatch: pyte
     assert driver.wait_for_cooling(timeout=60) is not None
     assert driver.cooling_seconds is not None
     assert _FakeDriver([]).wait_for_cooling() is None
+
+
+def test_the_guide_star_is_wide_enough_for_phd2_to_use() -> None:
+    """A 6.39 arcsec pixel needs a star 3.5 pixels wide: seeing about 15.9."""
+    scale = guide_pixel_scale(WORLD)
+    assert scale == pytest.approx(6.39, abs=0.01)
+    seeing = guide_star_seeing_floor(scale)
+    assert seeing is not None
+    # The driver draws a Gaussian of full width 1.41 times SIM_SEEING.
+    assert 1.4142 * seeing / scale == pytest.approx(GUIDE_MINIMUM_STAR_FWHM_PIXELS, rel=0.01)
+
+
+def test_the_guide_star_width_is_left_alone_when_the_optics_are_unknown() -> None:
+    """With no guide scope there is no pixel scale and no seeing setting."""
+    assert guide_pixel_scale({}) is None
+    assert guide_star_seeing_floor(None) is None
+    assert guide_star_seeing_floor(100.0) == pytest.approx(20.0)

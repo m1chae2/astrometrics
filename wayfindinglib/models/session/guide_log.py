@@ -51,6 +51,58 @@ class GuideCalibration:
 
 
 @dataclass
+class GuideAxisSettings:
+    """The guide algorithm PHD2 used on one axis, as the log header states it.
+
+    Attributes
+    ----------
+    algorithm : `str`
+        The algorithm name, for example ``"Hysteresis"`` or
+        ``"Resist Switch"``.
+    aggressiveness : `float` or `None`
+        How much of each measured error the algorithm corrects, as a
+        fraction (0.7 means 70 percent). The log writes a fraction in current
+        PHD2 versions and a percent in older ones; a value above 1 is read as
+        percent and divided by 100. `None` if the log gave none.
+    hysteresis : `float` or `None`
+        The Hysteresis algorithm's weight of the previous correction, as a
+        fraction (0.1 means 10 percent). `None` for other algorithms.
+    minimum_move_px : `float` or `None`
+        The smallest error the algorithm corrects, in guide camera pixels.
+    """
+
+    algorithm: str
+    aggressiveness: float | None = None
+    hysteresis: float | None = None
+    minimum_move_px: float | None = None
+
+
+@dataclass
+class GuideControllerSettings:
+    """The guiding controller settings a guiding section's header states.
+
+    Attributes
+    ----------
+    exposure_seconds : `float` or `None`
+        The guide exposure length, in seconds.
+    ra_axis : `GuideAxisSettings` or `None`
+        The algorithm on the right ascension (PHD2 "X") axis.
+    dec_axis : `GuideAxisSettings` or `None`
+        The algorithm on the declination (PHD2 "Y") axis.
+    maximum_ra_duration_ms : `float` or `None`
+        The longest right ascension pulse PHD2 may send, in milliseconds.
+    maximum_dec_duration_ms : `float` or `None`
+        The longest declination pulse PHD2 may send, in milliseconds.
+    """
+
+    exposure_seconds: float | None = None
+    ra_axis: GuideAxisSettings | None = None
+    dec_axis: GuideAxisSettings | None = None
+    maximum_ra_duration_ms: float | None = None
+    maximum_dec_duration_ms: float | None = None
+
+
+@dataclass
 class GuidingSection:
     """One continuous stretch of guiding, with the context it ran in.
 
@@ -87,6 +139,9 @@ class GuidingSection:
         cos(declination).
     dec_rate_arcsec_per_second : `float` or `None`
         Calibrated mount speed along Dec, in arcseconds per second.
+    controller : `GuideControllerSettings`
+        The guide exposure and algorithm settings the header states.
+        Fields the log did not state are `None`.
     frames_total : `int`
         How many frame rows the section holds.
     frames_with_error_code : `int`
@@ -112,6 +167,7 @@ class GuidingSection:
     azimuth_degrees: float | None = None
     ra_rate_arcsec_per_second: float | None = None
     dec_rate_arcsec_per_second: float | None = None
+    controller: GuideControllerSettings = field(default_factory=GuideControllerSettings)
     frames_total: int = 0
     frames_with_error_code: int = 0
     frames_without_pixel_scale: int = 0

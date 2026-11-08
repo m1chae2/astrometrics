@@ -18,7 +18,7 @@ the equipment without any step that updates stored limits.
 import logging
 import sqlite3
 import statistics
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from typing import Any, NamedTuple
 
 import numpy as np
@@ -27,6 +27,7 @@ from astrometricslib.exceptions import FITS_READ_ERRORS, AstrometricsError, Conf
 from wayfindinglib.analytics.capture_history import (
     collect_capture_baseline_values,
     collect_capture_frames,
+    night_of,
     usable_star_frames,
 )
 from wayfindinglib.analytics.performance_envelope import (
@@ -461,6 +462,7 @@ def assemble_performance_envelope(
     capture_frames: list[CaptureFrame] | None = None,
     records: Any = None,
     baseline_provider: Callable[[str], Sequence[NightGuidingBaseline]] | None = None,
+    exclude_nights: Collection[str] | None = None,
 ) -> PerformanceEnvelope | None:
     """Work out the performance limits of the active equipment.
 
@@ -493,6 +495,12 @@ def assemble_performance_envelope(
         values (`collect_night_baselines`). A caller that keeps them between
         calls passes this, so the guiding samples are not read again. The
         samples are read here when omitted.
+    exclude_nights : `Collection` [`str`], optional
+        Observing nights to leave out of every source of the limits: the
+        guiding baselines, the session records, the guiding runs and the
+        frames. Use it to judge a night, or fit the equipment, without that
+        night in the history (a leave-one-out check). It differs from
+        `before_night`, which also drops later nights.
 
     Returns
     -------
@@ -503,10 +511,16 @@ def assemble_performance_envelope(
     telescope, camera = catalog.active_telescope(), catalog.active_camera()
     if telescope is None or camera is None:
         return None
+    excluded = frozenset(exclude_nights or ())
     if contexts is None:
         contexts = butler.get_all("ekos_session_context")
     if runs is None:
         runs = butler.get_all("guiding_run")
+    if excluded:
+        contexts = [record for record in contexts if record.session_id not in excluded]
+        runs = [run for run in runs if run.session_id not in excluded]
+        if capture_frames is not None:
+            capture_frames = [frame for frame in capture_frames if night_of(frame) not in excluded]
     guide_scope, guide_camera = catalog.active_guide_scope(), catalog.active_guide_camera()
     equipment = EquipmentConfiguration(telescope=telescope, camera=camera)
     guide_scale = equipment.guider_plate_scale_arcsec_per_px(guide_scope, guide_camera)
@@ -523,6 +537,8 @@ def assemble_performance_envelope(
         if baseline_provider is not None
         else collect_night_baselines(records, contexts, fingerprint, runs)
     )
+    if excluded:
+        night_baselines = [night for night in night_baselines if night.night not in excluded]
     every_night = collect_baseline_values(
         records, contexts, fingerprint, runs, night_baselines=night_baselines
     )
@@ -542,6 +558,8 @@ def assemble_performance_envelope(
     guide_cadence = statistics.median(cadences) if cadences else None
     if capture_frames is None:
         capture_frames = read_capture_frames(astrometrics, telescope.name, camera.name)
+        if excluded:
+            capture_frames = [frame for frame in capture_frames if night_of(frame) not in excluded]
     minimum_exposure_seconds = (
         None if guide_cadence is None else MINIMUM_GUIDE_CYCLES_PER_EXPOSURE * guide_cadence
     )

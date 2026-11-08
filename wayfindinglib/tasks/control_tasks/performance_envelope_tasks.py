@@ -10,8 +10,10 @@ recorded plate solve to score the sky for tracking risk
 from __future__ import annotations
 
 import math
+from collections.abc import Collection
 from typing import TYPE_CHECKING
 
+from astrometricslib.reports import observing_night_id
 from wayfindinglib.analytics.alignment_sessions import group_alignment_attempts
 from wayfindinglib.analytics.tracking_risk import TrackedTarget, build_tracking_risk_map
 
@@ -59,7 +61,9 @@ def _mount_hour_angles_deg(
     return hour_angles
 
 
-def tracking_risk_map(context: ControlContext) -> TrackingRiskMap:
+def tracking_risk_map(
+    context: ControlContext, exclude_nights: Collection[str] | None = None
+) -> TrackingRiskMap:
     """Score the sky for tracking risk from every recorded plate solve.
 
     Parameters
@@ -67,6 +71,8 @@ def tracking_risk_map(context: ControlContext) -> TrackingRiskMap:
     context : `ControlContext`
         Supplies the active equipment (for the plate scale), the observer
         location and the log database.
+    exclude_nights : `Collection` [`str`], optional
+        Nights whose plate solves are left out.
 
     Returns
     -------
@@ -91,6 +97,13 @@ def tracking_risk_map(context: ControlContext) -> TrackingRiskMap:
     latitude = location["latitude"] if location else context.observer_latitude_deg()
     logs = context.records
     rows = logs.get_session_alignment_attempts("all") if logs is not None else []
+    excluded = set(exclude_nights or ())
+    if excluded:
+        rows = [
+            row
+            for row in rows
+            if (row.get("session_id") or observing_night_id(row.get("timestamp") or 0.0)) not in excluded
+        ]
     sessions = [
         s
         for s in group_alignment_attempts(attempt_models(rows))

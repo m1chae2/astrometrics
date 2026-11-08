@@ -26,6 +26,7 @@ from wayfindinglib._internal.control import SkyPosition
 from wayfindinglib.drivers.butler import DiskButler
 
 EXPECTED_EXPORTS = frozenset({
+    "FrameEndDetector",
     "ObservationExecution",
     "ObservationPackage",
     "ObservationPlanning",
@@ -37,6 +38,10 @@ EXPECTED_EXPORTS = frozenset({
 """What `from wayfindinglib import ...` offers."""
 
 EXPECTED_MODULE_NAMES = {
+    "wayfindinglib.drivers": frozenset({
+        "PHD2Client",
+        "PHD2Session",
+    }),
     "wayfindinglib.exceptions": frozenset({
         "DelegationPolicyValidationError",
         "PlanRevisionConflictError",
@@ -109,6 +114,11 @@ REVIEW_MEMBERS = frozenset({
     "get_live_session_status",
     "frame_guiding",
     "get_performance_envelope",
+    # What the recorded nights say about the equipment itself.
+    "measure_unguided_mount_error",
+    "measure_guiding_spectrum",
+    "measure_focus_temperature_coefficient",
+    "get_sky_rate_prediction",
 })
 """The public members of `ObservationReview`."""
 

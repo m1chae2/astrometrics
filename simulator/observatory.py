@@ -4,7 +4,10 @@ Description: `SimulatedObservatory` gives the app a telescope that is "on"
 without a telescope. It owns these pieces, all on this computer:
 
 * an INDI server (``indiserver``) with the INDI simulators, on a free port;
-* the stand-in PHD2 (`mock_phd2`) on a free port;
+* the guider on a free port: the real PHD2 (`phd2_launch`) for the interactive
+  simulation mode, or the stand-in PHD2 (`mock_phd2`) for the TPM runs and the
+  replay (decision D6). If the real PHD2 is not installed, or does not start,
+  the stand-in plays it and the world reports a note (a status, not an error);
 * a folder that plays the telescope computer (``<root>/standin/home``) and an
   ``ssh`` stand-in (`standin_ssh.sh`) that the app's transfer code reaches by
   PATH;
@@ -50,11 +53,11 @@ import sys
 import threading
 import time
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from simulator import library_copy, observatory_guard
+from simulator import library_copy, observatory_guard, phd2_launch
 from simulator.errors import SimulationUnavailableError
 from simulator.settings import (
     FALLBACK_TELESCOPE_KEYS,
@@ -133,6 +136,21 @@ LISTEN_WAIT_SECONDS = 30.0
 REPLAY_READY_WAIT_SECONDS = 90.0
 #: Seconds between the replay start signal and the first replayed event.
 REPLAY_LEAD_SECONDS = 3.0
+#: Seconds the real PHD2 may take to open its port (it draws a window first).
+PHD2_LISTEN_WAIT_SECONDS = 90.0
+#: The note the world keeps when the stand-in PHD2 plays in place of the real
+#: one. The reason follows it.
+PHD2_FALLBACK_NOTE = "PHD2 (guiding program): the stand-in guider plays PHD2"
+
+
+class GuiderKind(enum.StrEnum):
+    """Which program plays PHD2."""
+
+    MOCK = "mock"
+    """The stand-in (`mock_phd2`): it replays a guide log, the same way."""
+
+    PHD2 = "phd2"
+    """The real PHD2, run against the INDI guide and telescope simulators."""
 
 
 class SimulationKind(enum.StrEnum):
@@ -595,6 +613,15 @@ class SimulatedObservatory:
         The real folders for the copy (from
         `simulator.real_folders.real_folders`). Default: found when
         `prepare` runs.
+    guider : `GuiderKind`, optional
+        Which program plays PHD2 (default: the stand-in, which keeps the TPM
+        runs repeatable). The real PHD2 is used only in the simulated-sky
+        kind. With it, `phd2_port` must be the event port of a PHD2 instance
+        (`phd2_launch.event_port`); the replay is not played, because PHD2
+        writes its own genuine guide log.
+    controller_settings : `~collections.abc.Mapping` [`str`, `float`], optional
+        Guide controller settings for the real PHD2's profile (see
+        `phd2_launch.CONTROLLER_SETTING_KEYS`). Default: PHD2's own defaults.
     """
 
     def __init__(
@@ -611,6 +638,10 @@ class SimulatedObservatory:
         copy_library: bool = False,
         real_library: Any = None,
         existing_world: bool = False,
+        guider: GuiderKind = GuiderKind.MOCK,
+        controller_settings: Mapping[str, float] | None = None,
+        backend_port: int | None = None,
+        fitted_settings_path: Path | None = None,
     ) -> None:
         """Keep the settings; nothing runs yet."""
         self.root = root
@@ -625,6 +656,14 @@ class SimulatedObservatory:
         self.copy_library = copy_library
         self.real_library = real_library
         self.existing_world = existing_world
+        self.guider = GuiderKind(guider)
+        self.controller_settings = dict(controller_settings) if controller_settings else None
+        self.backend_port = backend_port
+        self.fitted_settings_path = fitted_settings_path
+        #: The PHD2 that runs, once started (`None` while the stand-in plays).
+        self.phd2: phd2_launch.Phd2Instance | None = None
+        #: Statuses about parts that are missing or replaced; not errors.
+        self.notes: list[str] = []
         self.sky_target_name = SIMULATED_TARGET_NAME
         self.copy_report: dict = {}
         self.standin_home = standin_home(root)
@@ -824,6 +863,7 @@ class SimulatedObservatory:
         command: list[str],
         log_name: str | None = None,
         extra_environment: Mapping[str, str] | None = None,
+        unset_environment: Iterable[str] = (),
     ) -> None:
         """Start one stand-in under the supervisor.
 
@@ -837,6 +877,8 @@ class SimulatedObservatory:
             The file under ``<root>/logs`` that gets its output.
         extra_environment : `~collections.abc.Mapping`, optional
             Variables for this process only (the INDI server's own ``HOME``).
+        unset_environment : `~collections.abc.Iterable` [`str`], optional
+            Variables this process must not inherit.
         """
         logs = self.root / "logs"
         logs.mkdir(parents=True, exist_ok=True)
@@ -848,6 +890,8 @@ class SimulatedObservatory:
         }
         environment.update(self.environment())
         environment.update(extra_environment or {})
+        for variable in unset_environment:
+            environment.pop(variable, None)
         process = subprocess.Popen(
             [sys.executable, str(SUPERVISOR_SCRIPT), "--", *command],
             stdout=log_file,
@@ -921,21 +965,28 @@ class SimulatedObservatory:
             indiserver_environment(self.root),
         )
         module = "simulator"
-        phd2_command = [python, "-m", f"{module}.mock_phd2", "--port", str(self.phd2_port)]
+        replay_directory = self.root / "replay"
         if self.kind is SimulationKind.REPLAY:
-            replay_directory = self.root / "replay"
             self._stage_replay()
-            phd2_command += [
-                "--plan", str(replay_directory / "plan.json"),
-                "--start-file", str(replay_directory / "start"),
-                "--stats", str(stats / "phd2_stats.json"),
-            ]  # fmt: skip
-        else:
-            phd2_command += ["--log", str(GUIDE_LOG_FIXTURE), "--stats", str(stats / "phd2_stats.json")]
-        self._launch("phd2", phd2_command, "mock_phd2.log")
+        self._wait_listening((self.indi_port,))
+        if self.kind is SimulationKind.SIMULATED_SKY and self.guider is GuiderKind.PHD2:
+            reason = self._start_real_phd2()
+            if reason is not None:
+                self.notes.append(f"{PHD2_FALLBACK_NOTE} ({reason})")
+                logger.warning("The real PHD2 is not used: %s. The stand-in guider plays PHD2.", reason)
+        if self.phd2 is None:
+            phd2_command = [python, "-m", f"{module}.mock_phd2", "--port", str(self.phd2_port)]
+            if self.kind is SimulationKind.REPLAY:
+                phd2_command += [
+                    "--plan", str(replay_directory / "plan.json"),
+                    "--start-file", str(replay_directory / "start"),
+                    "--stats", str(stats / "phd2_stats.json"),
+                ]  # fmt: skip
+            else:
+                phd2_command += ["--log", str(GUIDE_LOG_FIXTURE), "--stats", str(stats / "phd2_stats.json")]
+            self._launch("phd2", phd2_command, "mock_phd2.log")
         self._wait_listening((self.indi_port, self.phd2_port))
         if self.kind is SimulationKind.REPLAY:
-            replay_directory = self.root / "replay"
             self._launch(
                 "driver",
                 [
@@ -956,16 +1007,133 @@ class SimulatedObservatory:
                     python, "-m", f"{module}.exposure_driver",
                     "--indi-port", str(self.indi_port),
                     "--standin", str(self.standin_home),
-                    "--guide-log", str(GUIDE_LOG_FIXTURE),
                     "--stats", str(stats / "driver_stats.json"),
                     "--exposure-seconds", str(self.exposure_seconds),
                     "--target", self.sky_target_name,
                     "--ra-hours", str(SIMULATED_TARGET_RA_HOURS),
                     "--dec-degrees", str(SIMULATED_TARGET_DEC_DEGREES),
                     "--config", str(self.config_path),
+                    *self._driver_optional_arguments(),
                 ],
                 "driver.log",
             )  # fmt: skip
+
+    def _driver_optional_arguments(self) -> list[str]:
+        """Give the exposure driver's arguments that are not always there.
+
+        Returns
+        -------
+        arguments : `list` [`str`]
+            ``--guide-log`` with the stand-in guider, ``--backend-port`` when
+            the launcher gave the backend's port (real frames, S4), and
+            ``--fitted-settings`` when the fit wrote its file (S3).
+        """
+        arguments: list[str] = []
+        guide_log = self._driver_guide_log()
+        if guide_log is not None:
+            arguments += ["--guide-log", str(guide_log)]
+        if self.backend_port is not None:
+            arguments += ["--backend-port", str(self.backend_port)]
+        if self.fitted_settings_path is not None:
+            arguments += ["--fitted-settings", str(self.fitted_settings_path)]
+        return arguments
+
+    def _driver_guide_log(self) -> Path | None:
+        """Give the guide log the exposure driver replays into the stand-in.
+
+        Returns
+        -------
+        path : `pathlib.Path` or `None`
+            The sample guide log with the stand-in guider. `None` with the
+            real PHD2: PHD2 writes a genuine log, and a replay would count the
+            guiding twice, so the driver writes no guide log at all.
+        """
+        return GUIDE_LOG_FIXTURE if self.phd2 is None else None
+
+    def _guide_optics(self) -> tuple[float, float]:
+        """Read the guide scope and guide camera from the world's settings.
+
+        Returns
+        -------
+        focal_length_mm, pixel_size_um : `float`
+            The active guide scope's focal length and the secondary camera's
+            pixel size. A value the settings lack is PHD2 launch's default.
+        """
+        focal_length = phd2_launch.DEFAULT_GUIDE_FOCAL_LENGTH_MM
+        pixel_size = phd2_launch.DEFAULT_GUIDE_PIXEL_SIZE_UM
+        try:
+            settings = tomllib.loads(self.config_path.read_text(encoding="utf-8"))
+        except OSError, tomllib.TOMLDecodeError:
+            return focal_length, pixel_size
+        scopes = settings.get("Observatory.GuideScope", {})
+        scope = settings.get(f"Observatory.GuideScope.{scopes.get('active_guide_scope', '')}", {})
+        camera_name = settings.get("Observatory.Camera", {}).get("default_secondary_camera", "")
+        camera = settings.get(f"Observatory.Camera.{camera_name}", {})
+        try:
+            focal_length = float(scope.get("focal_length_mm", focal_length))
+            pixel_size = float(camera.get("pixel_size_\u03bcm", pixel_size))
+        except TypeError, ValueError:
+            pass
+        return focal_length, pixel_size
+
+    def _start_real_phd2(self) -> str | None:
+        """Write PHD2's profile and start the real PHD2 in the world.
+
+        PHD2 runs with the stand-in telescope computer's home as ``HOME``, an
+        instance number that matches `phd2_port`, and a profile that connects
+        it to the world's INDI server (see `phd2_launch`).
+
+        Returns
+        -------
+        reason : `str` or `None`
+            `None` when PHD2 listens on its port. Otherwise the reason it is
+            not used, in a few words (the caller falls back to the stand-in).
+        """
+        missing = phd2_launch.phd2_missing_reason(os.environ)
+        if missing is not None:
+            return missing
+        executable = phd2_launch.find_phd2(os.environ)
+        instance = self.phd2_port - phd2_launch.EVENT_PORT_BASE
+        if executable is None or instance < phd2_launch.FIRST_INSTANCE:
+            return f"port {self.phd2_port} is not a PHD2 instance port"
+        if not phd2_launch.choose_instance(candidates=[instance]) == instance:
+            return f"PHD2's ports for instance {instance} are in use"
+        focal_length, pixel_size = self._guide_optics()
+        try:
+            record = phd2_launch.write_profile(
+                self.standin_home,
+                self.root,
+                instance,
+                self.indi_port,
+                self.controller_settings,
+                focal_length,
+                pixel_size,
+            )
+        except ValueError as error:
+            return str(error)
+        self._launch(
+            "phd2",
+            phd2_launch.phd2_command(executable, instance, os.environ),
+            "phd2.log",
+            phd2_launch.phd2_environment(self.standin_home, os.environ),
+            phd2_launch.UNSET_VARIABLES,
+        )
+        deadline = time.time() + PHD2_LISTEN_WAIT_SECONDS
+        while time.time() < deadline:
+            if is_listening(record.event_port):
+                self.phd2 = record
+                return None
+            if self._processes["phd2"].poll() is not None:
+                break
+            time.sleep(0.5)
+        process = self._processes.pop("phd2")
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=8.0)
+            except subprocess.TimeoutExpired:
+                process.kill()
+        return "PHD2 did not open its port (see logs/phd2.log)"
 
     def _stage_replay(self) -> None:
         """Copy the chosen night's files into the simulator root.
@@ -1081,7 +1249,8 @@ class SimulatedObservatory:
         Returns
         -------
         status : `dict`
-            ``kind``, ``replay_night``, ``running``, the ports, and ``error``.
+            ``kind``, ``replay_night``, ``running``, the ports, ``guider``
+            (``phd2`` or ``mock``), ``notes`` and ``error``.
         """
         return {
             "kind": self.kind.value,
@@ -1089,6 +1258,8 @@ class SimulatedObservatory:
             "running": self.is_running(),
             "indi_port": self.indi_port,
             "phd2_port": self.phd2_port,
+            "guider": GuiderKind.PHD2.value if self.phd2 is not None else GuiderKind.MOCK.value,
+            "notes": list(self.notes),
             "error": self._start_error,
             "library_copy": library_copy.read_report(self.root) if self.copy_library else {},
         }
@@ -1131,16 +1302,22 @@ def run_start(arguments: argparse.Namespace) -> int:
         stand-in ended on its own.
     """
     root = arguments.root.resolve()
+    guider = GuiderKind(arguments.guider)
+    phd2_port = arguments.phd2_port
+    if not phd2_port:
+        instance = phd2_launch.choose_instance() if guider is GuiderKind.PHD2 else None
+        phd2_port = phd2_launch.event_port(instance) if instance is not None else choose_free_port()
     observatory = SimulatedObservatory(
         root,
         SimulationKind(arguments.kind),
         arguments.indi_port or choose_free_port(),
-        arguments.phd2_port or choose_free_port(),
+        phd2_port,
         arguments.replay_night,
         arguments.exposure_seconds,
         replay_staged=arguments.replay_staged,
         auto_start_replay=not arguments.manual_replay_start,
         existing_world=arguments.existing_world,
+        guider=guider,
     )
     stopping = threading.Event()
     parent_pid = os.getppid()
@@ -1227,6 +1404,12 @@ def main() -> int:
         "--manual-replay-start", action="store_true", help="Wait for the start file instead of starting."
     )
     start.add_argument("--exposure-seconds", type=float, default=60.0)
+    start.add_argument(
+        "--guider",
+        choices=[kind.value for kind in GuiderKind],
+        default=GuiderKind.MOCK.value,
+        help="Who plays PHD2: the stand-in (default, repeatable) or the real PHD2.",
+    )
     start.add_argument(
         "--existing-world",
         action="store_true",

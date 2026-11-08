@@ -278,6 +278,7 @@ def test_the_start_command_waits_until_it_is_stopped(world: dict, monkeypatch: p
         manual_replay_start=False,
         exposure_seconds=60.0,
         existing_world=False,
+        guider="mock",
     )
     try:
         status = observatory_module.run_start(arguments)

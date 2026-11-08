@@ -10,7 +10,8 @@ The library has a small public surface. Everything else is private.
 
 | Import from | What it holds |
 | :--- | :--- |
-| `wayfindinglib` (the root, 7 names) | `Wayfinder`, the four sub-API classes `ObservatoryControl`, `ObservationPlanning`, `ObservationExecution` and `ObservationReview`, and the two records `ObservationSession` and `ObservationPackage`. |
+| `wayfindinglib` (the root, 8 names) | `Wayfinder`, the four sub-API classes `ObservatoryControl`, `ObservationPlanning`, `ObservationExecution` and `ObservationReview`, the two records `ObservationSession` and `ObservationPackage`, and `FrameEndDetector` (says when a camera frame has ended, from the camera status text). |
+| `wayfindinglib.drivers` | The PHD2 client: `PHD2Client` (reads PHD2's guide steps, or opens a session) and `PHD2Session` (one connection that sends PHD2 commands such as connect, loop, guide and stop, and waits for events). Both refuse a host beyond this computer when the launch is offline. |
 | `wayfindinglib.exceptions` | `DelegationPolicyValidationError` and `PlanRevisionConflictError`. The shared categories (`NotFoundError`, `InvalidArgumentError` and the rest) come from `astrometricslib.exceptions`. |
 | `wayfindinglib.reports` | The states and levels that results report: `RunState`, `PackageStatus`, `DepthGoalState` and `DepthLevel`. |
 | `wayfindinglib.logs` | Readers for the Ekos analyze log: `read_ekos_captures` (the frames a session saved, as `SavedCapture` records with UTC times) and `ekos_utc_offset_hours` (the offset of a zone name Ekos writes). They only read files. |
@@ -18,7 +19,7 @@ The library has a small public surface. Everything else is private.
 
 The rules:
 
-- **Only `wayfindinglib` may import `_internal`.** The backend, the MCP servers and the simulator use the root and the three public modules only. Tests of the libraries are the one exception.
+- **Only `wayfindinglib` may import `_internal`.** The backend, the MCP servers and the simulator use the root and the public modules only. Tests of the libraries are the one exception.
 - **A result model is private, and its fields are not.** A call returns a Pydantic model (a Python class with typed, validated fields). A caller reads the fields by name and does not import the class. The API reference page lists the fields of each result without an import path.
 - **The library uses only public `astrometricslib` names.** It reaches the science library through the `Astrometrics` handle that `Wayfinder` holds.
 - **Calls take plain values.** A simple value is an argument. A group of options or a list of items is a dictionary, and the library checks it.
@@ -38,7 +39,7 @@ The rules:
 
 ### `review.py`
 
-`ObservationReview` (`wayfinder.review`) answers how the nights went. `query` reads past nights and analyses, `get_live_session_status` reads the night in progress, `frame_guiding` links a target's frames to the guiding record, `query_alignment_sessions` and `query_alignment_records` read pointing alignment, `get_performance_envelope` reads the limits that the equipment has shown. The library keeps each night review and the list of nights in memory until the frames, measurements, guiding records or equipment behind them change, so opening a night again is fast.
+`ObservationReview` (`wayfinder.review`) answers how the nights went. `query` reads past nights and analyses, `get_live_session_status` reads the night in progress, `frame_guiding` links a target's frames to the guiding record, `query_alignment_sessions` and `query_alignment_records` read pointing alignment, `get_performance_envelope` reads the limits that the equipment has shown. Four read-only measurements describe the equipment itself from the recorded nights: `measure_unguided_mount_error` rebuilds the mount's own error from the guide pulses and fits its periodic error, drift and jitter (arcseconds, seconds and radians; one entry per guiding run and a pooled summary); `measure_guiding_spectrum` is the guiding spectrum without saving it; `measure_focus_temperature_coefficient` fits focuser steps per degree Celsius with its uncertainty and the nights used; and `get_sky_rate_prediction` predicts the sky background rate (electrons and ADU per second per pixel) for a pointing and a time. All of them, and `get_performance_envelope`, take `exclude_nights` to leave nights out of the fit, which is how to check a model against a night it has not seen. Nothing they do is stored. The same call with the same arguments gives the same answer until the recorded data change. The library keeps each night review and the list of nights in memory until the frames, measurements, guiding records or equipment behind them change, so opening a night again is fast.
 
 ### `control/`
 

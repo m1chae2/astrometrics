@@ -1,0 +1,71 @@
+PHD2 version 2.6.14dev1 [Linux], Log version 2.5. Log enabled at 2026-11-07 21:31:44
+INFO: Guiding parameter change, MultiStar = false
+
+Calibration Begins at 2026-11-07 21:31:50
+Equipment Profile = Astrometrics simulator 2
+Dither = both axes, Dither scale = 1.000, Image noise reduction = none, Guide-frame time lapse = 0, Server enabled
+Pixel scale = 1.24 arc-sec/px, Binning = 1, Focal length = 400 mm
+Search region = 15 px, Star mass tolerance = 50.0%, Single-star mode
+Camera = INDI Camera [Guide Simulator], full size = 1280 x 1024, no dark, no defect map, pixel size = 2.4 um
+Exposure = 1000 ms
+Mount = INDI Mount [Telescope Simulator], Calibration Step = 350 ms, Calibration Distance = 25 px, Assume orthogonal axes = no
+RA Guide Speed = 7.5 a-s/s, Dec Guide Speed = 7.5 a-s/s
+RA = 12.00 hr, Dec = 40.0 deg, Hour angle = -4.31 hr, Pier side = West, Rotator pos = N/A, Alt = 19.1 deg, Az = 47.1 deg
+Lock position = 886.159, 199.226, Star position = 886.159, 199.226, HFD = 4.56 px
+Direction,Step,dx,dy,x,y,Dist
+West,0,0.000,0.000,886.153,199.194,0.000
+West,1,1.392,-0.100,884.761,199.295,1.395
+West,2,2.728,-0.181,883.425,199.376,2.734
+West,3,4.391,0.187,881.762,199.008,4.395
+West calibration complete. Angle = 1.9 deg, Rate = 4.263 px/sec, Parity = Even
+North calibration complete. Angle = 92.3 deg, Rate = 5.847 px/sec, Parity = Even
+Calibration complete, mount = INDI Mount [Telescope Simulator].
+
+Guiding Begins at 2026-11-07 21:32:55
+Equipment Profile = Astrometrics simulator 2
+Dither = both axes, Dither scale = 1.000, Image noise reduction = none, Guide-frame time lapse = 0, Server enabled
+Pixel scale = 1.24 arc-sec/px, Binning = 1, Focal length = 400 mm
+Search region = 15 px, Star mass tolerance = 50.0%, Single-star mode
+Camera = INDI Camera [Guide Simulator], full size = 1280 x 1024, no dark, no defect map, pixel size = 2.4 um
+Exposure = 1000 ms
+Mount = INDI Mount [Telescope Simulator], connected, guiding enabled, xAngle = 1.9, xRate = 4.263, yAngle = 92.3, yRate = 5.847, parity = +/+
+Norm rates RA = 6.9"/s @ dec 0, Dec = 7.2"/s; ortho.err. = 0.4 deg
+X guide algorithm = Hysteresis, Hysteresis = 0.250, Aggression = 0.450, Minimum move = 0.277
+Y guide algorithm = Resist Switch, Minimum move = 0.277 Aggression = 45% FastSwitch = enabled
+Backlash comp = disabled, pulse = 0 ms
+Max RA duration = 2500, Max DEC duration = 2500, DEC guide mode = Auto
+RA Guide Speed = 7.5 a-s/s, Dec Guide Speed = 7.5 a-s/s, Cal Dec = 40.0, Last Cal Issue = None, Timestamp = Sat 07 Nov 2026 09:32:55 PM MST
+RA = 12.00 hr, Dec = 40.0 deg, Hour angle = -4.29 hr, Pier side = West, Rotator pos = N/A, Alt = 19.3 deg, Az = 47.1 deg
+Lock position = 886.159, 199.226, Star position = 886.994, 200.939, HFD = 4.52 px
+Frame,Time,mount,dx,dy,RARawDistance,DECRawDistance,RAGuideDistance,DECGuideDistance,RADuration,RADirection,DECDuration,DECDirection,XStep,YStep,StarMass,SNR,ErrorCode
+INFO: SETTLING STATE CHANGE, Settling started
+1,1.463,"Mount",0.754,2.092,0.822,2.073,0.277,0.933,65,W,160,S,,,16818,90.33,0
+2,2.966,"Mount",0.408,0.699,0.431,0.689,0.177,0.310,41,W,53,S,,,16674,90.11,0
+3,4.006,"Mount",0.155,0.219,0.162,0.215,0.000,0.000,0,,0,,,,16775,90.27,0
+4,5.221,"Mount",0.065,0.440,0.080,0.439,0.000,0.197,0,,34,S,,,16837,90.36,0
+5,6.261,"Mount",0.132,0.087,0.134,0.083,0.000,0.000,0,,0,,,,16730,90.31,0
+6,7.308,"Mount",-0.041,-0.026,-0.042,-0.025,0.000,0.000,0,,0,,,,16814,90.34,0
+7,8.354,"Mount",-0.059,0.260,-0.051,0.261,0.000,0.000,0,,0,,,,16756,90.23,0
+8,9.398,"Mount",-0.040,-0.168,-0.046,-0.167,0.000,0.000,0,,0,,,,16735,90.29,0
+INFO: SETTLING STATE CHANGE, Settling complete
+9,10.445,"Mount",-0.074,-0.211,-0.081,-0.210,0.000,0.000,0,,0,,,,16714,90.25,0
+10,11.493,"Mount",0.068,0.066,0.070,0.064,0.000,0.000,0,,0,,,,16730,90.17,0
+11,12.584,"Mount",0.030,-0.142,0.026,-0.143,0.000,0.000,0,,0,,,,16771,90.29,0
+12,13.626,"Mount",-0.029,-0.305,-0.039,-0.304,0.000,0.000,0,,0,,,,16655,90.05,0
+13,14.671,"Mount",-0.155,-0.168,-0.161,-0.164,0.000,0.000,0,,0,,,,16732,90.31,0
+14,15.720,"Mount",0.029,-0.414,0.016,-0.415,0.000,0.000,0,,0,,,,16696,90.04,0
+15,16.995,"Mount",-0.038,-0.406,-0.052,-0.405,0.000,-0.182,0,,31,N,,,16792,90.33,0
+16,18.248,"Mount",-0.140,-0.367,-0.152,-0.364,0.000,-0.164,0,,28,N,,,16730,90.16,0
+17,19.501,"Mount",-0.135,-0.378,-0.147,-0.375,0.000,-0.169,0,,29,N,,,16776,90.25,0
+18,20.554,"Mount",0.069,0.130,0.074,0.128,0.000,0.000,0,,0,,,,16645,89.95,0
+19,21.605,"Mount",-0.052,0.090,-0.049,0.091,0.000,0.000,0,,0,,,,16764,90.40,0
+20,22.652,"Mount",0.012,-0.014,0.012,-0.014,0.000,0.000,0,,0,,,,16806,90.29,0
+21,23.703,"Mount",0.149,-0.206,0.143,-0.209,0.000,0.000,0,,0,,,,16794,90.45,0
+22,24.754,"Mount",0.060,-0.095,0.057,-0.096,0.000,0.000,0,,0,,,,16778,90.32,0
+23,26.013,"Mount",0.132,-0.532,0.115,-0.536,0.000,-0.241,0,,41,N,,,16757,90.23,0
+24,27.266,"Mount",0.371,0.093,0.374,0.083,0.126,0.000,30,W,0,,,,16705,90.21,0
+25,28.307,"Mount",0.127,-0.254,0.118,-0.257,0.000,0.000,0,,0,,,,16790,90.33,0
+Guiding Ends at 2026-11-07 21:29:56
+
+Log Summary: calcnt:1 gcnt:1 gdur:30 gacnt:0
+Log closed at 2026-11-07 21:29:56

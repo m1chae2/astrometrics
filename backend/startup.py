@@ -9,10 +9,10 @@ functions. They:
   needs them (`warm_start_up_caches`). The ``/api/ready`` route reports
   `sky_catalog_warmup_finished`, and the desktop shell keeps its splash
   screen up until it is set;
-* build the three most recent night reviews once the screens are ready, so
-  the Observatory Manager opens at once (`warm_night_reviews`);
 * build the depth goal status of the targets most likely to be opened first,
-  so the first Image Processing visit finds it kept (`warm_depth_goals`).
+  so the first Image Processing visit finds it kept (`warm_depth_goals`);
+* build the three most recent night reviews once the screens are ready, so
+  the Observatory Manager opens at once (`warm_night_reviews`).
 """
 
 import asyncio

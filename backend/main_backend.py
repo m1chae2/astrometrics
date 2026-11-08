@@ -154,15 +154,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
 
 async def _warm_up_in_order() -> None:
-    """Warm the start-up caches, then the night reviews, then the depth goals.
+    """Warm the start-up caches, then the depth goals, then the night reviews.
 
     Each step waits for the one before, so none delays the splash screen or
-    competes with it for the disk, and the depth goals (one target at a time)
-    come last.
+    competes with it for the disk. The depth goals (one target at a time, about
+    2 s) come before the slower night reviews (about 6.6 s), so they are ready
+    about 4 to 5 s after the app is ready.
     """
     await asyncio.to_thread(startup.warm_start_up_caches)
-    await asyncio.to_thread(startup.warm_night_reviews)
     await asyncio.to_thread(startup.warm_depth_goals)
+    await asyncio.to_thread(startup.warm_night_reviews)
 
 
 # The app serves only the routes in `backend.public_interface`, so FastAPI's

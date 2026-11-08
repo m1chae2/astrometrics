@@ -77,7 +77,7 @@ build/tpm/run_tpm.sh --browser chrome --gpu nvidia    # browser flow on the NVID
 build/tpm/run_tpm.sh --require-power-profile performance   # refuse unless that profile and AC power are active
 build/tpm/run_tpm.sh --cold             # drop the file cache first: a cold start (see "Cold start")
 build/tpm/run_tpm.sh --preflight        # only check that no upload, backup or real backend is running
-build/tpm/run_tpm.sh --update-baseline  # save this run as the new baseline
+build/tpm/run_tpm.sh --update-baseline  # save this run as the new baseline (written after the sealed run ends)
 build/tpm/run_tpm.sh                    # the default: a read-only copy of your real library and the simulated observatory
 build/tpm/run_tpm.sh --library synthetic   # the made-up library: quick, headless and CI checks, never a baseline
 build/tpm/run_tpm.sh --sim-exposure-seconds 20   # shorter simulated exposures
@@ -427,7 +427,7 @@ The baseline never changes by itself. To accept a new normal (for example after 
 
 1. Run `build/tpm/run_tpm.sh` twice and confirm the numbers agree.
 2. Say in the pull request why the number moved.
-3. Run `build/tpm/run_tpm.sh --update-baseline` (on the setup you want the baseline for) and commit the new `tpm_baseline.json`.
+3. Run `build/tpm/run_tpm.sh --update-baseline` (on the setup you want the baseline for) and commit the new `tpm_baseline.json`. The sealed run cannot write the repository, so it saves its new entry as `baseline-entry.json` in the results folder, and the outer script merges that entry into `tpm_baseline.json` after the sealed run ends (`compile_tpm.py --merge-baseline-entry`). Only your setup's key changes. The file is not written if the real-library check fails. Set `TPM_BASELINE_PATH` to use another baseline file, as the tests do.
 
 To change one limit only, edit its `watch_ratio`, `breach_ratio` or `slack` in the file.
 

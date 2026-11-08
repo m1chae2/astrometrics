@@ -63,6 +63,7 @@ old single baseline (no ``setups`` block) under this run's key, once.
 
 import argparse
 import json
+import os
 import re
 import statistics
 import sys
@@ -73,7 +74,7 @@ from pathlib import Path
 from resource_usage import BACKEND_GROUP, read_samples, summarize_run, window_usage
 from setup_fingerprint import classify_renderer, make_setup_key
 
-BASELINE_PATH = Path(__file__).with_name("tpm_baseline.json")
+BASELINE_PATH = Path(os.environ.get("TPM_BASELINE_PATH") or Path(__file__).with_name("tpm_baseline.json"))
 #: The one library mode that is compared with a baseline.
 SIMULATION_MODE = "simulation"
 CATALOG_PATH = Path(__file__).with_name("tpm_catalog.json")
@@ -1179,6 +1180,82 @@ def print_setup(setup: dict) -> None:
         print("  Baseline file has no setup keys (old format): compared as before.")
 
 
+def build_baseline_entry(
+    baseline: dict,
+    tpms: list[dict],
+    fingerprint: dict,
+    gpu_used: str,
+    observatory_profile: str,
+    flow_target: str | None,
+    setup_key: str,
+) -> dict:
+    """Make the baseline entry that a run would file under its setup key.
+
+    Parameters
+    ----------
+    baseline : `dict`
+        The parsed baseline file; the old limits of this key are kept.
+    tpms : `list` [`dict`]
+        The compiled TPMs of the run.
+    fingerprint : `dict`
+        The setup fingerprint of the run.
+    gpu_used : `str`
+        The graphics card class the run used.
+    observatory_profile : `str`
+        The observatory profile of the run.
+    flow_target : `str` or `None`
+        What the display flow ran in.
+    setup_key : `str`
+        The key the entry is filed under.
+
+    Returns
+    -------
+    entry : `dict`
+        The entry for ``baseline["setups"][setup_key]``.
+    """
+    limits = (baseline.get("setups") or {}).get(setup_key, {}).get("tpms", {})
+    new_limits = {}
+    for tpm in tpms:
+        previous = limits.get(tpm["name"], {})
+        new_limits[tpm["name"]] = {
+            "unit": tpm["unit"],
+            "baseline": tpm["value"],
+            "watch_ratio": previous.get("watch_ratio", DEFAULT_WATCH_RATIO),
+            "breach_ratio": previous.get("breach_ratio", DEFAULT_BREACH_RATIO),
+            "slack": previous.get("slack", default_slack(tpm)),
+            **(
+                {"direction": "higher_is_better"}
+                if tpm["name"] in HIGHER_IS_BETTER or previous.get("direction")
+                else {}
+            ),
+        }
+    return {
+        "created": datetime.now(UTC).isoformat(),
+        "observatory_profile": observatory_profile,
+        "setup": {**fingerprint, "gpu_used": gpu_used, "flow_target": flow_target},
+        "status": "Design estimate: one run on one setup.",
+        "tpms": new_limits,
+    }
+
+
+def merge_baseline_entry(setup_key: str, entry: dict) -> None:
+    """Write one setup's entry into the baseline, keeping the other keys.
+
+    Parameters
+    ----------
+    setup_key : `str`
+        The key to file the entry under.
+    entry : `dict`
+        The entry from `build_baseline_entry`.
+    """
+    baseline = load_baseline()
+    if baseline.get("setups") is None:
+        baseline = {"schema": 2, "setups": {}}
+    baseline["setups"][setup_key] = entry
+    BASELINE_PATH.write_text(json.dumps(baseline, indent=2) + "\n")
+    print(f"Baseline for setup {setup_key} written to {BASELINE_PATH}")
+
+
 def main() -> int:
     """Compile a run, compare it and print the table.
 
@@ -1199,6 +1276,14 @@ def main() -> int:
     )
     parser.add_argument("--update-baseline", action="store_true")
     parser.add_argument(
+        "--baseline-entry-out",
+        help="with --update-baseline: save the entry here, not in the baseline (sealed run)",
+    )
+    parser.add_argument(
+        "--merge-baseline-entry",
+        help="only merge an entry file made by --baseline-entry-out into the baseline, then stop",
+    )
+    parser.add_argument(
         "--mode", default=SIMULATION_MODE, choices=(SIMULATION_MODE, "synthetic", "real-snapshot")
     )
     parser.add_argument("--observatory-profile", default="offline")
@@ -1215,6 +1300,10 @@ def main() -> int:
     parser.add_argument("--scenario", default="flow", choices=("flow", "processing"))
     parser.add_argument("--processing-metrics")
     arguments = parser.parse_args()
+    if arguments.merge_baseline_entry:
+        saved = json.loads(Path(arguments.merge_baseline_entry).read_text())
+        merge_baseline_entry(saved["setup_key"], saved["entry"])
+        return 0
     if arguments.update_baseline and arguments.mode != SIMULATION_MODE:
         print("ERROR: only a simulation run can update the baseline.", file=sys.stderr)
         return 2
@@ -1421,33 +1510,23 @@ def main() -> int:
         print(f"BEYOND A CONFIRMED THRESHOLD: {', '.join(beyond)}")
         print_offenders(beyond, errors)
     if arguments.update_baseline:
-        limits = (baseline.get("setups") or {}).get(setup_key, {}).get("tpms", {})
-        new_limits = {}
-        for tpm in tpms:
-            previous = limits.get(tpm["name"], {})
-            new_limits[tpm["name"]] = {
-                "unit": tpm["unit"],
-                "baseline": tpm["value"],
-                "watch_ratio": previous.get("watch_ratio", DEFAULT_WATCH_RATIO),
-                "breach_ratio": previous.get("breach_ratio", DEFAULT_BREACH_RATIO),
-                "slack": previous.get("slack", default_slack(tpm)),
-                **(
-                    {"direction": "higher_is_better"}
-                    if tpm["name"] in HIGHER_IS_BETTER or previous.get("direction")
-                    else {}
-                ),
-            }
-        if baseline.get("setups") is None:
-            baseline = {"schema": 2, "setups": {}}
-        baseline["setups"][setup_key] = {
-            "created": datetime.now(UTC).isoformat(),
-            "observatory_profile": arguments.observatory_profile,
-            "setup": {**fingerprint, "gpu_used": gpu_used, "flow_target": arguments.flow_target},
-            "status": "Design estimate: one run on one setup.",
-            "tpms": new_limits,
-        }
-        BASELINE_PATH.write_text(json.dumps(baseline, indent=2) + "\n")
-        print(f"Baseline for setup {setup_key} written to {BASELINE_PATH}")
+        new_entry = build_baseline_entry(
+            baseline,
+            tpms,
+            fingerprint,
+            gpu_used,
+            arguments.observatory_profile,
+            arguments.flow_target,
+            setup_key,
+        )
+        if arguments.baseline_entry_out:
+            # The sealed run cannot write the repository, so the outer
+            # script of run_tpm.sh merges this file afterwards.
+            saved = {"setup_key": setup_key, "entry": new_entry}
+            Path(arguments.baseline_entry_out).write_text(json.dumps(saved, indent=2) + "\n")
+            print(f"Baseline entry for setup {setup_key} saved: {arguments.baseline_entry_out}")
+        else:
+            merge_baseline_entry(setup_key, new_entry)
     return 1 if beyond or any(tpm["status"] == "breached" for tpm in tpms) else 0
 
 

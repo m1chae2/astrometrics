@@ -69,6 +69,9 @@ def test_the_lifespan_starts_the_services_and_stops_them(monkeypatch: pytest.Mon
         assert "shutdown" not in calls
 
     # The warm-up steps run on worker threads and may finish after shutdown.
+    # The depth goals must come before the night reviews.
+    warm_calls = [call for call in calls if call.startswith("warm")]
+    assert warm_calls in (["warm"], ["warm", "warm_depth"], ["warm", "warm_depth", "warm_nights"])
     stopping = [call for call in calls if call in ("detach", "shutdown")]
     assert stopping == ["detach", "shutdown"]
 

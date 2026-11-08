@@ -378,6 +378,15 @@ if [ "$LIBRARY" = "simulation" ] && [ -z "${TPM_SEALED:-}" ]; then
     "$PYTHON" "$TPM_DIR/real_snapshot.py" verify "$OUTER_SANDBOX/real-fingerprint-before.json" "$OUTER_SANDBOX/real-fingerprint-after.json" \
       "$OUTER_RESULTS_DIR/real-library-check.json" || REAL_CHECK_OK=0
   fi
+  if [ "$UPDATE_BASELINE" = "1" ] && [ "$REAL_CHECK_OK" = "1" ]; then
+    if [ -f "$OUTER_RESULTS_DIR/baseline-entry.json" ]; then
+      "$PYTHON" "$TPM_DIR/compile_tpm.py" "$OUTER_RESULTS_DIR" --merge-baseline-entry "$OUTER_RESULTS_DIR/baseline-entry.json" \
+        || { echo "ERROR: the baseline could not be written." >&2; [ "$SEALED_STATUS" = "0" ] && SEALED_STATUS=1; }
+    else
+      echo "ERROR: --update-baseline was given but the run saved no baseline entry; tpm_baseline.json is unchanged." >&2
+      [ "$SEALED_STATUS" = "0" ] && SEALED_STATUS=1
+    fi
+  fi
   if [ "$REAL_CHECK_OK" = "0" ]; then
     echo "ERROR: THE RUN FAILED THE REAL-LIBRARY CHECK. Something in your real library changed (or could not be checked) while the run went on. The run itself could not write there (it is read only), so this may be your own app or an upload, but it is not proved. See $OUTER_RESULTS_DIR/real-library-check.json." >&2
     [ "$SEALED_STATUS" = "0" ] && SEALED_STATUS=1
@@ -906,7 +915,12 @@ RPC_FLOW_ARGUMENT=(--flow "$RESULTS_DIR/flow-metrics.json")
 COMPILE_ARGUMENTS=("$RESULTS_DIR" "${ELECTRON_ARGUMENT[@]}" --mode "$MODE" --observatory-profile "$OBSERVATORY_PROFILE"
   --data-size "$RESULTS_DIR/data-size.json" --setup "$RESULTS_DIR/setup-fingerprint.json" --gpu-requested "$GPU" \
   --boot-age "$BOOT_AGE_SECONDS" "${COLD_ARGUMENT[@]}" "${OBSERVATORY_ARGUMENT[@]}" "${EXTRA_COMPILE_ARGUMENTS[@]}")
-[ "$UPDATE_BASELINE" = "1" ] && COMPILE_ARGUMENTS+=(--update-baseline)
+# The sealed run cannot write the repository (it is read only), so under the seal the compile only saves the new
+# baseline entry in the results folder; the outer script merges it into tpm_baseline.json after the sealed run.
+if [ "$UPDATE_BASELINE" = "1" ]; then
+  COMPILE_ARGUMENTS+=(--update-baseline)
+  [ -z "${TPM_SEALED:-}" ] || COMPILE_ARGUMENTS+=(--baseline-entry-out "$RESULTS_DIR/baseline-entry.json")
+fi
 echo "== TPMs (results in $RESULTS_DIR)"
 set +e
 "$PYTHON" "$TPM_DIR/compile_tpm.py" "${COMPILE_ARGUMENTS[@]}"

@@ -48,8 +48,8 @@ For exact behavior, read the code.
 After the app is ready, `backend/startup.py` fills caches in the background, one step after another (the steps are chained in `_warm_up_in_order` in `backend/main_backend.py`). None of them delays `/api/ready`, except the first group.
 
 1. `warm_start_up_caches` loads the star catalog, the Earth-orientation table and the stellar summaries side by side. The splash screen waits for these.
-2. `warm_night_reviews` builds the three newest night reviews.
-3. `warm_depth_goals` builds the depth goal status of up to three targets, one at a time, by calling the same function as `advisory:depth_goal`. The first target is the one the telescope points at, when the telemetry loop already knows it. The others are the targets with a stacked picture, newest imaged first, which is the target the Image Processing screen opens on. A target appears once. A failure is logged at debug level and skipped.
+2. `warm_depth_goals` builds the depth goal status of up to three targets, one at a time, by calling the same function as `advisory:depth_goal`. The first target is the one the telescope points at, when the telemetry loop already knows it. The others are the targets with a stacked picture, newest imaged first, which is the target the Image Processing screen opens on. A target appears once. A failure is logged at debug level and skipped.
+3. `warm_night_reviews` builds the three newest night reviews.
 
 A failed step only makes the first visit slower. The steps read and never write.
 

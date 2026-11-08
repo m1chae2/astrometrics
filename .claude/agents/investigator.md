@@ -11,6 +11,7 @@ tools:
   - mcp__astrometricslib-core__processing_stack_summary
   - mcp__astrometricslib-core__quality_calibration_identities
   - mcp__astrometricslib-core__quality_capture_settings
+  - mcp__astrometricslib-core__quality_measure_folder
   - mcp__astrometricslib-core__quality_measure_frames
   - mcp__astrometricslib-core__quality_measure_stack
   - mcp__astrometricslib-core__quality_metrics
@@ -51,6 +52,10 @@ tools:
   - mcp__wayfindinglib-core__review_get_advisory
   - mcp__wayfindinglib-core__review_get_live_session_status
   - mcp__wayfindinglib-core__review_get_performance_envelope
+  - mcp__wayfindinglib-core__review_get_sky_rate_prediction
+  - mcp__wayfindinglib-core__review_measure_focus_temperature_coefficient
+  - mcp__wayfindinglib-core__review_measure_guiding_spectrum
+  - mcp__wayfindinglib-core__review_measure_unguided_mount_error
   - mcp__wayfindinglib-core__review_query
   - mcp__astrometrics-backend__app_controls
   - mcp__astrometrics-backend__app_status

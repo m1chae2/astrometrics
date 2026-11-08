@@ -7,15 +7,11 @@ only says which container service method serves it.
 # AGENT-1.1, AGENT-1.3, AGENT-1.5, HDR-6.4
 """
 
-import asyncio
-import functools
 import inspect
-import json
 import logging
 from collections.abc import Callable
 from typing import Any
 
-import anyio
 from fastapi import APIRouter
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
@@ -25,12 +21,12 @@ from astrometricslib.jobs import log_context, new_request_id
 from backend.container import container
 from backend.public_interface import RPC_METHODS
 from backend.services.infrastructure.frontend_log import log_frontend_message
+from backend.services.infrastructure.heavy_lane import run_heavy
 from backend.services.rpc_protocol import (
     RPCMethodNotFoundError,
     RPCRequest,
-    get_cors_headers,
+    encode_rpc_success_body,
     make_rpc_error_response,
-    serialize_rpc_result,
 )
 
 logger = logging.getLogger(__name__)
@@ -314,9 +310,9 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
 #: thread adds a wait of up to 5 ms each time the event loop or a light call
 #: needs the lock. Thirty such calls at once, as when a view opens, made a
 #: call that takes a millisecond wait more than a second (TPM run
-#: 20261106-205416). These methods therefore share `HEAVY_LANE_SLOTS`
-#: places and the others run freely. Add a method here when a trace shows it
-#: busy for more than about 100 ms of CPU.
+#: 20261106-205416). These methods therefore share the places of the heavy lane
+#: (`HEAVY_LANE_SLOTS` in `heavy_lane`) and the others run freely. Add a
+#: method here when a trace shows it busy for more than about 100 ms of CPU.
 HEAVY_METHODS = frozenset({
     "history:nights",
     "history:night_quality",
@@ -331,29 +327,6 @@ HEAVY_METHODS = frozenset({
     "planetarium:get_sources",
     "planetarium:get_catalog_sources",
 })
-
-#: How many `HEAVY_METHODS` calls may run at once. Two keeps the processor
-#: busy while leaving the lock mostly free for light calls.
-HEAVY_LANE_SLOTS = 2
-
-_heavy_lane_limiters: dict[Any, anyio.CapacityLimiter] = {}
-"""One limiter per running event loop, made on first use."""
-
-
-def _heavy_lane_limiter() -> anyio.CapacityLimiter:
-    """Give the limiter that holds the heavy lane's places for this loop.
-
-    Returns
-    -------
-    limiter : `anyio.CapacityLimiter`
-        Holds `HEAVY_LANE_SLOTS` places. A call waits for a place without
-        using a worker thread.
-    """
-    loop = asyncio.get_running_loop()
-    if loop not in _heavy_lane_limiters:
-        _heavy_lane_limiters.clear()
-        _heavy_lane_limiters[loop] = anyio.CapacityLimiter(HEAVY_LANE_SLOTS)
-    return _heavy_lane_limiters[loop]
 
 
 async def run_in_lane(method: str, function: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
@@ -374,9 +347,7 @@ async def run_in_lane(method: str, function: Callable[..., Any], *args: Any, **k
         What `function` returns.
     """
     if method in HEAVY_METHODS:
-        return await anyio.to_thread.run_sync(
-            functools.partial(function, *args, **kwargs), limiter=_heavy_lane_limiter()
-        )
+        return await run_heavy(function, *args, **kwargs)
     return await run_in_threadpool(function, *args, **kwargs)
 
 
@@ -557,35 +528,6 @@ def _log_rpc_failure(method: str, exc: Exception, info: ErrorInfo) -> None:
         logger.error("RPC %s failed (%s): %s", method, info.code, info.message, exc_info=exc)
 
 
-def _encode_success_body(result: Any, request_id: int | str | None) -> bytes:
-    """Turn a handler result into the bytes of a JSON-RPC success reply.
-
-    The conversion of models and NumPy values and the JSON encoding can take
-    a few hundred milliseconds for a large result, so the caller runs this in
-    a worker thread. The bytes match what ``JSONResponse`` would send.
-
-    Parameters
-    ----------
-    result : `~typing.Any`
-        The raw value the handler returned.
-    request_id : `int` or `str` or `None`
-        The JSON-RPC request identifier to echo back.
-
-    Returns
-    -------
-    body : `bytes`
-        The UTF-8 encoded JSON-RPC success envelope.
-    """
-    envelope = {
-        "jsonrpc": "2.0",
-        "result": {"status": "success", "data": serialize_rpc_result(result)},
-        "id": request_id,
-    }
-    return json.dumps(
-        envelope, ensure_ascii=False, allow_nan=False, indent=None, separators=(",", ":")
-    ).encode("utf-8")
-
-
 @router.post("/rpc")
 async def handle_rpc(request: RPCRequest) -> Response:
     """Serve the unified entrypoint for all frontend JSON-RPC calls.
@@ -612,10 +554,10 @@ async def handle_rpc(request: RPCRequest) -> Response:
     ):
         try:
             result = await rpc_registry.execute(request.method, request.params)
-            body = await run_in_lane(request.method, _encode_success_body, result, request.id)
-            return Response(
-                content=body, status_code=200, headers=get_cors_headers(), media_type="application/json"
-            )
+            # Encoding is not heavy-lane work: a finished result must not wait
+            # behind queued heavy builds, so it uses the ordinary thread pool.
+            body = await run_in_threadpool(encode_rpc_success_body, result, request.id)
+            return Response(content=body, status_code=200, media_type="application/json")
         except RPCMethodNotFoundError as exc:
             logger.warning("RPC method not found: %s", request.method)
             info = ErrorInfo(code="not_found", message=f"Method not found: {exc!s}", request_id=request_id)

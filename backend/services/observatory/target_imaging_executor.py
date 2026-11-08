@@ -301,6 +301,19 @@ class TargetImagingExecutor:
         self._thread.start()
         logger.info("Imaging sequence started.")
 
+    def is_running(self) -> bool:
+        """Report whether the imaging thread is running a queue now.
+
+        A running session starts no job, so the busy check of the backend
+        asks this instead.
+
+        Returns
+        -------
+        is_running : `bool`
+            `True` while the sequencer thread is alive.
+        """
+        return self._thread is not None and self._thread.is_alive()
+
     def pause_imaging(self) -> None:
         """Stop running the queue after the current entry; keep the queue."""
         self._stop.set()

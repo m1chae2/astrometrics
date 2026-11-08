@@ -4,7 +4,10 @@ Description: The INDI simulators start with made-up equipment: a 1280 x 1024
 camera with 5.2 micron pixels and no telescope focal length. This module reads
 the settings file of the world (a copy of the real settings, see
 `simulator.observatory`) and lists the INDI properties that make the
-simulators look like the real equipment:
+simulators match the real equipment's geometry (they do not make the frames
+realistic: the sky brightness, noise, star width and star brightness stay at
+INDI's defaults, so noise, signal-to-noise and depth checks are not valid on
+the frames until the fitted settings of step S3 of the simulator plan):
 
 * the main camera simulator's resolution and pixel size (``SIM_XRES``,
   ``SIM_YRES``, ``SIM_XSIZE``, ``SIM_YSIZE``), from the primary camera's
@@ -20,9 +23,13 @@ simulators look like the real equipment:
 * the main camera's cooler target (``CCD_TEMPERATURE``), from the temperature
   recorded with the primary camera profile's bias level (else its noise
   measurement);
-* the main camera's gain and offset (``CCD_GAIN``, ``CCD_OFFSET``), from the
-  first bias level (or noise measurement) recorded in the primary camera's
-  profile, so frames carry the real capture setting.
+* the main camera's gain (``CCD_GAIN``) and pedestal (``CCD_OFFSET``), from
+  the first bias level (or noise measurement) recorded in the primary
+  camera's profile. The INDI simulator uses ``CCD_OFFSET`` as the pixel
+  value of an empty frame, not as a camera offset setting, so the value sent
+  is the real camera's bias level (in ADU) for that setting. The camera
+  offset setting itself is kept in `DeviceSetting.header_value` and written
+  into the frame's ``OFFSET`` header.
 
 Nothing here talks to a server. `exposure_driver.ExposureDriver` sends the
 properties after it connects the simulators. The property names were checked
@@ -37,16 +44,20 @@ names. The camera simulator has no cooler switch (no ``CCD_COOLER``); setting
 ``CCD_TEMPERATURE`` starts the cooling, and the value read back is the current
 temperature, not the target, so that setting is not read back.
 
-The driver does not write an ``OFFSET`` header into its frames (it writes
-``GAIN``), so the offset is set on the simulator but does not reach the file.
+The INDI driver does not write an ``OFFSET`` header into its frames (it
+writes ``GAIN``), so `simulator.exposure_driver` adds it from
+`DeviceSetting.header_value`.
 """
 
+import logging
+import math
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+LOGGER = logging.getLogger(__name__)
 MAIN_CAMERA = "CCD Simulator"
 GUIDE_CAMERA = "Guide Simulator"
 #: The focal length (mm) and focal ratio used when the settings give none.
@@ -71,12 +82,17 @@ class DeviceSetting:
     check : `bool`, optional
         `True` (default) to read the values back after setting. `False` for a
         property whose value moves on its own (the cooler's temperature).
+    header_value : `float` or `None`, optional
+        The value to write in the frame header when it differs from the value
+        sent. Used by ``CCD_OFFSET``: the simulator is sent a pedestal in ADU,
+        while the header keeps the camera's offset setting.
     """
 
     device: str
     property_name: str
     elements: tuple[tuple[str, float | str], ...]
     check: bool = True
+    header_value: float | None = None
 
     def specification(self) -> str:
         """Write the setting the way ``indi_setprop`` takes it.
@@ -217,6 +233,40 @@ def _capture_setting(profile: Mapping[str, Any]) -> tuple[float, float] | None:
     return None
 
 
+def _bias_level_adu(profile: Mapping[str, Any], gain: float, offset: float) -> float | None:
+    """Find the real camera's bias level for one capture setting.
+
+    Parameters
+    ----------
+    profile : `~collections.abc.Mapping`
+        The camera's profile section.
+    gain : `float`
+        The gain setting.
+    offset : `float`
+        The camera offset setting.
+
+    Returns
+    -------
+    level : `float` or `None`
+        The ``bias_levels`` entry for this gain and offset, in ADU. `None`
+        when none is recorded.
+    """
+    for entry in profile.get("bias_levels") or []:
+        try:
+            if not (
+                math.isclose(float(entry["gain_setting"]), gain)
+                and math.isclose(float(entry["offset"]), offset)
+            ):
+                continue
+            recorded = entry["bias_level_adu"]
+            level = _number(recorded["value"] if isinstance(recorded, Mapping) else recorded)
+        except KeyError, TypeError, ValueError:
+            continue
+        if level is not None:
+            return level
+    return None
+
+
 #: Slots in the INDI filter wheel simulator (fixed by the driver).
 FILTER_WHEEL_SLOTS = 8
 FILTER_WHEEL = "Filter Simulator"
@@ -339,7 +389,21 @@ def device_settings_from_world(settings: Mapping[str, Any]) -> list[DeviceSettin
     capture = _capture_setting(primary)
     if capture is not None:
         result.append(DeviceSetting(MAIN_CAMERA, "CCD_GAIN", (("GAIN", capture[0]),)))
-        result.append(DeviceSetting(MAIN_CAMERA, "CCD_OFFSET", (("OFFSET", capture[1]),)))
+        # INDI uses CCD_OFFSET as the empty-frame pixel value, so send the
+        # real camera's bias level; the header keeps the camera offset.
+        pedestal = _bias_level_adu(primary, capture[0], capture[1])
+        if pedestal is None:
+            LOGGER.warning(
+                "No bias level is recorded for gain %s, offset %s; "
+                "simulated frames will sit near %s ADU, not at the real bias level.",
+                capture[0],
+                capture[1],
+                capture[1],
+            )
+            pedestal = capture[1]
+        result.append(
+            DeviceSetting(MAIN_CAMERA, "CCD_OFFSET", (("OFFSET", pedestal),), header_value=capture[1])
+        )
     setpoint = camera_setpoint(primary)
     if setpoint is not None:
         result.append(

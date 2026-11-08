@@ -44,9 +44,10 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from astrometricslib.drivers import real_folders
 from astrometricslib.exceptions import AstrometricsError
-from wayfindinglib.exceptions import SimulationUnavailableError
+from simulator import path_guard
+from simulator.errors import SimulationUnavailableError
+from simulator.real_folders import real_folders
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +204,7 @@ def keep_sections(text: str, dropped: tuple[str, ...] = DROPPED_SECTIONS) -> str
     blocks = re.split(r'(?m)^(?=\["?[A-Za-z])', text)
     kept = []
     for block in blocks:
-        header = re.match(r'\["?(.*?)"?\]\s*$', block.split("\n", 1)[0])
+        header = re.match(r'\["?(.*?)"?\]\s*(?:#.*)?$', block.split("\n", 1)[0])
         if header and header.group(1) in dropped:
             continue
         kept.append(block)
@@ -282,6 +283,31 @@ def database_size(database: Path) -> int:
     return database.stat().st_size + (wal.stat().st_size if wal.exists() else 0)
 
 
+def rewrite_text(value: str, replacements: Iterable[tuple[str, str]]) -> str:
+    """Replace folder prefixes in one text.
+
+    A prefix matches only as a whole folder name: it must be followed by a
+    slash, a quote, a space, a comma or the end of the text. Longer ``old``
+    texts are applied first.
+
+    Parameters
+    ----------
+    value : `str`
+        The text, such as a stored path or a whole JSON file.
+    replacements : `~collections.abc.Iterable` [`tuple` [`str`, `str`]]
+        ``(old, new)`` pairs.
+
+    Returns
+    -------
+    changed : `str`
+        The text with the folder prefixes replaced.
+    """
+    for old, new in sorted(set(replacements), key=lambda pair: len(pair[0]), reverse=True):
+        pattern = re.compile(re.escape(old) + r"""(?=/|$|["'\s,])""")
+        value = pattern.sub(lambda _match, new=new: new, value)
+    return value
+
+
 def rewrite_paths(database: Path, replacements: Iterable[tuple[str, str]]) -> int:
     """Replace folder prefixes in every text column of a database copy.
 
@@ -303,7 +329,6 @@ def rewrite_paths(database: Path, replacements: Iterable[tuple[str, str]]) -> in
     pairs = sorted(set(replacements), key=lambda pair: len(pair[0]), reverse=True)
     if not pairs:
         return 0
-    patterns = [(re.compile(re.escape(old) + r"""(?=/|$|["'\s,])"""), new) for old, new in pairs]
 
     def rewrite(value: str) -> str:
         """Apply every replacement to one text value.
@@ -313,9 +338,7 @@ def rewrite_paths(database: Path, replacements: Iterable[tuple[str, str]]) -> in
         changed : `str`
             The value with the folder prefixes replaced.
         """
-        for pattern, new in patterns:
-            value = pattern.sub(lambda _match, new=new: new, value)
-        return value
+        return rewrite_text(value, pairs)
 
     contains = " OR ".join('instr("{column}", ?) > 0' for _ in pairs)
     changed = 0
@@ -482,7 +505,10 @@ def copy_databases(
             rewritten += count
     for name in PLAIN_FILES:
         if (library / name).is_file():
-            shutil.copyfile(library / name, root / "library" / name)
+            # These files hold absolute paths too; read them as text and
+            # write them back through the same replacements as the databases.
+            text = (library / name).read_text(encoding="utf-8")
+            (root / "library" / name).write_text(rewrite_text(text, replacements), encoding="utf-8")
     return {"bytes": sizes, "paths_rewritten": rewritten, "seconds": round(time.monotonic() - started, 2)}
 
 
@@ -581,9 +607,10 @@ def teardown(root: Path) -> bool:
     """End a library copy: unmount the overlay and delete the temporary files.
 
     Deletes only inside `root`: the overlay's upper and work folders, the
-    database copies and the copy report. Nothing is deleted while the
-    overlay is still mounted, so a write through the mount can never reach
-    the real library.
+    whole ``library`` folder (database copies and every other file the world
+    wrote there), the wayfinding database copy and the copy report.
+    Nothing is deleted while the overlay is still mounted, so a write
+    through the mount can never reach the real library.
 
     Parameters
     ----------
@@ -603,9 +630,10 @@ def teardown(root: Path) -> bool:
             return False
     shutil.rmtree(folders["stacks_mountpoint"], ignore_errors=True)
     shutil.rmtree(root / "overlay", ignore_errors=True)
-    for name in (*LIBRARY_DATABASES, *PLAIN_FILES):
-        for suffix in ("", "-wal", "-shm"):
-            (root / "library" / f"{name}{suffix}").unlink(missing_ok=True)
+    # Both overlays are unmounted, so everything in the world's library
+    # folder is the world's own (database copies, the plain files, and any
+    # file the app wrote there, such as capability_gaps.db). Remove it all.
+    shutil.rmtree(root / "library", ignore_errors=True)
     for suffix in ("", "-wal", "-shm"):
         (root / "wayfinding" / f"{WAYFINDING_DATABASE}{suffix}").unlink(missing_ok=True)
     (root / REPORT_FILE_NAME).unlink(missing_ok=True)
@@ -641,7 +669,7 @@ def database_replacements(real: Any, plan: dict, root: Path) -> list[tuple[str, 
     Parameters
     ----------
     real : `object`
-        The real folders (from `astrometricslib.drivers.real_folders`).
+        The real folders (from `simulator.real_folders.real_folders`).
     plan : `dict`
         The mount plan from `plan_mounts`.
     root : `pathlib.Path`
@@ -662,6 +690,67 @@ def database_replacements(real: Any, plan: dict, root: Path) -> list[tuple[str, 
     return replacements
 
 
+def world_path_files(root: Path) -> tuple[list[tuple[str, tuple[str, ...] | None]], list[str]]:
+    """List the copied files of the world that hold absolute paths.
+
+    Parameters
+    ----------
+    root : `pathlib.Path`
+        The simulator's root folder.
+
+    Returns
+    -------
+    databases, json_files : `tuple`
+        ``(file, tables)`` for the library and wayfinding database copies
+        that exist (``tables`` is `None` for every table), and the plain JSON
+        files that exist.
+    """
+    databases: list[tuple[str, tuple[str, ...] | None]] = [
+        (str(root / "library" / "astrometrics.db"), ("targets",)),
+        (str(root / "wayfinding" / WAYFINDING_DATABASE), None),
+    ]
+    databases = [(file, tables) for file, tables in databases if Path(file).is_file()]
+    json_files = [str(root / "library" / name) for name in PLAIN_FILES if (root / "library" / name).is_file()]
+    return databases, json_files
+
+
+def make_paths_safe(root: Path) -> int:
+    """Move stale stored paths into the world and refuse if any stay outside.
+
+    The named folders were already rewritten by `copy_databases`. A path to a
+    folder on no list (an old stacks folder, a moved library) still points at
+    a real place, so each is moved to ``<root>/outside/<original path>``.
+    Then the copies are read again: any absolute path that is still outside
+    ``root`` stops the build, and the launcher falls back to the offline
+    world.
+
+    Parameters
+    ----------
+    root : `pathlib.Path`
+        The simulator's root folder.
+
+    Returns
+    -------
+    moved : `int`
+        How many stale stored paths were moved.
+
+    Raises
+    ------
+    SimulationUnavailableError
+        If a stored path still leads outside the world.
+    """
+    databases, json_files = world_path_files(root)
+    scratch = str(root.resolve())
+    moved = path_guard.mirror_stale_paths(databases, json_files, scratch)
+    offenders = path_guard.outside_paths(databases, json_files, scratch)
+    if offenders:
+        shown = "; ".join(f"{name} {trail}: {path}" for name, _t, _l, trail, path in offenders[:3])
+        raise SimulationUnavailableError(
+            f"The world's copy still stores {len(offenders)} path(s) outside the world ({shown})."
+        )
+    return moved
+
+
 def prepare_library_copy(
     root: Path, real_environment: dict[str, str] | None = None, real: Any = None
 ) -> dict:
@@ -675,13 +764,14 @@ def prepare_library_copy(
         The environment that names the real folders. Default: the process
         environment.
     real : `object`, optional
-        The real folders (from `astrometricslib.drivers.real_folders`).
+        The real folders (from `simulator.real_folders.real_folders`).
         Overrides `real_environment`.
 
     Returns
     -------
     report : `dict`
         ``seconds`` (the whole copy), ``bytes``, ``paths_rewritten``,
+        ``paths_mirrored`` (stale stored paths moved into the world),
         ``mounted`` (`True` if there was a real frames folder to overlay),
         and the real folders used. Also written to
         ``<root>/library_copy.json``.
@@ -689,7 +779,8 @@ def prepare_library_copy(
     Raises
     ------
     SimulationUnavailableError
-        If the overlay program is missing or the mount fails.
+        If the overlay program is missing, the mount fails, or a stored path
+        in the copies still leads outside the world.
     """
     started = time.monotonic()
     real = real or real_folders(real_environment)
@@ -700,6 +791,11 @@ def prepare_library_copy(
         mount["mountpoint"].mkdir(parents=True, exist_ok=True)
     replacements = database_replacements(real, plan, root)
     report = copy_databases(root, real.library, real.wayfinding, replacements)
+    try:
+        report["paths_mirrored"] = make_paths_safe(root)
+    except SimulationUnavailableError:
+        teardown(root)
+        raise
     mounted = []
     try:
         for mount in plan["mounts"]:

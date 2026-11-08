@@ -100,13 +100,6 @@
       "interim_block": "",
       "note": "Lists every saved guider calibration, for all telescope and camera pairings (status reads only the active one). No device needed."
     },
-    "observatory_guiding_query_runs": {
-      "tool_class": "unclassified",
-      "category": "observatory-status",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Returns every saved guiding run with no size bound. review_query with kind='guiding_runs' answers the same question in a reply of bounded size."
-    },
     "observatory_guiding_record_calibration": {
       "tool_class": "change-data",
       "category": "observatory-status",
@@ -568,13 +561,6 @@
       "disposition": "keep",
       "interim_block": "",
       "note": "Slow: reads every session and target twice."
-    },
-    "review_invalidate_night": {
-      "tool_class": "unclassified",
-      "category": "observatory-status",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Forgets the app's kept night reviews. Housekeeping for the backend, not a question."
     },
     "review_query": {
       "tool_class": "compute",

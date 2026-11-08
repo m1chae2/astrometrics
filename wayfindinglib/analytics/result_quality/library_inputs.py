@@ -48,7 +48,7 @@ from typing import Any
 
 from astrometricslib import Target
 from astrometricslib.drivers import VersionedCache, get_camera_data_versions
-from astrometricslib.exceptions import AstrometricsError
+from astrometricslib.exceptions import AstrometricsError, NotFoundError
 from astrometricslib.reports import CaptureSetting, QualityMeasurement, SubjectLevel, observing_night_id
 from wayfindinglib.analytics.capture_history import normalize_name
 from wayfindinglib.analytics.result_quality.efficiency import (
@@ -597,13 +597,18 @@ class LibraryInputs:
         Returns
         -------
         target : `Target` or `None`
-            The target, or ``None`` when the library has none by that id.
+            The target, or ``None`` when the library has none by that id or
+            the lookup failed. A failed lookup leaves a note, so the read it
+            belongs to counts as incomplete and is not kept.
         """
         if self._targets is not None:
             return self._targets.get(target_id)
         try:
             return self.astrometrics.targets.get(target_id)
-        except AstrometricsError:
+        except NotFoundError:
+            return None
+        except (AstrometricsError, OSError, sqlite3.Error) as error:
+            self.notes.append(f"The target {target_id} could not be read: {error}")
             return None
 
     @property
@@ -621,7 +626,8 @@ class LibraryInputs:
         """Read the width, sky rate and read noise rows of a camera's frames.
 
         Only finished nights are read. A frame of the night in progress
-        (`unfinished_night_id`) is left out. A row with no night is kept.
+        (`unfinished_night_id`) is left out. So is a frame row with no night,
+        because it may be from tonight.
 
         Parameters
         ----------
@@ -648,7 +654,7 @@ class LibraryInputs:
             self._rows[camera] = [
                 row
                 for row in rows
-                if row.subject.observing_night_id is None or row.subject.observing_night_id < unfinished
+                if row.subject.observing_night_id is not None and row.subject.observing_night_id < unfinished
             ]
         return self._rows[camera]
 

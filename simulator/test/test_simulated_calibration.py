@@ -16,6 +16,7 @@ import pytest
 from astrometricslib import AppConfiguration
 from astrometricslib.exceptions import ConfigurationError, PermissionDeniedError
 from simulator import record_simulated_calibrations
+from simulator.errors import GuardError
 from simulator.simulated_calibration import (
     SIMULATED_GUIDE_RATE_ARCSEC_PER_SEC,
     build_simulated_calibrations,
@@ -23,7 +24,6 @@ from simulator.simulated_calibration import (
 )
 from wayfindinglib import Wayfinder
 from wayfindinglib.analytics.guide_pulses import GUIDE_RATE_ARCSEC_PER_S
-from wayfindinglib.exceptions import GuardError
 from wayfindinglib.models.equipment_and_site.focus_model import ApproachDirection, FocusModel
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
 from wayfindinglib.models.policy.delegation import (
@@ -32,7 +32,6 @@ from wayfindinglib.models.policy.delegation import (
     DelegationState,
     ObservatoryCapability,
 )
-from wayfindinglib.models.session.guiding_run import GuidingRunSummary
 from wayfindinglib.test import monitor_mode_support as support
 
 
@@ -133,105 +132,50 @@ def test_capture_focus_and_filter_commands_pass_the_safety_check(
     assert wayfinder.recording.commands_sent() != []
 
 
-def _run(index: int, ra_rate: float | None, dec_rate: float | None) -> GuidingRunSummary:
-    """Make one guide-log run, like those read from the user's logs.
-
-    Returns
-    -------
-    run : `GuidingRunSummary`
-        Run number `index`; later numbers are more recent.
-    """
-    return GuidingRunSummary(
-        id=f"guide_log.txt#{index}",
-        sessionId="2026-10-03",
-        sourceFileName="guide_log.txt",
-        writtenByEkos=False,
-        startedAt=1_790_000_000.0 + index,
-        pixelScaleArcsecPerPx=6.39,
-        focalLengthMm=121.05,
-        raRateArcsecPerSecond=ra_rate,
-        decRateArcsecPerSecond=dec_rate,
-    )
-
-
-def test_without_real_records_the_values_come_from_the_real_guide_log_runs(
+def test_the_guider_calibration_holds_the_simulators_own_values(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The guider follows the real runs; nonsense runs are left out."""
+    """Angle 0 and the 0.5x sidereal guide rate, whatever the real runs say."""
     wayfinder = _make_wayfinder(tmp_path, monkeypatch)
-    butler = wayfinder.control._context.butler
-    for index, (ra_rate, dec_rate) in enumerate([
-        (7.0, 5.0),
-        (8.0, 6.0),
-        (6.0, 7.0),
-        (473.7, 799.0),
-        (1.0, 3.0),
-    ]):
-        butler.put(_run(index, ra_rate, dec_rate), "guiding_run", {})
+    wayfinder.control._context.butler.put(
+        GuiderCalibration(
+            id="real-1",
+            camera_id="Real Cam",
+            telescope_id="Real Scope",
+            arcsec_per_pixel=6.39,
+            camera_angle_deg=12.0,
+            ra_rate_arcsec_per_sec=7.1,
+            dec_rate_arcsec_per_sec=6.2,
+            calibrated_at=datetime(2026, 10, 3, tzinfo=UTC),
+        ),
+        "guider_calibration",
+        {},
+    )
 
     report = record_simulated_calibrations(wayfinder.control, tmp_path)
 
     calibration = wayfinder.control.guiding.status(include=["calibration"]).calibration
     focus_model = wayfinder.control.imaging.status(include=["focus_model"]).focus_model
     assert calibration.id == report.guider_calibration.id
-    assert calibration.arcsec_per_pixel == report.guider_calibration.arcsec_per_pixel
+    assert calibration.camera_angle_deg == pytest.approx(0.0)
+    assert calibration.arcsec_per_pixel == pytest.approx(206.265 * 3.76 / 450.0, rel=1e-3)
+    assert (
+        calibration.ra_rate_arcsec_per_sec
+        == calibration.dec_rate_arcsec_per_sec
+        == GUIDE_RATE_ARCSEC_PER_S
+        == SIMULATED_GUIDE_RATE_ARCSEC_PER_SEC
+    )
+    assert calibration.source_note.startswith("Simulator value, not the real camera's")
     assert focus_model.id == report.focus_model.id
-    assert focus_model.backlash_steps == report.focus_model.backlash_steps
-    assert calibration.arcsec_per_pixel == pytest.approx(6.39)
-    assert calibration.ra_rate_arcsec_per_sec == pytest.approx(7.0)
-    assert calibration.dec_rate_arcsec_per_sec == pytest.approx(6.0)
-    assert calibration.source_note.startswith("Simulator: derived from")
-    assert "3 sensible real guide-log runs" in calibration.source_note
     assert focus_model.source_note.startswith("Simulator: made-up focus model")
     assert focus_model.backlash_steps == 0
     assert report.focus_source == "simulator focuser defaults"
 
 
-def test_with_no_runs_the_equipment_and_simulator_defaults_are_used(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """With no real data: the equipment's scale, the simulator's rate."""
+def test_the_newest_real_focus_model_is_copied(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real focus model wins, renamed to the active equipment."""
     wayfinder = _make_wayfinder(tmp_path, monkeypatch)
-
-    report = record_simulated_calibrations(wayfinder.control, tmp_path)
-
-    calibration = report.guider_calibration
-    assert calibration.arcsec_per_pixel == pytest.approx(206.265 * 3.76 / 450.0, rel=1e-3)
-    assert (
-        calibration.ra_rate_arcsec_per_sec == GUIDE_RATE_ARCSEC_PER_S == SIMULATED_GUIDE_RATE_ARCSEC_PER_SEC
-    )
-    assert "equipment plate scale" in calibration.source_note
-
-
-def test_the_newest_real_records_are_copied_and_follow_new_ones(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Real records win, renamed to the active equipment."""
-    wayfinder = _make_wayfinder(tmp_path, monkeypatch)
-    butler = wayfinder.control._context.butler
-
-    def calibration(day: int, scale: float) -> GuiderCalibration:
-        """Make a real calibration for other equipment names.
-
-        Returns
-        -------
-        calibration : `GuiderCalibration`
-            Calibrated on October `day`.
-        """
-        return GuiderCalibration(
-            id=f"real-{day}",
-            camera_id="Real Cam",
-            telescope_id="Real Scope",
-            arcsec_per_pixel=scale,
-            camera_angle_deg=12.0,
-            ra_rate_arcsec_per_sec=7.1,
-            dec_rate_arcsec_per_sec=6.2,
-            calibrated_at=datetime(2026, 10, day, tzinfo=UTC),
-        )
-
-    butler.put(calibration(1, 6.0), "guider_calibration", {})
-    butler.put(calibration(3, 6.39), "guider_calibration", {})
-    butler.put(
+    wayfinder.control._context.butler.put(
         FocusModel(
             id="real-focus",
             camera_id="Real Cam",
@@ -247,14 +191,9 @@ def test_the_newest_real_records_are_copied_and_follow_new_ones(
 
     report = record_simulated_calibrations(wayfinder.control, tmp_path)
 
-    assert report.guider_calibration.arcsec_per_pixel == pytest.approx(6.39)
-    assert report.guider_calibration.camera_angle_deg == pytest.approx(12.0)
-    assert report.guider_calibration.telescope_id == "Rig A"
-    assert report.guider_calibration.source_note == "Simulator: copied from real calibration of 2026-10-03."
     assert report.focus_model.backlash_steps == 40
     assert report.focus_model.camera_id == "CamA"
     assert report.focus_model.source_note == "Simulator: copied from real focus model of 2026-10-02."
-    assert wayfinder.control.guiding.status(include=["calibration"]).calibration is not None
 
 
 def test_recording_twice_keeps_one_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

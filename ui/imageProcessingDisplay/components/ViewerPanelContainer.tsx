@@ -63,7 +63,7 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
         title="FITS Viewer"
         className="image-processing-display__viewer-section"
         headerContent={
-          <div className="fits-header-controls" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <div className="fits-header-controls">
             <Button
               size="small"
               active={stretch}
@@ -89,7 +89,6 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
               <span
                 className="fits-header-controls__note"
                 data-testid="astrometry-overlay-reason"
-                style={{ fontSize: '0.8em', opacity: 0.7 }}
               >
                 {overlayReason}
               </span>

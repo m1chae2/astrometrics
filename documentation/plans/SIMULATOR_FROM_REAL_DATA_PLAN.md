@@ -18,8 +18,8 @@ functions.
 
 ## Status
 
-Status on 2026-11-07: decisions D1 to D17 are made, and both review rounds are folded in
-(appendices A and B). No phase is built. Items marked "verify" depend on INDI driver behavior
+Status on 2026-11-07: decisions D1 to D24 are made, and the two plan reviews and the review of
+pull request 151 are folded in (appendices A to C). Phases L0 to L3 and S0 are built. Items marked "verify" depend on INDI driver behavior
 that must be confirmed against the INDI 2.2.5 driver source before the phase that uses them.
 
 ## 1. Goal
@@ -56,6 +56,13 @@ that must be confirmed against the INDI 2.2.5 driver source before the phase tha
 | D15 | Delivered real frames carry the simulated time ("as if taken now"), with no flag in the frame records. Time-dependent results computed from them land only in the simulator's throwaway library, which is deleted when the user leaves the mode. |
 | D17 | In simulation mode the app sends nothing off the computer: no submissions (the asteroid report to the Minor Planet Center), no online catalog or name lookups (SIMBAD, online Gaia), no online plate solving. It talks only to the stand-ins on this computer, and lookups use the local catalogs copied into the simulator. |
 | D16 | The simulator is a layer around the backend and the libraries (top-level `simulator/` package). The core never imports it, and it uses only the libraries' public names and the backend's public interface. Core changes are allowed where the layer needs them, and they must be general-purpose (useful for a second real observatory or a real night too). Measurements that also describe a real night are made in the core and reached through its public API; the layer only turns them into simulator settings. |
+| D18 | Review of pull request 151: the RPC endpoint gets a host check (local addresses, plus the LAN addresses in LAN mode) and loses the hand-set "any origin" reply header in this pull request. Requiring the session token on every RPC is its own issue (#158), because it touches the whole UI. |
+| D19 | The launcher contract (the source choice, its file and the restart exit code) lives in `backend/public_interface.py`. The simulator may import that one backend module and nothing else from the backend. |
+| D20 | The connection guard is fixed now: it fails closed, checks UDP as well as TCP, and is documented as a detector. Running the simulated world with no network at all (a network namespace) comes with S1. |
+| D21 | Frames drawn by a camera simulator carry a general "synthetic frame" header keyword, and the quality measurements of those frames carry a warning that their noise, sky and depth values do not describe a real sky. Real frames delivered "as if taken now" (D14, D15) do not carry it. |
+| D22 | The observing night follows the computer's time zone today. Working it out from the site's longitude, or a configured zone, is its own issue (#159). |
+| D23 | The TPM keeps its baselines per machine setup. Frame-end detection moves from the backend into `wayfindinglib` control in S2, when the capture runner needs it. |
+| D24 | All other review findings on pull request 151 are fixed in that pull request, the UX findings included. |
 
 ## 3. What exists today
 
@@ -251,11 +258,18 @@ A test fixture starts `indiserver` with the simulators on a free port and its ow
   source's processes,
 - the contract tests (section 7).
 
+The interactive simulation mode also runs its world with no network (D20): the launcher starts
+the backend and the stand-ins in their own network namespace, so the connection guard becomes a
+second check rather than the only one.
+
 Acceptance: the job runs and passes in CI and never reaches port 7624 or any network outside
 the sandbox.
 
 ### Phase S2: real PHD2 in simulation mode
 
+- Frame-end detection (`FrameEndDetector` and its tuned values) moves from the backend's
+  auto-download service into `wayfindinglib` control, so the capture runner and the backend use
+  one detector (D23). The backend keeps only the scheduling.
 - One PHD2 client: the command methods the operator needs (connect, loop, guide with
   calibration, stop) are added to the core's PHD2 client and exported through the narrow public
   module (section 4). `record_phd2_contract.py` moves to it.
@@ -390,6 +404,7 @@ By decision D9:
 | Plate solving in simulation | The app's solve and sync against GSC-drawn frames | None |
 | Simulator settings screen | Shows each fitted value with its source and date (S3 results file) | None |
 | Simulator comparison screen | Shows the S5 comparison | None |
+| MCP servers in simulation mode | The library MCP servers say which world they read (real library or simulator world), or follow the active world, so an agent never mixes the two | None |
 
 ## 10. Risks
 
@@ -499,3 +514,42 @@ before folding in.
 No finding was rejected. The astronomer's proposal to flag simulated frames in the database was
 not taken: the user chose to keep "as if taken now" without a flag, because the simulator's
 library is thrown away (D15).
+
+## Appendix C. Review of pull request 151
+
+Review board on 2026-11-07 over the whole pull request: the astronomer, the software engineer and
+the architect, with a user-experience and a security reviewer. All five approved with changes.
+Every major claim was checked against the code before it was accepted.
+
+| Finding | Raised by | Where it landed |
+| :--- | :--- | :--- |
+| The connection guard fails open when its check errors, and sees only TCP | Software engineer, security | D20; fixed in the layer |
+| A missing or mistyped `offline` value means online | Security | Fails closed; the launcher also sets an environment flag |
+| Stored paths in the world's databases and `calibration_frames.json` can still name real files | Software engineer | The TPM path guard moved into the layer and runs on every world |
+| A backend restart is allowed when the busy check fails, and misses imaging, log sync and download timers | Software engineer | Fails closed; all four counted |
+| Section headers with a trailing comment are not recognized when sections are dropped | Security | Fixed |
+| The TPM real-snapshot run has no offline flag; the seal exposes the session's runtime folder | Security | Fixed |
+| Remote shell strings are not quoted; record RPCs overwrite by id; the RPC client follows proxies | Security | Fixed |
+| RPC calls need no token; replies allow any origin; no host check | Security | D18 |
+| Simulated frames sit about 385 ADU below the bias the app subtracts | Astronomer | The simulator gets the real bias as its pedestal; the header keeps the camera offset |
+| The camera model is described as realistic, but only its geometry and labels match | Astronomer | Wording fixed; D21 |
+| The copied guider calibration does not match the guide simulator | Astronomer | The simulator's own angle and rate are recorded |
+| A failed target lookup counts as a complete read and stays cached | Software engineer | Counted as incomplete |
+| Frame rows with no night count as finished | Astronomer | Left out |
+| The text says a restack does not refit the camera part; it does | Astronomer | Text fixed; blind spots recorded in WAY-D107 |
+| The night boundary depends on the computer's time zone | Astronomer | D22 |
+| The SIMULATOR chip is hidden in a narrow window | UX | Never hidden; a short label at narrow widths |
+| One command flag, taken from the mount, turns on every device command | UX | Each panel checks its own capability |
+| Failed-simulator detection matches the text "fail" | UX | Uses the backend's failed flag |
+| Error toasts write browser console errors; the header strip uses a hidden button; smaller UI items | UX | Fixed |
+| Simulator-only names and errors live in the core's public surface; `real_folders` is defined twice; a second path parser | Architect | Moved to the layer; D19 |
+| Two loopback checks; the wheel ships `simulator`; the import contract does not forbid `backend` | Architect | One check; removed from the wheel; contract extended |
+| Unused public methods `invalidate_night` and `query_runs` | Architect | Removed |
+| Warm-ups run outside the heavy lane and log failures as errors | Architect, software engineer | Through the lane, as warnings, cancelled on shutdown |
+| The MCP servers read the real library while the backend is in the simulated world | Architect | Section 9 |
+| Frame-end detection is control logic in the backend | Architect | D23, S2 |
+| The TPM harness is large; postpone per-setup baselines | Architect | D23: kept |
+
+Rejected: going back to absolute paths in `.mcp.json`. The user chose project-relative paths
+earlier. Corrected: the architect reported that `query_runs` had no caller, but the simulator
+called it; it is removed anyway because the review query already returns guiding runs.

@@ -295,3 +295,36 @@ describe('Telescope Control slew speed', () => {
         expect((screen.getByRole('slider') as HTMLInputElement).value).toBe('0');
     });
 });
+
+describe('Telescope Control panel per-capability gates', () => {
+    /** A delegated focuser greys only the focuser; the direction pad stays on while the mount is authoritative. */
+    it('greys only the group whose own capability is off', async () => {
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+        render(
+            <QueryClientProvider client={client}>
+                <TelescopeControlPanel
+                    isTracking={false}
+                    isParked={false}
+                    onSetTracking={vi.fn()}
+                    onPark={vi.fn()}
+                    onUnpark={vi.fn()}
+                    onStartMove={vi.fn()}
+                    onStopMove={vi.fn()}
+                    onSetSlewRate={vi.fn()}
+                    onStop={vi.fn()}
+                    commandsDisabled={false}
+                    capabilityGates={{
+                        mount: { disabled: false, reason: '' },
+                        focuser: { disabled: true, reason: 'Ekos controls the focuser.' },
+                    }}
+                />
+            </QueryClientProvider>,
+        );
+        fireEvent.click(screen.getByRole('tab', { name: 'Manual' }));
+        expect((await screen.findByRole('button', { name: 'Focus in' }) as HTMLButtonElement).disabled).toBe(true);
+        expect((screen.getByRole('button', { name: 'STOP' }) as HTMLButtonElement).disabled).toBe(false);
+        expect(screen.getAllByTestId('command-gate')).toHaveLength(1);
+        // The header button still explains why something is greyed.
+        expect(screen.getByRole('button', { name: 'Why unavailable?' })).toBeTruthy();
+    });
+});

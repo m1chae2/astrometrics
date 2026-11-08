@@ -16,6 +16,7 @@ vi.mock('../services/observatoryService', async (importOriginal) => ({
   getObservatorySource: vi.fn(),
 }));
 
+import { ObservatoryCapability } from '../types/backendTypes';
 import { callBackend } from '../services/backendApi';
 import { getObservatorySource } from '../services/observatoryService';
 import {
@@ -31,7 +32,7 @@ import {
  * @param overrides Fields to change.
  * @return The report.
  */
-function report(source: 'real' | 'simulated' | 'offline', overrides: Record<string, unknown> = {}) {
+function report(source: 'real' | 'simulated' | 'no_telescope', overrides: Record<string, unknown> = {}) {
   return {
     source, chosen: source, label: '',
     launch: source === 'simulated' ? { label: 'SIMULATOR', live_hardware: false, disposable_library: true, offline: true, locked_keys: [] } : null, restart_pending: false, starting: false, ready: true,
@@ -64,6 +65,36 @@ function renderAvailability() {
   );
   return renderHook(() => useCommandAvailability(), { wrapper });
 }
+
+describe('useCommandAvailability per capability', () => {
+  /** An authoritative mount does not turn on a delegated focuser, and the reason names the focuser. */
+  it('decides each capability from its own delegation state', async () => {
+    vi.mocked(getObservatorySource).mockResolvedValue(report('simulated') as never);
+    vi.mocked(callBackend).mockResolvedValue({
+      delegation_policy: { capability_delegations: [
+        { capability: 'MOUNT_CONTROL', state: 'AUTHORITATIVE' },
+        { capability: 'AUTOFOCUS', state: 'DELEGATED' },
+        { capability: 'AUTOGUIDING', state: 'AUTHORITATIVE' },
+      ] },
+    } as never);
+    const { result } = renderAvailability();
+    await waitFor(() => expect(result.current.canCommandCapability(ObservatoryCapability.MOUNT_CONTROL)).toBe(true));
+    expect(result.current.canCommandCapability(ObservatoryCapability.AUTOGUIDING)).toBe(true);
+    expect(result.current.canCommandCapability(ObservatoryCapability.AUTOFOCUS)).toBe(false);
+    expect(result.current.canCommandCapability(ObservatoryCapability.CAPTURE_ORCHESTRATION)).toBe(false);
+    expect(result.current.reasonForCapability(ObservatoryCapability.MOUNT_CONTROL)).toBe('');
+    expect(result.current.reasonForCapability(ObservatoryCapability.AUTOFOCUS)).toContain('the focuser');
+  });
+
+  /** A failed source keeps every capability off, even when the policy says AUTHORITATIVE. */
+  it('keeps every capability off for a failed source', async () => {
+    mountIs('AUTHORITATIVE');
+    vi.mocked(getObservatorySource).mockResolvedValue(report('no_telescope', { failed: true }) as never);
+    const { result } = renderAvailability();
+    await waitFor(() => expect(getObservatorySource).toHaveBeenCalled());
+    expect(result.current.canCommandCapability(ObservatoryCapability.MOUNT_CONTROL)).toBe(false);
+  });
+});
 
 describe('useCommandAvailability', () => {
   beforeEach(() => { vi.clearAllMocks(); mountIs('AUTHORITATIVE'); });
@@ -134,7 +165,7 @@ describe('useCommandAvailability', () => {
 
   /** A simulator that failed to start leaves the app on the offline fallback: no commands. */
   it('keeps commands off for a failed simulator', async () => {
-    vi.mocked(getObservatorySource).mockResolvedValue(report('offline', { failed: true }) as never);
+    vi.mocked(getObservatorySource).mockResolvedValue(report('no_telescope', { failed: true }) as never);
     const { result } = renderAvailability();
     await waitFor(() => expect(getObservatorySource).toHaveBeenCalled());
     expect(result.current.canCommand).toBe(false);

@@ -24,6 +24,20 @@ STATUS_SECTIONS = ("filters", "current_filter", "focuser", "camera", "focus_mode
 """Sections `ImagingControl.status` can read."""
 
 
+#: Longest id a recorded focus model may have.
+MAXIMUM_RECORD_ID_LENGTH = 100
+
+#: Longest source note a recorded focus model may have.
+MAXIMUM_SOURCE_NOTE_LENGTH = 500
+
+#: Largest backlash or filter offset accepted, in focuser steps. Real
+#: focusers travel tens of thousands of steps at most.
+MAXIMUM_BACKLASH_STEPS = 100000
+
+#: Largest focus shift per degree Celsius accepted, in steps.
+MAXIMUM_THERMAL_COEFFICIENT_STEPS_PER_C = 10000.0
+
+
 class ImagingControl(ControlChild):
     """Operate the main camera, the filter wheel and the focuser."""
 
@@ -190,34 +204,39 @@ class ImagingControl(ControlChild):
         thermal_coefficient_steps_per_c: float = 0.0,
         filter_offsets: dict[str, int] | None = None,
         calibrated_at: datetime | None = None,
+        replace: bool = False,
     ) -> FocusModel:
         """Save a focus model that was measured elsewhere.
 
         Use this when the numbers come from a focus run in another tool or
-        from a copy of an earlier record. The record replaces any saved
-        record with the same id, and the delegation rules treat it like one
-        fitted here. Nothing is sent to a device.
+        from a copy of an earlier record. A record with an id that is already
+        saved is refused unless `replace` is true. The delegation rules treat
+        the record like one fitted here. Nothing is sent to a device.
 
         Parameters
         ----------
         focus_model_id : `str`
-            Id of the record. Saving the same id again replaces it.
+            Id of the record, at most 100 characters.
         camera_id, telescope_id : `str`
             The equipment pairing the model belongs to.
         backlash_steps : `int`
-            Focuser backlash in steps. Zero or more.
+            Focuser backlash in steps. Zero or more, at most 100000.
         approach_direction : `str`
             ``"inward"`` or ``"outward"``: the one direction every focus
             move ends in.
         source_note : `str`
             Where the numbers came from. Required, so a record never has an
-            unknown origin.
+            unknown origin. At most 500 characters.
         thermal_coefficient_steps_per_c : `float`, optional
-            Focus shift in steps for each degree Celsius. Default 0.
+            Focus shift in steps for each degree Celsius, from -10000 to
+            10000. Default 0.
         filter_offsets : `dict` [`str`, `int`], optional
             Focus offset in steps for each filter name.
         calibrated_at : `~datetime.datetime`, optional
             When the model was made. Now when omitted.
+        replace : `bool`, optional
+            Replace a saved record that has the same id. Defaults to
+            `False`, which refuses instead.
 
         Returns
         -------
@@ -227,8 +246,9 @@ class ImagingControl(ControlChild):
         Raises
         ------
         InvalidArgumentError
-            If a value is out of range or not recognized, an id is empty,
-            or `source_note` is empty.
+            If a value is out of range or not recognized, an id or
+            `source_note` is empty or too long, or the id is already saved
+            and `replace` is false.
         """
         from pydantic import ValidationError
 
@@ -236,6 +256,23 @@ class ImagingControl(ControlChild):
         from wayfindinglib.models.equipment_and_site.focus_model import FilterFocusOffset
 
         require_text(source_note=source_note, focus_model_id=focus_model_id)
+        if len(focus_model_id) > MAXIMUM_RECORD_ID_LENGTH or len(source_note) > MAXIMUM_SOURCE_NOTE_LENGTH:
+            raise InvalidArgumentError(
+                f"focus_model_id may have at most {MAXIMUM_RECORD_ID_LENGTH} characters and source_note "
+                f"at most {MAXIMUM_SOURCE_NOTE_LENGTH}."
+            )
+        if backlash_steps > MAXIMUM_BACKLASH_STEPS:
+            raise InvalidArgumentError(f"backlash_steps must be at most {MAXIMUM_BACKLASH_STEPS}.")
+        if abs(thermal_coefficient_steps_per_c) > MAXIMUM_THERMAL_COEFFICIENT_STEPS_PER_C:
+            raise InvalidArgumentError(
+                f"thermal_coefficient_steps_per_c must be within {MAXIMUM_THERMAL_COEFFICIENT_STEPS_PER_C}."
+            )
+        if any(abs(offset) > MAXIMUM_BACKLASH_STEPS for offset in (filter_offsets or {}).values()):
+            raise InvalidArgumentError(f"Each filter offset must be within {MAXIMUM_BACKLASH_STEPS} steps.")
+        if not replace and self._context.butler.get("focus_model", {"id": focus_model_id}) is not None:
+            raise InvalidArgumentError(
+                f"A focus model with id {focus_model_id!r} is already saved. Pass replace=True to replace it."
+            )
         fields = {
             "id": focus_model_id,
             "camera_id": camera_id,

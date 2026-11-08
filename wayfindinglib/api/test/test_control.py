@@ -1591,7 +1591,6 @@ def test_record_focus_model_refuses_invalid_values(control: ObservatoryControl, 
 def test_the_query_reads_list_every_saved_record_oldest_first(control: ObservatoryControl) -> None:
     """The three query reads list all pairings, not only the active one."""
     assert control.guiding.query_calibrations() == []
-    assert control.guiding.query_runs() == []
     assert control.imaging.query_focus_models() == []
     for day, camera in ((3, "Cam B"), (1, "Cam A")):
         control.guiding.record_calibration(

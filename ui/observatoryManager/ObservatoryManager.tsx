@@ -6,6 +6,8 @@ import { TargetListFilterPanel } from '../common/radioList/TargetListFilterPanel
 import { useTargetListLogic } from '../common/hooks/useTargetListLogic';
 import { ListActions } from '../common/components/ListActions';
 import { ControlPanel } from './ControlPanel';
+import type { CapabilityGate, TelescopeCapabilityGates } from './panels/TelescopeControlPanel';
+import { ObservatoryCapability } from '../common/types/backendTypes';
 import { IndiStatusPanel } from './IndiStatusPanel';
 import { useTargetContext } from '../common/context/TargetContext';
 import { useTelescopeStatus } from '../common/hooks/useTelescopeStatus';
@@ -146,6 +148,17 @@ export const ObservatoryManager: React.FC = () => {
     // Equipment commands also stay off while a past night is shown.
     const commandsDisabled = !availability.canCommand || !isLive;
     const commandsDisabledReason = !isLive ? liveOnlyReason : availability.reason;
+    // Each group of controls follows its own capability, so a delegated focuser does not grey the mount.
+    const gateFor = (capability: ObservatoryCapability): CapabilityGate => ({
+        disabled: !availability.canCommandCapability(capability) || !isLive,
+        reason: !isLive ? liveOnlyReason : availability.reasonForCapability(capability),
+    });
+    const capabilityGates: TelescopeCapabilityGates = {
+        mount: gateFor(ObservatoryCapability.MOUNT_CONTROL),
+        alignment: gateFor(ObservatoryCapability.PLATE_SOLVE_ALIGNMENT),
+        guiding: gateFor(ObservatoryCapability.AUTOGUIDING),
+        focuser: gateFor(ObservatoryCapability.AUTOFOCUS),
+    };
 
     // The targets imaged on the chosen night, and the list the panel shows for it.
     const nightTargetKeys = React.useMemo(
@@ -259,11 +272,7 @@ export const ObservatoryManager: React.FC = () => {
                             <Button
                                 variant="primary"
                                 disabled={commandsDisabled}
-                                aria-disabled={commandsDisabled}
-                                onClick={() => {
-                                    if (commandsDisabled) return;
-                                    void handlers.onSlewToTarget(raShared, decShared);
-                                }}
+                                onClick={() => { void handlers.onSlewToTarget(raShared, decShared); }}
                             >
                                 Slew to Target
                             </Button>
@@ -296,6 +305,7 @@ export const ObservatoryManager: React.FC = () => {
             isAligningActive={telemetry.alignmentActive}
             commandsDisabled={commandsDisabled}
             commandsDisabledReason={commandsDisabledReason}
+            capabilityGates={capabilityGates}
             cameras={equipment.availableCameras}
             camerasLoading={equipment.loading}
             camerasError={equipment.error}

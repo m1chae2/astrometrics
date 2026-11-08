@@ -5,8 +5,9 @@ JSON-RPC 2.0 message, and the backend wraps each result as
 ``{"status": ..., "data": ...}``. The launcher uses this one function for
 the operator step (it records the calibrations and enters controller mode
 after the backend answers), and the TPM harness scripts share it through
-``build/tpm/backend_rpc.py``. It reaches ``127.0.0.1`` only. The route takes
-no session token (only the WebSockets do), so none is sent.
+``build/tpm/backend_rpc.py``. It reaches ``127.0.0.1`` only, and it
+ignores the proxy variables. The route takes no session token (only the
+WebSockets do), so none is sent.
 """
 
 import json
@@ -14,6 +15,10 @@ import urllib.error
 import urllib.request
 
 __all__ = ["backend_is_ready", "call_rpc"]
+
+#: An opener that ignores ``http_proxy`` and the other proxy variables, so a
+#: request to 127.0.0.1 can never be sent to a proxy.
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def call_rpc(port: int, method: str, params: dict, timeout: float = 60.0) -> object:
@@ -44,7 +49,7 @@ def call_rpc(port: int, method: str, params: dict, timeout: float = 60.0) -> obj
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}/api/rpc", data=body, headers={"Content-Type": "application/json"}
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with _OPENER.open(request, timeout=timeout) as response:
         reply = json.loads(response.read())
     if "error" in reply:
         raise RuntimeError(f"{method} failed: {reply['error']}")
@@ -71,7 +76,7 @@ def backend_is_ready(port: int, timeout: float = 2.0) -> bool:
         `True` on status 200. Any failure to connect or a 503 gives `False`.
     """
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ready", timeout=timeout) as response:
+        with _OPENER.open(f"http://127.0.0.1:{port}/api/ready", timeout=timeout) as response:
             return response.status == 200
     except urllib.error.URLError, OSError, ValueError:
         return False

@@ -22,7 +22,7 @@ vi.mock('../../common/components/IngestFramesModal', () => ({ IngestFramesModal:
 vi.mock('../../common/hooks/useIngestionManager', () => ({ useIngestionManager: () => ({ isActive: false }) }));
 vi.mock('../IndiStatusPanel', () => ({ IndiStatusPanel: () => <div>Devices</div> }));
 vi.mock('../../common/hooks/useCommandAvailability', () => ({
-    useCommandAvailability: () => ({ canCommand: true, reason: '' }),
+    useCommandAvailability: () => ({ canCommand: true, reason: '', canCommandCapability: () => true, reasonForCapability: () => '' }),
 }));
 vi.mock('../../common/hooks/useTelescopeStatus', () => ({
     useTelescopeStatus: () => ({

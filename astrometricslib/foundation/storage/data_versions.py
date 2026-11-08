@@ -20,6 +20,12 @@ catalog).
 A write made by raw SQL that does not call `bump_data_version` is not seen.
 So is a database file swapped for an older copy. Restore a backup only while
 the app is stopped.
+
+Known blind spots. The counts, newest row numbers and newest times miss an
+in-place UPDATE made by another process that does not bump the counter or
+change those values. The camera version also does not see a later edit to a
+frame record that lives in another target's document (it sees that target's
+quality rows, not its document).
 """
 
 import hashlib
@@ -226,7 +232,9 @@ def get_camera_data_versions(
 
     With ``finished_before_night`` the version counts only the measurements
     of finished nights: a measurement whose observing night is older than
-    that night, or that has no night (a stack row). A frame measured tonight
+    that night, or a stack-level measurement with no night. A frame-level
+    measurement with no night is left out, because it may be from tonight.
+    A frame measured tonight
     then leaves the version as it is, and the version changes once when the
     night rolls over (the frames of that night start to count).
 
@@ -283,7 +291,8 @@ def get_camera_data_versions(
                     "COALESCE(MAX(m.observing_night_id), '') "
                     "FROM quality_measurements m JOIN quality_capture_setting s "
                     "ON s.capture_setting_id = m.capture_setting_id WHERE s.camera = ? "
-                    "AND (m.observing_night_id IS NULL OR m.observing_night_id < ?)",
+                    "AND ((m.subject_level <> 'frame' AND m.observing_night_id IS NULL) "
+                    "OR m.observing_night_id < ?)",
                     (camera, finished_before_night),
                     (0, 0, "", ""),
                 )

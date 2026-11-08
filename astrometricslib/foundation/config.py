@@ -26,6 +26,7 @@ from astrometricslib.foundation.observatory_site import ObservatorySite, load_ob
 from astrometricslib.foundation.paths import (
     config_directory,
     data_directory,
+    resolve_library_setting,
     resolve_mounted_path,
     state_directory,
 )
@@ -1364,11 +1365,16 @@ class AppConfiguration:
         -------
         identity : `LaunchIdentity` or `None`
             The identity, or `None` when the config has no ``[Launch]``
-            section (an ordinary run).
+            section (an ordinary run). A section that is there but cannot be
+            read gives an identity with ``offline`` true.
         """
         if not self.app_config.has_section(LAUNCH_SECTION):
             return None
-        return launch_identity_from_settings({LAUNCH_SECTION: self.app_config[LAUNCH_SECTION]})
+        try:
+            section = dict(self.app_config[LAUNCH_SECTION])
+        except KeyError, TypeError, ValueError:
+            section = None
+        return launch_identity_from_settings({LAUNCH_SECTION: section})
 
     def get_camera_default_iso(self, camera_name: str | None) -> str | None:
         """Return the ISO or gain to assume for a camera whose header has none.
@@ -1450,16 +1456,9 @@ class AppConfiguration:
             path_str = self.app_config.get("Image Library", "path")
             if not path_str:
                 return Path(data_directory()).absolute()
-            path = Path(path_str)
-            if not path.is_absolute():
-                # If path starts with ./, resolve relative to project root.
-                # If `library` was moved to astrometricslib/library,
-                # check there.
-                check_path = self.get_project_root() / "astrometricslib" / path
-                if check_path.exists():
-                    return check_path.absolute()
-                return (self.get_project_root() / path).absolute()
-            return path.absolute()
+            # A relative path starts at the project root, or inside
+            # astrometricslib/ where an older install kept the library.
+            return resolve_library_setting(path_str, self.get_project_root(), search_package=True)
         except configparser.NoSectionError, configparser.NoOptionError, KeyError:
             return Path(data_directory()).absolute()
 
@@ -1479,15 +1478,7 @@ class AppConfiguration:
         try:
             path_str = self.app_config.get("Image Library", "frames_path")
             if path_str:
-                path = Path(path_str)
-                if not path.is_absolute():
-                    check_path = self.get_project_root() / "astrometricslib" / path
-                    if check_path.exists():
-                        path = check_path.absolute()
-                    else:
-                        path = (self.get_project_root() / path).absolute()
-                else:
-                    path = path.absolute()
+                path = resolve_library_setting(path_str, self.get_project_root(), search_package=True)
                 if not path.exists():
                     path = Path(resolve_mounted_path(str(path)))
                 return path
@@ -1542,10 +1533,7 @@ class AppConfiguration:
             path_str = None
         if not path_str:
             return self.get_frames_path()
-        path = Path(path_str)
-        if not path.is_absolute():
-            path = self.get_project_root() / path
-        return path.absolute()
+        return resolve_library_setting(path_str, self.get_project_root())
 
     def get_library_file_path(self, filename: str) -> Path:
         """Return the absolute path to a file within `library`.

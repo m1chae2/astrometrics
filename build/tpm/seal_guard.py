@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 
 from simulator.connection_guard import descendant_pids, non_loopback_connections, parse_ss_connections
-from wayfindinglib.exceptions import GuardError
+from simulator.errors import GuardError
 
 __all__ = [
     "check_sealed",

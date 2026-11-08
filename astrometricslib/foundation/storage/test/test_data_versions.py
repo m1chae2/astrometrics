@@ -321,6 +321,39 @@ def test_the_finished_night_camera_version_ignores_the_night_in_progress(config:
     assert rolled[0] == 3
 
 
+def test_the_finished_night_camera_version_leaves_out_frame_rows_with_no_night(
+    config: AppConfiguration,
+) -> None:
+    """A frame row with no night is left out; a stack row with none counts."""
+    store = QualityStore.from_configuration(config)
+    store.write_measurements([_night_measurement(store, "CamA", "M 31", "run-1", "2026-11-05")])
+
+    def version() -> tuple[str | int, ...]:
+        """Read CamA's finished-night version for the night 2026-11-07.
+
+        Returns
+        -------
+        version : `tuple`
+            The version.
+        """
+        found = get_camera_data_versions(config, ["CamA"], finished_before_night="2026-11-07")
+        assert found is not None
+        return found["CamA"]
+
+    before = version()
+    frame_without_night = _camera_measurement(store, "CamA", "M 13", "run-2")
+    assert frame_without_night.subject.observing_night_id is None
+    store.write_measurements([frame_without_night])
+    assert version() == before
+
+    stack = _camera_measurement(store, "CamA", "M 13", "run-3")
+    stack = stack.model_copy(
+        update={"subject": stack.subject.model_copy(update={"level": SubjectLevel.STACK})}
+    )
+    store.write_measurements([stack])
+    assert version() != before
+
+
 def test_the_camera_version_sees_a_calibration_record_of_that_camera(config: AppConfiguration) -> None:
     """A camera's calibration record changes its version."""
     store = QualityStore.from_configuration(config)

@@ -5,24 +5,28 @@ Description: The library's delegation rules let autoguiding leave
 focus model exists, and capture only when both corrections are
 ``AUTHORITATIVE``. A real night earns those records by calibrating the
 guider and running a focus curve. The simulated observatory has no sky to
-calibrate on, so it records ones that follow how the user's real telescope
-performs, and the same rules then run unchanged.
+calibrate on, so it records ones that describe the simulators, and the same
+rules then run unchanged.
 
 `record_simulated_calibrations` records both into the simulator's own
 wayfinding library, for the active telescope and camera, at every
-simulator start. The simulator's library is a copy of the real one, made at
-the same start, so new real data is picked up by itself. Each value comes
-from the first source that has it:
+simulator start.
 
-1. the most recent real `GuiderCalibration` or `FocusModel` in the library
-   (copied, with the equipment names changed to the active ones);
-2. for the guider, the real guide-log runs: the guide camera's plate scale
-   and the middle (median) calibrated RA and Dec speeds of the most recent
-   runs that look sensible, or else the plate scale of the active
-   equipment;
-3. the INDI simulators' own behavior: the guide rate the simulated mount
-   accepts (half the sidereal rate), a camera angle of 0 degrees, and a
-   focuser with no backlash and no thermal model.
+The guider calibration holds the simulator's own values, never the real
+camera's. The real camera angle and the real RA and Dec speeds describe the
+real mount and guide camera. The INDI guide simulator draws unrotated frames
+(its rotation setting, ``SIM_ROTATION``, is 0 and nothing changes it), and the
+simulated mount guides at the guide rate set in the mount simulator, half the
+sidereal rate, on both axes. The plate scale is the active guide train's
+(guide camera pixel size over guide scope focal length), the same numbers
+`simulator.device_settings` sends to the guide simulator.
+
+The focus model is the most recent real `FocusModel` in the library (copied,
+with the equipment names changed to the active ones), or else the INDI
+focuser simulator's behavior: no backlash. Its thermal coefficient of 0 is a
+placeholder until the simulator is fitted to real data (step S3 of the
+simulator plan); with 0, the autofocus never sees a temperature drift to
+follow.
 
 Each record carries a ``source_note`` that says it is for the simulator and
 names the source. They are saved through the public
@@ -42,7 +46,6 @@ sends them to the running backend with the public RPC methods
 
 import argparse
 import json
-import statistics
 import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -50,8 +53,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from simulator.errors import GuardError
 from simulator.observatory_guard import real_protected_paths
-from wayfindinglib.exceptions import GuardError
 
 if TYPE_CHECKING:
     from wayfindinglib import ObservatoryControl
@@ -65,20 +68,14 @@ __all__ = [
     "rpc_calls",
 ]
 
-#: The guide simulator's frames are not rotated against the mount axes.
+#: The guide simulator's rotation setting (``SIM_ROTATION``): its frames are
+#: not rotated against the mount axes. `simulator.device_settings` never
+#: changes it from INDI's default of 0.
 SIMULATED_CAMERA_ANGLE_DEG = 0.0
 #: The guide rate the simulated mount accepts: half the sidereal rate of
 #: 15.04 arcsec/s. The library's own guide rate is the same number (a test
 #: checks that they agree).
 SIMULATED_GUIDE_RATE_ARCSEC_PER_SEC = 7.52
-
-
-#: The speeds of one guide-log run count only between these (arcsec/s). Below
-#: is a failed calibration; above is faster than the sky moves (sidereal rate
-#: is 15.04 arcsec/s), which a guide pulse cannot do.
-PLAUSIBLE_RATE_RANGE_ARCSEC_PER_SEC = (1.5, 15.0)
-#: How many of the most recent sensible guide-log runs set the speeds.
-RECENT_RUN_COUNT = 20
 
 
 @dataclass(frozen=True)
@@ -247,61 +244,47 @@ def _day(moment: datetime) -> str:
     return moment.astimezone(UTC).date().isoformat()
 
 
-def _guider_from_history(
-    control: ObservatoryControl, plate_scale_from_equipment: float | None
-) -> tuple[float, float, float, str]:
-    """Work out the guider numbers from the real guide-log runs.
+def _simulator_guider(
+    plate_scale_from_equipment: float | None,
+) -> tuple[float, float, float, float, str]:
+    """Give the guider numbers of the INDI simulators.
 
     Parameters
     ----------
-    control : `ObservatoryControl`
-        Supplies the recorded runs.
     plate_scale_from_equipment : `float` or `None`
-        The active equipment's guide plate scale, used when no run has one.
+        The active guide train's plate scale, in arcseconds per pixel.
 
     Returns
     -------
-    plate_scale, ra_rate, dec_rate : `float`
-        Arcseconds per pixel, and arcseconds per second along each axis.
+    plate_scale, angle, ra_rate, dec_rate : `float`
+        Arcseconds per pixel, the camera angle in degrees, and the guide
+        speed along each axis in arcseconds per second.
     source : `str`
         Where the numbers came from, for the note.
 
     Raises
     ------
     ConfigurationError
-        If no plate scale is known from the runs or the equipment.
+        If the guide train has no known plate scale.
     """
     from astrometricslib.exceptions import ConfigurationError
 
-    low, high = PLAUSIBLE_RATE_RANGE_ARCSEC_PER_SEC
-    runs = sorted(control.guiding.query_runs(), key=lambda run: run.started_at)
-    sensible = [
-        run
-        for run in runs
-        if run.ra_rate_arcsec_per_second is not None
-        and run.dec_rate_arcsec_per_second is not None
-        and low <= run.ra_rate_arcsec_per_second <= high
-        and low <= run.dec_rate_arcsec_per_second <= high
-    ][-RECENT_RUN_COUNT:]
-    scales = [run.pixel_scale_arcsec_per_px for run in runs if run.pixel_scale_arcsec_per_px]
-    if scales:
-        plate_scale = statistics.median(scales[-RECENT_RUN_COUNT:])
-        scale_source = "guide-log plate scale"
-    elif plate_scale_from_equipment is not None:
-        plate_scale = plate_scale_from_equipment
-        scale_source = "equipment plate scale"
-    else:
+    if plate_scale_from_equipment is None:
         raise ConfigurationError(
             "The guide camera's plate scale is not known, so no calibration can be made."
         )
-    if sensible:
-        ra_rate = statistics.median(run.ra_rate_arcsec_per_second for run in sensible)
-        dec_rate = statistics.median(run.dec_rate_arcsec_per_second for run in sensible)
-        rate_source = f"median speeds of the last {len(sensible)} sensible real guide-log runs"
-    else:
-        ra_rate = dec_rate = SIMULATED_GUIDE_RATE_ARCSEC_PER_SEC
-        rate_source = "simulator guide rate (no sensible real runs)"
-    return plate_scale, ra_rate, dec_rate, f"{scale_source}, {rate_source}"
+    source = (
+        "guide simulator's own values: equipment plate scale, "
+        f"camera angle {SIMULATED_CAMERA_ANGLE_DEG:g} deg (SIM_ROTATION), "
+        f"guide rate {SIMULATED_GUIDE_RATE_ARCSEC_PER_SEC:g} arcsec/s on both axes"
+    )
+    return (
+        plate_scale_from_equipment,
+        SIMULATED_CAMERA_ANGLE_DEG,
+        SIMULATED_GUIDE_RATE_ARCSEC_PER_SEC,
+        SIMULATED_GUIDE_RATE_ARCSEC_PER_SEC,
+        source,
+    )
 
 
 def build_simulated_calibrations(
@@ -311,10 +294,11 @@ def build_simulated_calibrations(
 ) -> SimulatedCalibrationReport:
     """Work out the guider calibration and focus model, and save nothing.
 
-    The values follow the user's real telescope (see the module
-    description). This only reads the library, so the launcher can call it
-    before the backend starts and send the result to the running backend
-    through its RPC methods (`rpc_calls`).
+    The guider values are the simulator's own, and the focus model follows
+    the user's real one when there is one (see the module description). This
+    only reads the library, so the launcher can call it before the backend
+    starts and send the result to the running backend through its RPC
+    methods (`rpc_calls`).
 
     Parameters
     ----------
@@ -353,26 +337,19 @@ def build_simulated_calibrations(
     names = {"telescope_id": equipment.telescope.id, "camera_id": equipment.camera.id}
     identifier = f"simulator-{equipment.telescope.id}-{equipment.camera.id}"
 
-    real_calibration = _latest_real(control.guiding.query_calibrations())
-    if real_calibration is not None:
-        guider_source = f"real calibration of {_day(real_calibration.calibrated_at)}"
-        calibration = _calibration_values(
-            real_calibration, **names, id=identifier, source_note=f"Simulator: copied from {guider_source}."
-        )
-    else:
-        plate_scale, ra_rate, dec_rate, guider_source = _guider_from_history(
-            control, control.guiding.status(include=["plate_scale"]).plate_scale_arcsec_per_px
-        )
-        calibration = GuiderCalibrationValues(
-            id=identifier,
-            arcsec_per_pixel=plate_scale,
-            camera_angle_deg=SIMULATED_CAMERA_ANGLE_DEG,
-            ra_rate_arcsec_per_sec=ra_rate,
-            dec_rate_arcsec_per_sec=dec_rate,
-            source_note=f"Simulator: derived from the {guider_source}; camera angle 0 (not recorded).",
-            calibrated_at=datetime.now(UTC),
-            **names,
-        )
+    plate_scale, angle, ra_rate, dec_rate, guider_source = _simulator_guider(
+        control.guiding.status(include=["plate_scale"]).plate_scale_arcsec_per_px
+    )
+    calibration = GuiderCalibrationValues(
+        id=identifier,
+        arcsec_per_pixel=plate_scale,
+        camera_angle_deg=angle,
+        ra_rate_arcsec_per_sec=ra_rate,
+        dec_rate_arcsec_per_sec=dec_rate,
+        source_note=f"Simulator value, not the real camera's: {guider_source}.",
+        calibrated_at=datetime.now(UTC),
+        **names,
+    )
 
     real_focus = _latest_real(control.imaging.query_focus_models())
     if real_focus is not None:
@@ -390,7 +367,8 @@ def build_simulated_calibrations(
             filter_offsets={},
             source_note=(
                 "Simulator: made-up focus model from the INDI focuser simulator's behavior "
-                "(no backlash, no thermal model); no real focus model is recorded."
+                "(no backlash; thermal coefficient 0 is a placeholder until the simulator is fitted); "
+                "no real focus model is recorded."
             ),
             calibrated_at=datetime.now(UTC),
             **names,
@@ -433,6 +411,7 @@ def rpc_calls(report: SimulatedCalibrationReport) -> list[tuple[str, dict]]:
                 "ra_rate_arcsec_per_sec": calibration.ra_rate_arcsec_per_sec,
                 "dec_rate_arcsec_per_sec": calibration.dec_rate_arcsec_per_sec,
                 "source_note": calibration.source_note,
+                "replace": True,
             },
         ),
         (
@@ -446,6 +425,7 @@ def rpc_calls(report: SimulatedCalibrationReport) -> list[tuple[str, dict]]:
                 "source_note": focus_model.source_note,
                 "thermal_coefficient_steps_per_c": focus_model.thermal_coefficient_steps_per_c,
                 "filter_offsets": dict(focus_model.filter_offsets),
+                "replace": True,
             },
         ),
     ]
@@ -495,6 +475,7 @@ def record_simulated_calibrations(
         dec_rate_arcsec_per_sec=calibration.dec_rate_arcsec_per_sec,
         source_note=calibration.source_note,
         calibrated_at=calibration.calibrated_at,
+        replace=True,
     )
     saved_focus_model = control.imaging.record_focus_model(
         focus_model_id=focus_model.id,
@@ -506,6 +487,7 @@ def record_simulated_calibrations(
         thermal_coefficient_steps_per_c=focus_model.thermal_coefficient_steps_per_c,
         filter_offsets=dict(focus_model.filter_offsets),
         calibrated_at=focus_model.calibrated_at,
+        replace=True,
     )
     return SimulatedCalibrationReport(
         guider_calibration=_calibration_values(saved_calibration),

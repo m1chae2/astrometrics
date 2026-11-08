@@ -157,6 +157,18 @@ def test_begin_runs_the_session_queue_on_a_thread(executor: TargetImagingExecuto
     assert executor.runs == [executor._session().id]
 
 
+def test_is_running_is_true_while_the_sequencer_thread_lives(executor: TargetImagingExecutor) -> None:
+    """The busy check can see a running session, which starts no job."""
+    assert executor.is_running() is False
+    release = threading.Event()
+    executor._thread = threading.Thread(target=release.wait, daemon=True)
+    executor._thread.start()
+    assert executor.is_running() is True
+    release.set()
+    executor._thread.join(timeout=5.0)
+    assert executor.is_running() is False
+
+
 def test_pause_stops_the_loop_and_abort_also_closes_it(executor: TargetImagingExecutor) -> None:
     """Pause raises the stop signal; abort also aborts the running session."""
     aborted: list[tuple[str, str]] = []

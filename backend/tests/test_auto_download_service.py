@@ -359,3 +359,13 @@ def test_stop_cancels_the_idle_timer() -> None:
     rig.frame()
     rig.service.stop()
     assert rig.idle_timers[0].cancelled
+
+
+def test_pending_timer_count_follows_the_timers() -> None:
+    """The count is the waiting timers, and zero after a stop."""
+    rig = Rig()
+    assert rig.service.pending_timer_count() == 0
+    rig.frame()
+    assert rig.service.pending_timer_count() == 1
+    rig.service.stop()
+    assert rig.service.pending_timer_count() == 0

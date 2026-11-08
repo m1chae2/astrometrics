@@ -20,7 +20,6 @@ The checks that watch a running process tree and the network seal belong to
 the test harness, which lives in ``build/tpm/``.
 """
 
-import ipaddress
 import os
 import re
 import socket
@@ -28,9 +27,10 @@ import tomllib
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
-from astrometricslib.drivers import real_folders
+from astrometricslib.drivers import is_loopback_host
+from simulator.errors import GuardError
+from simulator.real_folders import real_folders
 from simulator.settings import OFFLINE_PORT
-from wayfindinglib.exceptions import GuardError
 
 #: Hosts that mean this computer.
 LOOPBACK_NAMES = ("127.0.0.1", "localhost", "::1")
@@ -60,32 +60,8 @@ __all__ = [
     "check_settings",
     "check_settings_text",
     "check_settings_update",
-    "is_loopback_address",
     "real_protected_paths",
 ]
-
-
-def is_loopback_address(text: str) -> bool:
-    """Say whether an address text is a loopback address.
-
-    Parameters
-    ----------
-    text : `str`
-        An IP address, possibly in brackets or with an IPv4-mapped prefix.
-
-    Returns
-    -------
-    is_loopback : `bool`
-        `True` for 127.x.x.x, ::1 and ::ffff:127.x.x.x.
-    """
-    cleaned = text.strip("[]").split("%")[0]
-    try:
-        address = ipaddress.ip_address(cleaned)
-    except ValueError:
-        return False
-    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
-        return address.ipv4_mapped.is_loopback
-    return address.is_loopback
 
 
 def _require_loopback_host(name: str, host: str) -> None:
@@ -112,7 +88,7 @@ def _require_loopback_host(name: str, host: str) -> None:
         resolved = {info[4][0] for info in socket.getaddrinfo(host, None)}
     except OSError as error:
         raise GuardError(f"{name} '{host}' does not resolve: {error}") from error
-    bad = [address for address in resolved if not is_loopback_address(address)]
+    bad = [address for address in resolved if not is_loopback_host(address)]
     if bad:
         raise GuardError(f"{name} '{host}' resolves to {', '.join(sorted(bad))}, which is not this computer.")
 
@@ -252,7 +228,7 @@ def check_offline_settings_text(text: str, root: Path, protected: Iterable[Path]
         folder is outside `root` or is a real folder.
     """
     for address in _IPV4_TEXT.findall(text):
-        if not is_loopback_address(address):
+        if not is_loopback_host(address):
             raise GuardError(f"The settings file names the address {address}, which is not this computer.")
     try:
         settings = tomllib.loads(text)
@@ -299,7 +275,7 @@ def check_offline_settings_update(update: dict, root: Path, protected: Iterable[
     for section, values in update.items():
         for key, value in dict(values).items():
             for address in _IPV4_TEXT.findall(str(value)):
-                if not is_loopback_address(address):
+                if not is_loopback_host(address):
                     raise GuardError(f"[{section}] {key} names {address}, which is not this computer.")
     if "hostname" in telescope:
         _require_loopback_host("[Observatory.Telescope] hostname", str(telescope["hostname"]))
@@ -386,7 +362,7 @@ def check_settings_text(
         On the first problem found.
     """
     for address in _IPV4_TEXT.findall(text):
-        if not is_loopback_address(address):
+        if not is_loopback_host(address):
             raise GuardError(f"The settings file names the address {address}, which is not this computer.")
     try:
         settings = tomllib.loads(text)
@@ -458,7 +434,7 @@ def check_settings_update(
     for section, values in update.items():
         for key, value in dict(values).items():
             for address in _IPV4_TEXT.findall(str(value)):
-                if not is_loopback_address(address):
+                if not is_loopback_host(address):
                     raise GuardError(f"[{section}] {key} names {address}, which is not this computer.")
     telescope = dict(update.get("Observatory.Telescope", {}))
     guiding = dict(update.get("Observatory.Guiding", {}))

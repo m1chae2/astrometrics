@@ -162,7 +162,7 @@ def main() -> int:
         return 2
     real_settings = None
     if arguments.mode == "synthetic":
-        from astrometricslib.drivers import real_folders
+        from simulator.real_folders import real_folders
 
         real_settings = read_real_settings(real_folders().config_file)
     applied = apply(config_path, arguments.mode, real_settings)

@@ -10,6 +10,9 @@ computer:
 2. It takes one exposure after another on the simulated camera. The camera
    saves each FITS file straight into a folder that stands in for the
    telescope computer's picture folder (``<standin>/Pictures/<target>/Light``).
+   The frames match the real telescope's geometry and capture labels, not its
+   sky, noise or star brightness (INDI's defaults), so each frame is marked
+   ``SYNTHETC = T``.
 3. It writes a guide log into the stand-in's guide log folder, one line at a
    time, at the pace of a real log (`guide_log_replay.py`). The app pulls
    both folders through its one rsync runner and a local stand-in for ssh.
@@ -77,6 +80,8 @@ SETTING_TRIES = 3
 
 #: The header key the camera simulator does not write.
 OFFSET_KEYWORD = "OFFSET"
+#: The general header flag for a frame that was drawn, not taken from the sky.
+SYNTHETIC_KEYWORD = "SYNTHETC"
 
 
 def unused_frame_name(name: str, directory: Path) -> str:
@@ -106,16 +111,18 @@ def unused_frame_name(name: str, directory: Path) -> str:
     return f"{stem}_{number:03d}.fits"
 
 
-def stamp_offset(source: Path, destination: Path, offset: float | None) -> None:
+def stamp_offset(source: Path, destination: Path, offset: float | None, mark_synthetic: bool = False) -> None:
     """Move a frame into its final folder with the camera offset in its header.
 
     The CCD simulator writes a ``GAIN`` header but no ``OFFSET``. The app
     reads both to find the capture setting, so the offset the operator set
-    (``CCD_OFFSET``) is added. Only the header changes: the stored pixel
-    values are copied as they are, without scaling. The new file is written
-    next to the source (same folder, so the same file system), then renamed
-    over the destination in one step, so a transfer never sees a half-written
-    file. A frame that already has an ``OFFSET`` is moved as it is.
+    (``CCD_OFFSET``) is added. With ``mark_synthetic``, the general
+    ``SYNTHETC`` flag is added too, so the app can tell a drawn frame from a
+    real one. Only the header changes: the stored pixel values are copied as
+    they are, without scaling. The new file is written next to the source
+    (same folder, so the same file system), then renamed over the destination
+    in one step, so a transfer never sees a half-written file. A keyword that
+    is already in the header is left as it is.
 
     Parameters
     ----------
@@ -124,13 +131,22 @@ def stamp_offset(source: Path, destination: Path, offset: float | None) -> None:
     destination : `pathlib.Path`
         Where the app will find it. Replaced if it exists.
     offset : `float` or `None`
-        The offset to write. `None` moves the frame unchanged.
+        The offset to write. `None` writes no offset.
+    mark_synthetic : `bool`, optional
+        `True` to add ``SYNTHETC = T``. Leave `False` for a real frame.
     """
-    if offset is not None:
+    if offset is not None or mark_synthetic:
         with fits.open(source, memmap=False, do_not_scale_image_data=True) as hdus:
-            if OFFSET_KEYWORD not in hdus[0].header:
+            header = hdus[0].header
+            changed = False
+            if offset is not None and OFFSET_KEYWORD not in header:
                 value = int(offset) if float(offset).is_integer() else float(offset)
-                hdus[0].header[OFFSET_KEYWORD] = (value, "Camera offset set by the simulator operator")
+                header[OFFSET_KEYWORD] = (value, "Camera offset set by the simulator operator")
+                changed = True
+            if mark_synthetic and SYNTHETIC_KEYWORD not in header:
+                header[SYNTHETIC_KEYWORD] = (True, "Drawn by a camera simulator, not a real sky")
+                changed = True
+            if changed:
                 temporary = source.with_name(f".{source.name}.stamping")
                 hdus.writeto(temporary, overwrite=True)
                 temporary.replace(source)
@@ -416,12 +432,17 @@ class ExposureDriver:
         Returns
         -------
         offset : `float` or `None`
-            The value of the ``CCD_OFFSET`` setting, or `None` when the
-            settings have none.
+            The camera offset setting (the ``header_value`` of the
+            ``CCD_OFFSET`` setting, else its value), or `None` when the
+            settings have none. The value sent to INDI may differ: it is the
+            pedestal in ADU.
         """
         for setting in self.device_settings:
             if setting.device == CAMERA and setting.property_name == "CCD_OFFSET":
-                return setting.elements[0][1]
+                if setting.header_value is not None:
+                    return setting.header_value
+                value = setting.elements[0][1]
+                return None if isinstance(value, str) else value
         return None
 
     def _fits_files(self) -> set[str]:
@@ -461,7 +482,7 @@ class ExposureDriver:
             self.pictures_directory.mkdir(parents=True, exist_ok=True)
             new_name = unused_frame_name(new_name, self.pictures_directory)
             path_in_pictures = self.pictures_directory / new_name
-            stamp_offset(path, path_in_pictures, self.camera_offset())
+            stamp_offset(path, path_in_pictures, self.camera_offset(), mark_synthetic=True)
             path = path_in_pictures
             with self._lock:
                 self.frames.append({

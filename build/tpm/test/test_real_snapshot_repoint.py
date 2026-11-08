@@ -14,6 +14,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+import pytest
+
 TPM_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TPM_DIR))
 
@@ -67,3 +69,45 @@ def test_stale_path_is_repointed_and_guard_passes(tmp_path: Path) -> None:
     )
     assert stored["stackedImage"] == str(sandbox / "outside" / STALE.lstrip("/"))
     assert stored["kept"] == f"{OVERLAY}/lights/M1/a.fits"
+
+
+def test_toml_string_keeps_a_hostile_path_inside_its_string() -> None:
+    """A quote or backslash in a path cannot end the TOML string early."""
+    import tomllib
+
+    path = 'C:\\data "x"\nline'
+    parsed = tomllib.loads(f"key = {real_snapshot.toml_string(path)}\n")
+    assert parsed["key"] == path
+
+
+def test_prepare_writes_an_offline_launch_section(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The throwaway settings say offline, so no client leaves the computer."""
+    import tomllib
+
+    config_home = tmp_path / "config"
+    library = tmp_path / "real_library"
+    (library / "wayfinding").mkdir(parents=True)
+    for name in ("astrometrics.db", "astrometrics_log.db"):
+        sqlite3.connect(library / name).close()
+    sqlite3.connect(library / "wayfinding" / "wayfinding.db").close()
+    config = config_home / "astrometrics" / "astrometrics.config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text(
+        f'["Image Library"]\npath = "{library}"\nframes_path = "{library}"\nstacks_path = "{library}"\n'
+        f'["Wayfinding Library"]\npath = "{library / "wayfinding"}"\n'
+    )
+    monkeypatch.setenv("ASTROMETRICS_REAL_CONFIG_HOME", str(config_home))
+    monkeypatch.setenv("ASTROMETRICS_REAL_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("ASTROMETRICS_REAL_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("ASTROMETRICS_REAL_CONFIG_PATH", str(config))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    (tmp_path / "cache" / "astrometrics" / "catalogs").mkdir(parents=True)
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+
+    assert real_snapshot.prepare(sandbox, tmp_path / "mount") == 0
+
+    parsed = tomllib.loads((sandbox / "astrometrics.config.toml").read_text())
+    assert parsed["Launch"]["offline"] is True
+    assert parsed["Launch"]["live_hardware"] is False
+    assert parsed["Image Library"]["frames_path"] == str(tmp_path / "mount")

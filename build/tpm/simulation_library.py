@@ -38,10 +38,10 @@ import sys
 import time
 from pathlib import Path
 
-from astrometricslib.drivers import real_folders
 from simulator import SimulatedObservatory, SimulationKind, library_copy
 from simulator import observatory as observatory_module
-from wayfindinglib.exceptions import SimulationUnavailableError
+from simulator.errors import SimulationUnavailableError
+from simulator.real_folders import real_folders
 
 #: The deep-star catalog's place inside a library folder.
 DEEP_CATALOG_PATH = Path("catalogs") / "deep_star_catalog.db"

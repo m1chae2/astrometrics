@@ -31,7 +31,14 @@ WORLD = {
         "pixel_size_μm": "3.76",
         "sensor_width_px": "3008",
         "sensor_height_px": "3008",
-        "bias_levels": [{"gain_setting": "0", "offset": "10", "binning": "1x1"}],
+        "bias_levels": [
+            {
+                "gain_setting": "0",
+                "offset": "10",
+                "binning": "1x1",
+                "bias_level_adu": {"value": 394.85, "kind": "measured", "source": "test"},
+            }
+        ],
     },
     "Observatory.Camera.ZWO ASI120MC-S": {
         "pixel_size_μm": "3.75",
@@ -67,8 +74,27 @@ def test_the_cameras_optics_and_capture_setting_come_from_the_real_settings() ->
         "CCD Simulator.SCOPE_INFO.FOCAL_LENGTH;APERTURE=405;75",
         "Guide Simulator.SCOPE_INFO.FOCAL_LENGTH;APERTURE=121.05;32",
         "CCD Simulator.CCD_GAIN.GAIN=0",
-        "CCD Simulator.CCD_OFFSET.OFFSET=10",
+        "CCD Simulator.CCD_OFFSET.OFFSET=394.85",
     ]
+
+
+def test_the_simulator_pedestal_is_the_real_bias_level_and_the_header_keeps_the_offset() -> None:
+    """INDI reads CCD_OFFSET as the empty-frame level: send the bias."""
+    settings = {s.property_name: s for s in device_settings_from_world(WORLD)}
+    assert settings["CCD_OFFSET"].elements == (("OFFSET", 394.85),)
+    assert settings["CCD_OFFSET"].header_value == pytest.approx(10.0)
+
+
+def test_a_missing_bias_level_falls_back_to_the_offset_with_a_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """With no bias level, the offset is sent and a warning logged."""
+    profile = dict(WORLD["Observatory.Camera.ZWO ASI 533MM Pro"])
+    profile["bias_levels"] = [{"gain_setting": "0", "offset": "10", "binning": "1x1"}]
+    with caplog.at_level("WARNING"):
+        specifications = _specifications({**WORLD, "Observatory.Camera.ZWO ASI 533MM Pro": profile})
+    assert "CCD Simulator.CCD_OFFSET.OFFSET=10" in specifications
+    assert "No bias level is recorded" in caplog.text
 
 
 def test_gain_and_offset_come_last_so_a_resolution_change_cannot_undo_them() -> None:
@@ -159,7 +185,7 @@ def test_a_value_the_server_did_not_take_is_set_again(monkeypatch: pytest.Monkey
     monkeypatch.setattr("simulator.exposure_driver.SETTING_WAIT_SECONDS", 0.2)
     driver = _FakeDriver(device_settings_from_world(WORLD))
     assert driver.apply_device_settings() == []
-    assert driver.values["CCD Simulator.CCD_OFFSET.OFFSET"] == "10"
+    assert driver.values["CCD Simulator.CCD_OFFSET.OFFSET"] == "394.85"
 
 
 def test_a_value_that_never_takes_is_reported_not_raised(monkeypatch: pytest.MonkeyPatch) -> None:

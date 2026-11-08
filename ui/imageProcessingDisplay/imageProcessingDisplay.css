@@ -321,8 +321,14 @@
 
 .fits-header-controls {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   align-items: center;
+}
+
+/* The reason the astrometry overlay is off, small and muted beside the buttons. */
+.fits-header-controls__note {
+  font-size: var(--small-font-size);
+  color: var(--text-muted);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1468,7 +1474,8 @@
   top: 0;
   left: 0;
   pointer-events: none;
-  color: var(--ubuntu-cyan);
+  /* Read by FitsRenderer when it draws the star markers. */
+  --star-marker-color: var(--accent-sky);
 }
 
 /* Name shown when the pointer is over a star with no label. */

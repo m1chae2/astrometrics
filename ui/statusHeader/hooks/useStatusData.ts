@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAstrometrics } from '../../common/context/AstrometricsContext';
 import { emitToast } from '../../common/utils/emitToast';
+import { isBackendRestarting } from '../../common/services/backendApi';
 import { isAppReady } from '../../common/utils/appBootReadiness';
 import { isTrackingStatus } from '../../common/utils/isTrackingStatus';
 import { normalizeAppMode } from '../../common/utils/normalizeAppMode';
@@ -114,7 +115,8 @@ export const useStatusData = () => {
         // user, so only that is a warning, and never during start-up.
         if (prevConn !== null && prevConn !== connBool && isAppReady()) {
             // Coming back online is a status the chip shows; no toast.
-            if (!connBool && prevIsTracking) {
+            // A backend restart the user asked for (a source switch) drops the mount on purpose; that is no warning.
+            if (!connBool && prevIsTracking && !isBackendRestarting()) {
                 emitToast('Telescope disconnected while tracking', 'warning', 'telescope', { notify: true });
             }
         }

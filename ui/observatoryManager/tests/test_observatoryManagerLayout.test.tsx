@@ -192,7 +192,8 @@ describe('ObservatoryManager layout', () => {
         expect(parkButton.closest('[data-testid="command-gate"]')?.getAttribute('title')).toBeTruthy();
         await userEvent.click(within(screen.getByRole('tablist', { name: 'Telescope control groups' })).getByRole('tab', { name: 'Manual' }));
         expect((screen.getByRole('button', { name: 'STOP' }) as HTMLButtonElement).disabled).toBe(true);
-        expect(screen.getAllByTestId('command-gate')).toHaveLength(2);
+        // The Telescope and Focuser sections each have their own gate, plus Slew to Target.
+        expect(screen.getAllByTestId('command-gate')).toHaveLength(3);
 
         await userEvent.click(within(screen.getByRole('tablist', { name: 'Telescope control groups' })).getByRole('tab', { name: 'Limits' }));
         const accuracy = screen.getByLabelText('Alignment Accuracy') as HTMLInputElement;
@@ -207,7 +208,6 @@ describe('ObservatoryManager layout', () => {
 
         const slew = screen.getByRole('button', { name: 'Slew to Target' }) as HTMLButtonElement;
         expect(slew.disabled).toBe(true);
-        expect(slew.getAttribute('aria-disabled')).toBe('true');
         expect(within(slew.closest('[data-testid="command-gate"]') as HTMLElement).getByText(/Checking|Equipment commands are off/)).toBeTruthy();
     });
 

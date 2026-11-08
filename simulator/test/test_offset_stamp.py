@@ -199,3 +199,23 @@ def test_a_name_that_is_taken_gets_the_next_number(tmp_path: Path) -> None:
     (tmp_path / "M_13_Light_003.fits").touch()
     assert unused_frame_name("M_13_Light_001.fits", tmp_path) == "M_13_Light_002.fits"
     assert unused_frame_name("Other_Light_007.fits", tmp_path) == "Other_Light_001.fits"
+
+
+def test_a_drawn_frame_is_marked_synthetic_and_a_real_one_is_not(tmp_path: Path) -> None:
+    """``SYNTHETC`` is added only when asked for."""
+    marked, plain = tmp_path / "marked.fits", tmp_path / "plain.fits"
+    _write_frame(tmp_path / "a.fits")
+    _write_frame(tmp_path / "b.fits")
+    stamp_offset(tmp_path / "a.fits", marked, 10, mark_synthetic=True)
+    stamp_offset(tmp_path / "b.fits", plain, 10)
+    assert fits.getheader(marked)["SYNTHETC"] is True
+    assert "SYNTHETC" not in fits.getheader(plain)
+
+
+def test_the_header_offset_is_the_camera_setting_not_the_pedestal_sent_to_indi(tmp_path: Path) -> None:
+    """The driver stamps ``header_value``, not the pedestal."""
+    from simulator.device_settings import DeviceSetting
+
+    settings = [DeviceSetting("CCD Simulator", "CCD_OFFSET", (("OFFSET", 394.85),), header_value=10.0)]
+    driver = ExposureDriver(1, tmp_path, Path("log"), Path("stats"), 1.0, "M 13", 0.0, 0.0, settings)
+    assert driver.camera_offset() == pytest.approx(10.0)

@@ -16,6 +16,8 @@ export interface TelescopeControlProps {
 
     /** True when the app may not command the mount. Every button is then disabled. */
     disabled?: boolean;
+    /** True when the app may not command alignment. Leave out to follow {@link disabled}. */
+    alignmentDisabled?: boolean;
 }
 
 /**
@@ -34,6 +36,7 @@ export const TelescopeControl: React.FC<TelescopeControlProps> = ({
     onStopAlignment,
     isAligningActive = false,
     disabled = false,
+    alignmentDisabled = disabled,
 }) => {
     // Local state to track which action is pending
     const [pendingAction, setPendingAction] = React.useState<string | null>(null);
@@ -49,7 +52,7 @@ export const TelescopeControl: React.FC<TelescopeControlProps> = ({
     }, [isTracking, isParked, isAligningActive, pendingAction]);
 
     const handleAction = (action: string, callback: () => void) => {
-        if (disabled) return;
+        if (action.startsWith('align') ? alignmentDisabled : disabled) return;
         setPendingAction(action);
         callback();
     };
@@ -67,8 +70,8 @@ export const TelescopeControl: React.FC<TelescopeControlProps> = ({
                     onClick={() => handleAction('align_start', () => {
                         onStartAlignment?.();
                     })}
-                    disabled={disabled || isAligningActive}
-                    aria-disabled={disabled || isAligningActive}
+                    disabled={alignmentDisabled || isAligningActive}
+                    aria-disabled={alignmentDisabled || isAligningActive}
                 >
                     Start Alignment
                 </Button>
@@ -79,8 +82,8 @@ export const TelescopeControl: React.FC<TelescopeControlProps> = ({
                     active={!isAligningActive}
                     pending={pendingAction === 'align_stop'}
                     onClick={() => handleAction('align_stop', () => onStopAlignment?.())}
-                    disabled={disabled || !isAligningActive}
-                    aria-disabled={disabled || !isAligningActive}
+                    disabled={alignmentDisabled || !isAligningActive}
+                    aria-disabled={alignmentDisabled || !isAligningActive}
                 >
                     Stop Alignment
                 </Button>

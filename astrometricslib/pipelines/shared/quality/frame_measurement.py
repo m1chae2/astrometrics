@@ -74,8 +74,10 @@ from astrometricslib.models.quality.measurement import (
     QualitySubject,
     SubjectLevel,
 )
+from astrometricslib.models.quality.metric_spec import Checkpoint
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_seconds
+from astrometricslib.pipelines.shared.quality.frame_notices import FRAME_NOTICE_METRICS
 from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_BACKGROUND_LEVEL,
     FRAME_DETECTED_REGION_COUNT,
@@ -95,6 +97,8 @@ from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_STAR_WIDTH_MOFFAT_PX,
     FRAME_STAR_WIDTH_REGION_PX,
 )
+from astrometricslib.pipelines.shared.quality.notices import notice_measurement
+from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.shared.quality.raw_frame_check import detect_stars
 from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
 from astrometricslib.pipelines.shared.quality.sky_electrons import (
@@ -131,6 +135,18 @@ logger = logging.getLogger(__name__)
 # network mount that dropped out, a file still being written) is retried on the
 # next run instead of being recorded as measured.
 UNREADABLE_FRAME_REASON_PREFIX = "the frame could not be read"
+
+# The general header card that marks a frame drawn by a camera simulator (a
+# synthetic frame) rather than taken of a real sky. Any program that draws
+# frames may write it; this module does not know which one.
+SYNTHETIC_FRAME_KEYWORD = "SYNTHETC"
+# The sentence stored with the warning for a synthetic frame.
+SYNTHETIC_FRAME_REASON = (
+    "the frame is marked synthetic (header card SYNTHETC): it was drawn by a camera simulator, so its "
+    "noise, sky and depth values do not describe a real sky"
+)
+# The version stored with a frame notice row, which no pipeline version covers.
+FRAME_PIPELINE_VERSION = "frame_measurement"
 
 # The names of the planes of a frame stored as three color planes.
 _COLOR_PLANE_NAMES = {3: ("R", "G", "B")}
@@ -693,6 +709,8 @@ def measure_frame(
         context.add(FRAME_READ_NOISE_E, **_read_noise_arguments(read_noise, noise_reason))
         return context.measurements
 
+    _emit_synthetic_notice(context, header)
+
     # The offset fallback needs to know the frame is not cut off at zero.
     clipped_at_zero = (
         None
@@ -751,6 +769,47 @@ def measure_frame(
                 result = StarProfileResult(reason=f"the star fits failed: {error}")
         _emit_star_profile_measurements(context, result, channel, mosaic_note)
     return context.measurements
+
+
+def _emit_synthetic_notice(context: _Context, header: fits.Header) -> None:
+    """Add a warning when the header says the frame was drawn, not taken.
+
+    A frame whose header card ``SYNTHETC`` is true came from a camera
+    simulator. Its noise, sky brightness and depth values do not describe a
+    real sky, so a notice row is stored that a job lists with its warnings.
+
+    Parameters
+    ----------
+    context : `_Context`
+        The measurement under way.
+    header : `astropy.io.fits.Header`
+        The header of the frame's pixels.
+    """
+    flag = header.get(SYNTHETIC_FRAME_KEYWORD, False)
+    if str(flag).strip().upper() not in ("T", "TRUE"):
+        return
+    pipeline_context = PipelineRunContext(
+        target_id=context.target_id,
+        pipeline_name=Checkpoint.FRAME.value,
+        pipeline_version=FRAME_PIPELINE_VERSION,
+        run_id=context.run_id,
+        job_id=context.job_id,
+        measured_at=context.measured_at,
+    )
+    context.measurements.append(
+        notice_measurement(
+            FRAME_NOTICE_METRICS[0],
+            1.0,
+            pipeline_context,
+            frame_subject(
+                context.path,
+                context.target_id,
+                context.frame.timestamp,
+                capture_setting_id=context.capture_setting_id,
+            ),
+            SYNTHETIC_FRAME_REASON,
+        )
+    )
 
 
 def frame_zero_fraction(planes: list[tuple[str | None, np.ndarray]]) -> float:

@@ -10,6 +10,7 @@ mode unmounts and deletes only what the simulator made.
 """
 
 import hashlib
+import json
 import shutil
 import sqlite3
 import tomllib
@@ -17,9 +18,10 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib.drivers import real_folders
-from simulator import library_copy
-from wayfindinglib.exceptions import SimulationUnavailableError
+from simulator import library_copy, path_guard
+from simulator.errors import SimulationUnavailableError
+from simulator.observatory import missing_programs
+from simulator.real_folders import real_folders
 
 
 def _overlay_works(tmp_path: Path) -> bool:
@@ -377,3 +379,114 @@ def test_world_database_copy_repoints_job_log_paths_into_the_world(tmp_path: Pat
     assert stored == str(library_copy.world_logs_folder(root) / real_log.name)
     assert not stored.startswith(str(real.logs))
     assert real_log.read_text() == "real log"
+
+
+def test_a_section_header_with_a_trailing_comment_is_still_dropped() -> None:
+    """``["Observatory.Telescope"]  # note`` is recognized and removed."""
+    real = '["Observatory.Telescope"]  # my scope\nhostname = "x"\n\n["Observatory.Camera"]\nmodels = "y"\n'
+
+    kept = library_copy.keep_sections(real, ("Observatory.Telescope",))
+
+    parsed = tomllib.loads(kept)
+    assert "Observatory.Telescope" not in parsed
+    assert parsed["Observatory.Camera"]["models"] == "y"
+
+
+def test_the_simulator_needs_ss_for_its_connection_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without ``ss`` the program list says so."""
+    monkeypatch.setattr(shutil, "which", lambda name: None if name == "ss" else "/usr/bin/" + name)
+    assert missing_programs(include_overlay=False) == ["ss"]
+
+
+def test_teardown_removes_every_file_of_the_worlds_library_folder(tmp_path: Path) -> None:
+    """A file the app wrote beside the databases is removed too."""
+    root = tmp_path / "simulator"
+    (root / "library" / "frames" / "lights").mkdir(parents=True)
+    (root / "library" / "capability_gaps.db").write_text("gaps")
+    (root / "library" / "frames" / "lights" / "stray.fits").write_text("stray")
+    (root / "wayfinding").mkdir()
+    (root / "wayfinding" / "wayfinding.db").write_text("w")
+    assert library_copy.teardown(root)
+    assert not (root / "library").exists()
+    assert not (root / "wayfinding" / "wayfinding.db").exists()
+
+
+def test_teardown_refuses_while_an_overlay_is_mounted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing is deleted while a mount remains."""
+    root = tmp_path / "simulator"
+    (root / "library").mkdir(parents=True)
+    (root / "library" / "capability_gaps.db").write_text("gaps")
+    monkeypatch.setattr(library_copy, "unmount_overlay", lambda mountpoint: False)
+    assert library_copy.teardown(root) is False
+    assert (root / "library" / "capability_gaps.db").exists()
+
+
+def _stale_path_world(tmp_path: Path, stale: str) -> tuple[Path, Path]:
+    """Build a world folder whose copies hold one stale real path.
+
+    Returns
+    -------
+    root, library : `tuple` [`pathlib.Path`, `pathlib.Path`]
+        The world root and its library folder.
+    """
+    root = tmp_path / "simulator"
+    (root / "library").mkdir(parents=True)
+    (root / "wayfinding").mkdir()
+    with sqlite3.connect(root / "library" / "astrometrics.db") as connection:
+        connection.execute("CREATE TABLE targets (id TEXT, data_json TEXT)")
+        connection.execute(
+            "INSERT INTO targets VALUES ('m1', ?)",
+            (json.dumps({"stackedImage": stale, "kept": str(root / "library" / "frames" / "a.fits")}),),
+        )
+    return root, root / "library"
+
+
+def test_a_stale_unlisted_real_prefix_in_a_database_copy_is_repointed(tmp_path: Path) -> None:
+    """A path to an old folder on no list moves into the world."""
+    stale = "/old/Astrometrics/stacks/lights/M 1/stack.fits"
+    root, _library = _stale_path_world(tmp_path, stale)
+
+    moved = library_copy.make_paths_safe(root)
+
+    assert moved == 1
+    with sqlite3.connect(root / "library" / "astrometrics.db") as connection:
+        stored = json.loads(connection.execute("SELECT data_json FROM targets").fetchone()[0])
+    assert stored["stackedImage"] == str(root.resolve() / "outside" / stale.lstrip("/"))
+    assert not path_guard.outside_paths(*library_copy.world_path_files(root), str(root))
+
+
+def test_the_world_refuses_when_a_stored_path_still_leads_outside(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A path the repoint missed stops the build; the launcher goes offline."""
+    root, _library = _stale_path_world(tmp_path, "/old/stacks/stack.fits")
+    monkeypatch.setattr(path_guard, "mirror_stale_paths", lambda databases, json_files, scratch: 0)
+
+    with pytest.raises(SimulationUnavailableError, match="outside the world"):
+        library_copy.make_paths_safe(root)
+
+
+def test_calibration_frames_json_is_rewritten_and_repointed(tmp_path: Path) -> None:
+    """The plain file gets the folder replacements; a stale path moves in."""
+    library = tmp_path / "real_library"
+    library.mkdir()
+    (library / "calibration_frames.json").write_text(
+        json.dumps({"darks": ["/real/frames/darks/a.fits"], "old": ["/gone/frames/b.fits"]})
+    )
+    root = tmp_path / "simulator"
+    (root / "library").mkdir(parents=True)
+
+    library_copy.copy_databases(
+        root, library, tmp_path / "no_wayfinding", [("/real/frames", "/world/frames")]
+    )
+    copied = json.loads((root / "library" / "calibration_frames.json").read_text())
+    assert copied["darks"] == ["/world/frames/darks/a.fits"]
+    assert copied["old"] == ["/gone/frames/b.fits"]
+
+    # /world/frames is not under this root, so it too is stale and moves in.
+    assert library_copy.make_paths_safe(root) == 2
+    final = json.loads((root / "library" / "calibration_frames.json").read_text())
+    assert all(path.startswith(str(root.resolve())) for path in final["darks"] + final["old"])
+    assert not path_guard.outside_paths(*library_copy.world_path_files(root), str(root))

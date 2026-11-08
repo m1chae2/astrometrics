@@ -41,7 +41,7 @@ export const GeneralForm: React.FC<GeneralFormProps> = ({
                 checked={secondaryWindowEnabled} onChange={(e) => handleToggleSecondaryWindow(e.target.checked)}
             />
             {secondaryWindowEnabled && (
-                <div className="settings__field" style={{ marginTop: '8px' }}>
+                <div className="settings__field settings__field--spaced">
                     <span className="settings__label">Secondary Window Display</span>
                     <PopoverSelect
                         label="Secondary Window Default Display"

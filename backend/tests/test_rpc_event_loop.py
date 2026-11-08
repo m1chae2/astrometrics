@@ -18,7 +18,9 @@ from fastapi.responses import JSONResponse
 
 from astrometricslib.exceptions import NotFoundError
 from backend.routers import rpc_router
-from backend.services.rpc_protocol import RPCRequest, get_cors_headers
+from backend.services import rpc_protocol
+from backend.services.infrastructure import heavy_lane
+from backend.services.rpc_protocol import RPCRequest
 
 
 @pytest.fixture
@@ -81,17 +83,16 @@ def _large_expected_body() -> bytes:
 )
 def test_success_body_matches_fixed_json(result: object, expected: bytes) -> None:
     """The threadpool-encoded body equals a fixed compact JSON envelope."""
-    assert rpc_router._encode_success_body(result, 7) == expected
+    assert rpc_protocol.encode_rpc_success_body(result, 7) == expected
 
 
 def test_handler_reply_has_headers_and_json_type(registered_methods: dict) -> None:
-    """A success reply keeps the CORS headers and JSON content type."""
+    """A success reply keeps the JSON content type and sets no CORS header."""
     registered_methods["x:y"] = lambda: {"v": np.float32(1.5)}
     response = asyncio.run(rpc_router.handle_rpc(RPCRequest(method="x:y", params={}, id=3)))
     assert response.status_code == 200
     assert response.media_type == "application/json"
-    for name, value in get_cors_headers().items():
-        assert response.headers[name] == value
+    assert "access-control-allow-origin" not in response.headers
     assert json.loads(response.body) == {
         "jsonrpc": "2.0",
         "result": {"status": "success", "data": {"v": 1.5}},
@@ -124,7 +125,7 @@ def test_slow_encoding_does_not_block_small_call(
     registered_methods: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A small RPC finishes while a large reply is still being encoded."""
-    real_serialize = rpc_router.serialize_rpc_result
+    real_serialize = rpc_protocol.serialize_rpc_result
 
     def slow_serialize(obj: object) -> object:
         """Serialize, but take 0.5 s when given the large marker.
@@ -143,7 +144,7 @@ def test_slow_encoding_does_not_block_small_call(
             time.sleep(0.5)
         return real_serialize(obj)
 
-    monkeypatch.setattr(rpc_router, "serialize_rpc_result", slow_serialize)
+    monkeypatch.setattr(rpc_protocol, "serialize_rpc_result", slow_serialize)
     registered_methods["x:big"] = lambda: "big"
     registered_methods["x:small"] = lambda: "small"
 
@@ -219,7 +220,7 @@ def test_heavy_methods_do_not_delay_a_light_call(
     # behind twelve 0.2 s calls (about 1.2 s), and leaves room for a slow
     # continuous-integration machine (0.18 s seen there).
     assert asyncio.run(scenario()) < 0.5
-    assert running["most"] <= rpc_router.HEAVY_LANE_SLOTS
+    assert running["most"] <= heavy_lane.HEAVY_LANE_SLOTS
 
 
 def test_declared_heavy_methods_exist() -> None:

@@ -441,9 +441,6 @@ DECISIONS = {
     "review_get_performance_envelope": ToolDecision(
         "keep", "Slow: reads every session and target twice.", "observe"
     ),
-    "review_invalidate_night": ToolDecision(
-        "drop", "Forgets the app's kept night reviews. Housekeeping for the backend, not a question."
-    ),
     "observatory_remote_check_connection": ToolDecision("keep", "A small network probe.", "observe"),
     # ---- Status reads of the control children ----
     "observatory_mount_status": ToolDecision(
@@ -471,11 +468,6 @@ DECISIONS = {
         "Lists every saved focus model, for all telescope and camera pairings (status reads only the active "
         "one). No device needed.",
         "observe",
-    ),
-    "observatory_guiding_query_runs": ToolDecision(
-        "drop",
-        "Returns every saved guiding run with no size bound. review_query with kind='guiding_runs' answers "
-        "the same question in a reply of bounded size.",
     ),
     "observatory_safety_status": ToolDecision(
         "keep",

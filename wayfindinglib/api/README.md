@@ -38,7 +38,7 @@ The rules:
 
 ### `review.py`
 
-`ObservationReview` (`wayfinder.review`) answers how the nights went. `query` reads past nights and analyses, `get_live_session_status` reads the night in progress, `frame_guiding` links a target's frames to the guiding record, `query_alignment_sessions` and `query_alignment_records` read pointing alignment, `get_performance_envelope` reads the limits that the equipment has shown, and `invalidate_night` forgets the kept night reviews. The library keeps each night review and the list of nights in memory until the frames, measurements, guiding records or equipment behind them change, so opening a night again is fast.
+`ObservationReview` (`wayfinder.review`) answers how the nights went. `query` reads past nights and analyses, `get_live_session_status` reads the night in progress, `frame_guiding` links a target's frames to the guiding record, `query_alignment_sessions` and `query_alignment_records` read pointing alignment, `get_performance_envelope` reads the limits that the equipment has shown. The library keeps each night review and the list of nights in memory until the frames, measurements, guiding records or equipment behind them change, so opening a night again is fast.
 
 ### `control/`
 
@@ -46,12 +46,12 @@ The rules:
 
 - `mount`: slewing, parking, tracking and polar alignment.
 - `imaging`: the camera, the filter wheel and the focuser. `query_focus_models` lists every saved focus model, and `record_focus_model` saves a focus model that was measured elsewhere.
-- `guiding`: the guide loop and the guiding spectrum fit. `query_calibrations` lists every saved guider calibration, `query_runs` lists the guiding runs read from the guide logs, and `record_calibration` saves a guider calibration that was measured elsewhere, such as PHD2's own.
+- `guiding`: the guide loop and the guiding spectrum fit. `query_calibrations` lists every saved guider calibration, and `record_calibration` saves a guider calibration that was measured elsewhere, such as PHD2's own.
 - `safety`: the safety status and the delegation mode.
 - `equipment`: device connection, the active telescope and camera, and the configuration.
 - `remote`: the telescope computer's frame and log transfer.
 
-Each of `mount`, `imaging`, `guiding`, `safety` and `equipment` has a `status` call with the same shape: it takes an optional `include` list of sections and returns a typed status. `mount.status` reads only the mount. `record_calibration` and `record_focus_model` take the numbers as keyword arguments and a required `source_note`, check them as the saved records do (a bad value raises `InvalidArgumentError` and saves nothing), and send nothing to a device. The backend serves them as `observatory:record_guider_calibration` and `observatory:record_focus_model`. `safety.enter_controller_mode` takes `shadow_first` to move the corrections to the shadowed state first, and `observatory:enter_controller_mode` passes it on. `library_path` names the folder of the wayfinding library, so a program that writes records can check where they go. `close` stops the INDI session (INDI is the protocol that talks to the devices) when a program is done.
+Each of `mount`, `imaging`, `guiding`, `safety` and `equipment` has a `status` call with the same shape: it takes an optional `include` list of sections and returns a typed status. `mount.status` reads only the mount. `record_calibration` and `record_focus_model` take the numbers as keyword arguments and a required `source_note`, check them as the saved records do (a bad value raises `InvalidArgumentError` and saves nothing), and send nothing to a device. An id that is already saved is refused unless `replace=True` is passed. The id is at most 100 characters and the note at most 500. The backend serves them as `observatory:record_guider_calibration` and `observatory:record_focus_model`. `safety.enter_controller_mode` takes `shadow_first` to move the corrections to the shadowed state first, and `observatory:enter_controller_mode` passes it on. `library_path` names the folder of the wayfinding library, so a program that writes records can check where they go. `close` stops the INDI session (INDI is the protocol that talks to the devices) when a program is done.
 
 `Wayfinder` builds its own INDI session. Give `simulated=True` for the simulator, or leave it unset to use the simulator when `ASTROMETRICS_TESTING` is set. `separate_process=True` runs the session in a process of its own, which a program with a busy event loop needs. `open_port_forwards=True` lets the library open live SSH tunnels, such as the one to PHD2 on the observatory computer; it is off by default and only the backend turns it on. The driver properties on `control` are private.
 

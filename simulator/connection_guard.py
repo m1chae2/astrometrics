@@ -7,16 +7,22 @@ looks every few seconds and stops the session if it finds one, and the TPM
 harness (``build/tpm/seal_guard.py``) checks once at the end of a run.
 
 The check reads ``/proc`` for the process and everything it started, then
-asks ``ss`` for the TCP connections and keeps those whose peer address is
-not a loopback address (`simulator.observatory_guard.is_loopback_address`).
+asks ``ss`` for the TCP and UDP sockets and keeps those whose peer address is
+not a loopback address (`astrometricslib.drivers.is_loopback_host`).
+A UDP socket with no peer (a listener) is not a connection and is skipped.
 It needs no root rights and opens no connection itself.
+
+This guard sees a connection after it exists. It ends the session; it does
+not stop the first packet. The offline settings and the settings checks are
+what prevent traffic. If ``ss`` itself fails, `non_loopback_connections`
+raises `OSError`, so the caller can count the failure and fail closed.
 """
 
 import re
 import subprocess
 from pathlib import Path
 
-from simulator.observatory_guard import is_loopback_address
+from astrometricslib.drivers import is_loopback_host
 
 __all__ = ["descendant_pids", "non_loopback_connections", "parse_ss_connections"]
 
@@ -62,7 +68,9 @@ def parse_ss_connections(output: str, pids: set[int]) -> list[str]:
     Parameters
     ----------
     output : `str`
-        The output of ``ss -H -tnp``.
+        The output of ``ss -H -tunp``. Each line starts with the socket type
+        (``tcp`` or ``udp``), then the state, the two queue sizes, the local
+        address and the peer address.
     pids : `set` [`int`]
         The processes to look at.
 
@@ -74,21 +82,24 @@ def parse_ss_connections(output: str, pids: set[int]) -> list[str]:
     offending = []
     for line in output.splitlines():
         parts = line.split()
-        if len(parts) < 5:
+        if len(parts) < 6:
             continue
-        peer = parts[4]
-        users = " ".join(parts[5:])
+        # With -t and -u, the first column is the type: tcp or udp.
+        peer = parts[5]
+        if peer in ("*", "*:*", "0.0.0.0:*", "[::]:*"):
+            continue  # an unconnected UDP socket has no peer
+        users = " ".join(parts[6:])
         owner_pids = {int(number) for number in re.findall(r"pid=(\d+)", users)}
         if not owner_pids & pids:
             continue
         peer_address = peer.rsplit(":", 1)[0]
-        if not is_loopback_address(peer_address):
+        if not is_loopback_host(peer_address):
             offending.append(line.strip())
     return offending
 
 
 def non_loopback_connections(root_pid: int) -> list[str]:
-    """List the TCP connections of a process tree that go beyond this computer.
+    """List the TCP and UDP sockets of a process tree that leave this computer.
 
     Parameters
     ----------
@@ -100,8 +111,15 @@ def non_loopback_connections(root_pid: int) -> list[str]:
     offending : `list` [`str`]
         The ``ss`` lines of the offending connections, empty when all are
         local.
+
+    Raises
+    ------
+    OSError
+        If ``ss`` cannot run or exits with an error. An empty answer from a
+        failed run is not the same as "no connections".
     """
-    output = subprocess.run(
-        ["ss", "-H", "-tnp"], capture_output=True, text=True, check=False, timeout=20
-    ).stdout
+    result = subprocess.run(["ss", "-H", "-tunp"], capture_output=True, text=True, check=False, timeout=20)
+    if result.returncode != 0:
+        raise OSError(f"ss failed with exit code {result.returncode}: {result.stderr.strip()}")
+    output = result.stdout
     return parse_ss_connections(output, descendant_pids(root_pid))

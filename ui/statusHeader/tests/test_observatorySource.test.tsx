@@ -53,7 +53,7 @@ import {
  * @param overrides Fields to change.
  * @return The report.
  */
-function report(source: 'real' | 'simulated' | 'offline', overrides: Record<string, unknown> = {}) {
+function report(source: 'real' | 'simulated' | 'no_telescope', overrides: Record<string, unknown> = {}) {
   const label = source === 'real' ? '' : 'SIMULATOR';
   const launch = source === 'real' ? null
     : { label, live_hardware: false, disposable_library: true, offline: true, locked_keys: [] };
@@ -71,6 +71,15 @@ describe('Observatory source', () => {
     vi.mocked(waitForBackendRestart).mockResolvedValue(false);
   });
 
+  /** A simulator chip is never hidden: it carries a short word for narrow windows and the full text for hover and screen readers. */
+  it('gives the simulator chip a short label and the full text as its name', async () => {
+    vi.mocked(getObservatorySource).mockResolvedValue(report('simulated') as never);
+    const { container } = render(<ObservatorySourceChip />);
+    const chip = await screen.findByRole('img', { name: 'SIMULATOR' });
+    expect(chip.getAttribute('title')).toContain('not using your telescope');
+    expect(container.querySelector('.status-chip__word--short')?.textContent).toBe('SIM');
+  });
+
   it('shows no chip for the real telescope', async () => {
     vi.mocked(getObservatorySource).mockResolvedValue(report('real') as never);
     const { container } = render(<ObservatorySourceChip />);
@@ -83,7 +92,7 @@ describe('Observatory source', () => {
     const cases: Array<[Record<string, unknown>, string | null]> = [
       [{ launch: null }, null],
       [{ launch: { label: 'LIVE', live_hardware: true, disposable_library: false, offline: false, locked_keys: [] } }, null],
-      [{ launch: { label: 'SIMULATOR FAILED', live_hardware: false, disposable_library: true, offline: true, locked_keys: [] } }, 'SIMULATOR FAILED'],
+      [{ failed: true, label: 'SIMULATOR FAILED', launch: { label: 'SIMULATOR', live_hardware: false, disposable_library: true, offline: true, locked_keys: [] } }, 'SIMULATOR FAILED'],
       [{ launch: { label: 'TPM RUN', live_hardware: false, disposable_library: true, offline: true, locked_keys: [] } }, 'TPM RUN'],
     ];
     for (const [overrides, expected] of cases) {
@@ -194,11 +203,14 @@ describe('Observatory source', () => {
 
   /** A failed simulator shows as a red chip with the reason on hover, and in the dialog, but no extra line in Settings. */
   it('shows the failure only in the chip and the dialog', async () => {
-    const failed = report('real', { failed: true, reason: 'indiserver is not installed', error: 'raw backend text' });
+    const failed = report('real', { failed: true, label: 'SIMULATOR FAILED', reason: 'indiserver is not installed', error: 'raw backend text' });
     vi.mocked(getObservatorySource).mockResolvedValue(failed as never);
     const { container, unmount } = render(<ObservatorySourceChip />);
     expect(await screen.findByText('SIMULATOR FAILED')).toBeTruthy();
-    expect(container.querySelector('[title="indiserver is not installed"]')).not.toBeNull();
+    // The tooltip gives the reason and says how to switch back.
+    const title = container.querySelector('.header__source-chip')?.getAttribute('title') ?? '';
+    expect(title).toContain('indiserver is not installed');
+    expect(title).toContain('Open Settings, Observatory source');
     expect(container.querySelector('[data-status="error"]')).not.toBeNull();
     unmount();
     render(<ObservatorySourceControl />);

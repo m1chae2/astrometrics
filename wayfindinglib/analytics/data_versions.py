@@ -205,7 +205,7 @@ def report_context_version(config: Any, butler: Any) -> Hashable | None:
         )
     except Exception:
         # A version that cannot be worked out only means no result is kept.
-        logger.exception("Could not work out the context version of the target report.")
+        logger.warning("Could not work out the context version of the target report.", exc_info=True)
         return None
 
 
@@ -325,7 +325,7 @@ def nights_index_version(context: Any, tonight: str, signs: Hashable) -> Hashabl
         return (tuple(sorted(wayfinding.items())), targets, tonight, signs)
     except Exception:
         # A version that cannot be worked out only means no result is kept.
-        logger.exception("Could not work out the data version of the index of the nights.")
+        logger.warning("Could not work out the data version of the index of the nights.", exc_info=True)
         return None
 
 
@@ -399,7 +399,7 @@ def nights_data_versions(
         )
     except Exception:
         # A version that cannot be worked out only means no result is kept.
-        logger.exception("Could not work out the data versions of the list of nights.")
+        logger.warning("Could not work out the data versions of the list of nights.", exc_info=True)
         return None
 
 
@@ -434,5 +434,5 @@ def review_data_version(context: Any) -> Hashable | None:
         )
     except Exception:
         # A version that cannot be worked out only means no result is kept.
-        logger.exception("Could not work out the data version of the night review.")
+        logger.warning("Could not work out the data version of the night review.", exc_info=True)
         return None

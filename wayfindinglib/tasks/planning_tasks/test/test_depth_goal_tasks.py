@@ -636,7 +636,7 @@ def test_a_frame_of_the_same_camera_from_another_target_builds_again(
     """The forecast compares with the camera's other frames, so they count."""
     _write_camera_frame(cached.config, "NGC 7331", "CamA", "own")
     cached.ask()
-    _write_camera_frame(cached.config, "M 13", "CamA", "other")
+    _write_camera_frame(cached.config, "M 13", "CamA", "other", night="2020-01-02")
     cached.ask()
     assert len(cached.recorder.ratios) == 2
     cached.ask()

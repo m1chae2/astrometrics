@@ -122,7 +122,7 @@ export function decodeFitsBlob(blob: Blob, getWorker: () => Worker | null): Fits
 
         return new Promise<ParsedFitsData>((resolve, reject) => {
             worker.onerror = (e) => {
-                console.error("Worker error:", e);
+                console.warn("Worker error:", e);
                 reject(new Error("Worker Error"));
             };
 
@@ -132,7 +132,7 @@ export function decodeFitsBlob(blob: Blob, getWorker: () => Worker | null): Fits
                 if (cancelled) return;
                 const { cmd, result, error } = ev.data;
                 if (error) {
-                    console.error("Worker parse error:", error);
+                    console.warn("Worker parse error:", error);
                     reject(new Error(`Error: ${error}`));
                     return;
                 }
@@ -501,7 +501,7 @@ export const useFitsLoader = (
                 setStatus(null);
             } catch (err) {
                 if (!cancelled) {
-                    console.error("FITS Load Error:", err);
+                    console.warn("FITS Load Error:", err);
                     fail(err instanceof Error ? err.message : String(err));
                 }
             }

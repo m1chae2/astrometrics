@@ -50,11 +50,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from write_sandbox_config import OFFLINE_TELESCOPE_SETTINGS
 
-from astrometricslib.drivers import real_folders
 from simulator import library_copy
+from simulator.real_folders import real_folders
+from simulator.settings import launch_section_text
 
 #: Do not copy more than this many bytes of databases and caches.
 MAXIMUM_COPY_BYTES = 5 * 1024**3
+
+
+def toml_string(value: object) -> str:
+    """Write a value as a quoted TOML string, with escapes where needed.
+
+    Parameters
+    ----------
+    value : `object`
+        A path or other value; it is converted with `str`.
+
+    Returns
+    -------
+    text : `str`
+        The value in double quotes. Quotes, backslashes and control
+        characters are escaped, so the value cannot end the string early.
+    """
+    return json.dumps(str(value), ensure_ascii=False)
 
 
 def repoint_outside_paths(sandbox: Path) -> int:
@@ -157,10 +175,15 @@ def prepare(sandbox: Path, mountpoint: Path | None = None) -> int:
     library = sandbox / "library"
     library.mkdir(parents=True, exist_ok=True)
     config_path = sandbox / "astrometrics.config.toml"
+    # The [Launch] section makes the run offline: every outgoing client in
+    # the library refuses (SIMBAD, online solvers, downloads), so the
+    # unsealed processing scenario cannot reach the internet. Paths are
+    # written as TOML strings with `toml_string`, never pasted in bare.
     config_path.write_text(
-        f'["Image Library"]\npath = "{library}"\nframes_path = "{frames_path}"\n'
-        f'stacks_path = "{stacks_path}"\n\n'
-        f'["Wayfinding Library"]\npath = "{sandbox / "wayfinding"}"\n'
+        launch_section_text("TPM SNAPSHOT", live_hardware=False, disposable_library=True, offline=True)
+        + f'["Image Library"]\npath = {toml_string(library)}\nframes_path = {toml_string(frames_path)}\n'
+        f"stacks_path = {toml_string(stacks_path)}\n\n"
+        f'["Wayfinding Library"]\npath = {toml_string(sandbox / "wayfinding")}\n'
         + OFFLINE_TELESCOPE_SETTINGS
         + "\n"
         + library_copy.keep_sections(text, library_copy.DROPPED_SECTIONS + library_copy.TELESCOPE_SECTIONS),

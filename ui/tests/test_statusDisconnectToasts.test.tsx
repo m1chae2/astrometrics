@@ -10,8 +10,10 @@ import { renderHook } from '@testing-library/react';
 const emitToast = vi.fn();
 let telescope: Record<string, unknown> = {};
 let appReady = false;
+let restarting = false;
 
 vi.mock('../common/utils/emitToast', () => ({ emitToast }));
+vi.mock('../common/services/backendApi', () => ({ isBackendRestarting: () => restarting }));
 vi.mock('../common/utils/appBootReadiness', () => ({ isAppReady: () => appReady }));
 vi.mock('../common/context/AstrometricsContext', () => ({
   useAstrometrics: () => ({ telescope, connected: true }),
@@ -32,6 +34,18 @@ describe('telescope connection toasts', () => {
   beforeEach(() => {
     emitToast.mockReset();
     appReady = false;
+    restarting = false;
+  });
+
+  /** A disconnect during an intended backend restart (a source switch) is expected and silent. */
+  it('shows no toast while the backend restarts on purpose', async () => {
+    appReady = true;
+    restarting = true;
+    await feed([
+      { connectionStatus: 'Connected', trackingStatus: 'Tracking' },
+      { connectionStatus: 'Disconnected', trackingStatus: 'Not Tracking' },
+    ]);
+    expect(emitToast).not.toHaveBeenCalled();
   });
 
   /** Starting with the telescope offline shows nothing. */

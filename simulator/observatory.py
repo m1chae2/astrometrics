@@ -55,6 +55,7 @@ from pathlib import Path
 from typing import Any
 
 from simulator import library_copy, observatory_guard
+from simulator.errors import SimulationUnavailableError
 from simulator.settings import (
     FALLBACK_TELESCOPE_KEYS,
     SIMULATED_LAUNCH_SETTINGS,
@@ -66,7 +67,6 @@ from simulator.settings import (
     standin_home,
     with_launch_section,
 )
-from wayfindinglib.exceptions import SimulationUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -211,7 +211,8 @@ def missing_programs(include_overlay: bool = True) -> list[str]:
     missing : `list` [`str`]
         Program names, empty when all are on the PATH.
     """
-    names = REQUIRED_PROGRAMS + (library_copy.OVERLAY_PROGRAMS if include_overlay else ())
+    # ss is the connection guard's only eyes; without it the guard cannot work.
+    names = (*REQUIRED_PROGRAMS, "ss", *(library_copy.OVERLAY_PROGRAMS if include_overlay else ()))
     return [name for name in names if shutil.which(name) is None]
 
 
@@ -592,7 +593,7 @@ class SimulatedObservatory:
         the overlay or write the settings file again.
     real_library : `object`, optional
         The real folders for the copy (from
-        `astrometricslib.drivers.real_folders`). Default: found when
+        `simulator.real_folders.real_folders`). Default: found when
         `prepare` runs.
     """
 
@@ -724,7 +725,7 @@ class SimulatedObservatory:
             gains the INDI simulator's instrument name as an alias. Without a
             real settings file, the made-up equipment is used.
         """
-        from astrometricslib.drivers import real_folders
+        from simulator.real_folders import real_folders
 
         real = self.real_library or real_folders()
         mine = SIMULATED_LAUNCH_SETTINGS + library_settings_text(

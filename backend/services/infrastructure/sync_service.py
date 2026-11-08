@@ -254,6 +254,19 @@ class SyncService:
         """
         return thread_management.is_syncing(object_id)
 
+    def is_log_sync_running(self) -> bool:
+        """Report whether the guide-log copy thread is running.
+
+        Returns
+        -------
+        is_running : `bool`
+            `True` while the log sync thread is alive. It is not counted
+            in `get_all_active_syncs`.
+        """
+        with self._log_sync_lock:
+            thread = self._log_sync_thread
+        return thread is not None and thread.is_alive()
+
     def start_log_sync(self, on_finished: Callable[[Any], None] | None = None) -> dict[str, Any]:
         """Start copying the guide and Ekos logs on a background thread.
 

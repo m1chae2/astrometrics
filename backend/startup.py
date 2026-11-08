@@ -81,7 +81,7 @@ def warm_start_up_caches() -> None:
         except Exception:
             # Warm-up runs in the background; a failure only makes the first
             # request slower, so it is logged and the server keeps going.
-            logger.exception("Sky catalog warm-up failed; first Planetarium load will be slow")
+            logger.warning("Sky catalog warm-up failed; first Planetarium load will be slow", exc_info=True)
 
     def warm_earth_orientation() -> None:
         """Load astropy's Earth-orientation table."""
@@ -89,7 +89,9 @@ def warm_start_up_caches() -> None:
             elapsed = warm_earth_orientation_data()
             logger.info("Earth-orientation data loaded in %.1fs", elapsed)
         except Exception:
-            logger.exception("Earth-orientation warm-up failed; the first star click will be slow")
+            logger.warning(
+                "Earth-orientation warm-up failed; the first star click will be slow", exc_info=True
+            )
 
     def warm_stellar_summaries() -> None:
         """Fill the stellar catalog summary cache."""
@@ -98,7 +100,9 @@ def warm_start_up_caches() -> None:
             container.stellar_service.warm_catalog_summary_cache()
             logger.info("Stellar catalog summary warmed in %.1fs", time.monotonic() - stellar_started_at)
         except Exception:
-            logger.exception("Stellar summary warm-up failed; first Astronomy Manager load will be slow")
+            logger.warning(
+                "Stellar summary warm-up failed; first Astronomy Manager load will be slow", exc_info=True
+            )
 
     try:
         steps = [
@@ -131,7 +135,7 @@ def warm_night_reviews(night_count: int = NIGHT_REVIEW_WARMUP_COUNT) -> None:
     the splash screen. It only reads, starts no job and writes no record. It
     shares the wayfinder's review cache, so a later `history:night_quality`
     request for one of these nights is answered from memory. A night that
-    fails is logged and skipped, and the others are still built.
+    fails is logged as a warning and skipped, and the others are still built.
 
     Parameters
     ----------
@@ -149,10 +153,12 @@ def warm_night_reviews(night_count: int = NIGHT_REVIEW_WARMUP_COUNT) -> None:
                     review.query(kind="night_quality", session_id=night.night_id, register_job=False)
                 except Exception:
                     # A failed night only means a slower first open.
-                    logger.exception("Night review warm-up failed for %s", night.night_id)
+                    logger.warning("Night review warm-up failed for %s", night.night_id, exc_info=True)
             logger.info("Night reviews warmed in %.1fs", time.monotonic() - started_at)
         except Exception:
-            logger.exception("Night review warm-up failed; the first Observatory Manager open will be slow")
+            logger.warning(
+                "Night review warm-up failed; the first Observatory Manager open will be slow", exc_info=True
+            )
 
 
 DEPTH_GOAL_WARMUP_COUNT = 3
@@ -189,7 +195,12 @@ def _depth_goal_warmup_targets(count: int) -> list[str]:
     telescope_state = container.astrometrics_service.get_state().get("telescope", {})
     pointed_at = telescope_state.get("targetName")
     if pointed_at:
-        chosen.append(str(pointed_at))
+        # The telescope reports a name; the library may spell the id otherwise.
+        pointed_target = container.target_service.get_targets(str(pointed_at), detail="summary")
+        if pointed_target is not None:
+            chosen.append(str(pointed_target.id))
+        else:
+            logger.debug("Depth goal warm-up: %r is not a library target; skipped", pointed_at)
 
     imaged_at = container.target_service.get_camera_index()["targets"]
     with_picture = {

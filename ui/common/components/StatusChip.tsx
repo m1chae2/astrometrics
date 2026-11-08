@@ -11,6 +11,13 @@ export interface StatusChipProps {
     status: StatusChipStatus;
     /** The word shown beside the icon, for example "Ready". */
     label: string;
+    /**
+     * A shorter word for narrow windows, for example "SIM". The full label stays in the tooltip and the
+     * accessible name, so the chip is never hidden.
+     */
+    shortLabel?: string;
+    /** The tooltip. With `shortLabel` it defaults to the full label. */
+    title?: string;
 }
 
 /** Inline SVG icons, one shape per status so the shapes differ as well as the colors. */
@@ -27,8 +34,10 @@ const STATUS_ICON_PATHS: Record<StatusChipStatus, React.ReactNode> = {
  * @param props See {@link StatusChipProps}.
  * @return The chip element.
  */
-export const StatusChip: React.FC<StatusChipProps> = ({ status, label }) => (
+export const StatusChip: React.FC<StatusChipProps> = ({ status, label, shortLabel, title }) => (
     <Badge
+        title={title ?? (shortLabel ? label : undefined)}
+        {...(shortLabel ? { role: 'img', 'aria-label': label } : {})}
         tone={status}
         className={`status-chip status-chip--${status}`}
         data-status={status}
@@ -38,6 +47,13 @@ export const StatusChip: React.FC<StatusChipProps> = ({ status, label }) => (
             </svg>
         )}
     >
-        <span className="status-chip__word">{label}</span>
+        {shortLabel ? (
+            <>
+                <span className="status-chip__word status-chip__word--full" aria-hidden="true">{label}</span>
+                <span className="status-chip__word status-chip__word--short" aria-hidden="true">{shortLabel}</span>
+            </>
+        ) : (
+            <span className="status-chip__word">{label}</span>
+        )}
     </Badge>
 );

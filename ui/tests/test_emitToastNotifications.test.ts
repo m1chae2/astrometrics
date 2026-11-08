@@ -31,7 +31,7 @@ describe('emitToast desktop notifications', () => {
     vi.useFakeTimers();
     showNotification.mockReset();
     (window as unknown as { astrometrics: unknown }).astrometrics = { app: { showNotification, reportAppFullyLoaded: vi.fn() } };
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
   afterEach(() => {

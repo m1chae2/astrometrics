@@ -5,10 +5,12 @@ services start in the app's lifespan, when the server starts, and stop when
 it ends. The lifespan test replaces the real work with mocks.
 """
 
+import asyncio
 import logging
 import os
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -71,7 +73,8 @@ def test_the_lifespan_starts_the_services_and_stops_them(monkeypatch: pytest.Mon
     # The warm-up steps run on worker threads and may finish after shutdown.
     # The depth goals must come before the night reviews.
     warm_calls = [call for call in calls if call.startswith("warm")]
-    assert warm_calls in (["warm"], ["warm", "warm_depth"], ["warm", "warm_depth", "warm_nights"])
+    # Leaving the app cancels the warm-up, so it may have run only part way.
+    assert warm_calls in ([], ["warm"], ["warm", "warm_depth"], ["warm", "warm_depth", "warm_nights"])
     stopping = [call for call in calls if call in ("detach", "shutdown")]
     assert stopping == ["detach", "shutdown"]
 
@@ -136,13 +139,27 @@ def _depth_goal_container(
     fake_container.target_service.get_camera_index.return_value = {
         "targets": {name: {"lastFrameTime": time} for name, time in imaged.items()}
     }
-    fake_container.target_service.get_targets.return_value = [
+    targets = [
         MagicMock(
             id=name,
             stacking=MagicMock(processed_image="a.jpg" if name in with_picture else "", stacked_image=""),
         )
         for name in imaged
     ]
+
+    def get_targets(target_id: str | None = None, detail: str = "full") -> object:
+        """Answer like the target service.
+
+        Returns
+        -------
+        found : `object`
+            One target (or `None`) for an id, else all targets.
+        """
+        if target_id is None:
+            return targets
+        return next((target for target in targets if target.id == target_id), None)
+
+    fake_container.target_service.get_targets.side_effect = get_targets
     return fake_container
 
 
@@ -210,3 +227,71 @@ def test_depth_goal_warm_up_survives_an_empty_library(
     with caplog.at_level("DEBUG"):
         startup.warm_depth_goals()
     assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
+
+
+def test_depth_goal_warm_up_skips_a_pointed_name_that_is_not_a_library_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A telescope target name with no library target is skipped, not built."""
+    fake_container = _depth_goal_container("Unknown field", {"A": 1.0}, {"A"})
+    monkeypatch.setattr(startup, "container", fake_container)
+
+    startup.warm_depth_goals()
+
+    asked = [call.args[0] for call in fake_container.advisory_service.get_depth_goal.call_args_list]
+    assert asked == ["A"]
+
+
+def test_the_cache_warm_ups_log_a_failure_as_a_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A failed background warm-up is a warning, not an error."""
+    fake_container = MagicMock()
+    fake_container.wayfinder.planning.query_sources.side_effect = RuntimeError("no catalog")
+    fake_container.wayfinder.review.query.side_effect = RuntimeError("no nights")
+    monkeypatch.setattr(startup, "container", fake_container)
+    monkeypatch.setattr(startup, "warm_earth_orientation_data", MagicMock(side_effect=RuntimeError("iers")))
+    fake_container.stellar_service.warm_catalog_summary_cache.side_effect = RuntimeError("cache")
+
+    with caplog.at_level("DEBUG"):
+        startup.warm_start_up_caches()
+        startup.warm_night_reviews()
+
+    levels = {record.levelname for record in caplog.records if "warm-up failed" in record.getMessage()}
+    assert levels == {"WARNING"}
+    assert startup.sky_catalog_warmup_finished.is_set()
+
+
+def test_the_lifespan_cancels_the_warm_up_task_and_runs_it_in_the_heavy_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Warm-up steps go through `run_heavy`, and shutdown cancels the task."""
+    lane_calls: list[str] = []
+
+    async def fake_run_heavy(function: object, *args: object, **kwargs: object) -> None:
+        """Note the step and, for the last one, wait until cancelled."""
+        lane_calls.append(function.__name__)
+        if function.__name__ == "warm_night_reviews":
+            await asyncio.sleep(60)
+
+    monkeypatch.setattr(main_backend, "run_heavy", fake_run_heavy)
+    fake_container = MagicMock()
+
+    async def idle_loop() -> None:
+        """Stand in for the telemetry loop."""
+
+    monkeypatch.setattr(main_backend, "container", fake_container)
+    monkeypatch.setattr(main_backend, "attach_log_handlers", lambda: None)
+    monkeypatch.setattr(main_backend, "detach_log_handlers", lambda: None)
+    monkeypatch.setattr(startup, "periodic_telemetry_loop", idle_loop)
+    monkeypatch.setattr(main_backend, "close_interrupted_jobs", lambda configuration: None)
+    monkeypatch.setattr(main_backend, "require_mounted_storage", lambda *arguments: None)
+    monkeypatch.setattr(main_backend.app_configuration, "watch_for_changes", lambda: None)
+
+    with TestClient(main_backend.app):
+        time.sleep(0.2)
+        task = main_backend.app.state.sky_warmup_task
+        assert not task.done()
+
+    assert task.cancelled()
+    assert lane_calls == ["warm_start_up_caches", "warm_depth_goals", "warm_night_reviews"]

@@ -52,12 +52,12 @@ describe('StatusHeader frame copy text', () => {
     expect(screen.getByText('Idle')).toBeTruthy();
   });
 
-  /** Before the count is known the word Downloading is shown. */
-  it('shows Downloading when the count is not known', () => {
+  /** Before the count is known the words Copying frames are shown. */
+  it('shows Copying frames when the count is not known', () => {
     mockHeader('Idle', { active: true, targetId: 'M 31', measured: null, total: null });
     render(<StatusHeader />);
     const suffix = screen.getByTestId('frame-copy');
-    expect(suffix.textContent).toContain('· Downloading');
+    expect(suffix.textContent).toContain('· Copying frames');
     expect(suffix.textContent).not.toMatch(/\d\/\d/);
     expect(suffix.getAttribute('title')).toBe('Copying new M 31 frames to this computer');
   });

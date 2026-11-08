@@ -37,7 +37,7 @@ from simulator.source_choice import (
     ACTIVE_SOURCE_VARIABLE,
     LAUNCH_ERROR_VARIABLE,
     LAUNCHER_VARIABLE,
-    OFFLINE,
+    NO_TELESCOPE,
     REAL,
     REAL_CONFIG_HOME_VARIABLE,
     RESTART_EXIT_CODE,
@@ -465,7 +465,7 @@ def test_a_world_that_failed_to_start_runs_the_backend_offline(tmp_path: Path) -
         (root / "astrometrics.config.toml").write_text("[Launch]\n")
         return World(
             root=root,
-            source=OFFLINE,
+            source=NO_TELESCOPE,
             config_path=root / "astrometrics.config.toml",
             error="SimulationUnavailableError: no indiserver",
         )
@@ -473,7 +473,7 @@ def test_a_world_that_failed_to_start_runs_the_backend_offline(tmp_path: Path) -
     launcher = rig.launcher(world_builder=offline, operator=lambda *args: operated.append(1) or {})
     assert launcher.run() == 0
     environment = rig.starts()[0]["environment"]
-    assert environment[ACTIVE_SOURCE_VARIABLE] == OFFLINE
+    assert environment[ACTIVE_SOURCE_VARIABLE] == NO_TELESCOPE
     assert environment[LAUNCH_ERROR_VARIABLE] == "SimulationUnavailableError: no indiserver"
     assert operated == []
 
@@ -500,7 +500,7 @@ def test_build_world_falls_back_to_the_offline_world(tmp_path: Path, monkeypatch
     monkeypatch.setattr(launch, "SimulatedObservatory", Broken)
     rig = Rig(tmp_path, "exit:0", SIMULATED)
     world = launch.build_world(rig.root, rig.environ)
-    assert world.source == OFFLINE
+    assert world.source == NO_TELESCOPE
     assert world.error == "RuntimeError: fuse-overlayfs is missing"
     assert world.config_path.exists()
     assert world.variables["ASTROMETRICS_STANDIN_SSH_MODE"] == "refuse"
@@ -533,3 +533,59 @@ def test_live_world_starts_stand_ins_and_is_removed(tmp_path: Path) -> None:
 def test_restart_code_is_the_agreed_one() -> None:
     """The launcher and the backend agree on 75."""
     assert RESTART_EXIT_CODE == 75
+
+
+def test_three_failed_connection_checks_in_a_row_end_the_session(tmp_path: Path) -> None:
+    """Three blind looks in a row end the session like a hit."""
+    rig = Rig(tmp_path, "wait", SIMULATED)
+
+    def blind(pid: int) -> list[str]:
+        """Fail like a broken ``ss`` run.
+
+        Raises
+        ------
+        OSError
+            Always.
+        """
+        raise OSError("ss is gone")
+
+    launcher = rig.launcher(connection_check=blind)
+    assert launcher.run() == GUARD_EXIT_CODE
+    assert rig.events == ["built", "stopped", "removed"]
+
+
+def test_a_single_failed_connection_check_does_not_end_the_session(tmp_path: Path) -> None:
+    """One failure, then good looks: the failure count starts again."""
+    rig = Rig(tmp_path, "wait", SIMULATED)
+    results: list[object] = [OSError("once"), [], [], OSError("again"), [], []]
+    looks: list[int] = []
+
+    def flaky(pid: int) -> list[str]:
+        """Give the next scripted result, then clean looks.
+
+        Returns
+        -------
+        offending : `list` [`str`]
+            Nothing.
+        """
+        looks.append(pid)
+        result = results.pop(0) if results else []
+        if isinstance(result, OSError):
+            raise result
+        return result
+
+    launcher = rig.launcher(connection_check=flaky)
+    thread = threading.Thread(target=launcher.run)
+    thread.start()
+    assert wait_for(lambda: len(looks) >= 7)
+    launcher.request_stop()
+    thread.join(timeout=30)
+    assert rig.events == ["built", "stopped", "removed"]
+    assert not results
+
+
+def test_the_simulated_backend_child_gets_the_offline_backstop_flag(tmp_path: Path) -> None:
+    """The child's environment carries ``ASTROMETRICS_OFFLINE=1``."""
+    rig = Rig(tmp_path, "exit:0", SIMULATED)
+    assert rig.launcher().run() == 0
+    assert rig.starts()[0]["environment"]["ASTROMETRICS_OFFLINE"] == "1"

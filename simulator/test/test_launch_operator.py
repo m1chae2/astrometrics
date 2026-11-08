@@ -10,6 +10,7 @@ import logging
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -201,13 +202,35 @@ def test_a_backend_that_is_not_listening_is_not_ready() -> None:
 def test_the_connection_guard_picks_out_only_non_loopback_peers() -> None:
     """The parser keeps only connections that leave the computer."""
     output = (
-        'ESTAB 0 0 127.0.0.1:5000 127.0.0.1:41000 users:(("python",pid=10,fd=3))\n'
-        'ESTAB 0 0 192.168.1.5:40000 93.184.216.34:443 users:(("python",pid=11,fd=4))\n'
-        'ESTAB 0 0 192.168.1.5:40001 93.184.216.34:443 users:(("other",pid=99,fd=4))\n'
+        'tcp ESTAB 0 0 127.0.0.1:5000 127.0.0.1:41000 users:(("python",pid=10,fd=3))\n'
+        'tcp ESTAB 0 0 192.168.1.5:40000 93.184.216.34:443 users:(("python",pid=11,fd=4))\n'
+        'tcp ESTAB 0 0 192.168.1.5:40001 93.184.216.34:443 users:(("other",pid=99,fd=4))\n'
     )
     offending = parse_ss_connections(output, {10, 11})
     assert len(offending) == 1
     assert "pid=11" in offending[0]
+
+
+def test_the_connection_guard_catches_a_udp_peer_and_skips_an_unconnected_socket() -> None:
+    """A UDP socket with a remote peer is reported; a UDP listener is not."""
+    output = (
+        'udp ESTAB 0 0 192.168.1.5:40000 8.8.8.8:53 users:(("python",pid=10,fd=3))\n'
+        'udp UNCONN 0 0 0.0.0.0:5353 0.0.0.0:* users:(("python",pid=10,fd=4))\n'
+        'udp ESTAB 0 0 127.0.0.1:40001 127.0.0.1:53 users:(("python",pid=10,fd=5))\n'
+    )
+    offending = parse_ss_connections(output, {10})
+    assert len(offending) == 1
+    assert "8.8.8.8:53" in offending[0]
+
+
+def test_a_failed_ss_run_is_an_error_not_an_empty_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An ``ss`` that exits with an error raises, so the guard can count it."""
+    from simulator import connection_guard
+
+    failed = SimpleNamespace(returncode=1, stdout="", stderr="boom")
+    monkeypatch.setattr(connection_guard.subprocess, "run", lambda *args, **kwargs: failed)
+    with pytest.raises(OSError, match="boom"):
+        connection_guard.non_loopback_connections(1)
 
 
 def test_the_choice_file_lives_in_the_real_settings_folder(tmp_path: Path) -> None:
@@ -217,3 +240,40 @@ def test_the_choice_file_lives_in_the_real_settings_folder(tmp_path: Path) -> No
     write_choice(SourceChoice(SIMULATED), environment)
     assert choice_file_path(environment) == tmp_path / "config" / "astrometrics" / "observatory_source.json"
     assert read_choice(environment).source == SIMULATED
+
+
+def test_rpc_calls_ignore_the_proxy_variables(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A request to 127.0.0.1 never goes through ``http_proxy``."""
+    monkeypatch.setenv("http_proxy", "http://203.0.113.9:3128")
+    monkeypatch.setenv("HTTP_PROXY", "http://203.0.113.9:3128")
+    monkeypatch.delenv("no_proxy", raising=False)
+    monkeypatch.delenv("NO_PROXY", raising=False)
+
+    class _Handler(BaseHTTPRequestHandler):
+        """Answer the ready check and one RPC call."""
+
+        def do_GET(self) -> None:
+            """Answer 200."""
+            self.send_response(200)
+            self.end_headers()
+
+        def do_POST(self) -> None:
+            """Answer with a wrapped result."""
+            body = json.dumps({"result": {"status": "ok", "data": 7}}).encode()
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args: object) -> None:
+            """Stay quiet."""
+
+    server = HTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        assert backend_is_ready(port, timeout=5.0) is True
+        assert call_rpc(port, "x:y", {}, timeout=5.0) == 7
+    finally:
+        server.shutdown()
+        server.server_close()

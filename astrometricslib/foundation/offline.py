@@ -17,10 +17,16 @@ unavailable. That is a status, not an error in the log.
 
 import ipaddress
 import logging
+import os
 
 from astrometricslib.foundation.config import get_configuration
 
 logger = logging.getLogger(__name__)
+
+#: Environment variable a launcher sets to ``1`` or ``true`` for a world that
+#: must send nothing off the computer. It works even when the settings file
+#: cannot be read, so it is a second switch behind ``offline = true``.
+OFFLINE_VARIABLE = "ASTROMETRICS_OFFLINE"
 
 
 class OfflineModeError(ConnectionError):
@@ -33,9 +39,14 @@ def network_is_offline() -> bool:
     Returns
     -------
     offline : `bool`
-        `True` when the settings in use have ``offline = true`` in their
-        ``[Launch]`` section.
+        `True` when ``ASTROMETRICS_OFFLINE`` is ``1`` or ``true``, or when the
+        settings in use have ``offline = true`` (or a value that is not
+        clearly false) in their ``[Launch]`` section. A ``[Launch]`` section
+        that cannot be read also counts as offline. No ``[Launch]`` section
+        is an ordinary, online run.
     """
+    if os.environ.get(OFFLINE_VARIABLE, "").strip().lower() in ("1", "true"):
+        return True
     identity = get_configuration().get_launch_identity()
     return identity is not None and identity.offline
 
@@ -54,15 +65,20 @@ def is_loopback_host(host: str) -> bool:
     -------
     loopback : `bool`
         `True` for ``localhost``, a name ending in ``.localhost``, and a
-        loopback IPv4 or IPv6 address.
+        loopback IPv4 or IPv6 address. The address may be in brackets, may
+        carry a zone (``%lo``), and may be an IPv4-mapped IPv6 address such as
+        ``::ffff:127.0.0.1``, which is judged by the IPv4 address inside it.
     """
-    name = host.strip().strip("[]").lower()
+    name = host.strip().strip("[]").split("%")[0].lower()
     if name == "localhost" or name.endswith(".localhost"):
         return True
     try:
-        return ipaddress.ip_address(name).is_loopback
+        address = ipaddress.ip_address(name)
     except ValueError:
         return False
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        return address.ipv4_mapped.is_loopback
+    return address.is_loopback
 
 
 def require_online(service: str) -> None:

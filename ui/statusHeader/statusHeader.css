@@ -83,8 +83,11 @@
   pointer-events: none;
 }
 
+/* A visible focus ring around the whole strip, drawn a little outside it. */
 .header__strip-button:focus-visible {
-  outline: none;
+  outline: var(--focus-outline);
+  outline-offset: 6px;
+  border-radius: var(--radius-md);
 }
 
 /* The Target item sits above the strip button so it can have its own action. */
@@ -379,6 +382,22 @@
   display: inline-block;
 }
 
+/* The identified target's name. */
+.header__telemetry-value--target {
+  color: var(--status-cyan-bright);
+  font-weight: 600;
+}
+
+/* A value that opens something looks like a link: underlined, and brighter on hover. */
+.header__telemetry-value--link {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.header__telemetry-item:hover .header__telemetry-value--link {
+  color: var(--white);
+}
+
 .header__telemetry-unit {
   font-size: var(--tiny-font-size);
   color: color-mix(in srgb, var(--white) 60%, transparent);
@@ -670,6 +689,10 @@
   width: 100%;
 }
 
+.settings__field--spaced {
+  margin-top: var(--space-2);
+}
+
 .settings__field--row,
 .settings__field--checkbox {
   flex-direction: row;
@@ -900,11 +923,4 @@
   flex: 0 1 auto;
   min-width: 0;
   white-space: nowrap;
-}
-
-/* At narrow widths the chip gives way first, so the readouts keep their room. */
-@media (max-width: 1100px) {
-  .header__source-chip {
-    display: none;
-  }
 }

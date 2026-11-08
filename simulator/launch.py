@@ -24,7 +24,10 @@ runs unaware of simulation. One session goes like this:
    through the backend's public RPC methods. The log says so in lines that
    start with ``OPERATOR STEP (D11)``.
 5. Connection guard. Every few seconds the launcher lists the backend's TCP
-   connections. One to an address beyond this computer ends the session.
+   and UDP sockets. One to an address beyond this computer ends the session,
+   and so do three failed checks in a row. The guard acts after the fact; the
+   offline settings are what prevent traffic. The backend also gets
+   ``ASTROMETRICS_OFFLINE=1`` as a backstop.
 6. When the backend ends, the launcher stops the stand-ins, removes the
    library copy and releases the lock. Exit code 75 (`RESTART_EXIT_CODE`)
    means "the user changed the source": the launcher reads the choice again
@@ -55,7 +58,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from astrometricslib.drivers import LAUNCH_NOTES_VARIABLE, MISSING_PROGRAMS_VARIABLE, real_folders
+from astrometricslib.drivers import OFFLINE_VARIABLE
 from simulator.connection_guard import non_loopback_connections
 from simulator.library_copy import teardown as remove_library_copy
 from simulator.observatory import (
@@ -67,13 +70,16 @@ from simulator.observatory import (
     offline_environment,
     prepare_offline_world,
 )
+from simulator.real_folders import real_folders
 from simulator.rpc_client import backend_is_ready, call_rpc
 from simulator.source_choice import (
     ACTIVE_ROOT_VARIABLE,
     ACTIVE_SOURCE_VARIABLE,
     LAUNCH_ERROR_VARIABLE,
+    LAUNCH_NOTES_VARIABLE,
     LAUNCHER_VARIABLE,
-    OFFLINE,
+    MISSING_PROGRAMS_VARIABLE,
+    NO_TELESCOPE,
     REAL,
     REAL_CONFIG_HOME_VARIABLE,
     REAL_CONFIG_PATH_VARIABLE,
@@ -86,7 +92,9 @@ from simulator.source_choice import (
 
 __all__ = [
     "GUARD_EXIT_CODE",
+    "GUARD_FAILURE_LIMIT",
     "LOCKED_EXIT_CODE",
+    "OFFLINE_VARIABLE",
     "Launcher",
     "World",
     "acquire_world_lock",
@@ -106,6 +114,9 @@ LOCK_FILE_NAME = "launcher.lock"
 LOCKED_EXIT_CODE = 73
 #: Exit code when the connection guard ended the session (``EX_SOFTWARE``).
 GUARD_EXIT_CODE = 70
+#: This many connection checks in a row may fail before the guard ends the
+#: session (a guard that cannot look is not a guard).
+GUARD_FAILURE_LIMIT = 3
 #: Seconds between looks at the backend's connections.
 GUARD_INTERVAL_SECONDS = 5.0
 #: Seconds the backend gets to end after SIGTERM before it is killed.
@@ -249,7 +260,7 @@ def _offline_world(root: Path, error: str) -> World:
         folder = Path(tempfile.mkdtemp(prefix="astrometrics-offline-"))
         config_path = prepare_offline_world(folder)
         variables = offline_environment(folder)
-    return World(root=folder, source=OFFLINE, config_path=config_path, variables=variables, error=error)
+    return World(root=folder, source=NO_TELESCOPE, config_path=config_path, variables=variables, error=error)
 
 
 def build_world(root: Path, environ: dict[str, str]) -> World:
@@ -350,6 +361,8 @@ def world_environment(base: dict[str, str], world: World, environ: dict[str, str
     if world.error:
         child[LAUNCH_ERROR_VARIABLE] = world.error
     child[LAUNCHER_VARIABLE] = "1"
+    # Backstop: the library itself refuses online lookups and downloads.
+    child[OFFLINE_VARIABLE] = "1"
     child[MISSING_PROGRAMS_VARIABLE] = ",".join(missing_programs())
     child[LAUNCH_NOTES_VARIABLE] = "\n".join(launch_notes())
     return child
@@ -630,7 +643,7 @@ class Launcher:
         world: World | None = None
         try:
             world = self.world_builder(self.root, self.environ)
-            if world.source == OFFLINE:
+            if world.source == NO_TELESCOPE:
                 logger.error("SIMULATOR FAILED (%s); the backend runs in the offline world.", world.error)
             if self.stop_requested.is_set():
                 return 0
@@ -692,6 +705,7 @@ class Launcher:
             The backend's exit code, or `GUARD_EXIT_CODE`.
         """
         next_check = time.monotonic() + self.guard_interval
+        failed_checks = 0
         while True:
             try:
                 return child.wait(timeout=POLL_SECONDS)
@@ -705,8 +719,22 @@ class Launcher:
                 next_check = time.monotonic() + self.guard_interval
                 try:
                     offending = self.connection_check(child.pid)
+                    failed_checks = 0
                 except OSError, subprocess.SubprocessError:
-                    logger.warning("The connection guard could not look at the connections.", exc_info=True)
+                    failed_checks += 1
+                    logger.warning(
+                        "The connection guard could not look at the connections (%d in a row).",
+                        failed_checks,
+                        exc_info=True,
+                    )
+                    if failed_checks >= GUARD_FAILURE_LIMIT:
+                        logger.critical(
+                            "CONNECTION GUARD: the check failed %d times in a row, so the guard is blind; "
+                            "ending the simulator session.",
+                            failed_checks,
+                        )
+                        self._end_backend(child)
+                        return GUARD_EXIT_CODE
                     continue
                 if offending:
                     logger.critical(

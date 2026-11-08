@@ -97,6 +97,7 @@ _NOTICE_ROW_REASON = (
 )
 UNUSED_DECISION_METRICS = {
     "stacking.notice_frames_moved_to_excluded": _NOTICE_ROW_REASON,
+    "frame.notice_synthetic": _NOTICE_ROW_REASON,
     "stacking.notice_single_frame_stack": _NOTICE_ROW_REASON,
     "stacking.notice_flat_calibration_note": _NOTICE_ROW_REASON,
     "stacking.notice_exposure_group_left_out": _NOTICE_ROW_REASON,

@@ -53,9 +53,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from astrometricslib.drivers import real_folders
 from simulator.guide_log_replay import timed_lines
 from simulator.observatory_guard import real_protected_paths
+from simulator.real_folders import real_folders
 from wayfindinglib.logs import SavedCapture, ekos_utc_offset_hours, read_ekos_captures
 
 #: The one fixed night (the date its guide log begins, local time).
@@ -136,7 +136,7 @@ def default_sources() -> tuple[Path, Path]:
         ``ekos_logs`` inside the real wayfinding library, and the real
         image library's frames folder. The app's simulator world keeps the
         real folders in ``ASTROMETRICS_REAL_*`` variables, which
-        `astrometricslib.drivers.real_folders` honours.
+        `simulator.real_folders.real_folders` honours.
     """
     folders = real_folders()
     return folders.wayfinding / "ekos_logs", folders.frames

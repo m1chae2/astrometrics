@@ -96,7 +96,7 @@ def with_launch_section(text: str, launch_text: str) -> str:
         first.
     """
     blocks = re.split(r'(?m)^(?=\["?[A-Za-z])', text)
-    kept = [block for block in blocks if not re.match(r'\["?Launch"?\]\s*$', block.split("\n", 1)[0])]
+    kept = [block for block in blocks if not re.match(r'\["?Launch"?\]\s*(?:#.*)?$', block.split("\n", 1)[0])]
     return launch_text + "".join(kept)
 
 

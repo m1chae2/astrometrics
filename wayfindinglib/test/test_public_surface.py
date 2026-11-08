@@ -39,9 +39,7 @@ EXPECTED_EXPORTS = frozenset({
 EXPECTED_MODULE_NAMES = {
     "wayfindinglib.exceptions": frozenset({
         "DelegationPolicyValidationError",
-        "GuardError",
         "PlanRevisionConflictError",
-        "SimulationUnavailableError",
     }),
     "wayfindinglib.logs": frozenset({
         "SavedCapture",
@@ -111,7 +109,6 @@ REVIEW_MEMBERS = frozenset({
     "get_live_session_status",
     "frame_guiding",
     "get_performance_envelope",
-    "invalidate_night",
 })
 """The public members of `ObservationReview`."""
 
@@ -158,7 +155,6 @@ CHILDREN = {
     "guiding": {
         "status",
         "query_calibrations",
-        "query_runs",
         "record_calibration",
         "expose",
         "refit_spectrum",

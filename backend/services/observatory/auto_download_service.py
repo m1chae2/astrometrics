@@ -241,6 +241,17 @@ class AutoDownloadService:
         except Exception:  # the status poll must never fail because of this feature
             logger.exception("Automatic frame download could not handle a camera status")
 
+    def pending_timer_count(self) -> int:
+        """Count the frame downloads that are waiting for their timer.
+
+        Returns
+        -------
+        count : `int`
+            How many targets have a download timer that has not fired yet.
+        """
+        with self._lock:
+            return len(self._timers)
+
     def stop(self) -> None:
         """Cancel every pending timer and refuse new ones."""
         with self._lock:

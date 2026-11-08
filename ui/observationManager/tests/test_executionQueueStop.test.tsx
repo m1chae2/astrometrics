@@ -17,7 +17,7 @@ vi.mock('../../common/services/sequencerService', () => ({
     stopImagingSession: vi.fn(),
 }));
 vi.mock('../../common/hooks/useCommandAvailability', () => ({
-    useCommandAvailability: () => ({ canCommand: false, reason: 'Ekos controls the equipment.', delegations: [], isChecking: false }),
+    useCommandAvailability: () => ({ canCommand: false, reason: 'Ekos controls the equipment.', delegations: [], isChecking: false, canCommandCapability: () => false, reasonForCapability: () => 'Ekos controls the equipment.' }),
 }));
 
 /** Renders an empty strip; Pause and Stop do not depend on the queue. */

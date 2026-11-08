@@ -98,7 +98,7 @@ class Container:
             raise
 
     def _running_work(self) -> list[str]:
-        """List the jobs, stacks and downloads that are running now.
+        """List the jobs, imaging, copies and downloads that are running now.
 
         Returns
         -------
@@ -108,14 +108,24 @@ class Container:
         work = []
         try:
             jobs = self.job_service.get_active_jobs() if self.job_service is not None else []
-        except Exception:  # a failed look must not block the answer; report no jobs
-            logger.exception("Could not list the running jobs")
+        except Exception:
+            # A restart that loses a running job is worse than a refused
+            # restart, so a failed check counts as busy.
+            logger.warning("Could not list the running jobs", exc_info=True)
+            work.append("could not check the running jobs")
             jobs = []
         if jobs:
             work.append(f"{len(jobs)} job(s) running (for example stacking)")
         syncs = self.sync_service.get_all_active_syncs() if self.sync_service else []
         if syncs:
             work.append(f"{len(syncs)} frame download(s) running")
+        if self.sync_service is not None and self.sync_service.is_log_sync_running():
+            work.append("guide log copy running")
+        if self.target_imaging_executor is not None and self.target_imaging_executor.is_running():
+            work.append("target imaging session running")
+        pending = self.auto_download_service.pending_timer_count() if self.auto_download_service else 0
+        if pending:
+            work.append(f"{pending} automatic frame download(s) waiting to start")
         return work
 
     def shutdown_resources(self) -> None:

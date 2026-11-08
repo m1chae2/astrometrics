@@ -1,26 +1,33 @@
-"""Purpose: Keep the observatory source choice and shared launch names.
+"""Purpose: Give the simulator the launcher contract and its own launch names.
 
 Description: The "Observatory source" setting has two values: the real
 telescope, or a simulated sky. The choice is kept in a small file next to
 the user's settings file (``observatory_source.json`` in the real settings
 folder). The real settings file itself is never changed.
 
-The choice file helpers and the names shared with the backend live in the
-core (`astrometricslib.foundation.source_choice`, public through
-`astrometricslib.drivers`), so there is one copy of the format. This module
-re-exports them for the launcher and adds the names only the layer uses.
+The backend owns the contract: the choice file helpers and the names shared
+with the backend are defined in `backend.launch_contract` and public through
+`backend.public_interface`, the one backend module a launcher may import. This
+module re-exports them for the rest of the layer and adds the two names only
+the layer uses.
 
 The environment variables below are how a world tells the backend where it
 is. The launcher sets them when it runs the backend as its child.
 """
 
-from astrometricslib.drivers import (
+from backend.public_interface import (
     ACTIVE_SOURCE_VARIABLE,
     CHOICE_FILE_NAME,
     LAUNCH_ERROR_VARIABLE,
+    LAUNCH_NOTES_VARIABLE,
     LAUNCHER_VARIABLE,
-    OFFLINE,
+    MISSING_PROGRAMS_VARIABLE,
+    NO_TELESCOPE,
     REAL,
+    REAL_CONFIG_HOME_VARIABLE,
+    REAL_CONFIG_PATH_VARIABLE,
+    REAL_DATA_HOME_VARIABLE,
+    REAL_STATE_HOME_VARIABLE,
     RESTART_EXIT_CODE,
     SIMULATED,
     SOURCES,
@@ -37,7 +44,9 @@ __all__ = [
     "CHOICE_FILE_NAME",
     "LAUNCHER_VARIABLE",
     "LAUNCH_ERROR_VARIABLE",
-    "OFFLINE",
+    "LAUNCH_NOTES_VARIABLE",
+    "MISSING_PROGRAMS_VARIABLE",
+    "NO_TELESCOPE",
     "REAL",
     "REAL_CONFIG_HOME_VARIABLE",
     "REAL_CONFIG_PATH_VARIABLE",
@@ -55,7 +64,3 @@ __all__ = [
 #: Variables a launch sets, so the running backend knows its world.
 ACTIVE_ROOT_VARIABLE = "ASTROMETRICS_SIMULATOR_ROOT"
 ACTIVE_PORTS_VARIABLE = "ASTROMETRICS_SIMULATOR_PORTS"
-REAL_CONFIG_HOME_VARIABLE = "ASTROMETRICS_REAL_CONFIG_HOME"
-REAL_DATA_HOME_VARIABLE = "ASTROMETRICS_REAL_DATA_HOME"
-REAL_CONFIG_PATH_VARIABLE = "ASTROMETRICS_REAL_CONFIG_PATH"
-REAL_STATE_HOME_VARIABLE = "ASTROMETRICS_REAL_STATE_HOME"

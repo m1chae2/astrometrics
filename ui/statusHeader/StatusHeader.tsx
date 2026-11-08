@@ -286,6 +286,11 @@ export const StatusHeader: React.FC = () => {
                 variant="ghost"
                 className="header__strip-button"
                 aria-label={stripLabel}
+                onClick={(event) => {
+                  // The strip also opens the view on a mouse click; stop this click so it is not handled twice.
+                  event.stopPropagation();
+                  chooseMode(OBSERVATORY_MODE);
+                }}
               />
             )}
             <div className="header__telemetry-item" title={`Mount: ${connTxt}, ${trackVal}`}>
@@ -309,7 +314,7 @@ export const StatusHeader: React.FC = () => {
                     />
                   )}
                   <span className="header__telemetry-label">TARGET</span>
-                  <span className="header__telemetry-value header__telemetry-value--coord" style={{ color: 'var(--status-cyan-bright)', fontWeight: 600 }}>
+                  <span className={`header__telemetry-value header__telemetry-value--coord header__telemetry-value--target${inObservatory ? ' header__telemetry-value--link' : ''}`}>
                     {targetName}
                   </span>
                 </div>

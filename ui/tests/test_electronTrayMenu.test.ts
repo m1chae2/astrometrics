@@ -88,6 +88,13 @@ describe('buildTrayMenuTemplate', () => {
     expect(template[0].label).toContain('SIMULATOR');
   });
 
+  /** The simulator's Park item says it parks the simulator; the real one does not. */
+  it('labels Park as the simulator when it is one', () => {
+    const labels = (template: any[]) => template.map((item) => item.label);
+    expect(labels(buildTrayMenuTemplate({ ...TRACKING, simulator: true }, fakeActions()))).toContain('Park (simulator)');
+    expect(labels(buildTrayMenuTemplate({ ...TRACKING }, fakeActions()))).toContain('Park');
+  });
+
   /** Offline shows Disconnected and dashes. */
   it('shows Disconnected and dashes when offline', () => {
     const template: any[] = buildTrayMenuTemplate(OFFLINE_STATUS, fakeActions());
@@ -123,6 +130,17 @@ describe('fetchTrayStatus', () => {
     });
     const status: any = await fetchTrayStatus({ fetchImpl, baseUrl: 'http://x' });
     expect(status).toMatchObject({ online: true, mount: 'Parked', observatoryName: 'Dome', simulator: true });
+  });
+
+  /** The target comes from the telescope status. */
+  it('reads the target from the telescope status', async () => {
+    const fetchImpl = fetchFor({
+      'telescope:status': { connectionStatus: 'Connected', trackingStatus: 'Tracking', targetName: 'M 31' },
+      'observatory:get_source': { launch: null },
+      'observatory:get_active_telescope': { name: 'Dome' },
+    });
+    const status: any = await fetchTrayStatus({ fetchImpl, baseUrl: 'http://x' });
+    expect(status.target).toBe('M 31');
   });
 
   /** The flag comes from the launch report, not from the label text. */

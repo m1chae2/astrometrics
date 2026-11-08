@@ -18,13 +18,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-#: Names of the variables in which a launcher keeps the user's real folders,
-#: after it has moved the ``XDG_*`` variables to a world of its own.
-REAL_CONFIG_HOME_VARIABLE = "ASTROMETRICS_REAL_CONFIG_HOME"
-REAL_DATA_HOME_VARIABLE = "ASTROMETRICS_REAL_DATA_HOME"
-REAL_CONFIG_PATH_VARIABLE = "ASTROMETRICS_REAL_CONFIG_PATH"
-REAL_STATE_HOME_VARIABLE = "ASTROMETRICS_REAL_STATE_HOME"
-
 
 def _cache_root() -> str:
     """Give the folder under which this program keeps its working files.
@@ -248,143 +241,6 @@ def is_path_inside(root: str, path: str) -> bool:
 
 
 @dataclass(frozen=True)
-class RealFolders:
-    """The user's real settings file and library folders.
-
-    Attributes
-    ----------
-    config_home, data_home, state_home : `pathlib.Path`
-        The folders that hold ``astrometrics/`` for settings, for data and
-        for state (the run logs).
-    config_file : `pathlib.Path`
-        The real settings file.
-    library, frames, stacks, wayfinding : `pathlib.Path`
-        The image library, its frames, the folder for stacks and other
-        derived files, and the wayfinding library, as the real settings file
-        names them (or their defaults).
-    """
-
-    config_home: Path
-    data_home: Path
-    config_file: Path
-    library: Path
-    frames: Path
-    stacks: Path
-    wayfinding: Path
-    state_home: Path
-
-    @property
-    def logs(self) -> Path:
-        """Give the real folder of the job and run logs.
-
-        Returns
-        -------
-        logs : `pathlib.Path`
-            ``<state_home>/astrometrics/logs``. Nothing is created.
-        """
-        return self.state_home / "astrometrics" / "logs"
-
-    def protected_paths(self) -> tuple[Path, ...]:
-        """Give the folders that a simulator must never use or write in.
-
-        Returns
-        -------
-        paths : `tuple` [`pathlib.Path`]
-            The library, frames, stacks and wayfinding folders, and the
-            real ``astrometrics`` data and settings folders, each resolved.
-        """
-        found = (
-            self.library,
-            self.frames,
-            self.stacks,
-            self.wayfinding,
-            self.data_home / "astrometrics",
-            self.config_home / "astrometrics",
-        )
-        return tuple(dict.fromkeys(path.resolve() for path in found))
-
-
-def _setting_path(settings: Mapping, section: str, key: str) -> Path | None:
-    """Read one folder setting from a parsed settings file.
-
-    Parameters
-    ----------
-    settings : `~collections.abc.Mapping`
-        The parsed settings.
-    section, key : `str`
-        Where the folder is named.
-
-    Returns
-    -------
-    path : `pathlib.Path` or `None`
-        The folder, made absolute against the project root when it is
-        relative, or `None` when the setting is missing or empty.
-    """
-    value = settings.get(section, {})
-    text = str(value.get(key, "")).strip() if isinstance(value, Mapping) else ""
-    if not text:
-        return None
-    path = Path(text).expanduser()
-    return path if path.is_absolute() else Path(__file__).resolve().parents[2] / path
-
-
-def real_folders(environ: Mapping[str, str] | None = None) -> RealFolders:
-    """Find the user's real settings file and library folders.
-
-    A launcher may move the ``XDG_*`` variables and the settings path to a
-    world of its own, and keep the real ones in ``ASTROMETRICS_REAL_*``
-    variables. This function honours those first, so it names the real
-    folders both before and after the move. It reads the real settings file
-    (read only) and creates nothing.
-
-    Parameters
-    ----------
-    environ : `~collections.abc.Mapping` [`str`, `str`], optional
-        The environment. Default: the process environment.
-
-    Returns
-    -------
-    folders : `RealFolders`
-        The real folders. A missing or damaged settings file gives the
-        defaults.
-    """
-    environment = os.environ if environ is None else environ
-    home = Path.home()
-    config_home = Path(
-        environment.get(REAL_CONFIG_HOME_VARIABLE) or environment.get("XDG_CONFIG_HOME") or home / ".config"
-    )
-    data_home = Path(
-        environment.get(REAL_DATA_HOME_VARIABLE)
-        or environment.get("XDG_DATA_HOME")
-        or home / ".local" / "share"
-    )
-    state_home = Path(
-        environment.get(REAL_STATE_HOME_VARIABLE)
-        or environment.get("XDG_STATE_HOME")
-        or home / ".local" / "state"
-    )
-    named_file = (
-        environment.get(REAL_CONFIG_PATH_VARIABLE)
-        or environment.get("ASTROMETRICS_CONFIG_PATH")
-        or environment.get("ASTROMETRICS_CONFIG")
-    )
-    config_file = (
-        Path(named_file) if named_file else config_home / "astrometrics" / "astrometrics.config.toml"
-    )
-    named = library_folders(config_file, default_data_home=data_home)
-    return RealFolders(
-        config_home,
-        data_home,
-        config_file,
-        named.library,
-        named.frames,
-        named.stacks,
-        named.wayfinding,
-        state_home,
-    )
-
-
-@dataclass(frozen=True)
 class LibraryFolders:
     """The library folders that one settings file names.
 
@@ -402,6 +258,60 @@ class LibraryFolders:
     wayfinding: Path
 
 
+def resolve_library_setting(text: str, project_root: Path, search_package: bool = False) -> Path:
+    """Turn the text of a folder setting into an absolute path.
+
+    This is the one rule for the folder settings of ``[Image Library]`` and
+    ``[Wayfinding Library]``. `AppConfiguration` and `library_folders` both
+    use it, so a program that wants to know which folders the app writes to
+    gets the app's own answer.
+
+    Parameters
+    ----------
+    text : `str`
+        The setting, not empty.
+    project_root : `pathlib.Path`
+        The project folder, against which a relative path is taken.
+    search_package : `bool`, optional
+        If `True`, a relative path is first looked for inside the
+        ``astrometricslib`` folder, where an older install kept the library,
+        and used there when it exists. Default: `False`.
+
+    Returns
+    -------
+    path : `pathlib.Path`
+        The absolute path. Nothing is created.
+    """
+    path = Path(text)
+    if path.is_absolute():
+        return path.absolute()
+    if search_package:
+        in_package = project_root / "astrometricslib" / path
+        if in_package.exists():
+            return in_package.absolute()
+    return (project_root / path).absolute()
+
+
+def _setting_text(settings: Mapping, section: str, key: str) -> str:
+    """Read one folder setting from parsed settings.
+
+    Parameters
+    ----------
+    settings : `~collections.abc.Mapping`
+        The parsed settings.
+    section, key : `str`
+        Where the folder is named.
+
+    Returns
+    -------
+    text : `str`
+        The setting with spaces trimmed, or an empty string when the section
+        or the key is missing.
+    """
+    value = settings.get(section, {})
+    return str(value.get(key, "")).strip() if isinstance(value, Mapping) else ""
+
+
 def library_folders(
     config_file: str | os.PathLike, default_data_home: str | os.PathLike | None = None
 ) -> LibraryFolders:
@@ -409,7 +319,11 @@ def library_folders(
 
     It reads the file (read only) and creates nothing. It does not look at
     the environment, so it works for any settings file: the one in use, the
-    user's real one, or one that belongs to a throwaway library.
+    user's real one, or one that belongs to a throwaway library. It follows
+    the same rules as `AppConfiguration.get_library_path`,
+    `~AppConfiguration.get_frames_path` and
+    `~AppConfiguration.get_stacks_path` (through `resolve_library_setting`),
+    so it names the folders the app would write to.
 
     Parameters
     ----------
@@ -430,10 +344,23 @@ def library_folders(
         settings = tomllib.loads(path.read_text(encoding="utf-8"))
     except OSError, ValueError:
         settings = {}
-    library = _setting_path(settings, "Image Library", "path") or data_home / "astrometrics"
-    frames = _setting_path(settings, "Image Library", "frames_path") or library / "frames"
-    stacks = _setting_path(settings, "Image Library", "stacks_path") or frames
-    wayfinding = (
-        _setting_path(settings, "Wayfinding Library", "path") or data_home / "astrometrics" / "wayfinding"
-    )
+    root = Path(__file__).resolve().parents[2]
+    default_library = data_home / "astrometrics"
+
+    text = _setting_text(settings, "Image Library", "path")
+    library = resolve_library_setting(text, root, search_package=True) if text else default_library
+
+    text = _setting_text(settings, "Image Library", "frames_path")
+    if text:
+        frames = resolve_library_setting(text, root, search_package=True)
+        if not frames.exists():
+            frames = Path(resolve_mounted_path(str(frames)))
+    else:
+        frames = library / "frames"
+
+    text = _setting_text(settings, "Image Library", "stacks_path")
+    stacks = resolve_library_setting(text, root) if text else frames
+
+    text = _setting_text(settings, "Wayfinding Library", "path")
+    wayfinding = resolve_library_setting(text, root) if text else default_library / "wayfinding"
     return LibraryFolders(path, library, frames, stacks, wayfinding)

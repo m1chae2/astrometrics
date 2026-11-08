@@ -189,3 +189,18 @@ def test_new_guiding_samples_are_announced_with_their_nights() -> None:
     remote.samples = 0
     service.sync_telescope_logs()
     assert len(events) == 1
+
+
+def test_is_log_sync_running_follows_the_log_thread() -> None:
+    """The log copy thread shows as running until it ends."""
+    remote = _Remote()
+    remote.log_release.clear()
+    service = SyncService(observatory_api=SimpleNamespace(remote=remote))
+    assert service.is_log_sync_running() is False
+
+    service.start_log_sync()
+    assert service.is_log_sync_running() is True
+
+    remote.log_release.set()
+    _wait_for_log_sync(service)
+    assert service.is_log_sync_running() is False

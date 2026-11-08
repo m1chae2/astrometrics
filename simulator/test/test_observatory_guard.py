@@ -18,6 +18,7 @@ import pytest
 
 from simulator import observatory as observatory_module
 from simulator import observatory_guard
+from simulator.errors import GuardError, SimulationUnavailableError
 from simulator.observatory import (
     SimulatedObservatory,
     SimulationKind,
@@ -25,7 +26,6 @@ from simulator.observatory import (
     unavailable_reason,
 )
 from simulator.settings import simulator_config_text, standin_home
-from wayfindinglib.exceptions import GuardError, SimulationUnavailableError
 
 
 @pytest.fixture

@@ -62,3 +62,14 @@ def test_an_existing_launch_section_is_replaced_not_doubled() -> None:
     assert tomllib.loads(text)["Launch"]["label"] == "SIMULATOR"
     assert tomllib.loads(text)["Image Library"]["path"] == "x"
     assert tomllib.loads(with_launch_section('["Image Library"]\npath = "x"\n', launch))["Launch"]["offline"]
+
+
+def test_a_launch_header_with_a_trailing_comment_is_replaced_too() -> None:
+    """A comment after the header must not leave the old section behind."""
+    old = '[Launch]  # written by hand\noffline = false\n\n["Image Library"]\npath = "x"\n'
+    launch = launch_section_text("SIMULATOR", False, True, True, [])
+
+    text = with_launch_section(old, launch)
+
+    assert text.count("[Launch]") == 1
+    assert tomllib.loads(text)["Launch"]["offline"] is True

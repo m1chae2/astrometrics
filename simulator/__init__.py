@@ -18,13 +18,13 @@ import importlib
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from simulator.errors import GuardError, SimulationUnavailableError
     from simulator.library_copy import read_report as read_library_copy_report
     from simulator.library_copy import teardown as remove_library_copy
     from simulator.night_replay import list_nights
     from simulator.observatory import (
         SimulatedObservatory,
         SimulationKind,
-        SimulationUnavailableError,
         choose_free_port,
         missing_programs,
         offline_environment,
@@ -32,7 +32,6 @@ if TYPE_CHECKING:
         unavailable_reason,
     )
     from simulator.observatory_guard import (
-        GuardError,
         check_offline_settings_update,
         check_settings_update,
     )
@@ -40,10 +39,10 @@ if TYPE_CHECKING:
 
 #: Each public name and where it comes from: the module, and the name there.
 _LOCATIONS = {
-    "GuardError": ("observatory_guard", "GuardError"),
+    "GuardError": ("errors", "GuardError"),
     "SimulatedObservatory": ("observatory", "SimulatedObservatory"),
     "SimulationKind": ("observatory", "SimulationKind"),
-    "SimulationUnavailableError": ("observatory", "SimulationUnavailableError"),
+    "SimulationUnavailableError": ("errors", "SimulationUnavailableError"),
     "check_offline_settings_update": ("observatory_guard", "check_offline_settings_update"),
     "check_settings_update": ("observatory_guard", "check_settings_update"),
     "choose_free_port": ("observatory", "choose_free_port"),

@@ -20,6 +20,7 @@ import ipaddress
 import logging
 import os
 import re
+import shlex
 import subprocess
 import threading
 import time
@@ -473,7 +474,7 @@ class StellarMateInterface(RemoteTransferDriver):
             the listing command fails.
         """
         try:
-            cmd = f"ls -F {self.remote_pictures_path} | grep '/$'"
+            cmd = f"ls -F {shlex.quote(self.remote_pictures_path)} | grep '/$'"
             output = self._run_command(["ssh", "--", self.host_alias, cmd])
             dirs = [d.rstrip("/") for d in output.split("\n") if d.strip()]
             return dirs
@@ -539,7 +540,8 @@ class StellarMateInterface(RemoteTransferDriver):
             folder_name = self._resolve_remote_folder_name(folder_name)
             remote_path = f"{self.remote_pictures_path}/{folder_name}"
             cmd = (
-                f"find '{remote_path}' -type f \\( -name '*.fits' -o -name '*.fit' \\) -printf '%P\\n' | sort"
+                f"find {shlex.quote(remote_path)} -type f \\( -name '*.fits' -o -name '*.fit' \\) "
+                "-printf '%P\\n' | sort"
             )
             output = self._run_command(["ssh", "--", self.host_alias, cmd])
             files = [f.strip() for f in output.split("\n") if f.strip()]
@@ -573,7 +575,7 @@ class StellarMateInterface(RemoteTransferDriver):
             folder_name = self._resolve_remote_folder_name(folder_name)
             remote_path = f"{self.remote_pictures_path}/{folder_name}"
             cmd = (
-                f"find '{remote_path}' -type f \\( -name '*.fits' -o -name '*.fit' \\) "
+                f"find {shlex.quote(remote_path)} -type f \\( -name '*.fits' -o -name '*.fit' \\) "
                 f"-printf '%s\\t%P\\n' | sort -k2"
             )
             output = self._run_command(["ssh", "--", self.host_alias, cmd])
@@ -607,7 +609,7 @@ class StellarMateInterface(RemoteTransferDriver):
         try:
             folder_name = self._resolve_remote_folder_name(folder_name)
             remote_path = f"{self.remote_pictures_path}/{folder_name}"
-            cmd = f"find '{remote_path}' -type f \\( -name '*.fits' -o -name '*.fit' \\) | wc -l"
+            cmd = f"find {shlex.quote(remote_path)} -type f \\( -name '*.fits' -o -name '*.fit' \\) | wc -l"
             output = self._run_command(["ssh", "--", self.host_alias, cmd])
             return int(output)
         except ExternalServiceError, OSError, ValueError:

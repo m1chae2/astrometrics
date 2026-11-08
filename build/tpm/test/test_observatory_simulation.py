@@ -103,10 +103,10 @@ def test_guard_refuses_remote_phd2_and_outside_pictures(tmp_path: Path) -> None:
 def test_connection_check_finds_only_remote_peers_of_the_given_processes() -> None:
     """Only a non-loopback peer of a listed process is reported."""
     output = "\n".join([
-        'ESTAB 0 0 127.0.0.1:50000 127.0.0.1:7777 users:(("python",pid=10,fd=5))',
-        'ESTAB 0 0 [::ffff:127.0.0.1]:50001 [::ffff:127.0.0.1]:7778 users:(("python",pid=10,fd=6))',
-        'ESTAB 0 0 192.168.1.5:50002 192.168.50.188:22 users:(("ssh",pid=11,fd=3))',
-        'ESTAB 0 0 192.168.1.5:50003 8.8.8.8:443 users:(("firefox",pid=99,fd=3))',
+        'tcp ESTAB 0 0 127.0.0.1:50000 127.0.0.1:7777 users:(("python",pid=10,fd=5))',
+        'tcp ESTAB 0 0 [::ffff:127.0.0.1]:50001 [::ffff:127.0.0.1]:7778 users:(("python",pid=10,fd=6))',
+        'tcp ESTAB 0 0 192.168.1.5:50002 192.168.50.188:22 users:(("ssh",pid=11,fd=3))',
+        'tcp ESTAB 0 0 192.168.1.5:50003 8.8.8.8:443 users:(("firefox",pid=99,fd=3))',
     ])
     offending = seal_guard.parse_ss_connections(output, {10, 11})
     assert len(offending) == 1

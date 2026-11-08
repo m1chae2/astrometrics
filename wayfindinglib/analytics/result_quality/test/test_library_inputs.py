@@ -383,7 +383,7 @@ def test_the_sky_model_is_fitted_once_for_every_report_until_its_camera_changes(
     assert len(fits) == 1
 
     # A frame of another target taken with the same camera fits it again.
-    _write_camera_row(config, SETTING.camera, "run-2", target_id="Other")
+    _write_camera_row(config, SETTING.camera, "run-2", target_id="Other", observing_night_id="2020-01-01")
     LibraryInputs(None, _butler(SITE), config).sky_model_for(SETTING)
     assert len(fits) == 2
 
@@ -422,7 +422,7 @@ def test_the_camera_observations_are_read_once_until_their_camera_changes(
     LibraryInputs(library, _butler(SITE), config).camera_observations(SETTING.camera)
     assert reads == [SETTING.camera]
 
-    _write_camera_row(config, SETTING.camera, "run-2", target_id="Other")
+    _write_camera_row(config, SETTING.camera, "run-2", target_id="Other", observing_night_id="2020-01-01")
     LibraryInputs(library, _butler(SITE), config).camera_observations(SETTING.camera)
     assert reads == [SETTING.camera, SETTING.camera]
 
@@ -560,3 +560,67 @@ def test_a_frame_tonight_keeps_the_camera_inputs_and_the_rollover_reads_once(
     assert (len(reads), len(fits)) == (3, 3)
     visit(next_evening)
     assert (len(reads), len(fits)) == (3, 3)
+
+
+def test_a_failed_target_lookup_leaves_a_note_and_is_not_kept(
+    config: AppConfiguration, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed lookup is not a missing target, and nothing is kept."""
+    from astrometricslib.exceptions import StorageError
+
+    monkeypatch.setattr(library_inputs, "_CAMERA_OBSERVATIONS_CACHE", library_inputs.VersionedCache())
+    target = make_target(STAR, 1)
+    library = FakeLibrary([target], make_rows(target, REVIEWED))
+    good_get = library.targets.get
+    state = {"fail": True}
+
+    def flaky_get(target_id: str) -> Target | None:
+        """Fail while the test says the database is busy.
+
+        Returns
+        -------
+        target : `Target` or `None`
+            The target.
+
+        Raises
+        ------
+        StorageError
+            While the test says the database is busy.
+        """
+        if state["fail"]:
+            raise StorageError("database is locked")
+        return good_get(target_id)
+
+    library.targets.get = flaky_get
+    inputs = LibraryInputs(library, _butler(SITE), config)
+    assert inputs.target(target.id) is None
+    assert any("could not be read" in note for note in inputs.notes)
+
+    # A target that is not there leaves no note.
+    state["fail"] = False
+    quiet = LibraryInputs(library, _butler(SITE), config)
+    assert quiet.target("No such target") is None
+    assert not quiet.notes
+
+    # A failed lookup inside the camera read marks it incomplete: not kept.
+    state["fail"] = True
+    first = LibraryInputs(library, _butler(SITE), config)
+    first.camera_observations(SETTING.camera)
+    assert first.notes
+    state["fail"] = False
+    second = LibraryInputs(library, _butler(SITE), config)
+    assert second.camera_observations(SETTING.camera)
+    assert not second.notes
+
+
+def test_a_frame_row_with_no_night_is_not_a_finished_night(config: AppConfiguration) -> None:
+    """A frame row with no night may be from tonight; it is left out."""
+    target = make_target(STAR, 2)
+    rows = make_rows(target, REVIEWED)
+    no_night = [
+        row.model_copy(update={"subject": row.subject.model_copy(update={"observing_night_id": None})})
+        for row in rows
+    ]
+    library = FakeLibrary([target], no_night)
+    inputs = LibraryInputs(library, _butler(SITE), config, now=_local_evening("2026-12-31"))
+    assert inputs.camera_rows(SETTING.camera) == []

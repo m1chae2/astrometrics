@@ -15,6 +15,22 @@ export const OBSERVATORY_SOURCE_QUERY_KEY = ['observatorySource'] as const;
 /** Time between questions while the backend has not answered or is still starting, in milliseconds. */
 export const OBSERVATORY_SOURCE_RETRY_MS = 2000;
 
+/** The longest wait between two tries of a failed question, in milliseconds. */
+export const OBSERVATORY_SOURCE_MAX_RETRY_MS = 30000;
+
+/** How many times a failed question is tried again before polling stops and waits for the event socket. */
+export const OBSERVATORY_SOURCE_MAX_RETRIES = 5;
+
+/**
+ * Gives the wait before a failed question is tried again: it doubles each time, up to a cap.
+ *
+ * @param attemptIndex The number of failures so far, counting from 0.
+ * @return The wait in milliseconds.
+ */
+export function observatorySourceRetryDelay(attemptIndex: number): number {
+    return Math.min(OBSERVATORY_SOURCE_RETRY_MS * 2 ** attemptIndex, OBSERVATORY_SOURCE_MAX_RETRY_MS);
+}
+
 /**
  * Says whether a report is final, so no more questions are needed.
  *
@@ -28,9 +44,9 @@ export function isObservatorySourceSettled(state: ObservatorySourceState | undef
 /**
  * Reads the backend's observatory source report.
  *
- * It keeps asking until the backend answers (a failed call is tried again) and says it is ready, then stops.
- * A final answer is asked for again only when the event socket comes back after a break, because the
- * backend may have restarted on another source.
+ * It keeps asking until the backend answers and says it is ready, then stops. A failed call is tried again
+ * a few times with a growing wait, then polling stops. A final answer, or a gave-up question, is asked for
+ * again when the event socket comes back, because the backend may have restarted on another source.
  *
  * @param active False to skip the question (for a hidden panel).
  * @return The report, or undefined until the backend answers.
@@ -41,10 +57,14 @@ export function useObservatorySourceQuery(active = true): ObservatorySourceState
         queryKey: OBSERVATORY_SOURCE_QUERY_KEY,
         queryFn: getObservatorySource,
         enabled: active,
-        retry: true,
-        retryDelay: OBSERVATORY_SOURCE_RETRY_MS,
+        retry: OBSERVATORY_SOURCE_MAX_RETRIES,
+        retryDelay: observatorySourceRetryDelay,
         staleTime: Infinity,
-        refetchInterval: (query) => (isObservatorySourceSettled(query.state.data) ? false : OBSERVATORY_SOURCE_RETRY_MS),
+        // Poll only while the backend answers that it is still starting. After the tries run out the query
+        // stays in error and the event socket's 'connected' event starts it again.
+        refetchInterval: (query) => (
+            query.state.status === 'error' || isObservatorySourceSettled(query.state.data) ? false : OBSERVATORY_SOURCE_RETRY_MS
+        ),
     });
 
     const socketWasDown = useRef(false);
@@ -52,7 +72,8 @@ export function useObservatorySourceQuery(active = true): ObservatorySourceState
         if (!active) return;
         const onDisconnected = () => { socketWasDown.current = true; };
         const onConnected = () => {
-            if (!socketWasDown.current) return;
+            const gaveUp = queryClient.getQueryState(OBSERVATORY_SOURCE_QUERY_KEY)?.status === 'error';
+            if (!socketWasDown.current && !gaveUp) return;
             socketWasDown.current = false;
             void queryClient.invalidateQueries({ queryKey: OBSERVATORY_SOURCE_QUERY_KEY });
         };

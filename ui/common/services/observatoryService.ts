@@ -33,8 +33,8 @@ export async function enterControllerMode(evidenceNote = ''): Promise<BulkDelega
 }
 
 /** Where the app gets its observatory from. */
-/** `offline` is a state, not a choice: the chosen simulator failed to start and the app has no telescope. */
-export type ObservatorySource = 'real' | 'simulated' | 'offline';
+/** `no_telescope` is a state, not a choice: the chosen simulator failed to start and the app has no telescope. */
+export type ObservatorySource = 'real' | 'simulated' | 'no_telescope';
 
 /** How the backend was launched: the world it runs in, from the config's [Launch] section. */
 export interface ObservatoryLaunch {

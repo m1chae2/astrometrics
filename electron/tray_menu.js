@@ -100,12 +100,11 @@ export async function fetchTrayStatus(options = {}) {
   ]);
   // The launch report says whether the app is off live hardware. A failed start is not shown as a simulator.
   const launch = source && source.launch;
-  const simulator = Boolean(launch && launch.live_hardware === false) && !source.failed
-    && !/fail/i.test(String(launch.label || ''));
+  const simulator = Boolean(launch && launch.live_hardware === false) && !source.failed;
   return {
     online: true,
     mount: connected ? (telescope.trackingStatus || 'Ready') : 'Disconnected',
-    target: null,
+    target: typeof telescope.targetName === 'string' && telescope.targetName ? telescope.targetName : null,
     ra: connected ? (telescope.ra ?? null) : null,
     dec: connected ? (telescope.dec ?? null) : null,
     altitude: connected ? (telescope.altitude ?? null) : null,
@@ -141,7 +140,7 @@ export function buildTrayMenuTemplate(status, actions) {
     { type: 'separator' },
     ...TRAY_WORKSPACES.map(({ label, mode }) => ({ label, click: () => actions.navigate(mode) })),
     { type: 'separator' },
-    { label: 'Park', click: () => actions.park() },
+    { label: status.simulator ? 'Park (simulator)' : 'Park', click: () => actions.park() },
     { label: 'Open App', click: () => actions.openApp() },
     { label: 'Quit', click: () => actions.quit() },
   ];
@@ -209,7 +208,8 @@ export function createTrayMenu({
     }
     rebuildPending = false;
     try {
-      const shown = { ...status, target };
+      // The target the main window reports wins; otherwise the one the telescope status carries.
+      const shown = { ...status, target: target || status.target || null };
       const menu = Menu.buildFromTemplate(buildTrayMenuTemplate(shown, actions));
       // Menu open/close events exist on some Electron versions and platforms.
       // Where they never fire, the menu is simply rebuilt on the timer.

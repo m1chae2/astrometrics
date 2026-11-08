@@ -136,13 +136,12 @@ astrometrics = "backend.main_backend:main"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["backend", "astrometricslib", "wayfindinglib", "mcp_servers", "simulator"]
+packages = ["backend", "astrometricslib", "wayfindinglib", "mcp_servers"]
 exclude = [
   "backend/tests",
   "astrometricslib/test",
   "wayfindinglib/test",
   "mcp_servers/**/test",
-  "simulator/test",
 ]
 
 [tool.pytest.ini_options]
@@ -434,6 +433,24 @@ ignore_imports = [
     "simulator.** -> wayfindinglib.logs",
     "simulator.test.** -> astrometricslib.**",
     "simulator.test.** -> wayfindinglib.**",
+]
+
+[[tool.importlinter.contracts]]
+name = "the simulator imports only the backend's public interface"
+type = "forbidden"
+# The backend owns the launcher contract (decision D19 of
+# SIMULATOR_FROM_REAL_DATA_PLAN.md) and declares it in
+# `backend.public_interface`. That one module is all the simulator may import
+# from the backend; it needs the choice file, the launch variables and the
+# restart exit code, and nothing of the app. `backend.public_interface`
+# imports only `backend.launch_contract`, which imports the standard library
+# only, so reaching it starts none of the app.
+source_modules = ["simulator"]
+forbidden_modules = ["backend"]
+allow_indirect_imports = true
+unmatched_ignore_imports_alerting = "none"
+ignore_imports = [
+    "simulator.** -> backend.public_interface",
 ]
 
 [[tool.importlinter.contracts]]

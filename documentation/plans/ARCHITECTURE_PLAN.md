@@ -41,6 +41,10 @@ and the target design. Some of the paths they name have since moved, for example
 - **Phases 4 to 6.** The section 5.1 copies and the section 6.3 legacy code are gone. The library
   API has the section 4 shape, including the seven `control` children. Library code raises the
   section 7.2 categories. The section 5.2 logic lives in the libraries.
+- **Later additions.** The telescope link in `wayfindinglib/drivers/` has two small modules:
+  `ssh_port_forward.py` keeps an SSH port forward open to the observatory computer, and
+  `host_resolver.py` remembers the last good address of its `.local` name. Both stay internal. The
+  simulator layer (item 5 of section 1) has its own import-linter contracts.
 - **Phase 7.** The MCP servers live in `mcp_servers/`, and `mcp` is an optional dependency. The
   backend declares its public interface in `backend/public_interface.py`. Startup work lives in
   `backend/startup.py`, and the routes live in `backend/routers/`.
@@ -151,11 +155,21 @@ The repository has four kinds of code. Each layer may call only the layer below 
 
    Nothing outside that interface is reachable from the UI. Handoff and the emergency park
    command become RPC methods. CLAUDE.md records the same list.
+5. **Simulator layer** (`simulator/`, a top-level package beside `backend/`). It builds a simulated
+   observatory around the app and starts the backend as its child. The core (the two libraries,
+   `backend/` and `mcp_servers/`) never imports it. The simulator uses only the libraries' public
+   names and, from the backend, only `backend.public_interface`, which also declares the launcher
+   contract (the saved source choice, the launch variables and the restart exit code).
 
 "Public API" means the names each library exports from its package root (`astrometricslib.__all__`,
 `wayfindinglib.__all__`): the top-level class (`Astrometrics`, `Wayfinder`), its sub-API classes,
 the data models those classes accept and return, the exceptions, and the drivers a caller must
 inject. Everything else is internal.
+
+Each library also offers a few public modules besides its package root. In astrometricslib they
+are `exceptions`, `reports`, `jobs` and `drivers`. In wayfindinglib they are `exceptions`,
+`reports` and `logs` (readers for the Ekos session logs). The backend, the MCP servers and the
+simulator may import these modules.
 
 ## 2. Summary of findings
 
@@ -681,7 +695,7 @@ statuses only for problems below the RPC layer: 400 for a request that is not va
 | Check | Purpose |
 |---|---|
 | Ruff `TID251` banned-API entries for `wayfindinglib.drivers`, `.tasks`, `.models`, `.analytics`, `.session_analysis`, `.data_access`, `.observationlib`, `.observatorylib`, `.watchdog`, plus `astrometricslib.visualization`, with a per-file exemption for each library's own tree | Blocks the internal imports that pass lint today |
-| import-linter contracts: layers `backend.routers` above `backend.services` above the libraries; libraries never import `backend`; `astrometricslib` never imports `wayfindinglib`; `backend.services` never imports `backend.container` or `backend.routers`; the MCP package imports only public library names | Turns the CLAUDE.md layer rules from convention into a failing check |
+| import-linter contracts: layers `backend.routers` above `backend.services` above the libraries; libraries never import `backend`; `astrometricslib` never imports `wayfindinglib`; `backend.services` never imports `backend.container` or `backend.routers`; the MCP package imports only public library names; the core never imports `simulator`; `simulator` imports only public library names and `backend.public_interface` | Turns the CLAUDE.md layer rules from convention into a failing check |
 | Public-surface tests for both libraries | Keeps the export lists from growing or leaking again |
 | A test that the generated MCP tool list equals the public API minus the dispositions table | Makes every new public method a deliberate choice of AI tool |
 | A backend test that every route mounted on the FastAPI app appears in the public-interface declaration (section 8.1) | Keeps the backend's public interface explicit |

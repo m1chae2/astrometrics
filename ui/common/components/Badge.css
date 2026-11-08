@@ -78,3 +78,18 @@
     flex: 0 0 auto;
     white-space: nowrap;
 }
+
+/* A chip with a short label shows the short word in narrow windows. The full text stays in the tooltip. */
+.status-chip__word--short {
+    display: none;
+}
+
+@media (max-width: 1100px) {
+    .status-chip__word--short {
+        display: inline;
+    }
+
+    .status-chip__word--full {
+        display: none;
+    }
+}

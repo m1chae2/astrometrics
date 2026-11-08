@@ -569,6 +569,14 @@ def cached_depth_goal_status(
     stack or a new level always gives a fresh status. The caller gets its own
     copy.
 
+    The key has no time bound, unlike the target report's one-hour bound. The
+    report is built for "now", but the depth goal status reads none of the
+    parts that depend on the time: the report uses the time only for its
+    starting point (a target with no frames) and its ``generatedAt`` stamp,
+    and the status reads neither. The one time-based input, the end of the
+    night that closes the camera's finished nights, is already in the data
+    version, so the status is rebuilt when the night rolls over.
+
     Parameters
     ----------
     target_id : `str`

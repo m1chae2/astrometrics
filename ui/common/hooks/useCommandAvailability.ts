@@ -36,7 +36,24 @@ export interface CommandAvailability {
     delegations: CapabilityDelegation[];
     /** Whether the policy is still loading. */
     isChecking: boolean;
+    /**
+     * True only when this app may command the given capability: that capability's own delegation state is
+     * AUTHORITATIVE and the source is settled and not failed.
+     */
+    canCommandCapability: (capability: ObservatoryCapability) => boolean;
+    /** The visible reason the given capability is off, or an empty string while it is on. */
+    reasonForCapability: (capability: ObservatoryCapability) => string;
 }
+
+/** Plain names of the capabilities, used in the reason text. */
+const CAPABILITY_NAMES: Record<ObservatoryCapability, string> = {
+    [ObservatoryCapability.MOUNT_CONTROL]: 'the mount',
+    [ObservatoryCapability.PLATE_SOLVE_ALIGNMENT]: 'alignment',
+    [ObservatoryCapability.AUTOGUIDING]: 'guiding',
+    [ObservatoryCapability.AUTOFOCUS]: 'the focuser',
+    [ObservatoryCapability.CAPTURE_ORCHESTRATION]: 'the camera',
+    [ObservatoryCapability.OBSERVATORY_SAFETY]: 'the safety checks',
+};
 
 /**
  * Reads the delegation policy and gives the fail-safe command answer.
@@ -52,14 +69,24 @@ export function useCommandAvailability(): CommandAvailability {
         retry: false,
     });
     const delegations = query.data?.delegation_policy?.capability_delegations ?? [];
-    const mountAuthoritative = delegations.some(
-        (entry) => entry.capability === ObservatoryCapability.MOUNT_CONTROL && entry.state === DelegationState.AUTHORITATIVE,
-    );
-    const canCommand = mountAuthoritative && sourceSettled && !source?.failed;
+    const canCommandCapability = (capability: ObservatoryCapability): boolean => delegations.some(
+        (entry) => entry.capability === capability && entry.state === DelegationState.AUTHORITATIVE,
+    ) && sourceSettled && !source?.failed;
+    const canCommand = canCommandCapability(ObservatoryCapability.MOUNT_CONTROL);
     // A world that is not on live hardware is up, but the app may not have command of it yet.
     const simulatorUp = isNotLiveLaunch(source) && sourceSettled && !source?.failed;
     const isChecking = query.isPending || query.isError;
+    const reasonForCapability = (capability: ObservatoryCapability): string => {
+        if (canCommandCapability(capability)) return '';
+        if (simulatorUp) {
+            return `The simulator is up, but the app has no command of ${CAPABILITY_NAMES[capability]} yet. ${source?.commands?.error ?? describeCommandsStillOff(source)}`.trim();
+        }
+        if (isChecking) return CHECKING_CONTROL_TEXT;
+        return `Equipment commands are off for ${CAPABILITY_NAMES[capability]}. Ekos controls it; this app only watches.`;
+    };
     return {
+        canCommandCapability,
+        reasonForCapability,
         canCommand,
         reason: canCommand
             ? (simulatorUp ? `${SIMULATOR_COMMANDS_TEXT} ${describeCommandsStillOff(source)}`.trim() : '')

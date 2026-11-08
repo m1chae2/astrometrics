@@ -45,7 +45,7 @@ vi.mock('../../common/components/SelectableList', () => ({ SelectableList: () =>
 vi.mock('../../common/radioList/TargetListFilterPanel', () => ({ TargetListFilterPanel: () => null }));
 vi.mock('../../common/components/AddTargetModal', () => ({ AddTargetModal: () => null }));
 vi.mock('../../common/hooks/useCommandAvailability', () => ({
-    useCommandAvailability: () => ({ canCommand: true, reason: '' }),
+    useCommandAvailability: () => ({ canCommand: true, reason: '', canCommandCapability: () => true, reasonForCapability: () => '' }),
 }));
 vi.mock('../../common/hooks/useEquipmentConfiguration', () => ({
     useEquipmentConfiguration: () => ({ availableCameras: [], loading: false, error: null, reload: () => undefined }),

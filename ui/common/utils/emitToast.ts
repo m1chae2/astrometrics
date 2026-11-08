@@ -59,9 +59,10 @@ export function emitToast(
   try {
     if (kind === 'error') {
       try {
-        console.error(source ? `${source}: ${text}` : text);
+        // A failed user action is expected, so it is logged as a warning, not a console error.
+        console.warn(source ? `${source}: ${text}` : text);
       } catch {
-        // Ignore console errors.
+        // Ignore console failures.
       }
     }
 

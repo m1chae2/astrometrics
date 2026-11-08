@@ -40,6 +40,21 @@ SAVED_SECTIONS = ("calibration", "spectrum_analysis", "plate_scale")
 need no device."""
 
 
+#: Longest id a recorded calibration or focus model may have.
+MAXIMUM_RECORD_ID_LENGTH = 100
+
+#: Longest source note a recorded calibration may have.
+MAXIMUM_SOURCE_NOTE_LENGTH = 500
+
+#: Largest plate scale a guide camera could have (arcsec per pixel). Real
+#: guide trains are about 1 to 10; 100 only catches a typing slip.
+MAXIMUM_PLATE_SCALE_ARCSEC_PER_PIXEL = 100.0
+
+#: Largest guide pulse speed accepted (arcsec per second). The sidereal rate
+#: is about 15; PHD2 reports a few times that at most.
+MAXIMUM_GUIDE_RATE_ARCSEC_PER_SEC = 1000.0
+
+
 class GuidingControl(ControlChild):
     """Operate the guide camera and the guider's saved models."""
 
@@ -519,22 +534,6 @@ class GuidingControl(ControlChild):
         records = self._context.butler.get_all("guider_calibration")
         return sorted(records, key=lambda record: record.calibrated_at)
 
-    def query_runs(self) -> list[GuidingRunSummary]:
-        """List every guiding run read from the guide logs, oldest first.
-
-        Each run is one continuous stretch of guiding, with the plate scale
-        and the calibrated mount speeds the guider used. They are saved
-        when a guide log is read (see `refit_spectrum`). It only reads.
-
-        Returns
-        -------
-        runs : `list` [`GuidingRunSummary`]
-            The saved runs in order of ``started_at``. Empty when none is
-            saved.
-        """
-        runs = self._context.butler.get_all("guiding_run")
-        return sorted(runs, key=lambda run: run.started_at)
-
     def record_calibration(
         self,
         *,
@@ -547,32 +546,37 @@ class GuidingControl(ControlChild):
         dec_rate_arcsec_per_sec: float,
         source_note: str,
         calibrated_at: datetime | None = None,
+        replace: bool = False,
     ) -> GuiderCalibration:
         """Save a guider calibration that was measured elsewhere.
 
         Use this when the numbers come from a tool outside this library, such
-        as PHD2's own calibration, or from a copy of an earlier record. The
-        record replaces any saved record with the same id, and the delegation
-        rules treat it like one measured here. Nothing is sent to a device.
+        as PHD2's own calibration, or from a copy of an earlier record. A
+        record with an id that is already saved is refused unless `replace`
+        is true. The delegation rules treat the record like one measured
+        here. Nothing is sent to a device.
 
         Parameters
         ----------
         calibration_id : `str`
-            Id of the record. Saving the same id again replaces it.
+            Id of the record, at most 100 characters.
         camera_id, telescope_id : `str`
             The equipment pairing the calibration belongs to.
         arcsec_per_pixel : `float`
-            Guide camera plate scale. Must be above zero.
+            Guide camera plate scale. Above zero, at most 100.
         camera_angle_deg : `float`
             Angle of the camera against the mount axes, from -180 to 180.
         ra_rate_arcsec_per_sec, dec_rate_arcsec_per_sec : `float`
             Speed of the mount along each axis for a guide pulse. Each must
-            be above zero.
+            be above zero and at most 1000.
         source_note : `str`
             Where the numbers came from. Required, so a record never has an
-            unknown origin.
+            unknown origin. At most 500 characters.
         calibrated_at : `~datetime.datetime`, optional
             When the calibration was made. Now when omitted.
+        replace : `bool`, optional
+            Replace a saved record that has the same id. Defaults to
+            `False`, which refuses instead.
 
         Returns
         -------
@@ -582,14 +586,32 @@ class GuidingControl(ControlChild):
         Raises
         ------
         InvalidArgumentError
-            If a number is out of range, an id is empty, or `source_note`
-            is empty.
+            If a number is out of range, an id or `source_note` is empty or
+            too long, or the id is already saved and `replace` is false.
         """
         from pydantic import ValidationError
 
         from astrometricslib.exceptions import InvalidArgumentError
 
         require_text(source_note=source_note, calibration_id=calibration_id)
+        if len(calibration_id) > MAXIMUM_RECORD_ID_LENGTH or len(source_note) > MAXIMUM_SOURCE_NOTE_LENGTH:
+            raise InvalidArgumentError(
+                f"calibration_id may have at most {MAXIMUM_RECORD_ID_LENGTH} characters and source_note "
+                f"at most {MAXIMUM_SOURCE_NOTE_LENGTH}."
+            )
+        if arcsec_per_pixel > MAXIMUM_PLATE_SCALE_ARCSEC_PER_PIXEL:
+            raise InvalidArgumentError(
+                f"arcsec_per_pixel must be at most {MAXIMUM_PLATE_SCALE_ARCSEC_PER_PIXEL}."
+            )
+        if max(ra_rate_arcsec_per_sec, dec_rate_arcsec_per_sec) > MAXIMUM_GUIDE_RATE_ARCSEC_PER_SEC:
+            raise InvalidArgumentError(
+                f"The guide rates must be at most {MAXIMUM_GUIDE_RATE_ARCSEC_PER_SEC} arcsec/s."
+            )
+        if not replace and self._context.butler.get("guider_calibration", {"id": calibration_id}) is not None:
+            raise InvalidArgumentError(
+                f"A guider calibration with id {calibration_id!r} is already saved. "
+                "Pass replace=True to replace it."
+            )
         fields = {
             "id": calibration_id,
             "camera_id": camera_id,

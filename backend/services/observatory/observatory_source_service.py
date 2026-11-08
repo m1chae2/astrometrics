@@ -20,22 +20,22 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from astrometricslib import get_configuration
-from astrometricslib.drivers import (
+from astrometricslib.drivers import LaunchIdentity
+from astrometricslib.exceptions import ConfigurationError, InvalidArgumentError
+from backend import observatory_source
+from backend.launch_contract import (
     ACTIVE_SOURCE_VARIABLE,
     LAUNCH_ERROR_VARIABLE,
     LAUNCH_NOTES_VARIABLE,
     MISSING_PROGRAMS_VARIABLE,
-    OFFLINE,
-    REAL,
+    NO_TELESCOPE,
     SIMULATED,
     SOURCES,
-    LaunchIdentity,
     SourceChoice,
+    normalize_source,
     read_choice,
     write_choice,
 )
-from astrometricslib.exceptions import ConfigurationError, InvalidArgumentError
-from backend import observatory_source
 
 logger = logging.getLogger(__name__)
 
@@ -96,8 +96,8 @@ class ObservatorySourceService:
 
     @property
     def active_source(self) -> str:
-        """The launcher's source: ``real``, ``simulated`` or ``offline``."""
-        return self._environ.get(ACTIVE_SOURCE_VARIABLE) or REAL
+        """The launcher's source: ``real``, ``simulated``, ``no_telescope``."""
+        return normalize_source(self._environ.get(ACTIVE_SOURCE_VARIABLE))
 
     def _missing_programs(self) -> list[str]:
         """Give the programs the launcher found missing.
@@ -151,11 +151,12 @@ class ObservatorySourceService:
             ``running`` (`False`), ``error`` and ``reason`` (why the chosen
             simulator could not start, from the launcher; empty otherwise),
             ``failed`` (`True` when it could not start and the backend runs
-            offline), ``missing_programs`` (the simulator's programs the
-            launcher did not find), ``notes`` (the launcher's status notes,
-            for example an optional program that is missing; they never stop
-            a source change), ``available`` and ``unavailable_reason``
-            (whether the source can change from here, and why not),
+            with no telescope), ``missing_programs`` (the simulator's
+            programs the launcher did not find), ``notes`` (the launcher's
+            status notes, for example an optional program that is missing;
+            they never stop a source change), ``available`` and
+            ``unavailable_reason`` (whether the source can change from
+            here, and why not),
             ``library_copy`` (empty), ``commands`` (`None`) and ``launch``.
             ``launch`` is the launch identity from the ``[Launch]`` section
             of the settings in use: ``label`` (`str`), ``live_hardware``,
@@ -165,7 +166,7 @@ class ObservatorySourceService:
         """
         choice = read_choice(self._environ)
         active = self.active_source
-        failed = active == OFFLINE
+        failed = active == NO_TELESCOPE
         launch = self._launch_description()
         error = self._environ.get(LAUNCH_ERROR_VARIABLE) or None
         reason = self._unavailable_reason()

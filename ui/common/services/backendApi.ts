@@ -765,6 +765,15 @@ export function setBackendRestarting(restarting: boolean): void {
     backendRestarting = restarting;
 }
 
+/**
+ * Says whether the backend is restarting on purpose, so callers can treat a lost connection as expected.
+ *
+ * @return {boolean} True between {@link setBackendRestarting}(true) and the page reload or a clear.
+ */
+export function isBackendRestarting(): boolean {
+    return backendRestarting;
+}
+
 /** Longest the readiness gate waits for the backend to finish starting, in milliseconds. */
 export const BACKEND_READY_TIMEOUT_MS = 60000;
 

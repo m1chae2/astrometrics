@@ -47,6 +47,8 @@ real location; scripts must not write there.
 
 ### Stored paths in the copy database
 
+The code is in `simulator/path_guard.py`, which the simulator's library copy uses too. `copy_path_guard.py` is a thin wrapper around it, so `realrun.sh`, `repoint_copy_paths.py` and the TPM real snapshot work as before.
+
 A copied database still holds the absolute paths of the real library (stack images, `inputs.json`,
 subset folders) inside each target record. A script run on such a copy would write into the real
 stacks folder. Before it runs a script, `realrun.sh` calls `copy_path_guard.py`, which opens the

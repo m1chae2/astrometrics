@@ -25,6 +25,7 @@ setup that wants the local network but not the internet would need a separate
 switch, which does not exist yet.
 """
 
+import re
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
@@ -33,6 +34,14 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 LAUNCH_SECTION = "Launch"
+
+#: Texts that clearly mean "no" for the ``offline`` key. Any other value
+#: counts as offline, so a typo keeps the run closed instead of open.
+_CLEARLY_FALSE = ("false", "no", "0", "off")
+
+#: A ``[Launch]`` header line, with an optional comment after it. It is used
+#: to tell whether a file that cannot be parsed had a ``[Launch]`` section.
+_LAUNCH_HEADER = re.compile(r"^\s*\[\s*Launch\s*\]\s*(?:#.*)?$", re.MULTILINE)
 
 
 class LaunchIdentity(BaseModel):
@@ -120,6 +129,40 @@ def _as_bool(value: object, default: bool) -> bool:
     return str(value).strip().lower() in ("true", "1", "yes", "on")
 
 
+def _as_offline(value: object) -> bool:
+    """Read the ``offline`` key so that a doubtful value means offline.
+
+    Parameters
+    ----------
+    value : `object`
+        The value, or `None` when the key is missing.
+
+    Returns
+    -------
+    offline : `bool`
+        `False` when the key is missing or clearly false (`False`,
+        ``"false"``, ``"no"``, ``"0"`` or ``"off"``, in any letter case).
+        `True` for every other value, because a launch that wanted to stay
+        online would have written one of those.
+    """
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in _CLEARLY_FALSE
+
+
+def _unreadable_section_identity() -> LaunchIdentity:
+    """Give the identity for a ``[Launch]`` section that cannot be read.
+
+    Returns
+    -------
+    identity : `LaunchIdentity`
+        An identity with ``offline`` true and everything else at its default.
+    """
+    return LaunchIdentity(offline=True)
+
+
 def _as_names(value: object) -> tuple[str, ...]:
     """Read a list of names given as a TOML array or as comma-separated text.
 
@@ -150,18 +193,28 @@ def launch_identity_from_settings(settings: Mapping[str, Any]) -> LaunchIdentity
     Returns
     -------
     identity : `LaunchIdentity` or `None`
-        The identity, or `None` when there is no ``[Launch]`` section.
+        The identity, or `None` when there is no ``[Launch]`` section. A
+        section that is there but is not a table of keys, or whose keys
+        cannot be read, gives an identity with ``offline`` true: when the
+        launcher's statement is unreadable, the run stays closed. The
+        ``offline`` key itself is true unless it is missing or clearly false
+        (see `_as_offline`).
     """
-    section = settings.get(LAUNCH_SECTION)
-    if not isinstance(section, Mapping):
+    if LAUNCH_SECTION not in settings:
         return None
-    return LaunchIdentity(
-        label=str(section.get("label", "") or "").strip(),
-        live_hardware=_as_bool(section.get("live_hardware"), True),
-        disposable_library=_as_bool(section.get("disposable_library"), False),
-        offline=_as_bool(section.get("offline"), False),
-        locked_keys=_as_names(section.get("locked_keys")),
-    )
+    section = settings[LAUNCH_SECTION]
+    if not isinstance(section, Mapping):
+        return _unreadable_section_identity()
+    try:
+        return LaunchIdentity(
+            label=str(section.get("label", "") or "").strip(),
+            live_hardware=_as_bool(section.get("live_hardware"), True),
+            disposable_library=_as_bool(section.get("disposable_library"), False),
+            offline=_as_offline(section.get("offline")),
+            locked_keys=_as_names(section.get("locked_keys")),
+        )
+    except TypeError, ValueError:
+        return _unreadable_section_identity()
 
 
 def read_launch_identity(config_file: str | Path) -> LaunchIdentity | None:
@@ -175,11 +228,16 @@ def read_launch_identity(config_file: str | Path) -> LaunchIdentity | None:
     Returns
     -------
     identity : `LaunchIdentity` or `None`
-        The identity, or `None` when the file is missing, cannot be parsed or
-        has no ``[Launch]`` section.
+        The identity, or `None` when the file is missing or has no
+        ``[Launch]`` section. A file that cannot be parsed but has a
+        ``[Launch]`` header gives an identity with ``offline`` true.
     """
     try:
-        settings = tomllib.loads(Path(config_file).read_text(encoding="utf-8"))
+        text = Path(config_file).read_text(encoding="utf-8")
     except OSError, ValueError:
         return None
+    try:
+        settings = tomllib.loads(text)
+    except ValueError:
+        return _unreadable_section_identity() if _LAUNCH_HEADER.search(text) else None
     return launch_identity_from_settings(settings)

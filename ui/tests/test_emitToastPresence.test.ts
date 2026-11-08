@@ -35,7 +35,7 @@ describe('emitToast presence rule', () => {
     vi.useFakeTimers();
     showNotification.mockReset();
     presence = 'present';
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
   afterEach(() => {

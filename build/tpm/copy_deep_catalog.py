@@ -12,7 +12,7 @@ with.
 Safety: the real file is only read, through a read-only SQLite connection and
 the SQLite backup call (a write-ahead log file cannot be half copied). Nothing
 is symlinked or opened in place. The real library folder comes from the real
-settings file, read only (``astrometricslib.drivers.real_folders``). If the
+settings file, read only (``simulator.real_folders.real_folders``). If the
 file is missing the script prints one line and exits with status 0, so the
 run carries on without it.
 
@@ -32,7 +32,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from astrometricslib.drivers import real_folders
+from simulator.real_folders import real_folders
 
 #: The deep-star catalog's file name (``deep_star_store.py`` in wayfindinglib).
 DEEP_CATALOG_FILENAME = "deep_star_catalog.db"

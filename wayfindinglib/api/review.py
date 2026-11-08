@@ -289,37 +289,6 @@ class ObservationReview(ControlChild):
                 return night_quality_task.build_night_quality(self._context, session_id)
         raise InvalidArgumentError(f"kind {kind!r} is not a typed kind.")
 
-    def invalidate_night(self, night_id: str | None = None) -> int:
-        """Forget the kept night reviews so the next request builds them again.
-
-        The reviews are kept until the data behind them change, and the
-        library notices the changes it can see (new frames, measurements,
-        guiding records, equipment). Call this after a change it cannot see,
-        such as a write made by another program.
-
-        Parameters
-        ----------
-        night_id : `str`, optional
-            The night whose review to forget, such as ``"2026-09-24"``. The
-            lists of nights and the shared guiding baselines are forgotten
-            with it, because a changed night changes them. Every kept review
-            is forgotten when omitted.
-
-        Returns
-        -------
-        count : `int`
-            How many kept results were forgotten.
-        """
-        from wayfindinglib.tasks.control_tasks import night_quality_task
-
-        if night_id is None:
-            return self._context.review_cache.invalidate()
-        this_night = (night_quality_task.NIGHT_QUALITY_CACHE_KEY, night_id)
-        # Other nights stay: their own version check still guards them.
-        return self._context.review_cache.invalidate(
-            lambda key: key == this_night or key[0] != night_quality_task.NIGHT_QUALITY_CACHE_KEY
-        )
-
     def get_live_session_status(
         self,
         window_minutes: float = 10.0,

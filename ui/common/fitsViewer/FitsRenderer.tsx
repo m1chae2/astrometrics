@@ -299,7 +299,11 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, width, height);
     if (!overlayVisible || !overlayStars) return;
-    context.strokeStyle = getComputedStyle(canvas).color || '#33c7de';
+    // The marker color is a theme token (`--accent-sky`), read through the layer's own custom property.
+    const layerStyle = getComputedStyle(canvas);
+    const markerColor = layerStyle.getPropertyValue('--star-marker-color').trim()
+      || layerStyle.getPropertyValue('--accent-sky').trim();
+    if (markerColor) context.strokeStyle = markerColor;
     context.lineWidth = 1;
     context.globalAlpha = 0.65;
     context.beginPath();

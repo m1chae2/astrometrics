@@ -1,5 +1,5 @@
 import React from 'react';
-import { TelescopeControlPanel } from './panels/TelescopeControlPanel';
+import { TelescopeControlPanel, type TelescopeCapabilityGates } from './panels/TelescopeControlPanel';
 import { GuidingTrendsPlot } from './panels/GuidingStatusPanel';
 import { AlignmentGuidingTabs } from './panels/AlignmentGuidingTabs';
 import { GuidingSample, AlignmentAttempt } from '../common/types/backendTypes';
@@ -45,6 +45,8 @@ export interface ControlPanelProps {
     commandsDisabled?: boolean;
     /** Why commands are off; shown when the user hovers a greyed control. */
     commandsDisabledReason?: string;
+    /** Per-capability gates for the Telescope Control panel. */
+    capabilityGates?: TelescopeCapabilityGates;
 
     /** The camera profiles shown in the Camera Profiles panel. */
     cameras: CameraProfile[];
@@ -88,6 +90,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     isAligningActive = false,
     commandsDisabled = false,
     commandsDisabledReason = '',
+    capabilityGates,
     cameras,
     camerasLoading,
     camerasError,
@@ -121,6 +124,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                     onGuidingGainChange={onGuidingGainChange}
                     commandsDisabled={commandsDisabled}
                     commandsDisabledReason={commandsDisabledReason}
+                    capabilityGates={capabilityGates}
                 />
 
                 {/* Camera Profiles sits under Telescope Control. It scrolls inside itself. */}

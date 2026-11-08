@@ -21,7 +21,7 @@ import { InfoButton } from '../common/components/InfoButton';
 import { useCommandAvailability } from '../common/hooks/useCommandAvailability';
 import { captureTestFrame } from '../common/services/imaging/captureService';
 import { emitToast } from '../common/utils/emitToast';
-import { DitherConfig, ExposureRequest, FilterType, ObservationPackage } from '../common/types/backendTypes';
+import { DitherConfig, ExposureRequest, FilterType, ObservationPackage, ObservatoryCapability } from '../common/types/backendTypes';
 import { ditherValuesOf, frameTypeFromLabel, labelFromFrameType } from './packageModel';
 import { useAvailableFilters } from './hooks/useAvailableFilters';
 import '../common/styles/panels.css';
@@ -73,6 +73,8 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
 }) => {
     /** Test image is a device command: greyed while Ekos controls the equipment. */
     const availability = useCommandAvailability();
+    const cameraCommandable = availability.canCommandCapability(ObservatoryCapability.CAPTURE_ORCHESTRATION);
+    const cameraReason = availability.reasonForCapability(ObservatoryCapability.CAPTURE_ORCHESTRATION);
     /** The Image Planner tab shown: Exposures or Dither. */
     const [plannerTab, setPlannerTab] = useState('exposures');
     /** Index of the exposure row being edited in the Image Planner, if any. */
@@ -128,7 +130,7 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
 
     /** Captures one test frame with the planner's current settings. */
     const handleTestImage = async (type: string, _count: number, exposure: number, filter: string) => {
-        if (!availability.canCommand) return;
+        if (!availability.canCommandCapability(ObservatoryCapability.CAPTURE_ORCHESTRATION)) return;
         if (!editedPackage) {
             emitToast('Choose a package before capturing a test frame', 'error');
             return;
@@ -189,7 +191,7 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
                     <SectionPanel
                         title="Image Planner"
                         className="target-planner__planner"
-                        headerContent={!availability.canCommand ? <InfoButton label="Why unavailable?" text={availability.reason} /> : undefined}
+                        headerContent={!cameraCommandable ? <InfoButton label="Why unavailable?" text={cameraReason} /> : undefined}
                     >
                         {editedPackage ? (
                             <>
@@ -206,7 +208,7 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
                                         editingItem={editingItem}
                                         onCancel={() => setEditingIndex(null)}
                                         onTestImage={handleTestImage}
-                                        testImageUnavailableReason={availability.canCommand ? null : availability.reason}
+                                        testImageUnavailableReason={cameraCommandable ? null : cameraReason}
                                         filterOptions={availableFilters}
                                         values={{ type: imgType, count: imgCount, exposure: imgExposure, filter: imgFilter, delay: imgDelay }}
                                         onChange={(values) => {

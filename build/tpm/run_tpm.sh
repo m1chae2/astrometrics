@@ -310,6 +310,31 @@ seal_tmp_binds() {
   esac
 }
 
+#: Adds the display to SEAL_BINDS without the rest of $XDG_RUNTIME_DIR. That folder also holds the session D-Bus socket
+#: and often the ssh-agent socket, and a read-only mount does not stop a connect to a socket, so the run gets an empty
+#: private $XDG_RUNTIME_DIR (a tmpfs) with only what Electron needs to draw put in it: the Wayland socket (named by
+#: WAYLAND_DISPLAY; a plain name is looked up in $XDG_RUNTIME_DIR) and the X authority file XAUTHORITY when it lives
+#: there (Wayland sessions keep XWayland's cookie in that folder, and --ozone x11 needs it). Nothing else is bound.
+#: UNVERIFIED without a TPM run: if Electron cannot open its window, a file it needs is missing from this short list.
+seal_display_binds() {
+  [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "$XDG_RUNTIME_DIR" ] || return 0
+  case "${TMPDIR:-/tmp}" in
+    "$XDG_RUNTIME_DIR"|"$XDG_RUNTIME_DIR"/*)
+      echo "ERROR: TMPDIR is inside XDG_RUNTIME_DIR; the seal would hide it. Set TMPDIR to /tmp." >&2
+      exit 1 ;;
+  esac
+  SEAL_BINDS+=(--perms 0700 --tmpfs "$XDG_RUNTIME_DIR")
+  local wayland_socket="${WAYLAND_DISPLAY:-}"
+  if [ -n "$wayland_socket" ]; then
+    case "$wayland_socket" in /*) ;; *) wayland_socket="$XDG_RUNTIME_DIR/$wayland_socket" ;; esac
+    [ -S "$wayland_socket" ] && SEAL_BINDS+=(--bind "$wayland_socket" "$wayland_socket")
+  fi
+  case "${XAUTHORITY:-}" in
+    "$XDG_RUNTIME_DIR"/*) [ -f "$XAUTHORITY" ] && SEAL_BINDS+=(--ro-bind "$XAUTHORITY" "$XAUTHORITY") ;;
+  esac
+  return 0
+}
+
 # The simulation library is made BEFORE the seal. Its overlay of your real library is a FUSE mount, which only an
 # ordinary process can make (the network seal is a user namespace, where the system refuses it). The sealed run
 # then reaches the mount, because a bind of the folder that holds it carries the mount along (README.md). So in this
@@ -364,7 +389,7 @@ if [ "$LIBRARY" = "simulation" ] && [ -z "${TPM_SEALED:-}" ]; then
   SEAL_BINDS+=(--bind "$ROOT_DIR/node_modules/.vite-temp" "$ROOT_DIR/node_modules/.vite-temp"
     --bind "$ROOT_DIR/node_modules/.vite" "$ROOT_DIR/node_modules/.vite")
   [ -d /tmp/.X11-unix ] && SEAL_BINDS+=(--bind /tmp/.X11-unix /tmp/.X11-unix)
-  [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "$XDG_RUNTIME_DIR" ] && SEAL_BINDS+=(--bind "$XDG_RUNTIME_DIR" "$XDG_RUNTIME_DIR")
+  seal_display_binds
   env TPM_SEALED=1 TPM_SANDBOX="$OUTER_SANDBOX" TPM_RESULTS_DIR="$OUTER_RESULTS_DIR" TPM_INDI_PORT="$OUTER_INDI_PORT" \
     TPM_PHD2_PORT="$OUTER_PHD2_PORT" bwrap --ro-bind / / --dev-bind /dev /dev --proc /proc "${SEAL_BINDS[@]}" \
     --unshare-net --unshare-pid --die-with-parent "$0" "${ORIGINAL_ARGUMENTS[@]}" &
@@ -412,7 +437,7 @@ if [ "$SEAL" = "1" ] && [ -z "${TPM_SEALED:-}" ]; then
   SEAL_BINDS+=(--bind "$ROOT_DIR/node_modules/.vite-temp" "$ROOT_DIR/node_modules/.vite-temp"
     --bind "$ROOT_DIR/node_modules/.vite" "$ROOT_DIR/node_modules/.vite")
   [ -d /tmp/.X11-unix ] && SEAL_BINDS+=(--bind /tmp/.X11-unix /tmp/.X11-unix)
-  [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "$XDG_RUNTIME_DIR" ] && SEAL_BINDS+=(--bind "$XDG_RUNTIME_DIR" "$XDG_RUNTIME_DIR")
+  seal_display_binds
   exec env TPM_SEALED=1 bwrap --ro-bind / / --dev-bind /dev /dev --proc /proc "${SEAL_BINDS[@]}" \
     --unshare-net --unshare-pid --die-with-parent "$0" "${ORIGINAL_ARGUMENTS[@]}"
 fi

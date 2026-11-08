@@ -31,6 +31,26 @@ const TELESCOPE_CONTROL_TABS: TabDefinition[] = [
 /** Prefix that keeps the tab element ids unique on the page. */
 const TELESCOPE_CONTROL_TABS_ID_PREFIX = 'telescope-control';
 
+/** Whether one capability may be commanded, and the reason when it may not. */
+export interface CapabilityGate {
+    /** True when the app may not command this capability. */
+    disabled: boolean;
+    /** Why it is off; shown on hover and by the info button. */
+    reason: string;
+}
+
+/** The gate of each group of controls in the panel. A group left out follows the panel's own gate. */
+export interface TelescopeCapabilityGates {
+    /** Mount: tracking, park, direction pad and the limits. */
+    mount?: CapabilityGate;
+    /** Alignment: the start and stop buttons and the alignment settings. */
+    alignment?: CapabilityGate;
+    /** Guiding: the guiding settings. */
+    guiding?: CapabilityGate;
+    /** Focuser: the focus buttons. */
+    focuser?: CapabilityGate;
+}
+
 export interface TelescopeControlPanelProps {
     isTracking: boolean;
     isParked: boolean;
@@ -63,6 +83,8 @@ export interface TelescopeControlPanelProps {
     commandsDisabled?: boolean;
     /** Why commands are off; shown by the header button and on hover. */
     commandsDisabledReason?: string;
+    /** Per-capability gates. A group left out uses `commandsDisabled`. */
+    capabilityGates?: TelescopeCapabilityGates;
 }
 
 /**
@@ -93,7 +115,16 @@ export const TelescopeControlPanel: React.FC<TelescopeControlPanelProps> = ({
     onGuidingGainChange,
     commandsDisabled = false,
     commandsDisabledReason = '',
+    capabilityGates = {},
 }) => {
+    // Each group of controls follows its own capability; a missing one follows the panel's gate.
+    const panelGate: CapabilityGate = { disabled: commandsDisabled, reason: commandsDisabledReason };
+    const mountGate = capabilityGates.mount ?? panelGate;
+    const alignmentGate = capabilityGates.alignment ?? panelGate;
+    const guidingGate = capabilityGates.guiding ?? panelGate;
+    const focuserGate = capabilityGates.focuser ?? panelGate;
+    // The header button explains the global reason whenever any group is greyed.
+    const anyGroupDisabled = [mountGate, alignmentGate, guidingGate, focuserGate].some((gate) => gate.disabled);
     const [selectedTab, setSelectedTab] = useState('controls');
     // The slew rate lives here, so the slider keeps it when the Manual tab is closed and opened.
     const [slewRate, setSlewRate] = useState<number>(DEFAULT_SLEW_RATE);
@@ -103,21 +134,23 @@ export const TelescopeControlPanel: React.FC<TelescopeControlPanelProps> = ({
         onSetSlewRate(rate);
     };
     // One form for both limit sections, so an unsaved edit survives a tab switch.
-    const limitsForm = useSafetyLimitsForm(commandsDisabled);
+    const limitsForm = useSafetyLimitsForm(mountGate.disabled);
 
     /**
      * Draws the settings of one group inside a command gate.
      * @param section Which settings to show.
      * @return The gated settings.
      */
-    const renderSettings = (section: 'alignment' | 'guiding') => (
+    const renderSettings = (section: 'alignment' | 'guiding') => {
+        const gate = section === 'alignment' ? alignmentGate : guidingGate;
+        return (
         <CommandGate
-            disabled={commandsDisabled}
-            reason={commandsDisabledReason}
+            disabled={gate.disabled}
+            reason={gate.reason}
             renderChildren={(reasonId) => (
                 <TrackingSettings
                     section={section}
-                    disabled={commandsDisabled}
+                    disabled={gate.disabled}
                     disabledReasonId={reasonId}
                     accuracy={accuracy}
                     settleTime={settleTime}
@@ -130,13 +163,14 @@ export const TelescopeControlPanel: React.FC<TelescopeControlPanelProps> = ({
                 />
             )}
         />
-    );
+        );
+    };
 
     return (
         <SectionPanel
             title="Telescope Control"
             className="observatory-top-row__fit telescope-control-panel"
-            headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}
+            headerContent={<WhyUnavailableButton disabled={commandsDisabled || anyGroupDisabled} reason={commandsDisabledReason} />}
         >
             <Tabs
                 tabs={TELESCOPE_CONTROL_TABS}
@@ -147,9 +181,13 @@ export const TelescopeControlPanel: React.FC<TelescopeControlPanelProps> = ({
                 className="telescope-control-tabs"
             />
             <TabPanel idPrefix={TELESCOPE_CONTROL_TABS_ID_PREFIX} tabId="controls" selected={selectedTab === 'controls'}>
-                <CommandGate disabled={commandsDisabled} reason={commandsDisabledReason}>
+                <CommandGate
+                    disabled={mountGate.disabled || alignmentGate.disabled}
+                    reason={mountGate.disabled ? mountGate.reason : alignmentGate.reason}
+                >
                     <TelescopeControl
-                        disabled={commandsDisabled}
+                        disabled={mountGate.disabled}
+                        alignmentDisabled={alignmentGate.disabled}
                         isTracking={isTracking}
                         isParked={isParked}
                         onSetTracking={onSetTracking}
@@ -162,25 +200,27 @@ export const TelescopeControlPanel: React.FC<TelescopeControlPanelProps> = ({
                 </CommandGate>
             </TabPanel>
             <TabPanel idPrefix={TELESCOPE_CONTROL_TABS_ID_PREFIX} tabId="manual" selected={selectedTab === 'manual'}>
-                <CommandGate disabled={commandsDisabled} reason={commandsDisabledReason}>
-                    <div className="manual-tab">
+                <div className="manual-tab">
                         <section className="manual-tab__section" aria-labelledby="manual-telescope-heading">
                             <h4 id="manual-telescope-heading" className="limits-tab__heading">Telescope</h4>
-                            <DirectionalControl
-                                disabled={commandsDisabled}
-                                onStartMove={onStartMove}
-                                onStopMove={onStopMove}
-                                slewRate={slewRate}
-                                onSetSlewRate={handleSlewRateChange}
-                                onStop={onStop}
-                            />
+                            <CommandGate disabled={mountGate.disabled} reason={mountGate.reason}>
+                                <DirectionalControl
+                                    disabled={mountGate.disabled}
+                                    onStartMove={onStartMove}
+                                    onStopMove={onStopMove}
+                                    slewRate={slewRate}
+                                    onSetSlewRate={handleSlewRateChange}
+                                    onStop={onStop}
+                                />
+                            </CommandGate>
                         </section>
                         <section className="manual-tab__section" aria-labelledby="manual-focuser-heading">
                             <h4 id="manual-focuser-heading" className="limits-tab__heading">Focuser</h4>
-                            <FocuserControl active={selectedTab === 'manual'} disabled={commandsDisabled} />
+                            <CommandGate disabled={focuserGate.disabled} reason={focuserGate.reason}>
+                                <FocuserControl active={selectedTab === 'manual'} disabled={focuserGate.disabled} />
+                            </CommandGate>
                         </section>
                     </div>
-                </CommandGate>
             </TabPanel>
             <TabPanel idPrefix={TELESCOPE_CONTROL_TABS_ID_PREFIX} tabId="limits" selected={selectedTab === 'limits'}>
                 <div className="limits-tab">
@@ -193,7 +233,7 @@ export const TelescopeControlPanel: React.FC<TelescopeControlPanelProps> = ({
                         {renderSettings('guiding')}
                     </section>
                     <section className="limits-tab__section limits-tab__section--wide">
-                        <LimitSettings form={limitsForm} group="all" disabled={commandsDisabled} reason={commandsDisabledReason} />
+                        <LimitSettings form={limitsForm} group="all" disabled={mountGate.disabled} reason={mountGate.reason} />
                     </section>
                 </div>
             </TabPanel>

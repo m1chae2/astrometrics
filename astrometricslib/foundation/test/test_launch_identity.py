@@ -120,11 +120,11 @@ def test_text_values_and_comma_lists_are_read_like_the_settings_page_writes_them
 
 
 def test_the_identity_is_read_from_a_file_and_a_bad_file_gives_none(tmp_path: Path) -> None:
-    """A missing or unparsable file is an ordinary run."""
+    """A missing file, or one with no launch header, is an ordinary run."""
     good = tmp_path / "good.toml"
     good.write_text(FULL_SECTION, encoding="utf-8")
     bad = tmp_path / "bad.toml"
-    bad.write_text("[Launch\nlabel =", encoding="utf-8")
+    bad.write_text("[Image Library\nlabel =", encoding="utf-8")
 
     assert read_launch_identity(good).label == "SIMULATOR"
     assert read_launch_identity(bad) is None
@@ -159,6 +159,40 @@ def test_library_folders_gives_defaults_for_a_missing_file(tmp_path: Path) -> No
     assert folders.library == tmp_path / "share" / "astrometrics"
     assert folders.frames == folders.library / "frames"
     assert folders.wayfinding == tmp_path / "share" / "astrometrics" / "wayfinding"
+
+
+@pytest.mark.parametrize("text", ["false", "False", " NO ", "0", "off", "Off"])
+def test_offline_is_false_only_for_clearly_false_values(text: str) -> None:
+    """The clearly false spellings leave the run online."""
+    assert launch_identity_from_settings({"Launch": {"offline": text}}).offline is False
+    assert launch_identity_from_settings({"Launch": {"offline": False}}).offline is False
+
+
+@pytest.mark.parametrize("value", ["true", "yes", "1", "on", "maybe", "flase", "", "ture", 1, ["x"]])
+def test_any_other_offline_value_counts_as_offline(value: object) -> None:
+    """A typo or an odd value keeps the run closed (fail closed)."""
+    assert launch_identity_from_settings({"Launch": {"offline": value}}).offline is True
+
+
+def test_a_launch_section_that_is_not_a_table_counts_as_offline() -> None:
+    """An unreadable section is offline; no section is online."""
+    assert launch_identity_from_settings({"Launch": "oops"}).offline is True
+    assert launch_identity_from_settings({"Launch": {"locked_keys": 5}}).offline is True
+    assert launch_identity_from_settings({}) is None
+
+
+def test_a_file_that_cannot_be_parsed_but_has_a_launch_header_counts_as_offline(tmp_path: Path) -> None:
+    """The file is unreadable, but its ``[Launch]`` header is still found."""
+    broken = tmp_path / "broken.toml"
+    broken.write_text('[Launch]  # the launcher\noffline = tru\nlabel = "SIM', encoding="utf-8")
+
+    assert read_launch_identity(broken).offline is True
+
+
+def test_the_settings_object_reads_a_doubtful_offline_value_as_offline() -> None:
+    """`AppConfiguration.get_launch_identity` fails closed too."""
+    assert _identity_from_text("[Launch]\noffline = 'ture'\n").offline is True
+    assert _identity_from_text("[Launch]\noffline = 'off'\n").offline is False
 
 
 class _Configuration:
@@ -199,6 +233,7 @@ def launch(monkeypatch: pytest.MonkeyPatch) -> object:
     choose : `~collections.abc.Callable`
         Call it with a `LaunchIdentity` (or `None`).
     """
+    monkeypatch.delenv(offline.OFFLINE_VARIABLE, raising=False)
 
     def choose(identity: LaunchIdentity | None) -> None:
         """Make the offline switch read `identity`."""
@@ -239,6 +274,38 @@ def test_an_offline_launch_keeps_this_computer_reachable(launch: object) -> None
     for host in ("stellarmate.local", "192.168.1.20", "10.0.0.5", "example.com", ""):
         with pytest.raises(OfflineModeError, match="INDI"):
             require_local_host(host, "The INDI server")
+
+
+@pytest.mark.parametrize("value", ["1", "true", "TRUE", " 1 "])
+def test_the_offline_variable_makes_the_launch_offline(
+    launch: object, monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    """``ASTROMETRICS_OFFLINE`` closes the network even for an ordinary run."""
+    launch(None)
+    monkeypatch.setenv(offline.OFFLINE_VARIABLE, value)
+
+    assert network_is_offline()
+    with pytest.raises(OfflineModeError):
+        require_online("SIMBAD")
+
+
+@pytest.mark.parametrize("value", ["", "0", "false"])
+def test_other_offline_variable_values_change_nothing(
+    launch: object, monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    """Only ``1`` and ``true`` close the network through the variable."""
+    launch(None)
+    monkeypatch.setenv(offline.OFFLINE_VARIABLE, value)
+
+    assert not network_is_offline()
+
+
+def test_loopback_detection_handles_mapped_bracketed_and_zoned_addresses() -> None:
+    """IPv4-mapped loopback is loopback; a mapped outside address is not."""
+    for host in ("::ffff:127.0.0.1", "[::ffff:127.0.0.1]", "::1%lo", "[::1]", "127.0.0.2"):
+        assert is_loopback_host(host)
+    for host in ("::ffff:10.0.0.1", "::ffff:192.168.1.1", "2001:db8::1", "8.8.8.8"):
+        assert not is_loopback_host(host)
 
 
 def test_loopback_detection_looks_nothing_up() -> None:

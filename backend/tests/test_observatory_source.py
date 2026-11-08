@@ -13,23 +13,23 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib.drivers import (
+from astrometricslib.drivers import LaunchIdentity
+from astrometricslib.exceptions import ConfigurationError, InvalidArgumentError
+from backend import observatory_source
+from backend.public_interface import (
     ACTIVE_SOURCE_VARIABLE,
     LAUNCH_ERROR_VARIABLE,
     LAUNCH_NOTES_VARIABLE,
     LAUNCHER_VARIABLE,
     MISSING_PROGRAMS_VARIABLE,
-    OFFLINE,
+    NO_TELESCOPE,
     REAL,
     RESTART_EXIT_CODE,
     SIMULATED,
-    LaunchIdentity,
     SourceChoice,
     read_choice,
     write_choice,
 )
-from astrometricslib.exceptions import ConfigurationError, InvalidArgumentError
-from backend import observatory_source
 from backend.services.observatory.observatory_source_service import ObservatorySourceService
 
 SIMULATOR_IDENTITY = LaunchIdentity(
@@ -108,7 +108,7 @@ def test_get_source_reports_the_launch_identity_and_the_saved_choice(environment
 
 def test_a_failed_simulator_is_reported_with_its_reason(environment: dict[str, str]) -> None:
     """The offline world reports ``failed`` and the launcher's reason."""
-    environment[ACTIVE_SOURCE_VARIABLE] = OFFLINE
+    environment[ACTIVE_SOURCE_VARIABLE] = NO_TELESCOPE
     environment[LAUNCH_ERROR_VARIABLE] = "RuntimeError: no indiserver"
     write_choice(SourceChoice(SIMULATED), environment)
 

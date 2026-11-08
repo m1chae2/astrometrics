@@ -4,7 +4,7 @@ Description: Asks the review for a night through the public front door, with
 a made-up science library, and counts how often the night is really built.
 A second request with nothing changed must not build again. A new guiding
 sample, a write to the science database, a new guiding run or an equipment
-change must. `invalidate_night` forgets a night. The guiding baselines that
+change must. The guiding baselines that
 the envelope uses are built once and shared by every night.
 """
 
@@ -187,35 +187,6 @@ def test_a_change_of_active_equipment_builds_again(
     """New active equipment is new data, because the review judges for it."""
     _ask(review)
     monkeypatch.setattr("wayfindinglib.analytics.data_versions.equipment_signs", lambda config: ("other",))
-    _ask(review)
-
-    assert builds["night_quality"] == 2
-
-
-def test_invalidate_night_forgets_that_night(review: ObservationReview, builds: dict[str, int]) -> None:
-    """After `invalidate_night` the night is built again, others are kept."""
-    _ask(review)
-    review.query(kind="nights", register_job=False)
-    other = review._context.review_cache
-    other.get_or_build((night_quality_task.NIGHT_QUALITY_CACHE_KEY, "2020-01-01"), "v", lambda: "kept")
-
-    forgotten = review.invalidate_night(REVIEWED)
-    _ask(review)
-
-    assert forgotten == 4  # the night, and the index and two parts of the list of nights
-    assert builds["night_quality"] == 2
-    assert (
-        other.get_or_build((night_quality_task.NIGHT_QUALITY_CACHE_KEY, "2020-01-01"), "v", lambda: "x")
-        == "kept"
-    )
-
-
-def test_invalidate_without_a_night_forgets_everything(
-    review: ObservationReview, builds: dict[str, int]
-) -> None:
-    """With no night, every kept result goes."""
-    _ask(review)
-    review.invalidate_night()
     _ask(review)
 
     assert builds["night_quality"] == 2

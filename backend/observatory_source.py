@@ -13,9 +13,9 @@ processes. The launcher then reads the choice and starts the next session.
 Any other exit code is a stop.
 
 The choice file and the names shared with a launcher live in
-`astrometricslib.foundation.source_choice`. Without a launcher the backend
-cannot restart itself on another source, so the change is refused (see
-`ObservatorySourceService.set_source`).
+`backend.launch_contract` (public through `backend.public_interface`).
+Without a launcher the backend cannot restart itself on another source, so
+the change is refused (see `ObservatorySourceService.set_source`).
 """
 
 import logging
@@ -27,7 +27,7 @@ from collections.abc import Callable, Mapping
 
 import psutil
 
-from astrometricslib.drivers import LAUNCHER_VARIABLE, RESTART_EXIT_CODE
+from backend.launch_contract import LAUNCHER_VARIABLE, RESTART_EXIT_CODE
 
 __all__ = [
     "RESTART_DELAY_SECONDS",

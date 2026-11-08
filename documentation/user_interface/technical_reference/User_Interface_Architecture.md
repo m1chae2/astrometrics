@@ -45,7 +45,7 @@ The shell is the *main process*: the one Node.js program that owns the app. Its 
 | `ipc_handlers.js` | Answers those calls in the main process |
 | `figure_target.js` | Decides what a plot window may open |
 | `python_terminal_manager.js` | Runs the Python terminal, and pauses it when the screen locks |
-| `tray_window.js`, `window_state.js` | The tray popover, and saved window size and position |
+| `tray_menu.js`, `window_state.js` | The tray icon menu, and saved window size and position |
 | `platforms/` | The differences between Linux, macOS and Windows |
 
 ### Start-up
@@ -64,7 +64,7 @@ The backend listens on port 5000 unless `ASTROMETRICS_PORT` names another port.
 - **Main window.** Holds the whole app. Every view is mounted at start-up.
 - **Display windows.** Each view can open in its own window, for a second monitor. The URL carries `?mode=<view>&windowId=<number>`, and the window shows only that view.
 - **Figure windows.** Hold a Matplotlib plot from the Python terminal. `figure_target.js` lets a figure window open only the backend's own `/figure/<number>` page or a PNG file in the backend's scratch folder. The backend sends each figure's size in pixels, and the window opens big enough for the figure and its toolbar, but no bigger than the screen.
-- **Tray popover.** A small window beside the tray icon. It is a second page of the same build, `ui/tray_popover.html`, with its code in `ui/trayPopover/`.
+- **Tray menu.** The tray icon opens a native menu that the desktop draws under the icon. `tray_menu.js` fills it with the mount status, the workspace list and Park, Open App and Quit, and refreshes the status every five seconds through `backend_client.js`.
 
 ### The bridge between a window and the shell
 
@@ -86,7 +86,7 @@ Each view lives in its own folder.
 | Observatory Manager | `ui/observatoryManager/` |
 | Observation Manager | `ui/observationManager/` |
 
-Other folders hold the title bar (`ui/titleBar/`), the status header with the settings panel (`ui/statusHeader/`) and the tray popover (`ui/trayPopover/`). The list of views and the setting that turns each on or off live in `ui/common/constants/displayFlags.ts`.
+Other folders hold the title bar (`ui/titleBar/`) and the status header with the settings panel (`ui/statusHeader/`). The list of views and the setting that turns each on or off live in `ui/common/constants/displayFlags.ts`.
 
 `ui/common/` holds everything shared: components, hooks, services, queries, contexts and types. The shared components in `ui/common/components/` are described in [its README](https://github.com/m1chae2/astrometrics/blob/main/ui/common/components/README.md). Its files must not import from any other top-level `ui/` folder. ESLint enforces this, so a shared file never depends on one view.
 
@@ -171,7 +171,7 @@ The Observatory Manager (`ui/observatoryManager/`) holds the equipment setup. Ek
 - `useCommandAvailability.ts` (in `ui/common/hooks/`, shared by every display that sends a command) reads the delegation state (`observatory:safety_status`). Until the library says the app may command a capability, the answer is no. The Observation Manager (Start Imaging Session, Test Image) and the Planetarium (Slew Telescope Here) turn off their command controls with the same answer.
 - `CommandGate.tsx` turns off the controls that send commands, shows the reason on hover, and adds a Why unavailable? info button (`WhyUnavailableButton`) to the panel title for keyboard and touch users.
 
-Safety Limits (`panels/LimitSettings.tsx`) reads the active telescope (`observatory:get_active_telescope`) and saves through `observatory:set_active_telescope` with a `limits` value. The library checks the limits and refuses to create a configuration section. Camera Profiles (`equipment/CameraProfilesPanel.tsx`) shows the camera noise that the library returns with each profile, and the Measure noise button calls `calibration:measure_sensor_noise`. The Calibration Library (`calibration/CalibrationLibraryPanel.tsx`) reads `calibration:query`.
+The Mount tab of Telescope Control (`panels/TelescopeControl.tsx`) has Start Capture and Stop Capture. Start Capture sends `imaging:capture` through `common/services/imaging/captureService.ts` with fixed settings for the target the telescope points at, and Stop Capture sends `imaging:stop_capture`. The buttons read whether a capture runs from the shared `activeJobs` list, so they add no polling. The Altitude and Hour angle tabs of Telescope Control (`panels/LimitSettings.tsx`, inside `panels/TelescopeControlPanel.tsx`) reads the active telescope (`observatory:get_active_telescope`) and saves through `observatory:set_active_telescope` with a `limits` value. The library checks the limits and refuses to create a configuration section. Camera Profiles (`equipment/CameraProfilesPanel.tsx`) shows the camera noise that the library returns with each profile, and the Measure noise button calls `calibration:measure_sensor_noise`. The Calibration Library (`calibration/CalibrationLibraryPanel.tsx`) reads `calibration:query`.
 
 ### Planetarium actions
 

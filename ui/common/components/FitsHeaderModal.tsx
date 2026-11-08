@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
+import { TextInput } from './TextInput';
 import { BaseModal } from './BaseModal';
 import { SectionPanel } from './SectionPanel';
 import { EmptyState } from './EmptyState';
+import { Skeleton } from './Skeleton';
 import { fetchTargetFrameHeader } from '../services/targetService';
 import { FitsHeaderEntry } from '../types/backendTypes';
 import { useToast } from '../hooks/useToast';
 import '../styles/layout.css';
+import { Button } from './Button';
 
 interface FitsHeaderModalProps {
     isOpen: boolean;
@@ -64,7 +67,7 @@ export const FitsHeaderModal: React.FC<FitsHeaderModalProps> = ({
     );
 
     const footerButtons = (
-        <button className="btn btn--secondary" onClick={onClose}>Close</button>
+        <Button variant="secondary" onClick={onClose}>Close</Button>
     );
 
     const filename = filePath ? filePath.split(/[/\\]/).pop() : 'Unknown File';
@@ -81,9 +84,8 @@ export const FitsHeaderModal: React.FC<FitsHeaderModalProps> = ({
                 <SectionPanel
                     title="Header Keywords"
                     headerContent={
-                        <input
-                            type="text"
-                            className="entry fits-header-search"
+                        <TextInput
+                            className="fits-header-search"
                             placeholder="Filter..."
                             value={searchTerm}
                             onChange={e => setSearchTerm(e.target.value)}
@@ -91,7 +93,7 @@ export const FitsHeaderModal: React.FC<FitsHeaderModalProps> = ({
                     }
                 >
                     {loading ? (
-                        <div className="loading-container">Loading header data...</div>
+                        <Skeleton variant="rows" columns={3} count={8} label="Loading header data" />
                     ) : error ? (
                         <EmptyState variant="error" message={error} />
                     ) : (

@@ -59,7 +59,7 @@ describe('QualityChip', () => {
         expect(screen.getByText('Choose a target')).toBeTruthy();
     });
 
-    /** Evidence and calibration actions are wired (user decision D5). */
+    /** The Evidence and Show in calibration library actions are offered. */
     it('offers Evidence and Show in calibration library', async () => {
         callBackendMock.mockResolvedValue([
             { ...calibrationStatement, evidence: [{ rowId: 7 }] },
@@ -72,12 +72,12 @@ describe('QualityChip', () => {
         expect(navigateToElement).toHaveBeenCalledWith(expect.objectContaining({ action: 'showCalibrationRow' }));
     });
 
-    /** The loading state is plain text with aria-busy, not a live region. */
-    it('shows loading as busy text, not a live region', () => {
+    /** The loading state is plain text not a live region. */
+    it('shows loading as a skeleton with a hidden label', () => {
         render(<QualityPanelState state="loading" />);
-        const loading = screen.getByText('Loading…');
-        expect(loading).toHaveAttribute('aria-busy', 'true');
-        expect(loading).not.toHaveAttribute('role');
+        const loading = screen.getByRole('status');
+        expect(loading).not.toHaveAttribute('aria-busy');
+        expect(loading).toHaveTextContent('Loading the quality report');
         expect(loading).not.toHaveAttribute('aria-live');
     });
 });

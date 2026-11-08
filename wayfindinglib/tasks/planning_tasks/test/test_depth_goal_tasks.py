@@ -336,7 +336,7 @@ def test_more_frames_will_not_help_names_what_to_fix(butler: DiskButler, forecas
         ),
         (
             FixedPatternCause.SKY_STRUCTURE,
-            "The sky has fixed structure, likely faint light or a slope in the background.",
+            "The sky has fixed structure, likely faint light in the background.",
         ),
         (FixedPatternCause.UNPLACED, "The noise has a fixed part we can't place yet."),
     ],
@@ -479,3 +479,249 @@ def test_depth_goal_met_for_the_suggestion_refresh(butler: DiskButler) -> None:
     assert tasks.depth_goal_met(library, butler, "NGC 7331") is False
     assert tasks.depth_goal_met(FakeLibrary({"NGC 7331": []}, [], STORED_TYPES), butler, "NGC 7331") is None
     assert tasks.depth_goal_met(library, butler, "Vega") is None
+
+
+@pytest.fixture
+def cached(tmp_path: Any, butler: DiskButler, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """Give a library folder, an empty cache and a way to ask for a status.
+
+    Returns
+    -------
+    holder : `SimpleNamespace`
+        ``config`` (its image library is a temporary folder), ``recorder``
+        (counts the reports built) and ``ask`` (asks for the status of
+        NGC 7331 through the cache).
+    """
+    library = tmp_path / "library"
+    library.mkdir()
+    config = AppConfiguration()
+    config.update_config({"Image Library": {"path": str(library)}})
+    monkeypatch.setattr(tasks, "_DEPTH_GOAL_CACHE", tasks.VersionedCache())
+    monkeypatch.setattr("wayfindinglib.analytics.data_versions.equipment_signs", lambda _config: ("rig",))
+    recorder = Recorder([statement("more_frames", StatementKind.RECOMMENDATION, seconds=4800.0, frames=40)])
+    fake_library = FakeLibrary({"NGC 7331": []}, [row(SURFACE_METRIC, 24.2)], {"NGC 7331": "LIN"})
+
+    def ask() -> Any:
+        """Ask for the status of NGC 7331.
+
+        Returns
+        -------
+        status : `DepthGoalStatus`
+            The status.
+        """
+        return tasks.cached_depth_goal_status(
+            "NGC 7331",
+            config=config,
+            astrometrics=fake_library,
+            butler=butler,
+            report_for_noise_ratio=recorder,
+        )
+
+    return SimpleNamespace(config=config, butler=butler, recorder=recorder, ask=ask)
+
+
+def _write_measurement(config: AppConfiguration, target: str) -> None:
+    """Store one quality row for a target, as a measuring run does."""
+    from astrometricslib._internal.drivers.quality_store import QualityStore
+
+    QualityStore.from_configuration(config).write_measurements([
+        row(SURFACE_METRIC, 24.3, target=target).model_copy(
+            update={"row_id": None, "run_id": f"run-{target}"}
+        )
+    ])
+
+
+def test_an_unchanged_target_is_built_once(cached: SimpleNamespace, forecast_status: dict) -> None:
+    """The second request is answered from memory, as its own copy."""
+    first = cached.ask()
+    second = cached.ask()
+    assert len(cached.recorder.ratios) == 1
+    assert first == second and first is not second
+    assert second.seconds_to_goal == pytest.approx(4800.0)
+
+
+def test_a_change_to_the_target_builds_again(cached: SimpleNamespace, forecast_status: dict) -> None:
+    """A new frame record, measurement or level gives a fresh status."""
+    from astrometricslib import Target
+    from astrometricslib._internal.drivers.local_database import save_target
+
+    cached.ask()
+    save_target(cached.config, Target(id="NGC 7331"))
+    cached.ask()
+    assert len(cached.recorder.ratios) == 2
+    cached.ask()
+    assert len(cached.recorder.ratios) == 2
+
+    save_target(cached.config, Target(id="NGC 7331", common_name="Fireworks"))
+    cached.ask()
+    assert len(cached.recorder.ratios) == 3
+
+    _write_measurement(cached.config, "NGC 7331")
+    cached.ask()
+    assert len(cached.recorder.ratios) == 4
+
+    tasks.store_chosen_level(cached.butler, "NGC 7331", DepthLevel.DEEP)
+    chosen = cached.ask()
+    assert len(cached.recorder.ratios) == 5
+    assert chosen.level == DepthLevel.DEEP
+
+
+def test_a_change_to_another_target_keeps_the_answer(cached: SimpleNamespace, forecast_status: dict) -> None:
+    """A new frame or measurement of M 13 keeps the status of NGC 7331."""
+    from astrometricslib import Target
+    from astrometricslib._internal.drivers.local_database import save_target
+
+    cached.ask()
+    save_target(cached.config, Target(id="M 13"))
+    _write_measurement(cached.config, "M 13")
+    cached.ask()
+    assert len(cached.recorder.ratios) == 1
+
+
+def test_a_version_that_cannot_be_read_keeps_nothing(
+    cached: SimpleNamespace, forecast_status: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the data version is unknown, every request builds the status."""
+    monkeypatch.setattr(tasks, "depth_goal_data_version", lambda *_arguments: None)
+    cached.ask()
+    cached.ask()
+    assert len(cached.recorder.ratios) == 2
+
+
+def _write_camera_frame(
+    config: AppConfiguration, target: str, camera: str, run_id: str, night: str | None = None
+) -> None:
+    """Store one frame row of a target taken with a camera.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The configuration whose library gets the row.
+    target : `str`
+        The target the frame belongs to.
+    camera : `str`
+        The camera of the row's capture setting.
+    run_id : `str`
+        The run that wrote it.
+    night : `str`, optional
+        The observing night of the frame. Defaults to none.
+    """
+    from astrometricslib._internal.drivers.quality_store import QualityStore
+
+    store = QualityStore.from_configuration(config)
+    setting_id = store.get_or_create_capture_setting(CaptureSetting(camera=camera))
+    store.write_measurements([
+        QualityMeasurement(
+            metric="frame.sky_rate_e_per_s_per_px",
+            definition_version=1,
+            subject=QualitySubject(
+                level=SubjectLevel.FRAME,
+                subject_id=f"{target}/{run_id}.fits",
+                target_id=target,
+                observing_night_id=night,
+                capture_setting_id=setting_id,
+            ),
+            status=MeasurementStatus.MEASURED,
+            value=1.0,
+            origin=MeasurementOrigin.MEASURED,
+            run_id=run_id,
+            measured_at=NOW,
+        )
+    ])
+
+
+def test_a_frame_of_the_same_camera_from_another_target_builds_again(
+    cached: SimpleNamespace, forecast_status: dict
+) -> None:
+    """The forecast compares with the camera's other frames, so they count."""
+    _write_camera_frame(cached.config, "NGC 7331", "CamA", "own")
+    cached.ask()
+    _write_camera_frame(cached.config, "M 13", "CamA", "other", night="2020-01-02")
+    cached.ask()
+    assert len(cached.recorder.ratios) == 2
+    cached.ask()
+    assert len(cached.recorder.ratios) == 2
+
+
+def test_a_same_camera_frame_tonight_keeps_the_camera_part(
+    cached: SimpleNamespace, forecast_status: dict
+) -> None:
+    """The camera-wide estimate counts finished nights only (WAY-D107)."""
+    import time
+
+    from astrometricslib.reports import observing_night_id
+
+    tonight = observing_night_id(time.time())
+    _write_camera_frame(cached.config, "NGC 7331", "CamA", "own", night="2020-01-01")
+    cached.ask()
+
+    # Another target's frame tonight, with the same camera: a cache hit.
+    _write_camera_frame(cached.config, "M 13", "CamA", "other-tonight", night=tonight)
+    cached.ask()
+    assert len(cached.recorder.ratios) == 1
+
+    # A frame of a finished night builds again, once.
+    _write_camera_frame(cached.config, "M 13", "CamA", "other-old", night="2020-01-02")
+    cached.ask()
+    assert len(cached.recorder.ratios) == 2
+    cached.ask()
+    assert len(cached.recorder.ratios) == 2
+
+    # The target's own part still sees tonight's frame.
+    _write_camera_frame(cached.config, "NGC 7331", "CamA", "own-tonight", night=tonight)
+    cached.ask()
+    assert len(cached.recorder.ratios) == 3
+
+
+def test_the_depth_goal_version_changes_once_when_the_night_rolls_over(
+    cached: SimpleNamespace, forecast_status: dict
+) -> None:
+    """Tonight's frames join the camera part after the night ends."""
+    import time
+
+    from astrometricslib.reports import observing_night_id
+    from wayfindinglib.analytics.data_versions import depth_goal_data_version
+
+    now = time.time()
+    _write_camera_frame(cached.config, "NGC 7331", "CamA", "own", night="2020-01-01")
+    _write_camera_frame(cached.config, "M 13", "CamA", "other", night=observing_night_id(now))
+
+    def version(moment: float) -> Any:
+        """Work out the depth goal version at a moment.
+
+        Returns
+        -------
+        version : `Any`
+            The version.
+        """
+        return depth_goal_data_version(cached.config, cached.butler, "NGC 7331", moment)
+
+    assert version(now) == version(now + 60.0)
+    assert version(now + 86400.0) != version(now)
+    assert version(now + 86400.0) == version(now + 86460.0)
+
+
+def test_a_frame_of_another_camera_keeps_the_answer(cached: SimpleNamespace, forecast_status: dict) -> None:
+    """A frame of another target taken with another camera changes nothing."""
+    _write_camera_frame(cached.config, "NGC 7331", "CamA", "own")
+    cached.ask()
+    _write_camera_frame(cached.config, "M 13", "CamB", "other")
+    cached.ask()
+    assert len(cached.recorder.ratios) == 1
+
+
+def test_the_kept_status_equals_one_built_without_the_cache(
+    cached: SimpleNamespace, forecast_status: dict
+) -> None:
+    """The cache gives the answer an uncached build gives."""
+    _write_camera_frame(cached.config, "NGC 7331", "CamA", "own")
+    cached.ask()
+    kept = cached.ask()
+    fake_library = FakeLibrary({"NGC 7331": []}, [row(SURFACE_METRIC, 24.2)], {"NGC 7331": "LIN"})
+    direct = tasks.build_depth_goal_status(
+        "NGC 7331",
+        astrometrics=fake_library,
+        butler=cached.butler,
+        report_for_noise_ratio=cached.recorder,
+    )
+    assert kept == direct

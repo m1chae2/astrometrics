@@ -706,7 +706,7 @@ def test_a_dry_run_with_the_new_options_writes_nothing(
     assert list(tmp_path.iterdir()) == []
 
 
-# -- The earlier-nights stack (decision D11) ----------------------------------
+# -- The earlier-nights stack ----------------------------------
 
 TWO_NIGHTS = ("2026-10-01", "2026-10-02")
 BOTH_FRAMES = ("Both/light_0.fit", "Both/light_1.fit")
@@ -980,7 +980,7 @@ def noise_rows(target: str, ratio: float | None) -> dict[str, list[SimpleNamespa
 def test_the_odd_even_difference_runs_whatever_the_ratio_or_without_a_row(
     script: Any, fake: FakeAstrometrics, tmp_path: Path, ratio: float | None
 ) -> None:
-    """Check every stack gets the measurement (D19); no ratio gates it."""
+    """Check every stack gets the measurement; no ratio gates it."""
     fake.quality_rows = noise_rows("Both", ratio)
 
     records = run_stack_only(script, tmp_path)

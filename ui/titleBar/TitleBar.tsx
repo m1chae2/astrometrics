@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import appIcon from '../../assets/orbit-smooth-64.png';
+import { Button } from '../common/components/Button';
 import './titleBar.css';
 
 /**
@@ -51,24 +52,24 @@ export const TitleBar: React.FC = () => {
             </div>
 
             <div className="title-bar__controls">
-                <button
+                <Button
+                    variant="ghost"
                     className="title-bar__button"
                     aria-label="Minimize window"
                     title="Minimize window"
                     onClick={() => windowApi.minimize()}
-                    type="button"
                 >
                     <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">
                         <rect x="2" y="5.5" width="8" height="1" />
                     </svg>
-                </button>
+                </Button>
 
-                <button
+                <Button
+                    variant="ghost"
                     className="title-bar__button"
                     aria-label={isMaximized ? 'Restore window' : 'Maximize window'}
                     title={isMaximized ? 'Restore window' : 'Maximize window'}
                     onClick={() => windowApi.toggleMaximize()}
-                    type="button"
                 >
                     {isMaximized ? (
                         <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">
@@ -80,19 +81,19 @@ export const TitleBar: React.FC = () => {
                             <rect x="2" y="2" width="8" height="8" fill="none" stroke="currentColor" strokeWidth="1" />
                         </svg>
                     )}
-                </button>
+                </Button>
 
-                <button
+                <Button
+                    variant="ghost"
                     className="title-bar__button title-bar__button--close"
                     aria-label="Close window"
                     title="Close window"
                     onClick={() => windowApi.close()}
-                    type="button"
                 >
                     <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">
                         <path d="M2 2L10 10M10 2L2 10" fill="none" stroke="currentColor" strokeWidth="1.2" />
                     </svg>
-                </button>
+                </Button>
             </div>
         </div>
     );

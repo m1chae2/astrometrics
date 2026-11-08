@@ -29,6 +29,16 @@ Use the `.venv` interpreter for everything.
 
 Every file starts with a description block, and every class, function, method and test has a docstring. For changes under `ui/`, also run `npm run type-check` and `npm test`.
 
+Frontend unit tests never reach a backend: `ui/setupTests.ts` mocks `fetch` and refuses `fetch`, `XMLHttpRequest` and `WebSocket` calls to the default backend port (5000). A few files need a real backend and carry the marker `@requires-test-backend`. They are skipped unless you set `ASTROMETRICS_LIVE_BACKEND_TESTS=1`. With it set, `ui/globalSetup.ts` starts a throwaway backend of its own (its own library, a random port, the INDI simulator), and the marked tests use only that one. Never point these tests at a backend that is connected to real hardware or the real library, and keep device commands, policy changes, library writes and ingestion starts out of them.
+
+## UI controls
+
+Build every screen from the components in `ui/common/components/` (`Button`, `TextInput`, `Checkbox`, `PopoverSelect`, `Tabs` and the others there), and never restyle them for one screen. If a control needs a new look or size, add a prop or variant to the component. ESLint rejects a raw `<button>`, `<input>`, `<select>` or `<textarea>`, a hand-built `btn` class and an inline color. Stylelint rejects a stylesheet that targets a shared control's classes (such as `.btn` or `.panel .btn`) outside the control's own stylesheet. New colors, sizes and radii are tokens in `ui/common/styles/theme.css`.
+
+## Performance measures (TPMs)
+
+`build/tpm/run_tpm.sh` measures how fast the app is and how many resources it uses (display switch times, blocking time, memory, CPU and backend calls) and compares the result with `build/tpm/tpm_baseline.json`. It runs only against a throwaway library and a throwaway backend on a random port, never your real backend or hardware. Run it before and after a change that could make the app slower or heavier. A **breached** TPM needs a fix or a stated reason in the pull request. Update the baseline only on purpose, with `--update-baseline`. [`build/tpm/README.md`](build/tpm/README.md) explains each measure.
+
 ## Documentation
 
 The rules for writing and placing documentation are in [Documentation conventions](documentation/Documentation_Conventions.md), and [About these docs](documentation/About_These_Docs.md) maps every document.
@@ -50,4 +60,4 @@ The first line starts with one of `doc:`, `refactor:`, `new:`, `fix:` or `mainte
 
 ## Issues and pull requests
 
-Open an issue before starting tracked work. Before a pull request that closes an issue can merge, the issue must contain an `## Analysis and Plan` section: what you found investigating the problem and what the change will do. The `Issue Progress Required` workflow (`.github/workflows/issue-progress-required.yml`) checks for it. Close the issue from the pull request description with a keyword such as `Closes #123`. Fill in the checklist in the pull request template.
+Open an issue before starting tracked work. Plans and design decisions live in the issue, not as files in the repository. Give it a subsystem, component and type label, and a display label (for example `Planetarium` or `Status Header`) for each part of the screen it changes. Before a pull request that closes an issue can merge, the issue must contain an `## Analysis and Plan` section: what you found investigating the problem and what the change will do. The `Issue Progress Required` workflow (`.github/workflows/issue-progress-required.yml`) checks for it. Close the issue from the pull request description with a keyword such as `Closes #123`. Fill in the checklist in the pull request template.

@@ -19,12 +19,16 @@ interface InteractionState {
  * @param containerRef Reference to the parent container element.
  * @param drawnSize Current dimensions of the drawn image on the canvas.
  * @param onLevelChange Optional callback for level adjustment gestures.
+ * @param keepViewOnResizeRef While its value is true, a change of the drawn size that keeps the
+ *   same shape (a small preview replaced by the full picture) keeps what the user sees: the
+ *   zoom is rescaled so the picture covers the same area on screen. Read once per change, then set back to false.
  * @returns Object with zoom, pan positions, transform helpers, and pointer event handlers.
  */
 export const useCanvasInteraction = (
     containerRef: RefObject<HTMLDivElement | null>,
     drawnSize: { w: number; h: number },
-    onLevelChange?: (delta: number) => void // if we want level dragging
+    onLevelChange?: (delta: number) => void, // if we want level dragging
+    keepViewOnResizeRef?: RefObject<boolean>
 ) => {
     const [zoom, setZoom] = useState(1);
     const [panX, setPanX] = useState(0);
@@ -49,7 +53,7 @@ export const useCanvasInteraction = (
      * Applies the current pan and zoom values to the canvas and overlay transform styles.
      */
     const scheduleTransformWrite = useCallback(() => {
-        const elements = containerRef.current?.querySelectorAll<HTMLElement | SVGElement>('canvas');
+        const elements = containerRef.current?.querySelectorAll<HTMLElement | SVGElement>('canvas:not([data-overlay-layer])');
         if (!elements || elements.length === 0) return;
         const transform = `translate(${panRef.current.x}px, ${panRef.current.y}px) scale(${zoomRef.current})`;
         elements.forEach((el) => {
@@ -303,11 +307,26 @@ export const useCanvasInteraction = (
 
         prevDrawnSizeRef.current = { w: drawnSize.w, h: drawnSize.h };
 
-        if (isFirstLoad || hasDimensionChanged) {
+        const keepView = Boolean(keepViewOnResizeRef?.current);
+        if (keepViewOnResizeRef && hasDimensionChanged) keepViewOnResizeRef.current = false;
+        const sameShape = hasDimensionChanged && drawnSize.w > 0 && drawnSize.h > 0 &&
+            Math.abs((prev.w / prev.h) / (drawnSize.w / drawnSize.h) - 1) < 0.01;
+
+        if (keepView && sameShape) {
+            // Same picture at a new pixel size: keep it covering the same screen area.
+            const newZoom = zoomRef.current * (prev.w / drawnSize.w);
+            zoomRef.current = newZoom;
+            clampPan();
+            scheduleTransformWrite();
+            setZoom(newZoom);
+            setPanX(panRef.current.x);
+            setPanY(panRef.current.y);
+        } else if (isFirstLoad || hasDimensionChanged) {
             resetView();
         } else if (drawnSize.w > 0 && drawnSize.h > 0) {
             scheduleTransformWrite();
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [drawnSize.w, drawnSize.h, resetView, scheduleTransformWrite]);
 
     // zoomToFit reads container.clientWidth/clientHeight at call time. If an
@@ -325,7 +344,8 @@ export const useCanvasInteraction = (
     const wasZeroSizeRef = useRef(true);
     useEffect(() => {
         const containerElement = containerRef.current;
-        if (!containerElement) return;
+        // Older WebViews may lack ResizeObserver; the view is then fitted on load only.
+        if (!containerElement || typeof ResizeObserver === 'undefined') return;
 
         const observer = new ResizeObserver((entries) => {
             const entry = entries[0];

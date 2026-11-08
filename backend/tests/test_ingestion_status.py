@@ -123,3 +123,74 @@ def test_a_library_reindex_starts_a_measurement_for_each_target_that_gained_fram
     assert service._reindex_library("job1") is True
 
     assert measurement.started == ["M 13"]
+
+
+def _offline_service() -> IngestionService:
+    """Build an ingestion service whose observatory computer cannot be reached.
+
+    Returns
+    -------
+    service : `IngestionService`
+        A service whose remote listing raises `ExternalServiceError`.
+    """
+    from astrometricslib.exceptions import ExternalServiceError
+
+    wayfinder = MagicMock()
+    wayfinder.control.remote.list.side_effect = ExternalServiceError(
+        "The observatory computer is not reachable."
+    )
+    return IngestionService(wayfinder=wayfinder)
+
+
+@pytest.mark.parametrize("folder", ["M 81", "calibration"])
+def test_offline_stats_and_file_list_are_a_status_not_an_error(
+    folder: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An unreachable observatory computer gives `reachable: False`, no log."""
+    import logging
+
+    service = _offline_service()
+    with caplog.at_level(logging.DEBUG):
+        stats = service.get_remote_stats(folder)
+        listing = service.list_remote_files(folder)
+    assert stats["reachable"] is False
+    assert stats["fileCount"] == 0
+    assert listing == {"files": [], "resolvedFolder": folder, "reachable": False}
+    assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
+
+
+def test_offline_telescope_polls_log_no_error_and_note_the_change_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Polls of an offline telescope log one INFO line, no WARNING or ERROR."""
+    import logging
+
+    from astrometricslib.exceptions import ExternalServiceError
+    from backend.services.observatory.telescope_service import TelescopeService
+
+    wayfinder = MagicMock()
+    wayfinder.control.mount.status.side_effect = ExternalServiceError("offline")
+    service = TelescopeService(wayfinder=wayfinder)
+    with caplog.at_level(logging.DEBUG):
+        for _ in range(3):
+            data = service.get_status()
+    assert data["connectionStatus"] == "Disconnected"
+    assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
+    assert len([record for record in caplog.records if "status is unavailable" in record.getMessage()]) == 1
+
+
+def test_scan_reports_offline_computer_as_status() -> None:
+    """An empty scan from an offline computer gives ``reachable: False``."""
+    from unittest.mock import MagicMock
+
+    from backend.services.processing.ingestion_service import IngestionService
+
+    wayfinder = MagicMock()
+    wayfinder.control.remote.list.return_value = []
+    wayfinder.control.remote.check_connection.return_value = False
+    service = IngestionService.__new__(IngestionService)
+    service._wayfinder = wayfinder
+    assert service.scan_remote_targets_rpc() == {"folders": [], "reachable": False}
+
+    wayfinder.control.remote.list.return_value = ["M_31"]
+    assert service.scan_remote_targets_rpc() == {"folders": ["M_31"], "reachable": True}

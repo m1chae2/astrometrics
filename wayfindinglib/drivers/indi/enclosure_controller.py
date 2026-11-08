@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from wayfindinglib.models.equipment_and_site.enclosure import EnclosureState
 
+from .property_state import get_property_state
 from .property_wait import wait_for_switch_state
 from .pyindi_compatibility import PyIndi
 
@@ -53,7 +54,7 @@ class EnclosureController:
         if not shutter_switch:
             return EnclosureState.UNKNOWN
 
-        vector_state = getattr(shutter_switch, "s", None)
+        vector_state = get_property_state(shutter_switch)
         if vector_state == PyIndi.IPS_ALERT:
             return EnclosureState.FAULT
 

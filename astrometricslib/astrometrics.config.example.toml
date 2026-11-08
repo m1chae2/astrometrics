@@ -19,6 +19,22 @@
 # `clip_ceiling_adu = { value = 65532.0, kind = "measured", source = "..." }`
 # -- see the comment above ["Observatory.Camera.Nikon D5300"] for what these
 # mean and how to add a camera of your own.
+#
+# OPTIONAL, and not for editing by hand: a program that starts the app (a
+# launcher) may add a read-only ["Launch"] section to the settings file it
+# starts the app with. It says what kind of run this is. A normal install has
+# no such section. The keys are:
+#   label              text for the status chip, for example "SIMULATOR"
+#   live_hardware      true when real devices can be commanded
+#   disposable_library true when the libraries can be thrown away (the backup
+#                      script then skips them)
+#   offline            true when nothing may leave this computer: online
+#                      lookups, catalogs, plate solving and downloads refuse,
+#                      and so do connections to other computers. This computer
+#                      itself (localhost) stays reachable.
+#   locked_keys        a list of "Section.key" names the settings page cannot
+#                      change while the app runs
+# See astrometricslib/foundation/launch_identity.py.
 
 ["Image Library"]
 # Folder for the databases. Leave it empty to use the user's data folder,

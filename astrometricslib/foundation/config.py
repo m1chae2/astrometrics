@@ -16,11 +16,17 @@ import tomlkit
 
 from astrometricslib.foundation.camera_names import normalize_camera_name
 from astrometricslib.foundation.enums import FilterType
+from astrometricslib.foundation.launch_identity import (
+    LAUNCH_SECTION,
+    LaunchIdentity,
+    launch_identity_from_settings,
+)
 from astrometricslib.foundation.observatory_setups import ObservatorySetups, load_observatory_setups
 from astrometricslib.foundation.observatory_site import ObservatorySite, load_observatory_site
 from astrometricslib.foundation.paths import (
     config_directory,
     data_directory,
+    resolve_library_setting,
     resolve_mounted_path,
     state_directory,
 )
@@ -1349,6 +1355,27 @@ class AppConfiguration:
         """
         return load_observatory_site(self)
 
+    def get_launch_identity(self) -> LaunchIdentity | None:
+        """Return what the launcher says about this run, if it says anything.
+
+        Read from the ``[Launch]`` section (see
+        `astrometricslib.foundation.launch_identity`).
+
+        Returns
+        -------
+        identity : `LaunchIdentity` or `None`
+            The identity, or `None` when the config has no ``[Launch]``
+            section (an ordinary run). A section that is there but cannot be
+            read gives an identity with ``offline`` true.
+        """
+        if not self.app_config.has_section(LAUNCH_SECTION):
+            return None
+        try:
+            section = dict(self.app_config[LAUNCH_SECTION])
+        except KeyError, TypeError, ValueError:
+            section = None
+        return launch_identity_from_settings({LAUNCH_SECTION: section})
+
     def get_camera_default_iso(self, camera_name: str | None) -> str | None:
         """Return the ISO or gain to assume for a camera whose header has none.
 
@@ -1429,16 +1456,9 @@ class AppConfiguration:
             path_str = self.app_config.get("Image Library", "path")
             if not path_str:
                 return Path(data_directory()).absolute()
-            path = Path(path_str)
-            if not path.is_absolute():
-                # If path starts with ./, resolve relative to project root.
-                # If `library` was moved to astrometricslib/library,
-                # check there.
-                check_path = self.get_project_root() / "astrometricslib" / path
-                if check_path.exists():
-                    return check_path.absolute()
-                return (self.get_project_root() / path).absolute()
-            return path.absolute()
+            # A relative path starts at the project root, or inside
+            # astrometricslib/ where an older install kept the library.
+            return resolve_library_setting(path_str, self.get_project_root(), search_package=True)
         except configparser.NoSectionError, configparser.NoOptionError, KeyError:
             return Path(data_directory()).absolute()
 
@@ -1458,15 +1478,7 @@ class AppConfiguration:
         try:
             path_str = self.app_config.get("Image Library", "frames_path")
             if path_str:
-                path = Path(path_str)
-                if not path.is_absolute():
-                    check_path = self.get_project_root() / "astrometricslib" / path
-                    if check_path.exists():
-                        path = check_path.absolute()
-                    else:
-                        path = (self.get_project_root() / path).absolute()
-                else:
-                    path = path.absolute()
+                path = resolve_library_setting(path_str, self.get_project_root(), search_package=True)
                 if not path.exists():
                     path = Path(resolve_mounted_path(str(path)))
                 return path
@@ -1521,10 +1533,7 @@ class AppConfiguration:
             path_str = None
         if not path_str:
             return self.get_frames_path()
-        path = Path(path_str)
-        if not path.is_absolute():
-            path = self.get_project_root() / path
-        return path.absolute()
+        return resolve_library_setting(path_str, self.get_project_root())
 
     def get_library_file_path(self, filename: str) -> Path:
         """Return the absolute path to a file within `library`.
@@ -1618,6 +1627,68 @@ class AppConfiguration:
             ``"stellarmate"``.
         """
         return self.app_config.get("Observatory.RemoteTransfer", "driver", fallback="stellarmate")
+
+    def get_auto_download_frames(self) -> bool:
+        """Return whether finished frames and guide logs copy by themselves.
+
+        The key is ``auto_download`` in ``Observatory.RemoteTransfer``. When
+        it is not set, the answer is `True` if the remote-transfer driver is
+        ``"stellarmate"`` (the camera runs on the observatory computer) and
+        `False` otherwise. The value is read on every call, so a change in
+        the settings file applies without a restart.
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` when a finished frame should start a download, and guide
+            logs should download every few minutes while imaging and once
+            after imaging stops.
+        """
+        default = self.get_remote_transfer_driver_name() == "stellarmate"
+        return bool(
+            self.app_config.getboolean("Observatory.RemoteTransfer", "auto_download", fallback=default)
+        )
+
+    def get_phd2_location(self) -> str:
+        """Return where PHD2 runs: ``"observatory"`` or ``"local"``.
+
+        ``"observatory"`` means PHD2 runs on the telescope computer, and
+        the app reaches its event server through an SSH port forward.
+        ``"local"`` means PHD2 runs on this computer. When the key
+        ``phd2_location`` in ``Observatory.Guiding`` is not set, the answer
+        is ``"observatory"`` if the remote-transfer driver is
+        ``"stellarmate"`` and ``"local"`` otherwise.
+
+        Returns
+        -------
+        location : `str`
+            ``"observatory"`` or ``"local"``.
+
+        Raises
+        ------
+        ValueError
+            If the configured value is neither.
+        """
+        default = "observatory" if self.get_remote_transfer_driver_name() == "stellarmate" else "local"
+        value = (
+            str(self.app_config.get("Observatory.Guiding", "phd2_location", fallback=default)).strip().lower()
+        )
+        if value not in ("observatory", "local"):
+            raise ValueError(f"phd2_location must be 'observatory' or 'local', not '{value}'.")
+        return value
+
+    def get_phd2_remote_port(self) -> int:
+        """Return the port PHD2's event server listens on, default 4400.
+
+        The port is on the observatory computer for ``"observatory"`` and on
+        this computer for ``"local"``.
+
+        Returns
+        -------
+        port : `int`
+            The configured port.
+        """
+        return int(self.app_config.get("Observatory.Guiding", "phd2_port", fallback="4400"))
 
     def get_min_altitude(self) -> float:
         """Return the minimum allowed altitude for telescope slews.

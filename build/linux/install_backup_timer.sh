@@ -5,7 +5,7 @@ set -euo pipefail
 # Installs the Astrometrics backup units as systemd user units and enables
 # them. Run once; running it again just refreshes the files.
 #
-#   astrometrics-backup.timer          database backup + Drive integrity
+#   astrometrics-backup.timer          local database backup + Drive integrity
 #                                      check, 10 min after login, then every 4 h
 #   astrometrics-library-watch.service uploads library changes to Drive once
 #                                      they settle (needs inotify-tools)

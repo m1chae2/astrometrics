@@ -1,9 +1,11 @@
 """JSON-RPC 2.0 protocol specifications and serialization utilities.
 
-Defines standard request models, CORS support headers, and recursive
-serialization utilities for JSON-RPC 2.0 compliance.
+Defines the request model, the success and error replies, and the recursive
+serialization utilities for JSON-RPC 2.0 compliance. CORS headers are not set
+here: the app's CORS middleware decides them.
 """
 
+import json
 import logging
 from typing import Any
 
@@ -32,22 +34,6 @@ class RPCMethodNotFoundError(NotFoundError):
     `NotFoundError`, so a caller outside the router, such as the MCP proxy,
     reports it as ``not_found``.
     """
-
-
-def get_cors_headers() -> dict[str, str]:
-    """Get standardized CORS headers to avoid browser CORS issues.
-
-    Returns
-    -------
-    headers : `dict` [`str`, `str`]
-        The permissive CORS header set applied to RPC responses.
-    """
-    return {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Credentials": "true",
-        "Access-Control-Allow-Methods": "*",
-        "Access-Control-Allow-Headers": "*",
-    }
 
 
 def serialize_rpc_result(obj: Any) -> Any:
@@ -113,31 +99,6 @@ def serialize_rpc_result(obj: Any) -> Any:
         return str(obj)
 
 
-def make_rpc_success_response(result: Any, request_id: int | str | None) -> JSONResponse:
-    """Construct a standard successful JSON-RPC response in a success envelope.
-
-    Parameters
-    ----------
-    result : `~typing.Any`
-        The raw result value to serialize into the response body.
-    request_id : `int` or `str` or `None`
-        The JSON-RPC request identifier to echo back to the caller.
-
-    Returns
-    -------
-    response : `~fastapi.responses.JSONResponse`
-        A 200 JSON-RPC response envelope containing the serialized
-        result under ``"result"`` and the standard CORS headers.
-    """
-    serialized_result = serialize_rpc_result(result)
-    response_body = {
-        "jsonrpc": "2.0",
-        "result": {"status": "success", "data": serialized_result},
-        "id": request_id,
-    }
-    return JSONResponse(content=response_body, status_code=200, headers=get_cors_headers())
-
-
 def make_rpc_error_response(
     code: int,
     message: str,
@@ -168,10 +129,40 @@ def make_rpc_error_response(
     Returns
     -------
     response : `~fastapi.responses.JSONResponse`
-        A JSON-RPC error envelope with the standard CORS headers.
+        A JSON-RPC error envelope. CORS headers come from the app's
+        CORS middleware, not from here.
     """
     error: dict[str, Any] = {"code": code, "message": message}
     if data is not None:
         error["data"] = data
     response_body = {"jsonrpc": "2.0", "error": error, "id": request_id}
-    return JSONResponse(content=response_body, status_code=status_code, headers=get_cors_headers())
+    return JSONResponse(content=response_body, status_code=status_code)
+
+
+def encode_rpc_success_body(result: Any, request_id: int | str | None) -> bytes:
+    """Turn a handler result into the bytes of a JSON-RPC success reply.
+
+    The conversion of models and NumPy values and the JSON encoding can take
+    a few hundred milliseconds for a large result, so the caller runs this in
+    a worker thread. The bytes match what ``JSONResponse`` would send.
+
+    Parameters
+    ----------
+    result : `~typing.Any`
+        The raw value the handler returned.
+    request_id : `int` or `str` or `None`
+        The JSON-RPC request identifier to echo back.
+
+    Returns
+    -------
+    body : `bytes`
+        The UTF-8 encoded JSON-RPC success envelope.
+    """
+    envelope = {
+        "jsonrpc": "2.0",
+        "result": {"status": "success", "data": serialize_rpc_result(result)},
+        "id": request_id,
+    }
+    return json.dumps(
+        envelope, ensure_ascii=False, allow_nan=False, indent=None, separators=(",", ":")
+    ).encode("utf-8")

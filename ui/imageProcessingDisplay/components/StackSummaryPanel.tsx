@@ -1,16 +1,15 @@
 /**
  * @file StackSummaryPanel.tsx
  * @description The "Stack Summary" block of the Image Processing Display's Data tab.
- * It answers in plain words how a target's current stack was made: how many frames
- * went in and how many were set aside, how many pixels were rejected, how wide the
- * stars are against what the input frames predict, the warnings, and what happened to
- * each exposure group. The numbers are the ones the stacking step saved with the
- * stack, so nothing is measured again. The warnings are the failed checks of the stacking
- * job that made the stack, each with its number and its limit. A stack that has no job id
- * (older data) shows the failed checks stored for its target and file instead. The panel
- * only reports; it does not rate a stack. The whole block is a disclosure that is closed
- * at first and shows one line (frames, date), so it does not push the session frames far
- * down the tab. It remembers nothing between visits.
+ * It answers in plain words how a target's current stack was made. The closed line shows
+ * how many frames were stacked. Inside are the stack date, the frames set aside or left out
+ * (each shown only when there are some, with the reasons), the warnings, and, when the
+ * stack has more than one exposure length, a closed list of the exposure groups with
+ * short notes. The numbers are the ones the stacking step saved with the stack, so nothing
+ * is measured again. The warnings are the failed checks of the stacking job that made the
+ * stack, each with its number and its limit; a stack with no job id (older data) shows the
+ * failed checks stored for its target and file instead. A check that passed gets no row.
+ * The panel only reports; it does not rate a stack. It remembers nothing between visits.
  */
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -28,6 +27,7 @@ import {
 } from '../../common/services/imaging/stackReviewService';
 import { describeStackWarningTitle, describeWarningNumbers } from '../utils/stackWarnings';
 
+import { Skeleton } from '../../common/components/Skeleton';
 /** Which stack to summarize. */
 export type StackSummaryKind = 'imaging' | 'spectral';
 
@@ -54,64 +54,29 @@ export interface ExposureGroupView {
     left_out_reason?: string | null;
 }
 
-/** The star width numbers, as the backend sends them inside `StackSummary.star_width_px`. */
-export interface StarWidthView {
-    stack?: number | null;
-    expected_from_inputs?: number | null;
-    median_of_inputs?: number | null;
-}
-
 /** One frame left out of the stack, as the backend sends it inside `StackSummary.skipped_reasons`. */
 export interface SkippedFrameView {
     file?: string;
     reason?: string;
 }
 
-/**
- * Writes a share of pixels as a percentage with a unit.
- * @param fraction The share, from 0 to 1.
- * @return Text such as `0.8% of pixels`, or `not recorded`.
- */
-export const formatPixelShare = (fraction: number | null | undefined): string => {
-    if (fraction == null) return 'not recorded';
-    const percent = fraction * 100;
-    const digits = percent > 0 && percent < 0.1 ? 3 : 1;
-    return `${percent.toFixed(digits)}% of pixels`;
-};
-
-/**
- * Writes a star width in pixels.
- * @param pixels The width (FWHM), in pixels.
- * @return Text such as `2.31 px`, or `not recorded`.
- */
-export const formatStarWidth = (pixels: number | null | undefined): string =>
-    pixels == null ? 'not recorded' : `${pixels.toFixed(2)} px`;
-
 export { formatExposureSeconds };
 
 /**
- * Says how far an exposure group was moved to line up with the others.
+ * Writes the short notes for one exposure group: why it was left out, or what to know about it.
  * @param group The exposure group.
- * @return Text such as `1.4 px`, `Not moved (reference)`, or a dash.
+ * @return Notes joined by "; ", or a dash when nothing applies.
  */
-export const describeGroupShift = (group: ExposureGroupView): string => {
-    const shift = group.alignment_shift_pixels;
-    if (!shift || shift.length < 2) {
-        return group.left_out_reason ? '—' : 'Not moved (reference)';
+export const describeGroupNotes = (group: ExposureGroupView): string => {
+    const notes: string[] = [];
+    if (group.left_out_reason) {
+        notes.push(group.left_out_reason);
+    } else if (group.frames_stacked < group.frames_submitted) {
+        notes.push('some frames left out');
     }
-    return `${Math.hypot(shift[0], shift[1]).toFixed(1)} px`;
-};
-
-/**
- * Says whether an exposure group clipped, and where.
- * @param group The exposure group.
- * @return `No`, or what clipped.
- */
-export const describeGroupClipping = (group: ExposureGroupView): string => {
-    const parts: string[] = [];
-    if (group.saturated) parts.push('Bright stars at the camera limit');
-    if (group.clipped_at_zero) parts.push('Sky pixels cut off at zero');
-    return parts.length > 0 ? parts.join('; ') : 'No';
+    if (group.saturated) notes.push('bright stars clipped');
+    if (group.clipped_at_zero) notes.push('sky cut off at zero');
+    return notes.length > 0 ? notes.join('; ') : '—';
 };
 
 /**
@@ -137,6 +102,8 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
             }
         },
         enabled: Boolean(targetId),
+        // A finished stack changes `refreshKey`, so 30 s is safe.
+        staleTime: 30_000,
     });
 
     // The warnings come from the stacking job that made the stack. Without a job id, or when the
@@ -154,7 +121,7 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
 
     if (!targetId) return null;
     if (isLoading) {
-        return <div className="stack-summary stack-summary--muted">Loading {label.toLowerCase()} summary...</div>;
+        return <Skeleton variant="keyValue" count={3} label={`Loading the ${label.toLowerCase()} summary`} />;
     }
     if (isError) {
         return (
@@ -171,91 +138,78 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
         );
     }
 
-    const starWidth = (summary.star_width_px ?? {}) as StarWidthView;
     const groups = (summary.exposure_groups ?? []) as unknown as ExposureGroupView[];
     const skipped = (summary.skipped_reasons ?? []) as SkippedFrameView[];
     const madeAt = new Date(summary.made_at);
     const madeAtText = Number.isNaN(madeAt.getTime()) ? summary.made_at : madeAt.toLocaleString();
 
+    // Warnings stay readable while the block is closed: the count goes on the closed line.
+    const warningCount = warnings?.length ?? 0;
+
     return (
         <details className="stack-summary">
             <summary className="stack-summary__title">
                 <span className="stacked-image-panel__label">
-                    {`${label} summary: ${summary.frames_stacked} of ${summary.frames_submitted} frames, `
-                        + `made ${madeAtText}`}
+                    {`${label} summary: ${summary.frames_stacked} of ${summary.frames_submitted} frames`}
                 </span>
+                {warningCount > 0 && (
+                    <span className="stack-summary__flag" data-testid="stack-warning-count">
+                        {` · ${warningCount} ${warningCount === 1 ? 'warning' : 'warnings'}`}
+                    </span>
+                )}
             </summary>
 
             <dl className="stack-summary__list">
-                <dt>Frames used</dt>
-                <dd>{summary.frames_stacked} of {summary.frames_submitted} frames</dd>
+                <dt>Stack date</dt>
+                <dd>{madeAtText}</dd>
 
-                {summary.frames_set_aside_before_stacking != null && (
+                {(summary.frames_set_aside_before_stacking ?? 0) > 0 && (
                     <>
                         <dt>Set aside before stacking</dt>
                         <dd>
                             {summary.frames_set_aside_before_stacking} frames
-                            {summary.frames_set_aside_before_stacking > 0 && (
-                                <details
-                                    className="stack-summary__details"
-                                    onToggle={(event) => setShowSetAside(event.currentTarget.open)}
-                                >
-                                    <summary>Why they were set aside</summary>
-                                    {showSetAside && (
-                                        <SetAsideFramesList
-                                            targetId={targetId}
-                                            count={summary.frames_set_aside_before_stacking}
-                                            refreshKey={refreshKey}
-                                        />
+                            <details
+                                className="stack-summary__details"
+                                onToggle={(event) => setShowSetAside(event.currentTarget.open)}
+                            >
+                                <summary>Why they were set aside</summary>
+                                {showSetAside && (
+                                    <SetAsideFramesList
+                                        targetId={targetId}
+                                        count={summary.frames_set_aside_before_stacking as number}
+                                        refreshKey={refreshKey}
+                                    />
+                                )}
+                            </details>
+                        </dd>
+                    </>
+                )}
+
+                {summary.frames_skipped > 0 && (
+                    <>
+                        <dt>Left out while stacking</dt>
+                        <dd>
+                            {summary.frames_skipped} frames
+                            {skipped.length > 0 && (
+                                <details className="stack-summary__details">
+                                    <summary>Why</summary>
+                                    <ul>
+                                        {skipped.map((frame, index) => (
+                                            <li key={`${frame.file}-${index}`}>
+                                                {frame.file}: {frame.reason}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                    {summary.frames_skipped > skipped.length && (
+                                        <div className="stack-summary--muted">
+                                            Showing the first {skipped.length} of {summary.frames_skipped} frames.
+                                        </div>
                                     )}
                                 </details>
                             )}
                         </dd>
                     </>
                 )}
-
-                <dt>Left out while stacking</dt>
-                <dd>
-                    {summary.frames_skipped} frames
-                    {skipped.length > 0 && (
-                        <details className="stack-summary__details">
-                            <summary>Why</summary>
-                            <ul>
-                                {skipped.map((frame, index) => (
-                                    <li key={`${frame.file}-${index}`}>
-                                        {frame.file}: {frame.reason}
-                                    </li>
-                                ))}
-                            </ul>
-                            {summary.frames_skipped > skipped.length && (
-                                <div className="stack-summary--muted">
-                                    Showing the first {skipped.length} of {summary.frames_skipped} frames.
-                                </div>
-                            )}
-                        </details>
-                    )}
-                </dd>
-
-                <dt>Pixels rejected</dt>
-                <dd>
-                    {formatPixelShare(summary.rejected_pixel_fraction)}
-                </dd>
-
-                <dt>Star width (FWHM)</dt>
-                <dd>
-                    {formatStarWidth(starWidth.stack)} in the stack
-                    {starWidth.expected_from_inputs != null && (
-                        <>, against {formatStarWidth(starWidth.expected_from_inputs)} expected from the input frames</>
-                    )}{' '}
-                    (the input frames' median is {formatStarWidth(starWidth.median_of_inputs)}).
-                </dd>
-
-                {summary.calibration_mismatches ? (
-                    <>
-                        <dt>Calibration mismatches</dt>
-                        <dd>{summary.calibration_mismatches} (frames whose calibration files did not match)</dd>
-                    </>
-                ) : null}
             </dl>
 
             <div className="stack-summary__flags">
@@ -266,9 +220,6 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
                     <span className="stack-summary--muted">Reading the warnings...</span>
                 ) : warnings.length > 0 ? (
                     <>
-                        <span>
-                            Each is a check of this stack that failed, with the number measured and its limit.
-                        </span>
                         <ul className="stack-summary__flag-list">
                             {warnings.map((warning, index) => {
                                 const numbers = describeWarningNumbers(warning);
@@ -285,34 +236,32 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
                         </ul>
                     </>
                 ) : (
-                    <span className="stack-summary--muted">None raised.</span>
+                    <span className="stack-summary--muted">none</span>
                 )}
             </div>
 
-            {groups.length > 0 && (
-                <table className="stack-summary__groups">
-                    <caption>Exposure groups (frames with the same exposure length are stacked together)</caption>
-                    <thead>
-                        <tr>
-                            <th scope="col">Exposure</th>
-                            <th scope="col">Frames used</th>
-                            <th scope="col">Clipped</th>
-                            <th scope="col">Moved to line up</th>
-                            <th scope="col">Left out</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {groups.map((group) => (
-                            <tr key={group.exposure_seconds}>
-                                <th scope="row">{formatExposureSeconds(group.exposure_seconds)}</th>
-                                <td>{group.frames_stacked} of {group.frames_submitted}</td>
-                                <td>{describeGroupClipping(group)}</td>
-                                <td>{describeGroupShift(group)}</td>
-                                <td>{group.left_out_reason ?? 'No, it is in the stack'}</td>
+            {groups.length > 1 && (
+                <details className="stack-summary__details">
+                    <summary>{`Exposure groups (${groups.length})`}</summary>
+                    <table className="stack-summary__groups">
+                        <thead>
+                            <tr>
+                                <th scope="col">Exposure</th>
+                                <th scope="col">Frames used</th>
+                                <th scope="col">Notes</th>
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            {groups.map((group) => (
+                                <tr key={group.exposure_seconds}>
+                                    <th scope="row">{formatExposureSeconds(group.exposure_seconds)}</th>
+                                    <td>{group.frames_stacked} of {group.frames_submitted}</td>
+                                    <td>{describeGroupNotes(group)}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </details>
             )}
 
             <StackComparisonControl targetId={targetId} kind={kind} />

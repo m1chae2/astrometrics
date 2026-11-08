@@ -4,7 +4,7 @@ Description: Builds guide samples by hand (a quiet log, a log with a bad
 60-second stretch in every 300 seconds, and a noisy log) and checks the
 allowed error, the share of sharp windows at each exposure, the exposure the
 guiding supports, the reasons given when data is missing, and the
-statement the report rule makes from the result. User decision U3,
+statement the report rule makes from the result. User decision,
 2026-10-24 (issue #95).
 """
 

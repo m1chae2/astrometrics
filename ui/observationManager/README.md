@@ -12,7 +12,7 @@ Terms are defined in the [glossary](../../documentation/Glossary.md). This file 
 
 ## What the display does
 
-The page does not scroll. The Execution Queue runs across the top. Under it are the package library on the left, the package editor in the center and the Visible Targets table on the right. You can work on one thing at a time. Picking a package or a queue card clears the other pick.
+The page does not scroll. The Execution Queue runs across the top. Under it are the package library on the left, the package editor in the center and the Visible Targets table on the right. You can work on one thing at a time. Picking a package or a queue card clears the other pick. When the display opens with nothing picked, it opens the first Planned package (else the first Suggested, else the first Complete) once, so the editor is not empty. This default does not change the shared target.
 
 The display only shows what the library returns. The library chooses which packages exist, counts the frames, and writes the plain sentences. The display does no ranking, counting or wording.
 
@@ -48,5 +48,7 @@ The display only shows what the library returns. The library chooses which packa
 - Sessions are set up by hand here and in Ekos for now. The sequencer stays in the code so that the app can run sessions without Ekos later.
 - Target-level quality statements are not shown here. They are for the library and the AI companion.
 - The old names Observation Planner and Observation Execution open this display (`ui/common/utils/normalizeAppMode.ts`).
+
+Every button, text box, number box, check box and slider here comes from the shared parts in `ui/common/components/` (`Button`, `TextInput`, `NumberInput`, `Checkbox`, `Slider`). This folder's CSS only places them; it does not restyle them.
 
 For exact behavior, read the code.

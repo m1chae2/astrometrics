@@ -2,7 +2,7 @@
 
 Description: `build_night_quality` is the work behind
 `review.query(kind="night_quality", session_id=...)`
-(`QUALITY_METRICS_PLAN.md` Section 6.1, use case UC1). For each target imaged
+(use case UC1 in `Wayfinding_Quality_Use_Cases.md`). For each target imaged
 that night it states where the time went: frames set aside, and the efficiency
 lost in the frames kept, against the user's own best nights with the same
 equipment (the baseline) or, when there are too few nights, against the
@@ -13,7 +13,10 @@ same rules as the target report, counts the warnings with the same
 The review reads only what the last sync copied: the quality measurements in
 the science library, the recorded guiding runs and Ekos sessions, and the
 configuration. It asks the mount for nothing, starts no job and copies no log.
-Nothing is stored.
+Nothing is written to disk. The finished review is kept in memory, in the
+context's review cache, until the data behind it change (see
+`wayfindinglib.analytics.data_versions`), so opening the same night again
+is fast.
 
 The inputs (site, references, sky models, frame observations) come from the
 shared builder, ``library_inputs``, the same one the target report and
@@ -51,6 +54,7 @@ from astrometricslib.reports import (
     QualityMeasurement,
     SubjectLevel,
 )
+from wayfindinglib.analytics.data_versions import review_data_version
 from wayfindinglib.analytics.result_quality.aggregates import DataSummary, SetAsideInput, night_summary
 from wayfindinglib.analytics.result_quality.allowed_capture_values import filter_names_match
 from wayfindinglib.analytics.result_quality.efficiency import (
@@ -104,6 +108,9 @@ if TYPE_CHECKING:
 NIGHT_QUALITY_ENTRY = "WAY-74"
 """Register entry behind the night review."""
 
+NIGHT_QUALITY_CACHE_KEY = "night_quality"
+"""First part of the review cache key of a night's review."""
+
 ROTATION_METRIC = "stacking.frame_registration_rotation_deg"
 """The exploratory frame metric that the polar-alignment estimate reads."""
 
@@ -112,7 +119,9 @@ FOCUS_FILTER = FilterType.L
 own best focus, so frames of different filters must not share one fit."""
 
 
-def _guiding_summary(context: ControlContext, night_id: str) -> GuidingNightSummary:
+def _guiding_summary(
+    context: ControlContext, night_id: str, targets: Sequence[Target] | None = None
+) -> GuidingNightSummary:
     """Summarize the night's guiding from the recorded runs.
 
     Parameters
@@ -121,13 +130,15 @@ def _guiding_summary(context: ControlContext, night_id: str) -> GuidingNightSumm
         Supplies the recorded guiding runs and Ekos sessions.
     night_id : `str`
         The night.
+    targets : `Sequence` [`Target`], optional
+        The library's targets, when the caller has just listed them.
 
     Returns
     -------
     summary : `GuidingNightSummary`
         The summary, or one that says there is no guiding data.
     """
-    analysis = night_analysis.guiding_night_analysis(context, night_id)
+    analysis = night_analysis.guiding_night_analysis(context, night_id, targets=targets)
     if analysis is None:
         return GuidingNightSummary(
             available=False, reason="No guiding run or sample is recorded for this night."
@@ -449,7 +460,38 @@ def _polar_alignment_for_night(
 
 
 def build_night_quality(context: ControlContext, night_id: str) -> NightQuality:
-    """Review one observing night.
+    """Review one night, reusing the last review while its data are unchanged.
+
+    The review is kept in the context's review cache with the version of its
+    data (`review_data_version`). A second call for the same night, with no
+    new frame, measurement, guiding record or equipment change in between,
+    gives the kept review at once. Several threads that ask for the same
+    night together build it once. A night that cannot be reviewed raises
+    `NotFoundError` every time and is not kept.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the science library handle, the configuration, the recorded
+        sessions and the review cache.
+    night_id : `str`
+        The night, named for the local date on which it began.
+
+    Returns
+    -------
+    quality : `NightQuality`
+        The review, as `review_night_quality` gives it. Each caller gets its
+        own copy.
+    """
+    return context.review_cache.get_or_build(
+        (NIGHT_QUALITY_CACHE_KEY, night_id),
+        lambda: review_data_version(context),
+        lambda: review_night_quality(context, night_id),
+    )
+
+
+def review_night_quality(context: ControlContext, night_id: str) -> NightQuality:
+    """Review one observing night from the stored records, always afresh.
 
     Parameters
     ----------
@@ -476,18 +518,19 @@ def build_night_quality(context: ControlContext, night_id: str) -> NightQuality:
     astrometrics = context.astrometrics
     capture_settings = astrometrics.quality.capture_settings()
     night_rows = astrometrics.quality.query(observing_night_id=night_id, library_only=True).rows
-    guiding = _guiding_summary(context, night_id)
+    inputs = LibraryInputs(astrometrics, context.butler, context.config)
+    # The targets are listed once and handed to every step that needs them.
+    targets: dict[str, Target] = inputs.targets()
+    guiding = _guiding_summary(context, night_id, list(targets.values()))
     if not night_rows and not guiding.available:
         raise NotFoundError(
             f"Night {night_id} has no frame measurements and no guiding data.", details={"night_id": night_id}
         )
 
-    inputs = LibraryInputs(astrometrics, context.butler, context.config)
     rows_by_target: dict[str, list[QualityMeasurement]] = defaultdict(list)
     for row in night_rows:
         if row.subject.target_id:
             rows_by_target[row.subject.target_id].append(row)
-    targets: dict[str, Target] = inputs.targets()
 
     night_frame_rows = [row for row in night_rows if row.subject.level == SubjectLevel.FRAME]
     reasons: dict[str, str] = {}
@@ -523,7 +566,7 @@ def build_night_quality(context: ControlContext, night_id: str) -> NightQuality:
         goal_target = target if target else Target(id=target_id)
         target_goal = science_goal_for_target(goal_target)
 
-        goal_for_setting = partial(science_goal_for_setting, goal_target)  # user decision U2
+        goal_for_setting = partial(science_goal_for_setting, goal_target)  # user decision, issue #95
         target_observations = [o for o in night_observations if o.target_id == target_id]
         set_aside = _unobserved_set_aside(
             night_frame_rows, target_id, night_id, reasons, observed_ids, capture_settings
@@ -603,7 +646,7 @@ def _summary_by_goal(
 ) -> tuple[DataSummary, ScienceGoal]:
     """Summarize a target's night, each capture setting for its own goal.
 
-    The user decided on 2026-10-24 (issue #95, decision U2) that the goal is
+    The user decided on 2026-10-24 (issue #95) that the goal is
     chosen for each capture setting. The settings are split into groups that
     share a goal, each group is summarized, and the groups are added up. When
     the goals differ, the whole-target loss account is left out (it would have
@@ -754,6 +797,8 @@ def _unobserved_set_aside(
 
 
 __all__ = [
+    "NIGHT_QUALITY_CACHE_KEY",
     "NIGHT_QUALITY_ENTRY",
     "build_night_quality",
+    "review_night_quality",
 ]

@@ -50,7 +50,7 @@ MANIFEST_PATH = Path(__file__).resolve().parents[2] / "mcp_servers" / "wayfindin
 COMMAND_TOOL_CLASSES = frozenset({"actuate", "safe-stop"})
 """Manifest classes whose tools command hardware. ``safe-stop`` is
 included because `abort_motion` is a motion command the user wants
-refused in monitor mode (decision 2026-10-24)."""
+refused in monitor mode (decision of 2026-10-24, issue #95)."""
 
 ALLOWED_IN_MONITOR_MODE = frozenset({
     "observatory_equipment_connect",
@@ -59,7 +59,7 @@ ALLOWED_IN_MONITOR_MODE = frozenset({
 })
 """Commands that stay allowed in monitor mode.
 
-The user decided this on 2026-10-24 (issue #95, settled decision S10):
+The user decided this on 2026-10-24 (issue #95):
 every motion and capture command stays refused while delegated, but
 device settings (`set_device_property`, the backend's
 ``telescope:set_indi_property``) and the app's own INDI connect and
@@ -115,6 +115,7 @@ COMMAND_DRIVER_METHODS = frozenset({
     "set_slew_rate",
     "pulse_guide",
     "expose",
+    "abort_exposure",
     "move_relative",
     "set_position",
     "open",
@@ -132,6 +133,7 @@ SAMPLE_ARGUMENTS: dict[str, dict[str, Any]] = {
     "observatory_imaging_capture_image": {"exposure_seconds": 1.0, "register_job": False},
     "observatory_imaging_focus_move": {"steps": 10},
     "observatory_imaging_set_filter": {"filter_name": "L"},
+    "observatory_imaging_stop_capture": {},
     "observatory_mount_abort_motion": {},
     "observatory_mount_cancel_centering": {"run_is_active": True},
     "observatory_mount_manual_move": {"direction": "north"},

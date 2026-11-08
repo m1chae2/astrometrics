@@ -89,7 +89,50 @@ def test_driver_passes_the_limit_and_a_cap_to_the_source() -> None:
 
     ra, dec, radius, limit, cap = source.calls[0]
     assert (ra, dec, radius, limit) == (250.0, 36.0, 2.0, 13.0)
-    assert cap == deep_star_catalog_driver._MAXIMUM_STARS_PER_QUERY
+    assert cap == deep_star_catalog_driver._MAXIMUM_STARS_PER_QUERY + 1
+
+
+def _numbered_stars(count: int) -> list[tuple[int, float, float, float]]:
+    """Make ``count`` stars, brightest first.
+
+    Returns
+    -------
+    stars : `list` [`tuple`]
+        ``(source_id, ra, dec, magnitude)`` rows.
+    """
+    return [(index, 250.0, 36.0, 10.0 + index * 0.001) for index in range(count)]
+
+
+def test_a_full_answer_is_cut_to_the_cap_and_flagged_truncated() -> None:
+    """When the store has more than the cap, the extra star proves a cut."""
+    cap = deep_star_catalog_driver._MAXIMUM_STARS_PER_QUERY
+    source = _RecordingSource(_numbered_stars(cap + 1))
+
+    stars, truncated = DeepStarCatalogDriver(star_source=source).query_region_with_status(
+        250.0, 36.0, 2.0, 16.0
+    )
+
+    assert truncated is True
+    assert len(stars) == cap
+    assert stars[-1].id == f"Gaia DR3 {cap - 1}"
+
+
+def test_an_answer_of_exactly_the_cap_is_not_truncated() -> None:
+    """Nothing was left out when the store returns just the cap."""
+    cap = deep_star_catalog_driver._MAXIMUM_STARS_PER_QUERY
+    source = _RecordingSource(_numbered_stars(cap))
+
+    stars, truncated = DeepStarCatalogDriver(star_source=source).query_region_with_status(
+        250.0, 36.0, 2.0, 16.0
+    )
+
+    assert truncated is False
+    assert len(stars) == cap
+
+
+def test_a_missing_catalog_is_not_truncated() -> None:
+    """No catalog means an empty, complete answer."""
+    assert DeepStarCatalogDriver().query_region_with_status(250.0, 36.0, 2.0, 16.0) == ([], False)
 
 
 def test_no_limit_means_no_star_is_excluded_by_magnitude() -> None:

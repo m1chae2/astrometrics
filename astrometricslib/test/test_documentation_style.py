@@ -383,11 +383,7 @@ def _equation_files() -> list[Path]:
         Every Markdown file under ``documentation/`` except build output, and
         every README in the two libraries.
     """
-    files = {
-        path
-        for path in (REPO_ROOT / "documentation").rglob("*.md")
-        if "_build" not in path.parts and "plans" not in path.parts
-    }
+    files = {path for path in (REPO_ROOT / "documentation").rglob("*.md") if "_build" not in path.parts}
     for library in ("astrometricslib", "wayfindinglib"):
         files.update((REPO_ROOT / library).rglob("README.md"))
     return sorted(files)

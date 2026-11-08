@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { parkTelescope, unparkTelescope, slewTelescope, abortTelescopeMotion, setTelescopeTracking, moveTelescope, setTelescopeSlewRate } from '../../common/services/telescope/motionService';
-import { startGuiding, stopGuiding, captureGuideFrame } from '../../common/services/telescope/guidingService';
+import { parkTelescope, unparkTelescope, slewToTarget, abortTelescopeMotion, setTelescopeTracking, moveTelescope, setTelescopeSlewRate } from '../../common/services/telescope/motionService';
+import { captureGuideFrame } from '../../common/services/telescope/guidingService';
 import { startAlignment, stopAlignment } from '../../common/services/alignmentApi';
-import { createTarget } from '../../common/services/targetService';
+import { createTarget, fetchTargetObject } from '../../common/services/targetService';
+import { startOpenEndedCapture, stopCapture } from '../../common/services/imaging/captureService';
 import { emitToast } from '../../common/utils/emitToast';
 
 export const useObservatoryControl = (forceReload: () => void) => {
@@ -17,101 +18,96 @@ export const useObservatoryControl = (forceReload: () => void) => {
         forceReload();
     };
 
-    const handleSlewToTarget = async (raShared: string | null, decShared: string | null) => {
-        if (!raShared || !decShared) {
-            emitToast('Target has no coordinates', 'error');
-            return;
-        }
-
-        emitToast(`Slewing to RA:${raShared} Dec:${decShared}`, 'info');
-        await slewTelescope(parseFloat(raShared), parseFloat(decShared));
-    };
+    /**
+     * Slews the mount to a library target. The backend looks up the target's coordinates.
+     * @param targetId The id of the selected target.
+     * @return True if the mount accepted the slew.
+     */
+    const handleSlewToTarget = async (targetId: string): Promise<boolean> => slewToTarget(targetId);
 
     const handleStop = async () => {
-        emitToast('Stopping Telescope', 'info');
         await abortTelescopeMotion();
     };
 
 
     const handleStartMove = async (direction: string) => {
-        emitToast(`Manual Slew Start: ${direction}`, 'info');
         await moveTelescope(direction, true);
     };
 
     const handleStopMove = async (direction: string) => {
-        // emitToast(`Manual Slew Stop: ${direction}`, 'info');
         await moveTelescope(direction, false);
     };
 
     const handleSetSlewRate = async (rate: number) => {
-        emitToast(`Setting Slew Rate: ${rate}`, 'info');
         await setTelescopeSlewRate(rate);
     };
 
-    const handleSetTracking = async (enabled: boolean) => {
-        emitToast(`${enabled ? 'Enabling' : 'Disabling'} Tracking`, 'info');
-        await setTelescopeTracking(enabled);
-    };
+    /**
+     * Turns sidereal tracking on or off.
+     * @param enabled True to track.
+     * @return True if the mount accepted the command.
+     */
+    const handleSetTracking = async (enabled: boolean): Promise<boolean> => setTelescopeTracking(enabled);
 
-    const handlePark = async () => {
-        emitToast('Parking Telescope', 'info');
-        await parkTelescope();
-    };
+    /**
+     * Parks the mount.
+     * @return True if the mount accepted the command.
+     */
+    const handlePark = async (): Promise<boolean> => parkTelescope();
 
-    const handleUnpark = async () => {
-        emitToast('Unparking Telescope', 'info');
-        await unparkTelescope();
-    };
+    /**
+     * Unparks the mount.
+     * @return True if the mount accepted the command.
+     */
+    const handleUnpark = async (): Promise<boolean> => unparkTelescope();
 
     const handleAddTarget = () => {
         setIsAddModalOpen(true);
     };
 
-    /**
-     * Starts guiding with the exposure and gain the user entered. A failure is shown as a toast.
-     * @param exposure Guide exposure in seconds.
-     * @param gain Guide camera gain.
-     */
-    const handleGuideStart = async (exposure: number, gain: number) => {
-        emitToast(`Starting Guiding (Exp: ${exposure}s, Gain: ${gain})`, 'info');
-        const started = await startGuiding(exposure, gain);
-        if (!started) {
-            emitToast('Guiding did not start. Check that the guide camera and mount are connected.', 'error');
-        }
-    };
-
-    /** Stops guiding. A failure is shown as a toast. */
-    const handleGuideStop = async () => {
-        emitToast('Stopping Guiding', 'info');
-        const stopped = await stopGuiding();
-        if (!stopped) {
-            emitToast('Guiding did not stop. Check the guiding status and try again.', 'error');
-        }
-    };
-
     const handleGuideCapture = async () => {
-        emitToast(`Capturing single guide frame (${guidingExposure}s)`, 'info');
         const captured = await captureGuideFrame(guidingExposure, guidingGain);
-        emitToast(
-            captured ? 'Guide frame captured' : 'Guide frame capture failed',
-            captured ? 'success' : 'error'
-        );
+        if (!captured) emitToast('Guide frame capture failed', 'error');
     };
 
-    const handleStartAlignment = async (raShared: string | null, decShared: string | null) => {
-        if (!raShared || !decShared) {
-            emitToast('Target has no coordinates', 'error');
-            return;
+    /**
+     * Starts alignment on a library target, using the target's own coordinates.
+     * @param targetId The id of the selected target.
+     * @return True if alignment started.
+     */
+    const handleStartAlignment = async (targetId: string): Promise<boolean> => {
+        const target = await fetchTargetObject(targetId);
+        if (!target?.ra || !target?.dec) {
+            emitToast(`${targetId} has no coordinates in the library, so alignment cannot start.`, 'error');
+            return false;
         }
-
-        emitToast(`Starting alignment for RA:${raShared} Dec:${decShared}`, 'info');
-        await startAlignment(raShared, decShared);
+        return startAlignment(target.ra, target.dec);
     };
 
-    const handleStopAlignment = async () => {
-        emitToast('Stopping Alignment', 'info');
-        await stopAlignment();
+    /**
+     * Stops alignment.
+     * @return True if alignment was stopped.
+     */
+    const handleStopAlignment = async (): Promise<boolean> => stopAlignment();
+
+    /**
+     * Starts the open-ended capture on the target the telescope points at.
+     * @param targetName The target the telescope points at, or undefined when it points at none.
+     * @return True if the capture started.
+     */
+    const handleStartCapture = async (targetName: string | undefined): Promise<boolean> => {
+        if (!targetName) {
+            emitToast('The telescope is not pointing at a target', 'error');
+            return false;
+        }
+        return (await startOpenEndedCapture(targetName)) !== null;
     };
+
+    /**
+     * Stops the capture the app started.
+     * @return True if a capture was stopped.
+     */
+    const handleStopCapture = async (): Promise<boolean> => stopCapture();
 
     return {
         isAddModalOpen,
@@ -131,11 +127,11 @@ export const useObservatoryControl = (forceReload: () => void) => {
             onPark: handlePark,
             onUnpark: handleUnpark,
             onAddTarget: handleAddTarget,
-            onGuideStart: handleGuideStart,
-            onGuideStop: handleGuideStop,
             onGuideCapture: handleGuideCapture,
             onStartAlignment: handleStartAlignment,
-            onStopAlignment: handleStopAlignment
+            onStopAlignment: handleStopAlignment,
+            onStartCapture: handleStartCapture,
+            onStopCapture: handleStopCapture
         }
     };
 };

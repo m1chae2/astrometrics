@@ -1,8 +1,8 @@
 """Purpose: Build the target dataset report for one target.
 
 Description: The report tells the user what is wrong with the data already
-taken on one target, and what to take next (`QUALITY_METRICS_PLAN.md` section
-6). It is recomputed on every read and never stored. It joins:
+taken on one target, and what to take next (`Wayfinding_Quality_Judgment.md`).
+It is recomputed on every read and never stored. It joins:
 
 * a summary of each capture setting, with its loss account (``aggregates``);
 * the statements of the rule table: the plain rules (``judge_results``) and
@@ -44,6 +44,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from astrometricslib import Target
+from astrometricslib.drivers import VersionedCache
 from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.reports import (
     CaptureSetting,
@@ -51,6 +52,7 @@ from astrometricslib.reports import (
     QualityMeasurement,
     observing_night_id,
 )
+from wayfindinglib.analytics.data_versions import report_data_version
 from wayfindinglib.analytics.result_quality.aggregates import (
     MeasuredNoiseCheck,
     capture_setting_summaries,
@@ -634,16 +636,16 @@ MORE_FRAMES_NOT_CHECKED_REASON = (
     "frames and stack them; then the report compares the forecast with what the stack did, and once "
     "one check agrees, it will say how many more frames to take."
 )
-"""Why "take N more" is hidden. The user decided on 2026-10-24 (issue #95,
-decision U1) that the number of frames is shown for a target only after one of
-THAT target's forecast checks came out as forecast."""
+"""Why "take N more" is hidden. The user decided on 2026-10-24 (issue #95)
+that the number of frames is shown for a target only after one of THAT
+target's forecast checks came out as forecast."""
 
 
 PROVISIONAL_COUNT_SENTENCE = (
     "It rests on a check made from frames already taken; the next real stack will confirm it or withdraw it."
 )
 """What a "take N more" statement says when only an earlier-nights check
-agreed. The user decided on 2026-10-26 (issue #134, decision D11) that such a
+agreed. The user decided on 2026-10-26 (issue #134) that such a
 count is shown, marked provisional, and ranked below a count that a real later
 stack confirmed."""
 
@@ -909,7 +911,7 @@ def _more_frames_for_setting(
 
     The new frames copy the setting's past frames. When the past frames were
     limited by read noise, the new frames use the exposure at which the sky
-    dominates instead (plan section 6.4), and the reason says so.
+    dominates instead, and the reason says so.
 
     The number comes from the model the forecast check used. When the newest
     stack that holds the setting's frames was combined from exposure groups,
@@ -948,7 +950,7 @@ def _more_frames_for_setting(
     fixed_pattern_history : `Mapping`, optional
         Other targets' fixed-pattern shares by setup (`read_noise_history`).
         A target with no fixed-pattern noise of its own starts from their
-        median, and the statement says so (decision D23).
+        median, and the statement says so (issue #134).
     target_id : `str`, optional
         The target, left out of its own borrowed median.
     target_noise_ratio : `float`, optional
@@ -1240,9 +1242,9 @@ def _quality_statements_of_settings(
         The stored Ekos session records, for the download times.
     forecast_checks : `Sequence` [`ForecastCheck`], optional
         The target's own forecast checks. The recommended additional frames are
-        shown only when one came out as forecast (user decision U1,
+        shown only when one came out as forecast (user decision, issue #95,
         2026-10-24). When only a check made from frames already taken agreed,
-        the count is marked provisional (decision D11, 2026-10-26).
+        the count is marked provisional (issue #134, 2026-10-26).
     has_frame_weights : `bool`, optional
         Whether the target has any ``stacking.frame_weight`` rows; when it
         has none, the "take N more" reason says to restack.
@@ -1349,7 +1351,8 @@ def _quality_statements_of_settings(
                     )
                 )
         frames, used, _problems = _stack_frames(setting_observations)
-        widths = [_width_row_value(target_rows.rows, observation.frame_id) for observation in used]
+        moffat_widths = _moffat_widths_by_frame(target_rows.rows)
+        widths = [moffat_widths.get(observation.frame_id) for observation in used]
         if frames and all(width is not None for width in widths):
             mode = predict_weighting_mode(
                 configured_weight,
@@ -1376,8 +1379,7 @@ def _quality_statements_of_settings(
                 tradeoff = None
                 if position is not None:
                     group_widths = [
-                        _width_row_value(target_rows.rows, frame.frame_id)
-                        for frame in run_groups.groups[position].frames
+                        moffat_widths.get(frame.frame_id) for frame in run_groups.groups[position].frames
                     ]
                     if all(width is not None for width in group_widths):
                         tradeoff = find_sharpness_tradeoff_in_groups(
@@ -1441,7 +1443,7 @@ def _add_fixed_pattern_accounts(
     that text in the message and are added to the reason, so the statement
     names the shape that was found and what the master flat and dark explain,
     in place of only saying the cause is probably the flats or calibration
-    (decisions D21 and D22). The "take N more" and "will not help"
+    (issue #134). The "take N more" and "will not help"
     statements of a setting with an account also carry the cause code
     (`fixed_pattern_cause`) in ``values["fixed_pattern_cause"]``.
 
@@ -1481,24 +1483,33 @@ def _add_fixed_pattern_accounts(
     return updated
 
 
-def _width_row_value(rows: Sequence[QualityMeasurement], frame_id: str) -> float | None:
-    """Read a frame's Moffat star width in arcseconds.
+def _moffat_widths_by_frame(rows: Sequence[QualityMeasurement]) -> dict[str, float | None]:
+    """Read every frame's Moffat star width in arcseconds, in one pass.
 
     Parameters
     ----------
     rows : `Sequence` [`QualityMeasurement`]
         The target's stored rows.
-    frame_id : `str`
-        The frame's subject id.
 
     Returns
     -------
-    width : `float` or `None`
-        The value of the newest ``frame.star_width_moffat_arcsec`` row of
-        the frame, or ``None`` when there is none or it was not measured.
+    widths : `dict` [`str`, `float` or `None`]
+        For each frame subject id that has a ``frame.star_width_moffat_arcsec``
+        row: the value of its newest such row (the first of equally new
+        rows), or ``None`` when that row has no value or its value is not
+        above zero. A frame with no such row is not in the dict.
     """
-    row = _newest([r for r in rows if r.subject.subject_id == frame_id], STAR_WIDTH_MOFFAT_ARCSEC_METRIC)
-    return float(row.value) if row is not None and row.value is not None and row.value > 0.0 else None
+    newest: dict[str, QualityMeasurement] = {}
+    for row in rows:
+        if row.metric != STAR_WIDTH_MOFFAT_ARCSEC_METRIC:
+            continue
+        held = newest.get(row.subject.subject_id)
+        if held is None or row.measured_at > held.measured_at:
+            newest[row.subject.subject_id] = row
+    return {
+        frame_id: float(row.value) if row.value is not None and row.value > 0.0 else None
+        for frame_id, row in newest.items()
+    }
 
 
 def _calibration_statements(
@@ -1694,7 +1705,7 @@ def _guiding_exposure_statements(
 def _state_goals(statements: Sequence[TargetStatement], summaries: Sequence[Any]) -> list[TargetStatement]:
     """Put the science goal into each statement that is about one setting.
 
-    The user decided on 2026-10-24 (issue #95, decision U2) that each
+    The user decided on 2026-10-24 (issue #95) that each
     statement states its goal. The goal goes in ``values["science_goal"]``. A
     statement about the whole target gets it only when every setting has the
     same goal.
@@ -2055,6 +2066,113 @@ def _starting_point(
 # -----------------------------------------------------------------------------
 
 
+TARGET_REPORT_CACHE_MAXIMUM_ENTRIES = 32
+"""How many target reports are kept (one per target and noise ratio).
+
+Design estimate: the depth goal asks for one or two reports per target, and a
+night's planning for a few more. A report is some tens of kilobytes, so 32 of
+them stay under a few megabytes. Not measured."""
+
+_TARGET_REPORT_CACHE = VersionedCache(maximum_entries=TARGET_REPORT_CACHE_MAXIMUM_ENTRIES)
+"""The built reports, each kept until the data behind it changes."""
+
+
+EKOS_CONTEXT_CACHE_MAXIMUM_ENTRIES = 4
+"""How many libraries' Ekos session records are kept. An app works on one
+library; a few more cover tests and a library switch. Design estimate,
+register row WAY-D107."""
+
+_EKOS_CONTEXT_CACHE = VersionedCache(maximum_entries=EKOS_CONTEXT_CACHE_MAXIMUM_ENTRIES)
+"""The Ekos session records of each library, kept until the table that holds
+them is written. Decoding them is the same work for every report and a new
+frame does not change it. The records are only read."""
+
+
+def _read_ekos_contexts(butler: Any, config: Any) -> list[Any]:
+    """Read the stored Ekos session records, or give the ones read before.
+
+    The records are kept until the ``ekos_session_contexts`` table is written
+    (its write counter changes). The list is shared between callers, so the
+    caller must not change it or its records.
+
+    Parameters
+    ----------
+    butler : `DiskButler`
+        The storage layer.
+    config : `AppConfiguration`
+        The configuration, for the library folder.
+
+    Returns
+    -------
+    contexts : `list` [`EkosSessionContext`]
+        The records.
+    """
+    try:
+        library = str(config.get_library_path())
+    except AttributeError, OSError, TypeError, ValueError:
+        return butler.get_all("ekos_session_context")
+
+    def version() -> Any:
+        """Work out the write counter of the Ekos session records.
+
+        Returns
+        -------
+        version : `Any`
+            The counter, or `None` when it cannot be read.
+        """
+        try:
+            found = butler.control_records.data_versions(("ekos_session_contexts",))
+        except AttributeError:
+            return None
+        return None if found is None else tuple(sorted(found.items()))
+
+    return _EKOS_CONTEXT_CACHE.get_or_build(
+        ("ekos_contexts", library),
+        version,
+        lambda: butler.get_all("ekos_session_context"),
+        copy_result=False,
+    )
+
+
+def _report_cache_key(target: Target, config: Any, target_noise_ratio: float) -> tuple | None:
+    """Name the report for the cache.
+
+    The report depends on more than the data version: on which library and
+    target it is for, the noise ratio it aims at, the stack weight setting,
+    and the hour (the starting point uses the sky and the Moon at the time).
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+    config : `AppConfiguration`
+        The configuration.
+    target_noise_ratio : `float`
+        The noise ratio the report aims at.
+
+    Returns
+    -------
+    key : `tuple` or `None`
+        The key, or `None` if the library cannot be named (nothing is kept).
+    """
+    try:
+        library = str(config.get_library_path())
+        weight = str(config.get_stack_weight()) if hasattr(config, "get_stack_weight") else ""
+    except AttributeError, OSError, TypeError, ValueError:
+        return None
+    hour = datetime.now(UTC).strftime("%Y-%m-%dT%H")
+    # The frame count catches frames the held target gained but has not saved.
+    return (
+        "target_report",
+        library,
+        target.id,
+        len(target.frames),
+        round(target_noise_ratio, 9),
+        weight,
+        hour,
+    )
+
+
 def build_target_dataset_report(
     target: Target,
     *,
@@ -2064,7 +2182,78 @@ def build_target_dataset_report(
     at: datetime | None = None,
     target_noise_ratio: float = TARGET_NOISE_RATIO,
 ) -> TargetDatasetReport:
-    """Build the report on one target's data.
+    """Build the report on one target's data, or give the one built before.
+
+    A report takes seconds to build, and the display that asks for it asks
+    again a moment later. A report built for "now" (`at` omitted) is kept in
+    a `VersionedCache` until the data behind it changes: the library's write
+    counters, the wayfinding tables the report reads, and the active
+    equipment and site (see `report_data_version`). It reflects what is
+    stored, so frames the held target gained but has not saved are seen only
+    by their count. A report for a given `at` is built every time. The caller
+    gets its own copy.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+    astrometrics : `Astrometrics`
+        The science library handle. Its ``quality``, ``processing`` and
+        ``targets`` parts are read.
+    butler : `DiskButler`
+        The storage layer, for the stored night plans, the Ekos session
+        records and the site.
+    config : `AppConfiguration`
+        The configuration, for the equipment and the stacker's weight mode.
+    at : `datetime`, optional
+        The time the report is for. Used only by the starting point.
+        Defaults to now.
+    target_noise_ratio : `float`, optional
+        The noise after the recommended additional frames over the noise now.
+        The default is one doubling of the effective time. The depth goal
+        passes the ratio that reaches its depth.
+
+    Returns
+    -------
+    report : `TargetDatasetReport`
+        The summaries, the statements in priority order, how many warnings
+        need attention, the starting point when there are no frames, the
+        forecast checks and the science outcomes. Nothing is stored.
+    """
+    key = None if at is not None else _report_cache_key(target, config, target_noise_ratio)
+    if key is None:
+        return _build_target_dataset_report(
+            target,
+            astrometrics=astrometrics,
+            butler=butler,
+            config=config,
+            at=at,
+            target_noise_ratio=target_noise_ratio,
+        )
+    return _TARGET_REPORT_CACHE.get_or_build(
+        key,
+        lambda: report_data_version(config, butler),
+        lambda: _build_target_dataset_report(
+            target,
+            astrometrics=astrometrics,
+            butler=butler,
+            config=config,
+            at=at,
+            target_noise_ratio=target_noise_ratio,
+        ),
+    )
+
+
+def _build_target_dataset_report(
+    target: Target,
+    *,
+    astrometrics: Any,
+    butler: Any,
+    config: Any,
+    at: datetime | None = None,
+    target_noise_ratio: float = TARGET_NOISE_RATIO,
+) -> TargetDatasetReport:
+    """Build the report on one target's data, without using the cache.
 
     Parameters
     ----------
@@ -2098,7 +2287,7 @@ def build_target_dataset_report(
     now = at or datetime.now(UTC)
     target_rows = read_target_rows(astrometrics, target.id)
     rows = target_rows.rows
-    # The goal is chosen for each capture setting (user decision U2).
+    # The goal is chosen for each capture setting (user decision, issue #95).
     lights = [frame for frame in target.frames if str(frame.role).upper().endswith("LIGHT")]
 
     def goal_for_setting(setting: CaptureSetting) -> ScienceGoal:
@@ -2166,7 +2355,7 @@ def build_target_dataset_report(
     # Summaries, one group of settings for each science goal.
     moonless = context.moonless_sky_rates(observations)
     weight_seconds = _weight_effective_seconds(rows, stack_setting_by_subject, target_rows.settings)
-    noise_history = read_noise_history(astrometrics)
+    noise_history = read_noise_history(astrometrics, config)
     noise_model_errors = noise_history.model_errors
     checks = _measured_noise_checks(
         rows,
@@ -2240,7 +2429,7 @@ def build_target_dataset_report(
         seeing_limit_statements(observations, goal_for_setting, context.reference_for, star_width_evidence)
     )
     statements.extend(_guiding_exposure_statements(summaries, observations, butler, star_width_evidence))
-    contexts = butler.get_all("ekos_session_context")
+    contexts = _read_ekos_contexts(butler, config)
     # The checks come first: "take N more" waits for one that agreed (U1).
     forecast_checks: list[ForecastCheck] = (
         forecast_check(

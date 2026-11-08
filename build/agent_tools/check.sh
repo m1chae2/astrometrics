@@ -6,7 +6,7 @@
 #   check.sh <checkout> doctests                    the documentation tests only (quick, no slot)
 #   check.sh <checkout> docs                        the documentation tests and lint_docs.sh (Vale, markdownlint)
 #   check.sh <checkout> golden                      the M 13 golden suite
-# The full suites are left to continuous integration (see QUALITY_METRICS_PLAN.md section 9.1).
+# The full suites are left to continuous integration (per .claude/CLAUDE.md).
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh" "$1" || exit 2
 mode=$2
 shift 2

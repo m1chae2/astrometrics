@@ -196,6 +196,10 @@ def test_query_filters(store: QualityStore) -> None:
     ids = [m.row_id for m in store.query(target_id="M31")]
     assert {m.row_id for m in store.query(row_ids=ids)} == set(ids)
     assert store.query(row_ids=[]) == []
+    assert {m.subject.subject_id for m in store.query(subject_ids=["f1", "s1", "unknown"])} == {"f1", "s1"}
+    assert store.query(subject_ids=[]) == []
+    with pytest.raises(InvalidArgumentError):
+        store.query(subject_ids=[str(number) for number in range(20001)])
 
 
 def test_row_ids_return_exact_rows_even_when_superseded(store: QualityStore) -> None:
@@ -828,3 +832,38 @@ def test_version_7_adds_the_job_id_index_to_an_old_database_and_keeps_the_rows(t
     # Running the move again changes nothing.
     QualityStore(str(path)).write_measurements([make_measurement(run_id="again")])
     assert "quality_measurements_job_id" in _index_names(path)
+
+
+def test_a_migration_that_rewrites_rows_is_counted(tmp_path: Path) -> None:
+    """Migrating an old file adds one to the quality counter.
+
+    The migration merges and rewrites rows in place. A result built from the
+    old rows must be rebuilt, so the migration counts like any other write.
+    A file that is already current counts only the write.
+    """
+
+    def counter(path: Path) -> int:
+        """Read the quality counter.
+
+        Returns
+        -------
+        count : `int`
+            The counter, 0 when there is none.
+        """
+        with sqlite3.connect(path) as connection:
+            row = connection.execute("SELECT version FROM data_versions WHERE kind = 'quality'").fetchone()
+        return 0 if row is None else row[0]
+
+    old_path = tmp_path / "old" / "astrometrics.db"
+    old_path.parent.mkdir()
+    _make_version_3_database_with_split_settings(old_path)
+    old_before = counter(old_path)
+    QualityStore(str(old_path)).write_measurements([make_measurement(run_id="after")])
+    current_path = tmp_path / "current" / "astrometrics.db"
+    current_path.parent.mkdir()
+    QualityStore(str(current_path)).write_measurements([make_measurement()])
+    current_before = counter(current_path)
+    QualityStore(str(current_path)).write_measurements([make_measurement(run_id="again")])
+
+    assert counter(old_path) - old_before == 2
+    assert counter(current_path) - current_before == 1

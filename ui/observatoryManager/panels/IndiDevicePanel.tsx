@@ -1,4 +1,5 @@
 import React from 'react';
+import { Button } from '../../common/components/Button';
 import { EmptyState } from '../../common/components/EmptyState';
 import './IndiDevicePanel.css';
 import '../../common/styles/theme.css';
@@ -27,7 +28,7 @@ export const IndiDevicePanel: React.FC<IndiDevicePanelProps> = ({
             <div id="indi-device-list" className="indi-devices">
                 <EmptyState
                     variant={isLoading ? 'loading' : 'empty'}
-                    message={isLoading ? 'Loading devices…' : 'No INDI devices connected.'}
+                    message={isLoading ? 'Loading devices' : 'No INDI devices connected.'}
                 />
             </div>
         );
@@ -36,15 +37,16 @@ export const IndiDevicePanel: React.FC<IndiDevicePanelProps> = ({
     return (
         <div id="indi-device-list" className="indi-devices">
             {devices.map((device) => (
-                <button
+                <Button
                     key={device}
                     id={`btn-indi-device-${device.replace(/\s+/g, '-')}`}
-                    className={`indi-devices__btn ${selectedDevice === device ? 'indi-devices__btn--active' : ''}`}
+                    variant="secondary"
+                    truncate
+                    pressed={selectedDevice === device}
                     onClick={() => onSelectDevice(device)}
-                    type="button"
                 >
                     {device}
-                </button>
+                </Button>
             ))}
         </div>
     );

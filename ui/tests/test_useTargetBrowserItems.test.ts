@@ -61,7 +61,7 @@ describe('useTargetBrowserItems', () => {
         const { result } = renderHook(() => useTargetBrowserItems());
 
         expect(result.current.items).toEqual([
-            expect.objectContaining({ id: 'Albireo', subtitle: 'Loading…' }),
+            expect.objectContaining({ id: 'Albireo', subtitle: '\u00a0' }),
         ]);
     });
 

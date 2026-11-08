@@ -15,6 +15,7 @@ import time
 from typing import Any
 
 from astrometricslib.exceptions import AstrometricsError
+from backend.services.infrastructure.background_logging import background_log_context
 from wayfindinglib import ObservatoryControl
 
 logger = logging.getLogger(__name__)
@@ -65,7 +66,8 @@ class GuidingService:
         def run() -> None:
             """Run the guide loop; the top of a background thread."""
             try:
-                self._observatory.guiding.run_loop(self._stop, exposure_seconds=exposure, gain=gain)
+                with background_log_context("guiding"):
+                    self._observatory.guiding.run_loop(self._stop, exposure_seconds=exposure, gain=gain)
             except AstrometricsError as error:
                 logger.warning("Guiding did not run: %s", error.message)
             except Exception:  # the top of a background thread: log it, never lose it

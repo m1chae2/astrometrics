@@ -259,11 +259,39 @@ stop_backend_if_launched_here() {
   fi
 }
 
+# Name of the systemd group (slice) that holds the backend, Vite and Electron.
+# `systemd-cgls --user-unit astrometrics.slice` shows them as one tree, and
+# `systemctl --user stop astrometrics.slice` stops all of them.
+ASTROMETRICS_SLICE="astrometrics.slice"
+
+# Sets ASTROMETRICS_SLICE_PREFIX (an array) to the words that run a command in
+# its own scope inside the slice. The array is empty when there is no systemd
+# user session, and the command then starts as before.
+# Argument: a short name for the unit (vite, electron).
+astrometrics_slice_prefix() {
+  ASTROMETRICS_SLICE_PREFIX=()
+  if command -v systemd-run >/dev/null 2>&1 \
+      && systemd-run --user --scope --quiet true >/dev/null 2>&1; then
+    # systemd-run replaces itself with the command, so $! is still the command's pid.
+    ASTROMETRICS_SLICE_PREFIX=(systemd-run --user --scope --quiet "--slice=$ASTROMETRICS_SLICE" "--unit=astrometrics-$1-$(date +%Y%m%d%H%M%S).scope")
+  fi
+}
+
+# Stops everything left in the slice (called after the normal, graceful stops).
+stop_slice() {
+  if command -v systemctl >/dev/null 2>&1 \
+      && systemctl --user is-active --quiet "$ASTROMETRICS_SLICE" 2>/dev/null; then
+    echo "Stopping what is left in $ASTROMETRICS_SLICE..."
+    systemctl --user stop "$ASTROMETRICS_SLICE" 2>/dev/null || true
+  fi
+}
+
 start_vite_bg() {
   echo "Starting Vite on ${PORT} (logs: $LOG_DIR/vite.log)..."
   local host_arg=""
   [ "${DEV_LAN:-0}" = "1" ] && host_arg="--host 0.0.0.0"
-  (cd "$ROOT_DIR" && npm run dev -- --port "$PORT" $host_arg) >"$LOG_DIR/vite.log" 2>&1 &
+  astrometrics_slice_prefix vite
+  (cd "$ROOT_DIR" && exec ${ASTROMETRICS_SLICE_PREFIX[@]+"${ASTROMETRICS_SLICE_PREFIX[@]}"} npm run dev -- --port "$PORT" $host_arg) >"$LOG_DIR/vite.log" 2>&1 &
   echo $! > "$VITE_PID_FILE"
 }
 
@@ -277,44 +305,37 @@ start_vite_bg() {
 start_electron_bg() {
     local extra_args="--ozone-platform-hint=auto --enable-features=WaylandWindowDecorations"
     [ "${FORCE_NO_SANDBOX:-0}" = "1" ] && extra_args+=" --no-sandbox"
+    # Pick the graphics card BEFORE Electron starts (it cannot switch cards while it runs).
+    # electron/gpu_choice.js reads ASTROMETRICS_GPU or the "gpu" key in [Frontend] of the settings file
+    # (never writes it). "auto" = NVIDIA on AC power, Intel on battery. It sets the card variables and the switches.
+    local ELECTRON_GPU_SWITCHES="" ELECTRON_GPU_REASON=""
+    if command -v node >/dev/null 2>&1; then
+        eval "$(cd "$ROOT_DIR" && node electron/gpu_choice.js shell-plan 2>/dev/null)" || true
+        [ -n "$ELECTRON_GPU_REASON" ] && echo "Graphics card: ${ELECTRON_GPU_REASON}"
+        extra_args+=" ${ELECTRON_GPU_SWITCHES}"
+    fi
     local file_arg=""
     [ -n "${OPEN_FILE:-}" ] && file_arg="\"${OPEN_FILE}\""
 
     cd "$ROOT_DIR" || return 1
-    if command -v npx >/dev/null 2>&1; then
+    astrometrics_slice_prefix electron
+    # The local launcher directly: `npx` adds about 0.25 s of its own start-up.
+    if [ -x node_modules/.bin/electron ]; then
         set +e
         if [ "${WATCH:-0}" = "1" ]; then
             echo "Starting Electron (watch mode) (logs: $LOG_DIR/electron.log)..."
             # OPEN_FILE is passed as one argument, so a path with spaces stays whole.
-            ELECTRON_RENDERER_URL="${VITE_URL}" SKIP_BACKEND=1 NODE_ENV=development node --watch-path=electron --watch-preserve-output node_modules/electron/cli.js . --remote-debugging-port=${ELECTRON_DEBUG_PORT} ${extra_args} ${OPEN_FILE:+"$OPEN_FILE"} >"$LOG_DIR/electron.log" 2>&1 &
+            ELECTRON_RENDERER_URL="${VITE_URL}" SKIP_BACKEND=1 NODE_ENV=development ${ASTROMETRICS_SLICE_PREFIX[@]+"${ASTROMETRICS_SLICE_PREFIX[@]}"} node --watch-path=electron --watch-preserve-output node_modules/electron/cli.js . --remote-debugging-port=${ELECTRON_DEBUG_PORT} ${extra_args} ${OPEN_FILE:+"$OPEN_FILE"} >"$LOG_DIR/electron.log" 2>&1 &
         else
             echo "Starting Electron (logs: $LOG_DIR/electron.log)..."
-            ELECTRON_RENDERER_URL="${VITE_URL}" SKIP_BACKEND=1 NODE_ENV=development npx electron . --remote-debugging-port=${ELECTRON_DEBUG_PORT} ${extra_args} ${file_arg} >"$LOG_DIR/electron.log" 2>&1 &
+            ELECTRON_RENDERER_URL="${VITE_URL}" SKIP_BACKEND=1 NODE_ENV=development ${ASTROMETRICS_SLICE_PREFIX[@]+"${ASTROMETRICS_SLICE_PREFIX[@]}"} node_modules/.bin/electron . --remote-debugging-port=${ELECTRON_DEBUG_PORT} ${extra_args} ${file_arg} >"$LOG_DIR/electron.log" 2>&1 &
         fi
         local pid=$!
         set -e
         echo "$pid" > "$ELECTRON_PID_FILE"
     else
-        echo "npx not found." >&2
+        echo "node_modules/.bin/electron not found; run npm install." >&2
     fi
-}
-
-# wait_for_backend_alive: confirms the backend answers HTTP before Electron is
-# launched. Electron runs with SKIP_BACKEND=1, so with no backend behind it the
-# app would sit on the splash screen. Catalog warm-up is covered by the splash
-# itself, so this only waits for the server to start listening.
-wait_for_backend_alive() {
-  echo "Waiting for backend to answer..."
-  local tries=0
-  local max=120
-  while [ $tries -lt $max ]; do
-    if curl -s -o /dev/null --max-time 2 "$BACKEND_URL"; then return 0; fi
-    sleep 0.5
-    tries=$((tries+1))
-  done
-  echo "Backend is not answering at $BACKEND_URL."
-  tail -n 20 "$LOG_DIR/backend.log" 2>/dev/null
-  return 1
 }
 
 wait_for_vite() {
@@ -371,6 +392,9 @@ stop_frontend() {
 stop_all() {
   stop_frontend
   stop_backend
+  # Anything the graceful stops missed (a stray helper, a hung child) is still
+  # in the slice, so it cannot outlive `stop`.
+  stop_slice
 }
 
 stop_what_this_run_started() {
@@ -422,6 +446,17 @@ status_check() {
   else
     echo "Backend is NOT running."
   fi
+
+  # Everything this script starts is in one systemd group. Anything listed here
+  # that the lines above did not report is a leftover; `stop` removes it.
+  if command -v systemd-cgls >/dev/null 2>&1 \
+      && systemctl --user is-active --quiet "$ASTROMETRICS_SLICE" 2>/dev/null; then
+    echo
+    echo "Processes in $ASTROMETRICS_SLICE:"
+    systemd-cgls --user-unit "$ASTROMETRICS_SLICE" --no-pager 2>/dev/null || true
+  else
+    echo "Nothing is running in $ASTROMETRICS_SLICE."
+  fi
   return 0
 }
 
@@ -445,11 +480,8 @@ case "$CMD" in
         stop_what_this_run_started
         exit 1
     fi
-    if ! wait_for_backend_alive; then
-        echo "Backend is not running; not launching Electron."
-        stop_what_this_run_started
-        exit 1
-    fi
+    # No wait for the backend here: the splash polls /api/ready, and Electron
+    # reports a backend that died (see electron/backend_manager.js).
     start_electron_bg
     echo "Astrometrics started. The splash screen stays up until the backend is ready."
     ;;
@@ -489,10 +521,6 @@ case "$CMD" in
         exit 1
     fi
 
-    if ! wait_for_backend_alive; then
-        echo "Backend is not running; not launching Electron."
-        exit 1
-    fi
     start_electron_bg
 
     epid=$(cat "$ELECTRON_PID_FILE")

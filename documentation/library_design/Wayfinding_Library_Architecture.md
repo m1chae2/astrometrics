@@ -413,10 +413,9 @@ A recorder attaches to a session that planning created. At a fixed interval it c
 
 <!-- impl: wayfindinglib.tasks.execution_tasks.session_recorder.ObservationSessionRecorder -->
 
-When a session reaches a terminal status, execution runs two reconciliations that deliberately do not happen mid-run. Captured calibration frames are folded into the calibration inventory, which is recomputed from every finished session each time, so running the step twice never counts a frame twice. The session's science-side link is attached by finding the science-side target sessions of each imaged target for the same night, which is possible only after the night.
+When a session reaches a terminal status, execution runs a reconciliation that deliberately does not happen mid-run. The session's science-side link is attached by finding the science-side target sessions of each imaged target for the same night, which is possible only after the night. The step recomputes the link from the recorded frames each time, so running it twice gives the same result. Execution keeps no calibration inventory of its own: calibration advice reads the science library's calibration index, so there is one record of which calibration frames exist.
 
 <!-- impl: wayfindinglib.tasks.execution_tasks.post_session_reconciliation.reconcile_session -->
-<!-- impl: wayfindinglib.tasks.execution_tasks.post_session_reconciliation.compute_calibration_stats -->
 
 Two related refits run inside control, not execution: the standing mount-mechanical model and the session's pointing model (Section 6.7).
 
@@ -532,9 +531,11 @@ limited to the sampled range, so a poorly conditioned fit cannot command an extr
 <!-- impl: wayfindinglib.tasks.control_tasks.focus_correction.sample_focus_curve -->
 <!-- impl: wayfindinglib.analytics.pointing_model.predict_pointing_error -->
 
-Centering combines these pieces. A slew alone lands near the target because the mount's idea of where it points is off. Centering plate solves a short exposure and stops if the error is within tolerance. Otherwise it syncs the mount to the solved position and slews again.
+Centering plate solves a short exposure, stops when the error is within tolerance, else syncs and slews again. The exposure is the shortest whose limiting magnitude shows enough catalog stars: where $S/\sqrt{S + n(Bt + R^2)}$ ($S$ star signal, $n$ pixels, $B$ sky, $R$ read noise, $t$ time) reaches the detection threshold. A missing input gives a fixed one (WAY-D122).
 
 <!-- impl: wayfindinglib.tasks.control_tasks.centering.center_on -->
+<!-- impl: wayfindinglib.tasks.control_tasks.centering_exposure.choose_centering_exposure -->
+<!-- impl: wayfindinglib.tasks.control_tasks.centering_exposure.limiting_magnitude -->
 
 ### 6.5 Environmental safety
 
@@ -592,6 +593,8 @@ Closing the enclosure checks the mount's position against the configured clearan
 ### 6.7 Mount-mechanical models and bulk delegation modes
 
 The standing mount-mechanical model feeds a stored periodic-error and backlash model forward into the guiding correction (Equation (7)). The model comes from the guide error left after the guider's own corrections, so it is a cross-night fact about the mount. The analysis splits the guide samples into continuous stretches, analyzes each with its true time stamps using a Lomb-Scargle periodogram, and combines them. Peaks slower than any plausible gear period count as slow drift.
+
+Adding the running total of the guider's pulses back to each measured error rebuilds the mount's unguided error. A fitted sine and line give its periodic error and drift.
 
 The pointing correction takes a session-scoped fitted model instead. The classic geometric pointing model splits plate-solve offsets across the sky into physical mount terms, such as index errors, polar axis misalignment, cone error and tube flexure. Evaluating the fit forward predicts the systematic error at a position (Equation (5)). The polar-misalignment terms describe tonight's setup, not the mount, so they are never fed forward to a later session.
 

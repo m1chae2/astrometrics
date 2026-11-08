@@ -84,3 +84,37 @@ class CatalogDriver(abc.ABC):
             Transient StellarObject instances. Must not be saved to the
             database.
         """
+
+    def query_region_with_status(
+        self,
+        ra_degrees: float,
+        dec_degrees: float,
+        radius_degrees: float,
+        magnitude_limit: float | None = None,
+    ) -> tuple[list[StellarObject], bool]:
+        """Query a sky region and say whether the answer was cut short.
+
+        A driver that limits how many stars it returns should override this,
+        so the caller knows the list may be missing the faintest stars. The
+        default suits drivers that never cut their answer.
+
+        Parameters
+        ----------
+        ra_degrees : float
+            Center Right Ascension in degrees (ICRS).
+        dec_degrees : float
+            Center Declination in degrees (ICRS).
+        radius_degrees : float
+            Search radius in degrees.
+        magnitude_limit : float, optional
+            Faintest magnitude the caller wants.
+
+        Returns
+        -------
+        objects : `list` [`StellarObject`]
+            What `query_region` returns.
+        truncated : `bool`
+            True when stars inside the region were left out of ``objects``.
+        """
+        objects = self.query_region(ra_degrees, dec_degrees, radius_degrees, magnitude_limit)
+        return objects, False

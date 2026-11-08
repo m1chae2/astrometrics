@@ -147,4 +147,30 @@ describe('BackendManager.waitUntilWarm', () => {
     killSpy.mockRestore();
     fs.rmSync(appFolder, { recursive: true, force: true });
   });
+
+  it('reports "exited" when the pid file of a script-launched backend names a dead process', async () => {
+    fetchMock.mockRejectedValue(new Error('ECONNREFUSED'));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'warmup-pid-'));
+    fs.mkdirSync(path.join(root, '.run_pids'));
+    // A pid far above the kernel's maximum cannot belong to a live process.
+    fs.writeFileSync(path.join(root, '.run_pids', 'backend.pid'), '99999999');
+    vi.stubEnv('SKIP_BACKEND', '1');
+
+    const manager = new BackendManager({ getAppPath: () => root });
+    expect(await manager.waitUntilWarm({ timeoutMs: 5000, ...FAST_POLL })).toBe(false);
+    expect(manager.warmUpFailureReason).toBe('exited');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('keeps polling while the script-launched backend process is alive but not yet listening', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('ECONNREFUSED')).mockResolvedValueOnce(readyResponse(200));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'warmup-pid-'));
+    fs.mkdirSync(path.join(root, '.run_pids'));
+    fs.writeFileSync(path.join(root, '.run_pids', 'backend.pid'), String(process.pid));
+    vi.stubEnv('SKIP_BACKEND', '1');
+
+    const manager = new BackendManager({ getAppPath: () => root });
+    expect(await manager.waitUntilWarm({ timeoutMs: 5000, ...FAST_POLL })).toBe(true);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
 });

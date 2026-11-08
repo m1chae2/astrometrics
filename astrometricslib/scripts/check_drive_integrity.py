@@ -39,6 +39,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from astrometricslib.foundation.offline import OfflineModeError, require_online
 from astrometricslib.foundation.paths import scratch_directory
 
 logger = logging.getLogger(__name__)
@@ -112,6 +113,10 @@ def fetch_manifest(rclone_executable: str, remote: str, root: str) -> Manifest:
     RuntimeError
         If ``rclone`` cannot run, exits with an error, or prints bad JSON.
     """
+    try:
+        require_online("Google Drive")
+    except OfflineModeError as offline_error:
+        raise RuntimeError(str(offline_error)) from offline_error
     command = [rclone_executable, "lsjson", "-R", "--hash", "--files-only", f"{remote}:{root}"]
     try:
         completed = subprocess.run(command, capture_output=True, text=True, check=False)

@@ -86,7 +86,7 @@ describe('PackageLibraryPanel', () => {
 
     it('shows the loading state', () => {
         renderPanel({ isLoading: true });
-        expect(screen.getByText('Loading…')).toBeInTheDocument();
+        expect(screen.getByText('Loading packages')).toBeInTheDocument();
     });
 
     it('shows the error state with Try again', async () => {

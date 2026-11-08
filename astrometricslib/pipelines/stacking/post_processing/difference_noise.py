@@ -58,14 +58,14 @@ __all__ = [
 # The ratio of the odd–even difference's measured noise to the true random
 # noise of the same frames: below 1 when the difference reads low. Planck found
 # its half-difference low by about a percent, from correlations between the
-# halves and from clipping that removes the noise's positive tail (plan
-# decision D16, sources [P3], [P4]). Ours has both causes: the halves share the
+# halves and from clipping that removes the noise's positive tail (sources
+# [P3], [P4]). Ours has both causes: the halves share the
 # registration reference frame, and Siril rejects outlier pixels. The measured
 # noise is divided by this number in one place, `measure_difference_noise`. 1.0
 # means no correction. It stays 1.0 until `scripts/measure_odd_even_bias.py`
 # has measured it by injection (simulated frames of pure noise through the same
 # half stacks and rejection) and the result is entered here with its register
-# entry. The plan's decision D16 is to rerun that script once for each camera
+# entry. Run that script again once for each camera
 # and again whenever the stacker's rejection settings change. Status: Design
 # estimate (no measurement yet). If the script finds the camera matters, the
 # value belongs in the camera profile instead of here.

@@ -1,3 +1,4 @@
+import { TextInput } from '../../../common/components/TextInput';
 import { ConfigData } from '../utils/configUtils';
 
 interface ProcessingFormProps {
@@ -19,8 +20,7 @@ export const ProcessingForm: React.FC<ProcessingFormProps> = ({
             <h3>Processing</h3>
             <label className="settings__field">
                 <span className="settings__label">astrometry.net API Key</span>
-                <input
-                    className="settings__input"
+                <TextInput
                     type="password"
                     value={String(configData[ONLINE_SOLVER_SECTION]?.['api_key'] ?? '')}
                     onChange={(e) => handleConfigChange(ONLINE_SOLVER_SECTION, 'api_key', e.target.value)}
@@ -35,9 +35,7 @@ export const ProcessingForm: React.FC<ProcessingFormProps> = ({
 
             <label className="settings__field">
                 <span className="settings__label">Siril Executable</span>
-                <input
-                    className="settings__input"
-                    type="text"
+                <TextInput
                     value={String(configData[SIRIL_SECTION]?.['siril_executable'] ?? '')}
                     onChange={(e) => handleConfigChange(SIRIL_SECTION, 'siril_executable', e.target.value)}
                     disabled={loadingConfig}

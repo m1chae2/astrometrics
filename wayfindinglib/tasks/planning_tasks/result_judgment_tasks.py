@@ -2,7 +2,7 @@
 
 Description: `judge_star_result` is the work behind
 `ObservationReview.get_advisory(kind="result", target=..., object_id=...)`
-(`QUALITY_METRICS_PLAN.md` Section 6.1, use case UC5). It reads the star's
+(use case UC5 in `Wayfinding_Quality_Use_Cases.md`). It reads the star's
 record through the public root of the science library (`stars.get`), finds
 which per-star results exist (a spectrum, a period search, a repeating-dip
 search), and judges each with the rules of `star_result_rules`.

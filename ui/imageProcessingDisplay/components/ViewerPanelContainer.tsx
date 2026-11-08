@@ -4,6 +4,7 @@ import { SwitchDisplayButton } from '../../common/components/SwitchDisplayButton
 import { FitsViewerManager, FitsRendererHandle } from '../../common/fitsViewer/FitsViewerManager';
 import { FileBrowser, FileBrowserToolbar } from '../fileBrowser/FileBrowser';
 import { AstrometryOverlayStar } from '../../common/services/astronomyService';
+import { Button } from '../../common/components/Button';
 
 interface ViewerPanelContainerProps {
   // Viewer Props
@@ -22,6 +23,8 @@ interface ViewerPanelContainerProps {
   showAstrometryOverlay?: boolean;
   onToggleAstrometryOverlay?: () => void;
   isLoadingOverlay?: boolean;
+  /** Why no overlay markers are drawn (for example, no sky solution), or null. */
+  overlayReason?: string | null;
   onStarClick?: (star: AstrometryOverlayStar) => void;
   selectedStarId?: string | null;
 
@@ -48,7 +51,7 @@ interface ViewerPanelContainerProps {
 export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
   fitsRendererRef, imageUrl, imageBlob, imageFrameInfo, loading, error, selectedTarget,
   autoPanTrigger, disableStretch, stretch, toggleStretch,
-  overlayStars, showAstrometryOverlay, onToggleAstrometryOverlay, isLoadingOverlay, onStarClick,
+  overlayStars, showAstrometryOverlay, onToggleAstrometryOverlay, isLoadingOverlay, overlayReason, onStarClick,
   selectedStarId,
   allFiles, filteredFiles, fileFilterText, setFileFilterText, fileBrowserCamera, setFileBrowserCamera,
   checkedFiles, handleRequestDeleteFiles, onOpenHeaderModal, onFileClick, selectedFile,
@@ -60,30 +63,40 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
         title="FITS Viewer"
         className="image-processing-display__viewer-section"
         headerContent={
-          <div className="fits-header-controls" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <button
-              className={`btn btn--tiny ${stretch ? 'btn--active' : ''}`}
+          <div className="fits-header-controls">
+            <Button
+              size="small"
+              active={stretch}
               onClick={toggleStretch}
               title={stretch ? "Switch to Linear view" : "Switch to Auto-Stretched view (a stack shows its Siril-stretched JPEG when one exists)"}
             >
               {stretch ? "Stretch" : "Linear"}
-            </button>
-            <button
-              className={`btn btn--tiny ${showAstrometryOverlay ? 'btn--active' : ''}`}
+            </Button>
+            <Button
+              size="small"
+              active={showAstrometryOverlay}
               onClick={onToggleAstrometryOverlay}
               disabled={isLoadingOverlay}
               title={
                 isLoadingOverlay
-                  ? "Loading astrometry results..."
+                  ? "Getting astrometry results"
                   : (showAstrometryOverlay ? "Hide Astrometry Overlay" : "Show Astrometry Overlay")
               }
             >
-              {isLoadingOverlay ? "Loading..." : "Astrometry"}
-            </button>
-            <button className="btn btn--tiny" onClick={() => fitsRendererRef.current?.zoomIn()} title="Zoom In">+</button>
-            <button className="btn btn--tiny" onClick={() => fitsRendererRef.current?.zoomOut()} title="Zoom Out">-</button>
-            <button className="btn btn--tiny" onClick={() => fitsRendererRef.current?.zoomToFit()} title="Zoom to Fit">Fit</button>
-            <button className="btn btn--tiny" onClick={() => fitsRendererRef.current?.zoomToScale(1.0)} title="Actual Size">1:1</button>
+              {isLoadingOverlay ? "Getting stars" : "Astrometry"}
+            </Button>
+            {showAstrometryOverlay && overlayReason && !isLoadingOverlay && (
+              <span
+                className="fits-header-controls__note"
+                data-testid="astrometry-overlay-reason"
+              >
+                {overlayReason}
+              </span>
+            )}
+            <Button size="small" onClick={() => fitsRendererRef.current?.zoomIn()} title="Zoom In">+</Button>
+            <Button size="small" onClick={() => fitsRendererRef.current?.zoomOut()} title="Zoom Out">-</Button>
+            <Button size="small" onClick={() => fitsRendererRef.current?.zoomToFit()} title="Zoom to Fit">Fit</Button>
+            <Button size="small" onClick={() => fitsRendererRef.current?.zoomToScale(1.0)} title="Actual Size">1:1</Button>
             <SwitchDisplayButton targetDisplay="Image Viewer" selectedTarget={selectedTarget} />
           </div>
         }

@@ -52,6 +52,7 @@ Start by goal
         * :doc:`library_design/Astrometrics_Pipeline_Dataflow`
         * :doc:`library_design/Astrometrics_Library_Architecture`
         * :doc:`library_design/Wayfinding_Quality_Judgment`
+        * :doc:`library_design/Wayfinding_Quality_Use_Cases`
         * :doc:`library_design/validation/index`
 
 Explore by section

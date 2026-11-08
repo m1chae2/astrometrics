@@ -14,7 +14,7 @@
 
 .target-display-frame {
     border: 2px solid var(--grey-darker);
-    border-radius: 10px;
+    border-radius: var(--radius-xl);
     flex: 1 1 auto;
     min-height: 0;
     width: 100%;
@@ -61,15 +61,15 @@
 
 .target-details__label {
     min-width: 120px;
-    font-size: 14px;
+    font-size: var(--control-font-size);
     font-weight: bold;
-    color: var(--grey-light-text, #ccc);
+    color: var(--grey-light-text, var(--text-dark));
     text-align: left;
 }
 
 .target-details__value {
     flex: 1;
-    font-size: 14px;
+    font-size: var(--control-font-size);
     font-family: inherit;
     font-style: italic;
     color: var(--white);
@@ -82,7 +82,7 @@
 }
 
 .target-details__value--red {
-    color: var(--accent-red, red);
+    color: var(--accent-red);
 }
 
 /* Tree Sections for Target Details */
@@ -92,7 +92,7 @@
     gap: 6px;
     padding-bottom: 10px;
     margin-bottom: 6px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid color-mix(in srgb, var(--white) 6%, transparent);
     flex-shrink: 0;
 }
 
@@ -108,8 +108,8 @@
 
 .target-details__tree-header {
     font-weight: bold;
-    font-size: 14px;
-    color: var(--primary-blue-light, #58a6ff);
+    font-size: var(--control-font-size);
+    color: var(--primary-blue-light, var(--accent-sky));
     margin-bottom: 4px;
     flex-shrink: 0;
 }
@@ -144,7 +144,7 @@
 }
 
 .tree-branch {
-    color: var(--grey-light-text, #888);
+    color: var(--grey-light-text, var(--text-muted));
     font-family: monospace;
     font-style: normal;
     font-weight: bold;
@@ -152,14 +152,14 @@
 
 .tree-label {
     min-width: 110px;
-    font-size: 14px;
+    font-size: var(--control-font-size);
     font-weight: bold;
-    color: var(--grey-light-text, #ccc);
+    color: var(--grey-light-text, var(--text-dark));
 }
 
 .tree-value {
     flex: 1;
-    font-size: 14px;
+    font-size: var(--control-font-size);
     font-style: italic;
     color: var(--white);
 }
@@ -215,31 +215,14 @@
 
 .target-identification__label {
     text-align: right;
-    color: var(--grey-light-text, #ccc);
+    color: var(--grey-light-text, var(--text-dark));
     font-weight: bold;
     white-space: nowrap;
 }
 
-/* Input Styles */
+/* The target text fields use the shared .entry style; this only lets them fill their row. */
 .target-input {
     flex: 1;
-    width: 100%;
-    box-sizing: border-box;
-    padding: 10px 12px;
-    height: 40px;
-    font-size: 14px;
-    font-family: inherit;
-    border-radius: 8px;
-    border: 1px solid var(--grey-dark, #333);
-    background: var(--grey-darkest, #111);
-    color: var(--white);
-    font-style: italic;
-    transition: all 0.2s ease;
-}
-
-.target-input:focus {
-    border-color: var(--primary-blue);
-    outline: none;
 }
 
 /* Responsive Overrides */

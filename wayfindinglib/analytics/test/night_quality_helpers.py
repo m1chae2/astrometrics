@@ -148,7 +148,10 @@ class FakeLibrary:
             Every stored measurement.
         """
         self.rows = rows
-        self.targets = SimpleNamespace(list=lambda: targets)
+        self.targets = SimpleNamespace(
+            list=lambda: targets,
+            get=lambda target_id: next((target for target in targets if target.id == target_id), None),
+        )
         self.quality = SimpleNamespace(
             query=self._query,
             capture_settings=lambda ids=None: {1: SETTING},

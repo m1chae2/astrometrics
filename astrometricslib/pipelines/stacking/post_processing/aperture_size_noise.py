@@ -21,9 +21,8 @@ same at the positions of the target's stored empty apertures:
    is the stored exponent: 0.5 for independent pixels, 1.0 for fully
    correlated pixels.
 
-The prediction is not changed by the exponent (decision D20 of the imaged-
-target suggestions plan). The estimator and the numbers are declared in
-`pipelines/stacking/metrics.py`.
+The prediction is not changed by the exponent. The estimator and the numbers
+are declared in `pipelines/stacking/metrics.py`.
 """
 
 import logging

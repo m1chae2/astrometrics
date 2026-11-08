@@ -17,6 +17,8 @@ export interface IngestStatusResponse {
 
 export interface RemoteScanResponse {
     folders: string[];
+    /** False when the observatory computer did not answer; a status, not an error. */
+    reachable?: boolean;
 }
 
 /**

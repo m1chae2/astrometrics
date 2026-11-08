@@ -7,7 +7,7 @@ found its half-difference low by about one percent, from correlations between
 the halves and from clipping that removes the noise's positive tail. Ours has
 both causes: the halves share the registration reference frame, and Siril
 rejects outlier pixels. A low random part makes fixed-pattern noise look
-larger (plan decision D16).
+larger.
 
 This module measures the bias with a test whose answer is known. Every frame
 of a real library stack is replaced by a simulated frame that holds only
@@ -63,8 +63,8 @@ pattern cancels in the difference.
 Limits. The sky of a simulated frame is smooth, so the test says nothing
 about a structured sky. The injected noise is worked out for a stack of one
 exposure group; a stack of several groups is refused. The result belongs to
-the camera and the stacker settings of the run; the plan's decision D16 is to
-repeat it once for each camera and again whenever the rejection settings
+the camera and the stacker settings of the run; it should be
+repeated once for each camera and again whenever the rejection settings
 change. Raw frames of a color camera are smoothed within each Bayer position.
 It is a Design estimate until the result is entered in the validation
 register.

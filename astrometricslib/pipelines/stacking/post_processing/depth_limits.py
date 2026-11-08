@@ -315,6 +315,11 @@ def gaia_zero_point(
             continue
         offsets.append(star_magnitude + 2.5 * math.log10(flux))
     if len(offsets) < MINIMUM_ZERO_POINT_STARS:
+        if not nearest_separations:
+            return None, (
+                "the local Gaia cache holds no stars near the reference stars yet "
+                "(the cache is filled when the astrometry step runs on this field)"
+            )
         median_separation = float(np.median(nearest_separations)) if nearest_separations else 0.0
         if median_separation > POSITION_MISFIT_RADIUS_FACTOR * STAR_MATCH_RADIUS_ARCSEC:
             return None, (

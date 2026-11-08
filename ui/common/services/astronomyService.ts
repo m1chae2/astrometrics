@@ -199,19 +199,38 @@ export async function analyzeStarPeriodicity(starId: string): Promise<Spectrum |
 export type AstrometryOverlayStar = OverlayStar;
 
 /**
+ * The stars placed on an image, with the reason when there are none.
+ */
+export interface AstrometryOverlayResult {
+    /** The stars placed on the image. */
+    stars: AstrometryOverlayStar[];
+    /** Why there are no stars (for example, no sky solution), or null. */
+    reason: string | null;
+}
+
+/**
  * Fetches identified stars and their pixel coordinates for astrometry overlay.
  * @param targetId The target identifier to fetch stars for.
- * @param limit Maximum number of stars to return (defaults to 35).
- * @returns List of star overlay items with centroid coordinates and labels.
+ * @param limit Maximum number of stars to return. Zero (the default) means
+ *   every star the library places on the image.
+ * @param imagePath The image being shown. The stars are placed on it. When
+ *   omitted, the target's current stack is used.
+ * @returns The star overlay items with pixel coordinates and labels, and the
+ *   reason when there are none.
  */
 export async function fetchAstrometryOverlayStars(
     targetId: string,
-    limit = 35
-): Promise<AstrometryOverlayStar[]> {
-    if (!targetId || targetId.trim() === '') return [];
+    limit = 0,
+    imagePath?: string | null
+): Promise<AstrometryOverlayResult> {
+    if (!targetId || targetId.trim() === '') return { stars: [], reason: null };
     const data = await callBackend("astronomy:get_overlay_stars", {
         target_id: targetId.trim(),
-        limit
+        limit,
+        ...(imagePath ? { image_path: imagePath } : {})
     });
-    return Array.isArray(data) ? (data as AstrometryOverlayStar[]) : [];
+    return {
+        stars: Array.isArray(data?.stars) ? (data.stars as AstrometryOverlayStar[]) : [],
+        reason: typeof data?.reason === 'string' ? data.reason : null
+    };
 }

@@ -224,7 +224,9 @@ class SafetyControl(ControlChild):
         """
         return self._set_all(DelegationState.DELEGATED, evidence_note)
 
-    def enter_controller_mode(self, *, evidence_note: str = "") -> BulkDelegationOutcome:
+    def enter_controller_mode(
+        self, *, evidence_note: str = "", shadow_first: bool = False
+    ) -> BulkDelegationOutcome:
         """Move every capability toward `AUTHORITATIVE` ("controller mode").
 
         A capability that may not move yet (a correction not yet
@@ -236,6 +238,11 @@ class SafetyControl(ControlChild):
         ----------
         evidence_note : `str`, optional
             Why, in the operator's words.
+        shadow_first : `bool`, optional
+            First move each correction capability still `DELEGATED` to
+            `SHADOWED`, the step the rules need before `AUTHORITATIVE`.
+            The other rules (calibration presence, capture's dependencies)
+            still apply and still reject.
 
         Returns
         -------
@@ -243,9 +250,11 @@ class SafetyControl(ControlChild):
             Which capabilities reached `AUTHORITATIVE`, and why the others
             did not.
         """
-        return self._set_all(DelegationState.AUTHORITATIVE, evidence_note)
+        return self._set_all(DelegationState.AUTHORITATIVE, evidence_note, shadow_first=shadow_first)
 
-    def _set_all(self, state: DelegationState, evidence_note: str) -> BulkDelegationOutcome:
+    def _set_all(
+        self, state: DelegationState, evidence_note: str, shadow_first: bool = False
+    ) -> BulkDelegationOutcome:
         """Move every capability toward `state` and save the policy.
 
         Parameters
@@ -254,6 +263,8 @@ class SafetyControl(ControlChild):
             The state to move toward.
         evidence_note : `str`
             Why, in the operator's words.
+        shadow_first : `bool`, optional
+            See `enter_controller_mode`.
 
         Returns
         -------
@@ -269,4 +280,5 @@ class SafetyControl(ControlChild):
             evidence_note=evidence_note,
             has_guider_calibration=context.active_guider_calibration() is not None,
             has_focus_model=context.active_focus_model() is not None,
+            shadow_first=shadow_first,
         )

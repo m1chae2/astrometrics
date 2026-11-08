@@ -17,7 +17,7 @@ import { reportError } from '../utils/reportError';
 export function useTargetActions() {
     const {
         selectedTarget, setSelectedTarget, pendingTarget, setPendingTarget,
-        catalogId, commonName, raShared, decShared, invalidate
+        catalogId, commonName, invalidate
     } = useTargetContext();
 
     const activeTarget = pendingTarget || selectedTarget;
@@ -54,10 +54,6 @@ export function useTargetActions() {
             if (expVal !== undefined) {
                 objectInfo['exposure_sec'] = expVal;
             }
-
-            // Include RA/DEC edits from shared state
-            if (raShared) objectInfo['ra'] = raShared;
-            if (decShared) objectInfo['dec'] = decShared;
 
             await updateTargetById(activeTarget, objectInfo);
 

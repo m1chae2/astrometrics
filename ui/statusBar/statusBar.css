@@ -9,14 +9,14 @@
   height: 28px;
   width: 100%;
   box-sizing: border-box;
-  background-color: var(--grey-darkest, #151515);
-  color: var(--text-muted, rgba(255, 255, 255, 0.7));
+  background-color: var(--grey-darkest, var(--cmd-bg-darkest));
+  color: var(--text-muted, color-mix(in srgb, var(--white) 70%, transparent));
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 0 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 11px;
+  border-top: 1px solid color-mix(in srgb, var(--white) 8%, transparent);
+  font-size: var(--small-font-size);
   line-height: 1;
   user-select: none;
   z-index: 90;
@@ -44,19 +44,19 @@
 }
 
 .status-bar__label {
-  color: rgba(255, 255, 255, 0.45);
+  color: color-mix(in srgb, var(--white) 45%, transparent);
   font-weight: 500;
-  font-size: 10px;
+  font-size: var(--tiny-font-size);
   text-transform: uppercase;
   letter-spacing: 0.3px;
 }
 
 .status-bar__value {
-  color: var(--white, #ffffff);
+  color: var(--white, var(--white));
   font-family: var(--font-family-mono, monospace);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
-  font-size: 11px;
+  font-size: var(--small-font-size);
   letter-spacing: -0.2px;
 }
 
@@ -65,15 +65,15 @@
 }
 
 .status-bar__unit {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.6);
+  font-size: var(--tiny-font-size);
+  color: color-mix(in srgb, var(--white) 60%, transparent);
   margin-left: 1px;
 }
 
 .status-bar__divider {
   width: 1px;
   height: 14px;
-  background-color: rgba(255, 255, 255, 0.12);
+  background-color: color-mix(in srgb, var(--white) 12%, transparent);
   flex-shrink: 0;
 }
 
@@ -94,14 +94,14 @@
 }
 
 .status-bar__dot--connected {
-  background-color: var(--success-green, #4caf50);
-  box-shadow: 0 0 6px rgba(76, 175, 80, 0.4);
+  background-color: var(--success-green, var(--success-green));
+  box-shadow: 0 0 6px color-mix(in srgb, var(--success-green) 40%, transparent);
 }
 
 .status-bar__dot--disconnected {
-  background-color: var(--danger-red, #f44336);
+  background-color: var(--danger-red, var(--danger-red));
 }
 
 .status-bar__dot--unknown {
-  background-color: var(--warning-amber, #ff9800);
+  background-color: var(--warning-amber, var(--warning-orange));
 }

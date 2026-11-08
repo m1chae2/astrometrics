@@ -170,6 +170,14 @@ def test_stored_positions_far_from_every_gaia_star_are_named_in_the_reason() -> 
     assert "median nearest separation 30 arcsec" in reason
 
 
+def test_an_empty_gaia_cache_is_named_in_the_reason() -> None:
+    """With no cached Gaia stars near the reference stars, say so."""
+    zero_point, reason = gaia_zero_point(_fluxes(), lambda *_: [], 8.0, PIXEL_SCALE)
+
+    assert zero_point is None
+    assert "holds no stars near the reference stars yet" in reason
+
+
 def test_a_crowded_star_is_left_out_of_the_zero_point() -> None:
     """A bright Gaia neighbor in the aperture removes the star."""
 

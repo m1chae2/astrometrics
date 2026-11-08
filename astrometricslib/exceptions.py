@@ -23,6 +23,7 @@ from astrometricslib.foundation.errors import (
     error_from_info,
     to_error_info,
 )
+from astrometricslib.foundation.offline import OfflineModeError
 from astrometricslib.foundation.storage.mount import StorageNotMountedError
 from astrometricslib.foundation.storage.process_locks import DeviceInUseError
 from astrometricslib.utilities.exceptions import PlateSolveFailedError
@@ -38,6 +39,7 @@ __all__ = [
     "HardwareError",
     "InvalidArgumentError",
     "NotFoundError",
+    "OfflineModeError",
     "PermissionDeniedError",
     "PlateSolveFailedError",
     "ProcessingError",

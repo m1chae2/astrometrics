@@ -203,6 +203,61 @@ def test_the_router_sends_a_record_to_the_jobs_it_belongs_to() -> None:
     assert other.getvalue() == ""
 
 
+def test_a_request_record_without_a_job_is_not_copied_to_a_job() -> None:
+    """Keep a request's records out of a running job's log."""
+    router = get_job_log_router()
+    stream = StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    sink_key = router.register("busy", [handler], ("astrometricslib",))
+    logger = logging.getLogger("astrometricslib.router_test")
+    logger.setLevel(logging.INFO)
+    try:
+        with log_context(request_id="abc123"):
+            logger.info("from a request")
+    finally:
+        router.unregister(sink_key)
+    assert stream.getvalue() == ""
+
+
+def test_a_record_with_a_job_id_goes_only_to_that_job() -> None:
+    """Send a job's record to that job even when another job is registered."""
+    router = get_job_log_router()
+    first, second = StringIO(), StringIO()
+    sink_keys = []
+    for job_id, stream in (("first", first), ("second", second)):
+        handler = logging.StreamHandler(stream)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        sink_keys.append(router.register(job_id, [handler], ("astrometricslib",)))
+    logger = logging.getLogger("astrometricslib.router_test")
+    logger.setLevel(logging.INFO)
+    try:
+        with log_context(job_id="first", request_id="abc123"):
+            logger.info("job work")
+    finally:
+        for sink_key in sink_keys:
+            router.unregister(sink_key)
+    assert first.getvalue().splitlines() == ["job work"]
+    assert second.getvalue() == ""
+
+
+def test_a_record_with_no_context_at_all_still_reaches_registered_jobs() -> None:
+    """Keep the fallback for library work that lost its job context."""
+    router = get_job_log_router()
+    stream = StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    sink_key = router.register("busy", [handler], ("astrometricslib",))
+    logger = logging.getLogger("astrometricslib.router_test")
+    logger.setLevel(logging.INFO)
+    try:
+        logger.info("context-less work")
+        logging.getLogger("other_package.router_test").warning("not ours")
+    finally:
+        router.unregister(sink_key)
+    assert stream.getvalue().splitlines() == ["context-less work"]
+
+
 def test_unregistering_stops_delivery_and_returns_the_handlers() -> None:
     """Stop delivery after `unregister`, and return the handlers."""
     router = get_job_log_router()

@@ -121,6 +121,9 @@ class StarQueryResult(BaseModel):
     target_counts: dict[str, TargetStarCount] | None = None
     # detail="overlay": the target's stars placed on its reference image.
     overlay: list[OverlayStar] | None = None
+    # detail="overlay": why the list is empty, when the image has no sky
+    # solution (WCS) and no saved pixel center fits it. Otherwise None.
+    overlay_reason: str | None = None
     # detail="stats": counts and coverage for the whole library.
     stats: dict[str, Any] | None = None
 

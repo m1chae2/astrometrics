@@ -16,8 +16,11 @@ import { analyzeStarPeriodicity } from '../common/services/astronomyService';
 import { selectLightCurveSeries } from '../common/utils/starDisplayFormat';
 import { useReportModeReady } from '../common/utils/appBootReadiness';
 import './styles/astronomyManager.css';
+import { Tabs } from '../common/components/Tabs';
+import { Button } from '../common/components/Button';
 
 /** localStorage key under which Planetarium (and the image viewer) hand a star to this panel. */
+import { useHandoffConsumer } from '../common/utils/displayHandoffStore';
 const HANDED_OFF_STAR_KEY = 'planetariumSelectedStar';
 
 /**
@@ -126,18 +129,12 @@ export const AstronomyManager: React.FC = () => {
   }, []);
 
   // Picks up a star handed off from Planetarium's "Open in Astronomy Manager"
-  // action while this panel is already mounted. The `?star=`/localStorage
-  // read above only runs once, on this component's first mount, so a panel
-  // that was visited earlier in the session needs this live event to react
-  // to a later hand-off instead of missing it.
-  useEffect(() => {
-    const handleSelectStar = (event: Event) => {
-      const starId = (event as CustomEvent<string>).detail;
-      if (starId) setPendingId(starId);
-    };
-    window.addEventListener('astrometrics:astronomySelectStar', handleSelectStar);
-    return () => window.removeEventListener('astrometrics:astronomySelectStar', handleSelectStar);
-  }, []);
+  // action. The request waits in the hand-off store, so it also arrives when
+  // this display was hidden or paused at the moment it was sent. (The
+  // `?star=`/localStorage read above only runs once, on first mount.)
+  useHandoffConsumer<string>('Astronomy Manager', 'astronomySelectStar', (starId) => {
+    if (starId) setPendingId(starId);
+  });
 
   /** Callback triggered when a new spectrum is successfully loaded into the viewer. */
   const handleLoaded = useCallback((id: string) => {
@@ -209,7 +206,13 @@ export const AstronomyManager: React.FC = () => {
   // timestamps in place after switching to a star with entirely
   // different ones, so every point got filtered out of both plots even
   // though the new star had real data.
+  // Reset the time range when the star's timestamps change. It does not reset when
+  // a paused (hidden) display starts again with the same timestamps, so the range
+  // the user chose stays.
+  const rangeResetForTimestampsRef = React.useRef<typeof availableTimestamps | null>(null);
   useEffect(() => {
+    if (rangeResetForTimestampsRef.current === availableTimestamps) return;
+    rangeResetForTimestampsRef.current = availableTimestamps;
     setStartIdx(0);
     setEndIdx(Math.max(0, availableTimestamps.length - 1));
     setSelectedTimestamps(new Set(availableTimestamps));
@@ -228,20 +231,16 @@ export const AstronomyManager: React.FC = () => {
   const leftPanel = (
     <div className="astronomy-display__browser">
       <div className="astronomy-display__mode-toggle">
-        <button
-          type="button"
-          className={`segmented-btn ${navigationMode === 'target' ? 'active' : ''}`}
-          onClick={() => setNavigationMode('target')}
-        >
-          By target
-        </button>
-        <button
-          type="button"
-          className={`segmented-btn ${navigationMode === 'spectralClass' ? 'active' : ''}`}
-          onClick={() => setNavigationMode('spectralClass')}
-        >
-          By spectral class
-        </button>
+        <Tabs
+          idPrefix="navigation-mode"
+          ariaLabel="Browse by"
+          selectedId={navigationMode}
+          onChange={(modeId) => setNavigationMode(modeId as typeof navigationMode)}
+          tabs={[
+            { id: 'target', label: 'By target' },
+            { id: 'spectralClass', label: 'By spectral class' },
+          ]}
+        />
       </div>
 
       {navigationMode === 'target' ? (
@@ -257,7 +256,7 @@ export const AstronomyManager: React.FC = () => {
           onFilterTextChange={targetBrowser.setFilterText}
           filterPlaceholder="Search targets..."
           isLoading={targetBrowser.isLoading}
-          loadingMessage="Loading targets…"
+          loadingMessage="Loading targets"
           emptyMessage="No targets found."
           isError={targetBrowser.isError}
           errorMessage="Could not load the targets."
@@ -291,7 +290,7 @@ export const AstronomyManager: React.FC = () => {
         items={starList.items}
         selectedId={selectedSpectrum}
         pendingId={pendingId}
-        onSelect={setPendingId}
+        onSelect={isSpectralClassScoped ? setPendingId : starsByTarget.selectStar}
         onFilterOptionChange={() => {}}
         // REQ: AST-1.2: The display SHALL allow filtering of the data list by text search.
         filterText={starList.filterText}
@@ -303,7 +302,7 @@ export const AstronomyManager: React.FC = () => {
           </>
         }
         isLoading={starList.isLoading}
-        loadingMessage="Loading stars…"
+        loadingMessage="Loading stars"
         emptyMessage="No stars found for this selection."
         isError={starList.isError}
         errorMessage="Could not load the stars."
@@ -351,15 +350,15 @@ export const AstronomyManager: React.FC = () => {
           title="Spectrum"
           headerContent={
             hasFeatures ? (
-              <div className="astronomy-viewer__segmented-control">
-                <button
-                  type="button"
-                  className={`segmented-btn ${!showFeatures ? 'active' : ''}`}
-                  onClick={() => setShowFeatures((v) => !v)}
-                >
-                  Hide Feature Lines
-                </button>
-              </div>
+              <Button
+                variant="secondary"
+                size="small"
+                active={!showFeatures}
+                aria-pressed={!showFeatures}
+                onClick={() => setShowFeatures((v) => !v)}
+              >
+                Hide Feature Lines
+              </Button>
             ) : null
           }
         >

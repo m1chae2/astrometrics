@@ -6,7 +6,8 @@
 * Stored: `query` reads the quality measurements that earlier runs saved,
   and `metrics` lists what each metric means.
 * Live: `measure_frames` and `measure_stack` measure raw frames and finished
-  stacks now, without changing anything.
+  stacks now, without changing anything. `measure_folder` measures any folder
+  of FITS files with the stored `frame.*` metric set and returns the numbers.
 * Recorded: `record_frame_measurements` measures a target's light frames and
   stores the numbers that `query` reads.
 
@@ -14,6 +15,7 @@ The argument helpers it shares with `ProcessingPipelines` live in
 `pipelines/shared/api_arguments.py`.
 """
 
+import os
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -29,6 +31,7 @@ from astrometricslib.models.quality.aperture_record import OddEvenApertureRecord
 from astrometricslib.models.quality.calibration_identities import CalibrationIdentities
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.excluded_frames import QuarantinePreview, SetAsideFrameRecord
+from astrometricslib.models.quality.folder_measurement import FolderMeasurementReport
 from astrometricslib.models.quality.frame_measurement_summary import FrameMeasurementSummary
 from astrometricslib.models.quality.measurement import QualityMeasurement, SubjectLevel
 from astrometricslib.models.quality.metric_spec import Checkpoint, MetricSpec, MetricSummary
@@ -249,8 +252,9 @@ class QualityRecords:
             library_only=library_only,
         )
         registry = get_metric_registry()
+        registered = set(registry.names())
         for row in rows:
-            row.unit = registry.get(row.metric).unit if row.metric in registry.names() else None
+            row.unit = registry.get(row.metric).unit if row.metric in registered else None
         page = rows[offset:] if limit is None else rows[offset : offset + limit]
         return QualityQueryResult(
             rows=page,
@@ -726,8 +730,142 @@ class QualityRecords:
                     remeasure,
                     trend_frames,
                     trend_threshold_percent,
+                    self._stored_sky_rates(resolved),
                 )
             return report
+
+    @background_job("diagnostics", grace_period_seconds=20.0)
+    def measure_folder(
+        self,
+        folder_path: str,
+        limit: int = 20,
+        filter_name: str | None = None,
+        first_file: str | None = None,
+        last_file: str | None = None,
+        since: TimeInput = None,
+        until: TimeInput = None,
+        camera: str | None = None,
+        bias_level_adu: float | None = None,
+        register_job: bool = True,
+    ) -> FolderMeasurementReport:
+        """Measure a folder of frames with the frame metrics, storing nothing.
+
+        Each ``*.fits`` file is measured by the code that serves
+        `record_frame_measurements`, so the numbers (star width and shape,
+        sky brightness and noise, background level, saturation, temperatures)
+        agree with the stored ones. Nothing is written to the quality store
+        or to the library, and the folder need not be in the library, so
+        this is how to check tonight's staging folder, or a set of frames
+        drawn by a camera simulator, before they enter the library. A frame
+        takes about 12 seconds.
+
+        The sky brightness in electrons needs the bias level of the frame's
+        camera setting. By default it comes from the calibration library's
+        bias frames at exactly that setting. When there are none, give
+        `bias_level_adu` (for example the level of a simulator's bias frames),
+        or the sky metrics come back as not measured with the reason.
+
+        Parameters
+        ----------
+        folder_path : `str`
+            A folder of ``*.fits`` frames.
+        limit : `int`, optional
+            How many frames to measure, from 1 to 300: the first in file-name
+            order. Defaults to 20.
+        filter_name : `str`, optional
+            Only frames whose filter matches this text, ignoring case.
+        first_file : `str`, optional
+            Only frames from this file onward, by file name or number.
+        last_file : `str`, optional
+            Only frames up to and including this file, by name or number.
+        since : `str`, `datetime` or `Time`, optional
+            Only frames taken at or after this time. Text is ISO 8601; no
+            offset means UTC.
+        until : `str`, `datetime` or `Time`, optional
+            Only frames taken at or before this time.
+        camera : `str`, optional
+            Treat every frame as taken with this camera (a name in the
+            camera profiles) instead of the camera the header names.
+        bias_level_adu : `float`, optional
+            The bias level in ADU to use for the sky metrics of every frame.
+        register_job : `bool`, optional
+            Record the run in the job list. Defaults to `True`.
+
+        Returns
+        -------
+        report : `FolderMeasurementReport`
+            ``frames`` (the value of each metric, such as
+            ``frame.star_width_moffat_px`` in pixels and
+            ``frame.sky_rate_e_per_s_per_px`` in electrons per second per
+            pixel, with the reason for any that could not be measured),
+            ``medians`` over the frames, and ``notices`` (for example that a
+            frame was drawn by a simulator, so its noise and sky values do
+            not describe a real sky).
+
+        Raises
+        ------
+        InvalidArgumentError
+            If the folder does not exist, or a time cannot be read.
+        """
+        from astrometricslib.pipelines.stacking.folder_frame_measurement import measure_folder_frames
+        from astrometricslib.pipelines.stacking.frame_measurement_run import BiasLevelFinder
+
+        if not os.path.isdir(folder_path):
+            raise InvalidArgumentError(f"folder_path {folder_path!r} is not a folder.")
+        limit = _clamp(limit, 1, 300)
+        selection = make_frame_selection(filter_name, first_file, last_file, since, until, True)
+        bias_finder = None
+        if bias_level_adu is None and self._calibration_library_provider is not None:
+            bias_finder = BiasLevelFinder(self._calibration_library())
+        with registered_job(enabled=register_job, job_type="diagnostics", target_id=folder_path):
+            return measure_folder_frames(
+                folder_path,
+                selection,
+                limit,
+                self._config,
+                datetime.now(UTC),
+                camera=camera,
+                bias_level_adu=bias_level_adu,
+                bias_finder=bias_finder,
+            )
+
+    def _stored_sky_rates(self, target: Target) -> dict[str, float]:
+        """Read the stored sky rate of each frame of a target, by frame path.
+
+        The sky rate (electrons per second per pixel) is the sky level with
+        the exposure length divided out, so a trend in it is not caused by a
+        change of exposure.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target whose frames to look up.
+
+        Returns
+        -------
+        rates : `dict` [`str`, `float`]
+            The newest stored rate of each frame that has one.
+        """
+        from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
+        from astrometricslib.pipelines.shared.quality.metrics import FRAME_SKY_RATE_E_PER_S_PER_PX
+        from astrometricslib.utilities.frame_identity import frame_subject_id
+
+        rows = QualityStore(quality_database_path(self._config)).query(
+            metric=FRAME_SKY_RATE_E_PER_S_PER_PX,
+            level=SubjectLevel.FRAME,
+            target_id=target.id,
+            latest_only=True,
+        )
+        rate_by_subject = {
+            row.subject.subject_id: float(row.value)
+            for row in rows
+            if row.value is not None and row.subject.channel is None
+        }
+        return {
+            frame.path: rate_by_subject[frame_subject_id(frame.path, target.id)]
+            for frame in target.frames
+            if frame_subject_id(frame.path, target.id) in rate_by_subject
+        }
 
     def set_aside_frames(self, target: str | Target) -> list[SetAsideFrameRecord]:
         """List the frames in a target's `_excluded` folders, with reasons.
@@ -858,6 +996,31 @@ class QualityRecords:
             return stack_quality_report(
                 stack_path, target_id, sections, compare_to, kind == "spectral", self._drivers
             )
+
+    def forget(self, subject_ids: list[str]) -> int:
+        """Remove the stored measurements of frames that no longer exist.
+
+        Use this after a frame file is deleted, so its numbers do not stay in
+        the quality database. `TargetCatalog.delete_images` calls it for the
+        frames of the target it is given. Only frame measurements are
+        removed: stacks and runs are never touched, and the measurements of
+        other frames are left as they are. A frame's weight rows inside a
+        subset stack go with the frame. An id with no stored measurement is
+        ignored, and a library with no quality database is left as it is.
+
+        Parameters
+        ----------
+        subject_ids : `list` [`str`]
+            The frames' subject ids, as `Target.frame_subject_id` gives them.
+
+        Returns
+        -------
+        removed_count : `int`
+            How many stored measurements were removed.
+        """
+        from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
+
+        return QualityStore(quality_database_path(self._config)).delete_frame_measurements(subject_ids)
 
     @background_job("quality", grace_period_seconds=20.0)
     def record_frame_measurements(

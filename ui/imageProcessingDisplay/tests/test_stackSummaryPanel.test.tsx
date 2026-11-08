@@ -1,7 +1,7 @@
 /**
  * @fileoverview Tests for the Stack Summary block: the numbers with units, the warnings of
- * the stacking job (and the stored checks for a stack with no job id), the exposure groups,
- * the empty state for a target with no stack, and the loading and error states.
+ * the stacking job (and the stored checks for a stack with no job id), the exposure groups (hidden for one),
+ * the hidden zero-count rows, the empty state for a target with no stack, and the loading and error states.
  */
 import React from 'react';
 import { render, screen, within } from '@testing-library/react';
@@ -9,10 +9,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
     StackSummaryPanel,
-    describeGroupClipping,
-    describeGroupShift,
+    describeGroupNotes,
     formatExposureSeconds,
-    formatPixelShare,
 } from '../components/StackSummaryPanel';
 import { describeStackWarningTitle, describeWarningNumbers } from '../utils/stackWarnings';
 import { BackendError } from '../../common/services/backendError';
@@ -83,31 +81,67 @@ describe('StackSummaryPanel', () => {
         callBackendMock.mockReset();
     });
 
-    it('shows frames, rejected share and star width with units', async () => {
+    it('shows the frame count and the set-aside row, and no pixels rejected or star width row', async () => {
         answerWith({ 'processing:stack_summary': summary });
         renderPanel();
-        expect(await screen.findByText('36 of 40 frames')).toBeTruthy();
+        expect(await screen.findByText('Imaging stack summary: 36 of 40 frames')).toBeTruthy();
         expect(screen.getByText('3 frames')).toBeTruthy();
-        expect(screen.getByText(/1\.2% of pixels/)).toBeTruthy();
-        expect(screen.getByText(/2\.31 px in the stack/)).toBeTruthy();
+        expect(screen.queryByText(/Pixels rejected/)).toBeNull();
+        expect(screen.queryByText(/% of pixels/)).toBeNull();
+        expect(screen.queryByText(/Star width/)).toBeNull();
         expect(callBackendMock).toHaveBeenCalledWith(
             'processing:stack_summary', { target: 'M 81', kind: 'imaging' }, { silent: true });
     });
 
-    it('is closed at first and shows one line with frames and date, with no flag count', async () => {
+    it('hides the set-aside and left-out rows when their counts are 0', async () => {
+        answerWith({ 'processing:stack_summary': {
+            ...summary, frames_stacked: 40, frames_skipped: 0, skipped_reasons: [],
+            frames_set_aside_before_stacking: 0,
+        } });
+        renderPanel();
+        await screen.findByText('Imaging stack summary: 40 of 40 frames');
+        expect(screen.queryByText('Set aside before stacking')).toBeNull();
+        expect(screen.queryByText('Left out while stacking')).toBeNull();
+    });
+
+    it('shows the set-aside and left-out rows when their counts are above 0', async () => {
+        answerWith({ 'processing:stack_summary': summary });
+        renderPanel();
+        await screen.findByText('Imaging stack summary: 36 of 40 frames');
+        expect(screen.getByText('Set aside before stacking')).toBeTruthy();
+        expect(screen.getByText('Left out while stacking')).toBeTruthy();
+        expect(screen.getByText('4 frames')).toBeTruthy();
+    });
+
+    it('is closed at first and shows one line with the frames only, and the date row inside', async () => {
         answerWith({ 'processing:stack_summary': summary, 'jobs:query': { detail: 'warnings', warnings: [jobWarning] } });
         const { container } = renderPanel();
-        await screen.findByText('36 of 40 frames');
+        await screen.findByText('Imaging stack summary: 36 of 40 frames');
+        await screen.findByTestId('stack-warning-count');
         const disclosure = container.querySelector('details.stack-summary') as HTMLDetailsElement;
         expect(disclosure.open).toBe(false);
         const line = disclosure.querySelector(':scope > summary') as HTMLElement;
-        expect(line.textContent).toMatch(/^Imaging stack summary: 36 of 40 frames, made /);
+        expect(line.textContent).toBe('Imaging stack summary: 36 of 40 frames · 1 warning');
+        const firstLabel = disclosure.querySelector('dl > dt') as HTMLElement;
+        expect(firstLabel.textContent).toBe('Stack date');
+        expect((firstLabel.nextElementSibling as HTMLElement).textContent).not.toBe('');
+    });
+
+    it('adds the warning count to the closed line only when there are warnings', async () => {
+        answerWith({ 'processing:stack_summary': summary, 'jobs:query': { detail: 'warnings', warnings: [jobWarning, jobWarning] } });
+        const first = renderPanel();
+        expect((await screen.findByTestId('stack-warning-count')).textContent).toBe(' · 2 warnings');
+        first.unmount();
+        answerWith({ 'processing:stack_summary': summary });
+        renderPanel();
+        await screen.findByText('Imaging stack summary: 36 of 40 frames');
+        expect(screen.queryByTestId('stack-warning-count')).toBeNull();
     });
 
     it('keeps the summary content reachable by keyboard through the summary element', async () => {
         answerWith({ 'processing:stack_summary': summary });
         const { container } = renderPanel();
-        await screen.findByText('36 of 40 frames');
+        await screen.findByText('Imaging stack summary: 36 of 40 frames');
         const summaries = container.querySelectorAll('summary');
         // A summary element is focusable and opens with Enter or Space in a browser.
         expect(summaries.length).toBeGreaterThan(1);
@@ -125,7 +159,7 @@ describe('StackSummaryPanel', () => {
             ] },
         });
         const { container } = renderPanel();
-        await screen.findByText('36 of 40 frames');
+        await screen.findByText('Imaging stack summary: 36 of 40 frames');
         expect(callBackendMock).toHaveBeenCalledWith(
             'jobs:query', { job_id: 'job-stack-1', detail: 'warnings' }, { silent: true });
         const items = await screen.findAllByRole('listitem', {}).then(
@@ -155,7 +189,7 @@ describe('StackSummaryPanel', () => {
             ],
         });
         const { container } = renderPanel();
-        await screen.findByText('36 of 40 frames');
+        await screen.findByText('Imaging stack summary: 36 of 40 frames');
         const items = await screen.findAllByText(/Many zero pixels in the stack/);
         expect(items).toHaveLength(1);
         expect(container.querySelectorAll('.stack-summary__flag-list > li')).toHaveLength(1);
@@ -179,28 +213,48 @@ describe('StackSummaryPanel', () => {
     it('says when the warnings could not be read', async () => {
         answerWith({ 'processing:stack_summary': summary, 'jobs:query': new Error('down') });
         renderPanel();
-        await screen.findByText('36 of 40 frames');
+        await screen.findByText('Imaging stack summary: 36 of 40 frames');
         expect(await screen.findByText('Could not read the warnings.')).toBeTruthy();
     });
 
-    it('lists each exposure group with clipping, shift and why it was left out', async () => {
+    it('lists exposure groups in a closed disclosure with Frames used and Notes', async () => {
         answerWith({ 'processing:stack_summary': summary });
-        renderPanel();
-        const rows = await screen.findAllByRole('row');
-        expect(rows).toHaveLength(3);
-        expect(screen.getByRole('table')).toBeTruthy();
-        expect(screen.getByText('Bright stars at the camera limit')).toBeTruthy();
-        expect(screen.getByText('Sky pixels cut off at zero')).toBeTruthy();
-        expect(screen.getByText('Not moved (reference)')).toBeTruthy();
-        expect(screen.getByText('5.0 px')).toBeTruthy();
-        expect(screen.getByText('gain disagrees')).toBeTruthy();
+        const { container } = renderPanel();
+        await screen.findByText('Imaging stack summary: 36 of 40 frames');
+        const disclosure = screen.getByText('Exposure groups (2)').closest('details') as HTMLDetailsElement;
+        expect(disclosure.open).toBe(false);
+        expect(container.querySelector('caption')).toBeNull();
+        const headers = Array.from(container.querySelectorAll('thead th')).map((cell) => cell.textContent);
+        expect(headers).toEqual(['Exposure', 'Frames used', 'Notes']);
+        const rows = container.querySelectorAll('tbody tr');
+        expect(rows).toHaveLength(2);
+        expect(within(rows[0] as HTMLElement).getByText('bright stars clipped')).toBeTruthy();
+        expect(within(rows[1] as HTMLElement).getByText('gain disagrees; sky cut off at zero')).toBeTruthy();
+        expect(within(rows[1] as HTMLElement).getByText('6 of 10')).toBeTruthy();
     });
 
-    it('says no warnings were raised without judging the stack', async () => {
-        answerWith({ 'processing:stack_summary': { ...summary, exposure_groups: [] } });
+    it('hides the exposure groups when there is only one', async () => {
+        answerWith({ 'processing:stack_summary': { ...summary, exposure_groups: [summary.exposure_groups[0]] } });
         renderPanel();
-        expect(await screen.findByText('None raised.')).toBeTruthy();
+        await screen.findByText('Imaging stack summary: 36 of 40 frames');
+        expect(screen.queryByText(/Exposure groups/)).toBeNull();
         expect(screen.queryByRole('table')).toBeNull();
+    });
+
+    it('says "Warnings: none" without a preamble when no warnings were raised', async () => {
+        answerWith({ 'processing:stack_summary': summary });
+        const { container } = renderPanel();
+        await screen.findByText('Imaging stack summary: 36 of 40 frames');
+        await screen.findByText('none');
+        expect((container.querySelector('.stack-summary__flags') as HTMLElement).textContent)
+            .toBe('Warnings: none');
+    });
+
+    it('shows no preamble sentence above a warning list', async () => {
+        answerWith({ 'processing:stack_summary': summary, 'jobs:query': { detail: 'warnings', warnings: [jobWarning] } });
+        renderPanel();
+        await screen.findByText(/Many rejected pixels/);
+        expect(screen.queryByText(/Each is a check/)).toBeNull();
     });
 
     it('shows a muted note, not an error, when the target has no stack', async () => {
@@ -213,18 +267,17 @@ describe('StackSummaryPanel', () => {
     it('shows loading, then an error for other failures', async () => {
         answerWith({ 'processing:stack_summary': new Error('down') });
         renderPanel();
-        expect(screen.getByText(/Loading imaging stack summary/)).toBeTruthy();
+        expect(screen.getByText('Loading the imaging stack summary')).toBeTruthy();
         const alert = await screen.findByRole('alert');
         expect(alert.textContent).toContain('Could not load');
     });
 
     it('formats numbers with units', () => {
-        expect(formatPixelShare(0.5)).toBe('50.0% of pixels');
-        expect(formatPixelShare(null)).toBe('not recorded');
         expect(formatExposureSeconds(0.5)).toBe('0.5 s');
         expect(formatExposureSeconds(30)).toBe('30 s');
-        expect(describeGroupShift({ exposure_seconds: 5, frames_submitted: 1, frames_stacked: 0, left_out_reason: 'x' })).toBe('—');
-        expect(describeGroupClipping({ exposure_seconds: 5, frames_submitted: 1, frames_stacked: 1 })).toBe('No');
+        expect(describeGroupNotes({ exposure_seconds: 5, frames_submitted: 1, frames_stacked: 0, left_out_reason: 'x' })).toBe('x');
+        expect(describeGroupNotes({ exposure_seconds: 5, frames_submitted: 2, frames_stacked: 1 })).toBe('some frames left out');
+        expect(describeGroupNotes({ exposure_seconds: 5, frames_submitted: 1, frames_stacked: 1 })).toBe('—');
     });
 });
 

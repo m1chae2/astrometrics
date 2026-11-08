@@ -43,6 +43,7 @@ from typing import Any
 import numpy as np
 
 from astrometricslib import Target
+from astrometricslib.drivers import VersionedCache, get_stack_quality_data_version
 from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.reports import EARLIER_NIGHTS_VARIANT, CaptureSetting, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.result_quality.capture_overheads import EXPOSURE_MATCH_SECONDS
@@ -71,6 +72,16 @@ QUARANTINE_METRICS = (
 
 FRAME_WEIGHT_METRIC = "stacking.frame_weight"
 GROUP_EXPOSURE_METRIC = "stacking.group_exposure_s"
+
+
+NOISE_HISTORY_CACHE_MAXIMUM_ENTRIES = 4
+"""How many libraries' noise histories the cache keeps. An app works on one
+library; a few more cover tests and a library switch. Design estimate,
+register row WAY-D107."""
+
+_NOISE_HISTORY_CACHE = VersionedCache(maximum_entries=NOISE_HISTORY_CACHE_MAXIMUM_ENTRIES)
+"""The pooled noise history of each library, kept until its stack-level data
+change (`get_stack_quality_data_version`). A new frame does not change it."""
 
 
 @dataclass
@@ -210,22 +221,30 @@ def _read_library_stack_rows(astrometrics: Any) -> tuple[list[QualityMeasurement
     return rows, settings
 
 
-def read_noise_history(astrometrics: Any) -> NoiseHistory:
+def read_noise_history(astrometrics: Any, config: Any | None = None) -> NoiseHistory:
     """Read what every target's stacks say about noise, in one pass.
 
     One library-wide query of stack-level rows (library stacks, every run
     kept), one read of the capture settings and one read of the calibration
     records. From them it pools the odd–even differences of each capture
     setting group (camera, optic, gain setting, offset, binning) into the
-    noise model's own error (decision D17), and it collects each target's
-    measured fixed-pattern share by camera, optic and flat set (decision D23).
+    noise model's own error (issue #134), and it collects each target's
+    measured fixed-pattern share by camera, optic and flat set (issue #134).
     The target report and tonight's ranking both call it once, so neither
     queries per target.
+
+    The result reads stack-level rows only, so a new frame of any target does
+    not change it. With a `config` it is kept until the stack-level data
+    change (`get_stack_quality_data_version`), and a later call gives the
+    kept result. Without a `config` it is read every time.
 
     Parameters
     ----------
     astrometrics : `Astrometrics`
         The science library handle.
+    config : `AppConfiguration`, optional
+        The configuration, for the library folder and the data version. Leave
+        it out to read without keeping the result.
 
     Returns
     -------
@@ -235,12 +254,31 @@ def read_noise_history(astrometrics: Any) -> NoiseHistory:
         `noise_model_error_for_setting` gives the stand-in).
         ``fixed_pattern_shares``: the shares by setup.
     """
-    rows, settings = _read_library_stack_rows(astrometrics)
-    reader = getattr(astrometrics.quality, "calibration_identities", None)
-    identities = list(reader()) if callable(reader) else []
-    return NoiseHistory(
-        model_errors=noise_model_errors_by_setting_group(rows, settings),
-        fixed_pattern_shares=fixed_pattern_shares_by_setup(rows, identities),
+
+    def build() -> NoiseHistory:
+        """Read the stack rows and pool them.
+
+        Returns
+        -------
+        history : `NoiseHistory`
+            The noise history.
+        """
+        rows, settings = _read_library_stack_rows(astrometrics)
+        reader = getattr(astrometrics.quality, "calibration_identities", None)
+        identities = list(reader()) if callable(reader) else []
+        return NoiseHistory(
+            model_errors=noise_model_errors_by_setting_group(rows, settings),
+            fixed_pattern_shares=fixed_pattern_shares_by_setup(rows, identities),
+        )
+
+    if config is None:
+        return build()
+    try:
+        library = str(config.get_library_path())
+    except AttributeError, OSError, TypeError, ValueError:
+        return build()
+    return _NOISE_HISTORY_CACHE.get_or_build(
+        ("noise_history", library), lambda: get_stack_quality_data_version(config), build
     )
 
 
@@ -251,7 +289,7 @@ def read_noise_model_errors(astrometrics: Any) -> dict[Any, Any]:
     kept) and one read of the capture settings, then
     `noise_model_errors_by_setting_group` pools the odd–even differences of
     each capture setting group (camera, optic, gain setting, offset,
-    binning). Decision D17. `read_noise_history` does this and also gathers
+    binning). `read_noise_history` does this and also gathers
     the fixed-pattern history; use it when both are wanted.
 
     Parameters

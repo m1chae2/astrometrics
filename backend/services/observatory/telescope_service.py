@@ -14,6 +14,9 @@ from backend.services.coordinate_text import parse_coordinate_text
 
 logger = logging.getLogger(__name__)
 
+# Job states that mean the job is still running.
+_RUNNING_JOB_STATES = ("started", "running")
+
 
 class TelescopeService:
     """Service responsible for telescope control and telemetry.
@@ -29,6 +32,7 @@ class TelescopeService:
         wayfinder: Any = None,
         astrometrics_service: Any = None,
         alignment_service: Any = None,
+        auto_download_service: Any = None,
     ) -> None:
         """Initialize the service and Wayfinder high-level interface.
 
@@ -44,6 +48,9 @@ class TelescopeService:
             Service tracking cross-component state updates.
         alignment_service : `Any`, optional
             Service running plate-solving loops.
+        auto_download_service : `Any`, optional
+            Told each camera status so it can copy finished frames into the
+            library. None turns that feature off.
         """
         if wayfinder is None:
             from wayfindinglib import Wayfinder
@@ -56,6 +63,86 @@ class TelescopeService:
         self._target_service = target_service
         self._astrometrics_service = astrometrics_service
         self._alignment_service = alignment_service
+        self._auto_download_service = auto_download_service
+        self._sync_service: Any = None
+        self._job_service: Any = None
+        self._status_unavailable_logged = False
+
+    def set_auto_download_service(self, auto_download_service: Any) -> None:
+        """Attach the service that copies finished frames into the library.
+
+        The container builds it after this service, because it needs the
+        sync service, so it is attached here afterward.
+
+        Parameters
+        ----------
+        auto_download_service : `Any`
+            Told each camera status. None turns the feature off.
+        """
+        self._auto_download_service = auto_download_service
+
+    def set_frame_copy_sources(self, sync_service: Any, job_service: Any) -> None:
+        """Attach what the status needs to report the copy of new frames.
+
+        The container builds the sync service after this service, so both
+        are attached here afterward.
+
+        Parameters
+        ----------
+        sync_service : `Any`
+            Says whether a target's frames are being copied right now.
+        job_service : `Any`
+            Lists a target's jobs, so the measuring progress can be read.
+        """
+        self._sync_service = sync_service
+        self._job_service = job_service
+
+    def get_frame_copy_status(self, target_name: str | None) -> dict[str, Any]:
+        """Say whether new frames of the target are being copied and measured.
+
+        This runs about every 2 seconds, so it does nothing but one set
+        lookup when no copy is running. The job list is read only while a
+        copy runs.
+
+        Parameters
+        ----------
+        target_name : `str` or `None`
+            The target the telescope points at.
+
+        Returns
+        -------
+        status : `dict` [`str`, `Any`]
+            ``active`` (a copy of this target's frames is running),
+            ``targetId``, and ``measured`` and ``total`` (the frames measured
+            so far and the frames to measure). Both are `None` while the
+            files copy. Once the measuring job runs, ``measured`` is a number
+            (0 until the job reports progress) and ``total`` is the frame
+            count if the job has said it, else `None`.
+        """
+        status: dict[str, Any] = {"active": False, "targetId": target_name, "measured": None, "total": None}
+        if not target_name or self._sync_service is None:
+            return status
+        try:
+            if not self._sync_service.is_syncing(target_name):
+                return status
+            status["active"] = True
+            if self._job_service is None:
+                return status
+            jobs = self._job_service.get_jobs_for_target(target_name, job_type="quality", limit=3)
+            for job in jobs:
+                if job.status not in _RUNNING_JOB_STATES:
+                    continue
+                # A running measuring job means the copy is done. The job
+                # stores its frame counts as progress only after a frame
+                # finishes. Until then its progress is 0 (its total is still
+                # the placeholder 100), so report 0 and no total.
+                reported = (job.progress_current or 0) > 0
+                status["measured"] = int(job.progress_current) if reported else 0
+                status["total"] = int(job.progress_total) if reported else None
+                break
+        except Exception:  # a status detail must never break the telescope poll
+            logger.debug("Could not read the frame copy status of %s", target_name, exc_info=True)
+        return status
 
     def get_status(self) -> dict[str, Any]:
         """Retrieve current telescope status.
@@ -83,8 +170,15 @@ class TelescopeService:
                 "focuserPosition": imaging.focuser_position,
                 "cameraTemperature": imaging.camera_temperature,
             })
+            if self._status_unavailable_logged:
+                self._status_unavailable_logged = False
+                logger.info("The telescope status is available again.")
         except (AstrometricsError, OSError, RuntimeError) as e:
-            logger.warning("Failed to query telescope status (telescope may be offline): %s", e)
+            # An offline telescope is a status, not an error: say so once per
+            # change, not on every two-second poll.
+            if not self._status_unavailable_logged:
+                self._status_unavailable_logged = True
+                logger.info("The telescope status is unavailable (telescope may be offline): %s", e)
             data = {
                 "ra": "00 00 00",
                 "dec": "+00 00 00",
@@ -127,6 +221,11 @@ class TelescopeService:
         if target_name:
             data["targetName"] = target_name
 
+        if self._auto_download_service:
+            self._auto_download_service.on_camera_status(data.get("cameraStatus"), target_name)
+
+        data["frameCopy"] = self.get_frame_copy_status(target_name)
+
         if self._astrometrics_service:
             self._astrometrics_service.update_telescope_state(data)
 
@@ -145,8 +244,9 @@ class TelescopeService:
         Returns
         -------
         `str` | `None`
-            The matched target name, or None if coordinates are missing or no
-            target is within 1 degree separation.
+            The matched target's id (not its common name: remote folders, the
+            library and jobs are all keyed by id), or None if coordinates are
+            missing or no target is within 1 degree separation.
         """
         if not ra_str or not dec_str or ra_str in ("-", "Unknown", "00 00 00") or not self._target_service:
             return None
@@ -164,7 +264,7 @@ class TelescopeService:
             logger.debug("Target inference failed: %s", exc)
             return None
         rows = nearest.targets or []
-        return (rows[0].get("common_name") or rows[0]["id"]) if rows else None
+        return rows[0]["id"] if rows else None
 
     def connect(self) -> bool:
         """Connect to the telescope hardware via the high-level interface.

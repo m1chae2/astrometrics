@@ -5,7 +5,8 @@ Description: `center_on` is the work behind
 near the target but not on it, because the mount's own idea of where it
 points is off by some arcminutes. Centering closes that gap in a loop:
 
-1. wait for the mount to settle, then take a short exposure;
+1. wait for the mount to settle, then take a short exposure (its length is
+   worked out from the equipment's measurements, see `centering_exposure`);
 2. plate-solve the frame, which reads where the image really points
    from the star pattern;
 3. compare that with where the mount was sent
@@ -29,6 +30,7 @@ from astrometricslib.exceptions import AstrometricsError, PlateSolveFailedError
 from wayfindinglib.models.session.correction_result import PointingCorrection
 from wayfindinglib.models.sky_position import SkyPosition
 from wayfindinglib.tasks.control_tasks import hardware_operations
+from wayfindinglib.tasks.control_tasks.centering_exposure import choose_centering_exposure
 from wayfindinglib.tasks.control_tasks.imaging_capture import READOUT_SECONDS
 from wayfindinglib.tasks.control_tasks.pointing_correction import compute_pointing_correction
 
@@ -37,12 +39,13 @@ if TYPE_CHECKING:
 
     from wayfindinglib.api.control.context import ControlContext
 
-__all__ = ["CENTERING_EXPOSURE_SECONDS", "SETTLE_SECONDS", "center_on", "solved_center"]
+__all__ = ["SETTLE_SECONDS", "center_on", "solved_center"]
 
 logger = logging.getLogger(__name__)
 
-CENTERING_EXPOSURE_SECONDS = 1.0
-"""Exposure length of each centering frame, in seconds."""
+IMAGE_WAIT_SECONDS = 15.0
+"""Extra time to wait for a centering frame to arrive after the exposure
+and readout, in seconds. The frame may cross a slow Wi-Fi link."""
 
 SETTLE_SECONDS = 1.5
 """Wait after a slew before the centering frame, so the mount is still."""
@@ -111,10 +114,16 @@ def _capture_frame(context: ControlContext, exposure_seconds: float) -> Path | N
     path : `pathlib.Path` or `None`
         The written FITS file, or `None` if the camera sent no frame.
     """
-    if not hardware_operations.capture_image(context, exposure_seconds):
-        return None
-    time.sleep(exposure_seconds + READOUT_SECONDS)
-    data = hardware_operations._run_sync(context.camera_driver.get_last_image())
+    camera = context.camera_driver
+    hardware_operations._run_sync(camera.set_image_reception(True))
+    try:
+        if not hardware_operations.capture_image(context, exposure_seconds):
+            return None
+        data = hardware_operations._run_sync(
+            camera.wait_for_new_image(exposure_seconds + READOUT_SECONDS + IMAGE_WAIT_SECONDS)
+        )
+    finally:
+        hardware_operations._run_sync(camera.set_image_reception(False))
     if not data:
         return None
     path = _centering_image_path(context)
@@ -189,7 +198,7 @@ def center_on(
     tolerance_arcsec: float | None = None,
     max_iterations: int | None = None,
     target_name: str | None = None,
-    exposure_seconds: float = CENTERING_EXPOSURE_SECONDS,
+    exposure_seconds: float | None = None,
 ) -> bool:
     """Slew to `position` and refine the pointing until it is centered.
 
@@ -209,7 +218,12 @@ def center_on(
     target_name : `str`, optional
         Name stored with each recorded attempt.
     exposure_seconds : `float`, optional
-        Exposure length of each centering frame.
+        Exposure length of each centering frame. When omitted it is the
+        ``alignment_exposure_seconds`` setting. With
+        ``alignment_exposure_from_equipment`` on, it is chosen once, before
+        the first frame, by `choose_centering_exposure`: the shortest
+        exposure expected to show enough stars to solve, or the setting when
+        an input is missing.
 
     Returns
     -------
@@ -223,6 +237,13 @@ def center_on(
         config = config.model_copy(update={"alignment_convergence_tolerance_arcsec": tolerance_arcsec})
     iterations = max_iterations if max_iterations is not None else config.alignment_iteration_limit
     context.motion_stop.clear()
+    if exposure_seconds is None and config.alignment_exposure_from_equipment:
+        choice = choose_centering_exposure(context, position)
+        exposure_seconds = choice.exposure_seconds
+        logger.info("Centering exposure %.1f s (%s): %s", exposure_seconds, choice.source, choice.reason)
+    elif exposure_seconds is None:
+        exposure_seconds = config.alignment_exposure_seconds
+        logger.info("Centering exposure %.1f s (the alignment_exposure_seconds setting)", exposure_seconds)
     hardware_operations.slew(context, position)
     for iteration in range(1, iterations + 1):
         time.sleep(SETTLE_SECONDS)

@@ -6,6 +6,7 @@ computer and shapes each picture the way the viewer reads it.
 """
 
 import logging
+import os
 from typing import Any
 
 from astrometricslib.drivers import resolve_mounted_path
@@ -136,7 +137,36 @@ class ImageService:
             could not be removed, with the reason).
         """
         resolved_paths = [resolve_mounted_path(path) for path in paths]
-        return self._astrometrics.targets.delete_images(resolved_paths, target=target_id).model_dump()
+        result = self._astrometrics.targets.delete_images(resolved_paths, target=target_id).model_dump()
+        if target_id is None:
+            self._forget_measurements_of_deleted(result["deleted"])
+        return result
+
+    def _forget_measurements_of_deleted(self, deleted_paths: list[str]) -> None:
+        """Forget the measurements of frames deleted without a target.
+
+        The library forgets the measurements itself when it is given the
+        target. When the caller names none, the target is read from the
+        library's folder layout (``lights/<target>/...``), so a deleted
+        frame never leaves its numbers behind. A path that is not under a
+        ``lights`` folder, or whose target is not in the library, is left.
+
+        Parameters
+        ----------
+        deleted_paths : `list` [`str`]
+            The paths the library reports as deleted.
+        """
+        subject_ids: list[str] = []
+        for path in deleted_paths:
+            parts = os.path.normpath(path).split(os.sep)
+            positions = [i for i, part in enumerate(parts) if part.lower() == "lights" and i + 2 < len(parts)]
+            if not positions:
+                continue
+            target = self._astrometrics.targets.get(parts[positions[-1] + 1])
+            if target is not None:
+                subject_ids.append(target.frame_subject_id(path))
+        if subject_ids:
+            self._astrometrics.quality.forget(subject_ids)
 
     def get_last_image(self, stretch: bool = True) -> dict[str, Any] | None:
         """Find the most recently created FITS file and draw it.

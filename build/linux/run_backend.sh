@@ -27,6 +27,12 @@ set -euo pipefail
 # ASTROMETRICS_BACKEND_MEMORY_HIGH, or "off"). `status` reports a kill by the
 # kernel's out-of-memory killer.
 #   ./run_backend.sh help|--help|-h    - print this help text
+#
+# Every command that starts the backend starts the launcher (python -m simulator.launch),
+# which reads the observatory source choice, builds the world it names (none for the real
+# telescope) and runs the backend as its child (see simulator/README.md). The pid file
+# holds the launcher's pid, so `stop` stops the launcher, which stops the backend and takes
+# its world down.
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 # Console output goes to the user's log folder, not the project folder.
@@ -79,7 +85,14 @@ fi
 ## module lives in `backend/` so point the module to `backend.main_backend`.
 ## If you prefer installing and running the wheel from `dist/`, we can add
 ## an optional install step — currently this script runs the in-repo module.
-BACKEND_MODULE="backend.main_backend"
+BACKEND_MODULE="simulator.launch"
+# The launcher marker records that the pid file holds a launcher, not a bare backend.
+LAUNCHER_MARKER="$PID_DIR/backend.launcher"
+# Half-second polls to wait for a stop and for the first answer (so 120 polls = 60 s). The
+# launcher builds a world before the backend starts and removes it after, so it needs more
+# time than the backend alone.
+STOP_WAIT_POLLS=120
+HEALTH_WAIT_POLLS=360
 
 # Default bind host; can be overridden by passing --lan on the command line which
 # sets the bind host to 0.0.0.0 so the server is reachable on the local network.
@@ -184,6 +197,7 @@ launch_backend() {
   ASTROMETRICS_BIND_HOST="$BIND_HOST" nohup ${BACKEND_SCOPE_PREFIX[@]+"${BACKEND_SCOPE_PREFIX[@]}"} "$PYTHON" -u -m "$BACKEND_MODULE" >"$LOG_FILE" 2>&1 &
   backend_pid=$!
   echo "$backend_pid" > "$PID_FILE"
+  echo "launcher" > "$LAUNCHER_MARKER"
 }
 
 wait_for_backend_healthy() {
@@ -192,7 +206,7 @@ wait_for_backend_healthy() {
 
   # Health Check Loop
   echo "Waiting for backend to become healthy..."
-  for i in {1..120}; do
+  for ((i = 0; i < HEALTH_WAIT_POLLS; i++)); do
       # --max-time: an unresponsive-but-connectable backend would otherwise
       # hang this curl call indefinitely, which would also block the "did
       # the process die" check a few lines below from ever running again.
@@ -252,6 +266,19 @@ start_foreground() {
   ASTROMETRICS_BIND_HOST="$BIND_HOST" exec "$PYTHON" -u -m "$BACKEND_MODULE"
 }
 
+# Prints the pids of `backend.main_backend` processes listening on the given TCP
+# port (one per line). Other processes on the port, and backends on other ports,
+# are never listed.
+backend_port_owner_pids() {
+  local port="$1" pid
+  command -v ss >/dev/null 2>&1 || return 0
+  for pid in $(ss -ltnpH "sport = :${port}" 2>/dev/null | grep -o 'pid=[0-9]*' | sed 's/pid=//' | sort -u); do
+    if tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q "backend\.main_backend"; then
+      echo "$pid"
+    fi
+  done
+}
+
 stop_backend() {
   if [ -f "$PID_FILE" ]; then
     pid=$(cat "$PID_FILE")
@@ -267,7 +294,7 @@ stop_backend() {
       # shutdown handshake. Polling for up to 10s instead gives that room
       # while still returning as soon as the process actually exits, so the
       # common (fast) case isn't slowed down.
-      for _ in $(seq 1 20); do
+      for _ in $(seq 1 "$STOP_WAIT_POLLS"); do
         kill -0 "$pid" >/dev/null 2>&1 || break
         sleep 0.5
       done
@@ -278,13 +305,20 @@ stop_backend() {
     else
       echo "Process $pid not running; removing stale pidfile."
     fi
-    rm -f "$PID_FILE"
+    rm -f "$PID_FILE" "$LAUNCHER_MARKER"
   fi
 
-  # Clean up any orphaned backend instances by module name or port 5000
-  pkill -f "python.*backend.main_backend" 2>/dev/null || true
+  # Clean up an orphaned app backend, but only the one that owns the app port.
+  # This used to be `pkill -f "python.*backend.main_backend"`, which killed every
+  # backend on the machine, including the throwaway sandbox backends of the TPM
+  # harness (build/tpm/run_tpm.sh) and developers' test backends. Those listen on
+  # other ports, so selecting by port keeps them alive.
+  for orphan_pid in $(backend_port_owner_pids "${ASTROMETRICS_PORT:-5000}"); do
+    echo "Stopping orphaned backend pid $orphan_pid on port ${ASTROMETRICS_PORT:-5000}..."
+    kill "$orphan_pid" 2>/dev/null || true
+  done
   if command -v fuser >/dev/null 2>&1; then
-    fuser -k 5000/tcp 2>/dev/null || true
+    fuser -k "${ASTROMETRICS_PORT:-5000}"/tcp 2>/dev/null || true
   fi
   echo "Stopped."
 

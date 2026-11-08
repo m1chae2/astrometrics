@@ -42,7 +42,7 @@ const onlyQueryOptions = (client: QueryClient) => client.getQueryCache().getAll(
 describe('catalog query policy', () => {
     beforeEach(() => vi.clearAllMocks());
 
-    it('has no refetch interval, a 5 minute stale time and no focus refetch', () => {
+    it('has no refetch timer (but for an empty availability map), a 5 minute stale time and no focus refetch', () => {
         const hooks: Array<() => unknown> = [
             () => useAstronomyListQuery(),
             () => useAstronomyCountQuery(undefined, ''),
@@ -54,7 +54,14 @@ describe('catalog query policy', () => {
             const client = newClient();
             renderHook(hook, { wrapper: makeWrapper(client) });
             const options = onlyQueryOptions(client);
-            expect(options.refetchInterval).toBeUndefined();
+            // The availability query alone polls, and only while its map is empty
+            // (see useTargetDataAvailabilityQuery).
+            if (typeof options.refetchInterval === 'function') {
+                const interval = options.refetchInterval as (query: unknown) => number | false;
+                expect(interval({ state: { data: { Albireo: {} } } })).toBe(false);
+            } else {
+                expect(options.refetchInterval).toBeUndefined();
+            }
             expect(options.refetchOnWindowFocus).toBe(false);
             expect(options.staleTime).toBe(CATALOG_STALE_TIME_MS);
         }

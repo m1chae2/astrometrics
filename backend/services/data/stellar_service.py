@@ -11,14 +11,20 @@ arguments.
 """
 
 import logging
+import os
 import threading
 import time
-from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeVar
 
 from astrometricslib import Astrometrics, StellarObject
+from astrometricslib.drivers import (
+    VersionedCache,
+    get_library_data_version,
+    is_path_inside,
+    resolve_mounted_path,
+)
 from astrometricslib.exceptions import AstrometricsError, ConflictError, InvalidArgumentError
 from backend.services.data.deletion_archive import archive_record_before_delete
 from backend.services.infrastructure.heavy_read_limiter import DEFAULT_SHARED_WAIT_SECONDS, HeavyReadLimiter
@@ -42,10 +48,10 @@ _MAXIMUM_CONCURRENT_PERIOD_SEARCHES = 2
 # The whole-catalog answers (per-target counts, class counts, a class's
 # stars) each read every star's summary, which takes seconds on a large
 # library. They are kept until `StellarCatalog.dataset_version`
-# says a write has happened, not on a timer. This is only the fallback: how
-# long an answer may be served for a version already confirmed current, in
-# case a program outside this process (such as a maintenance script) wrote
-# to the library without the version counter seeing it.
+# says a write has happened, not on a timer. The counter lives in the
+# database, so it sees a write by another program too. This is only the
+# fallback: how long an answer may be served for a version already confirmed
+# current, in case a write was made by raw SQL that did not count itself.
 _CATALOG_ANSWER_CACHE_FALLBACK_MAX_AGE_SECONDS = 300.0
 
 # How many overlay answers are remembered (see
@@ -97,7 +103,7 @@ class StellarService:
             The planning library. Built on first use when omitted.
         """
         self.config = config
-        self._overlay_cache: OrderedDict[tuple, list[dict]] = OrderedDict()
+        self._overlay_cache = VersionedCache(maximum_entries=_OVERLAY_CACHE_SIZE)
         self.astrometrics = astrometrics or Astrometrics(config)
         self._wayfinder = wayfinder
         self._period_search_slots = threading.BoundedSemaphore(_MAXIMUM_CONCURRENT_PERIOD_SEARCHES)
@@ -155,6 +161,10 @@ class StellarService:
         Only one thread computes a given answer at a time; others asking for
         the same answer wait for it rather than starting a second scan.
 
+        An empty answer (no targets, no classes) is never kept, so a catalog
+        that was still empty at start-up cannot hide the data that arrives
+        later.
+
         The first answer computed for a new catalog version broadcasts a
         ``"catalog:changed"`` UI event (see `set_socket_manager`), so a
         connected client can refetch instead of polling on a timer.
@@ -205,6 +215,14 @@ class StellarService:
 
             answer = self._heavy_reads.run(("catalog_answer", key), compute)
 
+            if not answer:
+                # An empty answer is cheap to compute again and often wrong,
+                # because the library may not be filled yet (start-up, or a
+                # library copy swapped in). Keeping it would show "0 stars"
+                # for every target until the cache expires. Not keeping it
+                # also means the first real answer is announced.
+                return answer
+
             with self._catalog_answers_lock:
                 self._catalog_answers[key] = (now, current_version, answer)
                 announce = self._announced_catalog_version != current_version
@@ -244,32 +262,52 @@ class StellarService:
             or []
         )
 
-    def _catalog_version(self) -> tuple[int, ...]:
-        """Say whether the star database may have changed since last asked.
+    def _allowed_image_roots(self) -> list[str]:
+        """List the folders an overlay image may be in.
 
         Returns
         -------
-        version : `tuple` [`int`, ...]
-            The modification times of the database file and its write-ahead
-            log. Any write to the library changes it, whichever code made
-            the write.
+        roots : `list` [`str`]
+            The real paths of the library folder, plus the frames and
+            stacks folders when the configuration names them.
         """
-        library = Path(self.config.get_library_path())
-        times = []
-        for name in ("astrometrics.db", "astrometrics.db-wal"):
-            try:
-                times.append((library / name).stat().st_mtime_ns)
-            except OSError:
-                times.append(0)
-        return tuple(times)
+        roots = [Path(self.config.get_library_path())]
+        for getter in ("get_frames_path", "get_stacks_path"):
+            method = getattr(self.config, getter, None)
+            if callable(method):
+                roots.append(Path(method()))
+        return [os.path.realpath(root) for root in roots]
 
-    def get_astrometry_overlay_stars(self, target_id: str, limit: int = 35) -> list[dict]:
-        """Place a target's catalog stars on its image, remembering answers.
+    def _checked_image_path(self, image_path: str) -> str:
+        """Refuse an image path that is outside the library folders.
+
+        Returns
+        -------
+        path : `str`
+            The resolved path.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If the path is not inside the library, frames or stacks folder.
+        """
+        # The same check the AI tools make (`_check_path_sandbox` in
+        # mcp_servers/common/tool_registry.py), so both refuse the same paths.
+        resolved = os.path.realpath(resolve_mounted_path(image_path))
+        if not any(is_path_inside(root, resolved) for root in self._allowed_image_roots()):
+            raise InvalidArgumentError("The image must be inside the library folders.")
+        return resolved
+
+    def get_astrometry_overlay_stars(
+        self, target_id: str, limit: int = 35, image_path: str | None = None
+    ) -> dict[str, Any]:
+        """Place a target's catalog stars on an image, remembering answers.
 
         Working out the overlay for a target with tens of thousands of
         stars takes seconds. The answer only changes when the library
-        database or the target's reference image changes, so it is kept
-        (the 64 most recent) and reused until one of them does.
+        data (see `astrometricslib.drivers.get_library_data_version`) or the
+        image changes, so it is kept in a `VersionedCache` (the 64 most
+        recent) and reused until one of them does.
 
         Parameters
         ----------
@@ -278,46 +316,61 @@ class StellarService:
         limit : `int`, optional
             Maximum number of stars to return (default 35). Zero or less
             returns every star the library places, up to its cap.
+        image_path : `str`, optional
+            The image the app is showing. The stars are placed on it. By
+            default, the target's current stack. It must be inside the
+            library, frames or stacks folder; otherwise the call is refused.
 
         Returns
         -------
-        result : `list` of `dict`
-            One `OverlayStar` per star, with the keys ``id``, ``name``,
-            ``x``, ``y``, ``spectralType``, ``isCatalogIdentified``,
+        result : `dict`
+            ``stars``: one `OverlayStar` per star, with the keys ``id``,
+            ``name``, ``x``, ``y``, ``spectralType``, ``isCatalogIdentified``,
             ``referenceWidth``, ``referenceHeight`` and ``radiusPx``.
+            ``reason``: why there are no stars when the image has no sky
+            solution, else `None`.
         """
         if not target_id:
-            return []
+            return {"stars": [], "reason": None}
+        checked_path = self._checked_image_path(image_path) if image_path else None
         try:
             target = self.astrometrics.targets.get(target_id)
-            image_path = _overlay_reference_image_path(target)
-            image_time = Path(image_path).stat().st_mtime_ns if image_path else 0
-            key = (target_id, limit, str(image_path), image_time, self._catalog_version())
+            reference_path = checked_path or _overlay_reference_image_path(target)
+            image_time = Path(reference_path).stat().st_mtime_ns if reference_path else 0
+            key = (target_id, limit, str(reference_path), image_time)
         except AstrometricsError, OSError:
-            return self._compute_overlay(target_id, limit)
+            return self._compute_overlay(target_id, limit, checked_path)
 
-        cache = self._overlay_cache
-        if key in cache:
-            cache.move_to_end(key)
-            return [dict(star) for star in cache[key]]
-        result = self._compute_overlay(target_id, limit)
-        cache[key] = [dict(star) for star in result]
-        while len(cache) > _OVERLAY_CACHE_SIZE:
-            cache.popitem(last=False)
-        return result
+        # The version is the library's write counters, which see a write by
+        # any program, so the answer is rebuilt after any change to the stars,
+        # the targets or the quality rows.
+        return self._overlay_cache.get_or_build(
+            key,
+            lambda: get_library_data_version(self.config),
+            lambda: self._compute_overlay(target_id, limit, checked_path),
+        )
 
-    def _compute_overlay(self, target_id: str, limit: int) -> list[dict]:
-        """Ask the library to place a target's stars on its image.
+    def _compute_overlay(self, target_id: str, limit: int, image_path: str | None = None) -> dict[str, Any]:
+        """Ask the library to place a target's stars on an image.
 
         Returns
         -------
-        result : `list` of `dict`
-            The library's overlay stars, with the app's camelCase keys.
+        result : `dict`
+            ``stars``: the library's overlay stars, with the app's camelCase
+            keys. ``reason``: why there are none, or `None`.
         """
-        answer = self.astrometrics.stars.query(
-            target_id=target_id, detail="overlay", limit=limit if limit and limit > 0 else None
-        )
-        return [star.model_dump(by_alias=True) for star in answer.overlay or []]
+        query_arguments: dict[str, Any] = {
+            "target_id": target_id,
+            "detail": "overlay",
+            "limit": limit if limit and limit > 0 else None,
+        }
+        if image_path:
+            query_arguments["image_path"] = image_path
+        answer = self.astrometrics.stars.query(**query_arguments)
+        return {
+            "stars": [star.model_dump(by_alias=True) for star in answer.overlay or []],
+            "reason": answer.overlay_reason,
+        }
 
     def _query_listing(
         self,
@@ -469,10 +522,13 @@ class StellarService:
 
         Call this once during backend startup, so a user who opens the
         Astronomy Manager first does not wait for the per-target counts and
-        the class counts there.
+        the class counts there. It also looks up one id that no star has,
+        which builds the library's map of spelling-free star ids, so the
+        first Planetarium click on a star does not wait for it.
         """
         self.get_target_data_availability()
         self.get_spectral_class_summary()
+        self.get_object("warm-up: no such star")
 
     def get_target_data_availability(self) -> dict[str, dict[str, bool | int]]:
         """Say how many stars each target has, and what data they have.
@@ -786,7 +842,7 @@ class StellarService:
         radius: float,
         enabled_drivers: list[str],
         limiting_magnitude: float | None = None,
-    ) -> list[dict]:
+    ) -> dict[str, Any]:
         """List the stars the enabled online catalog drivers find in a region.
 
         Never reads or changes the library. Each source names the driver
@@ -809,8 +865,14 @@ class StellarService:
 
         Returns
         -------
-        sources : `list` [`dict`]
-            One `SkySource` per star, with the Planetarium's camelCase keys.
+        result : `dict`
+            ``sources`` is one `SkySource` per star, with the Planetarium's
+            camelCase keys. ``starsTruncated`` is true when a driver cut its
+            answer short (the Gaia driver stops at 20,000 stars), so fainter
+            stars in the region are missing and the map must ask again for a
+            different view instead of reusing this answer. ``failedCatalogs``
+            names the drivers that could not answer (empty when all did), so
+            an empty ``sources`` list is not mistaken for empty sky.
 
         REQ: PLN-3.1, PLN-3.2
         """
@@ -823,7 +885,11 @@ class StellarService:
             magnitude_max=limiting_magnitude,
             limit=None,
         )
-        return [source.model_dump(by_alias=True) for source in result.sources]
+        return {
+            "sources": [source.model_dump(by_alias=True) for source in result.sources],
+            "starsTruncated": bool(result.stars_truncated),
+            "failedCatalogs": list(result.failed_catalogs),
+        }
 
     def deep_catalog_status(self) -> dict:
         """Say how much of the downloaded deep-star catalog is installed.

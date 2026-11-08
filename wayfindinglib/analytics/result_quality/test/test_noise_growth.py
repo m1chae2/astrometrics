@@ -122,7 +122,7 @@ def test_predict_weighting_mode_follows_the_stacker_rule() -> None:
 
 
 # -----------------------------------------------------------------------------
-# Exposure-group stacks (decision D7)
+# Exposure-group stacks (issue #134)
 # -----------------------------------------------------------------------------
 
 CAMERA_GAIN = 0.8
@@ -317,7 +317,7 @@ def test_frame_noise_comes_back_from_the_stored_group_weight() -> None:
 def test_predicted_group_frame_noise_converts_electrons_to_adu() -> None:
     """The M 27 60 s frame: 933 ADU of sky, gain 0.783, read noise 3.8 e-.
 
-    The plan (section 3.6.1) gives 35.1 ADU; the function gives 34.9, within
+    Issue #134 records 35.1 ADU; the function gives 34.9, within
     the 1 percent the sky level is known to.
     """
     frame = _frame(sky=933.0 * 0.783 / 60.0, read=3.8)
@@ -466,12 +466,12 @@ def _new_copies(template: list[StackFrame], count: int, exposure: float) -> list
 
 
 # -----------------------------------------------------------------------------
-# The fixed-pattern noise of one stack (decision D8)
+# The fixed-pattern noise of one stack (issue #134)
 # -----------------------------------------------------------------------------
 
 # Measured and random noise of the validation stacks, in stack units
-# (plan section 3.6.1, after the D9 normalization scale). The aperture count
-# is the one that gives the plan's 11.7 percent error.
+# (issue #134, after Siril's normalization scale). The aperture count
+# is the one that gives the 11.7 percent error recorded there.
 APERTURES_FOR_11_7_PERCENT = 100
 
 
@@ -491,7 +491,7 @@ def test_m81_has_no_fixed_pattern_noise_at_two_sigma() -> None:
     """M 81: 1.126e-3 measured against 0.921e-3 random is within 2 sigma."""
     fixed_pattern = ng.measure_stack_fixed_pattern_noise(1.126e-3, 0.921e-3, APERTURES_FOR_11_7_PERCENT)
     assert not fixed_pattern.fixed_pattern_noise_detected
-    # 1.03 standard errors is just inside the "possible" band (decision D18).
+    # 1.03 standard errors is just inside the "possible" band (issue #134).
     assert fixed_pattern.possible
     assert fixed_pattern.sigmas == pytest.approx(1.03, abs=0.01)
 
@@ -671,7 +671,7 @@ def test_the_group_ratio_leaves_the_mean_exposure_scale_out() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Folded groups (decision D10, option B)
+# Folded groups (issue #134)
 # ---------------------------------------------------------------------------
 
 
@@ -1060,7 +1060,7 @@ def test_the_statements_name_the_basis_of_the_fixed_pattern_noise() -> None:
     assert "measured from the odd and even half stacks" in statement.message
 
 
-# -- D17: the noise model's error measured from odd-even differences ---------
+# -- The noise model's error measured from odd-even differences ---------
 
 
 def _samples(log_variance_ratios: list[float], apertures: int = 100) -> list[ng.NoiseModelErrorSample]:
@@ -1130,7 +1130,7 @@ def test_fewer_apertures_remove_more_scatter() -> None:
     assert few.relative_error < many.relative_error
 
 
-# -- D18: a graded answer between 1 and 2 sigma -------------------------------
+# -- A graded answer between 1 and 2 sigma -------------------------------
 
 
 def _m13_like_fixed_pattern(sigmas: float) -> ng.StackFixedPatternNoise:
@@ -1332,3 +1332,35 @@ def test_star_width_weights_match_the_stackers_rule() -> None:
     assert sum(weights) / 3 == pytest.approx(1.0)
     assert weights[0] > weights[1] > weights[2]
     assert star_width_weights([]) is None
+
+
+def test_the_new_frame_supply_gives_the_frames_new_frames_makes() -> None:
+    """The supply gives the same frames as `_new_frames`, in any order."""
+    template = [
+        _frame(index, exposure=30.0 + index, sky=1.0 + index / 10, width=2.0 + index / 5)
+        for index in range(5)
+    ]
+    for exposure in (None, 45.0):
+        supply = ng._NewFrameSupply(template, exposure)
+        for count in (3, 12, 1, 12, 0, 7):
+            assert supply.first(count) == ng._new_frames(template, count, exposure)
+
+
+@pytest.mark.parametrize("mode", [WeightingMode.EQUAL, WeightingMode.NOISE, WeightingMode.WFWHM])
+@pytest.mark.parametrize("target_ratio", [0.9, 0.707, 0.4])
+def test_take_more_equals_a_scan_with_the_public_forecast(mode: WeightingMode, target_ratio: float) -> None:
+    """The count found is the smallest one a plain scan finds."""
+    existing = [
+        _frame(index, exposure=60.0, sky=0.5 + (index % 7) / 10, read=1.5, width=2.0 + (index % 5) / 4)
+        for index in range(40)
+    ]
+    template = existing[-12:]
+    current = ng.forecast_stack_noise(existing, mode)
+    expected = None
+    for count in range(1, 400):
+        forecast = ng.noise_ratio_after_adding(existing, template, count, mode)
+        if forecast is not None and forecast.noise / current.noise <= target_ratio:
+            expected = count
+            break
+    result = ng.frames_to_cut_noise(existing, template, mode, target_noise_ratio=target_ratio)
+    assert result.frames_needed == expected

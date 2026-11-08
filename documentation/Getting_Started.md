@@ -64,10 +64,10 @@ The Observatory Manager has an Add Target button too.
 
 ### Bring in frames
 
-The app can download frames from the telescope's computer into your library.
+The app can download frames from the telescope's computer into your library. When auto-download is on, new frames also download by themselves after each exposure. To download frames yourself:
 
-1. Choose Image Processing and click your target in the Targets list.
-2. Click Download Frames. The "Ingest From Telescope" window opens.
+1. Choose Observatory Manager and click your target in the Target List.
+2. Click Download Frames, next to Add Target and Slew to Target at the bottom left. The "Ingest From Telescope" window opens.
 3. Check the Target Name and Telescope boxes, then pick the files you want.
 4. Click Start Ingestion and wait for it to finish.
 

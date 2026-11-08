@@ -183,7 +183,7 @@ __all__ = [
 
 _SPEC_BY_NAME: dict[str, MetricSpec] = {spec.name: spec for spec in STACKING_METRICS}
 
-# How each gate's limit was obtained (decision 26); `GATE_LIMIT_SOURCES`
+# How each gate's limit was obtained; `GATE_LIMIT_SOURCES`
 # below joins it with the metric that stores each gate. A limit that the
 # validation register marks as measured is a validated-dataset limit, and its
 # register entry goes with it. A limit derived from physics is a physical

@@ -29,6 +29,8 @@ vi.mock('../../common/context/AstrometricsContext', () => ({
   })),
 }));
 
+vi.mock('../ObservatorySourceChip', () => ({ ObservatorySourceChip: () => <span data-testid="source-chip" /> }));
+
 vi.mock('../SettingsPanel', () => ({
   SettingsPanel: () => <div data-testid="settings-panel" />,
 }));
@@ -128,5 +130,20 @@ describe('StatusHeader component', () => {
     const parkedElement = screen.getByText('Parked');
     expect(parkedElement).toBeTruthy();
     expect(parkedElement.className).toContain('header__telemetry-value--parked');
+  });
+
+  /** The simulation chip sits right after the display button, in the same group, and before the readouts. */
+  it('places the source chip immediately after the display button', () => {
+    vi.mocked(useStatusData).mockReturnValue({
+      telemetry: { altitude: '-', azimuth: '-', temperature: '-', humidity: '-', ra: '-', dec: '-' },
+      connected: true, trackingStatus: 'Idle', telescopeConnection: true,
+      selectedMode: 'Image Viewer', chooseMode: vi.fn(),
+    } as never);
+    const { container } = render(<StatusHeader />);
+    const chip = screen.getByTestId('source-chip');
+    const selector = container.querySelector('.mode-selector') as HTMLElement;
+    expect(selector.nextElementSibling).toBe(chip);
+    expect(chip.parentElement).toBe(selector.parentElement);
+    expect(container.querySelector('.header__right')?.contains(chip)).toBe(false);
   });
 });

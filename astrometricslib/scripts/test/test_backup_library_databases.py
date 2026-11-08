@@ -1,13 +1,12 @@
-"""Purpose: Tests for the library backup and restore scripts.
+"""Purpose: Tests for the local library backup and restore scripts.
 
-Description: Uses small SQLite files in tmp_path and a fake rclone (a Python
-script that maps a fake remote onto a local folder). Never touches the real
-library or Google Drive.
+Description: Uses small SQLite files in tmp_path. Checks that nothing is
+uploaded (any subprocess call fails the test), that a lock stops a second run,
+that an unchanged library is skipped, that only the newest snapshots are kept,
+and that the SQLite copy is valid. Never touches the real library.
 """
 
 import sqlite3
-import stat
-import sys
 from pathlib import Path
 
 import pytest
@@ -15,41 +14,30 @@ import pytest
 from astrometricslib.scripts import backup_library_databases as backup
 from astrometricslib.scripts import restore_library_databases as restore
 
-FAKE_RCLONE_SOURCE = """#!{python}
-import os, shutil, sys
-root = os.environ["FAKE_RCLONE_ROOT"]
-def local(path):
-    return os.path.join(root, path.split(":", 1)[1]) if ":" in path else path
-command, rest = sys.argv[1], sys.argv[2:]
-if os.environ.get("FAKE_RCLONE_FAIL") and command == "copy":
-    sys.exit(3)
-if command == "copy":
-    shutil.copytree(local(rest[0]), local(rest[1]), dirs_exist_ok=True)
-elif command == "lsf":
-    folder = local(rest[-1])
-    for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
-        print(name + "/")
-elif command == "purge":
-    shutil.rmtree(local(rest[0]))
-"""
-
 
 @pytest.fixture
 def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
-    """Build a fake library, config file, remote folder and fake rclone.
+    """Build a fake library and config file, and forbid any subprocess call.
 
     Parameters
     ----------
     tmp_path : `pathlib.Path`
         Pytest temporary folder.
     monkeypatch : `pytest.MonkeyPatch`
-        Used to set the fake remote's root folder.
+        Used to make every subprocess call fail the test.
 
     Returns
     -------
     environment : `dict`
         Paths and the common command-line arguments.
     """
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        """Fail the test: the backup must not start any program."""
+        pytest.fail("the backup started a subprocess")
+
+    monkeypatch.setattr("subprocess.run", forbidden)
+    monkeypatch.setattr("subprocess.Popen", forbidden)
     library = tmp_path / "library"
     library.mkdir()
     for name in backup.DATABASE_FILE_NAMES:
@@ -61,30 +49,22 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     (library / "calibration_frames.json").write_text("{}")
     config = tmp_path / "astrometrics.config.toml"
     config.write_text("a = 1")
-    remote_root = tmp_path / "remote"
-    remote_root.mkdir()
-    monkeypatch.setenv("FAKE_RCLONE_ROOT", str(remote_root))
-    monkeypatch.delenv("FAKE_RCLONE_FAIL", raising=False)
-    fake = tmp_path / "fake_rclone"
-    fake.write_text(FAKE_RCLONE_SOURCE.format(python=sys.executable))
-    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
-    staging = tmp_path / "staging"
+    backup_root = tmp_path / "backup"
+    # Point the observatory database at a folder that has none.
+    monkeypatch.setattr(backup, "data_directory", lambda: str(tmp_path / "data"))
     return {
         "library": library,
-        "remote_root": remote_root,
-        "staging": staging,
+        "backup_root": backup_root,
         "arguments": [
             "--library-path", str(library),
             "--config-path", str(config),
-            "--staging-root", str(staging),
-            "--rclone", str(fake),
-            "--remote", "fake:",
+            "--backup-root", str(backup_root),
         ],
     }  # fmt: skip
 
 
-def _remote_snapshots(environment: dict) -> list[str]:
-    """List snapshot folders on the fake remote.
+def _snapshots(environment: dict) -> list[str]:
+    """List the snapshot folders.
 
     Parameters
     ----------
@@ -96,88 +76,105 @@ def _remote_snapshots(environment: dict) -> list[str]:
     names : `list` [`str`]
         Sorted snapshot folder names.
     """
-    folder = environment["remote_root"] / "Library" / "_backup"
-    return sorted(path.name for path in folder.iterdir()) if folder.exists() else []
+    root = environment["backup_root"]
+    return sorted(p.name for p in root.iterdir() if p.is_dir()) if root.exists() else []
 
 
-def test_backup_uploads_all_files_and_clears_staging(environment: dict) -> None:
-    """A first run uploads databases, calibration file and config."""
+def test_backup_writes_a_local_snapshot_and_no_upload(environment: dict) -> None:
+    """A first run stores all files locally and starts no program."""
     assert backup.main(environment["arguments"]) == 0
 
-    names = _remote_snapshots(environment)
+    names = _snapshots(environment)
     assert len(names) == 1
-    uploaded = {
-        path.name for path in (environment["remote_root"] / "Library" / "_backup" / names[0]).iterdir()
-    }
-    assert uploaded == {
+    stored = {path.name for path in (environment["backup_root"] / names[0]).iterdir()}
+    assert stored == {
         "astrometrics.db",
         "astrometrics_log.db",
         "calibration_frames.json",
         "astrometrics.config.toml",
     }
-    assert not [p for p in environment["staging"].iterdir() if p.is_dir()]
+
+
+def test_sqlite_copy_is_valid(environment: dict) -> None:
+    """The copied database opens and holds the rows of the original."""
+    backup.main(environment["arguments"])
+
+    copy = environment["backup_root"] / _snapshots(environment)[0] / "astrometrics.db"
+    connection = sqlite3.connect(copy)
+    try:
+        assert connection.execute("SELECT x FROM t").fetchall() == [(1,)]
+        assert connection.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
+    finally:
+        connection.close()
+
+
+def test_lock_stops_a_second_run(environment: dict) -> None:
+    """While one backup holds the lock, another exits and makes nothing."""
+    environment["backup_root"].mkdir()
+    held = backup.acquire_lock(environment["backup_root"] / backup.LOCK_FILE_NAME)
+    assert held is not None
+    try:
+        assert backup.acquire_lock(environment["backup_root"] / backup.LOCK_FILE_NAME) is None
+        assert backup.main(environment["arguments"]) == 0
+        assert _snapshots(environment) == []
+    finally:
+        held.close()
+    # Once released, a run goes ahead.
+    assert backup.main(environment["arguments"]) == 0
+    assert len(_snapshots(environment)) == 1
 
 
 def test_unchanged_run_is_skipped_and_force_overrides(
-    environment: dict, monkeypatch: pytest.MonkeyPatch
+    environment: dict, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A second run with no changes uploads nothing; a changed file does."""
-    names = iter(["20261011_100000", "20261011_110000", "20261011_120000"])
+    """An unchanged library is skipped; a change or --force snapshots."""
+    names = iter(["20261011_100000", "20261011_110000", "20261011_120000", "20261011_130000"])
     monkeypatch.setattr(backup.time, "strftime", lambda _format: next(names))
     backup.main(environment["arguments"])
-    backup.main(environment["arguments"])
-    assert len(_remote_snapshots(environment)) == 1
+    with caplog.at_level("INFO"):
+        backup.main(environment["arguments"])
+    assert "unchanged, skipped" in caplog.text
+    assert len(_snapshots(environment)) == 1
 
     (environment["library"] / "calibration_frames.json").write_text('{"changed": true}')
     backup.main(environment["arguments"])
-    assert len(_remote_snapshots(environment)) == 2
+    assert len(_snapshots(environment)) == 2
+
+    backup.main([*environment["arguments"], "--force"])
+    assert len(_snapshots(environment)) == 3
 
 
-def test_failed_upload_keeps_staging_and_is_retried(
-    environment: dict, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A failing rclone keeps the folder; the next good run uploads it."""
-    monkeypatch.setenv("FAKE_RCLONE_FAIL", "1")
-    assert backup.main(environment["arguments"]) == 1
-    assert len([p for p in environment["staging"].iterdir() if p.is_dir()]) == 1
-    assert _remote_snapshots(environment) == []
+def test_retention_keeps_newest_and_never_the_protected(environment: dict) -> None:
+    """Only the newest snapshots stay; a protected one is never deleted."""
+    names = [f"202610{day:02d}_000000" for day in range(1, 11)]
 
-    monkeypatch.delenv("FAKE_RCLONE_FAIL")
-    assert backup.main(environment["arguments"]) == 0
-    assert len(_remote_snapshots(environment)) >= 1
-    assert not [p for p in environment["staging"].iterdir() if p.is_dir()]
+    assert backup.snapshots_to_delete(names) == names[: -backup.KEEP_SNAPSHOTS]
+    assert names[0] not in backup.snapshots_to_delete(names, protected_name=names[0])
+
+    environment["backup_root"].mkdir()
+    for name in names:
+        (environment["backup_root"] / name).mkdir()
+        (environment["backup_root"] / name / "file").write_text("x" * 10)
+    freed = backup.apply_retention(environment["backup_root"], None, dry_run=False)
+    assert _snapshots(environment) == names[-backup.KEEP_SNAPSHOTS :]
+    assert freed == 10 * (len(names) - backup.KEEP_SNAPSHOTS)
 
 
 def test_dry_run_changes_nothing(environment: dict, capsys: pytest.CaptureFixture) -> None:
-    """--dry-run prints actions and writes no staging or remote files."""
+    """--dry-run prints actions and makes no snapshot."""
     assert backup.main([*environment["arguments"], "--dry-run"]) == 0
 
     assert "[dry-run]" in capsys.readouterr().out
-    assert not environment["staging"].exists()
-    assert _remote_snapshots(environment) == []
+    assert _snapshots(environment) == []
 
 
-def test_retention_keeps_seven_newest_plus_newest_per_month() -> None:
-    """Old snapshots are deleted unless newest of their month."""
-    names = ["20260101_000000", "20260102_000000", "20260201_000000"] + [
-        f"202610{day:02d}_000000" for day in range(1, 11)
-    ]
-
-    assert backup.snapshots_to_delete(names) == [
-        "20260101_000000",
-        "20261001_000000",
-        "20261002_000000",
-        "20261003_000000",
-    ]
-
-
-def test_restore_lists_and_downloads_without_touching_library(
+def test_restore_lists_and_copies_without_touching_library(
     environment: dict, tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:
-    """Restore lists snapshots and downloads one, checking each database."""
+    """Restore lists local snapshots and copies one out and checks it."""
     backup.main(environment["arguments"])
-    name = _remote_snapshots(environment)[0]
-    common = ["--rclone", environment["arguments"][7], "--remote", "fake:"]
+    name = _snapshots(environment)[0]
+    common = ["--backup-root", str(environment["backup_root"])]
 
     assert restore.main(["--list", *common]) == 0
     assert name in capsys.readouterr().out
@@ -190,10 +187,63 @@ def test_restore_lists_and_downloads_without_touching_library(
 
 def test_restore_refuses_a_non_empty_destination(environment: dict, tmp_path: Path) -> None:
     """A destination that already holds files is rejected."""
+    backup.main(environment["arguments"])
+    name = _snapshots(environment)[0]
     destination = tmp_path / "occupied"
     destination.mkdir()
     (destination / "file").write_text("x")
 
-    code = restore.main(["--snapshot", "20260101_000000", "--destination", str(destination)])
+    code = restore.main([
+        "--snapshot", name, "--destination", str(destination),
+        "--backup-root", str(environment["backup_root"]),
+    ])  # fmt: skip
 
     assert code == 2
+
+
+def _config_path(environment: dict) -> Path:
+    """Find the settings file the fixture's arguments name.
+
+    Parameters
+    ----------
+    environment : `dict`
+        The fixture value.
+
+    Returns
+    -------
+    path : `pathlib.Path`
+        The settings file.
+    """
+    arguments = environment["arguments"]
+    return Path(arguments[arguments.index("--config-path") + 1])
+
+
+def test_a_library_the_launch_calls_disposable_is_not_backed_up(environment: dict) -> None:
+    """``disposable_library = true`` in ``[Launch]`` skips the backup."""
+    _config_path(environment).write_text("[Launch]\ndisposable_library = true\n")
+
+    assert backup.main(environment["arguments"]) == 0
+
+    assert _snapshots(environment) == []
+
+
+def test_a_launch_that_keeps_its_library_is_backed_up(environment: dict) -> None:
+    """``disposable_library = false`` (or no key) leaves the backup on."""
+    _config_path(environment).write_text('[Launch]\nlabel = "NIGHT"\ndisposable_library = false\n')
+
+    assert backup.main(environment["arguments"]) == 0
+
+    assert len(_snapshots(environment)) == 1
+
+
+def test_the_folder_name_no_longer_decides(environment: dict, tmp_path: Path) -> None:
+    """A folder named like a simulator's alone does not skip a backup."""
+    renamed = tmp_path / "astrometrics-simulator" / "library"
+    renamed.parent.mkdir()
+    environment["library"].rename(renamed)
+    arguments = [*environment["arguments"]]
+    arguments[arguments.index("--library-path") + 1] = str(renamed)
+
+    assert backup.main(arguments) == 0
+
+    assert len(_snapshots(environment)) == 1

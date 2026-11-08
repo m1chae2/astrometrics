@@ -1,0 +1,2713 @@
+{
+  "schema": 2,
+  "setups": {
+    "092d238233": {
+      "created": "2026-11-06T16:49:42.980265+00:00",
+      "status": "Design estimate: first run on one workstation, headless Chrome, software rendering.",
+      "setup": {
+        "cpu_model": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+        "cpu_logical_cores": 12,
+        "cpu_physical_cores": 6,
+        "cpu_governor": "powersave",
+        "ram_gb": 30.5,
+        "ac_online": true,
+        "power_profile": "balanced",
+        "kernel": "7.3.0-10-generic",
+        "displays": [
+          "DP-6 1920x1080 @120Hz",
+          "DP-8 1920x1080 @60Hz"
+        ],
+        "connected_outputs": [
+          "DP-6",
+          "DP-8",
+          "eDP-1"
+        ],
+        "docked": true,
+        "display_source": "xrandr",
+        "gpus_present": [
+          "VGA compatible controller: Intel Corporation CoffeeLake-H GT2 [UHD Graphics 630]",
+          "3D controller: NVIDIA Corporation TU117M [GeForce GTX 1650 Mobile / Max-Q] (rev a1)"
+        ],
+        "prime_mode": "on-demand",
+        "session_type": "wayland",
+        "gpu_used": "software"
+      },
+      "tpms": {
+        "time_to_app_ready": {
+          "unit": "ms",
+          "baseline": 2162.5999999996275,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median": {
+          "unit": "ms",
+          "baseline": 97.1499999994412,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_p95": {
+          "unit": "ms",
+          "baseline": 357.5350000011729,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 150.0
+        },
+        "display_switch_median[Image Viewer]": {
+          "unit": "ms",
+          "baseline": 88.79999999888241,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Image Processing]": {
+          "unit": "ms",
+          "baseline": 93.69999999925494,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Astronomy Manager]": {
+          "unit": "ms",
+          "baseline": 107.20000000111759,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Planetarium]": {
+          "unit": "ms",
+          "baseline": 108.69999999925494,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Observatory Manager]": {
+          "unit": "ms",
+          "baseline": 105.5,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Observation Manager]": {
+          "unit": "ms",
+          "baseline": 91.19999999925494,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "interaction_latency_select_target": {
+          "unit": "ms",
+          "baseline": 32.5,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "interaction_latency_open_night": {
+          "unit": "ms",
+          "baseline": 411.7000000011176,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "interaction_latency_change_tab": {
+          "unit": "ms",
+          "baseline": 93.1499999994412,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Load app]": {
+          "unit": "ms",
+          "baseline": 205.61000000000013,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Image Viewer]": {
+          "unit": "ms",
+          "baseline": 5.098000000000013,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Image Processing]": {
+          "unit": "ms",
+          "baseline": 8.067000000000007,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Astronomy Manager]": {
+          "unit": "ms",
+          "baseline": 13.531999999999982,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Planetarium]": {
+          "unit": "ms",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Observatory Manager]": {
+          "unit": "ms",
+          "baseline": 324.2300000000003,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Observation Manager]": {
+          "unit": "ms",
+          "baseline": 6.412000000000035,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "inp_worst": {
+          "unit": "ms",
+          "baseline": 413.517,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 150.0
+        },
+        "cls_load": {
+          "unit": "score",
+          "baseline": 0.0005081010480967079,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.02
+        },
+        "cls_worst_display_step": {
+          "unit": "score",
+          "baseline": 0.0017450394241898144,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.02
+        },
+        "script_transfer_size_load": {
+          "unit": "KB",
+          "baseline": 1895.4228515625,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "request_count_load": {
+          "unit": "requests",
+          "baseline": 101.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "planetarium_fps_panning": {
+          "unit": "fps",
+          "baseline": 26.43055372009393,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0,
+          "direction": "higher_is_better"
+        },
+        "js_heap_after_last_lap": {
+          "unit": "MB",
+          "baseline": 22.199825286865234,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "js_heap_growth_per_lap": {
+          "unit": "MB",
+          "baseline": 0.24182891845703125,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "electron_main_peak_memory_mb": {
+          "unit": "MB",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "electron_main_mean_cpu_percent": {
+          "unit": "%",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "electron_renderer_peak_memory_mb": {
+          "unit": "MB",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "electron_renderer_mean_cpu_percent": {
+          "unit": "%",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "electron_gpu_peak_memory_mb": {
+          "unit": "MB",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "electron_gpu_mean_cpu_percent": {
+          "unit": "%",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "backend_peak_rss": {
+          "unit": "MB",
+          "baseline": 373.6015625,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "backend_cpu_time": {
+          "unit": "s",
+          "baseline": 3.0100000000000007,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.5
+        },
+        "rpc_count_load": {
+          "unit": "calls",
+          "baseline": 42.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Image Viewer]": {
+          "unit": "calls",
+          "baseline": 1.3333333333333333,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Image Processing]": {
+          "unit": "calls",
+          "baseline": 11.333333333333334,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Astronomy Manager]": {
+          "unit": "calls",
+          "baseline": 3.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Planetarium]": {
+          "unit": "calls",
+          "baseline": 25.333333333333332,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Observatory Manager]": {
+          "unit": "calls",
+          "baseline": 7.666666666666667,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Observation Manager]": {
+          "unit": "calls",
+          "baseline": 3.3333333333333335,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_p95[history:night_quality]": {
+          "unit": "ms",
+          "baseline": 130.76500000078232,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 150.0
+        },
+        "rpc_p95[target:get_targets]": {
+          "unit": "ms",
+          "baseline": 224.44999999925494,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 150.0
+        },
+        "rpc_p95[processing:stack_summary]": {
+          "unit": "ms",
+          "baseline": 179.42499999999995,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 150.0
+        },
+        "idle_rpc_per_minute": {
+          "unit": "calls/min",
+          "baseline": 9.999600015999608,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 2.0
+        },
+        "fps_hw": {
+          "unit": "fps",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0,
+          "direction": "higher_is_better"
+        },
+        "pan_frame_ms_p50": {
+          "unit": "ms",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "pan_frame_ms_p95": {
+          "unit": "ms",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 10.0
+        },
+        "star_project_ms_p50": {
+          "unit": "ms",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 1.0
+        },
+        "overlay_draw_ms_p50": {
+          "unit": "ms",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 1.0
+        },
+        "gpu_ms_p50": {
+          "unit": "ms",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 1.0
+        }
+      }
+    },
+    "5ac2cdf42b": {
+      "created": "2026-11-06T17:43:14.326420+00:00",
+      "observatory_profile": "offline",
+      "setup": {
+        "cpu_model": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+        "cpu_logical_cores": 12,
+        "cpu_physical_cores": 6,
+        "cpu_governor": "powersave",
+        "ram_gb": 30.5,
+        "ac_online": true,
+        "power_profile": "balanced",
+        "kernel": "7.3.0-10-generic",
+        "displays": [
+          "eDP-1 1920x1080 @60Hz"
+        ],
+        "connected_outputs": [
+          "eDP-1"
+        ],
+        "docked": false,
+        "display_source": "xrandr",
+        "gpus_present": [
+          "VGA compatible controller: Intel Corporation CoffeeLake-H GT2 [UHD Graphics 630]",
+          "3D controller: NVIDIA Corporation TU117M [GeForce GTX 1650 Mobile / Max-Q] (rev a1)"
+        ],
+        "prime_mode": "on-demand",
+        "session_type": "wayland",
+        "gpu_used": "intel"
+      },
+      "status": "Design estimate: one run on one setup.",
+      "tpms": {
+        "time_to_app_ready": {
+          "unit": "ms",
+          "baseline": 1820.7000000000116,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median": {
+          "unit": "ms",
+          "baseline": 105.39999999999418,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_p95": {
+          "unit": "ms",
+          "baseline": 228.3350000000122,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Image Viewer]": {
+          "unit": "ms",
+          "baseline": 102.10000000003492,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Image Processing]": {
+          "unit": "ms",
+          "baseline": 104.79999999998836,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Astronomy Manager]": {
+          "unit": "ms",
+          "baseline": 103.90000000002328,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Planetarium]": {
+          "unit": "ms",
+          "baseline": 106.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Observatory Manager]": {
+          "unit": "ms",
+          "baseline": 107.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Observation Manager]": {
+          "unit": "ms",
+          "baseline": 106.59999999997672,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "interaction_latency_select_target": {
+          "unit": "ms",
+          "baseline": 42.79999999998836,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "interaction_latency_open_night": {
+          "unit": "ms",
+          "baseline": 423.79999999998836,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "interaction_latency_change_tab": {
+          "unit": "ms",
+          "baseline": 85.65000000000873,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Load app]": {
+          "unit": "ms",
+          "baseline": 201.26800000000003,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Image Viewer]": {
+          "unit": "ms",
+          "baseline": 4.399999999999977,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Image Processing]": {
+          "unit": "ms",
+          "baseline": 11.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Astronomy Manager]": {
+          "unit": "ms",
+          "baseline": 4.9220000000000255,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Planetarium]": {
+          "unit": "ms",
+          "baseline": 9.024000000000001,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Observatory Manager]": {
+          "unit": "ms",
+          "baseline": 326.46799999999985,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Observation Manager]": {
+          "unit": "ms",
+          "baseline": 11.638000000000034,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "inp_worst": {
+          "unit": "ms",
+          "baseline": 403.631,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "cls_load": {
+          "unit": "score",
+          "baseline": 0.0005081010480967079,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.02
+        },
+        "cls_worst_display_step": {
+          "unit": "score",
+          "baseline": 6.992125543874315e-05,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.02
+        },
+        "script_transfer_size_load": {
+          "unit": "KB",
+          "baseline": 1895.53125,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "request_count_load": {
+          "unit": "requests",
+          "baseline": 101.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "planetarium_fps_panning": {
+          "unit": "fps",
+          "baseline": 60.17687346233151,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0,
+          "direction": "higher_is_better"
+        },
+        "js_heap_after_last_lap": {
+          "unit": "MB",
+          "baseline": 22.17373275756836,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "js_heap_growth_per_lap": {
+          "unit": "MB",
+          "baseline": 0.23919677734375,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "electron_main_peak_memory_mb": {
+          "unit": "MB",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "electron_main_mean_cpu_percent": {
+          "unit": "%",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "electron_renderer_peak_memory_mb": {
+          "unit": "MB",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "electron_renderer_mean_cpu_percent": {
+          "unit": "%",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "electron_gpu_peak_memory_mb": {
+          "unit": "MB",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "electron_gpu_mean_cpu_percent": {
+          "unit": "%",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "backend_peak_rss": {
+          "unit": "MB",
+          "baseline": 373.578125,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "backend_cpu_time": {
+          "unit": "s",
+          "baseline": 3.33,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.5
+        },
+        "rpc_count_load": {
+          "unit": "calls",
+          "baseline": 42.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Image Viewer]": {
+          "unit": "calls",
+          "baseline": 1.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Image Processing]": {
+          "unit": "calls",
+          "baseline": 10.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Astronomy Manager]": {
+          "unit": "calls",
+          "baseline": 3.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Planetarium]": {
+          "unit": "calls",
+          "baseline": 29.666666666666668,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Observatory Manager]": {
+          "unit": "calls",
+          "baseline": 7.333333333333333,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Observation Manager]": {
+          "unit": "calls",
+          "baseline": 3.6666666666666665,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_p95[history:night_quality]": {
+          "unit": "ms",
+          "baseline": 124.41999999997206,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "rpc_p95[target:get_targets]": {
+          "unit": "ms",
+          "baseline": 164.62500000000728,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "rpc_p95[processing:stack_summary]": {
+          "unit": "ms",
+          "baseline": 16.970000000006983,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "idle_rpc_per_minute": {
+          "unit": "calls/min",
+          "baseline": 9.999066753769632,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 2.0
+        },
+        "fps_hw": {
+          "unit": "fps",
+          "baseline": 60.17687346233151,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0,
+          "direction": "higher_is_better"
+        },
+        "pan_frame_ms_p50": {
+          "unit": "ms",
+          "baseline": 16.658,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "pan_frame_ms_p95": {
+          "unit": "ms",
+          "baseline": 16.881,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "star_project_ms_p50": {
+          "unit": "ms",
+          "baseline": 2.7999999999883585,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "overlay_draw_ms_p50": {
+          "unit": "ms",
+          "baseline": 2.1000000000349246,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "gpu_ms_p50": {
+          "unit": "ms",
+          "baseline": 11.457,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        }
+      }
+    },
+    "e28635fe72": {
+      "created": "2026-11-06T17:43:14.401377+00:00",
+      "observatory_profile": "offline",
+      "setup": {
+        "cpu_model": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+        "cpu_logical_cores": 12,
+        "cpu_physical_cores": 6,
+        "cpu_governor": "powersave",
+        "ram_gb": 30.5,
+        "ac_online": true,
+        "power_profile": "balanced",
+        "kernel": "7.3.0-10-generic",
+        "displays": [
+          "eDP-1 1920x1080 @60Hz"
+        ],
+        "connected_outputs": [
+          "eDP-1"
+        ],
+        "docked": false,
+        "display_source": "xrandr",
+        "gpus_present": [
+          "VGA compatible controller: Intel Corporation CoffeeLake-H GT2 [UHD Graphics 630]",
+          "3D controller: NVIDIA Corporation TU117M [GeForce GTX 1650 Mobile / Max-Q] (rev a1)"
+        ],
+        "prime_mode": "on-demand",
+        "session_type": "wayland",
+        "gpu_used": "nvidia"
+      },
+      "status": "Design estimate: one run on one setup.",
+      "tpms": {
+        "time_to_app_ready": {
+          "unit": "ms",
+          "baseline": 1950.5999999999767,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median": {
+          "unit": "ms",
+          "baseline": 92.70000000001164,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_p95": {
+          "unit": "ms",
+          "baseline": 237.31000000002967,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Image Viewer]": {
+          "unit": "ms",
+          "baseline": 73.40000000002328,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Image Processing]": {
+          "unit": "ms",
+          "baseline": 106.29999999998836,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Astronomy Manager]": {
+          "unit": "ms",
+          "baseline": 107.20000000001164,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Planetarium]": {
+          "unit": "ms",
+          "baseline": 79.90000000002328,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Observatory Manager]": {
+          "unit": "ms",
+          "baseline": 106.40000000002328,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Observation Manager]": {
+          "unit": "ms",
+          "baseline": 90.40000000002328,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "interaction_latency_select_target": {
+          "unit": "ms",
+          "baseline": 29.20000000001164,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "interaction_latency_open_night": {
+          "unit": "ms",
+          "baseline": 393.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "interaction_latency_change_tab": {
+          "unit": "ms",
+          "baseline": 80.35000000000582,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Load app]": {
+          "unit": "ms",
+          "baseline": 377.8029999999999,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Image Viewer]": {
+          "unit": "ms",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Image Processing]": {
+          "unit": "ms",
+          "baseline": 7.680999999999983,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Astronomy Manager]": {
+          "unit": "ms",
+          "baseline": 16.13499999999999,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Planetarium]": {
+          "unit": "ms",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Observatory Manager]": {
+          "unit": "ms",
+          "baseline": 318.32500000000005,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Observation Manager]": {
+          "unit": "ms",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "inp_worst": {
+          "unit": "ms",
+          "baseline": 379.588,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "cls_load": {
+          "unit": "score",
+          "baseline": 0.0005081010480967079,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.02
+        },
+        "cls_worst_display_step": {
+          "unit": "score",
+          "baseline": 6.992125543874315e-05,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.02
+        },
+        "script_transfer_size_load": {
+          "unit": "KB",
+          "baseline": 1895.53125,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "request_count_load": {
+          "unit": "requests",
+          "baseline": 101.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "planetarium_fps_panning": {
+          "unit": "fps",
+          "baseline": 59.80861244019185,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0,
+          "direction": "higher_is_better"
+        },
+        "js_heap_after_last_lap": {
+          "unit": "MB",
+          "baseline": 22.207439422607422,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "js_heap_growth_per_lap": {
+          "unit": "MB",
+          "baseline": 0.24707603454589844,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "electron_main_peak_memory_mb": {
+          "unit": "MB",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "electron_main_mean_cpu_percent": {
+          "unit": "%",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "electron_renderer_peak_memory_mb": {
+          "unit": "MB",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "electron_renderer_mean_cpu_percent": {
+          "unit": "%",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "electron_gpu_peak_memory_mb": {
+          "unit": "MB",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "electron_gpu_mean_cpu_percent": {
+          "unit": "%",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "backend_peak_rss": {
+          "unit": "MB",
+          "baseline": 370.71484375,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "backend_cpu_time": {
+          "unit": "s",
+          "baseline": 3.0699999999999994,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.5
+        },
+        "rpc_count_load": {
+          "unit": "calls",
+          "baseline": 42.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Image Viewer]": {
+          "unit": "calls",
+          "baseline": 1.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Image Processing]": {
+          "unit": "calls",
+          "baseline": 9.333333333333334,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Astronomy Manager]": {
+          "unit": "calls",
+          "baseline": 3.3333333333333335,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Planetarium]": {
+          "unit": "calls",
+          "baseline": 29.666666666666668,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Observatory Manager]": {
+          "unit": "calls",
+          "baseline": 7.333333333333333,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Observation Manager]": {
+          "unit": "calls",
+          "baseline": 3.3333333333333335,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_p95[history:night_quality]": {
+          "unit": "ms",
+          "baseline": 125.23000000001338,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "rpc_p95[target:get_targets]": {
+          "unit": "ms",
+          "baseline": 315.5499999999738,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "rpc_p95[processing:stack_summary]": {
+          "unit": "ms",
+          "baseline": 41.50499999996681,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "idle_rpc_per_minute": {
+          "unit": "calls/min",
+          "baseline": 7.9993600511959135,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 2.0
+        },
+        "fps_hw": {
+          "unit": "fps",
+          "baseline": 59.80861244019185,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0,
+          "direction": "higher_is_better"
+        },
+        "pan_frame_ms_p50": {
+          "unit": "ms",
+          "baseline": 16.6595,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "pan_frame_ms_p95": {
+          "unit": "ms",
+          "baseline": 17.15385,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "star_project_ms_p50": {
+          "unit": "ms",
+          "baseline": 2.900000000023283,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "overlay_draw_ms_p50": {
+          "unit": "ms",
+          "baseline": 2.3999999999650754,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "gpu_ms_p50": {
+          "unit": "ms",
+          "baseline": 6.023,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        }
+      }
+    },
+    "812d9fca5a": {
+      "created": "2026-11-08T02:24:46.667638+00:00",
+      "observatory_profile": "simulated",
+      "setup": {
+        "cpu_model": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+        "cpu_logical_cores": 12,
+        "cpu_physical_cores": 6,
+        "cpu_governor": "powersave",
+        "ram_gb": 30.5,
+        "ac_online": true,
+        "power_profile": "balanced",
+        "kernel": "7.3.0-10-generic",
+        "displays": [
+          "eDP-1 1920x1080 @60Hz"
+        ],
+        "connected_outputs": [
+          "eDP-1"
+        ],
+        "docked": false,
+        "display_source": "xrandr",
+        "gpus_present": [
+          "VGA compatible controller: Intel Corporation CoffeeLake-H GT2 [UHD Graphics 630]",
+          "3D controller: NVIDIA Corporation TU117M [GeForce GTX 1650 Mobile / Max-Q] (rev a1)"
+        ],
+        "prime_mode": "on-demand",
+        "session_type": "wayland",
+        "deep_catalog": {
+          "star_count": 877141,
+          "size_bytes": 30576640
+        },
+        "library": {
+          "library_mode": "simulation",
+          "real_frames": "/home/michael/Astrometrics/Library",
+          "copy_seconds": 5.27,
+          "database_bytes": {
+            "astrometrics.db": 1249529856,
+            "astrometrics_log.db": 309383168,
+            "deep_star_catalog.db": 30576640,
+            "wayfinding.db": 8929280
+          },
+          "paths_rewritten": 1925,
+          "targets": 56,
+          "measured_frames": 53032,
+          "stellar_objects": 292093,
+          "deep_catalog_stars": 877141
+        },
+        "gpu_used": "nvidia",
+        "flow_target": "electron"
+      },
+      "status": "Design estimate: one run on one setup.",
+      "tpms": {
+        "time_to_app_ready": {
+          "unit": "ms",
+          "baseline": 3097.4000000059605,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "time_to_app_ready_cold": {
+          "unit": "ms",
+          "baseline": 3097.4000000059605,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "first_display_open[Image Viewer]": {
+          "unit": "ms",
+          "baseline": 19.600000001490116,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "first_display_open[Image Processing]": {
+          "unit": "ms",
+          "baseline": 781.6000000014901,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "first_display_open[Astronomy Manager]": {
+          "unit": "ms",
+          "baseline": 218.29999999701977,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "first_display_open[Planetarium]": {
+          "unit": "ms",
+          "baseline": 429.3999999985099,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "first_display_open[Observatory Manager]": {
+          "unit": "ms",
+          "baseline": 242.10000000149012,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "first_rpc[history:night_quality]": {
+          "unit": "ms",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "first_rpc[target:get_targets]": {
+          "unit": "ms",
+          "baseline": 37.100000001490116,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "first_rpc[processing:stack_summary]": {
+          "unit": "ms",
+          "baseline": 65.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median": {
+          "unit": "ms",
+          "baseline": 242.10000000149012,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_p95": {
+          "unit": "ms",
+          "baseline": 642.5800000004468,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Image Viewer]": {
+          "unit": "ms",
+          "baseline": 83.5,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Image Processing]": {
+          "unit": "ms",
+          "baseline": 532.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Astronomy Manager]": {
+          "unit": "ms",
+          "baseline": 148.5,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Planetarium]": {
+          "unit": "ms",
+          "baseline": 505.3999999985099,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Observatory Manager]": {
+          "unit": "ms",
+          "baseline": 242.10000000149012,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "interaction_latency_select_target": {
+          "unit": "ms",
+          "baseline": 85.19999999925494,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "interaction_latency_open_night": {
+          "unit": "ms",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "interaction_latency_change_tab": {
+          "unit": "ms",
+          "baseline": 84.60000000149012,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Load app]": {
+          "unit": "ms",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Image Viewer]": {
+          "unit": "ms",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Image Processing]": {
+          "unit": "ms",
+          "baseline": 74.5850000000001,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Astronomy Manager]": {
+          "unit": "ms",
+          "baseline": 36.84100000000001,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Planetarium]": {
+          "unit": "ms",
+          "baseline": 18.424000000000035,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Observatory Manager]": {
+          "unit": "ms",
+          "baseline": 36.148000000000025,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "inp_worst": {
+          "unit": "ms",
+          "baseline": 312.92,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "cls_load": {
+          "unit": "score",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.02
+        },
+        "cls_worst_display_step": {
+          "unit": "score",
+          "baseline": 0.0038822207629226283,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.02
+        },
+        "script_transfer_size_load": {
+          "unit": "KB",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "request_count_load": {
+          "unit": "requests",
+          "baseline": 8.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "planetarium_fps_panning": {
+          "unit": "fps",
+          "baseline": 60.07700477966644,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0,
+          "direction": "higher_is_better"
+        },
+        "catalog_failures": {
+          "unit": "count",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        },
+        "js_heap_after_last_lap": {
+          "unit": "MB",
+          "baseline": 37.386959075927734,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "js_heap_growth_per_lap": {
+          "unit": "MB",
+          "baseline": 1.2077770233154297,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "electron_main_peak_memory_mb": {
+          "unit": "MB",
+          "baseline": 364.61328125,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "electron_main_mean_cpu_percent": {
+          "unit": "%",
+          "baseline": 0.508053580186539,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "electron_renderer_peak_memory_mb": {
+          "unit": "MB",
+          "baseline": 762.78515625,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "electron_renderer_mean_cpu_percent": {
+          "unit": "%",
+          "baseline": 1.573558367664153,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "electron_gpu_peak_memory_mb": {
+          "unit": "MB",
+          "baseline": 564.6328125,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "electron_gpu_mean_cpu_percent": {
+          "unit": "%",
+          "baseline": 0.5005556746359816,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "backend_peak_rss": {
+          "unit": "MB",
+          "baseline": 1485.30859375,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "backend_cpu_time": {
+          "unit": "s",
+          "baseline": 101.10000000000001,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.5
+        },
+        "rpc_count_load": {
+          "unit": "calls",
+          "baseline": 49.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Image Viewer]": {
+          "unit": "calls",
+          "baseline": 6.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Image Processing]": {
+          "unit": "calls",
+          "baseline": 24.333333333333332,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Astronomy Manager]": {
+          "unit": "calls",
+          "baseline": 6.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Planetarium]": {
+          "unit": "calls",
+          "baseline": 25.333333333333332,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Observatory Manager]": {
+          "unit": "calls",
+          "baseline": 15.333333333333334,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_p95[history:night_quality]": {
+          "unit": "ms",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "rpc_p95[target:get_targets]": {
+          "unit": "ms",
+          "baseline": 162.69999999552965,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "rpc_p95[processing:stack_summary]": {
+          "unit": "ms",
+          "baseline": 63.8,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "idle_rpc_per_minute": {
+          "unit": "calls/min",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 2.0
+        },
+        "planetarium_fps_zooming": {
+          "unit": "fps",
+          "baseline": 57.83687997138197,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0,
+          "direction": "higher_is_better"
+        },
+        "fps_hw": {
+          "unit": "fps",
+          "baseline": 60.07700477966644,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0,
+          "direction": "higher_is_better"
+        },
+        "pan_frame_ms_p50": {
+          "unit": "ms",
+          "baseline": 16.732,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "pan_frame_ms_p95": {
+          "unit": "ms",
+          "baseline": 17.2834,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "star_project_ms_p50": {
+          "unit": "ms",
+          "baseline": 2.7999999970197678,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "overlay_draw_ms_p50": {
+          "unit": "ms",
+          "baseline": 2.2999999970197678,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "gpu_ms_p50": {
+          "unit": "ms",
+          "baseline": 5.819,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "zoom_frame_ms_p50": {
+          "unit": "ms",
+          "baseline": 16.69,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "zoom_frame_ms_p95": {
+          "unit": "ms",
+          "baseline": 17.8248,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "zoom_slow_frames": {
+          "unit": "frames",
+          "baseline": 14.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        },
+        "zoom_tick_latency_ms_p50": {
+          "unit": "ms",
+          "baseline": 16.056,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "zoom_tick_latency_ms_p95": {
+          "unit": "ms",
+          "baseline": 38.3566,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "zoom_settle_ms_p50": {
+          "unit": "ms",
+          "baseline": 380.1925,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "zoom_settle_ms_p95": {
+          "unit": "ms",
+          "baseline": 383.29675000000003,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "zoom_long_tasks": {
+          "unit": "tasks",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        },
+        "zoom_main_thread_ms_per_frame": {
+          "unit": "ms",
+          "baseline": 7.827950292397661,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "zoom_gpu_ms_p50": {
+          "unit": "ms",
+          "baseline": 5.493,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "planetarium_idle_draws_per_second": {
+          "unit": "draws/s",
+          "baseline": 1.9984245752931438,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.5
+        },
+        "disk_read_mb[backend]": {
+          "unit": "MB",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_write_mb[backend]": {
+          "unit": "MB",
+          "baseline": 207.183837890625,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_read_mb_per_lap[backend]": {
+          "unit": "MB",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_write_mb_per_lap[backend]": {
+          "unit": "MB",
+          "baseline": 34.5306396484375,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_read_mb[backend_other]": {
+          "unit": "MB",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_write_mb[backend_other]": {
+          "unit": "MB",
+          "baseline": 39.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_read_mb_per_lap[backend_other]": {
+          "unit": "MB",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_write_mb_per_lap[backend_other]": {
+          "unit": "MB",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_read_mb[backend_workers]": {
+          "unit": "MB",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_write_mb[backend_workers]": {
+          "unit": "MB",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_read_mb_per_lap[backend_workers]": {
+          "unit": "MB",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_write_mb_per_lap[backend_workers]": {
+          "unit": "MB",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_read_mb[electron]": {
+          "unit": "MB",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_write_mb[electron]": {
+          "unit": "MB",
+          "baseline": 0.140625,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_read_mb_per_lap[electron]": {
+          "unit": "MB",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_write_mb_per_lap[electron]": {
+          "unit": "MB",
+          "baseline": 0.015625,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "backend_tree_cpu_time": {
+          "unit": "s",
+          "baseline": 113.72999999999999,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.5
+        },
+        "backend_tree_peak_rss": {
+          "unit": "MB",
+          "baseline": 1588.61328125,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "nvidia_util_percent_mean": {
+          "unit": "%",
+          "baseline": 6.02,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "nvidia_util_percent_peak": {
+          "unit": "%",
+          "baseline": 39.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "nvidia_memory_mb_peak": {
+          "unit": "MB",
+          "baseline": 892.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "console_errors": {
+          "unit": "count",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        },
+        "failed_requests": {
+          "unit": "count",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        },
+        "error_toasts": {
+          "unit": "count",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        },
+        "desktop_notifications": {
+          "unit": "count",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        },
+        "backend_error_log_lines": {
+          "unit": "count",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        },
+        "simulator_chip_missing": {
+          "unit": "count",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        },
+        "frames_auto_downloaded": {
+          "unit": "frames",
+          "baseline": 6.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        },
+        "guide_events_received": {
+          "unit": "events",
+          "baseline": 131.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        },
+        "frame_to_library_seconds": {
+          "unit": "s",
+          "baseline": 5.558865427970886,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.5
+        },
+        "guide_log_lines_pulled": {
+          "unit": "lines",
+          "baseline": 142.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        }
+      }
+    },
+    "2b697a9bb2": {
+      "created": "2026-11-08T02:24:46.783275+00:00",
+      "observatory_profile": "simulated",
+      "setup": {
+        "cpu_model": "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+        "cpu_logical_cores": 12,
+        "cpu_physical_cores": 6,
+        "cpu_governor": "powersave",
+        "ram_gb": 30.5,
+        "ac_online": true,
+        "power_profile": "balanced",
+        "kernel": "7.3.0-10-generic",
+        "displays": [
+          "eDP-1 1920x1080 @60Hz"
+        ],
+        "connected_outputs": [
+          "eDP-1"
+        ],
+        "docked": false,
+        "display_source": "xrandr",
+        "gpus_present": [
+          "VGA compatible controller: Intel Corporation CoffeeLake-H GT2 [UHD Graphics 630]",
+          "3D controller: NVIDIA Corporation TU117M [GeForce GTX 1650 Mobile / Max-Q] (rev a1)"
+        ],
+        "prime_mode": "on-demand",
+        "session_type": "wayland",
+        "deep_catalog": {
+          "star_count": 877141,
+          "size_bytes": 30576640
+        },
+        "library": {
+          "library_mode": "simulation",
+          "real_frames": "/home/michael/Astrometrics/Library",
+          "copy_seconds": 5.65,
+          "database_bytes": {
+            "astrometrics.db": 1249529856,
+            "astrometrics_log.db": 309383168,
+            "deep_star_catalog.db": 30576640,
+            "wayfinding.db": 8929280
+          },
+          "paths_rewritten": 1925,
+          "targets": 56,
+          "measured_frames": 53032,
+          "stellar_objects": 292093,
+          "deep_catalog_stars": 877141
+        },
+        "gpu_used": "intel",
+        "flow_target": "electron"
+      },
+      "status": "Design estimate: one run on one setup.",
+      "tpms": {
+        "time_to_app_ready": {
+          "unit": "ms",
+          "baseline": 2981.2000000029802,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "time_to_app_ready_cold": {
+          "unit": "ms",
+          "baseline": 2981.2000000029802,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "first_display_open[Image Viewer]": {
+          "unit": "ms",
+          "baseline": 18.399999998509884,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "first_display_open[Image Processing]": {
+          "unit": "ms",
+          "baseline": 1840.6000000014901,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "first_display_open[Astronomy Manager]": {
+          "unit": "ms",
+          "baseline": 315.80000000447035,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "first_display_open[Planetarium]": {
+          "unit": "ms",
+          "baseline": 614.8999999985099,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "first_display_open[Observatory Manager]": {
+          "unit": "ms",
+          "baseline": 273.29999999701977,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "first_rpc[history:night_quality]": {
+          "unit": "ms",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "first_rpc[target:get_targets]": {
+          "unit": "ms",
+          "baseline": 138.20000000298023,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "first_rpc[processing:stack_summary]": {
+          "unit": "ms",
+          "baseline": 185.80000000447035,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median": {
+          "unit": "ms",
+          "baseline": 267.1000000014901,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_p95": {
+          "unit": "ms",
+          "baseline": 982.6099999994026,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Image Viewer]": {
+          "unit": "ms",
+          "baseline": 93.30000000447035,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Image Processing]": {
+          "unit": "ms",
+          "baseline": 502.80000000447035,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Astronomy Manager]": {
+          "unit": "ms",
+          "baseline": 149.60000000149012,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Planetarium]": {
+          "unit": "ms",
+          "baseline": 607.8000000044703,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "display_switch_median[Observatory Manager]": {
+          "unit": "ms",
+          "baseline": 267.1000000014901,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "interaction_latency_select_target": {
+          "unit": "ms",
+          "baseline": 87.09999999776483,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "interaction_latency_open_night": {
+          "unit": "ms",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "interaction_latency_change_tab": {
+          "unit": "ms",
+          "baseline": 78.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Load app]": {
+          "unit": "ms",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Image Viewer]": {
+          "unit": "ms",
+          "baseline": 1.6569999999999823,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Image Processing]": {
+          "unit": "ms",
+          "baseline": 71.04299999999984,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Astronomy Manager]": {
+          "unit": "ms",
+          "baseline": 32.144000000000005,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Planetarium]": {
+          "unit": "ms",
+          "baseline": 8.449000000000012,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "total_blocking_time[Observatory Manager]": {
+          "unit": "ms",
+          "baseline": 65.39999999999998,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "inp_worst": {
+          "unit": "ms",
+          "baseline": 272.593,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "cls_load": {
+          "unit": "score",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.02
+        },
+        "cls_worst_display_step": {
+          "unit": "score",
+          "baseline": 0.003882095678265291,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.02
+        },
+        "script_transfer_size_load": {
+          "unit": "KB",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "request_count_load": {
+          "unit": "requests",
+          "baseline": 8.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "planetarium_fps_panning": {
+          "unit": "fps",
+          "baseline": 60.118909223709046,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0,
+          "direction": "higher_is_better"
+        },
+        "catalog_failures": {
+          "unit": "count",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        },
+        "js_heap_after_last_lap": {
+          "unit": "MB",
+          "baseline": 37.26030731201172,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "js_heap_growth_per_lap": {
+          "unit": "MB",
+          "baseline": 1.1669635772705078,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "electron_main_peak_memory_mb": {
+          "unit": "MB",
+          "baseline": 357.80078125,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "electron_main_mean_cpu_percent": {
+          "unit": "%",
+          "baseline": 0.5355021038316937,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "electron_renderer_peak_memory_mb": {
+          "unit": "MB",
+          "baseline": 764.0234375,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "electron_renderer_mean_cpu_percent": {
+          "unit": "%",
+          "baseline": 1.6609236266766692,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "electron_gpu_peak_memory_mb": {
+          "unit": "MB",
+          "baseline": 326.1171875,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "electron_gpu_mean_cpu_percent": {
+          "unit": "%",
+          "baseline": 0.4304190590546972,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "backend_peak_rss": {
+          "unit": "MB",
+          "baseline": 1328.58984375,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "backend_cpu_time": {
+          "unit": "s",
+          "baseline": 102.94,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.5
+        },
+        "rpc_count_load": {
+          "unit": "calls",
+          "baseline": 50.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Image Viewer]": {
+          "unit": "calls",
+          "baseline": 6.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Image Processing]": {
+          "unit": "calls",
+          "baseline": 25.333333333333332,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Astronomy Manager]": {
+          "unit": "calls",
+          "baseline": 6.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Planetarium]": {
+          "unit": "calls",
+          "baseline": 24.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_count_per_visit[Observatory Manager]": {
+          "unit": "calls",
+          "baseline": 15.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "rpc_p95[history:night_quality]": {
+          "unit": "ms",
+          "baseline": null,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "rpc_p95[target:get_targets]": {
+          "unit": "ms",
+          "baseline": 855.7249999996275,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "rpc_p95[processing:stack_summary]": {
+          "unit": "ms",
+          "baseline": 186.04000000357627,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "idle_rpc_per_minute": {
+          "unit": "calls/min",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 2.0
+        },
+        "planetarium_fps_zooming": {
+          "unit": "fps",
+          "baseline": 59.36085686106427,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0,
+          "direction": "higher_is_better"
+        },
+        "fps_hw": {
+          "unit": "fps",
+          "baseline": 60.118909223709046,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0,
+          "direction": "higher_is_better"
+        },
+        "pan_frame_ms_p50": {
+          "unit": "ms",
+          "baseline": 16.659,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "pan_frame_ms_p95": {
+          "unit": "ms",
+          "baseline": 17.26965,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "star_project_ms_p50": {
+          "unit": "ms",
+          "baseline": 2.7999999970197678,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "overlay_draw_ms_p50": {
+          "unit": "ms",
+          "baseline": 2.1999999955296516,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "gpu_ms_p50": {
+          "unit": "ms",
+          "baseline": 17.399,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "zoom_frame_ms_p50": {
+          "unit": "ms",
+          "baseline": 16.624,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "zoom_frame_ms_p95": {
+          "unit": "ms",
+          "baseline": 18.394149999999996,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "zoom_slow_frames": {
+          "unit": "frames",
+          "baseline": 8.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        },
+        "zoom_tick_latency_ms_p50": {
+          "unit": "ms",
+          "baseline": 11.983,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "zoom_tick_latency_ms_p95": {
+          "unit": "ms",
+          "baseline": 37.8769,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "zoom_settle_ms_p50": {
+          "unit": "ms",
+          "baseline": 359.8165,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "zoom_settle_ms_p95": {
+          "unit": "ms",
+          "baseline": 381.2375,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "zoom_long_tasks": {
+          "unit": "tasks",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        },
+        "zoom_main_thread_ms_per_frame": {
+          "unit": "ms",
+          "baseline": 7.941117824773414,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "zoom_gpu_ms_p50": {
+          "unit": "ms",
+          "baseline": 4.258,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 50.0
+        },
+        "planetarium_idle_draws_per_second": {
+          "unit": "draws/s",
+          "baseline": 1.6647194997584491,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.5
+        },
+        "disk_read_mb[backend]": {
+          "unit": "MB",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_write_mb[backend]": {
+          "unit": "MB",
+          "baseline": 207.183837890625,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_read_mb_per_lap[backend]": {
+          "unit": "MB",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_write_mb_per_lap[backend]": {
+          "unit": "MB",
+          "baseline": 34.5306396484375,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_read_mb[backend_workers]": {
+          "unit": "MB",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_write_mb[backend_workers]": {
+          "unit": "MB",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_read_mb_per_lap[backend_workers]": {
+          "unit": "MB",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_write_mb_per_lap[backend_workers]": {
+          "unit": "MB",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_read_mb[electron]": {
+          "unit": "MB",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_write_mb[electron]": {
+          "unit": "MB",
+          "baseline": 0.15234375,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_read_mb_per_lap[electron]": {
+          "unit": "MB",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "disk_write_mb_per_lap[electron]": {
+          "unit": "MB",
+          "baseline": 0.019974879368728007,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "backend_tree_cpu_time": {
+          "unit": "s",
+          "baseline": 115.5,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.5
+        },
+        "backend_tree_peak_rss": {
+          "unit": "MB",
+          "baseline": 1599.8125,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "nvidia_util_percent_mean": {
+          "unit": "%",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "nvidia_util_percent_peak": {
+          "unit": "%",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 3.0
+        },
+        "nvidia_memory_mb_peak": {
+          "unit": "MB",
+          "baseline": 3.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 5.0
+        },
+        "console_errors": {
+          "unit": "count",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        },
+        "failed_requests": {
+          "unit": "count",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        },
+        "error_toasts": {
+          "unit": "count",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        },
+        "desktop_notifications": {
+          "unit": "count",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        },
+        "backend_error_log_lines": {
+          "unit": "count",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        },
+        "simulator_chip_missing": {
+          "unit": "count",
+          "baseline": 0.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        },
+        "frames_auto_downloaded": {
+          "unit": "frames",
+          "baseline": 6.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        },
+        "guide_events_received": {
+          "unit": "events",
+          "baseline": 131.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        },
+        "frame_to_library_seconds": {
+          "unit": "s",
+          "baseline": 5.657493233680725,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.5
+        },
+        "guide_log_lines_pulled": {
+          "unit": "lines",
+          "baseline": 142.0,
+          "watch_ratio": 1.25,
+          "breach_ratio": 1.5,
+          "slack": 0.0
+        }
+      }
+    }
+  }
+}

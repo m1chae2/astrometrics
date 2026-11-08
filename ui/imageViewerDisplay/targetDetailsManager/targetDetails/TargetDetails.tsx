@@ -1,4 +1,5 @@
 import React from 'react';
+import { TextInput } from '../../../common/components/TextInput';
 
 export interface FrameFilterGroup {
   filterName: string;
@@ -113,10 +114,9 @@ export const TargetDetails: React.FC<TargetDetailsProps> = ({
           <span className="tree-branch">└─</span>
           <label htmlFor="catalog-id" className="tree-label">Catalog ID:</label>
           {onCatalogIdChange ? (
-            <input
+            <TextInput
               id="catalog-id"
               className="target-input"
-              type="text"
               value={catalogId}
               onChange={(e) => onCatalogIdChange(e.target.value)}
             />
@@ -129,10 +129,9 @@ export const TargetDetails: React.FC<TargetDetailsProps> = ({
           <span className="tree-branch">└─</span>
           <label htmlFor="common-name" className="tree-label">Common Name:</label>
           {onCommonNameChange ? (
-            <input
+            <TextInput
               id="common-name"
               className="target-input"
-              type="text"
               value={commonName}
               onChange={(e) => onCommonNameChange(e.target.value)}
             />

@@ -5,8 +5,7 @@ repository. They give every agent the same few commands, so the commands can be 
 they keep two promises: heavy work never runs more than a set number of jobs at once, and
 real-data scripts reach only copies of the library.
 
-They were written during issue #94 and are described in `documentation/plans/QUALITY_METRICS_PLAN.md`
-section 9.1.
+They were written during issue #94. The full test suites are left to continuous integration.
 
 ## Scripts
 
@@ -47,6 +46,8 @@ real location; scripts must not write there.
 
 ### Stored paths in the copy database
 
+The code is in `simulator/path_guard.py`, which the simulator's library copy uses too. `copy_path_guard.py` is a thin wrapper around it, so `realrun.sh`, `repoint_copy_paths.py` and the TPM real snapshot work as before.
+
 A copied database still holds the absolute paths of the real library (stack images, `inputs.json`,
 subset folders) inside each target record. A script run on such a copy would write into the real
 stacks folder. Before it runs a script, `realrun.sh` calls `copy_path_guard.py`, which opens the
@@ -58,4 +59,4 @@ which may stay at its real read-only place.
 To fix a fresh copy, run `ASTROMETRICS_SCRATCH=... build/agent_tools/repoint_copy_paths.py
 <copy_config>`. It rewrites paths that contain a `/lights/` folder to the copy's stacks folder, and
 paths under the real data folder to the copy library folder. It edits only databases inside
-`ASTROMETRICS_SCRATCH` and refuses otherwise. Tests are in `backend/tests/test_copy_path_guard.py`.
+`ASTROMETRICS_SCRATCH` and refuses otherwise. With `--mirror-outside`, it instead moves every stored path still outside the copy (for example an old stacks folder) to `ASTROMETRICS_SCRATCH/outside/<original path>`; `build/tpm/real_snapshot.py prepare` does this for its database copies. Tests are in `backend/tests/test_copy_path_guard.py`.

@@ -5,12 +5,15 @@
  */
 
 import React, { useEffect } from 'react';
+import { TextInput } from './TextInput';
+import { Checkbox } from './Checkbox';
 import { BaseModal } from './BaseModal';
 import { SectionPanel } from './SectionPanel';
+import { Skeleton } from './Skeleton';
 import { IngestionState } from '../hooks/useIngestionManager';
-import '../styles/entry.css';
 import '../styles/layout.css';
 import '../styles/ingestFramesModal.css';
+import { Button } from './Button';
 
 interface IngestFramesModalProps {
     isOpen: boolean;
@@ -18,6 +21,9 @@ interface IngestFramesModalProps {
     ingestionState: IngestionState;
     onIngestComplete?: (targetName: string) => void;
 }
+
+/** How long to show the "completed" status before reporting completion, in milliseconds. */
+const COMPLETION_CLOSE_DELAY_MS = 1000;
 
 /**
  * Extracts only the trailing filename from a full filesystem or web path.
@@ -75,7 +81,9 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
         setSelectedFiles,
         isLoadingStats,
         status,
+        jobId,
         progress,
+        jobTargetName,
         logs,
         scanningRemote,
         startIngestionJob,
@@ -103,31 +111,47 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
     // User said: "If I close that window... process should continue... If I reopen... should show current process"
     // This implies we KEEP state.
 
-    // Track if complete callback was already fired for the current ingestion run
-    const completedFiredRef = React.useRef(false);
-
-    // Check completion callback
+    // Keep the newest callbacks and target name in refs. The parent passes new
+    // function objects on almost every render. If the effect below depended on
+    // them, each re-render would cancel the pending timer and the completion
+    // would never fire.
+    const onIngestCompleteRef = React.useRef(onIngestComplete);
+    const onCloseRef = React.useRef(onClose);
+    const targetNameRef = React.useRef(targetName);
     useEffect(() => {
-        let timer: any = null;
-        if (status === 'completed') {
-            if (!completedFiredRef.current) {
-                completedFiredRef.current = true;
-                if (onIngestComplete) {
-                    timer = setTimeout(() => {
-                        onIngestComplete(targetName);
-                        // Close the modal after completion to allow further interaction
-                        onClose();
-                    }, 1000);
-                }
-            }
-        } else {
-            completedFiredRef.current = false;
-        }
+        onIngestCompleteRef.current = onIngestComplete;
+        onCloseRef.current = onClose;
+        targetNameRef.current = targetName;
+    });
 
-        return () => {
-            if (timer) clearTimeout(timer);
-        };
-    }, [status, onIngestComplete, targetName, onClose]);
+    // Remembers which ingestion run (job) already reported completion, so each
+    // run reports once. An empty string stands for "no job id known".
+    const completedRunRef = React.useRef<string | null>(null);
+
+    // Close the dialog once per run, and report completion to `onIngestComplete`
+    // when a caller gave one. The app-wide `IngestionJobsContext` finishes the
+    // download itself (target record, lists), so this does not depend on the
+    // display being awake.
+    useEffect(() => {
+        if (status !== 'completed') {
+            completedRunRef.current = null;
+            return undefined;
+        }
+        const runKey = jobId ?? '';
+        if (completedRunRef.current === runKey) {
+            return undefined;
+        }
+        // Short pause so the person sees the "completed" status before the
+        // dialog closes. The run counts as reported only when the timer fires: if
+        // the display is paused first, the timer is cleared and starts again on resume.
+        const timer = setTimeout(() => {
+            completedRunRef.current = runKey;
+            onIngestCompleteRef.current?.(targetNameRef.current);
+            // Close the modal after completion to allow further interaction
+            onCloseRef.current();
+        }, COMPLETION_CLOSE_DELAY_MS);
+        return () => clearTimeout(timer);
+    }, [status, jobId]);
 
 
     if (!isOpen) return null;
@@ -137,15 +161,15 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
 
     const footerButtons = (
         <>
-            <button className="btn btn--secondary" onClick={onClose}>Close</button>
+            <Button variant="secondary" onClick={onClose}>Close</Button>
             {!isRunning && status !== 'completed' && (
-                <button className="btn btn--primary" onClick={startIngestionJob} disabled={scanningRemote}>
+                <Button variant="primary" onClick={startIngestionJob} disabled={scanningRemote}>
                     Start Ingestion
-                </button>
+                </Button>
             )}
             {/* Optional Reset Button if completed? */}
             {status === 'completed' && (
-                <button className="btn btn--text" onClick={resetState}>Start New</button>
+                <Button variant="secondary" onClick={resetState}>Start New</Button>
             )}
         </>
     );
@@ -167,9 +191,7 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
                     <SectionPanel title="Target Information">
                         <div className="form-group">
                             <label>Target Name</label>
-                            <input
-                                type="text"
-                                className="entry"
+                            <TextInput
                                 value={targetName}
                                 onChange={e => setTargetName(e.target.value)}
                                 disabled={isRunning}
@@ -178,9 +200,7 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
                         </div>
                         <div className="form-group">
                             <label>Telescope</label>
-                            <input
-                                type="text"
-                                className="entry"
+                            <TextInput
                                 value={telescope}
                                 onChange={e => setTelescope(e.target.value)}
                                 disabled={isRunning}
@@ -209,23 +229,24 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
                 <div className="modal-column ingest-modal__column--file-selection">
                     <SectionPanel title="File Selection" className="panel--flex-grow">
                         {isLoadingStats ? (
-                            <div className="text-muted ingest-modal__text-padded">Loading files...</div>
+                            <Skeleton variant="list" lines={1} count={6} label="Loading files" />
                         ) : remoteFiles.length > 0 ? (
                             <div className="ingest-modal__file-selection-container">
                                 <div className="ingest-modal__file-selection-header">
                                     <label className="ingest-modal__label-zero-margin">Select Files ({selectedFiles.size} / {remoteFiles.length})</label>
                                     <div className="ingest-modal__file-selection-actions">
-                                        <button
-                                            type="button"
-                                            className="ingest-modal__refresh-btn"
+                                        <Button
+                                            variant="secondary"
+                                            size="small"
                                             onClick={() => ingestionState.refreshFiles && ingestionState.refreshFiles()}
                                             disabled={isRunning || isLoadingStats}
                                             title="Refresh file list from telescope"
                                         >
                                             ↻ Refresh
-                                        </button>
-                                        <button
-                                            className="btn-link"
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            className="ingest-modal__link"
                                             onClick={() => {
                                                 if (selectedFiles.size === remoteFiles.length) {
                                                     setSelectedFiles(new Set());
@@ -236,7 +257,7 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
                                             disabled={isRunning}
                                         >
                                             {selectedFiles.size === remoteFiles.length ? 'Deselect All' : 'Select All'}
-                                        </button>
+                                        </Button>
                                     </div>
                                 </div>
                                 {isCalibrationTarget && (
@@ -245,16 +266,16 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
                                             const framesOfType = selectCalibrationFrameType(remoteFiles, frameType);
                                             if (framesOfType.length === 0) return null;
                                             return (
-                                                <button
+                                                <Button
                                                     key={frameType}
-                                                    type="button"
-                                                    className="btn-link"
+                                                    variant="ghost"
+                                                    className="ingest-modal__link"
                                                     onClick={() => setSelectedFiles(new Set(framesOfType))}
                                                     disabled={isRunning}
                                                     title={`Select only the ${framesOfType.length} ${frameType} frame(s)`}
                                                 >
                                                     {frameType} Only
-                                                </button>
+                                                </Button>
                                             );
                                         })}
                                     </div>
@@ -262,8 +283,7 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
                                 <div className="modal-list-container ingest-modal__list-container">
                                     {remoteFiles.map(file => (
                                         <label key={file} className={`ingest-modal__file-row ${isRunning ? 'ingest-modal__file-row--default' : 'ingest-modal__file-row--clickable'}`}>
-                                            <input
-                                                type="checkbox"
+                                            <Checkbox
                                                 checked={selectedFiles.has(file)}
                                                 disabled={isRunning}
                                                 onChange={() => {
@@ -298,7 +318,11 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
                                 <span className="status-label">Status: </span>
                                 <span className={`status-value ${status === 'running' ? 'text-warning' : 'text-success'}`}>{status || 'Idle'}</span>
                             </div>
-                            {progress && <div className="ingest-progress">{progress}</div>}
+                            {progress && (
+                                <div className="ingest-progress">
+                                    {jobTargetName ? `${jobTargetName}: ` : ''}{progress}
+                                </div>
+                            )}
                             <div className="logs modal-log-container">
                                 {logs.length === 0 ? (
                                     <div className="ingest-modal__logs-message">No logs available.</div>

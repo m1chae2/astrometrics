@@ -24,6 +24,7 @@ from astrometricslib.models.camera_profile import (
     SensorSettingNoise,
     ValueProvenance,
 )
+from astrometricslib.models.quality.gate_result import GateStatus
 from astrometricslib.models.quality.measurement import MeasurementStatus, QualityMeasurement
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
@@ -1183,3 +1184,39 @@ def test_measure_frame_refuses_the_offset_fallback_without_a_limit_or_for_a_clip
     )
     assert rows[FRAME_READ_NOISE_E][0].status == MeasurementStatus.NOT_MEASURED
     assert "clipped at zero" in rows[FRAME_READ_NOISE_E][0].reason
+
+
+def _mark_synthetic(path: str, value: object) -> None:
+    """Set the ``SYNTHETC`` header card of a frame file.
+
+    Parameters
+    ----------
+    path : `str`
+        The frame's path.
+    value : `object`
+        The card value.
+    """
+    with fits.open(path, mode="update") as hdus:
+        hdus[0].header["SYNTHETC"] = value
+
+
+def test_a_synthetic_frame_gets_a_warning_that_a_job_can_list(tmp_path: Path) -> None:
+    """SYNTHETC adds one failed notice row; a real frame gets none."""
+    path = _write_frame(tmp_path, _make_frame_pixels())
+    assert "frame.notice_synthetic" not in _by_metric(_run(path))
+
+    _mark_synthetic(path, True)
+    rows = _by_metric(_run(path))["frame.notice_synthetic"]
+
+    assert len(rows) == 1
+    notice = rows[0]
+    assert notice.check_outcome == GateStatus.FAILED
+    assert "do not describe a real sky" in notice.reason
+    check_measurement_against_registry(notice)
+
+
+def test_a_false_synthetic_card_adds_no_warning(tmp_path: Path) -> None:
+    """``SYNTHETC = F`` is a real frame."""
+    path = _write_frame(tmp_path, _make_frame_pixels())
+    _mark_synthetic(path, False)
+    assert "frame.notice_synthetic" not in _by_metric(_run(path))

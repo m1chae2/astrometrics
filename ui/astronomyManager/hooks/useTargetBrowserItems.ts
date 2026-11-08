@@ -45,7 +45,7 @@ export const useTargetBrowserItems = () => {
         return matching.map((name) => {
             const availability = targetDataAvailability[name];
             const subtitle = isAvailabilityLoading
-                ? 'Loading…'
+                ? '\u00a0'
                 : `${availability?.starCount ?? 0} star${(availability?.starCount ?? 0) === 1 ? '' : 's'}`;
             return {
                 id: name,

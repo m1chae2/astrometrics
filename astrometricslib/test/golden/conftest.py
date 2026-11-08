@@ -36,14 +36,14 @@ _JSON_COMMENT = (
 _SECTION_COMMENTS = {
     "photometry_pre_S2": (
         "Aperture photometry with every aperture centred on a whole pixel, which is what the pipeline "
-        "did before item S2 (sub-pixel apertures) in REVIEW_ACTION_PLAN.md. S2 now centres apertures on "
+        "did before sub-pixel aperture centering. The pipeline now centres apertures on "
         "the exact position, so this block is reproduced by rounding the position before the call. The "
         "fluxes are EXPECTED TO MOVE if the aperture sum or the background ring changes, and the block "
         "can be dropped once nobody needs the old numbers."
     ),
     "photometry_sub_pixel": (
-        "Aperture photometry with every aperture centred on the exact detected position (item S2). The "
-        "difference from photometry_pre_S2 is the effect of S2 on these ten stars."
+        "Aperture photometry with every aperture centred on the exact detected position. The "
+        "difference from photometry_pre_S2 is the effect of sub-pixel centering on these ten stars."
     ),
     "photometry_sequence": (
         "The committed photometry worker run over the five luminance lights. About 60 stars (detections "

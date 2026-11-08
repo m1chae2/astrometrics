@@ -6,7 +6,7 @@ Terms are defined in the [glossary](../../documentation/Glossary.md). This docum
 
 ## Checks on the quality judgments
 
-- `shadow_compare_verdicts.py` compares the result-quality rules with the flags that `astrometricslib` stored before it dropped them. It is the shadow run of issue #97 (`documentation/plans/VERDICT_REMOVAL_PLAN.md`, phase 1, and `QUALITY_METRICS_PLAN.md`, safeguard 4).
+- `shadow_compare_verdicts.py` compares the result-quality rules with the flags that `astrometricslib` stored before it dropped them. It is the shadow run of issue #97 (a reader switches only after a person has reviewed every disagreement; issue #93).
   - For every target it reads the gate outcomes of each pipeline (stacking, spectral stacking, astrometry, photometry, spectroscopy, asteroid detection) from the loaded target. For a summary saved before `flagged` and `flag_reasons` were removed, it also reads those two fields from the raw stored JSON of the catalog database (read-only; the models ignore them). A summary saved later has no flag: its flag is read as true when a gate failed, and it has no flag reasons. It also reads each star's match distance and gaps, and works out the old poor-match and ambiguity flags from them. It then asks `review.get_advisory` for the target's quality statements and for each star's result statements.
   - A rule is tied to a gate when the rule reads the gate's metric (`<pipeline>.gate_<name>`). A difference is a failed gate whose rule stays quiet, a rule that fires on a gate that did not fail, a flagged pipeline where no rule of that pipeline fires, a flag reason that no failed gate gives, or a rule with no flag to compare with.
   - The report lists the differences by pipeline and kind, the largest kinds by gate or rule, the gates that no rule reads (with how often each passed, failed and was not checked), and every difference by target. A person marks each difference as a bug fixed or an approved change.
@@ -14,6 +14,11 @@ Terms are defined in the [glossary](../../documentation/Glossary.md). This docum
   - It also checks that no warning is lost: each stored flag reason must be the reason of a failed row in the measurement table, the rows that `Jobs.query(detail="warnings")` lists. A reason with no row is counted as old data when the newest row of its pipeline on that target is older than `--new-rows-since` (default 2026-11-02, the day after the notice rows were written), and as a gap otherwise. The report states the two counts apart.
   - It is read-only. It writes only the file given with `--report` and nothing to any database. Run it on the data copy with `build/agent_tools/realrun.sh`, not on the real library. `--target ID` (repeatable) limits the run.
   - Its tests, on made-up summaries and statements, are in `test/test_shadow_compare_verdicts.py`.
+
+## Checks on the models
+
+- `check_centering_exposure.py` tests the centering exposure model (`control.mount.get_centering_exposure`). For one target it takes real light frames, predicts the catalog star count of each from the frame's exposure, time and pointing, detects the stars in the frame with a 5-sigma star finder, and prints the ratio of the two. The medians and the share within a factor of 2 go in the validation register (row WAY-D122).
+  - It reads frames and writes nothing. Run it on the data copy with `build/agent_tools/realrun.sh`, not on the real library. Its tests, on made-up numbers, are in `test/test_check_centering_exposure.py`.
 
 ## Catalog and reference data
 

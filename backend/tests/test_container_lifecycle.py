@@ -103,3 +103,41 @@ def test_init_does_nothing_when_already_initialized(monkeypatch: pytest.MonkeyPa
     container.init_resources()
 
     build.assert_not_called()
+
+
+def test_running_work_is_empty_when_everything_is_idle() -> None:
+    """Idle services report no work."""
+    container = Container()
+    container.job_service = MagicMock(get_active_jobs=MagicMock(return_value=[]))
+    container.sync_service = MagicMock(
+        get_all_active_syncs=MagicMock(return_value=[]), is_log_sync_running=MagicMock(return_value=False)
+    )
+    container.target_imaging_executor = MagicMock(is_running=MagicMock(return_value=False))
+    container.auto_download_service = MagicMock(pending_timer_count=MagicMock(return_value=0))
+
+    assert container._running_work() == []
+
+
+def test_a_failed_job_check_counts_as_busy() -> None:
+    """When the job list cannot be read, a restart is not allowed."""
+    container = Container()
+    container.job_service = MagicMock(get_active_jobs=MagicMock(side_effect=RuntimeError("db locked")))
+
+    assert container._running_work() == ["could not check the running jobs"]
+
+
+def test_running_work_reports_imaging_log_copy_and_waiting_downloads() -> None:
+    """Each kind of work that starts no job still blocks a restart."""
+    container = Container()
+    container.job_service = MagicMock(get_active_jobs=MagicMock(return_value=[]))
+    container.sync_service = MagicMock(
+        get_all_active_syncs=MagicMock(return_value=[]), is_log_sync_running=MagicMock(return_value=True)
+    )
+    container.target_imaging_executor = MagicMock(is_running=MagicMock(return_value=True))
+    container.auto_download_service = MagicMock(pending_timer_count=MagicMock(return_value=2))
+
+    work = container._running_work()
+
+    assert "guide log copy running" in work
+    assert "target imaging session running" in work
+    assert "2 automatic frame download(s) waiting to start" in work

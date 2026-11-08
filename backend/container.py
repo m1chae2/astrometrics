@@ -54,9 +54,11 @@ class Container:
         self.stack_review_service = None
         self.socket_manager = None
         self.telescope_service = None
+        self.auto_download_service = None
         self.notification_service = None
         self.handoff_service = None
         self.settings_service = None
+        self.observatory_source_service = None
         self.equipment_service = None
         self.scripting_service = None
         self.ingestion_service = None
@@ -95,6 +97,37 @@ class Container:
             self.__init__()
             raise
 
+    def _running_work(self) -> list[str]:
+        """List the jobs, imaging, copies and downloads that are running now.
+
+        Returns
+        -------
+        work : `list` [`str`]
+            One short text per kind of running work; empty when idle.
+        """
+        work = []
+        try:
+            jobs = self.job_service.get_active_jobs() if self.job_service is not None else []
+        except Exception:
+            # A restart that loses a running job is worse than a refused
+            # restart, so a failed check counts as busy.
+            logger.warning("Could not list the running jobs", exc_info=True)
+            work.append("could not check the running jobs")
+            jobs = []
+        if jobs:
+            work.append(f"{len(jobs)} job(s) running (for example stacking)")
+        syncs = self.sync_service.get_all_active_syncs() if self.sync_service else []
+        if syncs:
+            work.append(f"{len(syncs)} frame download(s) running")
+        if self.sync_service is not None and self.sync_service.is_log_sync_running():
+            work.append("guide log copy running")
+        if self.target_imaging_executor is not None and self.target_imaging_executor.is_running():
+            work.append("target imaging session running")
+        pending = self.auto_download_service.pending_timer_count() if self.auto_download_service else 0
+        if pending:
+            work.append(f"{pending} automatic frame download(s) waiting to start")
+        return work
+
     def shutdown_resources(self) -> None:
         """Stop the background threads and processes the container started.
 
@@ -108,6 +141,8 @@ class Container:
         """
         if self.maintenance_service is not None:
             self.maintenance_service.stop()
+        if self.auto_download_service is not None:
+            self.auto_download_service.stop()
         if self.astrometrics is not None:
             try:
                 self.astrometrics.processing.stop_stacking_programs()
@@ -123,6 +158,12 @@ class Container:
         from astrometricslib import get_configuration
 
         self.config_service = get_configuration()
+
+        # The observatory source: the backend only reports it and saves a new
+        # choice. A launcher, when one runs the backend, builds the world.
+        from backend.services.observatory.observatory_source_service import ObservatorySourceService
+
+        self.observatory_source_service = ObservatorySourceService()
 
         # 2. Initialize Data Services & Calibration
         from astrometricslib import Astrometrics
@@ -143,6 +184,7 @@ class Container:
             astrometrics=self.astrometrics,
             simulated=testing,
             separate_process=not testing,
+            open_port_forwards=not testing,
         )
 
         self.target_service = TargetService(self.config_service, astrometrics=self.astrometrics)
@@ -154,7 +196,7 @@ class Container:
         from astrometricslib.jobs import JobStore
 
         self.job_repository = JobStore(str(self.config_service.get_logs_db_path()))
-        self.job_service = JobService(self.job_repository)
+        self.job_service = JobService(self.job_repository, logs_folder=self.config_service.get_logs_path())
         self.maintenance_service = MaintenanceService(self.job_service)
         # Reuse the library's one calibration catalog, and load its index
         # from disk now (the first question builds and loads it).
@@ -166,7 +208,8 @@ class Container:
         from backend.services.infrastructure.settings_service import SettingsService
 
         self.settings_service = SettingsService(
-            self.config_service, equipment=self.wayfinder.control.equipment
+            self.config_service,
+            equipment=self.wayfinder.control.equipment,
         )
 
         # 4. Initialize Infrastructure Services
@@ -222,6 +265,7 @@ class Container:
             notification_service=self.notification_service,
             job_service=self.job_service,
             astrometrics_service=self.astrometrics_service,
+            socket_manager=self.socket_manager,
         )
 
         self.analysis_orchestrator = AnalysisOrchestrator(
@@ -251,7 +295,29 @@ class Container:
             observatory_api=self.wayfinder.control,
             measurement_announcer=self.quality_measurement_service,
             suggestion_trigger=self.suggestion_refresh_worker.request,
+            socket_manager=self.socket_manager,
+            calibration_trigger=self.image_processing_service.measure_new_calibration_frames,
         )
+
+        # The telescope status reports a running copy of new frames.
+        self.telescope_service.set_frame_copy_sources(self.sync_service, self.job_service)
+
+        # A change of observatory source restarts the backend in place. It
+        # waits for running work, and stops every service first (see
+        # `shutdown_resources`).
+        self.observatory_source_service.set_busy_probe(self._running_work)
+        self.observatory_source_service.set_shutdown_hook(self.shutdown_resources)
+
+        # Copy each finished camera frame into the library. Off in tests, which
+        # have no observatory computer to copy from.
+        if not testing:
+            from backend.services.observatory.auto_download_service import AutoDownloadService
+
+            self.auto_download_service = AutoDownloadService(
+                sync_service=self.sync_service,
+                is_enabled=self.config_service.get_auto_download_frames,
+            )
+            self.telescope_service.set_auto_download_service(self.auto_download_service)
 
         from backend.services.observatory.imaging_service import ImagingService
 

@@ -11,8 +11,8 @@ declaration. Every pipeline that emits measurements calls this function.
 One exception to the version rule: a row whose origin is ``backfilled`` may
 carry the definition version 0, which means "unknown (backfilled)". The history
 fill copies old summaries whose estimator was not checked against the code's
-history, so it cannot honestly claim today's version for them (plan
-safeguard 3). A measured row never uses 0.
+history, so it cannot honestly claim today's version for them. A measured row
+never uses 0.
 """
 
 from collections.abc import Sequence

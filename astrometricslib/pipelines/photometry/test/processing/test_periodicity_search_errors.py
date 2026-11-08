@@ -1,7 +1,7 @@
 """Purpose: Test that the period searches use per-point errors as weights.
 
 Description: A light curve in which some points are measured much better than
-others should be searched with those errors (review item S8). The test light
+others should be searched with those errors. The test light
 curve has a clean cycle seen by precise points and hidden by very noisy ones.
 With the true errors, both searches must find the cycle. The tests also check
 that errors of the wrong length or with a zero in them are ignored, and that

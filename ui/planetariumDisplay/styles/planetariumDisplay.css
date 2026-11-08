@@ -14,9 +14,9 @@
   position: relative;
   width: 100%;
   height: 100%;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
-  background: var(--grey-darkest, #181818);
+  background: var(--grey-darkest, var(--term-bg-dark));
 }
 
 .aladin-container {
@@ -34,11 +34,11 @@
   align-items: center;
   gap: 10px;
   padding: 6px 14px;
-  border-radius: 8px;
-  background: rgba(var(--grey-darkest-rgb, 24, 24, 24), 0.88);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--grey-darkest) 88%, transparent);
   backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.55);
+  border: 1px solid color-mix(in srgb, var(--white) 8%, transparent);
+  box-shadow: 0 4px 24px color-mix(in srgb, var(--black) 55%, transparent);
 }
 
 .planetarium-toolbar__group {
@@ -50,7 +50,7 @@
 .planetarium-toolbar__divider {
   width: 1px;
   height: 18px;
-  background: rgba(255, 255, 255, 0.12);
+  background: color-mix(in srgb, var(--white) 12%, transparent);
   margin: 0 2px;
 }
 
@@ -58,7 +58,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--text-primary, #eaeaea);
+  color: var(--text-primary, var(--text-primary));
   font-family: var(--font-family-base);
   font-size: var(--control-font-size, 13px);
   user-select: none;
@@ -67,28 +67,24 @@
 }
 
 .planetarium-toolbar__item:hover {
-  color: var(--status-cyan, #38bdf8);
+  color: var(--status-cyan, var(--accent-sky));
 }
 
 .planetarium-toolbar__chevron {
-  font-size: 11px;
+  margin-left: var(--space-1);
+  font-size: var(--small-font-size);
   opacity: 0.8;
 }
 
 .planetarium-toolbar__popover-header {
-  font-size: 10px;
+  font-size: var(--tiny-font-size);
   font-weight: 600;
-  color: var(--text-dim, #94a3b8);
+  color: var(--text-dim, var(--text-dim));
   text-transform: uppercase;
   letter-spacing: 0.5px;
   padding: 0 4px 4px 4px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid color-mix(in srgb, var(--white) 10%, transparent);
   margin-bottom: 4px;
-}
-
-.planetarium-toolbar__item input[type="checkbox"] {
-  accent-color: var(--status-cyan, #38bdf8);
-  cursor: pointer;
 }
 
 .planetarium-toolbar__popover-container {
@@ -104,63 +100,20 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  background: rgba(20, 24, 33, 0.95);
+  background: color-mix(in srgb, var(--term-bg-dark) 95%, transparent);
   backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.65);
+  border: 1px solid color-mix(in srgb, var(--white) 12%, transparent);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 28px color-mix(in srgb, var(--black) 65%, transparent);
   z-index: 110;
 }
 
-/* Session picker: a button + our own popover (see .planetarium-toolbar__popover-menu
-   below), not a native <select> — its open dropdown popup is drawn by the OS's
-   own widget toolkit on Linux (GTK) and follows the system theme rather than
-   this page's CSS, so it kept rendering light regardless of `color-scheme`. */
-.planetarium-toolbar__select {
-  justify-content: space-between;
-  min-width: 180px;
-}
-
-.planetarium-toolbar__session-container {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.planetarium-toolbar__popover-menu--sessions {
-  max-height: 320px;
-  overflow-y: auto;
-  min-width: 240px;
-}
-
-.planetarium-toolbar__session-option {
-  display: block;
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  border: none;
-  color: var(--text-primary, #eaeaea);
-  padding: 6px 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 13px;
-  font-family: var(--font-family-base);
-  white-space: nowrap;
-}
-
-.planetarium-toolbar__session-option:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.planetarium-toolbar__session-option--selected {
-  background: rgba(79, 193, 255, 0.16);
-  color: var(--status-cyan, #4fc1ff);
-}
+/* The session picker is the shared SessionPicker (common/components/sessionPicker.css). */
 
 .planetarium-toolbar__readout {
   font-family: var(--font-family-mono);
-  color: var(--status-cyan, #4fc1ff);
-  font-size: 13px;
+  color: var(--status-cyan, var(--accent-sky));
+  font-size: var(--compact-font-size);
   padding-left: 8px;
 }
 
@@ -173,29 +126,29 @@
   z-index: 150;
   width: min(520px, calc(100% - 32px));
   padding: 16px 20px;
-  border-radius: 12px;
-  background: rgba(10, 14, 22, 0.96);
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--cmd-bg-darkest) 96%, transparent);
   backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.8);
-  color: var(--text-primary, #eaeaea);
+  border: 1px solid color-mix(in srgb, var(--white) 10%, transparent);
+  box-shadow: 0 12px 40px color-mix(in srgb, var(--black) 80%, transparent);
+  color: var(--text-primary, var(--text-primary));
   font-family: var(--font-family-base);
 }
 
 .planetarium-deep-catalog-prompt__title {
   margin: 0 0 8px 0;
-  font-size: 15px;
+  font-size: var(--panel-header-size);
 }
 
 .planetarium-deep-catalog-prompt__text,
 .planetarium-deep-catalog-prompt__hint {
   margin: 0 0 8px 0;
-  font-size: 13px;
+  font-size: var(--compact-font-size);
   line-height: 1.45;
 }
 
 .planetarium-deep-catalog-prompt__hint {
-  color: var(--text-secondary, #a0a0a0);
+  color: var(--text-secondary, var(--text-dimmer));
 }
 
 .planetarium-deep-catalog-prompt__command-row {
@@ -208,11 +161,11 @@
 .planetarium-deep-catalog-prompt__command {
   flex: 1;
   padding: 6px 10px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--white) 6%, transparent);
   font-family: var(--font-family-mono);
-  font-size: 12px;
-  color: var(--status-cyan, #4fc1ff);
+  font-size: var(--section-label-size);
+  color: var(--status-cyan, var(--accent-sky));
   overflow-x: auto;
   white-space: nowrap;
   user-select: all;
@@ -224,20 +177,6 @@
   gap: 8px;
 }
 
-.planetarium-deep-catalog-prompt__button {
-  padding: 4px 12px;
-  border-radius: 4px;
-  border: 1px solid var(--grey-light, #444);
-  background: var(--grey-dark, #222);
-  color: var(--text-primary, #eaeaea);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.planetarium-deep-catalog-prompt__button:hover {
-  background: var(--grey-medium, #333);
-}
-
 /* Glassmorphic Floating Info Card */
 .planetarium-info-card {
   position: absolute;
@@ -245,14 +184,14 @@
   left: 16px;
   z-index: 100;
   width: 320px;
-  border-radius: 12px;
-  background: rgba(10, 14, 22, 0.88);
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--cmd-bg-darkest) 88%, transparent);
   backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  border: 1px solid color-mix(in srgb, var(--white) 8%, transparent);
+  box-shadow: 0 8px 32px color-mix(in srgb, var(--black) 60%, transparent);
   display: flex;
   flex-direction: column;
-  color: var(--text-primary, #eaeaea);
+  color: var(--text-primary, var(--text-primary));
   animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -269,34 +208,20 @@
   justify-content: space-between;
   align-items: flex-start;
   padding: 16px 16px 12px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid color-mix(in srgb, var(--white) 5%, transparent);
 }
 
 .planetarium-info-card__title {
   margin: 0;
-  font-size: 18px;
+  font-size: var(--large-font-size);
   font-weight: 600;
-  color: var(--white, #fff);
+  color: var(--white, var(--white));
   letter-spacing: -0.2px;
 }
 
 .planetarium-info-card__subtitle {
-  font-size: 12px;
-  color: var(--text-muted, #888);
-}
-
-.planetarium-info-card__close {
-  background: transparent;
-  border: none;
-  color: var(--text-dim, #aaa);
-  font-size: 20px;
-  cursor: pointer;
-  padding: 0;
-  line-height: 1;
-}
-
-.planetarium-info-card__close:hover {
-  color: var(--white);
+  font-size: var(--section-label-size);
+  color: var(--text-muted, var(--text-muted));
 }
 
 .planetarium-info-card__content {
@@ -310,45 +235,45 @@
 
 .planetarium-info-card__table td {
   padding: 6px 0;
-  font-size: 13px;
+  font-size: var(--compact-font-size);
 }
 
 .planetarium-info-card__table td:first-child {
-  color: var(--text-dim, #aaa);
+  color: var(--text-dim, var(--text-dim));
 }
 
 .planetarium-info-card__table td:last-child {
   text-align: right;
   font-family: var(--font-family-mono);
-  color: var(--text-light, #eee);
+  color: var(--text-light, var(--text-light));
 }
 
 .planetarium-info-card__badge {
   padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--tiny-font-size);
   font-weight: 600;
   text-transform: uppercase;
 }
 
 .planetarium-info-card__badge--green {
-  background: rgba(40, 167, 69, 0.15);
-  color: var(--status-green-dim, #4ade80);
+  background: color-mix(in srgb, var(--success-green) 15%, transparent);
+  color: var(--status-green-dim, var(--status-green-dim));
 }
 
 .planetarium-info-card__badge--yellow {
-  background: rgba(234, 179, 8, 0.15);
-  color: #facc15;
+  background: color-mix(in srgb, var(--warning-amber) 15%, transparent);
+  color: var(--warning-amber);
 }
 
 .planetarium-info-card__badge--red {
-  background: rgba(239, 68, 68, 0.15);
-  color: #f87171;
+  background: color-mix(in srgb, var(--danger-red) 15%, transparent);
+  color: var(--btn-red-pending);
 }
 
 .planetarium-info-card__badge--blue {
-  background: rgba(0, 123, 255, 0.15);
-  color: var(--status-cyan, #4fc1ff);
+  background: color-mix(in srgb, var(--accent-blue) 15%, transparent);
+  color: var(--status-cyan, var(--accent-sky));
 }
 
 /* Alignment Point Card variants of the shared info-card chrome */
@@ -359,18 +284,18 @@
 }
 
 .planetarium-info-card__avatar--alignment {
-  border: 2px solid #10b981;
-  box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+  border: 2px solid var(--success-green);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--success-green) 40%, transparent);
 }
 
 .planetarium-info-card__star-dot--alignment {
-  background-color: #10b981;
+  background-color: var(--success-green);
   transform: rotate(45deg);
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
 }
 
 .planetarium-info-card__title--compact {
-  font-size: 14px;
+  font-size: var(--control-font-size);
   line-height: 1.2;
 }
 
@@ -394,8 +319,8 @@
   display: flex;
   justify-content: space-between;
   width: 100%;
-  font-size: 11px;
-  color: var(--text-dim, #94a3b8);
+  font-size: var(--small-font-size);
+  color: var(--text-dim, var(--text-dim));
   margin-bottom: 4px;
 }
 
@@ -406,49 +331,49 @@
 }
 
 .planetarium-alignment-chart__svg {
-  background: rgba(15, 23, 42, 0.6);
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: color-mix(in srgb, var(--grey-darkest) 60%, transparent);
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--white) 6%, transparent);
 }
 
 .planetarium-alignment-chart__ring {
   fill: none;
-  stroke: rgba(255, 255, 255, 0.12);
+  stroke: color-mix(in srgb, var(--white) 12%, transparent);
   stroke-dasharray: 3 3;
 }
 
 .planetarium-alignment-chart__ring-label {
-  fill: rgba(148, 163, 184, 0.6);
-  font-size: 9px;
+  fill: color-mix(in srgb, var(--text-dim) 60%, transparent);
+  font-size: var(--tiny-font-size);
   font-family: var(--font-family-mono), monospace;
 }
 
 .planetarium-alignment-chart__axis-label {
-  fill: rgba(148, 163, 184, 0.5);
-  font-size: 9px;
+  fill: color-mix(in srgb, var(--text-dim) 50%, transparent);
+  font-size: var(--tiny-font-size);
   font-family: var(--font-family-mono), monospace;
 }
 
 .planetarium-alignment-chart__axis {
-  stroke: rgba(255, 255, 255, 0.15);
+  stroke: color-mix(in srgb, var(--white) 15%, transparent);
   stroke-width: 1;
 }
 
 .planetarium-alignment-chart__zero-axis {
-  stroke: rgba(255, 255, 255, 0.15);
+  stroke: color-mix(in srgb, var(--white) 15%, transparent);
   stroke-dasharray: 2 2;
 }
 
 .planetarium-alignment-chart__ellipse {
-  fill: rgba(16, 185, 129, 0.08);
-  stroke: #10b981;
+  fill: color-mix(in srgb, var(--success-green) 8%, transparent);
+  stroke: var(--success-green);
   stroke-width: 1.2;
   stroke-dasharray: 4 2;
 }
 
 .planetarium-alignment-chart__point {
-  fill: rgba(56, 189, 248, 0.85);
-  stroke: rgba(255, 255, 255, 0.4);
+  fill: color-mix(in srgb, var(--accent-sky) 85%, transparent);
+  stroke: color-mix(in srgb, var(--white) 40%, transparent);
   stroke-width: 0.75;
 }
 
@@ -459,49 +384,49 @@
 }
 
 .planetarium-alignment-chart__trace--ra {
-  stroke: #38bdf8;
+  stroke: var(--accent-sky);
 }
 
 .planetarium-alignment-chart__trace--dec {
-  stroke: #f43f5e;
+  stroke: var(--danger-red);
 }
 
 .planetarium-alignment-chart__legend {
   display: flex;
   gap: 12px;
-  font-size: 10px;
-  color: var(--text-dim, #94a3b8);
+  font-size: var(--tiny-font-size);
+  color: var(--text-dim, var(--text-dim));
   margin-top: 4px;
 }
 
 .planetarium-alignment-chart__legend-item--ellipse {
-  color: #10b981;
+  color: var(--success-green);
 }
 
 .planetarium-alignment-chart__legend-item--point {
-  color: #38bdf8;
+  color: var(--accent-sky);
 }
 
 .planetarium-alignment-chart__legend-item--ra {
-  color: #38bdf8;
+  color: var(--accent-sky);
 }
 
 .planetarium-alignment-chart__legend-item--dec {
-  color: #f43f5e;
+  color: var(--danger-red);
 }
 
 .planetarium-alignment-chart__value--good {
-  color: #4ade80;
+  color: var(--status-green-dim);
   font-weight: 600;
 }
 
 .planetarium-alignment-chart__value--warn {
-  color: #facc15;
+  color: var(--warning-amber);
   font-weight: 600;
 }
 
 .planetarium-alignment-chart__value--bad {
-  color: #f87171;
+  color: var(--btn-red-pending);
   font-weight: 600;
 }
 
@@ -511,11 +436,10 @@
   position: absolute;
   z-index: 1001;
   width: 180px;
-  background: rgba(15, 20, 30, 0.92);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.7);
+  background: var(--surface-menu);
+  border: 1px solid color-mix(in srgb, var(--white) 8%, transparent);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 4px 24px color-mix(in srgb, var(--black) 70%, transparent);
   padding: 8px 10px;
   display: flex;
   flex-direction: column;
@@ -527,7 +451,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid color-mix(in srgb, var(--white) 5%, transparent);
   padding-bottom: 5px;
 }
 
@@ -537,42 +461,28 @@
 }
 
 .planetarium-context-menu__label {
-  font-size: 11px;
+  font-size: var(--small-font-size);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--text-dim, #aaa);
+  color: var(--text-dim, var(--text-dim));
 }
 
 .planetarium-context-menu__value {
-  font-size: 14px;
+  font-size: var(--control-font-size);
   font-weight: 600;
   color: var(--white);
 }
 
 .planetarium-context-menu__coords {
   font-family: var(--font-family-mono);
-  font-size: 11px;
+  font-size: var(--small-font-size);
   color: var(--text-light);
   line-height: 1.3;
 }
 
+/* Only the spacing; the look comes from Button. */
 .planetarium-context-menu__action {
-  width: 100%;
-  background: var(--primary-blue);
-  color: var(--white);
-  border: none;
-  border-radius: 4px;
-  padding: 8px;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  text-align: center;
-  transition: background 0.12s ease;
-  margin-top: 4px;
-}
-
-.planetarium-context-menu__action:hover {
-  background: var(--accent-blue);
+  margin-top: var(--space-1);
 }
 
 @keyframes fadeIn {
@@ -611,27 +521,12 @@
 
 .planetarium-info-card__divider {
   margin: 0 6px;
-  color: var(--text-dimmest, #555);
+  color: var(--text-dimmest, var(--cmd-fg-dimmest));
 }
 
+/* Only the spacing; the look comes from Button. */
 .planetarium-info-card__view-in-astronomy-btn {
-  margin-top: 18px;
-  padding-top: 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-  background: transparent;
-  border-left: none;
-  border-right: none;
-  border-bottom: none;
-  color: var(--text-light, #eee);
-  font-size: 13px;
-  font-weight: 500;
-  text-align: left;
-  cursor: pointer;
-  width: 100%;
-}
-
-.planetarium-info-card__view-in-astronomy-btn:hover {
-  color: var(--primary-blue, #1976d2);
+  margin-top: var(--space-4);
 }
 
 /* Custom Celestial Canvas & Time Controller styles */
@@ -652,100 +547,26 @@
   align-items: center;
   gap: 10px;
   padding: 6px 14px;
-  border-radius: 20px;
-  background: rgba(10, 14, 22, 0.88);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--cmd-bg-darkest) 88%, transparent);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  border: 1px solid color-mix(in srgb, var(--white) 8%, transparent);
+  box-shadow: 0 4px 20px color-mix(in srgb, var(--black) 50%, transparent);
   pointer-events: auto;
-}
-
-.celestial-time-btn {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: var(--white, #fff);
-  border-radius: 50%;
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  font-size: 11px;
-  transition: background 0.15s;
-}
-
-.celestial-time-btn:hover,
-.celestial-time-btn.active {
-  background: var(--primary-blue, #1976d2);
-  border-color: var(--accent-blue, #2196f3);
-}
-
-.celestial-time-select {
-  background: var(--grey-darkest, #181818);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: var(--white);
-  padding: 2px 4px;
-  border-radius: 4px;
-  font-size: 11px;
-  outline: none;
-  cursor: pointer;
 }
 
 .celestial-time-slider {
   width: 140px;
   height: 4px;
   cursor: pointer;
-  accent-color: var(--primary-blue, #1976d2);
 }
 
 .celestial-time-label {
   font-family: var(--font-family-mono), monospace;
-  font-size: 11px;
-  color: var(--status-cyan, #4fc1ff);
+  font-size: var(--small-font-size);
+  color: var(--status-cyan, var(--accent-sky));
   min-width: 60px;
   text-align: right;
-}
-
-/* Toolbar buttons (Layers, Date & Time, Sync) */
-.planetarium-toolbar__button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  color: var(--text-primary, #eaeaea);
-  padding: 5px 12px;
-  border-radius: 5px;
-  cursor: pointer;
-  font-size: 13px;
-  font-family: var(--font-family-base);
-  font-weight: 500;
-  line-height: 1.2;
-  white-space: nowrap;
-  transition: all 0.15s ease;
-  user-select: none;
-}
-
-.planetarium-toolbar__button:hover {
-  background: rgba(255, 255, 255, 0.14);
-  border-color: rgba(255, 255, 255, 0.22);
-}
-
-.planetarium-toolbar__button:active {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.planetarium-toolbar__button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.planetarium-toolbar__button--active {
-  background: rgba(56, 189, 248, 0.18) !important;
-  border-color: rgba(56, 189, 248, 0.5) !important;
-  color: #bae6fd !important;
 }
 
 /* Canvas element inside the sky map container */
@@ -768,12 +589,12 @@
   transform: translate(-50%, -50%);
   z-index: 200;
   width: 400px;
-  border-radius: 12px;
-  background: rgba(10, 14, 22, 0.96);
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--cmd-bg-darkest) 96%, transparent);
   backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.8);
-  color: var(--text-primary, #eaeaea);
+  border: 1px solid color-mix(in srgb, var(--white) 10%, transparent);
+  box-shadow: 0 12px 40px color-mix(in srgb, var(--black) 80%, transparent);
+  color: var(--text-primary, var(--text-primary));
   font-family: var(--font-family-base);
 }
 
@@ -782,44 +603,30 @@
   justify-content: space-between;
   align-items: center;
   padding: 16px 20px 12px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  border-bottom: 1px solid color-mix(in srgb, var(--white) 7%, transparent);
 }
 
 .planetarium-datetime-modal__title {
-  font-size: 15px;
+  font-size: var(--panel-header-size);
   font-weight: 600;
-  color: var(--white, #fff);
-}
-
-.planetarium-datetime-modal__close {
-  background: transparent;
-  border: none;
-  color: var(--text-dim, #aaa);
-  font-size: 20px;
-  cursor: pointer;
-  line-height: 1;
-  padding: 0;
-}
-
-.planetarium-datetime-modal__close:hover {
-  color: var(--white, #fff);
+  color: var(--white, var(--white));
 }
 
 .planetarium-datetime-modal__tabs {
   display: flex;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  border-bottom: 1px solid color-mix(in srgb, var(--white) 7%, transparent);
 }
 
+/* A tab is a ghost Button; this only sizes it and marks the open tab. */
 .planetarium-datetime-modal__tab {
   flex: 1;
-  padding: 10px 16px;
-  background: transparent;
-  border: none;
-  color: var(--text-light, #eee);
-  font-size: 13px;
-  cursor: pointer;
-  text-align: center;
-  transition: background 0.1s ease;
+  padding: var(--space-2) var(--space-4);
+  border-radius: 0;
+}
+
+.planetarium-datetime-modal__tab--active {
+  font-weight: 600;
+  border-bottom: 2px solid var(--accent-blue);
 }
 
 .planetarium-datetime-modal__content {
@@ -840,10 +647,10 @@
 }
 
 .planetarium-datetime-modal__section-label {
-  font-size: 11px;
+  font-size: var(--small-font-size);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--text-dim, #aaa);
+  color: var(--text-dim, var(--text-dim));
 }
 
 .planetarium-datetime-modal__spinner-group {
@@ -859,45 +666,36 @@
   gap: 2px;
 }
 
+/* The up and down arrows of a spinner are small ghost Buttons; this only sets their size. */
 .planetarium-datetime-modal__arrow-btn {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: var(--text-light, #eee);
-  cursor: pointer;
-  border-radius: 3px;
   width: 24px;
   height: 18px;
-  font-size: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  line-height: 1;
+  font-size: var(--compact-font-size);
 }
 
-.planetarium-datetime-modal__arrow-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
+.planetarium-datetime-modal__arrow-btn--large {
+  font-size: var(--control-font-size);
 }
 
 .planetarium-datetime-modal__val {
   font-family: var(--font-family-mono), monospace;
-  font-size: 16px;
+  font-size: var(--base-font-size);
   padding: 2px 4px;
-  color: var(--white, #fff);
+  color: var(--white, var(--white));
   min-width: 32px;
   text-align: center;
 }
 
 .planetarium-datetime-modal__separator {
-  color: var(--text-dim, #aaa);
+  color: var(--text-dim, var(--text-dim));
   padding: 0 2px;
-  font-size: 16px;
+  font-size: var(--base-font-size);
   align-self: center;
 }
 
 .planetarium-datetime-modal__divider {
   width: 1px;
-  background: rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--white) 8%, transparent);
   align-self: stretch;
   margin: 0 4px;
 }
@@ -911,61 +709,29 @@
 
 .planetarium-datetime-modal__jd-display {
   font-family: var(--font-family-mono), monospace;
-  font-size: 22px;
-  color: var(--status-cyan, #4fc1ff);
+  font-size: var(--heading-font-size);
+  color: var(--status-cyan, var(--accent-sky));
   padding: 8px 16px;
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 6px;
+  background: color-mix(in srgb, var(--white) 4%, transparent);
+  border-radius: var(--radius-md);
   min-width: 180px;
   text-align: center;
 }
 
 .planetarium-datetime-modal__jd-hint {
-  font-size: 11px;
-  color: var(--text-dimmest, #666);
+  font-size: var(--small-font-size);
+  color: var(--text-dimmest, var(--text-dimmest));
   text-align: center;
 }
 
 .planetarium-datetime-modal__footer {
   padding: 12px 20px 16px 20px;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  border-top: 1px solid color-mix(in srgb, var(--white) 7%, transparent);
 }
 
-.planetarium-datetime-modal__reset-btn {
-  width: 100%;
-  padding: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
-  color: var(--text-primary, #eaeaea);
-  font-size: 13px;
-  font-family: var(--font-family-base);
-  cursor: pointer;
-  transition: background 0.12s ease;
-}
-
-.planetarium-datetime-modal__reset-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
-}
-
+/* Only the spacing; the look comes from Button. */
 .planetarium-info-card__add-package-btn {
   margin-top: var(--space-3);
-  padding: var(--space-1) var(--space-3);
-  background: var(--grey-dark);
-  border: 1px solid var(--border-control);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  cursor: pointer;
-}
-
-.planetarium-info-card__add-package-btn:disabled {
-  cursor: default;
-  opacity: 0.6;
-}
-
-.planetarium-info-card__add-package-btn:focus-visible {
-  outline: 2px solid var(--primary-blue);
-  outline-offset: 2px;
 }
 
 .planetarium-info-card__refusal {

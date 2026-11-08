@@ -13,6 +13,7 @@ import '../common/styles/panels.css';
 import './executionQueue.css';
 import './observationManagerLayout.css';
 import './queueProgress.css';
+import { Button } from '../common/components/Button';
 
 interface Props {
     queue: SequenceObject[];
@@ -179,49 +180,47 @@ export const ExecutionQueue: React.FC<Props> = ({
             className="execution-queue-panel execution-queue-strip"
             headerContent={
                 <span className="queue-header">
-                    {isSessionLoading && <span className="queue-header__status" aria-busy="true">Loading progress…</span>}
+                    {isSessionLoading && <span className="queue-header__status" role="status" aria-busy="true">Reading progress</span>}
                     {!isSessionLoading && sessionError && (
                         <span className="queue-header__error" role="alert">
                             Could not load progress.
-                            <button type="button" className="btn btn--tiny" onClick={onRetrySession}>Try again</button>
+                            <Button size="small" onClick={onRetrySession}>Try again</Button>
                         </span>
                     )}
                     {!isSessionLoading && !sessionError && asOfTime && (
                         <span className="queue-header__status">as of {asOfTime}</span>
                     )}
-                    <button
-                        type="button"
-                        className="btn btn--tiny"
+                    <Button
+                        size="small"
                         ref={checklistButtonRef}
                         onClick={() => setIsChecklistOpen(true)}
                     >
                         Checklist ({checklist.length})
-                    </button>
-                    <button
-                        type="button"
-                        className="btn btn--tiny btn--primary"
+                    </Button>
+                    <Button
+                        variant="primary"
+                        size="small"
                         onClick={handleStartSession}
                         disabled={!canStart}
                         aria-disabled={!canStart}
                         title={availability.canCommand ? undefined : availability.reason}
                     >
                         {isStarting ? 'Starting...' : 'Start Imaging Session'}
-                    </button>
-                    <button
-                        type="button"
-                        className="btn btn--tiny"
+                    </Button>
+                    <Button
+                        size="small"
                         onClick={handlePauseSession}
                         title="Stop after the package now being imaged. The queue is kept; Start Imaging Session continues it."
                     >
                         Pause Session
-                    </button>
-                    <button
-                        type="button"
-                        className="btn btn--tiny btn--danger"
+                    </Button>
+                    <Button
+                        variant="danger"
+                        size="small"
                         onClick={() => setIsStopConfirmOpen(true)}
                     >
                         Stop Session
-                    </button>
+                    </Button>
                     {!availability.canCommand && <InfoButton label="Why unavailable?" text={availability.reason} />}
                 </span>
             }
@@ -229,19 +228,19 @@ export const ExecutionQueue: React.FC<Props> = ({
             {startError && (
                 <div className="queue-header__error" role="alert">
                     <span>{startError}</span>
-                    <button type="button" className="btn btn--tiny" onClick={() => setStartError(null)}>Dismiss</button>
+                    <Button size="small" onClick={() => setStartError(null)}>Dismiss</Button>
                 </div>
             )}
             {stopError && (
                 <div className="queue-header__error" role="alert">
                     <span>{stopError}</span>
-                    <button type="button" className="btn btn--tiny" onClick={() => setStopError(null)}>Dismiss</button>
+                    <Button size="small" onClick={() => setStopError(null)}>Dismiss</Button>
                 </div>
             )}
             <ConfirmDialog
                 open={isStopConfirmOpen}
                 title="Stop Session"
-                message="Stop the imaging session? The packages not yet imaged are skipped and the session is closed. The package being imaged now stops after its current cycle. This does not stop the mount or the guider; use Stop in Manual Guide or Ekos for that."
+                message="Stop the imaging session? The packages not yet imaged are skipped and the session is closed. The package being imaged now stops after its current cycle. This does not stop the mount or the guider; use STOP on the Manual tab of Telescope Control or Ekos for that."
                 confirmLabel="Yes, Stop"
                 cancelLabel="Keep Imaging"
                 onConfirm={handleStopSession}

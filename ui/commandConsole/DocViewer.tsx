@@ -6,6 +6,7 @@
 import React, { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 
+import { Skeleton } from '../common/components/Skeleton';
 export interface DocTopicItem {
   id: string;
   title: string;
@@ -185,9 +186,7 @@ export const DocViewer: React.FC<DocViewerProps> = ({
   return (
     <div className="doc-viewer-container">
       {loading ? (
-        <div style={{ color: 'var(--text-dim)', textAlign: 'center', marginTop: '60px', width: '100%' }}>
-          Loading documentation topic...
-        </div>
+        <Skeleton variant="list" count={8} lines={3} label="Loading the documentation topic" />
       ) : processedContent ? (
         <div className="doc-viewer">
           <ReactMarkdown components={markdownComponents}>{processedContent}</ReactMarkdown>

@@ -1,8 +1,8 @@
 """Purpose: A first exposure for a target that has no frames yet.
 
 Description: A target with no frames has no noise history, so the report
-cannot say "take N more". It gives a starting point instead (plan section
-6.8), always labeled as one. The exposure comes from two limits:
+cannot say "take N more". It gives a starting point instead,
+always labeled as one. The exposure comes from two limits:
 
 * **Sky-dominated exposure.** Long enough that the sky's photon noise
   dominates the camera's read noise. For one pixel the sky variance is
@@ -14,7 +14,7 @@ cannot say "take N more". It gives a starting point instead (plan section
 * **Clipping cap.** Short enough that the brightest star does not clip. The
   cap needs the star's peak rate in ADU per second, which comes from a
   catalog magnitude and a photometric zero point. The library has no zero
-  point that is not exploratory (decision S12), so the cap is "not computed"
+  point that is not exploratory (issue #95), so the cap is "not computed"
   with that reason unless the caller supplies a measured peak rate. The star
   is assumed centered on a pixel, which gives the highest peak and so the
   shortest, safest cap.

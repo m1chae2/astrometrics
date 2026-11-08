@@ -99,7 +99,7 @@ def test_spectral_frame_check_matches_pins(golden: Any) -> None:
 def test_photometry_pre_s2_matches_pins(
     golden: Any, detection_frame: tuple[np.ndarray, fits.Header], detected_sources: list[dict[str, Any]]
 ) -> None:
-    """Aperture fluxes on whole-pixel centres match the pre-S2 pins.
+    """Aperture fluxes on whole-pixel centres match the whole-pixel pins.
 
     Parameters
     ----------

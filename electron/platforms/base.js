@@ -110,28 +110,6 @@ export class BasePlatform {
   }
 
   /**
-   * Calculates popover (x, y) coordinates relative to the tray icon and screen boundaries.
-   * Returns `null` if the host compositor or OS manages placement (e.g. Wayland).
-   *
-   * @param {Electron.Tray} _tray - The application tray instance.
-   * @param {{ width: number, height: number }} _windowSize - Popover window dimensions.
-   * @param {Object} [_screenModule] - Optional Electron screen module injection for testing.
-   * @returns {{ x: number, y: number } | null}
-   */
-  getTrayPopoverPosition(_tray, _windowSize, _screenModule) {
-    return null;
-  }
-
-  /**
-   * Determines whether the tray popover should auto-hide when losing focus (blur).
-   *
-   * @returns {boolean}
-   */
-  shouldDismissTrayOnBlur() {
-    return false;
-  }
-
-  /**
    * Determines whether closing all application windows should quit the process.
    *
    * @returns {boolean}

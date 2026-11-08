@@ -20,7 +20,6 @@ import { PlanetariumContextMenu } from './components/PlanetariumContextMenu';
 import { PlanetariumDateTimeModal } from './components/PlanetariumDateTimeModal';
 import { FramingPanel } from './components/FramingPanel';
 import type { FramingPanelCorners } from './layers/FramingOverlay';
-import { clearShowOnSkyRequest, getShowOnSkyRequest, subscribeToShowOnSky } from './showOnSky/showOnSkyStore';
 import { usePlanningTime } from '../common/context/PlanningTimeContext';
 import { useConstellationLines } from './hooks/useConstellationLines';
 import { useObserverLocation } from './hooks/useObserverLocation';
@@ -37,7 +36,7 @@ import { useRemoteStatusContext } from '../common/context/RemoteStatusContext';
 import { useTelescopeStatus } from '../common/hooks/useTelescopeStatus';
 import { safeParse } from './utils/coordinateUtils';
 import { DeepCatalogPrompt } from './components/DeepCatalogPrompt';
-import { useNavigationTarget, NavigationIntent } from '../common/utils/displayCoordinator';
+import { consumeHandoff, usePendingHandoff, useHandoffConsumer } from '../common/utils/displayHandoffStore';
 import { useTargetBrowserItems } from '../astronomyManager/hooks/useTargetBrowserItems';
 import { useSpectralClassBrowserItems, ALL_SPECTRAL_CLASSES_VALUE } from '../astronomyManager/hooks/useSpectralClassBrowserItems';
 import { useSpectrumList } from '../astronomyManager/hooks/useSpectrumList';
@@ -45,6 +44,7 @@ import { useStarsBySpectralClassList } from '../astronomyManager/hooks/useStarsB
 import { spectralClassLetter } from '../common/utils/starDisplayFormat';
 import { useReportModeReady } from '../common/utils/appBootReadiness';
 import '../common/styles/segmentedToggle.css';
+import { Tabs } from '../common/components/Tabs';
 import './styles/planetariumDisplay.css';
 
 // Field of view, in degrees, the sky map zooms to when a star is picked from
@@ -260,13 +260,14 @@ export const PlanetariumDisplay: React.FC = () => {
     };
 
     fetchDetails();
-    const interval = setInterval(fetchDetails, 10000);
+    // A chosen moment gives the same answer every time, so only live time is asked again.
+    const interval = isLiveTime ? setInterval(fetchDetails, 10000) : undefined;
     return () => {
       active = false;
       controller.abort();
-      clearInterval(interval);
+      if (interval !== undefined) clearInterval(interval);
     };
-  }, [selectedSource?.id, targetTimeIso]);
+  }, [selectedSource?.id, targetTimeIso, isLiveTime]);
 
   /**
    * Resolves the selected object ID to a PlanetariumSource and updates viewport center.
@@ -340,18 +341,20 @@ export const PlanetariumDisplay: React.FC = () => {
   }, [libraryTargets, targetList.targets, targetList.stars, setSelectedTargetId, setPendingTarget]);
 
   // Consumes a "Show on sky" request (from a quality statement in another
-  // display). The store keeps a request that arrived before this display
-  // mounted. The request waits until the target lists have loaded, then
-  // centers and selects the target like a pick from the list. The sky already
-  // follows the shared planning time, so the target is shown at that time.
-  const [showOnSkyRequest, setShowOnSkyRequest] = useState(getShowOnSkyRequest);
-  useEffect(() => subscribeToShowOnSky(setShowOnSkyRequest), []);
+  // display). The hand-off store keeps a request that arrived while this display
+  // was hidden, paused or not yet mounted. The request waits until the target
+  // lists have loaded, then centers and selects the target like a pick from the
+  // list. The sky already follows the shared planning time, so the target is
+  // shown at that time.
+  const showOnSkyRequest = usePendingHandoff<{ targetId?: string }>('Planetarium', 'showOnSky');
   const targetListsLoaded = libraryTargets.length > 0 || targetList.targets.length > 0;
   useEffect(() => {
     if (!showOnSkyRequest || !targetListsLoaded) return;
-    handleSelectObject(showOnSkyRequest.targetId);
-    setScopedTarget(showOnSkyRequest.targetId);
-    clearShowOnSkyRequest();
+    consumeHandoff(showOnSkyRequest);
+    const requestedTargetId = showOnSkyRequest.payload?.targetId;
+    if (typeof requestedTargetId !== 'string' || requestedTargetId === '') return;
+    handleSelectObject(requestedTargetId);
+    setScopedTarget(requestedTargetId);
   }, [showOnSkyRequest, targetListsLoaded, handleSelectObject]);
 
   /**
@@ -421,14 +424,12 @@ export const PlanetariumDisplay: React.FC = () => {
   }, [scopedStarList.items, applyLocateStar]);
 
   // Consumes a star handed off from Astronomy Manager's "Locate in
-  // Planetarium" action, routed through the shared displayCoordinator
-  // navigation-intent bus so the same handoff works whether this panel is
-  // already mounted or is switched to as part of the hand-off.
-  useNavigationTarget('Planetarium', undefined, useCallback((intent: NavigationIntent) => {
-    if (intent.action === 'locateStar' && intent.payload) {
-      applyLocateStar(intent.payload as PlanetariumSource);
-    }
-  }, [applyLocateStar]));
+  // Planetarium" action. The request waits in the hand-off store, so the same
+  // hand-off works whether this display is running, hidden, paused or is
+  // switched to as part of the hand-off.
+  useHandoffConsumer<PlanetariumSource>('Planetarium', 'locateStar', (source) => {
+    if (source) applyLocateStar(source);
+  });
 
   /**
    * Handles source selection from the canvas.
@@ -499,20 +500,16 @@ export const PlanetariumDisplay: React.FC = () => {
   const leftPanel = (
     <div className="astronomy-display__browser">
       <div className="astronomy-display__mode-toggle">
-        <button
-          type="button"
-          className={`segmented-btn ${navigationMode === 'target' ? 'active' : ''}`}
-          onClick={() => setNavigationMode('target')}
-        >
-          By target
-        </button>
-        <button
-          type="button"
-          className={`segmented-btn ${navigationMode === 'spectralClass' ? 'active' : ''}`}
-          onClick={() => setNavigationMode('spectralClass')}
-        >
-          By spectral class
-        </button>
+        <Tabs
+          idPrefix="navigation-mode"
+          ariaLabel="Browse by"
+          selectedId={navigationMode}
+          onChange={(modeId) => setNavigationMode(modeId as typeof navigationMode)}
+          tabs={[
+            { id: 'target', label: 'By target' },
+            { id: 'spectralClass', label: 'By spectral class' },
+          ]}
+        />
       </div>
 
       {navigationMode === 'target' ? (
@@ -529,7 +526,7 @@ export const PlanetariumDisplay: React.FC = () => {
           filterPlaceholder="Search targets..."
           highlightedIds={targetList.highlightedIds}
           isLoading={targetBrowser.isLoading}
-          loadingMessage="Loading targets…"
+          loadingMessage="Loading targets"
           emptyMessage="No targets found."
           isError={targetBrowser.isError}
           errorMessage="Could not load the targets."
@@ -581,7 +578,7 @@ export const PlanetariumDisplay: React.FC = () => {
           </>
         }
         isLoading={scopedStarList.isLoading}
-        loadingMessage="Loading stars…"
+        loadingMessage="Loading stars"
         emptyMessage="No stars found for this selection."
         isError={scopedStarList.isError}
         errorMessage="Could not load the stars."

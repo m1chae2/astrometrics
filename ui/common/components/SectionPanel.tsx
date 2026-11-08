@@ -1,5 +1,6 @@
 import React from 'react';
 import '../styles/panels.css';
+import { Skeleton, UpdatingBar, SkeletonProps } from './Skeleton';
 
 export interface SectionPanelProps {
     title?: string;
@@ -9,6 +10,12 @@ export interface SectionPanelProps {
     id?: string;
     style?: React.CSSProperties;
     fullHeight?: boolean;
+    /** True while the panel has no data yet: `skeleton` shows instead of the children. */
+    loading?: boolean;
+    /** True while data already shown is refreshed: the children stay and a thin bar shows at the panel's top edge. */
+    refreshing?: boolean;
+    /** The placeholder to show while `loading`. Required when `loading` can be true. */
+    skeleton?: SkeletonProps;
 }
 
 /**
@@ -24,7 +31,10 @@ export const SectionPanel: React.FC<SectionPanelProps> = ({
     headerContent,
     id,
     style,
-    fullHeight = false
+    fullHeight = false,
+    loading = false,
+    refreshing = false,
+    skeleton
 }) => {
     const fullHeightClass = fullHeight ? 'panel--full-height' : '';
     return (
@@ -35,8 +45,9 @@ export const SectionPanel: React.FC<SectionPanelProps> = ({
                     {headerContent}
                 </div>
             )}
+            {refreshing && !loading && <UpdatingBar label={title ? `Updating ${title}` : 'Updating'} />}
             <div className="panel__content">
-                {children}
+                {loading && skeleton ? <Skeleton {...skeleton} /> : children}
             </div>
         </div>
     );

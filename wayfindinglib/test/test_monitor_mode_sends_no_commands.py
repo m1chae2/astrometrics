@@ -1,8 +1,8 @@
 """Purpose: Prove that monitor mode sends no motion or capture command.
 
 Description: In monitor mode every capability is `DELEGATED`: the app
-watches and computes but commands nothing (plan decision 20). The user
-decided on 2026-10-24 (issue #95, settled decision S10) that:
+watches and computes but commands nothing (issue #95). The user
+decided on 2026-10-24 that:
 
 * every motion and capture command stays refused (the 15 guarded
   operations of `hardware_operations`, including `abort_motion`);
@@ -172,3 +172,58 @@ def test_the_two_stops_are_refused_in_monitor_mode_and_change_nothing(wayfinder:
             wayfinder.control.mount.cancel_centering(run_is_active)
     assert not wayfinder.control._context.motion_stop.is_set()
     assert wayfinder.recording.commands_sent() == []
+
+
+def test_controller_mode_lets_a_slew_through_and_monitor_mode_refuses_it(wayfinder: Wayfinder) -> None:
+    """Controller mode lets a slew through; monitor mode still refuses.
+
+    The backend runs ``enter_controller_mode`` only when its source is the
+    simulator, so the real telescope stays in monitor mode and refuses.
+    """
+    position = {"ra_deg": 10.0, "dec_deg": 20.0}
+    with pytest.raises(PermissionDeniedError, match="MOUNT_CONTROL"):
+        wayfinder.control.mount.slew(position)
+    assert wayfinder.recording.commands_sent() == []
+
+    wayfinder.control.safety.enter_controller_mode(evidence_note="simulator source")
+    wayfinder.control.mount.slew(position)
+    assert wayfinder.recording.commands_sent() == ["mount.slew"]
+
+
+def test_simulator_takes_command_from_the_real_starting_policy(wayfinder: Wayfinder) -> None:
+    """From the user's real policy, the mount and plate solving are taken.
+
+    The real policy holds one row: ``MOUNT_CONTROL`` ``DELEGATED``, every
+    other capability at its default. With ``shadow_first`` the rules'
+    shadow step is done, so the mount, safety and plate solving become
+    `AUTHORITATIVE` and a slew goes through. Autoguiding and autofocus stay
+    off because the rules need a guider calibration and a focus model, and
+    capture stays off because it depends on both.
+    """
+    from wayfindinglib.models.policy.delegation import (
+        CapabilityDelegation,
+        DelegationPolicy,
+        DelegationState,
+        ObservatoryCapability,
+    )
+
+    real_policy = DelegationPolicy(
+        id="default",
+        capability_delegations=[
+            CapabilityDelegation(
+                capability=ObservatoryCapability.MOUNT_CONTROL, state=DelegationState.DELEGATED
+            )
+        ],
+    )
+    wayfinder.control._context.butler.put(real_policy, "delegation_policy", {"id": "default"})
+
+    outcome = wayfinder.control.safety.enter_controller_mode(evidence_note="simulator", shadow_first=True)
+
+    allowed = {capability.value for capability in outcome.applied}
+    assert {"OBSERVATORY_SAFETY", "MOUNT_CONTROL", "PLATE_SOLVE_ALIGNMENT"} <= allowed
+    off = {capability.value: reason for capability, reason in outcome.rejected.items()}
+    assert "GuiderCalibration" in off["AUTOGUIDING"]
+    assert "FocusModel" in off["AUTOFOCUS"]
+    assert "CAPTURE_ORCHESTRATION" in off
+    wayfinder.control.mount.slew({"ra_deg": 10.0, "dec_deg": 20.0})
+    assert wayfinder.recording.commands_sent() == ["mount.slew"]

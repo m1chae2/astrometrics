@@ -24,6 +24,30 @@ class RemoteTransferDriver(abc.ABC):
         For example, ``"stellarmate"``.
         """
 
+    def port_forward_command(self, local_port: int, remote_port: int) -> list[str]:
+        """Build the command that forwards a local port to the telescope host.
+
+        Not every driver can do this, so the default refuses.
+
+        Parameters
+        ----------
+        local_port : `int`
+            Port to listen on, on this computer.
+        remote_port : `int`
+            Port to reach on the telescope computer.
+
+        Returns
+        -------
+        command : `list` [`str`]
+            The command tokens.
+
+        Raises
+        ------
+        NotImplementedError
+            If the driver has no port forward.
+        """
+        raise NotImplementedError(f"Driver '{self.driver_name}' has no port forward.")
+
     @abc.abstractmethod
     def check_connection(self) -> bool:
         """Probe the remote host connection.

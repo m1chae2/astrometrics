@@ -1,215 +1,60 @@
 /**
- * @fileoverview Test suite validating the 17 use cases mapping to astrometrics/scripts
- * inside the frontend client services layer, fully integrated with the running backend.
+ * @fileoverview Read-only checks of the frontend client services against a throwaway backend.
+ *
+ * This suite is opt-in. It runs only when `ASTROMETRICS_LIVE_BACKEND_TESTS=1` is set, and then only
+ * against the backend that `ui/globalSetup.ts` starts for the run (its own library, a random port,
+ * the INDI simulator). Without the variable the whole suite is skipped and nothing touches a
+ * backend. It must never be pointed at a backend that is connected to real hardware or the real
+ * library, so it contains no command that moves a device, changes a policy, writes to the library
+ * or starts an ingestion. Those paths are covered by mocked-network tests elsewhere.
  *
  * @requires-test-backend
  */
 
-import { describe, it, expect, beforeAll } from 'vitest';
-import { getTargets, createTarget, deleteTarget, addTargetData, fetchFrameStatsGrouped } from '../common/services/targetService';
+import { describe, it, expect, inject } from 'vitest';
+import { getTargets, fetchFrameStatsGrouped } from '../common/services/targetService';
 import { fetchTelescopeStatus } from '../common/services/telescope/statusService';
-import { slewTelescope } from '../common/services/telescope/motionService';
 import { fetchAstronomyList, fetchAstronomyData } from '../common/services/astronomyService';
-import { startIngestion, scanRemoteTargets } from '../common/services/imaging/ingestionService';
 import { previewMosaic } from '../common/services/mosaicService';
-import { callBackend } from '../common/services/backendApi';
 
-describe('Frontend Services Use Cases Suite', () => {
-    /**
-     * This test suite validates the frontend services layer against a live backend.
-     *
-     * **Test Strategy:**
-     * - These tests are true integration tests. They do not mock the network layer.
-     * - They ensure that the UI service adapters correctly serialize parameters,
-     *   route requests, and deserialize responses from the FastAPI backend.
-     *
-     * **Prerequisites:**
-     * - The Python backend must be running on the configured DEV_PORT.
-     * - The backend must be seeded with test fixtures if necessary.
-     */
-    // No mock fetch stubbing here! This tests the full astrometrics + backend + UI services integration stack.
+/** True only when this run started its own throwaway backend (the opt-in variable was set). */
+const hasThrowawayBackend = Boolean(inject('testBackendOrigin'));
 
-    beforeAll(async () => {
-        // Mount hardware commands require MOUNT_CONTROL to be AUTHORITATIVE
-        // (not the default DELEGATED), so promote it once for the suite --
-        // see wayfindinglib/tasks/control_tasks/hardware_operations.py.
-        await callBackend('telescope:apply_promotion_decision', {
-            capability: 'MOUNT_CONTROL',
-            new_state: 'AUTHORITATIVE',
-            evidence_note: 'Test suite setup: promoted for integration testing.',
-        });
-    });
-
-    it('test_use_case_1_1_local_image_registration', async () => {
-        /**
-         * ### Description
-         * Verifies local image registration and ingestion wrapper.
-         */
-        await createTarget('M31');
-        const res = await addTargetData('M31', '/local/path/to/frame.fits');
-        expect(res).not.toBeNull();
-    });
-
-    it('test_use_case_1_2_remote_image_ingestion', async () => {
-        /**
-         * ### Description
-         * Verifies remote image ingestion service trigger.
-         */
-        const res = await startIngestion('remote', '/remote/path');
-        expect(res).toBeDefined();
-        expect(res?.jobId).toBeDefined();
-    });
-
-    it('test_use_case_1_3_target_directory_scan', async () => {
-        /**
-         * ### Description
-         * Verifies remote directory scan service wrapper.
-         */
-        const res = await scanRemoteTargets();
-        expect(res).toBeDefined();
-        expect(res?.folders).toBeDefined();
-    });
-
-    it('test_use_case_2_1_image_stacking', async () => {
-        /**
-         * ### Description
-         * Verifies target image stacking task submission.
-         */
+describe.skipIf(!hasThrowawayBackend)('Frontend services read-only checks (throwaway backend)', () => {
+    it('lists targets', async () => {
+        /** Verifies the target list wrapper returns an array. */
         const res = await getTargets();
-        expect(res).toBeDefined();
         expect(Array.isArray(res)).toBe(true);
     });
 
-    it('test_use_case_2_2_astrometric_photometric_analysis', async () => {
-        /**
-         * ### Description
-         * Verifies image analysis service wrapper.
-         */
+    it('lists frame statistics for a target', async () => {
+        /** Verifies the grouped frame statistics wrapper returns an array. */
         const res = await fetchFrameStatsGrouped('M31');
-        expect(res).toBeDefined();
         expect(Array.isArray(res)).toBe(true);
     });
 
-    it('test_use_case_3_1_spectral_stacking', async () => {
-        /**
-         * ### Description
-         * Verifies spectral stacking task submission.
-         */
-        const res = await getTargets();
-        expect(res).toBeDefined();
-    });
-
-    it('test_use_case_3_2_ad_hoc_spectroscopy_analysis', async () => {
-        /**
-         * ### Description
-         * Verifies ad-hoc spectroscopy list fetch wrapper.
-         */
+    it('lists astronomy objects', async () => {
+        /** Verifies the astronomy list wrapper returns an array. */
         const res = await fetchAstronomyList();
-        expect(res).toBeDefined();
         expect(Array.isArray(res)).toBe(true);
     });
 
-    it('test_use_case_3_3_target_field_spectroscopy_analysis', async () => {
-        /**
-         * ### Description
-         * Verifies target field spectroscopy profile fetch wrapper.
-         */
+    it('fetches astronomy data for a star', async () => {
+        /** Verifies the astronomy data wrapper answers. */
         const res = await fetchAstronomyData('Vega');
         expect(res).toBeDefined();
     });
 
-    it('test_use_case_3_4_spectroscopy_calibration_tuning', async () => {
-        /**
-         * ### Description
-         * Verifies spectroscopy calibration parameter retrieval.
-         */
-        const res = await getTargets();
-        expect(res).toBeDefined();
-    });
-
-    it('test_use_case_4_1_stellar_object_profile_querying', async () => {
-        /**
-         * ### Description
-         * Verifies stellar object list querying wrapper.
-         */
-        const res = await fetchAstronomyList();
-        expect(res).toBeDefined();
-        expect(Array.isArray(res)).toBe(true);
-    });
-
-    it('test_use_case_5_1_mount_control', async () => {
-        /**
-         * ### Description
-         * Verifies telescope slew target command wrapper.
-         */
-        const res = await slewTelescope(5.5, -10.2);
-        expect(res).toBe(true);
-    });
-
-    it('test_use_case_5_2_focuser_filter_wheel', async () => {
-        /**
-         * ### Description
-         * Verifies cameras availability configuration wrapper.
-         */
+    it('reads the telescope status', async () => {
+        /** Verifies the status wrapper (a read) reports a connection state and guiding history. */
         const res = await fetchTelescopeStatus();
-        expect(res).toBeDefined();
         expect(res?.connectionStatus).toBeDefined();
-    });
-
-    it('test_use_case_5_3_telescope_active_guiding', async () => {
-        /**
-         * ### Description
-         * Verifies active guiding status query wrapper.
-         */
-        const res = await fetchTelescopeStatus();
-        expect(res).toBeDefined();
         expect(res?.guidingHistory).toBeDefined();
     });
 
-    it('test_use_case_6_1_target_visibility', async () => {
-        /**
-         * ### Description
-         * Verifies targets availability status checks.
-         */
-        const res = await getTargets();
-        expect(res).toBeDefined();
-    });
-
-    it('test_use_case_6_2_mosaic_sequence_planning', async () => {
-        /**
-         * ### Description
-         * Verifies previewing mosaic layout panels.
-         */
+    it('previews mosaic panels', async () => {
+        /** Verifies the mosaic preview (a calculation) returns panels. */
         const res = await previewMosaic(83.821, -5.391, { rows: 2, cols: 2, overlap: 20 });
-        expect(res).toBeDefined();
-        expect(Array.isArray(res)).toBe(true);
-    });
-
-    it('test_use_case_7_1_hdr_to_ldr_png_rendering', async () => {
-        /**
-         * ### Description
-         * Verifies target images conversion trigger.
-         */
-        const res = await getTargets();
-        expect(res).toBeDefined();
-    });
-
-    it('test_use_case_8_1_master_calibration_matching', async () => {
-        /**
-         * ### Description
-         * Verifies calibration database status checks.
-         */
-        const res = await getTargets();
-        expect(res).toBeDefined();
-    });
-
-    it('test_use_case_8_2_stellar_catalog_audit', async () => {
-        /**
-         * ### Description
-         * Verifies fetching target list.
-         */
-        const res = await getTargets();
-        expect(res).toBeDefined();
         expect(Array.isArray(res)).toBe(true);
     });
 });

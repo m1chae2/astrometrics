@@ -7,6 +7,7 @@ import { useState, useEffect, useRef } from 'react';
 import { fetchLightFrame, fetchImageByPath } from '../../common/services/imaging/imageService';
 import { reportError } from '../../common/utils/reportError';
 import { on as onEvent } from '../../common/utils/eventBus';
+import { useOnValueChange } from './useOnValueChange';
 import { STACK_PICTURE_REMADE_EVENT } from '../../common/services/imaging/stackReviewService';
 
 export interface ImageFrameInfo {
@@ -54,14 +55,14 @@ export const useViewerState = (
         setSelectedLightRow(null);
     }
 
-    // Reset state when target changes
-    useEffect(() => {
+    // Reset state only when the target really changes (not when the display is shown again).
+    useOnValueChange(selectedTarget, () => {
         setSelectedLightRow(null);
         setImageUrl(null);
         setImageFrameInfo(null);
         setError(null);
         setAutoPanTrigger((n) => n + 1);
-    }, [selectedTarget]);
+    });
 
     // A preview remade for the stack on screen has the same path, so the viewer is told to reload.
     useEffect(

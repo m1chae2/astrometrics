@@ -10,12 +10,12 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Never
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from astrometricslib.exceptions import ExternalServiceError
+from astrometricslib.exceptions import ConfigurationError, ExternalServiceError
 from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
 
 
@@ -61,7 +61,7 @@ def test_run_command_fails_fast_within_offline_cooldown() -> None:
 def test_check_connection_returns_false_on_failure() -> None:
     """Verify check_connection() returns False rather than raising."""
     driver = StellarMateInterface(host_alias="test-host")
-    with patch.object(driver, "_run_command", side_effect=ExternalServiceError("unreachable")):
+    with patch.object(driver, "_execute_command", side_effect=ExternalServiceError("unreachable")):
         assert driver.check_connection() is False
 
 
@@ -74,7 +74,7 @@ def test_check_connection_does_not_hide_a_bug() -> None:
     """
     driver = StellarMateInterface(host_alias="test-host")
     with (
-        patch.object(driver, "_run_command", side_effect=AttributeError("a coding mistake")),
+        patch.object(driver, "_execute_command", side_effect=AttributeError("a coding mistake")),
         pytest.raises(AttributeError),
     ):
         driver.check_connection()
@@ -147,7 +147,7 @@ def test_guide_log_listing_searches_both_the_phd2_and_the_kstars_folders() -> No
     with patch.object(driver, "_run_command", return_value=_REMOTE_LISTING) as mock_run:
         files = driver.list_remote_guide_logs()
 
-    find_command = mock_run.call_args[0][0][2]
+    find_command = mock_run.call_args[0][0][-1]
     assert ".local/share/kstars/guidelogs" in find_command
     assert "PHD2_GuideLog_*.txt" in find_command
     assert "guide_log*.txt" in find_command
@@ -164,7 +164,7 @@ def test_ekos_analyze_log_listing_reads_the_kstars_analyze_folder() -> None:
     with patch.object(driver, "_run_command", return_value=listing) as mock_run:
         files = driver.list_remote_ekos_analyze_logs()
 
-    assert ".local/share/kstars/analyze" in mock_run.call_args[0][0][2]
+    assert ".local/share/kstars/analyze" in mock_run.call_args[0][0][-1]
     assert files == ["/home/stellarmate/.local/share/kstars/analyze/ekos-2026-09-23T20-31-48.analyze"]
 
 
@@ -332,9 +332,9 @@ def test_listing_commands_tolerate_missing_folders() -> None:
     driver = _make_driver()
     with patch.object(driver, "_run_command", return_value="") as mock_run:
         driver.list_remote_guide_logs()
-        guide_command = mock_run.call_args[0][0][2]
+        guide_command = mock_run.call_args[0][0][-1]
         driver.list_remote_ekos_analyze_logs()
-        analyze_command = mock_run.call_args[0][0][2]
+        analyze_command = mock_run.call_args[0][0][-1]
 
     assert guide_command.rstrip().endswith("|| true")
     assert analyze_command.rstrip().endswith("|| true")
@@ -482,3 +482,218 @@ def test_a_transfer_past_the_overall_limit_ends_rsync_and_its_helper(
         time.sleep(0.05)
     stat_path = Path(f"/proc/{helper_process_id}/stat")
     assert not stat_path.exists() or stat_path.read_text().rsplit(")", 1)[1].split()[0] == "Z"
+
+
+def _refused() -> subprocess.CalledProcessError:
+    """Build the error ssh gives when the host refuses the connection.
+
+    Returns
+    -------
+    error : `subprocess.CalledProcessError`
+        A failed ssh run with a connection-refused message.
+    """
+    return subprocess.CalledProcessError(
+        255, "ssh", stderr="ssh: connect to host localhost port 22: Connection refused\n"
+    )
+
+
+def test_check_connection_probes_even_when_the_host_is_known_offline() -> None:
+    """The explicit question runs a real probe and records the new answer."""
+    driver = StellarMateInterface(host_alias="test-host")
+    driver._last_connection_status = False
+    driver._last_probe_time = time.time()
+
+    with patch("subprocess.run", return_value=MagicMock(stdout="connected\n")) as mock_run:
+        assert driver.check_connection() is True
+
+    mock_run.assert_called_once()
+    assert driver._last_connection_status is True
+
+
+def test_going_offline_logs_one_info_line_with_the_ssh_error(caplog: pytest.LogCaptureFixture) -> None:
+    """The switch to OFFLINE is logged once, at info level, with ssh's text."""
+    driver = StellarMateInterface(host_alias="localhost")
+
+    with (
+        caplog.at_level("INFO", logger="wayfindinglib.drivers.stellarmate_interface"),
+        patch("subprocess.run", side_effect=_refused()),
+    ):
+        assert driver.check_connection() is False
+        assert driver.check_connection() is False
+
+    offline = [record for record in caplog.records if "OFFLINE" in record.getMessage()]
+    assert len(offline) == 1
+    assert offline[0].levelname == "INFO"
+    assert "localhost" in offline[0].getMessage()
+    assert "Connection refused" in offline[0].getMessage()
+
+
+def test_a_timeout_marks_the_host_offline() -> None:
+    """A command that hangs counts as a failed connection."""
+    driver = StellarMateInterface(host_alias="test-host")
+
+    with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("ssh", 30)):
+        assert driver.check_connection() is False
+
+    assert driver._last_connection_status is False
+
+
+def test_ssh_commands_do_not_read_stdin_and_have_a_hard_timeout() -> None:
+    """Every ssh run gets stdin from /dev/null and a timeout."""
+    driver = StellarMateInterface(host_alias="test-host")
+
+    with patch("subprocess.run", return_value=MagicMock(stdout="")) as mock_run:
+        driver._run_command(["ssh", "test-host", "ls"])
+
+    assert mock_run.call_args.kwargs["stdin"] == subprocess.DEVNULL
+    assert mock_run.call_args.kwargs["timeout"] > 0
+
+
+@pytest.mark.parametrize(
+    "bad_alias", ["-oProxyCommand=evil", "host name", "host;rm", "", "a'b", "$(id)", "-L"]
+)
+def test_unsafe_host_alias_is_refused_before_any_command(bad_alias: str) -> None:
+    """An unsafe host alias never reaches a command line."""
+    driver = StellarMateInterface(host_alias=bad_alias)
+    with patch("subprocess.run") as mock_run, patch("subprocess.Popen") as mock_popen:
+        with pytest.raises(ConfigurationError):
+            driver._execute_command(["ssh", "--", bad_alias, "echo", "hi"])
+        with pytest.raises(ConfigurationError):
+            driver.port_forward_command(5555, 4400)
+        with pytest.raises(ConfigurationError):
+            driver._run_rsync("/remote/", "/local", [], "x")
+    mock_run.assert_not_called()
+    mock_popen.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "good_alias", ["stellarmate", "stellarmate.local", "my_host-1", "192.168.1.20", "fe80::1"]
+)
+def test_plain_host_names_and_addresses_are_accepted(good_alias: str) -> None:
+    """Names, aliases and IP addresses pass the check."""
+    assert StellarMateInterface(host_alias=good_alias)._checked_host_alias() == good_alias
+
+
+def test_rsync_ssh_is_non_interactive_with_a_connect_timeout() -> None:
+    """The ssh that rsync starts never waits for a password and times out."""
+    driver = StellarMateInterface(host_alias="test-host")
+    with patch("subprocess.Popen") as mock_popen:
+        mock_popen.return_value.stdout = None
+        mock_popen.return_value.wait.return_value = 0
+        driver._run_rsync("/remote/", "/local", [], "x")
+    rsync_cmd = mock_popen.call_args.args[0]
+    remote_shell = rsync_cmd[rsync_cmd.index("-e") + 1]
+    assert "BatchMode=yes" in remote_shell
+    assert "ConnectTimeout=10" in remote_shell
+
+
+def test_unreachable_host_lists_nothing_and_logs_no_error(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An unreachable host gives an empty list and no ERROR record."""
+    import logging
+
+    def fail(cmd_list: list[str], **_kwargs: Any) -> Never:
+        """Pretend ssh could not reach the host.
+
+        Raises
+        ------
+        subprocess.CalledProcessError
+            Always.
+        """
+        raise subprocess.CalledProcessError(255, cmd_list, stderr="ssh: Network is unreachable")
+
+    monkeypatch.setattr(subprocess, "run", fail)
+    driver = StellarMateInterface(host_alias="test-host")
+    with caplog.at_level(logging.DEBUG):
+        assert driver.list_remote_targets() == []
+        assert driver.list_remote_targets() == []
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+    assert driver._last_connection_status is False
+
+
+def test_missing_ssh_program_counts_as_offline(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A machine without ssh reports the host as offline, not an error."""
+    import logging
+
+    def missing(cmd_list: list[str], **_kwargs: Any) -> Never:
+        """Pretend the ssh program is not installed.
+
+        Raises
+        ------
+        FileNotFoundError
+            Always.
+        """
+        raise FileNotFoundError("ssh")
+
+    monkeypatch.setattr(subprocess, "run", missing)
+    driver = StellarMateInterface(host_alias="test-host")
+    with caplog.at_level(logging.DEBUG):
+        assert driver.list_remote_targets() == []
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "ssh: connect to host localhost port 22: Connection refused",
+        "kex_exchange_identification: read: Connection reset by peer",
+        "ssh: connect to host 10.0.0.9 port 22: No route to host",
+        "ssh: Could not resolve hostname stellarmate: Name or service not known",
+    ],
+)
+def test_expected_ssh_failures_give_no_error_record(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, stderr: str
+) -> None:
+    """Each unusable-computer ssh text gives no ERROR and sets offline."""
+    import logging
+
+    def fail(cmd_list: list[str], **_kwargs: Any) -> Never:
+        """Pretend ssh printed the given text and failed.
+
+        Raises
+        ------
+        subprocess.CalledProcessError
+            Always.
+        """
+        raise subprocess.CalledProcessError(255, cmd_list, stderr=stderr)
+
+    monkeypatch.setattr(subprocess, "run", fail)
+    driver = StellarMateInterface(host_alias="localhost")
+    with caplog.at_level(logging.DEBUG):
+        assert driver.list_remote_targets() == []
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+    assert driver._last_connection_status is False
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "user@host: Permission denied (publickey).",
+        "Bad owner or permissions on /etc/ssh/ssh_config.d/20-systemd-ssh-proxy.conf",
+    ],
+)
+def test_refused_login_is_still_logged_as_an_error(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, stderr: str
+) -> None:
+    """A refused key or broken ssh setup stays an ERROR, not offline."""
+    import logging
+
+    def fail(cmd_list: list[str], **_kwargs: Any) -> Never:
+        """Pretend the computer answered and refused the login.
+
+        Raises
+        ------
+        subprocess.CalledProcessError
+            Always.
+        """
+        raise subprocess.CalledProcessError(255, cmd_list, stderr=stderr)
+
+    monkeypatch.setattr(subprocess, "run", fail)
+    driver = StellarMateInterface(host_alias="localhost")
+    with caplog.at_level(logging.DEBUG):
+        driver.list_remote_targets()
+    assert [record for record in caplog.records if record.levelno >= logging.ERROR]
+    assert driver._last_connection_status is True

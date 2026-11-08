@@ -2,7 +2,8 @@
 
 Description: Gains are counted per hour of the night, not per hour of
 exposure. For 60 frames of 30 s with a dither every 3 frames, exposure time
-alone understates the hour by about 10 to 30 percent (plan section 4.2).
+alone understates the hour by about 10 to 30 percent (quality-metrics design,
+issue #93).
 This module finds the overheads from the stored Ekos session records
 (`EkosSessionContext`, readable through the Butler) and turns a frame count
 into wall-clock time.
@@ -55,8 +56,8 @@ points of 3 to 5 s frames and moves takes 1.5 to 3 minutes. Design estimate,
 register row WAY-D33."""
 
 DITHER_EVERY_FRAMES = 3
-"""Frames between dithers, when a run of frames is priced and the plan says
-nothing else. It is the cadence of the plan's wall-clock example (60 frames of
+"""Frames between dithers, when a run of frames is priced and the sequence says
+nothing else. It is the cadence of the wall-clock example (60 frames of
 30 s with a dither every 3 frames). The target report and tonight's ranking
 both use it, so they price the same hour. Design estimate, register row
 WAY-D71."""

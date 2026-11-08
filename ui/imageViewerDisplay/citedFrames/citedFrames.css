@@ -27,20 +27,6 @@
     gap: 8px;
 }
 
-.cited-frames__button {
-    cursor: pointer;
-}
-
-.cited-frames__button:disabled {
-    cursor: not-allowed;
-    opacity: 0.6;
-}
-
-.cited-frames__button:focus-visible {
-    outline: 2px solid currentColor;
-    outline-offset: 2px;
-}
-
 .cited-frames__message,
 .cited-frames__missing {
     margin: 8px 0 0;

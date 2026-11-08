@@ -13,28 +13,22 @@
 .confirm-backdrop {
   position: absolute;
   inset: 0;
-  background: var(--grey-darkest, #181818);
+  background: var(--grey-darkest, var(--term-bg-dark));
   opacity: 0.6;
 }
 
 .confirm-dialog {
   position: relative;
-  background: var(--grey-darkest, #181818);
-  color: var(--fg, #fff);
+  background: var(--grey-darkest, var(--term-bg-dark));
+  color: var(--fg, var(--white));
   padding: 1rem;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   width: min(460px, 92%);
-  box-shadow: 0 6px 24px rgba(0,0,0,0.6);
-  border: 1px solid rgba(255,255,255,0.06);
+  box-shadow: 0 6px 24px color-mix(in srgb, var(--black) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--white) 6%, transparent);
   backdrop-filter: blur(6px);
 }
 
-.confirm-dialog h3 { margin: 0 0 0.5rem 0; font-size: 1.05rem; }
+.confirm-dialog h3 { margin: 0 0 0.5rem 0; font-size: var(--base-font-size); }
 .confirm-body { margin-bottom: 1rem; white-space: pre-wrap; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
-
-/* Danger variant for the confirm action button */
-.confirm-actions .btn-danger {
-  background: var(--accent-red, #d9534f);
-  color: var(--white);
-}

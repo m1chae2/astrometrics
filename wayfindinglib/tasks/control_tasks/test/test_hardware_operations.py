@@ -35,6 +35,7 @@ from wayfindinglib.models.policy.delegation import (
 )
 from wayfindinglib.models.sky_position import SkyPosition
 from wayfindinglib.tasks.control_tasks import hardware_operations as ops
+from wayfindinglib.tasks.control_tasks.capture_runs import CaptureRuns
 
 
 def _assert_sent_in_current_epoch(driver_call: Any, ra_deg: float, dec_deg: float) -> None:
@@ -91,6 +92,7 @@ class _FakeManager:
     ) -> None:
         """Hold the given drivers, configuration and policy."""
         self.motion_stop = threading.Event()
+        self.capture_runs = CaptureRuns()
         self.astrometrics = astrometrics if astrometrics is not None else MagicMock()
         self.driver = driver
         self.mount_driver = mount_driver
@@ -362,6 +364,94 @@ def test_park_and_unpark_delegate_to_mount_driver(mocker: MockerFixture) -> None
     assert ops.unpark(manager) is True
 
 
+def test_slew_and_park_stop_the_apps_own_capture_run_first(mocker: MockerFixture) -> None:
+    """A slew or park flags the run, aborts its exposure, then moves."""
+    order: list[str] = []
+    mount_driver = mocker.Mock()
+    mount_driver.slew = mocker.AsyncMock(side_effect=lambda *_: order.append("slew") or True)
+    mount_driver.park = mocker.AsyncMock(side_effect=lambda: order.append("park") or True)
+    camera_driver = mocker.Mock()
+    camera_driver.abort_exposure = mocker.AsyncMock(side_effect=lambda: order.append("abort") or True)
+    manager = _FakeManager(mount_driver=mount_driver, camera_driver=camera_driver)
+    stop_flag = manager.capture_runs.begin()
+
+    assert ops.slew(manager, SkyPosition(ra_deg=150.0, dec_deg=20.0)) is True
+    assert stop_flag.is_set()
+    assert ops.park(manager) is True
+
+    assert order == ["abort", "slew", "abort", "park"]
+
+
+def test_slew_and_park_send_no_camera_command_when_the_app_has_no_run(mocker: MockerFixture) -> None:
+    """With no run of its own, a slew or park touches no camera."""
+    mount_driver = mocker.Mock()
+    mount_driver.slew = mocker.AsyncMock(return_value=True)
+    mount_driver.park = mocker.AsyncMock(return_value=True)
+    camera_driver = mocker.Mock()
+    camera_driver.abort_exposure = mocker.AsyncMock(return_value=True)
+    manager = _FakeManager(mount_driver=mount_driver, camera_driver=camera_driver)
+
+    ops.slew(manager, SkyPosition(ra_deg=150.0, dec_deg=20.0))
+    ops.park(manager)
+
+    camera_driver.abort_exposure.assert_not_called()
+    assert camera_driver.mock_calls == []
+
+
+def test_a_refused_slew_leaves_the_capture_run_alone(mocker: MockerFixture) -> None:
+    """A slew refused for lack of authority does not stop the run."""
+    camera_driver = mocker.Mock()
+    camera_driver.abort_exposure = mocker.AsyncMock(return_value=True)
+    manager = _FakeManager(
+        mount_driver=mocker.Mock(), camera_driver=camera_driver, policy=_authoritative_policy()
+    )
+    stop_flag = manager.capture_runs.begin()
+
+    with pytest.raises(PermissionDeniedError):
+        ops.park(manager)
+
+    assert not stop_flag.is_set()
+    camera_driver.abort_exposure.assert_not_called()
+
+
+def test_a_failed_abort_does_not_block_the_slew(mocker: MockerFixture) -> None:
+    """A camera that cannot abort is only logged; the slew goes on."""
+    mount_driver = mocker.Mock()
+    mount_driver.slew = mocker.AsyncMock(return_value=True)
+    camera_driver = mocker.Mock()
+    camera_driver.abort_exposure = mocker.AsyncMock(side_effect=HardwareError("no abort"))
+    manager = _FakeManager(mount_driver=mount_driver, camera_driver=camera_driver)
+    manager.capture_runs.begin()
+
+    assert ops.slew(manager, SkyPosition(ra_deg=150.0, dec_deg=20.0)) is True
+
+
+def test_stop_capture_stops_the_run_and_is_a_no_op_when_idle(mocker: MockerFixture) -> None:
+    """`stop_capture` aborts only while a run is going."""
+    camera_driver = mocker.Mock()
+    camera_driver.abort_exposure = mocker.AsyncMock(return_value=True)
+    manager = _FakeManager(camera_driver=camera_driver)
+
+    assert ops.stop_capture(manager) is False
+    camera_driver.abort_exposure.assert_not_called()
+
+    stop_flag = manager.capture_runs.begin()
+    assert ops.stop_capture(manager) is True
+    assert stop_flag.is_set()
+    camera_driver.abort_exposure.assert_called_once_with()
+
+
+def test_stop_capture_is_refused_without_capture_authority(mocker: MockerFixture) -> None:
+    """Monitor mode refuses a stop, whether or not a run is going."""
+    camera_driver = mocker.Mock()
+    camera_driver.abort_exposure = mocker.AsyncMock(return_value=True)
+    manager = _FakeManager(camera_driver=camera_driver, policy=_authoritative_policy())
+
+    with pytest.raises(PermissionDeniedError, match="CAPTURE_ORCHESTRATION"):
+        ops.stop_capture(manager)
+    camera_driver.abort_exposure.assert_not_called()
+
+
 def test_set_tracking_delegates_to_mount_driver(mocker: MockerFixture) -> None:
     """Verify set_tracking passes the enabled flag to the mount driver."""
     mount_driver = mocker.Mock()
@@ -557,6 +647,21 @@ def test_set_filter_succeeds_with_resolved_name(mocker: MockerFixture) -> None:
 
     assert ops.set_filter(manager, "lum") is True
     filter_wheel_driver.set_position.assert_called_once_with("Luminance")
+
+
+@pytest.mark.parametrize("requested", ["L", "Luminance", "Lum"])
+def test_set_filter_matches_a_luminance_slot_named_l(mocker: MockerFixture, requested: str) -> None:
+    """Every spelling of luminance finds a wheel slot that is called "L"."""
+    filter_wheel_driver = mocker.Mock()
+    filter_wheel_driver.get_names = mocker.AsyncMock(return_value=["L", "R", "G", "B"])
+    filter_wheel_driver.resolve_name = mocker.AsyncMock(return_value=None)
+    filter_wheel_driver.set_position = mocker.AsyncMock(return_value=True)
+    manager = _FakeManager(filter_wheel_driver=filter_wheel_driver)
+
+    # The wheel driver's own match fails for the long spellings; the
+    # control layer finds the slot through the library's filter rule.
+    assert ops.set_filter(manager, requested) is True
+    filter_wheel_driver.set_position.assert_called_once_with("L")
 
 
 def test_set_filter_raises_when_capture_orchestration_not_authoritative(mocker: MockerFixture) -> None:

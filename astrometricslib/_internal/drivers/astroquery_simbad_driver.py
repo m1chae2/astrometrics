@@ -45,6 +45,7 @@ from pyvo.dal.exceptions import DALServiceError
 
 from astrometricslib._internal.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib.foundation.errors import ExternalServiceError
+from astrometricslib.foundation.offline import OfflineModeError, require_online
 from astrometricslib.utilities.exceptions import ONLINE_QUERY_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -154,8 +155,13 @@ def _raise_if_paused(message: str, details: dict[str, Any]) -> None:
     Raises
     ------
     ExternalServiceError
-        If SIMBAD is paused.
+        If SIMBAD is paused, or if this launch sends nothing off the computer
+        (nothing is sent and no pause starts).
     """
+    try:
+        require_online("SIMBAD")
+    except OfflineModeError as offline_error:
+        raise ExternalServiceError(message, details={**details, "offline": True}) from offline_error
     remaining = _paused_until - time.monotonic()
     if remaining > 0:
         raise ExternalServiceError(

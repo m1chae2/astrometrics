@@ -697,7 +697,7 @@ def _noise_ratio(astrometrics: Any, target_id: str, since: Any) -> float | None:
 def _odd_even_difference_note(astrometrics: Astrometrics, target: Any, since: datetime) -> str:
     """Run the odd–even difference for the stack that was just made.
 
-    It runs for every stack (decision D19 of 2026-10-26): the library refuses,
+    It runs for every stack: the library refuses,
     with a stored reason, when a half would hold fewer than 8 frames. One line
     is printed with the stack's measured-to-predicted noise ratio. A failure is
     a by-product: it is reported in the returned text and never raised, so the

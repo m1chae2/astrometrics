@@ -57,9 +57,10 @@ describe('DepthGoalRow', () => {
         answerBackend(() => baseStatus);
         renderRow();
         expect(await screen.findByText(baseStatus.message)).toBeTruthy();
-        expect(screen.getByRole('option', { name: 'Quick look' })).toBeTruthy();
-        expect(screen.getByRole('option', { name: 'Deep' })).toBeTruthy();
-        expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('good');
+        const picker = screen.getByRole('button', { name: 'Integration Goal: Standard' });
+        fireEvent.click(picker);
+        expect(screen.getByRole('button', { name: 'Quick look' })).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'Deep' })).toBeTruthy();
         expect(backend.callBackend).toHaveBeenCalledWith('advisory:depth_goal', { target: 'M 31' });
     });
 
@@ -71,7 +72,8 @@ describe('DepthGoalRow', () => {
         ));
         renderRow();
         await screen.findByText(baseStatus.message);
-        fireEvent.change(screen.getByRole('combobox'), { target: { value: 'deep' } });
+        fireEvent.click(screen.getByRole('button', { name: /^Integration Goal:/ }));
+        fireEvent.click(screen.getByRole('button', { name: 'Deep' }));
         expect(await screen.findByText('Integration goal reached.')).toBeTruthy();
         expect(backend.callBackend).toHaveBeenCalledWith('advisory:set_depth_goal', { target: 'M 31', level: 'deep' });
     });
@@ -81,21 +83,56 @@ describe('DepthGoalRow', () => {
         renderRow();
         const note = await screen.findByText('No depth goal for this kind of object.');
         expect(note.getAttribute('title')).toBe('Planets move.');
-        expect(screen.queryByRole('combobox')).toBeNull();
+        expect(screen.queryByRole('button', { name: /^Integration Goal:/ })).toBeNull();
     });
 
     it('shows loading, then an error', async () => {
         answerBackend(() => new Promise((_, reject) => setTimeout(() => reject(new Error('down')), 30)));
         renderRow();
-        expect(await screen.findByText(/Loading depth goal/)).toBeTruthy();
+        expect(await screen.findByText('Loading the depth goal')).toBeTruthy();
         const alert = await screen.findByRole('alert');
         expect(alert.textContent).toContain('Could not load');
+    });
+
+    /** A slow first answer shows a loading line in the row only; the rest of the display is not held back. */
+    it('shows loading in its own row while a slow answer is pending and holds nothing else back', async () => {
+        answerBackend(() => new Promise(() => undefined));
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+        render(
+            <QueryClientProvider client={client}>
+                <div>
+                    <p>Stack summary</p>
+                    <DepthGoalRow targetId="M 31" />
+                </div>
+            </QueryClientProvider>
+        );
+        expect(screen.getByText('Stack summary')).toBeTruthy();
+        expect(await screen.findByText('Loading the depth goal')).toBeTruthy();
+    });
+
+    /** A second visit within the fresh time shows the earlier answer at once and asks the backend nothing. */
+    it('shows the earlier answer on a repeat visit without asking again', async () => {
+        answerBackend(() => baseStatus);
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+        const renderOnce = () => render(
+            <QueryClientProvider client={client}>
+                <DepthGoalRow targetId="M 31" />
+            </QueryClientProvider>
+        );
+        const first = renderOnce();
+        await screen.findByText(baseStatus.message);
+        first.unmount();
+        const asked = () => callBackendMock.mock.calls.filter(([action]) => action === 'advisory:depth_goal').length;
+        expect(asked()).toBe(1);
+        renderOnce();
+        expect(screen.getByText(baseStatus.message)).toBeTruthy();
+        expect(asked()).toBe(1);
     });
 
     it('reads no depth goal and shows nothing for a star that is not in the library', async () => {
         answerBackend(() => baseStatus);
         const { container } = renderRow('HIP 48113');
-        await vi.waitFor(() => expect(callBackendMock).toHaveBeenCalledWith('target:get_targets', {}));
+        await vi.waitFor(() => expect(callBackendMock).toHaveBeenCalledWith('target:get_targets', { detail: 'summary' }));
         // Give the row a chance to react to the loaded list before checking.
         await new Promise((resolve) => setTimeout(resolve, 50));
         expect(callBackendMock.mock.calls.some(([action]) => String(action).startsWith('advisory:'))).toBe(false);

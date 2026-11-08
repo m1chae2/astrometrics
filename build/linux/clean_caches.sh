@@ -5,7 +5,7 @@
 #
 # Usage: clean_caches.sh [--dry-run] [--all] [--include-master-cache] [--include-catalogs] [--include-rclone]
 #
-# Always kept: backup/ (database snapshots not yet uploaded), integrity/
+# Always kept: backup/ (the local database snapshots), integrity/
 # (Drive manifests), locks/ (used by running programs).
 # Default: removes everything else in the cache folder, plus the old
 # ~/.cache/siril folder if it exists. siril/MasterCache (calibration masters,

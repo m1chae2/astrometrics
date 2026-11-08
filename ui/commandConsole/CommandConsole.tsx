@@ -6,12 +6,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Panel, Group, Separator } from 'react-resizable-panels';
 import { callBackend } from '../common/services/backendApi';
+import { Tabs } from '../common/components/Tabs';
 import { ConsoleSidebar, ScriptRecipeItem, UserScriptItem } from './ConsoleSidebar';
 import { WorkspaceTable, WorkspaceVariable } from './WorkspaceTable';
 import { CodeEditor } from './CodeEditor';
 import { TerminalPane, TerminalEntry } from './TerminalPane';
 import { DocViewer } from './DocViewer';
 import { useReportModeReady } from '../common/utils/appBootReadiness';
+import { useHandoffConsumer } from '../common/utils/displayHandoffStore';
+import { COMMAND_CONSOLE_EVENT_KIND, type CommandConsoleEvent } from '../common/utils/commandConsoleEvents';
 import './commandConsole.css';
 
 /** One interactive plot, as the backend reports it after running code. */
@@ -110,37 +113,29 @@ export const CommandConsole: React.FC = () => {
       .catch((err) => console.warn('Failed loading doc topics:', err));
   }, []);
 
-  // Listen to WebSocket events (agent executions, plot generations, editor sync)
-  useEffect(() => {
-    const handleRemoteAction = (event: CustomEvent) => {
-      const { type, action, payload } = event.detail || {};
-      if (type === 'UI_EVENT') {
-        if (action === 'terminal:agent_exec') {
-          setTerminalEntries((prev) => [
-            ...prev,
-            {
-              id: String(Date.now()),
-              command: payload?.code || '',
-              source: 'agent',
-            },
-          ]);
-        } else if (action === 'terminal:plot_generated') {
-          if (payload?.interactive_url) {
-            openFigureWindows([payload]);
-          } else if (payload?.plot_path) {
-            openFigureWindows([], [payload.plot_path]);
-          }
-        } else if (action === 'editor:sync' && payload?.code !== undefined) {
-          setEditorCode(payload.code);
-        }
+  // Shows what an AI agent ran, plots it made, and editor syncs. They arrive
+  // through the hand-off store, which keeps them in order while this display is
+  // hidden or paused, so none is lost.
+  useHandoffConsumer<CommandConsoleEvent>('Command Console', COMMAND_CONSOLE_EVENT_KIND, ({ action, payload }) => {
+    if (action === 'terminal:agent_exec') {
+      setTerminalEntries((prev) => [
+        ...prev,
+        {
+          id: `${Date.now()}-${prev.length}`,
+          command: payload?.code || '',
+          source: 'agent',
+        },
+      ]);
+    } else if (action === 'terminal:plot_generated') {
+      if (payload?.interactive_url) {
+        openFigureWindows([payload]);
+      } else if (payload?.plot_path) {
+        openFigureWindows([], [payload.plot_path]);
       }
-    };
-
-    window.addEventListener('astrometrics:uiEvent' as any, handleRemoteAction as any);
-    return () => {
-      window.removeEventListener('astrometrics:uiEvent' as any, handleRemoteAction as any);
-    };
-  }, []);
+    } else if (action === 'editor:sync' && payload?.code !== undefined) {
+      setEditorCode(payload.code);
+    }
+  });
 
   // Handle Documentation Selection
   const handleSelectDoc = async (topicId: string) => {
@@ -319,6 +314,7 @@ export const CommandConsole: React.FC = () => {
                   recipes={recipes}
                   userScripts={userScripts}
                   docTopics={docTopics}
+                  isLoading={isLoadingSidebarData}
                   selectedDocId={selectedDocId}
                   activeSidebarTab={activeSidebarTab}
                   onTabChange={setActiveSidebarTab}
@@ -368,25 +364,21 @@ export const CommandConsole: React.FC = () => {
           <Panel defaultSize={35} minSize={25}>
             <div className="console-panel">
               <div className="console-panel__header" style={{ padding: 0 }}>
-                <div style={{ display: 'flex', width: '100%', height: '100%' }}>
-                  <button
-                    className={`console-sidebar__tab ${rightTab === 'terminal' ? 'console-sidebar__tab--active' : ''}`}
-                    onClick={() => setRightTab('terminal')}
-                    type="button"
-                  >
-                    Terminal
-                  </button>
-                  <button
-                    className={`console-sidebar__tab ${rightTab === 'docs' ? 'console-sidebar__tab--active' : ''}`}
-                    onClick={() => {
-                      setRightTab('docs');
-                      setActiveSidebarTab('docs');
-                    }}
-                    type="button"
-                  >
-                    Documentation
-                  </button>
-                </div>
+                <Tabs
+                  className="console-sidebar__tabs"
+                  tabs={[
+                    { id: 'terminal', label: 'Terminal' },
+                    { id: 'docs', label: 'Documentation' },
+                  ]}
+                  selectedId={rightTab}
+                  onChange={(tabId) => {
+                    setRightTab(tabId as 'terminal' | 'docs');
+                    if (tabId === 'docs') setActiveSidebarTab('docs');
+                  }}
+                  ariaLabel="Console views"
+                  idPrefix="console-right"
+                  size="compact"
+                />
               </div>
 
               <div className="console-panel__body">

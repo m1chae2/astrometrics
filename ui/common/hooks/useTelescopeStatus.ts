@@ -1,5 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
-import { emitToast } from '../utils/emitToast';
+import { useState, useEffect } from 'react';
 import { AlignmentAttempt, AlignmentTargetSession, PolarAlignmentStatus } from '../types/backendTypes';
 import { useAstrometrics } from '../context/AstrometricsContext';
 
@@ -51,6 +50,7 @@ export interface UseTelescopeStatusResult {
 
 /**
  * Custom hook to consume live telescope status from the centralized state context.
+ * It only reads data. It never shows toasts (the status header hook does that).
  */
 export function useTelescopeStatus(): UseTelescopeStatusResult {
     const { telescope } = useAstrometrics();
@@ -74,9 +74,6 @@ export function useTelescopeStatus(): UseTelescopeStatusResult {
         null
     );
     const [trackingStatus, setTrackingStatus] = useState<string>('Not Tracking');
-
-    const prevTelescopeConnection = useRef<boolean | null>(null);
-    const prevTelescopeTracking = useRef<string | null>(null);
 
     useEffect(() => {
         if (!telescope) return;
@@ -125,39 +122,13 @@ export function useTelescopeStatus(): UseTelescopeStatusResult {
         const connBool =
             connRaw === 'Connected' ? true : connRaw === 'Disconnected' ? false : null;
 
-        // Handle tracking state transitions.
+        // Transition toasts (tracking began or stopped, mount dropped) come only
+        // from the always-mounted status header hook. This hook is used by displays
+        // that can be paused, so a toast from here could be stale after a resume.
         if (typeof trackRaw === 'string' && trackRaw.trim().length) {
-            const prevTrack = prevTelescopeTracking.current;
-            const newTrack = trackRaw;
-            const prevIsTracking =
-                typeof prevTrack === 'string' && /\btracking\b/i.test(prevTrack);
-            const newIsTracking = /\btracking\b/i.test(newTrack);
-
-            if (prevTrack !== null && prevTrack !== newTrack) {
-                if (!prevIsTracking && newIsTracking) {
-                    emitToast('Telescope began tracking', 'success', 'telescope');
-                } else if (prevIsTracking && !newIsTracking) {
-                    emitToast('Telescope stopped tracking', 'info', 'telescope');
-                }
-            }
-            prevTelescopeTracking.current = newTrack;
-            setTrackingStatus(newTrack);
+            setTrackingStatus(trackRaw);
         }
-
-        // Handle connection state transitions.
-        const prevConn = prevTelescopeConnection.current;
-        if (prevConn === null) {
-            prevTelescopeConnection.current = connBool;
-            setTelescopeConnection(connBool);
-        } else {
-            if (prevConn === true && connBool === false) {
-                emitToast('Telescope disconnected', 'error', 'telescope');
-            } else if (prevConn === false && connBool === true) {
-                emitToast('Telescope connected', 'success', 'telescope');
-            }
-            prevTelescopeConnection.current = connBool;
-            setTelescopeConnection(connBool);
-        }
+        setTelescopeConnection(connBool);
     }, [telescope]);
 
     return { telemetry, telescopeConnection, trackingStatus };

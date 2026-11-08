@@ -1310,7 +1310,7 @@ def test_the_clipping_note_names_the_linearity_limit_when_there_is_one(
 def test_an_agreeing_earlier_nights_check_shows_a_provisional_count(
     isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch, camera_gain: float
 ) -> None:
-    """Decision D11: a subset check gives a provisional count."""
+    """A subset check gives a provisional count."""
     report = _report_with_checks(
         _Library(runs=TWO_RUNS),
         isolated_butler,
@@ -1460,10 +1460,54 @@ def test_the_fixed_pattern_sentence_points_at_calibration_advice_in_the_same_rep
 
 
 def test_a_provisional_status_keeps_its_sentence_on_the_doubling_statement() -> None:
-    """The D11 sentence and count basis go on the doubling statement too."""
+    """The provisional sentence and count basis go on the doubling one."""
     [marked] = target_report_tasks._mark_provisional([_fixed_pattern_statement()])
 
     assert target_report_tasks.PROVISIONAL_COUNT_SENTENCE in marked.message
     assert marked.message.startswith("Recommended additional frames: 44 (provisional) at 30 s")
     assert marked.values["count_basis"] == "provisional"
     assert marked.proposed_action.frame_count == 44
+
+
+def test_the_moffat_widths_by_frame_equal_the_newest_row_of_each_frame() -> None:
+    """One pass gives what a search of the rows for each frame gave."""
+    from wayfindinglib.tasks.planning_tasks.target_report_tasks import _moffat_widths_by_frame, _newest
+
+    def width_row(frame: str, value: float | None, minutes: int) -> QualityMeasurement:
+        """Build one width row.
+
+        Returns
+        -------
+        row : `QualityMeasurement`
+            The row.
+        """
+        return QualityMeasurement(
+            metric="frame.star_width_moffat_arcsec",
+            definition_version=1,
+            subject=QualitySubject(level=SubjectLevel.FRAME, subject_id=frame, target_id="T"),
+            status=MeasurementStatus.MEASURED if value is not None else MeasurementStatus.NOT_MEASURED,
+            value=value,
+            reason="" if value is not None else "no stars",
+            origin=MeasurementOrigin.MEASURED,
+            run_id=f"run-{minutes}",
+            measured_at=NOW + timedelta(minutes=minutes),
+        )
+
+    rows = [
+        width_row("a", 2.0, 0),
+        width_row("a", 3.0, 5),
+        width_row("b", 1.5, 1),
+        width_row("b", None, 9),
+        width_row("c", 0.0, 2),
+        width_row("d", 2.5, 3),
+        width_row("d", 2.6, 3),
+    ]
+    other = rows[0].model_copy(update={"metric": "frame.sky_noise_e", "value": 9.0})
+    widths = _moffat_widths_by_frame([*rows, other])
+    for frame in ("a", "b", "c", "d"):
+        newest = _newest(
+            [row for row in rows if row.subject.subject_id == frame], "frame.star_width_moffat_arcsec"
+        )
+        expected = float(newest.value) if newest.value is not None and newest.value > 0.0 else None
+        assert widths[frame] == expected
+    assert "e" not in widths

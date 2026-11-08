@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import '../../common/styles/button.css';
+import { useObservatoryNight } from '../ObservatoryNightContext';
 import './IndiPropertyItem.css';
+import { TextInput } from '../../common/components/TextInput';
+import { Button } from '../../common/components/Button';
 
 export interface IndiTextPropertyProps {
     name: string;
@@ -15,6 +17,8 @@ export interface IndiTextPropertyProps {
  * IndiTextProperty Component
  *
  * Handles rendering and editing of INDI Text and Number properties.
+ * While the Observatory Manager shows a past night, the input and Apply button are greyed
+ * with the reason, because an edit would change the live device.
  */
 export const IndiTextProperty: React.FC<IndiTextPropertyProps> = ({
     name,
@@ -24,6 +28,7 @@ export const IndiTextProperty: React.FC<IndiTextPropertyProps> = ({
     perm,
     onApply,
 }) => {
+    const { isLive, liveOnlyReason } = useObservatoryNight();
     // Local state for input
     const [inputs, setInputs] = useState<Record<string, string>>({});
 
@@ -46,21 +51,24 @@ export const IndiTextProperty: React.FC<IndiTextPropertyProps> = ({
                         </div>
                         {canEdit && (
                             <div id={`indi-input-row-${safeName}-${safeEl}`} className="indi-property__input-group">
-                                <input
+                                <TextInput
                                     id={`input-indi-${safeName}-${safeEl}`}
-                                    className="input input--fill"
+                                    width="fill"
                                     value={inputVal}
                                     placeholder="New Value"
+                                    disabled={!isLive}
+                                    title={isLive ? undefined : liveOnlyReason}
                                     onChange={(e) => setInputs(prev => ({ ...prev, [el]: e.target.value }))}
                                 />
-                                <button
+                                <Button
+                                    control
                                     id={`btn-apply-indi-${safeName}-${safeEl}`}
-                                    className="btn btn--control indi-property__apply"
-                                    onClick={() => onApply(el === 'value' ? name : el, inputVal)}
-                                    type="button"
+                                    onClick={() => isLive && onApply(el === 'value' ? name : el, inputVal)}
+                                    disabled={!isLive}
+                                    title={isLive ? undefined : liveOnlyReason}
                                 >
                                     Apply
-                                </button>
+                                </Button>
                             </div>
                         )}
                     </div>

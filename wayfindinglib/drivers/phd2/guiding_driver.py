@@ -3,9 +3,13 @@
 Description: PHD2 reports every guide step over its event connection.
 `PHD2GuidingService` keeps the connection open on a background thread
 and stores each step as a guide sample. This driver hands those samples
-on, labelled `PHD2_LIVE`. When PHD2 has reported nothing new (it is not
-running, or KStars/Ekos guides with its own guider), it reads the guide
-pulses the mount received instead, through the ``internal`` driver.
+on, labelled `PHD2_LIVE`. While the connection to PHD2 is open, PHD2 is the
+only authority: the guide pulses the mount received are drained and thrown
+away, because PHD2 also sends pulses while it calibrates (it sends no
+GuideStep then), and those are not guiding. Only when PHD2 cannot be reached
+(it is not running, or KStars/Ekos guides with its own guider) does the
+driver read the mount's guide pulses instead, through the ``internal``
+driver.
 
 PHD2 runs its own guiding loop, so this driver refuses `run_cycle`.
 """
@@ -87,10 +91,17 @@ class Phd2GuidingDriver(GuidingDriver):
     async def read_samples(self) -> GuidingReading:
         """Return PHD2's new guide steps, or else the mount's pulses.
 
+        While PHD2 is reachable it is the authority: the fallback driver is
+        still read, so its pulses do not pile up, but its samples are
+        dropped. They would include PHD2's calibration pulses, which are
+        not guide corrections.
+
         Returns
         -------
         reading : `GuidingReading`
-            ``PHD2_LIVE`` samples, or the fallback driver's reading.
+            ``PHD2_LIVE`` samples; an empty reading while PHD2 is reachable
+            and has sent no step; the fallback driver's reading when PHD2 is
+            not reachable.
         """
         try:
             self._phd2.poll_external_telemetry()
@@ -98,9 +109,13 @@ class Phd2GuidingDriver(GuidingDriver):
         except RuntimeError as error:  # the reader thread could not start
             logger.debug("PHD2 telemetry poll skipped: %s", error)
             samples = []
+        # Always drain the mount's pulses, so they do not pile up.
+        fallback_reading = await self._fallback.read_samples()
         if samples:
             return GuidingReading(samples=samples, source=GuidingSampleSource.PHD2_LIVE)
-        return await self._fallback.read_samples()
+        if self._phd2.is_reachable():
+            return GuidingReading(samples=[], source=None)
+        return fallback_reading
 
     async def run_cycle(
         self, exposure_seconds: float, gain: float | None, commands: GuideCommands

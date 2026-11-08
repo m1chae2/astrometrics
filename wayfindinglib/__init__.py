@@ -27,17 +27,20 @@ settings by itself::
 
 What to import from where
 -------------------------
-The package root holds 7 names: `Wayfinder`, the four sub-API classes
+The package root holds 8 names: `Wayfinder`, the four sub-API classes
 (`ObservatoryControl`, `ObservationPlanning`, `ObservationExecution` and
-`ObservationReview`), and the two records a script builds or reads most
-(`ObservationSession` and `ObservationPackage`).
-Two public modules hold the rest:
+`ObservationReview`), the two records a script builds or reads most
+(`ObservationSession` and `ObservationPackage`), and `FrameEndDetector`,
+which says when a camera frame has ended from the camera status text.
+Three public modules hold the rest:
 
 - `wayfindinglib.exceptions`: the errors that belong to this library. The
   shared categories (`NotFoundError`, `InvalidArgumentError` and the rest)
   come from `astrometricslib.exceptions`.
 - `wayfindinglib.reports`: the states and levels that results report
   (`RunState`, `PackageStatus`, `DepthGoalState` and `DepthLevel`).
+- `wayfindinglib.logs`: readers for the Ekos analyze log (`read_ekos_captures`,
+  `ekos_utc_offset_hours` and the `SavedCapture` record they return).
 
 Everything else is private. The result models that the calls return are
 private too: use their fields, as listed on the API reference page, and do
@@ -77,6 +80,7 @@ if TYPE_CHECKING:
     from wayfindinglib.api.review import ObservationReview
     from wayfindinglib.models.planning.observation_package import ObservationPackage
     from wayfindinglib.models.session.observation_session import ObservationSession
+    from wayfindinglib.tasks.control_tasks.frame_end_detection import FrameEndDetector
 
 try:
     # Single source of truth is pyproject.toml; both libraries ship from the
@@ -92,6 +96,7 @@ _LAZY_EXPORTS = {
     "ObservationReview": "wayfindinglib.api.review",
     "ObservationPackage": "wayfindinglib.models.planning.observation_package",
     "ObservationSession": "wayfindinglib.models.session.observation_session",
+    "FrameEndDetector": "wayfindinglib.tasks.control_tasks.frame_end_detection",
 }
 """Export name -> the module that defines it."""
 
@@ -140,6 +145,7 @@ class Wayfinder:
         *,
         simulated: bool | None = None,
         separate_process: bool = False,
+        open_port_forwards: bool = False,
     ) -> None:
         """Build the four sub-APIs over a shared configuration and storage.
 
@@ -162,6 +168,11 @@ class Wayfinder:
             such as the backend, should ask for it: the INDI client
             library holds Python's global lock during its blocking calls
             and would freeze everything else. `False` by default.
+        open_port_forwards : `bool`, optional
+            Allow live SSH port forwards, such as the one to PHD2 on the
+            observatory computer. `False` by default: each process would
+            otherwise open its own SSH connection, and the backend is the
+            one process that should hold live links.
 
         Attributes
         ----------
@@ -196,6 +207,7 @@ class Wayfinder:
             astrometrics=self.astrometrics,
             simulated=simulated,
             separate_process=separate_process,
+            open_port_forwards=open_port_forwards,
         )
         self.planning = ObservationPlanning(self.config, butler, astrometrics=self.astrometrics)
         self.review = ObservationReview(self.control)

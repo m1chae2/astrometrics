@@ -13,6 +13,7 @@ import time
 from datetime import datetime
 from typing import Any
 
+from astrometricslib.drivers import network_is_offline
 from astrometricslib.exceptions import (
     ConfigurationError,
     ExternalServiceError,
@@ -23,7 +24,24 @@ from backend.services.infrastructure.socket_manager import SocketManager
 
 logger = logging.getLogger(__name__)
 
+
 #: Message for a computer that has neither phone-link program installed.
+def _refuse_when_offline() -> None:
+    """Say the phone link is unavailable when this launch sends nothing off.
+
+    Raises
+    ------
+    ConfigurationError
+        If the launch is offline. It is the error a missing phone-link
+        program gives, so callers show it as a status.
+    """
+    if network_is_offline():
+        raise ConfigurationError(
+            "The phone link is not available: this launch sends nothing off the computer.",
+            details={"offline": True},
+        )
+
+
 _NO_PHONE_LINK_MESSAGE = (
     "Neither gsconnect-cli nor kdeconnect-cli is installed, so the phone cannot be reached."
 )
@@ -227,6 +245,7 @@ class HandoffService:
         import shutil
         import subprocess
 
+        _refuse_when_offline()
         kdeconnect_bin = shutil.which("kdeconnect-cli") or shutil.which("gsconnect-cli")
         deep_link = f"astrometrics://handoff?mode={mode or 'Planetarium'}"
         if target:
@@ -266,7 +285,7 @@ class HandoffService:
         import subprocess
 
         kdeconnect_bin = shutil.which("kdeconnect-cli") or shutil.which("gsconnect-cli")
-        if not kdeconnect_bin:
+        if not kdeconnect_bin or network_is_offline():
             return []
 
         try:
@@ -345,7 +364,7 @@ class HandoffService:
         kdeconnect_bin = shutil.which("kdeconnect-cli") or shutil.which("gsconnect-cli")
         delivered_channels = ["websocket"]
 
-        if kdeconnect_bin:
+        if kdeconnect_bin and not network_is_offline():
             try:
                 # Dispatch notification ping
                 notify_cmd = [kdeconnect_bin, "--ping-msg", f"{title}: {message}"]
@@ -418,6 +437,7 @@ class HandoffService:
         if not os.path.exists(file_path):
             raise NotFoundError(f"The file {file_path} does not exist.", details={"file_path": file_path})
 
+        _refuse_when_offline()
         kdeconnect_bin = shutil.which("kdeconnect-cli") or shutil.which("gsconnect-cli")
         if not kdeconnect_bin:
             raise ConfigurationError(_NO_PHONE_LINK_MESSAGE, details={"file_path": file_path})

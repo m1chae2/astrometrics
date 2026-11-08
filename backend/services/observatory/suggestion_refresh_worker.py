@@ -32,6 +32,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from astrometricslib.reports import observing_night_id
+from backend.services.infrastructure.background_logging import background_log_context
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +128,8 @@ class SuggestionRefreshWorker:
             if not found:
                 return
             try:
-                change = self._wayfinder.planning.refresh_suggestions(target_ids)
+                with background_log_context("suggestion-refresh"):
+                    change = self._wayfinder.planning.refresh_suggestions(target_ids)
             except Exception:  # the top of a background thread: log it, keep the worker alive
                 logger.exception("The suggestion refresh failed")
                 continue

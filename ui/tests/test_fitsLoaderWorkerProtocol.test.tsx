@@ -10,7 +10,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
-import { useFitsLoader } from '../common/fitsViewer/hooks/useFitsLoader';
+import { useFitsLoader, prefetchDecode } from '../common/fitsViewer/hooks/useFitsLoader';
 import { useCanvasDrawer } from '../common/fitsViewer/hooks/useCanvasDrawer';
 import { PARSED_FITS_CACHE_LIMIT } from '../common/fitsViewer/parsedFitsCache';
 
@@ -236,6 +236,69 @@ describe('useFitsLoader and useCanvasDrawer sharing one worker', () => {
     });
 
     await waitFor(() => expect(setStatus).toHaveBeenCalledWith('Error: bad pixels'));
+    hook.unmount();
+  });
+
+  it('reports an explicit phase: parsing while the worker decodes, ready afterwards', async () => {
+    const original = FakeFitsWorker.prototype.postMessage;
+    vi.spyOn(FakeFitsWorker.prototype, 'postMessage').mockImplementation(function (this: FakeFitsWorker, message: any) {
+      if (message.cmd === 'parse') {
+        this.sent.push(message); // held back, so the "parsing" phase can be seen
+        return;
+      }
+      original.call(this, message);
+    });
+    const { hook } = renderLoader(buildFitsBlob(4, 4));
+    await waitFor(() => expect(hook.result.current.phase).toBe('parsing'));
+    expect(hook.result.current.parsedData).toBeNull();
+    expect(hook.result.current.loadedKey).toBeNull();
+
+    const requestId = FakeFitsWorker.instances[0].commandsOf('parse')[0].requestId;
+    act(() => {
+      FakeFitsWorker.instances[0].reply({
+        cmd: 'parseComplete', requestId, result: { w: 4, h: 4, channels: 1, min: 0, max: 1 },
+      });
+    });
+    await waitFor(() => expect(hook.result.current.phase).toBe('ready'));
+    expect(hook.result.current.loadedKey).not.toBeNull();
+    hook.unmount();
+  });
+
+  it('reports the error phase with its message when the worker fails', async () => {
+    const original = FakeFitsWorker.prototype.postMessage;
+    vi.spyOn(FakeFitsWorker.prototype, 'postMessage').mockImplementation(function (this: FakeFitsWorker, message: any) {
+      if (message.cmd === 'parse') {
+        this.sent.push(message);
+        return;
+      }
+      original.call(this, message);
+    });
+    const { hook } = renderLoader(buildFitsBlob(2, 2));
+    await waitFor(() => expect(FakeFitsWorker.instances[0]?.commandsOf('parse')).toHaveLength(1));
+    const requestId = FakeFitsWorker.instances[0].commandsOf('parse')[0].requestId;
+    act(() => {
+      FakeFitsWorker.instances[0].reply({ cmd: 'error', requestId, error: 'bad pixels' });
+    });
+    await waitFor(() => expect(hook.result.current.phase).toBe('error'));
+    expect(hook.result.current.errorMessage).toBe('Error: bad pixels');
+    hook.unmount();
+  });
+
+  it('decodes a prefetched file ahead of time for a viewer that accepts prefetching', async () => {
+    const wanted = buildFitsBlob(6, 5);
+    const hook = renderHook(({ blob }) => useFitsLoader(null, blob, undefined, true), {
+      initialProps: { blob: buildFitsBlob(2, 2) as Blob },
+    });
+    await waitFor(() => expect(hook.result.current.parsedData).not.toBeNull());
+
+    await prefetchDecode(wanted, new AbortController().signal);
+    const parsesBefore = FakeFitsWorker.instances[0].commandsOf('parse').length;
+    expect(parsesBefore).toBe(2);
+
+    // Showing the prefetched file now needs no new decode.
+    hook.rerender({ blob: wanted });
+    await waitFor(() => expect(hook.result.current.parsedData?.w).toBe(6));
+    expect(FakeFitsWorker.instances[0].commandsOf('parse')).toHaveLength(parsesBefore);
     hook.unmount();
   });
 });

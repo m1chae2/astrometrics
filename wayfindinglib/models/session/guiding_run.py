@@ -63,6 +63,22 @@ class GuidingRunSummary(BaseModel):
         Azimuth when guiding began, in degrees.
     pier_side : `str` or `None`
         ``"East"`` or ``"West"``, the side of the pier the telescope was on.
+    guide_exposure_seconds : `float` or `None`
+        The guide exposure length the PHD2 log header states, in seconds.
+        `None` for a log that states none (the Ekos guider's).
+    ra_algorithm, dec_algorithm : `str` or `None`
+        The PHD2 guide algorithm names of the right ascension and
+        declination axes, for example ``"Hysteresis"``.
+    ra_aggressiveness, dec_aggressiveness : `float` or `None`
+        How much of each error the axis corrects, as a fraction (0.7 is 70
+        percent).
+    ra_hysteresis, dec_hysteresis : `float` or `None`
+        The Hysteresis algorithm's weight of the previous correction, as a
+        fraction. `None` for another algorithm.
+    ra_minimum_move_px, dec_minimum_move_px : `float` or `None`
+        The smallest error the axis corrects, in guide camera pixels.
+    maximum_ra_duration_ms, maximum_dec_duration_ms : `float` or `None`
+        The longest pulse PHD2 may send on each axis, in milliseconds.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -86,6 +102,17 @@ class GuidingRunSummary(BaseModel):
     altitude_degrees: float | None = Field(default=None, alias="altitudeDegrees")
     azimuth_degrees: float | None = Field(default=None, alias="azimuthDegrees")
     pier_side: str | None = Field(default=None, alias="pierSide")
+    guide_exposure_seconds: float | None = Field(default=None, alias="guideExposureSeconds")
+    ra_algorithm: str | None = Field(default=None, alias="raAlgorithm")
+    dec_algorithm: str | None = Field(default=None, alias="decAlgorithm")
+    ra_aggressiveness: float | None = Field(default=None, alias="raAggressiveness")
+    dec_aggressiveness: float | None = Field(default=None, alias="decAggressiveness")
+    ra_hysteresis: float | None = Field(default=None, alias="raHysteresis")
+    dec_hysteresis: float | None = Field(default=None, alias="decHysteresis")
+    ra_minimum_move_px: float | None = Field(default=None, alias="raMinimumMovePx")
+    dec_minimum_move_px: float | None = Field(default=None, alias="decMinimumMovePx")
+    maximum_ra_duration_ms: float | None = Field(default=None, alias="maximumRaDurationMs")
+    maximum_dec_duration_ms: float | None = Field(default=None, alias="maximumDecDurationMs")
 
     @property
     def duration_seconds(self) -> float | None:

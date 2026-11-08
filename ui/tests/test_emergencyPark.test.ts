@@ -37,7 +37,7 @@ describe('emergencyParkMount', () => {
 
     await expect(emergencyParkMount()).resolves.toBe(false);
 
-    expect(emitToast).toHaveBeenCalledWith(expect.stringContaining('Emergency park failed'), 'error', 'EmergencyPark');
+    expect(emitToast).toHaveBeenCalledWith(expect.stringContaining('Emergency park failed'), 'error', 'EmergencyPark', { notify: true });
   });
 
   /** A request that throws also produces an error toast. */

@@ -15,12 +15,12 @@ REQ: PLN-3.2
 """
 
 import logging
+import sqlite3
 from pathlib import Path
 
 import numpy as np
 
 from astrometricslib import StellarObject
-from astrometricslib.drivers import connect_db
 from wayfindinglib.drivers.catalog.base_catalog_driver import CatalogDriver
 
 logger = logging.getLogger(__name__)
@@ -103,15 +103,19 @@ class LocalBrightStarCatalogDriver(CatalogDriver):
             self._cached_rows = np.empty(0, dtype=_ROW_DTYPE)
             return self._cached_rows
 
-        conn = connect_db(str(self._catalog_path))
+        # The file ships with the app and is only read. It is opened
+        # read-only and "immutable" so SQLite writes no -wal, -shm or journal
+        # file next to it. The usual connect_db switches the file to
+        # write-ahead logging, which needs a writable folder: in a read-only
+        # install the open failed with "unable to open database file" and the
+        # sky had no stars at all.
+        conn = sqlite3.connect(f"{self._catalog_path.resolve().as_uri()}?mode=ro&immutable=1", uri=True)
         try:
             cursor = conn.execute(f"SELECT hip_id, ra, dec, magnitude FROM {CATALOG_TABLE_NAME}")
-            # connect_db's row_factory returns sqlite3.Row objects, which
-            # np.array(..., dtype=_ROW_DTYPE) -- a *structured* dtype --
-            # would silently broadcast each scalar into all four fields
-            # instead of building one record per row. Converting back to
-            # plain tuples first keeps the structured-array construction
-            # below correct.
+            # Plain tuples are needed here: np.array(..., dtype=_ROW_DTYPE) --
+            # a *structured* dtype -- would silently broadcast a non-tuple
+            # row's scalars into all four fields instead of building one
+            # record per row.
             rows = [tuple(row) for row in cursor.fetchall()]
         finally:
             conn.close()
@@ -146,9 +150,40 @@ class LocalBrightStarCatalogDriver(CatalogDriver):
             Transient StellarObject instances, capped to the _MAX_RESULTS
             brightest matches. Never recorded to the database.
         """
+        objects, _ = self.query_region_with_status(ra_degrees, dec_degrees, radius_degrees, magnitude_limit)
+        return objects
+
+    def query_region_with_status(
+        self,
+        ra_degrees: float,
+        dec_degrees: float,
+        radius_degrees: float,
+        magnitude_limit: float | None = None,
+    ) -> tuple[list[StellarObject], bool]:
+        """Query a sky region and say whether the result cap cut the answer.
+
+        Parameters
+        ----------
+        ra_degrees : float
+            Center Right Ascension in degrees (ICRS).
+        dec_degrees : float
+            Center Declination in degrees (ICRS).
+        radius_degrees : float
+            Search radius in degrees.
+        magnitude_limit : float, optional
+            Not used; the bundled catalog is already limited to bright stars.
+
+        Returns
+        -------
+        objects : `list` [`StellarObject`]
+            The brightest matches, at most _MAX_RESULTS of them.
+        truncated : `bool`
+            True when more than _MAX_RESULTS stars matched, so the
+            faintest were left out.
+        """
         rows = self._load_rows()
         if rows.size == 0:
-            return []
+            return [], False
 
         ra_center_rad = np.radians(ra_degrees)
         dec_center_rad = np.radians(dec_degrees)
@@ -164,11 +199,12 @@ class LocalBrightStarCatalogDriver(CatalogDriver):
         separation_deg = np.degrees(2.0 * np.arcsin(np.sqrt(np.clip(haversine_term, 0.0, 1.0))))
 
         matched_rows = rows[separation_deg <= radius_degrees]
-        if matched_rows.size > _MAX_RESULTS:
+        truncated = bool(matched_rows.size > _MAX_RESULTS)
+        if truncated:
             brightest_indices = np.argsort(matched_rows["magnitude"])[:_MAX_RESULTS]
             matched_rows = matched_rows[brightest_indices]
 
-        return [
+        objects = [
             StellarObject(
                 id=f"HIP_{int(row['hip_id'])}",
                 name=f"HIP {int(row['hip_id'])}",
@@ -179,3 +215,4 @@ class LocalBrightStarCatalogDriver(CatalogDriver):
             )
             for row in matched_rows
         ]
+        return objects, truncated

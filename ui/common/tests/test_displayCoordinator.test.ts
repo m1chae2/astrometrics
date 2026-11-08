@@ -2,12 +2,12 @@
  * @file test_displayCoordinator.test.ts
  * @description Unit tests for the universal cross-display navigation coordinator.
  * Verifies remote intent routing via Electron IPC, fallback to local workspace
- * mode changes, and receiver hook filtering.
+ * mode changes, and the hand-off the receiving display reads.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook } from '@testing-library/react';
-import { navigateToElement, useNavigationTarget, NavigationIntent } from '../utils/displayCoordinator';
+import { navigateToElement, NavigationIntent } from '../utils/displayCoordinator';
+import { peekHandoffs } from '../utils/displayHandoffStore';
 
 describe('displayCoordinator', () => {
   beforeEach(() => {
@@ -64,12 +64,7 @@ describe('displayCoordinator', () => {
     };
 
     const modeChangeSpy = vi.fn();
-    const actionSpy = vi.fn();
-    const navigationIntentSpy = vi.fn();
-
     window.addEventListener('astrometrics:modeChange', modeChangeSpy);
-    window.addEventListener('astrometrics:astronomySelectStar', actionSpy);
-    window.addEventListener('astrometrics:navigationIntent', navigationIntentSpy);
 
     const intent: NavigationIntent = {
       targetDisplay: 'Astronomy Manager',
@@ -84,14 +79,14 @@ describe('displayCoordinator', () => {
     expect(routeDisplayActionMock).toHaveBeenCalledWith(intent);
     expect(modeChangeSpy).toHaveBeenCalled();
     expect((modeChangeSpy.mock.calls[0][0] as CustomEvent).detail).toBe('Astronomy Manager');
-    expect(actionSpy).toHaveBeenCalled();
-    expect((actionSpy.mock.calls[0][0] as CustomEvent).detail).toBe('HD 151023');
-    expect(navigationIntentSpy).toHaveBeenCalled();
+    // The request waits in the hand-off store for the Astronomy Manager.
+    const waiting = peekHandoffs('Astronomy Manager', 'astronomySelectStar');
+    expect(waiting).toHaveLength(1);
+    expect(waiting[0].payload).toBe('HD 151023');
+    expect(waiting[0].element).toBe('spectrumViewer');
     expect(window.localStorage.getItem('appMode')).toBe('Astronomy Manager');
 
     window.removeEventListener('astrometrics:modeChange', modeChangeSpy);
-    window.removeEventListener('astrometrics:astronomySelectStar', actionSpy);
-    window.removeEventListener('astrometrics:navigationIntent', navigationIntentSpy);
   });
 
   /**
@@ -116,42 +111,35 @@ describe('displayCoordinator', () => {
     window.removeEventListener('astrometrics:modeChange', modeChangeSpy);
   });
 
-  /**
-   * Verifies that useNavigationTarget receives matching intents and ignores non-matching intents.
-   */
-  it('useNavigationTarget invokes callback only for matching display and elementId', () => {
-    const onIntentMock = vi.fn();
+  /** Switching the display in this window is its own feedback: the intent's toast is not shown. */
+  it('shows no toast when it switches the display in this window', async () => {
+    const toasts: unknown[] = [];
+    const listener = (event: Event) => toasts.push((event as CustomEvent).detail);
+    window.addEventListener('astrometrics:toast', listener);
+    (window as any).astrometrics = { app: { routeDisplayAction: vi.fn().mockResolvedValue({ handledRemotely: false }) } };
+    await navigateToElement({
+      targetDisplay: 'Astronomy Manager',
+      action: 'astronomySelectStar',
+      payload: 'HD 1',
+      toast: { message: 'Opening HD 1 in Astronomy Manager' },
+    });
+    window.removeEventListener('astrometrics:toast', listener);
+    expect(toasts).toHaveLength(0);
+  });
 
-    renderHook(() => useNavigationTarget('Image Processing', 'fitsViewer', onIntentMock));
-
-    // Non-matching display
-    window.dispatchEvent(
-      new CustomEvent('astrometrics:navigationIntent', {
-        detail: { targetDisplay: 'Planetarium', targetElement: 'fitsViewer', action: 'test', payload: {} },
-      })
-    );
-    expect(onIntentMock).not.toHaveBeenCalled();
-
-    // Non-matching element
-    window.dispatchEvent(
-      new CustomEvent('astrometrics:navigationIntent', {
-        detail: { targetDisplay: 'Image Processing', targetElement: 'frameList', action: 'test', payload: {} },
-      })
-    );
-    expect(onIntentMock).not.toHaveBeenCalled();
-
-    // Matching intent
-    const matchingIntent: NavigationIntent = {
-      targetDisplay: 'Image Processing',
-      targetElement: 'fitsViewer',
-      action: 'selectFrame',
-      payload: { frameIndex: 3 },
-    };
-    window.dispatchEvent(
-      new CustomEvent('astrometrics:navigationIntent', {
-        detail: matchingIntent,
-      })
-    );
-    expect(onIntentMock).toHaveBeenCalledWith(matchingIntent);
+  /** When another window handled it, the toast tells the user where it went. */
+  it('shows the toast when another window handled the request', async () => {
+    const toasts: unknown[] = [];
+    const listener = (event: Event) => toasts.push((event as CustomEvent).detail);
+    window.addEventListener('astrometrics:toast', listener);
+    (window as any).astrometrics = { app: { routeDisplayAction: vi.fn().mockResolvedValue({ handledRemotely: true }) } };
+    await navigateToElement({
+      targetDisplay: 'Astronomy Manager',
+      action: 'astronomySelectStar',
+      payload: 'HD 2',
+      toast: { message: 'Opening HD 2 in Astronomy Manager' },
+    });
+    window.removeEventListener('astrometrics:toast', listener);
+    expect(toasts).toHaveLength(1);
   });
 });

@@ -1,104 +1,147 @@
 """Purpose: Unit tests for calibration advisory computation.
 
-Description: Verifies build_calibration_advisory returns the matching
-existing count for a requested frame type/exposure/filter, and a zero
-count when none exists, without influencing anything beyond the
-returned advisory.
+Description: Verifies build_calibration_advisory counts the frames the
+calibration library holds (the source the Calibration Library view shows)
+for a requested frame type, exposure, filter and settings, and returns zero
+when none match. The library is the real `CalibrationCatalog` over a stub
+index, so the library's own matching rules are exercised.
 """
 
-from pathlib import Path
-
-import pytest
+from types import SimpleNamespace
+from typing import Any
 
 from astrometricslib import FilterType
-from wayfindinglib.drivers.butler import DiskButler
-from wayfindinglib.models.equipment_and_site.calibration import CalibrationEntry, CalibrationStats
+from astrometricslib.api.processing import CalibrationCatalog
 from wayfindinglib.models.planning.observation_package import FrameType
 from wayfindinglib.tasks.planning_tasks.calibration_advisory_tasks import build_calibration_advisory
 
+CAMERA = "ZWO ASI 533MM Pro"
 
-@pytest.fixture
-def isolated_butler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DiskButler:
-    """Build a DiskButler backed by a fully isolated temporary database.
+
+def _catalog() -> CalibrationCatalog:
+    """Build a calibration catalog over a small stub index.
 
     Returns
     -------
-    butler : `DiskButler`
-        The constructed, isolated butler.
+    catalog : `CalibrationCatalog`
+        A catalog whose index holds darks at gain 0 and 100, flats through
+        two filters and biases, all written the way the real index writes
+        them (gain ``"0.0"``, binning ``"1x1"``).
     """
-    from astrometricslib import AppConfiguration
-
-    config_path = tmp_path / "astrometrics.config.toml"
-    monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: config_path)
-    config = AppConfiguration()
-    config.update_config({"Wayfinding Library": {"path": str(tmp_path / "wayfinding_library")}})
-    return DiskButler(app_config=config)
-
-
-def test_returns_matching_existing_count(isolated_butler: DiskButler) -> None:
-    """Verify a matching frame_type/exposure/filter returns the count."""
-    stats = CalibrationStats(
-        camera_id="c1",
-        darks=[
-            CalibrationEntry(camera_id="c1", frame_type=FrameType.DARK, exposure_sec=300.0, count=40),
-            CalibrationEntry(camera_id="c1", frame_type=FrameType.DARK, exposure_sec=600.0, count=10),
+    stats: dict[str, Any] = {
+        "darks": [
+            {
+                "camera": CAMERA,
+                "iso": "0.0",
+                "offset": 10.0,
+                "binning": "1x1",
+                "temperature_c": -9.0,
+                "exposure": 60.0,
+                "count": 121,
+            },
+            {
+                "camera": CAMERA,
+                "iso": "0.0",
+                "offset": 10.0,
+                "binning": "1x1",
+                "temperature_c": -9.0,
+                "exposure": 120.0,
+                "count": 30,
+            },
+            {
+                "camera": CAMERA,
+                "iso": "100.0",
+                "offset": 10.0,
+                "binning": "1x1",
+                "temperature_c": -9.0,
+                "exposure": 60.0,
+                "count": 7,
+            },
+            {
+                "camera": CAMERA,
+                "iso": "0.0",
+                "offset": 0.0,
+                "binning": "1x1",
+                "temperature_c": 0.0,
+                "exposure": 60.0,
+                "count": 5,
+            },
         ],
-    )
-    isolated_butler.put(stats, "calibration_stats", {"camera_id": "c1"})
-
-    advisory = build_calibration_advisory(isolated_butler, "c1", FrameType.DARK, exposure_seconds=300.0)
-    assert advisory.existing_count == 40
-
-
-def test_returns_zero_when_no_matching_entry(isolated_butler: DiskButler) -> None:
-    """Verify a zero count is returned, not an error, when no entry matches."""
-    advisory = build_calibration_advisory(isolated_butler, "c1", FrameType.FLAT, exposure_seconds=1.0)
-    assert advisory.existing_count == 0
-
-
-def test_returns_zero_when_no_stats_persisted_at_all(isolated_butler: DiskButler) -> None:
-    """Verify an unconfigured camera resolves to zero, not a raise."""
-    advisory = build_calibration_advisory(isolated_butler, "unconfigured-camera", FrameType.BIAS)
-    assert advisory.existing_count == 0
-
-
-def test_filter_matching_for_flats(isolated_butler: DiskButler) -> None:
-    """Verify filter distinguishes matching entries for flats."""
-    stats = CalibrationStats(
-        camera_id="c1",
-        flats=[
-            CalibrationEntry(camera_id="c1", frame_type=FrameType.FLAT, filter=FilterType.L, count=20),
-            CalibrationEntry(camera_id="c1", frame_type=FrameType.FLAT, filter=FilterType.Ha, count=5),
+        "biases": [
+            {"camera": CAMERA, "iso": "0.0", "offset": 0.0, "binning": "1x1", "count": 100},
         ],
-    )
-    isolated_butler.put(stats, "calibration_stats", {"camera_id": "c1"})
-
-    advisory = build_calibration_advisory(isolated_butler, "c1", FrameType.FLAT, filter=FilterType.Ha)
-    assert advisory.existing_count == 5
-
-
-def test_gain_offset_binning_and_temperature_narrow_the_match(isolated_butler: DiskButler) -> None:
-    """Entries with a different setting are not counted; unstated ones are."""
-    stats = CalibrationStats(
-        camera_id="c1",
-        darks=[
-            CalibrationEntry(
-                camera_id="c1",
-                frame_type=FrameType.DARK,
-                exposure_sec=60.0,
-                gain_setting=100,
-                offset=50,
-                binning=1,
-                sensor_temperature_c=-10.0,
-                count=20,
-            ),
-            CalibrationEntry(
-                camera_id="c1", frame_type=FrameType.DARK, exposure_sec=60.0, gain_setting=200, count=5
-            ),
-            CalibrationEntry(camera_id="c1", frame_type=FrameType.DARK, exposure_sec=60.0, count=3),
+        "flats": [
+            {
+                "camera": CAMERA,
+                "filter": "Luminance",
+                "iso": "0.0",
+                "offset": 10.0,
+                "binning": "1x1",
+                "count": 30,
+            },
+            {
+                "camera": CAMERA,
+                "filter": "Star Analyzer 200",
+                "iso": "0.0",
+                "offset": 10.0,
+                "binning": "1x1",
+                "count": 30,
+            },
         ],
+    }
+    catalog = CalibrationCatalog(SimpleNamespace(), None)
+    catalog._library = SimpleNamespace(get_stats=lambda: stats, load_library=lambda: None)
+    return catalog
+
+
+def test_counts_darks_the_library_holds_with_integer_settings() -> None:
+    """Gain 0 matches a ``"0.0"`` index entry; unrelated rows are left out."""
+    advisory = build_calibration_advisory(
+        _catalog(),
+        CAMERA,
+        FrameType.DARK,
+        60.0,
+        gain_setting=0,
+        offset=10,
+        sensor_temperature_c=-10.0,
     )
-    isolated_butler.put(stats, "calibration_stats", {"camera_id": "c1"})
+    assert advisory.existing_count == 121
+
+
+def test_exposure_and_no_other_filters() -> None:
+    """With only an exposure, every gain and offset of that exposure counts."""
+    assert build_calibration_advisory(_catalog(), CAMERA, FrameType.DARK, 60.0).existing_count == 133
+
+
+def test_all_darks_without_filters() -> None:
+    """With no filters at all, every dark of the camera counts."""
+    assert build_calibration_advisory(_catalog(), CAMERA, FrameType.DARK).existing_count == 163
+
+
+def test_camera_is_matched_ignoring_case() -> None:
+    """The camera name's case does not matter."""
+    assert build_calibration_advisory(_catalog(), CAMERA.lower(), FrameType.BIAS).existing_count == 100
+
+
+def test_other_camera_has_none() -> None:
+    """A camera the library does not hold gives zero, not an error."""
+    assert build_calibration_advisory(_catalog(), "Other", FrameType.DARK).existing_count == 0
+
+
+def test_flat_filter_by_short_or_long_name() -> None:
+    """``L`` and ``Luminance`` are the same filter, and others are excluded."""
+    luminance = build_calibration_advisory(
+        _catalog(), CAMERA, FrameType.FLAT, filter=FilterType.L, gain_setting=0, offset=10
+    )
+    assert luminance.existing_count == 30
+    spectrum = build_calibration_advisory(_catalog(), CAMERA, FrameType.FLAT, filter=FilterType.SPEC)
+    assert spectrum.existing_count == 30
+    assert build_calibration_advisory(_catalog(), CAMERA, FrameType.FLAT).existing_count == 60
+
+
+def test_gain_offset_binning_and_temperature_narrow_the_match() -> None:
+    """A row with a different setting is not counted."""
+    catalog = _catalog()
 
     def count(**keywords: float) -> int:
         """Count the darks of 60 s that match the given settings.
@@ -108,20 +151,11 @@ def test_gain_offset_binning_and_temperature_narrow_the_match(isolated_butler: D
         count : `int`
             The matching frame count.
         """
-        return build_calibration_advisory(
-            isolated_butler,
-            "c1",
-            FrameType.DARK,
-            exposure_seconds=60.0,
-            dark_temperature_tolerance_c=3.0,
-            **keywords,
-        ).existing_count
+        return build_calibration_advisory(catalog, CAMERA, FrameType.DARK, 60.0, **keywords).existing_count
 
-    assert count() == 28
-    # The 200-gain entry differs; the entry with no settings still counts.
-    assert count(gain_setting=100) == 23
-    assert count(gain_setting=100, offset=10) == 3
-    assert count(gain_setting=100, binning=2) == 3
-    # 2 degrees away is inside the 3 degree tolerance; 8 is not.
-    assert count(gain_setting=100, sensor_temperature_c=-8.0) == 23
-    assert count(gain_setting=100, sensor_temperature_c=-2.0) == 3
+    assert count(gain_setting=100) == 7
+    assert count(offset=0) == 5
+    assert count(binning=1) == 133
+    assert count(binning=2) == 0
+    assert count(sensor_temperature_c=-8.0) == 128
+    assert count(sensor_temperature_c=-25.0) == 0

@@ -15,12 +15,17 @@ camera's plate scale, and the guide rate.
 
 When the call runs as a background job, each frame moves the job's
 progress bar.
+
+A run can be stopped from another thread (`control.imaging.stop_capture`,
+or a slew or park). The run checks its stop flag before each frame and
+during the wait for each exposure. It then ends cleanly with the frames
+it has, and the exposure in progress is aborted and not counted.
 """
 
 from __future__ import annotations
 
 import logging
-import time
+import threading
 from typing import TYPE_CHECKING
 
 from astrometricslib.exceptions import ConfigurationError, HardwareError, InvalidArgumentError
@@ -138,9 +143,11 @@ def capture_frames(
     InvalidArgumentError
         If `exposure_seconds` or `count` is not above zero, or
         `delay_seconds` is negative.
-    HardwareError
-        If the camera does not start an exposure, or the filter wheel
-        does not turn.
+
+    Notes
+    -----
+    Raises `HardwareError` if the camera does not start an exposure or
+    the filter wheel does not turn.
     """
     if exposure_seconds <= 0:
         raise InvalidArgumentError("exposure_seconds must be greater than zero.")
@@ -150,6 +157,57 @@ def capture_frames(
         raise InvalidArgumentError("delay_seconds cannot be negative.")
     dither_config = resolve_dither(dither)
     pulse_ms = dither_pulses_ms(context, dither_config) if dither_config.enabled and count > 1 else 0.0
+    stop_flag = context.capture_runs.begin()
+    try:
+        return _take_frames(
+            context, exposure_seconds, count, filter_name, dither_config, pulse_ms, delay_seconds, stop_flag
+        )
+    finally:
+        context.capture_runs.end(stop_flag)
+
+
+def _take_frames(
+    context: ControlContext,
+    exposure_seconds: float,
+    count: int,
+    filter_name: str | None,
+    dither_config: DitherConfig,
+    pulse_ms: float,
+    delay_seconds: float,
+    stop_flag: threading.Event,
+) -> CaptureResult:
+    """Run the filter change and the exposures of one registered run.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the drivers.
+    exposure_seconds : `float`
+        Length of each exposure, in seconds.
+    count : `int`
+        Number of exposures.
+    filter_name : `str` or `None`
+        Filter to turn to first, or `None` to leave the wheel.
+    dither_config : `DitherConfig`
+        The dithering to apply.
+    pulse_ms : `float`
+        The dither pulse length, in milliseconds (0 for none).
+    delay_seconds : `float`
+        Pause between exposures.
+    stop_flag : `threading.Event`
+        Set from another thread to ask the run to stop.
+
+    Returns
+    -------
+    result : `CaptureResult`
+        What was taken. ``stopped`` is `True` if the flag ended the run.
+
+    Raises
+    ------
+    HardwareError
+        If the camera does not start an exposure, or the filter wheel
+        does not turn.
+    """
     job = get_current_job()
 
     # One filter for the whole run: a run is defined as one filter, and
@@ -161,12 +219,21 @@ def capture_frames(
 
     result = CaptureResult(exposure_seconds=exposure_seconds, filter_name=filter_name or None)
     for index in range(count):
+        if stop_flag.is_set():
+            return _finish_stopped(result)
         if job is not None:
             job.stage(int(index / count * 100), f"Capturing frame {index + 1}/{count}")
         logger.info("Capturing frame %s/%s (%s s)", index + 1, count, exposure_seconds)
         if not hardware_operations.capture_image(context, exposure_seconds):
             raise HardwareError(f"The camera did not start frame {index + 1} of {count}.")
-        time.sleep(exposure_seconds + READOUT_SECONDS)
+        if _wait_or_stop(stop_flag, exposure_seconds + READOUT_SECONDS):
+            # Stopped during the exposure. Abort it here too, in case the
+            # stop arrived just as the exposure started.
+            try:
+                hardware_operations.abort_exposure(context)
+            except Exception:  # the run is ending anyway; the abort is a courtesy
+                logger.warning("The camera did not accept the abort for the stopped run.", exc_info=True)
+            return _finish_stopped(result)
         result.frames_captured += 1
         if index == count - 1:
             break
@@ -176,6 +243,47 @@ def capture_frames(
             for direction in directions:
                 hardware_operations.pulse(context, direction, pulse_ms)
             result.dithers += 1
-        if delay_seconds:
-            time.sleep(delay_seconds)
+        if delay_seconds and _wait_or_stop(stop_flag, delay_seconds):
+            return _finish_stopped(result)
+    return result
+
+
+def _wait_or_stop(stop_flag: threading.Event, seconds: float) -> bool:
+    """Wait for a time, ending early if a stop is requested.
+
+    Parameters
+    ----------
+    stop_flag : `threading.Event`
+        The run's stop flag.
+    seconds : `float`
+        How long to wait.
+
+    Returns
+    -------
+    stopped : `bool`
+        `True` if the stop flag was set before the time passed.
+    """
+    return stop_flag.wait(seconds)
+
+
+def _finish_stopped(result: CaptureResult) -> CaptureResult:
+    """Mark a run as stopped and say so in the log and the job.
+
+    Parameters
+    ----------
+    result : `CaptureResult`
+        The run's result so far.
+
+    Returns
+    -------
+    result : `CaptureResult`
+        The same result, with ``stopped`` set.
+    """
+    result.stopped = True
+    count = result.frames_captured
+    message = f"Capture stopped after {count} frame{'' if count == 1 else 's'}"
+    logger.info(message)
+    job = get_current_job()
+    if job is not None:
+        job.info(message)
     return result

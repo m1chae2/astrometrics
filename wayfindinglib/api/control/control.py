@@ -20,6 +20,7 @@ Callers never import `wayfindinglib.tasks` directly.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from wayfindinglib.api.control.context import ControlContext
@@ -69,6 +70,11 @@ class ObservatoryControl:
     separate_process : `bool`, optional
         Run the INDI session in a process of its own, so a slow INDI
         call cannot freeze the caller. `close` stops that process.
+    open_port_forwards : `bool`, optional
+        Allow live SSH port forwards, such as the one to PHD2 on the
+        observatory computer. `False` by default: each process would
+        otherwise open its own SSH connection, and the backend is the one
+        process that should hold live links. `close` stops them.
 
     Attributes
     ----------
@@ -102,6 +108,7 @@ class ObservatoryControl:
         astrometrics: Astrometrics | None = None,
         simulated: bool | None = None,
         separate_process: bool = False,
+        open_port_forwards: bool = False,
     ) -> None:
         """Build the shared context and the six children."""
         if config is None:
@@ -116,6 +123,7 @@ class ObservatoryControl:
             astrometrics=astrometrics,
             simulated=simulated,
             separate_process=separate_process,
+            open_port_forwards=open_port_forwards,
         )
         self.mount = MountControl(self._context)
         self.imaging = ImagingControl(self._context)
@@ -133,6 +141,21 @@ class ObservatoryControl:
         already running, and it is safe to call more than once.
         """
         self._context.close()
+
+    @property
+    def library_path(self) -> Path:
+        """The folder of the wayfinding library.
+
+        It holds ``wayfinding.db`` and the files kept next to it, such as
+        downloaded Ekos logs. A program that writes records can check that
+        this is the folder it means to write to. It is created when missing.
+
+        Returns
+        -------
+        path : `pathlib.Path`
+            The absolute path.
+        """
+        return self._context.butler.library_path
 
     @property
     def _driver(self) -> Any:

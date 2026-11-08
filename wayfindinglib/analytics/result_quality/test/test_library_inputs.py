@@ -5,7 +5,7 @@ direction, the set-aside reasons, the dominant setting and the science goal;
 the reviewed night being left out of its own baseline; the telescope coming
 from the capture setting; the observing site being read and never stored; and
 that the copy of the unknown-setting camera name agrees with the efficiency
-module (decision C2 of the code board).
+module (settled in review).
 """
 
 from datetime import UTC, datetime
@@ -55,11 +55,15 @@ def config(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> AppConfiguration:
     Returns
     -------
     config : `AppConfiguration`
-        The configuration.
+        The configuration, whose image library is an empty temporary folder.
     """
     config_path = tmp_path / "astrometrics.config.toml"
     monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: config_path)
-    return AppConfiguration()
+    library = tmp_path / "library"
+    library.mkdir()
+    configuration = AppConfiguration()
+    configuration.update_config({"Image Library": {"path": str(library)}})
+    return configuration
 
 
 def _butler(stored: SiteProfile | None = None) -> Any:
@@ -298,3 +302,357 @@ def test_the_configured_location_wins_over_a_stored_profile_and_a_note_says_so()
 def test_a_stored_profile_is_used_only_when_the_configuration_has_no_location() -> None:
     """With no configured location, the stored profile is used as is."""
     assert stored_site(_butler(SITE), _located(None, None)) == SITE
+
+
+def _write_camera_row(
+    config: AppConfiguration,
+    camera: str,
+    run_id: str,
+    target_id: str = "T",
+    observing_night_id: str | None = None,
+) -> None:
+    """Store one frame measurement taken with a camera.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The configuration whose library gets the row.
+    camera : `str`
+        The camera of the row's capture setting.
+    run_id : `str`
+        The run that wrote it. A new run id makes a new row.
+    target_id : `str`, optional
+        The target the frame belongs to.
+    observing_night_id : `str`, optional
+        The observing night of the frame. Defaults to none.
+    """
+    from astrometricslib._internal.drivers.quality_store import QualityStore
+    from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject
+    from astrometricslib.reports import MeasurementStatus, QualityMeasurement, SubjectLevel
+
+    store = QualityStore.from_configuration(config)
+    setting_id = store.get_or_create_capture_setting(CaptureSetting(camera=camera))
+    store.write_measurements([
+        QualityMeasurement(
+            metric="frame.sky_rate_e_per_s_per_px",
+            definition_version=1,
+            subject=QualitySubject(
+                level=SubjectLevel.FRAME,
+                subject_id=f"{target_id}/{run_id}.fits",
+                target_id=target_id,
+                observing_night_id=observing_night_id,
+                capture_setting_id=setting_id,
+            ),
+            status=MeasurementStatus.MEASURED,
+            value=1.0,
+            origin=MeasurementOrigin.MEASURED,
+            run_id=run_id,
+            measured_at=datetime(2026, 10, 1, 3, 0, tzinfo=UTC),
+        )
+    ])
+
+
+def test_the_sky_model_is_fitted_once_for_every_report_until_its_camera_changes(
+    config: AppConfiguration, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two reports share one fit until the same camera gets a frame."""
+    monkeypatch.setattr(library_inputs, "_SKY_MODEL_CACHE", library_inputs.VersionedCache())
+    fits: list[str] = []
+
+    def counted_fit(
+        self: LibraryInputs, setting: CaptureSetting, key: str, exclude_nights: frozenset[str] = frozenset()
+    ) -> tuple[None, str]:
+        """Count the fit and give no model.
+
+        Returns
+        -------
+        outcome : `tuple`
+            No model and a reason.
+        """
+        fits.append(key)
+        return None, "made up"
+
+    monkeypatch.setattr(LibraryInputs, "_fit_sky_model", counted_fit)
+
+    LibraryInputs(None, _butler(SITE), config).sky_model_for(SETTING)
+    second = LibraryInputs(None, _butler(SITE), config)
+    assert second.sky_model_for(SETTING) == (None, "made up")
+    assert len(fits) == 1
+
+    # A frame of another camera leaves the fit as it is.
+    _write_camera_row(config, "OtherCam", "run-1")
+    LibraryInputs(None, _butler(SITE), config).sky_model_for(SETTING)
+    assert len(fits) == 1
+
+    # A frame of another target taken with the same camera fits it again.
+    _write_camera_row(config, SETTING.camera, "run-2", target_id="Other", observing_night_id="2020-01-01")
+    LibraryInputs(None, _butler(SITE), config).sky_model_for(SETTING)
+    assert len(fits) == 2
+
+
+def test_a_sky_model_without_chosen_nights_is_fitted_and_kept_apart(
+    config: AppConfiguration, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Leaving nights out refits without them; the full fit is kept."""
+    monkeypatch.setattr(library_inputs, "_SKY_MODEL_CACHE", library_inputs.VersionedCache())
+    fits: list[frozenset[str]] = []
+
+    def counted_fit(
+        self: LibraryInputs, setting: CaptureSetting, key: str, exclude_nights: frozenset[str] = frozenset()
+    ) -> tuple[None, str]:
+        """Note which nights the fit left out and give no model.
+
+        Returns
+        -------
+        outcome : `tuple`
+            No model and a reason.
+        """
+        fits.append(exclude_nights)
+        return None, "made up"
+
+    monkeypatch.setattr(LibraryInputs, "_fit_sky_model", counted_fit)
+
+    inputs = LibraryInputs(None, _butler(SITE), config)
+    inputs.sky_model_for(SETTING)
+    inputs.sky_model_for(SETTING, ["2026-09-24"])
+    inputs.sky_model_for(SETTING, ["2026-09-24"])
+    inputs.sky_model_for(SETTING)
+    assert fits == [frozenset(), frozenset({"2026-09-24"})]
+
+
+def test_the_camera_observations_are_read_once_until_their_camera_changes(
+    config: AppConfiguration, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A camera's frames are read again only after a write for it."""
+    reads: list[str] = []
+    original = LibraryInputs._read_camera_observations
+
+    def counted(self: LibraryInputs, camera: str, **keywords: Any) -> list[FrameObservation]:
+        """Count the read and do it.
+
+        Returns
+        -------
+        observations : `list` [`FrameObservation`]
+            The observations.
+        """
+        reads.append(camera)
+        return original(self, camera, **keywords)
+
+    monkeypatch.setattr(LibraryInputs, "_read_camera_observations", counted)
+    target = make_target(STAR, 2)
+    library = FakeLibrary([target], make_rows(target, REVIEWED))
+
+    first = LibraryInputs(library, _butler(SITE), config).camera_observations(SETTING.camera)
+    second = LibraryInputs(library, _butler(SITE), config).camera_observations(SETTING.camera)
+    assert reads == [SETTING.camera]
+    assert first and second == first
+
+    # The kept list equals a read made without the cache.
+    assert first == original(LibraryInputs(library, _butler(SITE), config), SETTING.camera)
+
+    _write_camera_row(config, "OtherCam", "run-1")
+    LibraryInputs(library, _butler(SITE), config).camera_observations(SETTING.camera)
+    assert reads == [SETTING.camera]
+
+    _write_camera_row(config, SETTING.camera, "run-2", target_id="Other", observing_night_id="2020-01-01")
+    LibraryInputs(library, _butler(SITE), config).camera_observations(SETTING.camera)
+    assert reads == [SETTING.camera, SETTING.camera]
+
+
+def test_a_failed_read_of_a_cameras_frames_is_not_kept(
+    config: AppConfiguration, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A read made in part is used once and not kept."""
+    from astrometricslib.exceptions import AstrometricsError
+
+    target = make_target(STAR, 1)
+    library = FakeLibrary([target], make_rows(target, REVIEWED))
+    good_query = library.quality.query
+    state = {"fail": True}
+
+    def flaky(**keywords: Any) -> Any:
+        """Fail on the first round of reads.
+
+        Returns
+        -------
+        answer : `QualityQueryResult`
+            The rows.
+
+        Raises
+        ------
+        AstrometricsError
+            While the test says the library is busy.
+        """
+        if state["fail"]:
+            raise AstrometricsError("busy")
+        return good_query(**keywords)
+
+    library.quality.query = flaky
+    inputs = LibraryInputs(library, _butler(SITE), config)
+    assert inputs.camera_observations(SETTING.camera) == []
+    assert inputs.notes
+    state["fail"] = False
+    assert LibraryInputs(library, _butler(SITE), config).camera_observations(SETTING.camera)
+
+
+def _local_evening(night_id: str) -> float:
+    """Give a moment in the evening of an observing night.
+
+    Returns
+    -------
+    seconds : `float`
+        The Unix time of 20:00 local on that night's date.
+    """
+    return datetime.fromisoformat(f"{night_id}T20:00:00").timestamp()
+
+
+def test_the_camera_inputs_read_only_finished_nights(config: AppConfiguration) -> None:
+    """Frames of the night in progress are left out of the observations."""
+    target = make_target(STAR, 4)
+    library = FakeLibrary([target], make_rows(target, REVIEWED))
+    inputs = LibraryInputs(library, _butler(SITE), config, now=_local_evening(REVIEWED))
+    assert inputs.unfinished_night_id == REVIEWED
+    nights = {observation.night_id for observation in inputs.camera_observations(SETTING.camera)}
+    assert nights and all(night is not None and night < REVIEWED for night in nights)
+    # The night's frames join once it is over (its measurements are then
+    # counted by the version, so the kept list is not reused).
+    _write_camera_row(config, SETTING.camera, "run-1", target_id="Other", observing_night_id=REVIEWED)
+    everything = LibraryInputs(library, _butler(SITE), config, now=_local_evening("2026-12-31"))
+    assert REVIEWED in {observation.night_id for observation in everything.camera_observations("CamA")}
+
+
+def test_a_frame_tonight_keeps_the_camera_inputs_and_the_rollover_reads_once(
+    config: AppConfiguration, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A frame tonight is a cache hit; an older night or the rollover reads."""
+    monkeypatch.setattr(library_inputs, "_SKY_MODEL_CACHE", library_inputs.VersionedCache())
+    monkeypatch.setattr(library_inputs, "_CAMERA_OBSERVATIONS_CACHE", library_inputs.VersionedCache())
+    reads: list[str] = []
+    fits: list[str] = []
+    original = LibraryInputs._read_camera_observations
+
+    def counted_read(self: LibraryInputs, camera: str, **keywords: Any) -> list[FrameObservation]:
+        """Count the read and do it.
+
+        Returns
+        -------
+        observations : `list` [`FrameObservation`]
+            The observations.
+        """
+        reads.append(camera)
+        return original(self, camera, **keywords)
+
+    def counted_fit(self: LibraryInputs, setting: CaptureSetting, key: str) -> tuple[None, str]:
+        """Count the fit and give no model.
+
+        Returns
+        -------
+        outcome : `tuple`
+            No model and a reason.
+        """
+        fits.append(key)
+        return None, "made up"
+
+    monkeypatch.setattr(LibraryInputs, "_read_camera_observations", counted_read)
+    monkeypatch.setattr(LibraryInputs, "_fit_sky_model", counted_fit)
+    target = make_target(STAR, 4)
+    library = FakeLibrary([target], make_rows(target, REVIEWED))
+    tonight = _local_evening(REVIEWED)
+
+    def visit(now: float) -> list[FrameObservation]:
+        """Build the camera inputs of one report, as a visit does.
+
+        Returns
+        -------
+        observations : `list` [`FrameObservation`]
+            The camera's observations.
+        """
+        inputs = LibraryInputs(library, _butler(SITE), config, now=now)
+        inputs.sky_model_for(SETTING)
+        return inputs.camera_observations(SETTING.camera)
+
+    _write_camera_row(config, SETTING.camera, "run-1", target_id="Other", observing_night_id="2026-09-25")
+    first = visit(tonight)
+    assert (len(reads), len(fits)) == (1, 1)
+
+    # A same-camera frame tonight, of any target, changes nothing.
+    _write_camera_row(config, SETTING.camera, "run-2", target_id="Other", observing_night_id=REVIEWED)
+    _write_camera_row(config, SETTING.camera, "run-3", target_id=target.id, observing_night_id=REVIEWED)
+    assert visit(tonight) == first
+    assert (len(reads), len(fits)) == (1, 1)
+
+    # A frame of a finished night reads and fits again.
+    _write_camera_row(config, SETTING.camera, "run-4", target_id="Other", observing_night_id="2026-09-26")
+    visit(tonight)
+    assert (len(reads), len(fits)) == (2, 2)
+
+    # The night rolls over: tonight's frames count, once.
+    next_evening = tonight + 86400.0
+    visit(next_evening)
+    assert (len(reads), len(fits)) == (3, 3)
+    visit(next_evening)
+    assert (len(reads), len(fits)) == (3, 3)
+
+
+def test_a_failed_target_lookup_leaves_a_note_and_is_not_kept(
+    config: AppConfiguration, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed lookup is not a missing target, and nothing is kept."""
+    from astrometricslib.exceptions import StorageError
+
+    monkeypatch.setattr(library_inputs, "_CAMERA_OBSERVATIONS_CACHE", library_inputs.VersionedCache())
+    target = make_target(STAR, 1)
+    library = FakeLibrary([target], make_rows(target, REVIEWED))
+    good_get = library.targets.get
+    state = {"fail": True}
+
+    def flaky_get(target_id: str) -> Target | None:
+        """Fail while the test says the database is busy.
+
+        Returns
+        -------
+        target : `Target` or `None`
+            The target.
+
+        Raises
+        ------
+        StorageError
+            While the test says the database is busy.
+        """
+        if state["fail"]:
+            raise StorageError("database is locked")
+        return good_get(target_id)
+
+    library.targets.get = flaky_get
+    inputs = LibraryInputs(library, _butler(SITE), config)
+    assert inputs.target(target.id) is None
+    assert any("could not be read" in note for note in inputs.notes)
+
+    # A target that is not there leaves no note.
+    state["fail"] = False
+    quiet = LibraryInputs(library, _butler(SITE), config)
+    assert quiet.target("No such target") is None
+    assert not quiet.notes
+
+    # A failed lookup inside the camera read marks it incomplete: not kept.
+    state["fail"] = True
+    first = LibraryInputs(library, _butler(SITE), config)
+    first.camera_observations(SETTING.camera)
+    assert first.notes
+    state["fail"] = False
+    second = LibraryInputs(library, _butler(SITE), config)
+    assert second.camera_observations(SETTING.camera)
+    assert not second.notes
+
+
+def test_a_frame_row_with_no_night_is_not_a_finished_night(config: AppConfiguration) -> None:
+    """A frame row with no night may be from tonight; it is left out."""
+    target = make_target(STAR, 2)
+    rows = make_rows(target, REVIEWED)
+    no_night = [
+        row.model_copy(update={"subject": row.subject.model_copy(update={"observing_night_id": None})})
+        for row in rows
+    ]
+    library = FakeLibrary([target], no_night)
+    inputs = LibraryInputs(library, _butler(SITE), config, now=_local_evening("2026-12-31"))
+    assert inputs.camera_rows(SETTING.camera) == []

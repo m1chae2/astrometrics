@@ -1,7 +1,7 @@
 """Purpose: The quality of one observing night, for the night review.
 
 Description: `review.query(kind="night_quality", session_id=...)`
-returns a `NightQuality` (`QUALITY_METRICS_PLAN.md` Section 6.1, use case UC1).
+returns a `NightQuality` (use case UC1 in `Wayfinding_Quality_Use_Cases.md`).
 It lists each target imaged that night with where its time went (the loss
 account against a stated goal and reference), the warnings the night's
 measurements raise, and a count that decides whether the target needs
@@ -41,7 +41,7 @@ class NightTargetQuality(BaseModel):
         The target.
     goal : `ScienceGoal`
         The goal that holds most of the target's captured time. The goal is
-        chosen for each capture setting (decision U2), so when the settings
+        chosen for each capture setting (issue #95), so when the settings
         differ, each ``capture_settings`` entry states its own goal.
     frames_taken : `int`
         Frames of the night, kept and set aside.

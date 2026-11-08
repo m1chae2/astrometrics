@@ -93,12 +93,16 @@ class TargetCatalog:
         self._config = config
         self._drivers = drivers or Drivers()
         self._catalog_access = storage
+        from astrometricslib.pipelines.shared import target_records
+
+        # The write counter is read before the targets, so a write made while
+        # they are read is noticed by the next refresh.
+        version = target_records._stored_targets_version(self)
         self._targets: list = storage.get("target_catalog", {}) or []
         self._touched_target_ids: set = set()
         self._saved_fingerprints: dict[str, str] = {}
-        from astrometricslib.pipelines.shared import target_records
-
         target_records.remember_stored_state(self, self._targets)
+        target_records.record_listed_state(self, version)
 
     # -- Create, read, save, delete ------------------------------------------
 
@@ -126,9 +130,13 @@ class TargetCatalog:
             The target id. Underscores, spaces and capital letters may
             differ from the stored id.
         refresh : `bool`, optional
-            Read the stored targets first, so a target that another program
-            added or changed is seen. Defaults to `False`, which uses the
-            targets held in memory.
+            Bring the target up to date with storage first, so a target
+            that another program added or changed is seen. Only that
+            target's row is read, and nothing is read when nothing has been
+            written since the last read. A target this catalog does not hold
+            yet makes it read all the targets. Unsaved edits to the held
+            target are kept. Defaults to `False`, which uses the targets held
+            in memory.
 
         Returns
         -------
@@ -138,7 +146,7 @@ class TargetCatalog:
         from astrometricslib.pipelines.shared import target_records
 
         if refresh:
-            target_records.list_targets(self)
+            target_records.refresh_target(self, target_id)
         return target_records.get_target(self, target_id)
 
     def read_saved(self, target_id: str) -> Target | None:
@@ -686,8 +694,10 @@ class TargetCatalog:
         paths : `list` [`str`]
             File paths to delete.
         target : `str` or `Target`, optional
-            Also remove the matching frame records from this target, and
-            save it.
+            Also remove the matching frame records from this target, save
+            it, and forget the stored quality measurements of the deleted
+            frames (`QualityRecords.forget`). Without a target the
+            measurements stay, because a frame is named by its target.
 
         Returns
         -------
@@ -695,10 +705,15 @@ class TargetCatalog:
             ``deleted`` (the paths removed) and ``failed`` (each path that
             could not be removed, with the reason).
         """
+        from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
         from astrometricslib.pipelines.shared import image_conversions
 
-        target_id = resolve_target(self, target).id if target is not None else None
-        outcome = image_conversions.delete_images(paths, self, target_id)
+        resolved = resolve_target(self, target) if target is not None else None
+        outcome = image_conversions.delete_images(paths, self, resolved.id if resolved is not None else None)
+        if resolved is not None and outcome["deleted"]:
+            QualityStore(quality_database_path(self._config)).delete_frame_measurements([
+                resolved.frame_subject_id(str(path)) for path in outcome["deleted"]
+            ])
         return ImageDeletionResult(
             deleted=[str(path) for path in outcome["deleted"]],
             failed=[

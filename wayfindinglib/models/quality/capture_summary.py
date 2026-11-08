@@ -37,7 +37,8 @@ class CaptureSettingSummary(BaseModel):
     loss_account : `LossAccount` or `None`
         Where the time went. ``None`` when it cannot be built.
     science_goal : `ScienceGoal` or `None`
-        The goal this setting's efficiency is judged for (user decision U2,
+        The goal this setting's efficiency is judged for (user decision, issue
+        #95,
         2026-10-24: the goal is chosen for each capture setting). ``None``
         when the summary was built without one.
     """

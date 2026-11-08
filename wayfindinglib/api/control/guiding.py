@@ -13,10 +13,11 @@ need `AUTOGUIDING` to be `AUTHORITATIVE`.
 """
 
 import threading
+from datetime import datetime
 from typing import Any
 
 from astrometricslib.exceptions import ConfigurationError, ExternalServiceError
-from wayfindinglib.api.control.context import ControlChild
+from wayfindinglib.api.control.context import ControlChild, require_text
 from wayfindinglib.models.control_status import GuidingStatus
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
 from wayfindinglib.models.session.control_results import GuideExposureResult
@@ -37,6 +38,21 @@ STATUS_SECTIONS = ("calibration", "spectrum_analysis", "plate_scale", "live")
 SAVED_SECTIONS = ("calibration", "spectrum_analysis", "plate_scale")
 """The sections `GuidingControl.status` reads when none are named. They
 need no device."""
+
+
+#: Longest id a recorded calibration or focus model may have.
+MAXIMUM_RECORD_ID_LENGTH = 100
+
+#: Longest source note a recorded calibration may have.
+MAXIMUM_SOURCE_NOTE_LENGTH = 500
+
+#: Largest plate scale a guide camera could have (arcsec per pixel). Real
+#: guide trains are about 1 to 10; 100 only catches a typing slip.
+MAXIMUM_PLATE_SCALE_ARCSEC_PER_PIXEL = 100.0
+
+#: Largest guide pulse speed accepted (arcsec per second). The sidereal rate
+#: is about 15; PHD2 reports a few times that at most.
+MAXIMUM_GUIDE_RATE_ARCSEC_PER_SEC = 1000.0
 
 
 class GuidingControl(ControlChild):
@@ -501,6 +517,119 @@ class GuidingControl(ControlChild):
         return guiding_log_ingestion.refit_and_persist_guiding_spectrum(
             context, context.records, session_id, limit
         )
+
+    def query_calibrations(self) -> list[GuiderCalibration]:
+        """List every saved guider calibration, oldest first.
+
+        `status` reads only the calibration of the active equipment. This
+        reads them all, for every telescope and camera pairing, so a script
+        can compare calibrations or pick the latest one. It only reads.
+
+        Returns
+        -------
+        calibrations : `list` [`GuiderCalibration`]
+            The saved records in order of ``calibrated_at``. Empty when none
+            is saved.
+        """
+        records = self._context.butler.get_all("guider_calibration")
+        return sorted(records, key=lambda record: record.calibrated_at)
+
+    def record_calibration(
+        self,
+        *,
+        calibration_id: str,
+        camera_id: str,
+        telescope_id: str,
+        arcsec_per_pixel: float,
+        camera_angle_deg: float,
+        ra_rate_arcsec_per_sec: float,
+        dec_rate_arcsec_per_sec: float,
+        source_note: str,
+        calibrated_at: datetime | None = None,
+        replace: bool = False,
+    ) -> GuiderCalibration:
+        """Save a guider calibration that was measured elsewhere.
+
+        Use this when the numbers come from a tool outside this library, such
+        as PHD2's own calibration, or from a copy of an earlier record. A
+        record with an id that is already saved is refused unless `replace`
+        is true. The delegation rules treat the record like one measured
+        here. Nothing is sent to a device.
+
+        Parameters
+        ----------
+        calibration_id : `str`
+            Id of the record, at most 100 characters.
+        camera_id, telescope_id : `str`
+            The equipment pairing the calibration belongs to.
+        arcsec_per_pixel : `float`
+            Guide camera plate scale. Above zero, at most 100.
+        camera_angle_deg : `float`
+            Angle of the camera against the mount axes, from -180 to 180.
+        ra_rate_arcsec_per_sec, dec_rate_arcsec_per_sec : `float`
+            Speed of the mount along each axis for a guide pulse. Each must
+            be above zero and at most 1000.
+        source_note : `str`
+            Where the numbers came from. Required, so a record never has an
+            unknown origin. At most 500 characters.
+        calibrated_at : `~datetime.datetime`, optional
+            When the calibration was made. Now when omitted.
+        replace : `bool`, optional
+            Replace a saved record that has the same id. Defaults to
+            `False`, which refuses instead.
+
+        Returns
+        -------
+        calibration : `GuiderCalibration`
+            The saved record.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If a number is out of range, an id or `source_note` is empty or
+            too long, or the id is already saved and `replace` is false.
+        """
+        from pydantic import ValidationError
+
+        from astrometricslib.exceptions import InvalidArgumentError
+
+        require_text(source_note=source_note, calibration_id=calibration_id)
+        if len(calibration_id) > MAXIMUM_RECORD_ID_LENGTH or len(source_note) > MAXIMUM_SOURCE_NOTE_LENGTH:
+            raise InvalidArgumentError(
+                f"calibration_id may have at most {MAXIMUM_RECORD_ID_LENGTH} characters and source_note "
+                f"at most {MAXIMUM_SOURCE_NOTE_LENGTH}."
+            )
+        if arcsec_per_pixel > MAXIMUM_PLATE_SCALE_ARCSEC_PER_PIXEL:
+            raise InvalidArgumentError(
+                f"arcsec_per_pixel must be at most {MAXIMUM_PLATE_SCALE_ARCSEC_PER_PIXEL}."
+            )
+        if max(ra_rate_arcsec_per_sec, dec_rate_arcsec_per_sec) > MAXIMUM_GUIDE_RATE_ARCSEC_PER_SEC:
+            raise InvalidArgumentError(
+                f"The guide rates must be at most {MAXIMUM_GUIDE_RATE_ARCSEC_PER_SEC} arcsec/s."
+            )
+        if not replace and self._context.butler.get("guider_calibration", {"id": calibration_id}) is not None:
+            raise InvalidArgumentError(
+                f"A guider calibration with id {calibration_id!r} is already saved. "
+                "Pass replace=True to replace it."
+            )
+        fields = {
+            "id": calibration_id,
+            "camera_id": camera_id,
+            "telescope_id": telescope_id,
+            "arcsec_per_pixel": arcsec_per_pixel,
+            "camera_angle_deg": camera_angle_deg,
+            "ra_rate_arcsec_per_sec": ra_rate_arcsec_per_sec,
+            "dec_rate_arcsec_per_sec": dec_rate_arcsec_per_sec,
+            "source_note": source_note,
+        }
+        if calibrated_at is not None:
+            fields["calibrated_at"] = calibrated_at
+        try:
+            calibration = GuiderCalibration(**fields)
+        except ValidationError as error:
+            raise InvalidArgumentError(f"The guider calibration is not valid: {error}") from error
+        self._save_calibration(calibration)
+        return calibration
 
     def _save_calibration(self, calibration: GuiderCalibration) -> None:
         """Save a measured guider calibration.

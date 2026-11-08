@@ -9,6 +9,24 @@ import { buildStarListSubtitle, formatStarListLabel } from '../../common/utils/s
 const STARS_PER_PAGE = 100;
 
 /**
+ * Chooses the star to show when nothing has been picked.
+ *
+ * The backend sorts a target's stars most useful first, so the order is kept
+ * within each group: a star with a spectrum wins, then one with photometry
+ * (a light curve), then the first star in the list.
+ *
+ * @param items The star list rows, in the backend's order.
+ * @returns The id of the star to select, or undefined when the list is empty.
+ */
+export const chooseDefaultStar = (items: SelectableItem[]): string | undefined => {
+    const best =
+        items.find((item) => item.hasSpectra) ??
+        items.find((item) => item.hasPhotometry) ??
+        items[0];
+    return best?.id;
+};
+
+/**
  * Fetches and paginates the star list for one scope -- a single target, or
  * the whole catalog when `targetId` is undefined -- with text search.
  *
@@ -20,7 +38,13 @@ const STARS_PER_PAGE = 100;
  * @param reloadKey Changing this value re-triggers the star list fetch.
  * @param pendingId ID of a star awaiting confirmation of selection.
  * @param selectedId ID of the currently selected star, if any.
- * @param setPendingId Setter invoked to auto-select the first star once loaded.
+ * @param setPendingId Setter invoked to choose the default star once the list loads.
+ *
+ * When a target is in scope and its list first loads (on first open, or after
+ * the target changes), a star is chosen so the views are not left empty:
+ * the star the user last picked in that target during this session, else the
+ * most useful one (see `chooseDefaultStar`). A star already selected when the
+ * panel first opens (a hand-off from another view) is kept.
  */
 export const useSpectrumList = (
     targetId?: string,
@@ -81,14 +105,6 @@ export const useSpectrumList = (
         astronomyListQuery.refetch();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [reloadKey]);
-
-    // Auto-select the first spectrum once loaded, if nothing is selected/pending yet
-    useEffect(() => {
-        if (spectra.length > 0 && !pendingId && !selectedId && setPendingId) {
-            const first = spectra[0];
-            setPendingId(String(first.id ?? first.label ?? first));
-        }
-    }, [spectra, selectedId, pendingId, setPendingId]);
 
     useEffect(() => {
         if (!astronomyListQuery.error) return;
@@ -170,12 +186,38 @@ export const useSpectrumList = (
 
     const hasMore = spectra.length >= 100;
 
+    // The star the user picked by hand, per target, for this session.
+    const pickedStarByTarget = useRef<Map<string, string>>(new Map());
+    // The target whose default star has already been chosen.
+    const defaultedTargetRef = useRef<string | undefined>(undefined);
+
+    /** Records a star the user picked in the current target, then selects it. */
+    const selectStar = useCallback((starId: string) => {
+        if (targetId && starId) pickedStarByTarget.current.set(targetId, starId);
+        setPendingId?.(starId);
+    }, [targetId, setPendingId]);
+
+    // Choose the default star once, when a target's first page of stars has loaded.
+    useEffect(() => {
+        if (!targetId || !setPendingId || astronomyListQuery.isLoading || !astronomyListQuery.data) return;
+        if (debouncedFilterText !== '' || page !== 1 || defaultedTargetRef.current === targetId) return;
+        if (filteredItems.length === 0) return;
+        const isFirstTarget = defaultedTargetRef.current === undefined;
+        defaultedTargetRef.current = targetId;
+        // A star already open on first mount (a hand-off) is the user's choice.
+        if (isFirstTarget && (pendingId || selectedId)) return;
+        const starId = pickedStarByTarget.current.get(targetId) ?? chooseDefaultStar(filteredItems);
+        if (starId) setPendingId(starId);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [targetId, astronomyListQuery.isLoading, astronomyListQuery.data, debouncedFilterText, page]);
+
     return {
         items: filteredItems,
         filterText,
         setFilterText: handleSetFilterText,
         page,
         setPage,
+        selectStar,
         hasMore,
         totalPages,
         isLoading: astronomyListQuery.isLoading,

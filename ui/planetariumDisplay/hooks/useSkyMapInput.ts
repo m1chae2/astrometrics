@@ -11,10 +11,7 @@
 
 import React, { useState, useRef, useEffect, useCallback, RefObject, MutableRefObject } from 'react';
 import { pixelsPerDegree } from '../utils/projectionMath';
-
-/** FOV zoom bounds, matching the render loop's own clamp. */
-const MIN_FOV_DEG = 0.05;
-const MAX_FOV_DEG = 135.0;
+import { nextZoomTarget } from '../utils/zoomEasing';
 
 /**
  * Wraps an altitude/azimuth pair over the zenith or nadir instead of clamping
@@ -56,10 +53,10 @@ export interface SkyMapInputRefs {
   targetAzRef: MutableRefObject<number>;
   targetAltRef: MutableRefObject<number>;
   localFOVRef: MutableRefObject<number>;
+  /** Zoom target the render loop eases localFOVRef toward; wheel and key zoom only move this. */
+  targetFovRef: MutableRefObject<number>;
   /** Disables continuous tracking on any manual pan/zoom input. */
   setTrackingMode: (value: boolean) => void;
-  /** Debounced notification back to the parent when FOV changes via wheel/keys. */
-  notifyParentFOV: (nextFOV: number) => void;
 }
 
 /** Return shape of useSkyMapInput: pointer/wheel event handlers plus drag-visual state. */
@@ -79,8 +76,8 @@ export interface SkyMapInput {
  * @returns {SkyMapInput} Pointer/wheel handlers and drag-visual state for the canvas element.
  */
 export const useSkyMapInput = ({
-  canvasRef, centerAzRef, centerAltRef, targetAzRef, targetAltRef, localFOVRef,
-  setTrackingMode, notifyParentFOV,
+  canvasRef, centerAzRef, centerAltRef, targetAzRef, targetAltRef, localFOVRef, targetFovRef,
+  setTrackingMode,
 }: SkyMapInputRefs): SkyMapInput => {
   const [isDragging, setIsDragging] = useState(false);
   const isDraggingRef = useRef(false);
@@ -157,18 +154,16 @@ export const useSkyMapInput = ({
   }, []);
 
   /**
-   * Adjusts field of view via mouse wheel, clamped to MIN_FOV_DEG-MAX_FOV_DEG.
+   * Moves the zoom target one step per wheel tick, clamped to the zoom range. Ticks that
+   * arrive before the next frame add up. The render loop eases the drawn FOV toward the
+   * target and tells the parent when it settles.
    *
    * @param {React.WheelEvent} e - The wheel event.
    * @returns {void}
    */
   const onWheel = useCallback((e: React.WheelEvent) => {
-    const delta = e.deltaY < 0 ? 0.85 : 1.15;
-    const nextFOV = Math.max(MIN_FOV_DEG, Math.min(MAX_FOV_DEG, localFOVRef.current * delta));
-
-    localFOVRef.current = nextFOV;
-    notifyParentFOV(nextFOV);
-  }, [localFOVRef, notifyParentFOV]);
+    targetFovRef.current = nextZoomTarget(targetFovRef.current, e.deltaY < 0);
+  }, [targetFovRef]);
 
   // Keyboard listener for arrow key pan (plain arrows) and zoom (Ctrl+Up/Down)
   useEffect(() => {
@@ -178,10 +173,7 @@ export const useSkyMapInput = ({
 
       if (e.ctrlKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
         e.preventDefault();
-        const delta = e.key === 'ArrowUp' ? 0.85 : 1.15;
-        const nextFOV = Math.max(MIN_FOV_DEG, Math.min(MAX_FOV_DEG, localFOVRef.current * delta));
-        localFOVRef.current = nextFOV;
-        notifyParentFOV(nextFOV);
+        targetFovRef.current = nextZoomTarget(targetFovRef.current, e.key === 'ArrowUp');
         return;
       }
 
@@ -220,7 +212,7 @@ export const useSkyMapInput = ({
 
     window.addEventListener('keydown', handleArrowKey);
     return () => window.removeEventListener('keydown', handleArrowKey);
-  }, [notifyParentFOV, localFOVRef, targetAzRef, targetAltRef, setTrackingMode]);
+  }, [localFOVRef, targetFovRef, targetAzRef, targetAltRef, setTrackingMode]);
 
   return { isDragging, onPointerDown, onPointerMove, onPointerUp, onWheel };
 };

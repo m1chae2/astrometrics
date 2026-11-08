@@ -50,6 +50,25 @@ def test_infer_target_at_coordinates() -> None:
     assert service._infer_target_at_coordinates("18h 36m 56s", "+38° 47′ 01″") is None
 
 
+def test_infer_target_at_coordinates_returns_the_id_not_the_common_name() -> None:
+    """A target whose common name differs from its id is inferred by its id.
+
+    Remote folders, the library and jobs are keyed by id, so the automatic
+    download must ask for the id.
+    """
+    from astrometricslib._internal.catalog import TargetQueryResult
+    from backend.services.observatory.telescope_service import TelescopeService
+
+    target_service_mock = MagicMock()
+    target_service_mock.astrometrics.targets.query.return_value = TargetQueryResult(
+        detail="summary",
+        targets=[{"id": "M 13", "common_name": "Test Target Name", "separation_deg": 0.0}],
+    )
+    service = TelescopeService(target_service=target_service_mock)
+
+    assert service._infer_target_at_coordinates("16h 41m 41s", "+36° 27′ 36″") == "M 13"
+
+
 def test_infer_target_at_coordinates_ignores_missing_coordinates() -> None:
     """Return no match without a query when the mount has no position."""
     from backend.services.observatory.telescope_service import TelescopeService

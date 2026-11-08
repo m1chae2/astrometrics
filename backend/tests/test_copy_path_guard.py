@@ -123,3 +123,31 @@ def test_wayfinding_database_outside_path_is_refused(tmp_path: Path) -> None:
     assert [(row[0], row[1], row[2]) for row in offenders] == [("wayfinding.db", "sessions", "s1")]
     assert guard.repoint(config_file, tmp_path, real_data_folder="/real/data") == 1
     assert guard.check(config_file, tmp_path) == []
+
+
+def test_mirror_outside_moves_unmapped_paths_into_the_copy(tmp_path: Path) -> None:
+    """With ``mirror_outside`` a stale path moves to ``<scratch>/outside``."""
+    stale = "/old/place/lights/M1/M1_Stacked.fits"
+    config_file = _make_copy(tmp_path, {"a": stale, "b": f"{REAL_FRAMES}/lights/M13/f.fits"})
+    assert guard.repoint(config_file, tmp_path, mirror_outside=True) == 1
+    assert guard.check(config_file, tmp_path) == []
+    stored = json.loads(
+        sqlite3
+        .connect(tmp_path / "library" / "astrometrics.db")
+        .execute("SELECT data_json FROM targets")
+        .fetchone()[0]
+    )
+    assert stored["a"] == str(tmp_path / "outside" / stale.lstrip("/"))
+    assert stored["b"] == f"{REAL_FRAMES}/lights/M13/f.fits"
+
+
+def test_quoted_section_name_is_read(tmp_path: Path) -> None:
+    """Read a TOML section written with quotes, ``["Wayfinding Library"]``.
+
+    The TPM sandbox config is written this way. When the reader missed it,
+    the guard fell back to the real data folder's wayfinding database.
+    """
+    config = tmp_path / "astrometrics.config.toml"
+    config.write_text(f'["Wayfinding Library"]\npath = "{tmp_path / "wayfinding"}"\n')
+    value = guard.read_config_value_in_section(config, "Wayfinding Library", "path")
+    assert value == str(tmp_path / "wayfinding")

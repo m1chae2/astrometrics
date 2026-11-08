@@ -15,6 +15,8 @@ import {
 import { useOptionalTargetContext } from '../../common/context/TargetContext';
 import { emitToast } from '../../common/utils/emitToast';
 import { navigateToElement } from '../../common/utils/displayCoordinator';
+import { Button } from '../../common/components/Button';
+import { Badge } from '../../common/components/Badge';
 
 export interface StarSummaryCardProps {
     /** Detailed astronomy/stellar object data. */
@@ -147,20 +149,21 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
                 {typeBadges.map((badge) => (
                     <span
                         key={badge.text}
-                        className={`star-summary-card__badge spectral-badge spectral-badge--${badge.tone}`}
+                        className={`badge spectral-badge spectral-badge--${badge.tone}`}
                         title={badge.title}
                     >
                         {badge.text}
                     </span>
                 ))}
                 {patternBadges.map((badge) => (
-                    <span key={badge.text} className="star-summary-card__badge variability-badge" title={badge.title}>
+                    <span key={badge.text} className="badge variability-badge" title={badge.title}>
                         {badge.text}
                     </span>
                 ))}
                 {canLocate && (
-                    <button
-                        type="button"
+                    <Button
+                        variant="secondary"
+                        size="small"
                         className="star-summary-card__locate-btn"
                         onClick={() => locateInPlanetarium(
                             String(astronomyData?.id || astronomyData?.name || starId),
@@ -172,7 +175,7 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
                         )}
                     >
                         Locate in Planetarium
-                    </button>
+                    </Button>
                 )}
             </div>
 
@@ -191,9 +194,9 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
                     <span className="star-summary-card__item">
                         <span className="item-label">Targets:</span>{' '}
                         {targetIds.map((t) => (
-                            <button
+                            <Badge
                                 key={t}
-                                type="button"
+                                tone="purple"
                                 className="target-tag-badge"
                                 title={`Open ${t} in Image Processing Display with Astrometry enabled`}
                                 onClick={() => navigateToTarget(
@@ -204,7 +207,7 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
                                 )}
                             >
                                 {t}
-                            </button>
+                            </Badge>
                         ))}
                     </span>
                 )}

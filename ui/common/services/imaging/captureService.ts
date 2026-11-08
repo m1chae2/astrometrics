@@ -5,6 +5,22 @@
 
 import { callBackend } from '../backendApi';
 import { reportError } from '../../utils/reportError';
+import { FilterType, FrameType } from '../../types/backendTypes';
+
+/** Exposure of each frame of the open-ended capture, in seconds. */
+export const OPEN_ENDED_CAPTURE_EXPOSURE_SECONDS = 60;
+
+/** Filter of the open-ended capture: luminance. The library matches "L" to the wheel slot, however the wheel names it. */
+export const OPEN_ENDED_CAPTURE_FILTER = FilterType.L;
+
+/** Frame type of the open-ended capture. */
+export const OPEN_ENDED_CAPTURE_IMAGE_TYPE = FrameType.LIGHT;
+
+/**
+ * Frame count of the open-ended capture. The backend sets no maximum, so this is only a backstop for a run
+ * the user forgets: at 60 s per frame it lasts about a week. The user ends the run with Stop Capture.
+ */
+export const OPEN_ENDED_CAPTURE_FRAME_COUNT = 10000;
 
 /** Parameters describing a capture request. */
 export interface CaptureRequest {
@@ -65,4 +81,35 @@ export async function captureTestFrame(
     request: Omit<CaptureRequest, 'count' | 'delaySeconds'>
 ): Promise<string | null> {
     return startCaptureSequence({ ...request, count: 1, delaySeconds: 0 });
+}
+
+/**
+ * Starts a capture that runs until the user stops it: 60 s luminance light frames, with a large frame count
+ * as the only limit. The settings are fixed; Observation Planning will supply them later.
+ *
+ * @param targetId Target the frames are recorded against.
+ * @return The job id, or null if the capture could not be started (the failure is already shown).
+ */
+export async function startOpenEndedCapture(targetId: string): Promise<string | null> {
+    return startCaptureSequence({
+        targetId,
+        exposureSeconds: OPEN_ENDED_CAPTURE_EXPOSURE_SECONDS,
+        count: OPEN_ENDED_CAPTURE_FRAME_COUNT,
+        imageType: OPEN_ENDED_CAPTURE_IMAGE_TYPE,
+        filterName: OPEN_ENDED_CAPTURE_FILTER,
+    });
+}
+
+/**
+ * Stops the capture run the app started and aborts its exposure. The frames already taken are kept.
+ *
+ * @return True if a run was stopped, false if none was running or the stop failed (`callBackend` shows a failure).
+ */
+export async function stopCapture(): Promise<boolean> {
+    try {
+        return await callBackend('imaging:stop_capture', {});
+    } catch {
+        // callBackend has already shown the reason once.
+        return false;
+    }
 }

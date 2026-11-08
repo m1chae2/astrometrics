@@ -1,0 +1,71 @@
+# ==============================================================================
+# Purpose: GitHub Actions workflow for simulator unit testing and code coverage reporting.
+# ==============================================================================
+
+name: simulator CI
+
+on:
+  push:
+    branches: [ main, master ]
+    # The simulator drives both libraries, so a change to either can break its tests.
+    paths: &paths
+      - 'simulator/**'
+      - 'wayfindinglib/**'
+      - 'astrometricslib/**'
+      - 'pyproject.toml'
+      - 'build/linux/run_tests.sh'
+      - 'build/linux/setup_venv.sh'
+      - '.github/actions/setup-python-env/**'
+      - '.github/workflows/simulator.yml'
+  pull_request:
+    branches: [ main, master ]
+    paths: *paths
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Run simulator Tests
+    # ubuntu-26.04, not ubuntu-latest: this job installs INDI via
+    # setup-python-env, and the INDI Stable Builds PPA now publishes the
+    # core libindi packages only for the resolute (26.04) series. On
+    # noble, apt silently falls back to Ubuntu universe's libindi 1.9.9,
+    # which pyindi-client 2.x cannot load.
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+        with:
+          lfs: true
+
+      - name: Setup Python Environment
+        uses: ./.github/actions/setup-python-env
+
+      # The MCP SDK is an optional extra that only mcp_servers/ needs.
+      # Removing it here proves the library runs without it.
+      - name: Remove the Optional MCP SDK
+        run: .venv/bin/pip uninstall --yes mcp
+
+      - name: Run Unit Tests with Coverage
+        env:
+          PYTHONPATH: .
+          ASTROMETRICS_TESTING: "1"
+          ASTROMETRICS_FAST_TEST: "1"
+        run: |
+          COVERAGE=1 ./build/linux/run_tests.sh simulator
+
+      - name: Comment PR with Code Coverage
+        if: github.event_name == 'pull_request'
+        uses: py-cov-action/python-coverage-comment-action@v3
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SUBPROJECT_ID: "simulator"
+          MINIMUM_GREEN: 70
+          MINIMUM_ORANGE: 50

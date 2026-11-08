@@ -198,6 +198,13 @@ DECISIONS = {
         "the spectrum, a predicted peak at another exposure, a summary by exposure and pier side); it "
         "replaces quality_check_spectral_frames.",
     ),
+    "quality_measure_folder": ToolDecision(
+        "keep",
+        "Built 2026-11-07. Measures a folder of FITS files with the stored frame metric set (star width, "
+        "sky rate, background, saturation) and returns the numbers. Nothing is stored or moved. About "
+        "12 seconds a frame, so the limit defaults to 20. It reads any folder path it is given, as "
+        "quality_measure_frames does with folder_path; it only reads.",
+    ),
     "review_get_live_session_status": ToolDecision(
         "keep",
         "Served 2026-10-03. refresh=true copies the newest Ekos and KStars logs into a local folder, "
@@ -367,9 +374,7 @@ DECISIONS = {
     "planning_build_deep_star_catalog": ToolDecision(
         "withhold", "Downloads from Gaia for hours and writes the catalog database."
     ),
-    "execution_abort_session": ToolDecision(
-        "withhold", "Closes a session and records it. Stays separate from the read tools (section 4.2)."
-    ),
+    "execution_abort_session": ToolDecision("withhold", "Closes a session and records it."),
     "execution_reconcile_session": ToolDecision(
         "withhold", "Writes the calibration counts and the session after a night."
     ),
@@ -441,6 +446,37 @@ DECISIONS = {
     "review_get_performance_envelope": ToolDecision(
         "keep", "Slow: reads every session and target twice.", "observe"
     ),
+    "review_measure_unguided_mount_error": ToolDecision(
+        "keep",
+        "Built 2026-11-07. Reads the recorded guide samples and guiding runs and fits the mount's own "
+        "error (periodic error, drift, jitter). Nothing is stored or sent. Slow on a long history.",
+        "observe",
+    ),
+    "review_measure_guiding_spectrum": ToolDecision(
+        "keep",
+        "Built 2026-11-07. The guiding spectrum worked out from the recorded samples, with nights "
+        "optionally left out. Unlike observatory_guiding_refit_spectrum it stores nothing.",
+        "observe",
+    ),
+    "review_measure_focus_temperature_coefficient": ToolDecision(
+        "keep",
+        "Built 2026-11-07. Fits the focus-versus-temperature slope on recorded autofocus runs and "
+        "frame headers. Reads only; nothing is stored. Slow when it reads every frame record.",
+        "observe",
+    ),
+    "review_get_sky_rate_prediction": ToolDecision(
+        "keep",
+        "Built 2026-11-07. Predicts the sky background rate from the sky model fitted to the library's "
+        "own frames. Reads only; nothing is stored. The first call fits the model and is slow.",
+        "observe",
+    ),
+    "observatory_mount_get_centering_exposure": ToolDecision(
+        "keep",
+        "Built 2026-11-08. Works out the plate-solve centering exposure from the library's zero point and "
+        "star width, the camera profile, the sky model and the Gaia catalog. Reads only; nothing is "
+        "stored and nothing moves. The first call may fit the sky model and be slow.",
+        "observe",
+    ),
     "observatory_remote_check_connection": ToolDecision("keep", "A small network probe.", "observe"),
     # ---- Status reads of the control children ----
     "observatory_mount_status": ToolDecision(
@@ -455,6 +491,18 @@ DECISIONS = {
         "keep",
         "Reads the saved guider calibration, the mount's periodic error model and the guide plate scale "
         "(no device needed), and with include=['live'] the guiding going on now and its RMS error.",
+        "observe",
+    ),
+    "observatory_guiding_query_calibrations": ToolDecision(
+        "keep",
+        "Lists every saved guider calibration, for all telescope and camera pairings (status reads only the "
+        "active one). No device needed.",
+        "observe",
+    ),
+    "observatory_imaging_query_focus_models": ToolDecision(
+        "keep",
+        "Lists every saved focus model, for all telescope and camera pairings (status reads only the active "
+        "one). No device needed.",
         "observe",
     ),
     "observatory_safety_status": ToolDecision(
@@ -554,6 +602,25 @@ DECISIONS = {
         "the user decided an AI may not change configuration.",
         "change-data",
     ),
+    "observatory_guiding_record_calibration": ToolDecision(
+        "withhold",
+        "Saves a guider calibration record to the database. It sends nothing to a device, but the delegation "
+        "rules trust the record, and the AI is read-only. Read the saved one with "
+        "observatory_guiding_status.",
+        "change-data",
+    ),
+    "observatory_imaging_record_focus_model": ToolDecision(
+        "withhold",
+        "Saves a focus model record to the database. It sends nothing to a device, but the delegation rules "
+        "trust the record, and the AI is read-only. Read the saved one with observatory_imaging_status.",
+        "change-data",
+    ),
+    "quality_forget": ToolDecision(
+        "withhold",
+        "Deletes the stored quality measurements of the given frames from the quality database. The AI is "
+        "read-only, so it reads the stored numbers with quality_query instead.",
+        "change-data",
+    ),
     # ---- Records: dropped ----
     # ---- No use, empty, or cannot be called through MCP ----
     # ---- Not wanted by the user ----
@@ -626,6 +693,7 @@ DECISIONS = {
             "observatory_imaging_capture_image",
             "observatory_imaging_focus_move",
             "observatory_imaging_set_filter",
+            "observatory_imaging_stop_capture",
             "observatory_mount_manual_move",
             "observatory_mount_park",
             "observatory_mount_set_slew_rate",

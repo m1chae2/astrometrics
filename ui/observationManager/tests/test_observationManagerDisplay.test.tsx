@@ -81,10 +81,23 @@ describe('ObservationManager display', () => {
         expect(screen.getByText('Last Image stub')).toBeInTheDocument();
     });
 
+    it('opens the first package by default so the editor is never empty', async () => {
+        answerBackend();
+        renderDisplay();
+        await waitFor(() => expect(screen.queryByText('Choose a package or New package')).not.toBeInTheDocument());
+        expect(await screen.findByRole('button', { name: 'M 81, planned package' })).toBeInTheDocument();
+    });
+
+    it('keeps the empty prompt when the library has no packages', async () => {
+        answerBackend({ 'plan:list_packages': () => [] });
+        renderDisplay();
+        await waitFor(() => expect(callBackendMock).toHaveBeenCalledWith('plan:list_packages', expect.anything(), expect.anything()));
+        expect(screen.getAllByText('Choose a package or New package').length).toBeGreaterThan(0);
+    });
+
     it('lists the library packages and opens one in the editor', async () => {
         answerBackend();
         renderDisplay();
-        expect(screen.getAllByText('Choose a package or New package').length).toBeGreaterThan(0);
         await userEvent.click(await screen.findByRole('button', { name: 'M 81, planned package' }));
         expect(screen.queryByText('Choose a package or New package')).not.toBeInTheDocument();
         expect(callBackendMock).toHaveBeenCalledWith('plan:list_packages', { status: 'PLANNED' }, expect.anything());

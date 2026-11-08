@@ -11,6 +11,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { DeepCatalogStatus } from '../../common/services/backendApi';
+import { Button } from '../../common/components/Button';
 
 /** localStorage key remembering that the user chose "Don't remind me". */
 export const DEEP_CATALOG_PROMPT_DISMISSED_KEY = 'planetariumDeepCatalogPromptDismissed';
@@ -111,21 +112,21 @@ export const DeepCatalogPrompt: React.FC<Props> = ({ status }) => {
       </p>
       <div className="planetarium-deep-catalog-prompt__command-row">
         <code className="planetarium-deep-catalog-prompt__command">{status.installCommand}</code>
-        <button type="button" className="planetarium-deep-catalog-prompt__button" onClick={copyCommand}>
+        <Button variant="secondary" size="small" onClick={copyCommand}>
           {copied ? 'Copied' : 'Copy'}
-        </button>
+        </Button>
       </div>
       <p className="planetarium-deep-catalog-prompt__hint">
         It takes several hours and roughly 3 GB of disk. You can stop it with Ctrl-C at any time and run the same
         command again to carry on. Restart Astrometrics when it finishes.
       </p>
       <div className="planetarium-deep-catalog-prompt__actions">
-        <button type="button" className="planetarium-deep-catalog-prompt__button" onClick={hideForNow}>
+        <Button variant="secondary" size="small" onClick={hideForNow}>
           Not now
-        </button>
-        <button type="button" className="planetarium-deep-catalog-prompt__button" onClick={hideForGood}>
+        </Button>
+        <Button variant="secondary" size="small" onClick={hideForGood}>
           Don&apos;t remind me
-        </button>
+        </Button>
       </div>
     </div>
   );

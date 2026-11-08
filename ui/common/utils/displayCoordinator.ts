@@ -3,11 +3,12 @@
  * @description Universal cross-display and cross-window navigation infrastructure.
  * Enables any element on any display to trigger navigation to any other element
  * on another display, delegating to an existing open window when available or
- * switching the local workspace display as a fallback.
+ * switching the local workspace display as a fallback. The request waits in
+ * the hand-off store (`displayHandoffStore.ts`) until the target display runs.
  */
 
-import { useEffect } from 'react';
 import { emitToast } from './emitToast';
+import { postHandoff } from './displayHandoffStore';
 
 /**
  * Universal contract for navigating between displays and elements.
@@ -44,7 +45,7 @@ export interface NavigationIntent<T = any> {
   };
 
   /**
-   * Optional toast notification displayed to confirm the navigation.
+   * Optional toast, shown only when another window handled the request (in this window the display change itself is the feedback).
    */
   toast?: {
     message: string;
@@ -95,55 +96,17 @@ export async function navigateToElement<T = any>(
     // Ignore localStorage failures
   }
 
+  // 3. Switch the display, then leave the request in the hand-off store. The
+  // store keeps it until the target display is running, so it is not lost when
+  // that display is hidden or paused at this moment.
   window.dispatchEvent(
     new CustomEvent('astrometrics:modeChange', { detail: intent.targetDisplay })
   );
+  postHandoff(intent.targetDisplay, intent.action, intent.payload, { element: intent.targetElement });
 
-  // 3. Dispatch specific action and general navigationIntent locally
-  window.dispatchEvent(
-    new CustomEvent(`astrometrics:${intent.action}`, { detail: intent.payload })
-  );
-  window.dispatchEvent(
-    new CustomEvent('astrometrics:navigationIntent', { detail: intent })
-  );
-
-  if (intent.toast) {
-    emitToast(
-      intent.toast.message,
-      intent.toast.type || 'info',
-      intent.toast.title || intent.targetDisplay
-    );
-  }
-
+  // No toast here: the display changing is the feedback. A toast is only for the
+  // remote case above, where the request went to another window.
   return { handledRemotely: false };
-}
-
-/**
- * React hook for components/panels that act as navigation targets.
- * Listens for incoming navigation intents matching the given display and optional elementId.
- *
- * @param display The workspace display name this component belongs to.
- * @param elementId Optional specific element identifier within the display.
- * @param onIntent Callback invoked when a matching intent is received.
- */
-export function useNavigationTarget(
-  display: string,
-  elementId?: string,
-  onIntent?: (intent: NavigationIntent) => void
-): void {
-  useEffect(() => {
-    const handleIntent = (event: Event) => {
-      const intent = (event as CustomEvent<NavigationIntent>).detail;
-      if (!intent) return;
-      if (intent.targetDisplay !== display) return;
-      if (elementId && intent.targetElement && intent.targetElement !== elementId) return;
-
-      onIntent?.(intent);
-    };
-
-    window.addEventListener('astrometrics:navigationIntent', handleIntent);
-    return () => window.removeEventListener('astrometrics:navigationIntent', handleIntent);
-  }, [display, elementId, onIntent]);
 }
 
 /**

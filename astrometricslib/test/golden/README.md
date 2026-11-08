@@ -39,7 +39,7 @@ The table uses these terms:
 - The raw check counts stars as connected bright regions. The longest star streak is the length, in pixels, of the longest such region. A trailed star (one smeared into a short line) makes a long region; the raw check flags a frame whose longest region is far longer than the batch's typical one.
 - The zero-order finder first looks for one clear point source. When that fails, it runs an extended-target search, which looks for a bright extended patch such as a cluster core instead.
 - The streak tilt is the angle of the spectrum on the sensor. The tilt contrast is the typical height of the spectrum above the background, in units of the background noise. A visible spectrum scores in the hundreds; 0 means no spectrum could be followed.
-- An aperture is the circle of pixels whose light is summed to measure a star. Review item S2 (in `documentation/plans/REVIEW_ACTION_PLAN.md`) places the aperture centers on the exact detected positions instead of whole pixels. `photometry_pre_S2` keeps whole-pixel centers so the effect of that change stays visible.
+- An aperture is the circle of pixels whose light is summed to measure a star. A review of the photometry stage changed the pipeline to place the aperture centers on the exact detected positions instead of whole pixels. `photometry_pre_S2` keeps whole-pixel centers so the effect of that change stays visible.
 
 | Section | Frame | Numbers | Measured by |
 | --- | --- | --- | --- |
@@ -89,7 +89,7 @@ The source detector draws a random subsample to estimate the background, but onl
   - **Run.** Light `019` is measured in the test process, and lights `020` to `023` go through `_process_single_frame_worker` one after the other. The whole run takes about 8 s.
   - **Check.** Each light's shift agrees with the independent shift from the raw check to within 0.05 pixel (largest gap 0.043).
   - **Noise.** The gain and read noise come from the camera profile through `resolve_detector_noise`, as in the pipeline. Only the fluxes are pinned, not their errors.
-- `photometry_pre_S2` reproduces whole-pixel aperture centers, the placement that review item S2 replaced (see the table terms above). It rounds each position before calling `_measure_aperture_flux`. `photometry_sub_pixel` passes the exact positions. The difference between the two blocks is the effect of S2 on these ten stars.
+- `photometry_pre_S2` reproduces whole-pixel aperture centers, the placement that sub-pixel centering replaced (see the table terms above). It rounds each position before calling `_measure_aperture_flux`. `photometry_sub_pixel` passes the exact positions. The difference between the two blocks is the effect of sub-pixel centering on these ten stars.
 
 ## Regenerating the pins
 

@@ -9,6 +9,7 @@ wheels, and weather/environmental telemetry.
 #   sudo apt-add-repository ppa:mutlaqja/ppa
 #   sudo apt-get -y install python3-indi-client
 import logging
+import math
 import threading
 import time
 from datetime import datetime
@@ -30,6 +31,7 @@ from .indi.enclosure_controller import EnclosureController
 from .indi.filter_wheel_controller import FilterWheelController
 from .indi.focuser_controller import FocuserController
 from .indi.mount_controller import MountController
+from .indi.property_state import get_property_state, property_state_name
 from .indi.pyindi_compatibility import INDI_ERRORS, PyIndi
 from .indi.switch_controller import SwitchController
 from .indi.weather_controller import WeatherController
@@ -44,6 +46,12 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+# How far (seconds) the camera's reported remaining time may fall below the
+# countdown clock before the clock is moved to match. About one poll interval
+# plus transport delay; stale readings are always too high, so they never
+# reach this rule.
+_EXPOSURE_CLOCK_TOLERANCE_SECONDS = 3.0
 
 
 class TelescopeStatus(BaseModel):
@@ -109,9 +117,37 @@ class IndiClient(PyIndi.BaseClient):
     is never invoked.
     """
 
+    _image_arrivals = 0
+    """How many image (BLOB) updates this client has received."""
+
+    _image_arrivals_lock = threading.Lock()
+    """Guards `_image_arrivals`, which the client thread writes."""
+
     def __init__(self) -> None:
         """Initialize the INDI client."""
         super().__init__()
+
+    @property
+    def image_arrivals(self) -> int:
+        """Count the image (BLOB) updates received so far.
+
+        A caller notes the count before an exposure and later compares it
+        to see whether a new image has arrived.
+        """
+        return self._image_arrivals
+
+    def _count_image_arrival(self) -> None:
+        """Add one to the count of received images."""
+        with self._image_arrivals_lock:
+            self._image_arrivals += 1
+
+    def newBLOB(self, blob: Any) -> None:
+        """Count an image sent by a device.
+
+        PyIndi calls this on a 1.x client library. On a 2.x library the
+        image arrives through `updateProperty` instead.
+        """
+        self._count_image_arrival()
 
     def newDevice(self, device: PyIndi.BaseDevice) -> None:
         """Handle a new INDI device.
@@ -161,6 +197,9 @@ class IndiClient(PyIndi.BaseClient):
             The property whose value the server just changed.
         """
         property_type = property.getType()
+        if property_type == getattr(PyIndi, "INDI_BLOB", None):
+            self._count_image_arrival()
+            return
         for dispatch_type, callback_name, wrapper_class in _INDI_PROPERTY_TYPE_DISPATCH:
             if property_type == dispatch_type:
                 getattr(self, callback_name)(wrapper_class(property))
@@ -214,22 +253,18 @@ class IndiClient(PyIndi.BaseClient):
 class IndiInterface(IndiClient):
     """Connect wayfindinglib to an INDI server."""
 
-    def __init__(self, config: AppConfiguration) -> None:
-        """Initialize the interface to an INDI server.
+    _server_unreachable_logged = False
+    """Whether the current run of failed connections was already logged."""
 
-        Parameters
-        ----------
-        config
-            Configuration object providing telescope hostname and
-            INDI host/port, injected by the caller.
+    def _init_runtime_state(self) -> None:
+        """Create the plain in-memory state shared by every interface.
 
+        Holds the external pulse and sync queues, polar alignment
+        tracking, the exposure countdown and the reconnect flags. It
+        opens no connection, so the built-in simulator calls it too.
+        Add any new state of this kind here so the two ``__init__``
+        methods cannot drift apart.
         """
-        super().__init__()
-        self.config = config
-        self.sync_configuration()
-        self.device_map = {}
-        self._has_initialized_defaults = False
-
         # Thread-safe external pulse event queue
         self._external_pulses_lock = threading.Lock()
         self._external_pulses = []
@@ -264,7 +299,36 @@ class IndiInterface(IndiClient):
         self._active_exposure_duration: float | None = None
         self._exposure_start_time: float | None = None
         self._last_exposure_val: float | None = None
-        self._exposure_counts_up: bool | None = None
+        self._exposure_lock = threading.Lock()
+        # Clock used for the countdown. Tests replace it with a fake clock.
+        self._monotonic_clock = time.monotonic
+
+        # Fresh-client recovery (see `_reconnect`). The worker sets
+        # `supports_rebuild` when it can swap in a new client object.
+        self.supports_rebuild: bool = False
+        self.stale_client: bool = False
+        self._connection_loss_reported: bool = False
+        self._expected_disconnect: bool = False
+        self._has_initialized_defaults = False
+
+    def __init__(self, config: AppConfiguration) -> None:
+        """Initialize the interface to an INDI server.
+
+        Parameters
+        ----------
+        config
+            Configuration object providing telescope hostname and
+            INDI host/port, injected by the caller.
+
+        """
+        super().__init__()
+        self.config = config
+        # Created first: the client library can call back from its own
+        # thread as soon as the object exists, and the callbacks use it.
+        self.device_discovery = DeviceDiscovery(self)
+        self.sync_configuration()
+        self.device_map = {}
+        self._init_runtime_state()
 
         # Modular Controllers
         self.mount_controller = MountController(self)
@@ -275,7 +339,6 @@ class IndiInterface(IndiClient):
         self.switch_controller = SwitchController(self)
         self.weather_controller = WeatherController()
         self.connection_manager = ConnectionManager(config.get_indi_host(), config.get_indi_port())
-        self.device_discovery = DeviceDiscovery(self)
 
         self._reset_status()
         # self._ensure_connection() is removed to prevent blocking startup.
@@ -320,13 +383,14 @@ class IndiInterface(IndiClient):
                 logger.debug("Failed to query device name on removeDevice: %s", e)
 
     def sync_configuration(self) -> None:
-        """Read the telescope hostname from the configuration again.
+        """Read the telescope host and INDI port from the configuration again.
 
-        Points the INDI client at that host. It does not reconnect; see
-        `reload_connection` for that.
+        Points the INDI client at that host and port (``indi_port`` in
+        ``[Observatory.Telescope]``, 7624 unless the settings say otherwise).
+        It does not reconnect; see `reload_connection` for that.
         """
         self.hostname = self.config.get_telescope_hostname()
-        self.setServer(self.hostname, 7624)
+        self.setServer(self.hostname, self.config.get_indi_port())
         if hasattr(self, "connection_manager"):
             self.connection_manager.hostname = self.hostname
 
@@ -345,8 +409,10 @@ class IndiInterface(IndiClient):
         # first if host changed
         if self.isServerConnected():
             current_host = self.getHost()
-            if current_host != self.hostname:
+            known_address = self.connection_manager.known_address.cached_address
+            if current_host not in (self.hostname, known_address):
                 logger.info("Hostname changed from %s to %s. Reconnecting...", current_host, self.hostname)
+                self._expected_disconnect = True
                 self.disconnectServer()
                 # self.setServer is called in _load_config
 
@@ -379,15 +445,23 @@ class IndiInterface(IndiClient):
         if not self.connection_manager.is_host_resolvable(self.getHost(), self.getPort()):
             # Skips the client's own connect call, which would wait about five
             # seconds on the name lookup while holding the INDI worker.
-            logger.warning("No indiserver running on %s:%s", self.getHost(), self.getPort())
+            self._note_server_unreachable()
             self._reset_status()
             return None
 
+        # The name, or its last known address while the name lookup fails.
+        connect_address = self.connection_manager.connect_address
+        if connect_address and connect_address != self.getHost():
+            self.setServer(connect_address, self.getPort())
+
         if not self.connectServer():
-            # Only print if we haven't already logged this recently
-            logger.warning("No indiserver running on %s:%s", self.getHost(), self.getPort())
+            self._note_server_unreachable()
             self._reset_status()
             return None
+
+        if self._server_unreachable_logged:
+            self._server_unreachable_logged = False
+            logger.info("The indiserver on %s:%s is reachable again.", self.getHost(), self.getPort())
 
         # Waiting for devices to be discovered
         # Loop for up to 2 seconds to allow devices to show up
@@ -406,6 +480,9 @@ class IndiInterface(IndiClient):
             except INDI_ERRORS as e:
                 logger.debug("Failed to resolve device name in connect_to_server: %s", e)
 
+        if self._connection_loss_reported and self.deviceMap:
+            self._connection_loss_reported = False
+            logger.info("INDI connection restored with %d device(s).", len(self.deviceMap))
         return self
 
     def _ensure_connection(self) -> None:
@@ -426,7 +503,11 @@ class IndiInterface(IndiClient):
             # is re-checked here too: the INDI client runs a background
             # thread that can flip it False concurrently with the
             # responsiveness probe above.
-            server_ok = self._is_server_responsive() and self.isServerConnected()
+            # One failed handshake is not enough to drop a working connection:
+            # only a run of them is (see `MAX_CONSECUTIVE_PROBE_FAILURES`). A
+            # lost connection itself shows in `isServerConnected()`.
+            self._is_server_responsive()
+            server_ok = not connection_manager.probe_failures_exhausted() and self.isServerConnected()
             if not server_ok and cooldown_elapsed:
                 self._reconnect(now)
 
@@ -455,7 +536,17 @@ class IndiInterface(IndiClient):
         _ensure_connection share one debounce timer.
         """
         self.connection_manager.last_connection_attempt = now
+        self.connection_manager.reset_probe_failures()
+        if self.supports_rebuild:
+            # A client object that lost its server is not trusted to
+            # reconnect: after an indiserver restart a reused client kept
+            # connecting and being dropped, so the owner builds a new one.
+            # Nothing is closed or opened here; the owner does that after
+            # this call returns, outside any PyIndi callback.
+            self.stale_client = True
+            return
         if self.isServerConnected():
+            self._expected_disconnect = True
             self.disconnectServer()
         self.deviceMap = {}
         self._reset_status()
@@ -491,9 +582,32 @@ class IndiInterface(IndiClient):
         return self.connection_manager.is_server_responsive()
 
     def serverDisconnected(self, code: int) -> None:
-        """Handle the server-disconnected callback."""
-        logger.warning("INDI Server disconnected (code %s)", code)
+        """Handle the server-disconnected callback.
+
+        Runs on PyIndi's own thread, so it only logs and resets the status.
+        It never connects or disconnects. A loss is logged as a warning once;
+        the matching "restored" line is logged by `connect_to_server`.
+        """
+        if self._expected_disconnect:
+            self._expected_disconnect = False
+            logger.debug("INDI client closed its own connection (code %s)", code)
+        elif not self._connection_loss_reported:
+            self._connection_loss_reported = True
+            logger.warning("INDI Server connection lost (code %s); will reconnect.", code)
+        else:
+            logger.debug("INDI Server disconnected again (code %s)", code)
         self._reset_status()
+
+    def _note_server_unreachable(self) -> None:
+        """Log once, at info level, that the indiserver cannot be reached.
+
+        An offline telescope is a status, not an error, and the connection is
+        tried again on every poll, so only the first failure after a working
+        connection is logged.
+        """
+        if not self._server_unreachable_logged:
+            self._server_unreachable_logged = True
+            logger.info("No indiserver running on %s:%s", self.getHost(), self.getPort())
 
     def _reset_status(self) -> None:
         """Reset the status dictionary to default/disconnected state."""
@@ -508,7 +622,9 @@ class IndiInterface(IndiClient):
             "HUMIDITY": "-",
             "FILTER": "Unknown",
             "CAMERA_TEMPERATURE": "-",
-            "CAMERA_STATUS": "Idle",
+            # Not "Idle": a network drop in the middle of an exposure would
+            # look like a finished frame to the backend's frame-end detector.
+            "CAMERA_STATUS": "Unknown",
             "TARGET_NAME": None,
             "PIER_SIDE": None,
             "PARKED": None,
@@ -574,51 +690,8 @@ class IndiInterface(IndiClient):
                     connection_status = "Disconnected"
 
                 # Get telescope status
-                telescope_track_state = device_telescope.getSwitch("TELESCOPE_TRACK_STATE")
-                parking_status = device_telescope.getSwitch("TELESCOPE_PARK")
                 self.status.update(self._read_mount_switches(device_telescope))
-
-                if parking_status and parking_status[0].getState() == PyIndi.ISS_ON:
-                    tracking_status = "Parked"
-                elif telescope_track_state and any(
-                    (s.getName() in ("TRACK_ON", "ON") or "ON" in s.getName().upper())
-                    and s.getState() == PyIndi.ISS_ON
-                    for s in telescope_track_state
-                ):
-                    tracking_status = "Tracking"
-                else:
-                    # Check SkyWatcher / Star Adventurer GTi RASTATUS
-                    # light property
-                    ra_status = device_telescope.getLight("RASTATUS")
-                    is_ra_running = False
-                    if ra_status:
-                        for light in ra_status:
-                            light_name = light.getName()
-                            if light_name == "RARunning" and light.getState() in (
-                                PyIndi.IPS_BUSY,
-                                PyIndi.IPS_OK,
-                            ):
-                                is_ra_running = True
-                                break
-
-                    # Also check TELESCOPE_MOTION_RATE or TELESCOPE_TRACK_RATE
-                    # if present
-                    track_rate = device_telescope.getSwitch("TELESCOPE_TRACK_RATE")
-                    rate_active = False
-                    if (
-                        track_rate
-                        and telescope_track_state
-                        and not any(
-                            (s.getName() in ("TRACK_OFF", "OFF", "IDLE")) and s.getState() == PyIndi.ISS_ON
-                            for s in telescope_track_state
-                        )
-                    ):
-                        rate_active = any(s.getState() == PyIndi.ISS_ON for s in track_rate)
-
-                    if is_ra_running or rate_active:
-                        tracking_status = "Tracking"
-                    else:
-                        tracking_status = "Idle"
+                tracking_status = self._read_tracking_status(device_telescope)
             else:
                 connection_status = (
                     "Disconnecting..."
@@ -636,6 +709,57 @@ class IndiInterface(IndiClient):
         self.status["CONNECTION_STATUS"] = connection_status
 
         return device_telescope
+
+    @staticmethod
+    def _read_tracking_status(device_telescope: Any) -> str:
+        """Decide whether the mount is parked, tracking or idle.
+
+        The order of trust is: the park switch, then the track-state
+        switch, then (only when the mount has no track-state switch) the
+        SkyWatcher ``RASTATUS`` lights.
+
+        Parameters
+        ----------
+        device_telescope : `PyIndi.BaseDevice`
+            The mount device.
+
+        Returns
+        -------
+        tracking_status : `str`
+            ``"Parked"``, ``"Tracking"`` or ``"Idle"``.
+        """
+
+        def element_is_on(switch: Any, element_name: str) -> bool:
+            """Tell whether the named element of a switch property is on.
+
+            Returns
+            -------
+            is_on : `bool`
+                `True` when the element exists and is on.
+            """
+            return any(
+                element.getName() == element_name and element.getState() == PyIndi.ISS_ON
+                for element in switch or []
+            )
+
+        if element_is_on(device_telescope.getSwitch("TELESCOPE_PARK"), "PARK"):
+            return "Parked"
+
+        track_state = device_telescope.getSwitch("TELESCOPE_TRACK_STATE")
+        if track_state:
+            # The track-state switch is the driver's own statement, so no
+            # other property may override it.
+            return "Tracking" if element_is_on(track_state, "TRACK_ON") else "Idle"
+
+        # No track-state switch: fall back to the SkyWatcher RASTATUS
+        # lights. The Star Adventurer GTi driver shows Ok for true and Busy
+        # for false on these lights (seen live: a stopped mount reports
+        # RARunning Busy). That convention is not documented in the repo,
+        # so only Ok counts as running.
+        for light in device_telescope.getLight("RASTATUS") or []:
+            if light.getName() == "RARunning" and light.getState() == PyIndi.IPS_OK:
+                return "Tracking"
+        return "Idle"
 
     def _read_mount_switches(self, device_telescope: Any) -> dict[str, Any]:
         """Read the mount's pier side, park switch and tracking rate.
@@ -927,10 +1051,13 @@ class IndiInterface(IndiClient):
         ccd_exposure = camera.getNumber("CCD_EXPOSURE")
         if ccd_exposure and len(ccd_exposure) > 0:
             val = ccd_exposure[0].value
-            state = getattr(ccd_exposure, "s", None)
-            is_busy = (state == PyIndi.IPS_BUSY) if PyIndi else False
-            fits_exptime = self._extract_exptime_from_camera(camera)
-            self._handle_exposure_update(val, is_busy, fits_exptime)
+            state = get_property_state(ccd_exposure)
+            if state is None:
+                with self._exposure_lock:
+                    self.status["CAMERA_STATUS"] = "Unknown"
+            else:
+                fits_exptime = self._extract_exptime_from_camera(camera)
+                self._handle_exposure_update(val, state == PyIndi.IPS_BUSY, fits_exptime)
         else:
             self.status["CAMERA_STATUS"] = "Idle"
 
@@ -967,77 +1094,82 @@ class IndiInterface(IndiClient):
         return None
 
     def _handle_exposure_update(self, val: float, is_busy: bool, fits_exptime: float | None = None) -> None:
-        """Process camera exposure progress and maintain a countdown clock.
+        """Process camera exposure progress with a clock-based countdown.
 
-        Normalizes camera drivers that report elapsed seconds vs drivers that
-        report remaining seconds into a monotonically decreasing countdown.
+        INDI camera drivers report the REMAINING time in
+        ``CCD_EXPOSURE_VALUE``.
+        Readings can arrive late or out of order, and the poll and the
+        ``newNumber`` callback both feed this method. So the countdown is
+        driven by a clock and the reported value is used only for two things:
+
+        * Detecting a new frame. A frame starts when the property goes from
+          not busy to busy, or when it is busy and the reported value jumps up
+          by more than ``max(1 s, half the frame length)``. The jump rule
+          catches back-to-back frames (for example from Ekos), where the
+          property stays busy between frames. A small rise, such as a stale
+          57 s reading followed by 59 s, is not a new frame.
+        * Correcting the clock when the camera is clearly ahead of it. If the
+          reported value is more than ``_EXPOSURE_CLOCK_TOLERANCE_SECONDS``
+          below the clock's remaining time, the clock is moved to match. A
+          reported value above the clock is ignored, because a stale reading
+          is always too high.
+
+        The frame length is the FITS header EXPTIME when present, otherwise
+        the first value seen for the frame. When the countdown reaches 0 while
+        the camera is still busy, the status is "Downloading".
 
         Parameters
         ----------
         val : `float`
-            Current exposure value reported by the camera driver.
+            Current remaining exposure time reported by the camera driver.
         is_busy : `bool`
             Whether the camera exposure property state is IPS_BUSY.
         fits_exptime : `float` | `None`, optional
             Target exposure duration extracted from FITS_HEADER.
         """
-        import time
+        with self._exposure_lock:
+            if not is_busy:
+                self._exposure_in_progress = False
+                self._active_exposure_duration = None
+                self._exposure_start_time = None
+                self._last_exposure_val = None
+                self.status["CAMERA_STATUS"] = "Idle"
+                return
 
-        if not is_busy:
-            self._exposure_in_progress = False
-            self._active_exposure_duration = None
-            self._exposure_start_time = None
-            self._last_exposure_val = None
-            self._exposure_counts_up = None
-            self.status["CAMERA_STATUS"] = "Idle"
-            return
+            now = self._monotonic_clock()
+            length = self._active_exposure_duration
+            new_frame = not self._exposure_in_progress or length is None or self._exposure_start_time is None
+            if not new_frame and self._last_exposure_val is not None:
+                jump_threshold = max(1.0, 0.5 * length)
+                new_frame = val - self._last_exposure_val > jump_threshold
 
-        now = time.time()
-        if not self._exposure_in_progress:
-            self._exposure_in_progress = True
-            self._exposure_start_time = now
+            if new_frame:
+                if fits_exptime is not None and fits_exptime > 0:
+                    length = fits_exptime
+                elif val > 0:
+                    length = val
+                else:
+                    length = 0.0
+                self._exposure_in_progress = True
+                self._active_exposure_duration = length
+                self._exposure_start_time = now
             self._last_exposure_val = val
-            self._exposure_counts_up = None
 
-        if fits_exptime is not None and fits_exptime > 0:
-            self._active_exposure_duration = fits_exptime
-        elif self._active_exposure_duration is None and val > 0:
-            self._active_exposure_duration = val
-
-        # Detect direction of counter if changing
-        if self._last_exposure_val is not None and abs(val - self._last_exposure_val) > 0.02:
-            if val > self._last_exposure_val:
-                self._exposure_counts_up = True
-            elif val < self._last_exposure_val:
-                self._exposure_counts_up = False
-        self._last_exposure_val = val
-
-        # Calculate remaining countdown seconds
-        if self._exposure_counts_up is True:
-            # val is elapsed time, so remaining is duration - val
-            total = self._active_exposure_duration or val
-            remaining = max(0.0, total - val)
-        elif self._exposure_counts_up is False:
-            # val is already remaining time
-            remaining = val
-        else:
-            # Initial sample before direction is established:
-            # If we know total duration and val is a small fraction (< 50%),
-            # val is elapsed time (e.g. 0.4s into a 30s exposure).
-            if (
-                self._active_exposure_duration
-                and self._active_exposure_duration > 1.0
-                and val < self._active_exposure_duration * 0.5
-            ):
-                self._exposure_counts_up = True
-                remaining = max(0.0, self._active_exposure_duration - val)
-            else:
+            if length is None or self._exposure_start_time is None:
+                return
+            if val <= 0:
+                # The camera says the exposure is over; hold the clock at zero.
+                self._exposure_start_time = now - length
+            remaining = max(0.0, length - (now - self._exposure_start_time))
+            if val > 0 and val < remaining - _EXPOSURE_CLOCK_TOLERANCE_SECONDS:
+                # The camera is ahead of the clock, so move the clock forward.
+                self._exposure_start_time = now - (length - val)
                 remaining = val
 
-        if remaining > 0:
-            self.status["CAMERA_STATUS"] = f"Exposing ({remaining:.1f}s)"
-        else:
-            self.status["CAMERA_STATUS"] = "Downloading"
+            if remaining > 0:
+                self.status["CAMERA_STATUS"] = f"Exposing ({math.ceil(remaining)}s)"
+            else:
+                self.status["CAMERA_STATUS"] = "Downloading"
 
     def _extract_target_from_camera(self, camera: Any) -> None:
         """Check camera device properties for celestial target metadata.
@@ -1338,6 +1470,32 @@ class IndiInterface(IndiClient):
             "timestamp": data.get("timestamp"),
         }
 
+    def _can_handle_callbacks(self) -> bool:
+        """Tell whether this interface still takes property updates.
+
+        The client library calls back from its own thread, so an update can
+        arrive after the interface was closed (see `close_callbacks`), or
+        while Python is deleting the object. Python removes the object's
+        attributes before the client library's own clean-up runs, and that
+        clean-up can still send one last update.
+
+        Returns
+        -------
+        ready : `bool`
+            `False` once the interface has been closed, or when its runtime
+            state (see `_init_runtime_state`) does not exist (yet or any more).
+        """
+        state = vars(self)
+        return "_exposure_lock" in state and not state.get("_callbacks_closed", False)
+
+    def close_callbacks(self) -> None:
+        """Ignore every property update from now on.
+
+        Call this before dropping the interface, so updates still in flight
+        from the client library's thread do no work.
+        """
+        self._callbacks_closed = True
+
     def newSwitch(self, switch_vector: Any) -> None:
         """Handle a switch property update from the INDI server.
 
@@ -1349,6 +1507,8 @@ class IndiInterface(IndiClient):
         switch_vector : `Any`
             Updated INDI switch property from the server.
         """
+        if not self._can_handle_callbacks():
+            return
         try:
             property_name = switch_vector.getName()
             if property_name == "ON_COORD_SET":
@@ -1382,6 +1542,8 @@ class IndiInterface(IndiClient):
         number_vector : `Any`
             Updated INDI number property from the server.
         """
+        if not self._can_handle_callbacks():
+            return
         try:
             property_name = number_vector.getName()
             if property_name in ("TELESCOPE_TIMED_GUIDE_NS", "TELESCOPE_TIMED_GUIDE_WE"):
@@ -1588,11 +1750,14 @@ class IndiInterface(IndiClient):
             elif property_name == "CCD_EXPOSURE":
                 if len(number_vector) > 0:
                     val = number_vector[0].getValue()
-                    state = getattr(number_vector, "s", None)
-                    is_busy = (state == PyIndi.IPS_BUSY) if PyIndi else False
-                    camera = self._find_main_camera_device()
-                    fits_exptime = self._extract_exptime_from_camera(camera) if camera else None
-                    self._handle_exposure_update(val, is_busy, fits_exptime)
+                    state = get_property_state(number_vector)
+                    if state is None:
+                        with self._exposure_lock:
+                            self.status["CAMERA_STATUS"] = "Unknown"
+                    else:
+                        camera = self._find_main_camera_device()
+                        fits_exptime = self._extract_exptime_from_camera(camera) if camera else None
+                        self._handle_exposure_update(val, state == PyIndi.IPS_BUSY, fits_exptime)
 
         except Exception:
             # PyIndi calls this from its own thread. An error that escaped
@@ -1611,6 +1776,8 @@ class IndiInterface(IndiClient):
         text_vector : `Any`
             Updated INDI text property from the server.
         """
+        if not self._can_handle_callbacks():
+            return
         try:
             property_name = text_vector.getName()
             if property_name in ("FITS_HEADER", "OBJECT_INFO", "TARGET_NAME", "OBJECT_NAME"):
@@ -1685,7 +1852,7 @@ class IndiInterface(IndiClient):
                         )
                         else "rw"
                     ),
-                    "state": "Idle",
+                    "state": property_state_name(get_property_state(property_item)),
                 }
 
                 # Extract elements based on type
@@ -1714,15 +1881,7 @@ class IndiInterface(IndiClient):
                         vector = device.getLight(property_name)
                         if vector:
                             for i in range(len(vector)):
-                                state = vector[i].s
-                                state_str = "Idle"
-                                if state == PyIndi.IPS_OK:
-                                    state_str = "Ok"
-                                elif state == PyIndi.IPS_BUSY:
-                                    state_str = "Busy"
-                                elif state == PyIndi.IPS_ALERT:
-                                    state_str = "Alert"
-                                elements[vector[i].name] = state_str
+                                elements[vector[i].name] = property_state_name(vector[i].s)
                 except INDI_ERRORS as element_error:
                     property_info["error"] = str(element_error)
 
@@ -1975,6 +2134,44 @@ class IndiInterface(IndiClient):
         """
         return self.camera_controller.get_last_image(self._find_main_camera_device())
 
+    def set_main_image_reception(self, enabled: bool) -> bool:
+        """Turn on or off the receiving of images from the main camera.
+
+        An INDI client gets no image data unless it asks for it. This
+        setting belongs to this connection only, so it never changes what
+        other clients such as Ekos or PHD2 receive.
+
+        Parameters
+        ----------
+        enabled : `bool`
+            `True` to receive the camera's images, `False` to stop.
+
+        Returns
+        -------
+        success : `bool`
+            `True` if the request was sent, `False` if there is no main
+            camera.
+        """
+        return self.camera_controller.set_image_reception(self._find_main_camera_device(), enabled)
+
+    def wait_for_new_main_image(self, timeout_seconds: float) -> bytes | None:
+        """Wait for a new image from the main camera and return it.
+
+        Only an image that arrives after `set_main_image_reception`
+        turned reception on counts, so an older frame is never returned.
+
+        Parameters
+        ----------
+        timeout_seconds : `float`
+            How long to wait, in seconds.
+
+        Returns
+        -------
+        data : `bytes` or `None`
+            The new frame's raw data, or `None` if none arrived in time.
+        """
+        return self.camera_controller.wait_for_new_image(self._find_main_camera_device(), timeout_seconds)
+
     def _find_main_camera_device(self) -> PyIndi.BaseDevice | None:
         """Heuristic to find the main imaging camera.
 
@@ -1983,7 +2180,9 @@ class IndiInterface(IndiClient):
         device : `PyIndi.BaseDevice` or `None`
             The main camera device, or `None` if none is found.
         """
-        return self.device_discovery.find_main_camera()
+        # Absent only while the object is being built or torn down.
+        discovery = vars(self).get("device_discovery")
+        return discovery.find_main_camera() if discovery is not None else None
 
     def capture_image(self, exposure_seconds: float) -> bool:
         """Take an exposure with the main camera.
@@ -1995,6 +2194,30 @@ class IndiInterface(IndiClient):
         """
         device = self._find_main_camera_device()
         return self.camera_controller.expose(device, exposure_seconds)
+
+    def abort_main_exposure(self) -> bool:
+        """Cancel the exposure the main camera is taking.
+
+        Returns
+        -------
+        success : `bool`
+            `True` if the abort command was sent, `False` if there is no
+            main camera or it cannot abort.
+        """
+        device = self._find_main_camera_device()
+        return self.camera_controller.abort(device)
+
+    def abort_guide_exposure(self) -> bool:
+        """Cancel the exposure the guide camera is taking.
+
+        Returns
+        -------
+        success : `bool`
+            `True` if the abort command was sent, `False` if there is no
+            guide camera or it cannot abort.
+        """
+        device = self._find_guide_camera_device()
+        return self.camera_controller.abort(device)
 
     def move(self, direction: str, start: bool = True) -> bool:
         """Start or stops manual movement in a direction.

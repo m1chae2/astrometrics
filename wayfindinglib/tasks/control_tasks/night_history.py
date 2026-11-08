@@ -20,13 +20,27 @@ Nothing here writes. For exact behavior, read the code.
 
 from __future__ import annotations
 
+import copy
 import json
+import time
 from datetime import date
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib.exceptions import ConfigurationError, ConflictError, InvalidArgumentError, NotFoundError
-from wayfindinglib.analytics import capture_history
-from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
+from astrometricslib.exceptions import (
+    ConfigurationError,
+    ConflictError,
+    InvalidArgumentError,
+    NotFoundError,
+    StorageError,
+)
+from astrometricslib.reports import observing_night_id
+from wayfindinglib.analytics import night_index
+from wayfindinglib.analytics.data_versions import (
+    nights_context_signs,
+    nights_data_versions,
+    nights_index_version,
+)
+from wayfindinglib.analytics.night_index import NightFrame, NightIndex, build_night_index
 from wayfindinglib.models.session.night_list import NightListEntry
 from wayfindinglib.tasks.control_tasks import night_analysis
 
@@ -377,13 +391,22 @@ def clamp_limit(limit: int) -> int:
     return max(1, min(int(limit), MAXIMUM_LIMIT))
 
 
-def build_night_list(context: ControlContext, limit: int = DEFAULT_LIMIT) -> list[NightListEntry]:
+def build_night_list(
+    context: ControlContext, limit: int = DEFAULT_LIMIT, now: float | None = None
+) -> list[NightListEntry]:
     """List the recorded observing nights and what data each has.
 
     A night is listed if it has light frames from the active equipment, an
     Ekos session record or a guiding run. With no telescope and camera
     active, the frame columns are empty and the other two sources still
     list their nights.
+
+    The list is kept in two parts. The entries of the finished nights are
+    built once and kept until something that touches a finished night
+    changes. The entry of the night in progress is built again whenever its
+    own data change, which during a night is about once a minute, and that
+    needs only tonight's frames. The result is the same as building the
+    whole list.
 
     Parameters
     ----------
@@ -392,38 +415,146 @@ def build_night_list(context: ControlContext, limit: int = DEFAULT_LIMIT) -> lis
         library's frame records.
     limit : `int`, optional
         How many of the most recent nights to list.
+    now : `float`, optional
+        The moment that decides which night is in progress, as seconds since
+        the Unix epoch. Defaults to the present.
 
     Returns
     -------
     nights : `list` [`NightListEntry`]
-        One entry per night, oldest first.
+        One entry per night, oldest first. The two parts are kept in the
+        context's review cache until the data behind them change (the live
+        guiding samples do not count), and each caller gets its own copy.
     """
-    ekos_records, guiding_runs = night_analysis.recorded_sessions(context)
-    catalog = get_equipment_catalog(context.config)
-    telescope, camera = catalog.active_telescope(), catalog.active_camera()
-    frames_by_night: dict[str, list[Any]] = {}
-    if telescope is not None and camera is not None:
-        frames = night_analysis.capture_library(context, telescope.name, camera.name, {})
-        frames_by_night = capture_history.frames_by_night(frames)
-    ekos_nights = {record.session_id for record in ekos_records}
-    guiding_nights = {run.session_id for run in guiding_runs}
-    nights = sorted(set(frames_by_night) | ekos_nights | guiding_nights)[-clamp_limit(limit) :]
-    entries = []
+    limit = clamp_limit(limit)
+    tonight = observing_night_id(time.time() if now is None else now)
+    signs = nights_context_signs(context.config)
+    cache = context.review_cache
+    index = cache.get_or_build(
+        ("nights", "index"),
+        lambda: nights_index_version(context, tonight, signs),
+        lambda: _read_night_index(context, tonight),
+        copy_result=False,
+    )
+    versions = nights_data_versions(context, index, signs)
+    finished_version, tonight_version = (None, None) if versions is None else versions
+    finished = cache.get_or_build(
+        ("nights", "finished"),
+        finished_version,
+        lambda: _build_night_list(context, index, finished=True),
+        copy_result=False,
+    )
+    in_progress = cache.get_or_build(
+        ("nights", "tonight"),
+        tonight_version,
+        lambda: _build_night_list(context, index, finished=False),
+        copy_result=False,
+    )
+    entries: list[NightListEntry] = []
+    for night_id, entry in sorted([*finished, *in_progress], key=lambda pair: pair[0])[-limit:]:
+        # A recorded session named by something that is not a date fails here,
+        # and only when that night is among the ones listed.
+        entries.append(entry if entry is not None else _entry_of(night_id, [], index, frozenset()))
+    return [copy.deepcopy(entry) for entry in entries]
+
+
+def _read_night_index(context: ControlContext, tonight: str) -> NightIndex:
+    """Read the index of the nights, or fail if the sessions cannot be read.
+
+    Returns
+    -------
+    index : `NightIndex`
+        The nights' frames and recorded sessions.
+
+    Raises
+    ------
+    StorageError
+        If the recorded sessions cannot be read.
+    """
+    index = build_night_index(context, tonight)
+    if index is None:
+        raise StorageError("Could not read the recorded Ekos sessions and guiding runs.")
+    return index
+
+
+def _build_night_list(
+    context: ControlContext, index: NightIndex, finished: bool
+) -> list[tuple[str, NightListEntry | None]]:
+    """Build the entries of the finished nights, or of the night in progress.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the science library, for the stored sky background rows.
+    index : `NightIndex`
+        The nights' frames and recorded sessions.
+    finished : `bool`
+        Build the nights before tonight if true, and tonight (and any later
+        night) if false.
+
+    Returns
+    -------
+    entries : `list` [`tuple` [`str`, `NightListEntry` or `None`]]
+        Each night's id with its entry, oldest first. The entry is `None`
+        when the night's id is not a date; asking for that night fails then.
+    """
+
+    def wanted(night: str) -> bool:
+        """Say whether a night belongs to the part being built.
+
+        Returns
+        -------
+        wanted : `bool`
+            True when the night is finished and the finished part is built,
+            or the night is in progress and that part is built.
+        """
+        return (night < index.tonight) == finished
+
+    frames = index.finished_frames if finished else index.tonight_frames
+    frames_by_night: dict[str, list[NightFrame]] = {}
+    for frame in frames:
+        frames_by_night.setdefault(frame.night, []).append(frame)
+    nights = sorted({
+        *frames_by_night,
+        *filter(wanted, index.ekos_nights),
+        *filter(wanted, index.guiding_nights),
+    })
+    with_background = night_index.subjects_with_background(
+        context, None if finished else {frame.target_id for frame in frames}
+    )
+    entries: list[tuple[str, NightListEntry | None]] = []
     for night in nights:
-        night_frames = frames_by_night.get(night, [])
-        entries.append(
-            NightListEntry(
-                night_id=night,
-                night_date=date.fromisoformat(night),
-                targets_imaged=sorted({frame.target_id for frame in night_frames}),
-                frame_count=len(night_frames),
-                has_frame_data=bool(night_frames),
-                has_guiding_data=night in guiding_nights,
-                has_sky_data=any(frame.background_adu is not None for frame in night_frames),
-                has_ekos_record=night in ekos_nights,
-            )
-        )
+        try:
+            entry = _entry_of(night, frames_by_night.get(night, []), index, with_background)
+        except ValueError:
+            entry = None
+        entries.append((night, entry))
     return entries
+
+
+def _entry_of(
+    night: str, night_frames: list[NightFrame], index: NightIndex, with_background: frozenset[str]
+) -> NightListEntry:
+    """Make one night's entry.
+
+    A night whose id is not a date fails here, with the `ValueError` that
+    `date.fromisoformat` gives.
+
+    Returns
+    -------
+    entry : `NightListEntry`
+        The night's entry.
+    """
+    return NightListEntry(
+        night_id=night,
+        night_date=date.fromisoformat(night),
+        targets_imaged=sorted({frame.target_id for frame in night_frames}),
+        frame_count=len(night_frames),
+        has_frame_data=bool(night_frames),
+        has_guiding_data=night in index.guiding_nights,
+        has_sky_data=any(frame.subject_id in with_background for frame in night_frames),
+        has_ekos_record=night in index.ekos_nights,
+    )
 
 
 def build_night_history(

@@ -135,6 +135,7 @@ from astrometricslib.models.wavelength_scale import (
 )
 from backend.public_interface import ROUTES, RPC_METHODS, UI_EVENTS
 from backend.services.infrastructure.system_status_service import (
+    FrameCopyPulse,
     IndiStatus,
     IntrospectionEndpoint,
     IntrospectionMethod,
@@ -548,6 +549,7 @@ def render_types() -> str:
         generate_interface(TransitCandidate, "TransitCandidate"),
         generate_interface(SessionPhotometrySummary, "SessionPhotometrySummary"),
         generate_interface(PhotometryResult, "PhotometryResult"),
+        generate_interface(FrameCopyPulse, "FrameCopyPulse"),
         generate_interface(TelescopePulse, "TelescopePulse"),
         generate_interface(ProcessingJobPulse, "ProcessingJobPulse"),
         generate_interface(SystemPulse, "SystemPulse"),
@@ -697,10 +699,34 @@ def render_types() -> str:
     return "\n".join(line.rstrip() for line in content.split("\n"))
 
 
+def write_atomically(path: str, text: str) -> None:
+    """Write a file so a reader never sees it half written.
+
+    The text goes to a temporary file in the same folder, which then
+    replaces the target in one step. A dev server that reloads while the
+    generator runs sees either the old file or the new one, never an empty
+    one.
+
+    Parameters
+    ----------
+    path : `str`
+        The file to write.
+    text : `str`
+        The new contents.
+    """
+    temporary_path = f"{path}.{os.getpid()}.tmp"
+    try:
+        with open(temporary_path, "w") as temporary_file:
+            temporary_file.write(text)
+        os.replace(temporary_path, path)
+    finally:
+        if os.path.exists(temporary_path):
+            os.remove(temporary_path)
+
+
 def main() -> None:
     """Run the entry point for generating backend TypeScript interfaces."""
-    with open("ui/common/types/backendTypes.ts", "w") as f:
-        f.write(render_types())
+    write_atomically("ui/common/types/backendTypes.ts", render_types())
     print("Successfully generated ui/common/types/backendTypes.ts")
 
 

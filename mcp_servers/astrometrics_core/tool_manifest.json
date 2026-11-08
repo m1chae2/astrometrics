@@ -156,12 +156,26 @@
       "interim_block": "",
       "note": "Built 2026-10-24. Reads the camera, telescope, filter, exposure, gain setting, offset and binning that stored quality measurements point at, by capture setting id. Writes nothing and creates no table."
     },
+    "quality_forget": {
+      "tool_class": "change-data",
+      "category": "image-processing",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Deletes the stored quality measurements of the given frames from the quality database. The AI is read-only, so it reads the stored numbers with quality_query instead."
+    },
     "quality_get_aperture_record": {
       "tool_class": "observe",
       "category": "image-processing",
       "disposition": "drop",
       "interim_block": "",
       "note": "Reads a file from any path and returns every aperture, which can overflow the reply. Scripts and wayfindinglib use it."
+    },
+    "quality_measure_folder": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-07. Measures a folder of FITS files with the stored frame metric set (star width, sky rate, background, saturation) and returns the numbers. Nothing is stored or moved. About 12 seconds a frame, so the limit defaults to 20. It reads any folder path it is given, as quality_measure_frames does with folder_path; it only reads."
     },
     "quality_measure_frames": {
       "tool_class": "compute",

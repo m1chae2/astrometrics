@@ -8,6 +8,10 @@
  * answer hasn't changed. This cache remembers recent query results and serves a
  * new query instantly, filtered client-side, whenever an existing cached query's
  * circle fully contains the new one — no backend call needed.
+ *
+ * A result the backend cut short (the Gaia driver stops at 20,000 stars) is
+ * missing its faintest stars, so it is never used for a different query: a
+ * fresh query for a smaller or shifted circle would return stars it lacks.
  */
 
 import { PlanetariumSource } from '../../common/types/planetariumTypes';
@@ -21,6 +25,8 @@ interface CacheEntry {
   magnitudeLimit: number | undefined;
   timestamp: number;
   sources: PlanetariumSource[];
+  /** True when the backend cut this result short, so it may lack the faintest stars in its circle. */
+  truncated: boolean;
 }
 
 /** Entries older than this are treated as expired and ignored for cache hits. */
@@ -34,7 +40,7 @@ const cache: CacheEntry[] = [];
 /**
  * Great-circle separation between two RA/Dec points, in degrees (haversine).
  */
-function angularSeparationDeg(ra1: number, dec1: number, ra2: number, dec2: number): number {
+export function angularSeparationDeg(ra1: number, dec1: number, ra2: number, dec2: number): number {
   const ra1Rad = (ra1 * Math.PI) / 180.0;
   const dec1Rad = (dec1 * Math.PI) / 180.0;
   const ra2Rad = (ra2 * Math.PI) / 180.0;
@@ -84,6 +90,7 @@ export function findCachedCatalogSources(
     const entry = cache[i];
     if (entry.driversKey !== driversKey) continue;
     if (now - entry.timestamp > CACHE_TTL_MS) continue;
+    if (entry.truncated) continue;
     if (!coversMagnitudeLimit(entry.magnitudeLimit, magnitudeLimit)) continue;
 
     const centerSeparation = angularSeparationDeg(ra, dec, entry.ra, entry.dec);
@@ -102,6 +109,9 @@ export function findCachedCatalogSources(
  * @param {number} radius - Query radius in degrees.
  * @param {string} driversKey - Stable key identifying the enabled driver set for this query.
  * @param {PlanetariumSource[]} sources - The fetched sources to cache for this query.
+ * @param {number | undefined} magnitudeLimit - Faintest magnitude the query asked for, or undefined for no limit.
+ * @param {boolean} truncated - True when the backend cut the result short. Such an entry is kept
+ *   but never answers a later query.
  * @returns {void}
  */
 export function storeCatalogSources(
@@ -111,8 +121,9 @@ export function storeCatalogSources(
   driversKey: string,
   sources: PlanetariumSource[],
   magnitudeLimit?: number,
+  truncated: boolean = false,
 ): void {
-  cache.push({ ra, dec, radius, driversKey, magnitudeLimit, timestamp: Date.now(), sources });
+  cache.push({ ra, dec, radius, driversKey, magnitudeLimit, timestamp: Date.now(), sources, truncated });
   while (cache.length > MAX_ENTRIES) {
     cache.shift();
   }

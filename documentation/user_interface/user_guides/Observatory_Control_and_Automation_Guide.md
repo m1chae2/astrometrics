@@ -73,11 +73,11 @@ The app handles basic telescope control and simple capture queues. Full automate
 **Steps.**
 
 1. Open the Observatory Manager.
-2. If the status header reads Parked, click UNPARK in the Telescope Control panel.
+2. If the status header reads Parked, click UNPARK on the Controls tab of the Telescope Control panel.
 3. Select the target in the Target List.
-4. Click Slew to Target. A message tells you if the target has no coordinates.
+4. Click Slew to Target. The button is greyed, with a reason on hover, until you pick a target in the list.
 5. Watch RA and DEC in the status header move toward the target.
-6. When the mount stops, click Tracking ON in the Telescope Control panel.
+6. When the mount stops, click Tracking ON on the Controls tab of the Telescope Control panel.
 
 **Result.** The status header reads Tracking, and RA and DEC stay steady.
 
@@ -101,7 +101,7 @@ You can also slew from the Planetarium. Right-click an object on the sky map and
 4. Wait for ✓. A run makes at most 10 rounds.
 5. To stop early, click Stop Alignment.
 
-**Result.** The last row shows ✓ and small dRA and dDEC values. The Alignment tab of Tracking Settings holds Accuracy and Settle. Alignment start takes only the target, so there is no exposure field.
+**Result.** The last row shows ✓ and small dRA and dDEC values. The Alignment tab of the Telescope Control panel holds Accuracy and Settle. Alignment start takes only the target, so there is no exposure field.
 
 ## Move the mount by hand
 
@@ -127,11 +127,11 @@ You can also slew from the Planetarium. Right-click an object on the sky map and
 
 **Steps.**
 
-1. To park, open the Observatory Manager and click PARK in the Telescope Control panel.
+1. To park, open the Observatory Manager and click PARK on the Controls tab of the Telescope Control panel.
 2. Wait until the status header reads Parked.
 3. To unpark later, click UNPARK.
 4. To halt a move at once, click STOP in the Manual Guide panel.
-5. If the main window is not in front, click the Astrometrics icon in the system tray and click Park in the panel that opens.
+5. If the main window is not in front, click the Astrometrics icon in the system tray and click Park in the menu that opens.
 
 **Result.** The mount stops or parks. If the tray Park fails, an error message tells you to park the mount by hand. Do that at once.
 
@@ -145,7 +145,7 @@ The Observatory Manager has no Filter Wheel or Focuser panel. Ekos moves both. C
 
 **Before you start.**
 
-- Guiding is running. To start it from the app, open the Guiding tab in Tracking Settings, type an Exposure (s) and a Gain, and click Start Guiding. Click Stop Guiding to end it. A toast tells you if guiding did not start. These buttons are greyed while Ekos is in control, and then you start guiding in the program that guides, such as PHD2 or KStars/Ekos.
+- Guiding is running. To start it from the app, open the Guiding tab of the Telescope Control panel, type an Exposure (s) and a Gain, and click Start Guiding. Click Stop Guiding to end it. A toast tells you if guiding did not start. These buttons are greyed while Ekos is in control, and then you start guiding in the program that guides, such as PHD2 or KStars/Ekos.
 - Samples are arriving from the guiding program.
 
 **Steps.**
@@ -219,8 +219,8 @@ The Observatory Manager has no Filter Wheel or Focuser panel. Ekos moves both. C
 
 **Steps.**
 
-1. Open Image Processing and select the target.
-2. In the Image Controls panel, click Download Frames.
+1. Open the Observatory Manager and select the target in the Target List.
+2. At the bottom left of the Target List, next to Add Target and Slew to Target, click Download Frames. When auto-download is on, new frames also download by themselves after each exposure. Guide logs also download by themselves, every few minutes while you image and once more after imaging stops.
 3. In the Ingest From Telescope dialog, check Target Name. Check that Files Found shows a number.
 4. In the File Selection list, keep the files you want ticked. Click Refresh if you expect more files.
 5. Click Start Ingestion.

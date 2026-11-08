@@ -7,7 +7,8 @@ SIMBAD, and retrieves objects within a sky region for `SkyEngine`.
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib import StellarObject, Target
-from astrometricslib.exceptions import ExternalServiceError, NotFoundError, ProcessingError
+from astrometricslib.drivers import require_online
+from astrometricslib.exceptions import ExternalServiceError, NotFoundError, OfflineModeError, ProcessingError
 from wayfindinglib._internal.errors import ONLINE_QUERY_ERRORS
 from wayfindinglib.drivers.catalog.simbad_catalog_driver import (
     format_target_coordinates,
@@ -67,6 +68,12 @@ def resolve_target_coordinates(sky: SkyEngine, target_name: str) -> Target | Ste
             return star
 
     # 3. Fallback to SIMBAD query by name
+    try:
+        require_online("SIMBAD")
+    except OfflineModeError as offline_error:
+        raise ExternalServiceError(
+            f"Cannot resolve '{target_name}' via SIMBAD: {offline_error}"
+        ) from offline_error
     try:
         from astroquery.simbad import Simbad
     except ImportError as e:
@@ -230,7 +237,7 @@ def get_online_catalog_sources(
     radius_deg: float,
     enabled_driver_names: list[str],
     magnitude_limit: float | None = None,
-) -> list[tuple[str, StellarObject]]:
+) -> tuple[list[tuple[str, StellarObject]], bool, list[str]]:
     """Query registered online catalog drivers for objects in a sky region.
 
     Unlike get_sources(), this method performs only online catalog queries and
@@ -256,8 +263,12 @@ def get_online_catalog_sources(
 
     Returns
     -------
-    List[Tuple[str, StellarObject]]
+    tagged : `list` [`tuple` [`str`, `StellarObject`]]
         Tagged (driver_name, StellarObject) pairs. Never recorded.
+    truncated : `bool`
+        True when a driver left stars out of its answer.
+    failed_catalogs : `list` [`str`]
+        Names of the drivers whose query failed.
 
     REQ: PLN-3.1, PLN-3.2
     """
@@ -290,6 +301,7 @@ def _query_visual_magnitude(object_name: str) -> float | None:
         The V magnitude, or `None` if SIMBAD has none or the query fails.
     """
     try:
+        require_online("SIMBAD")
         from astroquery.simbad import Simbad
 
         magnitude_client = Simbad()

@@ -265,6 +265,36 @@ class _SimulatedCameraController:
         """
         return True
 
+    def abort(self, device: object) -> bool:
+        """Report success: the simulator has no exposure to cancel.
+
+        Returns
+        -------
+        success : `bool`
+            Always `True`.
+        """
+        return True
+
+    def set_image_reception(self, device: object, enabled: bool) -> bool:
+        """Report success: the simulator sends no images to turn on or off.
+
+        Returns
+        -------
+        success : `bool`
+            Always `True`.
+        """
+        return True
+
+    def wait_for_new_image(self, device: object, timeout_seconds: float) -> None:
+        """Return None at once: the simulator has no real camera image data.
+
+        Returns
+        -------
+        image : `None`
+            Always `None`.
+        """
+        return None
+
     def get_last_image(self, device: object) -> None:
         """Return None: the simulator has no real camera image data.
 
@@ -324,6 +354,7 @@ class _SimulatedConnectionManager:
         """Initialize minimal connection-health state IndiInterface reads."""
         self.hostname = None
         self.last_connection_attempt = None
+        self.connect_address = None
 
     def is_server_responsive(self) -> bool:
         """Report responsive: the simulator has no real socket to check.
@@ -334,6 +365,19 @@ class _SimulatedConnectionManager:
             Always `True`.
         """
         return True
+
+    def probe_failures_exhausted(self) -> bool:
+        """Report no lost server: the simulator has no handshake to fail.
+
+        Returns
+        -------
+        lost : `bool`
+            Always `False`.
+        """
+        return False
+
+    def reset_probe_failures(self) -> None:
+        """Ignore the call: the simulator counts no failures."""
 
     def can_attempt_reconnect(self) -> bool:
         """Allow every attempt: the simulator has no connection to wait for.
@@ -410,10 +454,7 @@ class SimulatorIndiInterface(IndiInterface):
             "FILTER": "Unknown",
         }
 
-        import threading
-
-        self._external_pulses_lock = threading.Lock()
-        self._external_pulses = []
+        self._init_runtime_state()
 
         logging.getLogger(__name__).info("SimulatorIndiInterface initialized.")
 

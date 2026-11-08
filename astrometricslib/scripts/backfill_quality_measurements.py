@@ -39,7 +39,7 @@ What the script does
   summary's pipeline version is known and at least the version that
   introduced the estimator, and keeps its registered definition version.
   Every other metric is written with the definition version 0, which means
-  "unknown (backfilled)" (plan safeguard 3), because nobody has checked that
+  "unknown (backfilled)", because nobody has checked that
   an older summary used today's estimator. The metric registry accepts 0 only
   for backfilled rows.
 * A summary is skipped (and counted) when the quality table already holds a

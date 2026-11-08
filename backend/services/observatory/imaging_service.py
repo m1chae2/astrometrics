@@ -4,7 +4,8 @@ Description: The capture itself (filter change, exposures, dithering)
 is `control.imaging.capture_image` in the wayfinding library. This
 service only runs it on a background thread inside a ``capture`` job,
 so the app gets a job id right away and can watch the progress. The
-library moves the job's progress bar once per frame.
+library moves the job's progress bar once per frame. `stop_capture`
+asks the library to end the run it started.
 """
 
 import logging
@@ -110,6 +111,20 @@ class ImagingService:
         if "error" in state and not thread.is_alive():
             raise state["error"]
         return state.get("job_id") or ""
+
+    def stop_capture(self) -> bool:
+        """Stop the capture run the app started, keeping the frames taken.
+
+        The run's job ends as completed, with a "stopped after N frames"
+        line in its log. A run started by another program is not touched.
+
+        Returns
+        -------
+        stopped : `bool`
+            `True` if a run was stopped, `False` if none was going. Not an
+            error: stopping nothing does nothing.
+        """
+        return self._observatory.imaging.stop_capture()
 
     def get_active_capture_jobs(self) -> list[Any]:
         """Return the capture jobs that are still running.

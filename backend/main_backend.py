@@ -41,6 +41,8 @@ from astrometricslib.jobs import DbLogHandler, close_interrupted_jobs, new_reque
 from backend import startup
 from backend.container import container
 from backend.routers import figures, rpc_router, startup_routes, static_files, websockets
+from backend.services.infrastructure.heavy_lane import run_heavy
+from backend.services.infrastructure.host_check import HostCheckMiddleware
 from backend.services.infrastructure.session_auth import ALLOWED_ORIGINS, LAN_ORIGIN_REGEX
 from backend.services.infrastructure.socket_manager import SocketLoggingHandler
 
@@ -144,13 +146,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # folder is served as soon as the drive is mounted.
         logger.warning("%s", not_mounted)
     app.state.telemetry_task = asyncio.create_task(startup.periodic_telemetry_loop())
-    app.state.sky_warmup_task = asyncio.create_task(asyncio.to_thread(startup.warm_start_up_caches))
+    app.state.sky_warmup_task = asyncio.create_task(_warm_up_in_order())
     try:
         yield
     finally:
         app.state.telemetry_task.cancel()
+        # A warm-up step that has not started yet must not start while the
+        # services are stopping. One that is running ends on its own.
+        app.state.sky_warmup_task.cancel()
+        await asyncio.gather(app.state.sky_warmup_task, return_exceptions=True)
         detach_log_handlers()
         container.shutdown_resources()
+
+
+async def _warm_up_in_order() -> None:
+    """Warm the start-up caches, then the depth goals, then the night reviews.
+
+    Each step waits for the one before, so none delays the splash screen or
+    competes with it for the disk. The depth goals (one target at a time, about
+    2 s) come before the slower night reviews (about 6.6 s), so they are ready
+    about 4 to 5 s after the app is ready. Each step runs in the heavy lane,
+    the same limited set of places the heavy RPC calls use, so the warm-up
+    never adds to the user's first heavy calls.
+    """
+    await run_heavy(startup.warm_start_up_caches)
+    await run_heavy(startup.warm_depth_goals)
+    await run_heavy(startup.warm_night_reviews)
 
 
 # The app serves only the routes in `backend.public_interface`, so FastAPI's
@@ -172,6 +193,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Added last, so it runs first: a request that names a host this backend does
+# not serve (DNS rebinding) is refused before anything else sees it.
+app.add_middleware(HostCheckMiddleware)
 
 
 #: HTTP status for each error code on the plain HTTP routes. The RPC route

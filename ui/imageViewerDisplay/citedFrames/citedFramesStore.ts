@@ -1,14 +1,17 @@
 /**
  * @file citedFramesStore.ts
  * @description Holds the latest `showFrames` request for the Image Viewer.
- * The listener is registered when this file is first imported, so a request
- * that arrives before the Image Viewer has been shown (the main window mounts
- * a display on its first visit) is kept and handed over when it mounts.
+ * A request arrives through the shared hand-off store
+ * (`common/utils/displayHandoffStore.ts`). This file watches those posts from
+ * the moment it is imported (App.tsx imports it at start-up) and keeps the
+ * request as long as the banner shows it, so the Image Viewer can be hidden or
+ * paused when the request is sent and still shows it afterwards.
  * The store also remembers which mode the window showed before, for the
  * "Back to <mode>" button.
  */
 
 import type { ShowFramesPayload } from '../../common/utils/displayCoordinator';
+import { consumeHandoff, observeHandoffs, peekHandoffs, type Handoff } from '../../common/utils/displayHandoffStore';
 
 /** The mode name of the Image Viewer. */
 export const IMAGE_VIEWER_MODE = 'Image Viewer';
@@ -53,12 +56,14 @@ function handleModeChange(event: Event): void {
 }
 
 /**
- * Stores a `showFrames` request and tells subscribers.
+ * Stores a `showFrames` request and tells subscribers. The hand-off is taken
+ * out of the shared store because this file now holds it.
  *
- * @param event The `astrometrics:showFrames` event; its detail is the payload.
+ * @param handoff The `showFrames` hand-off; its payload is the request.
  */
-function handleShowFrames(event: Event): void {
-  const payload = (event as CustomEvent<ShowFramesPayload>).detail;
+function handleShowFrames(handoff: Handoff): void {
+  consumeHandoff(handoff);
+  const payload = handoff.payload as ShowFramesPayload | null;
   if (!payload || !Array.isArray(payload.rowIds)) {
     return;
   }
@@ -74,7 +79,9 @@ function handleShowFrames(event: Event): void {
 
 if (typeof window !== 'undefined') {
   window.addEventListener('astrometrics:modeChange', handleModeChange);
-  window.addEventListener('astrometrics:showFrames', handleShowFrames);
+  observeHandoffs('showFrames', handleShowFrames);
+  // Requests posted before this file was imported are still waiting.
+  peekHandoffs(IMAGE_VIEWER_MODE, 'showFrames').forEach(handleShowFrames);
 }
 
 /**

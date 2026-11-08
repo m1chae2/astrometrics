@@ -17,14 +17,16 @@ import { SectionPanel } from '../common/components/SectionPanel';
 import { ConfirmDialog } from '../common/components/ConfirmDialog';
 import { TabPanel, Tabs, type TabDefinition } from '../common/components/Tabs';
 import { EmptyState } from '../common/components/EmptyState';
+import { InfoButton } from '../common/components/InfoButton';
 import { useCommandAvailability } from '../common/hooks/useCommandAvailability';
 import { captureTestFrame } from '../common/services/imaging/captureService';
 import { emitToast } from '../common/utils/emitToast';
-import { DitherConfig, ExposureRequest, FilterType, ObservationPackage } from '../common/types/backendTypes';
+import { DitherConfig, ExposureRequest, FilterType, ObservationPackage, ObservatoryCapability } from '../common/types/backendTypes';
 import { ditherValuesOf, frameTypeFromLabel, labelFromFrameType } from './packageModel';
 import { useAvailableFilters } from './hooks/useAvailableFilters';
 import '../common/styles/panels.css';
 import './packageLibrary.css';
+import { Button } from '../common/components/Button';
 
 /** The two views of the Image Planner panel. */
 const PLANNER_TABS: TabDefinition[] = [
@@ -71,6 +73,8 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
 }) => {
     /** Test image is a device command: greyed while Ekos controls the equipment. */
     const availability = useCommandAvailability();
+    const cameraCommandable = availability.canCommandCapability(ObservatoryCapability.CAPTURE_ORCHESTRATION);
+    const cameraReason = availability.reasonForCapability(ObservatoryCapability.CAPTURE_ORCHESTRATION);
     /** The Image Planner tab shown: Exposures or Dither. */
     const [plannerTab, setPlannerTab] = useState('exposures');
     /** Index of the exposure row being edited in the Image Planner, if any. */
@@ -126,7 +130,7 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
 
     /** Captures one test frame with the planner's current settings. */
     const handleTestImage = async (type: string, _count: number, exposure: number, filter: string) => {
-        if (!availability.canCommand) return;
+        if (!availability.canCommandCapability(ObservatoryCapability.CAPTURE_ORCHESTRATION)) return;
         if (!editedPackage) {
             emitToast('Choose a package before capturing a test frame', 'error');
             return;
@@ -171,20 +175,24 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
             {errorMessage && (
                 <div className="package-library__error" role="alert">
                     <span>{errorMessage}</span>
-                    <button type="button" className="btn btn--tiny" onClick={onDismissError}>Dismiss</button>
+                    <Button size="small" onClick={onDismissError}>Dismiss</Button>
                 </div>
             )}
             {removedNotice && (
                 <div className="package-library__error" role="alert">
                     <span>{removedNotice.text}</span>
-                    <button type="button" className="btn btn--tiny btn--primary" onClick={removedNotice.onSave}>
+                    <Button variant="primary" size="small" onClick={removedNotice.onSave}>
                         Save as planned package
-                    </button>
+                    </Button>
                 </div>
             )}
             <div className="target-planner__top-row">
                 <div className="target-planner__left-column">
-                    <SectionPanel title="Image Planner" className="target-planner__planner">
+                    <SectionPanel
+                        title="Image Planner"
+                        className="target-planner__planner"
+                        headerContent={!cameraCommandable ? <InfoButton label="Why unavailable?" text={cameraReason} /> : undefined}
+                    >
                         {editedPackage ? (
                             <>
                                 <Tabs
@@ -200,7 +208,7 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
                                         editingItem={editingItem}
                                         onCancel={() => setEditingIndex(null)}
                                         onTestImage={handleTestImage}
-                                        testImageUnavailableReason={availability.canCommand ? null : availability.reason}
+                                        testImageUnavailableReason={cameraCommandable ? null : cameraReason}
                                         filterOptions={availableFilters}
                                         values={{ type: imgType, count: imgCount, exposure: imgExposure, filter: imgFilter, delay: imgDelay }}
                                         onChange={(values) => {
@@ -233,37 +241,40 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
                             <span className="target-planner__header-actions">
                                 {isEditingQueueEntry ? (
                                     <>
-                                        <button type="button" className="btn btn--tiny" onClick={onCancelEdit}>
+                                        <Button size="small" fit onClick={onCancelEdit}>
                                             Cancel
-                                        </button>
-                                        <button
-                                            type="button"
-                                            className="btn btn--tiny btn--primary"
+                                        </Button>
+                                        <Button
+                                            variant="primary"
+                                            size="small"
+                                            fit
                                             disabled={!canAdd}
                                             onClick={() => editedPackage && onAddToSequence(editedPackage)}
                                         >
                                             Modify
-                                        </button>
+                                        </Button>
                                     </>
                                 ) : (
-                                    <button
-                                        type="button"
-                                        className="btn btn--tiny btn--primary"
+                                    <Button
+                                        variant="primary"
+                                        size="small"
+                                            fit
                                         disabled={!canAdd}
                                         onClick={() => editedPackage && onAddToSequence(editedPackage)}
                                     >
                                         Add to Sequence
-                                    </button>
+                                    </Button>
                                 )}
                                 {onDeletePackage && !isEditingQueueEntry && (
-                                    <button
-                                        type="button"
+                                    <Button
+                                        variant="danger"
+                                        size="small"
+                                            fit
                                         ref={deleteButtonRef}
-                                        className="btn btn--tiny btn--danger"
                                         onClick={() => setIsConfirmingDelete(true)}
                                     >
                                         Delete package
-                                    </button>
+                                    </Button>
                                 )}
                             </span>
                         ) : undefined}

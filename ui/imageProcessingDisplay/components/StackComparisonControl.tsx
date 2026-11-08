@@ -7,7 +7,7 @@
  * measured says so and gives the reason. A target with no previous stack says that instead.
  */
 import React from 'react';
-import { LoadingSpinner } from '../../common/components/LoadingSpinner';
+import { UpdatingBar } from '../../common/components/Skeleton';
 import {
     stackComparisonReportOf,
     startStackComparison,
@@ -15,7 +15,9 @@ import {
     type StackKind,
 } from '../../common/services/imaging/stackReviewService';
 import { useReviewJob } from '../hooks/useReviewJob';
+import { Button } from '../../common/components/Button';
 
+import { Skeleton } from '../../common/components/Skeleton';
 interface StackComparisonControlProps {
     /** The target whose stack to compare. */
     targetId: string;
@@ -61,19 +63,20 @@ export const StackComparisonControl: React.FC<StackComparisonControlProps> = ({ 
                 number the target report uses, measured in the same empty patches of sky. The
                 result does not say which stack is better. That depends on what changed.
             </p>
-            <button
-                type="button"
-                className="btn btn--secondary btn--tiny"
+            <Button
+                variant="secondary"
+                size="small"
                 onClick={() => void run(() => startStackComparison(targetId, kind))}
                 disabled={busy}
             >
                 Compare
-            </button>
+            </Button>
             <div className="stack-comparison__status" role="status" aria-live="polite">
                 {busy && (
                     <span>
-                        <LoadingSpinner size={12} /> Measuring both stacks. If a stack must be plate solved,
+                        Measuring both stacks. If a stack must be plate solved,
                         this can take about ten minutes.
+                        <UpdatingBar label="Measuring both stacks" inline />
                     </span>
                 )}
                 {report && !report.comparison && (

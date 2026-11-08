@@ -23,6 +23,7 @@
     "electron-forge:make": "npm run build && npm run build:backend && electron-forge make",
     "package:devflow": "cd .vscode/devflow && npx -y vsce package -o astrometrics-devflow.vsix && echo 'packaged at .vscode/devflow/astrometrics-devflow.vsix'",
     "install-playwright": "npx playwright install chromium",
+    "tpm": "bash build/tpm/run_tpm.sh",
     "docs:screenshots": "playwright test build/documentation/generate_screenshots.spec.ts",
     "prepare": "command -v pre-commit >/dev/null 2>&1 && pre-commit install || true"
   },
@@ -81,6 +82,8 @@
     "eslint-plugin-react-refresh": "^0.5.7",
     "globals": "^17.13.0",
     "jsdom": "^30.1.3",
+    "lighthouse": "13.5.0",
+    "puppeteer-core": "25.13.0",
     "stylelint": "^17.16.0",
     "stylelint-declaration-strict-value": "^1.12.1",
     "ts-node": "^10.9.2",

@@ -11,6 +11,34 @@ Two details of the format matter for correctness:
 * Distances in the frame rows are in **pixels** of the guide camera, not
   arcseconds. The pixel scale comes from the "Pixel scale = ..." line of
   each guiding section, and every distance is multiplied by it.
+* The mount speeds differ between the two writers. The Ekos guider writes
+  the ``xRate`` and ``yRate`` of a guiding section in arcseconds per second.
+  PHD2 writes them in **pixels per second**, so for a log PHD2 wrote itself
+  they are multiplied by the section's pixel scale.
+* The section RA rate is the speed the mount moved the star across the
+  sensor along the RA axis, so it is the **on-sky** rate at the declination
+  of the calibration. It already includes the factor cos(declination). The
+  guide speed in the calibration block is quoted as a fraction of the
+  sidereal rate and has no such factor. So for the same log,
+  ``section RA rate`` is about ``calibration RA guide speed`` times
+  ``cos(Cal Dec)``, and the two Dec numbers match without a factor. The
+  tests check this on the PHD2 contract fixture, within 10 percent.
+* The calibration's RA and Dec guide speeds (arcseconds per second, the
+  speed the mount moves for a guide pulse) are on a "Calibration guide
+  speeds: RA = ... a-s/s, Dec = ... a-s/s" line in Ekos logs and on a
+  "RA Guide Speed = ... a-s/s, Dec Guide Speed = ... a-s/s" line in PHD2
+  logs. These are the guide speed **the mount reports**, not a speed
+  measured from the calibration steps. PHD2 also writes "West calibration
+  complete. Angle = ... deg"; that angle is the guide camera angle in
+  **PHD2's image-axis convention** (the angle of the mount's west axis in
+  the guide image, measured by PHD2 from its own x axis and y axis). It is
+  stored as read. Do not compare it with a sky position angle or with the
+  Ekos angle until the two conventions are checked against each other.
+* PHD2's header also states the guide controller: the exposure, the guide
+  algorithm of each axis (``X`` is right ascension, ``Y`` is declination)
+  with its aggressiveness, hysteresis and minimum move, and the longest
+  pulses. They are read into each section's ``controller``. The Ekos
+  guider writes none of these lines, so its sections leave them `None`.
 * Correction directions are single letters (``W``, ``E``, ``N``, ``S``).
   Pulses are returned signed: east and north positive, west and south
   negative.
@@ -23,7 +51,12 @@ import re
 from datetime import datetime
 from typing import Any
 
-from wayfindinglib.models.session.guide_log import GuideCalibration, GuidingSection, ParsedGuideLog
+from wayfindinglib.models.session.guide_log import (
+    GuideAxisSettings,
+    GuideCalibration,
+    GuidingSection,
+    ParsedGuideLog,
+)
 from wayfindinglib.models.session.telemetry import GuidingSampleSource
 
 logger = logging.getLogger(__name__)
@@ -35,6 +68,10 @@ _CALIBRATION_BEGINS = re.compile(r"^Calibration Begins at\s+(\d{4}-\d{2}-\d{2} \
 _CALIBRATION_SPEEDS = re.compile(
     r"^Calibration guide speeds:\s*RA = (-?[\d.]+) a-s/s, Dec = (-?[\d.]+) a-s/s"
 )
+_CALIBRATION_SPEEDS_PHD2 = re.compile(
+    r"^RA Guide Speed = (-?[\d.]+) a-s/s, Dec Guide Speed = (-?[\d.]+) a-s/s"
+)
+_CALIBRATION_ANGLE = re.compile(r"^West calibration complete\. Angle = (-?[\d.]+) deg")
 _PIXEL_SCALE_LINE = re.compile(
     r"^Pixel scale = (?P<scale>[\d.]+) arc-sec/px, Binning = (?P<binning>\d+), "
     r"Focal length = (?P<focal>[\d.]+) mm"
@@ -51,6 +88,13 @@ _POINTING_FIELDS = {
     "azimuth_degrees": re.compile(r"\bAz = (-?[\d.]+) deg"),
 }
 _PIER_SIDE = re.compile(r"Pier side = (East|West)")
+_EXPOSURE_LINE = re.compile(r"(?:^|, )Exposure = (?P<milliseconds>[\d.]+) ms")
+_ALGORITHM_LINE = re.compile(r"^(?P<axis>X|Y|RA|Dec) guide algorithm = (?P<name>[^,]+)(?P<rest>.*)$")
+_ALGORITHM_PARAMETER = re.compile(r"(?P<name>Aggress\w*|Hysteresis|Minimum move) = (?P<value>-?[\d.]+)")
+_MAXIMUM_DURATIONS_LINE = re.compile(
+    r"Max RA duration = (?P<ra>[\d.]+), Max DEC duration = (?P<dec>[\d.]+)", re.IGNORECASE
+)
+_PERCENT_THRESHOLD = 1.0
 _EAST_OR_NORTH = {"E", "EAST", "N", "NORTH"}
 
 
@@ -78,6 +122,62 @@ def _read_pointing(line: str, section: GuidingSection) -> None:
     pier_match = _PIER_SIDE.search(line)
     if pier_match:
         section.pier_side = pier_match.group(1)
+
+
+def _as_fraction(value: float) -> float:
+    """Read a PHD2 setting that older versions wrote as a percent.
+
+    Returns
+    -------
+    fraction : `float`
+        `value` if it is at most 1, otherwise `value` divided by 100.
+    """
+    return value / 100.0 if value > _PERCENT_THRESHOLD else value
+
+
+def _read_controller_line(line: str, section: GuidingSection) -> bool:
+    """Fill a section's controller settings from one header line.
+
+    Parameters
+    ----------
+    line : `str`
+        One stripped line of the section header.
+    section : `GuidingSection`
+        The section being read; its ``controller`` is updated.
+
+    Returns
+    -------
+    used : `bool`
+        `True` if the line was an exposure, algorithm or pulse-limit line.
+    """
+    controller = section.controller
+    algorithm = _ALGORITHM_LINE.match(line)
+    if algorithm:
+        settings = GuideAxisSettings(algorithm=algorithm.group("name").strip())
+        for parameter in _ALGORITHM_PARAMETER.finditer(algorithm.group("rest")):
+            value = float(parameter.group("value"))
+            name = parameter.group("name")
+            if name.startswith("Aggress"):
+                settings.aggressiveness = _as_fraction(value)
+            elif name == "Hysteresis":
+                settings.hysteresis = _as_fraction(value)
+            else:
+                settings.minimum_move_px = value
+        if algorithm.group("axis") in ("X", "RA"):
+            controller.ra_axis = settings
+        else:
+            controller.dec_axis = settings
+        return True
+    limits = _MAXIMUM_DURATIONS_LINE.search(line)
+    if limits:
+        controller.maximum_ra_duration_ms = float(limits.group("ra"))
+        controller.maximum_dec_duration_ms = float(limits.group("dec"))
+        return True
+    exposure = _EXPOSURE_LINE.search(line)
+    if exposure:
+        controller.exposure_seconds = float(exposure.group("milliseconds")) / 1000.0
+        return True
+    return False
 
 
 def _signed_pulse_ms(duration_text: str, direction_text: str) -> float:
@@ -204,13 +304,20 @@ def parse_guide_log_file(
             continue
 
         if calibration is not None:
-            speeds = _CALIBRATION_SPEEDS.match(line)
+            speeds = _CALIBRATION_SPEEDS.match(line) or _CALIBRATION_SPEEDS_PHD2.match(line)
             if speeds:
                 calibration.ra_rate_arcsec_per_second = float(speeds.group(1))
                 calibration.dec_rate_arcsec_per_second = float(speeds.group(2))
+                continue
+            angle = _CALIBRATION_ANGLE.match(line)
+            if angle:
+                calibration.camera_angle_deg = float(angle.group(1))
             continue
 
         if section is None:
+            continue
+
+        if _read_controller_line(line, section):
             continue
 
         scale_line = _PIXEL_SCALE_LINE.match(line)
@@ -226,8 +333,12 @@ def parse_guide_log_file(
 
         rates = _MOUNT_RATES_LINE.search(line)
         if rates and line.startswith("Mount"):
-            section.ra_rate_arcsec_per_second = float(rates.group("x_rate"))
-            section.dec_rate_arcsec_per_second = float(rates.group("y_rate"))
+            # Ekos writes arcsec/s; PHD2 writes px/s, so scale it. Without a
+            # pixel scale the unit cannot be fixed, so leave the rates empty.
+            unit_scale = 1.0 if parsed_log.written_by_ekos else section.pixel_scale_arcsec_per_px
+            if unit_scale is not None:
+                section.ra_rate_arcsec_per_second = float(rates.group("x_rate")) * unit_scale
+                section.dec_rate_arcsec_per_second = float(rates.group("y_rate")) * unit_scale
             continue
 
         if line.startswith("Frame,"):

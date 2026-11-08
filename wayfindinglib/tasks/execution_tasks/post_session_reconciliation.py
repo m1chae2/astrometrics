@@ -1,17 +1,15 @@
 """Purpose: Post-Session Reconciliation.
 
 Description: Runs once a session reaches `COMPLETED` or `ABORTED`, per
-`Wayfinding_Library_Architecture.md` Section 5.7: folds captured
-calibration frames into `CalibrationStats`, and attaches
-`target_session_ids`. Both are idempotent on session identity --
-neither incrementally accumulates onto prior state; each recomputes
-its result from source data (recorded sessions, a target's frame
-records) every time, so re-running produces the same output rather
-than double-counting.
+`Wayfinding_Library_Architecture.md` Section 5.7: attaches
+`target_session_ids`. It is idempotent on session identity -- it does
+not accumulate onto prior state; it recomputes its result from source
+data (a target's frame records) every time, so re-running produces the
+same output rather than double-counting.
 
-`CalibrationEntry`/`CalibrationStats` had no writer anywhere in the
-codebase before this module (`models/calibration.py`); this closes
-that gap. `target_session_ids` are attached by re-deriving each
+Calibration advice reads the calibration index, so this module no longer
+writes a per-camera `CalibrationStats` record. `target_session_ids` are
+attached by re-deriving each
 imaged target's `TargetSession`s from its actual captured frames
 (`astrometricslib.pipelines.shared.target_sessions
 .derive_target_sessions`) for the session's night -- Execution
@@ -25,8 +23,6 @@ from typing import Any
 
 from astrometricslib.exceptions import ConflictError
 from wayfindinglib.drivers.butler import DiskButler
-from wayfindinglib.models.equipment_and_site.calibration import CalibrationEntry, CalibrationStats
-from wayfindinglib.models.planning.observation_package import FrameType
 from wayfindinglib.models.session.observation_session import (
     ObservationSession,
     QueueEntryStatus,
@@ -34,58 +30,6 @@ from wayfindinglib.models.session.observation_session import (
 )
 
 _TERMINAL_SESSION_STATUSES = (SessionStatus.COMPLETED, SessionStatus.ABORTED)
-
-
-def compute_calibration_stats(camera_id: str, sessions: list[ObservationSession]) -> CalibrationStats:
-    """Recompute a camera's full calibration inventory from terminal sessions.
-
-    Counts calibration-type (`DARK`/`BIAS`/`FLAT`) exposure requests on
-    every `COMPLETED` queue entry across every terminal session for
-    `camera_id`. Recomputed from scratch each call, so re-running
-    after a new session completes -- or re-running on the same input
-    -- always yields the count that input actually supports.
-
-    Parameters
-    ----------
-    camera_id : `str`
-        The camera to compute inventory for.
-    sessions : `list` [`ObservationSession`]
-        Every recorded session to consider (e.g. from
-        `butler.get_all("observation_session")`); sessions for other
-        cameras, and non-terminal sessions, are ignored.
-
-    Returns
-    -------
-    stats : `CalibrationStats`
-        The full recomputed inventory for `camera_id`.
-    """
-    counts: dict[tuple[FrameType, float | None, Any], int] = {}
-
-    for session in sessions:
-        if session.camera_id != camera_id or session.status not in _TERMINAL_SESSION_STATUSES:
-            continue
-        for entry in session.queue:
-            if entry.status != QueueEntryStatus.COMPLETED:
-                continue
-            for request in entry.exposure_requests:
-                if request.frame_type == FrameType.LIGHT:
-                    continue
-                key = (request.frame_type, request.exposure_sec, request.filter)
-                counts[key] = counts.get(key, 0) + request.count
-
-    darks, biases, flats = [], [], []
-    bucket_by_frame_type = {FrameType.DARK: darks, FrameType.BIAS: biases, FrameType.FLAT: flats}
-    for (frame_type, exposure_sec, filter_value), count in counts.items():
-        entry = CalibrationEntry(
-            camera_id=camera_id,
-            frame_type=frame_type,
-            exposure_sec=exposure_sec,
-            filter=filter_value,
-            count=count,
-        )
-        bucket_by_frame_type[frame_type].append(entry)
-
-    return CalibrationStats(camera_id=camera_id, darks=darks, biases=biases, flats=flats)
 
 
 def attach_target_session_ids(session: ObservationSession, astrometrics: Any) -> ObservationSession:
@@ -123,13 +67,12 @@ def attach_target_session_ids(session: ObservationSession, astrometrics: Any) ->
 def reconcile_session(
     butler: DiskButler, session: ObservationSession, astrometrics: Any
 ) -> ObservationSession:
-    """Run both reconciliations for a terminal session and record the results.
+    """Reconcile a terminal session and record the result.
 
     Parameters
     ----------
     butler : `DiskButler`
-        Storage layer: reads every session to recompute
-        `CalibrationStats`, and writes both results.
+        Storage layer: writes the reconciled session.
     session : `ObservationSession`
         The just-terminated session to reconcile.
     astrometrics : `Any`
@@ -151,10 +94,6 @@ def reconcile_session(
         raise ConflictError(
             f"Session {session.id} is not terminal (status={session.status}); cannot reconcile"
         )
-
-    all_sessions = butler.get_all("observation_session")
-    stats = compute_calibration_stats(session.camera_id, all_sessions)
-    butler.put(stats, "calibration_stats", {"camera_id": stats.camera_id})
 
     attach_target_session_ids(session, astrometrics)
     butler.put_session_from_execution(session)

@@ -5,7 +5,9 @@ import { EquipmentForm } from './components/EquipmentForm';
 import { ProcessingForm } from './components/ProcessingForm';
 import { AdvancedForm } from './components/AdvancedForm';
 import { useSettingsLogic } from './hooks/useSettingsLogic';
+import { Button } from '../../common/components/Button';
 
+import { Skeleton } from '../../common/components/Skeleton';
 type LogicResult = ReturnType<typeof useSettingsLogic>;
 
 const SETTINGS_TABS = ['General', 'Observatory', 'Equipment', 'Processing', 'Advanced'] as const;
@@ -22,6 +24,7 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({
     controllerModeEnabled, isChangingControlMode, handleSetControlMode,
     configData, loadingConfig,
     handleConfigChange,
+    hasUnsavedChanges,
     handleSaveBackend,
     handleRevertBackend,
     isReindexing, reindexingStatus, reindexingProgress, handleReindex,
@@ -60,31 +63,31 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({
             >
                 <div className="settings__header">
                     <h2 className="settings__title">System Configuration</h2>
-                    <button
+                    <Button
                         ref={closeBtnRef}
-                        className="settings__close-button"
+                        variant="ghost"
+                        size="square"
                         onClick={onClose}
                         aria-label="Close settings"
                         title="Close settings"
-                        type="button"
                     >
                         <svg viewBox="0 0 24 24" width="20" height="20">
                             <path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
                         </svg>
-                    </button>
+                    </Button>
                 </div>
 
                 <div className="settings__body">
                     <div className="settings__sidebar">
                         {SETTINGS_TABS.map((tab) => (
-                            <button
+                            <Button
                                 key={tab}
+                                variant="ghost"
                                 className={`settings__tab-button ${activeConfigTab === tab ? 'settings__tab-button--active' : ''}`}
                                 onClick={() => setActiveConfigTab(tab)}
-                                type="button"
                             >
                                 {tab}
-                            </button>
+                            </Button>
                         ))}
                     </div>
 
@@ -93,7 +96,7 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({
                         className="settings__content"
                     >
                     {loadingConfig ? (
-                        <div className="settings__loading">Loading configuration...</div>
+                        <Skeleton variant="keyValue" count={8} label="Loading the configuration" />
                     ) : (
                         <>
                             {activeConfigTab === 'General' && (
@@ -117,6 +120,7 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({
                                     controllerModeEnabled={controllerModeEnabled}
                                     isChangingControlMode={isChangingControlMode}
                                     onSetControlMode={handleSetControlMode}
+                                    hasUnsavedChanges={hasUnsavedChanges}
                                 />
                             )}
                             {activeConfigTab === 'Equipment' && (
@@ -144,20 +148,19 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({
                     )}
 
                         <div className="settings__footer">
-                            <button
-                                className="btn"
+                            <Button
+                                fit
                                 onClick={handleRevertBackend}
-                                type="button"
                             >
                                 Revert
-                            </button>
-                            <button
-                                className="btn btn--primary"
+                            </Button>
+                            <Button
+                                variant="primary"
+                                fit
                                 onClick={handleSaveBackend}
-                                type="button"
                             >
                                 Save
-                            </button>
+                            </Button>
                         </div>
                     </div>
                 </div>

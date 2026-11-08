@@ -179,3 +179,37 @@ export const formatLastImaged = (timestampSeconds: number | null): string | unde
     const isoDate = new Date(timestampSeconds * 1000).toISOString().slice(0, 10);
     return `Imaged ${isoDate}`;
 };
+
+/**
+ * Picks the target every display should show when the user has not chosen one.
+ *
+ * Only targets with a processed or stacked image qualify, so a display never
+ * opens on a target that has nothing to draw. Among those, the one imaged most
+ * recently wins; targets with no known imaging time come last, in list order.
+ * When no target has an image, the first target is returned so the lists still
+ * have a selection.
+ *
+ * @param {TargetListEntry[]} targets - Every target the library lists.
+ * @param {TargetCameraIndex | undefined} cameraIndex - The backend's camera summary.
+ * @return {string | null} The chosen target id, or null when there are no targets.
+ */
+export const pickDefaultTargetId = (
+    targets: ReadonlyArray<TargetListEntry | string>,
+    cameraIndex: TargetCameraIndex | undefined
+): string | null => {
+    const entries = targets.filter((target): target is TargetListEntry => typeof target !== 'string');
+    let best: TargetListEntry | null = null;
+    let bestTime = -Infinity;
+    for (const target of entries) {
+        if (!hasProcessedImage(target)) continue;
+        const imagedAt = lastImagedTime(target, CAMERA_ALL, cameraIndex) ?? -Infinity;
+        if (best === null || imagedAt > bestTime) {
+            best = target;
+            bestTime = imagedAt;
+        }
+    }
+    if (best) return targetListId(best) || null;
+    const first = targets[0];
+    if (first === undefined) return null;
+    return (typeof first === 'string' ? first : targetListId(first)) || null;
+};

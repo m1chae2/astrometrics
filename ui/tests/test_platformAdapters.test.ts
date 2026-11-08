@@ -71,59 +71,6 @@ describe('Electron Platform Adapters', () => {
       expect(adapted.actions).toEqual([{ type: 'button', text: 'Acknowledge' }]);
     });
 
-    /** Verifies blur dismissal behavior on Windows */
-    it('enables blur dismissal for Windows 11', () => {
-      expect(platform.shouldDismissTrayOnBlur()).toBe(true);
-    });
-
-    /** Verifies tray popover position calculation for bottom taskbar */
-    it('anchors popover directly above bottom taskbar tray icon clamped within workArea', () => {
-      const mockTray = {
-        getBounds: () => ({ x: 1500, y: 1040, width: 32, height: 40 })
-      } as any;
-
-      const mockScreen = {
-        getDisplayNearestPoint: () => ({
-          workArea: { x: 0, y: 0, width: 1920, height: 1040 }
-        })
-      };
-
-      const position = platform.getTrayPopoverPosition(
-        mockTray,
-        { width: 340, height: 460 },
-        mockScreen as any
-      );
-
-      expect(position).not.toBeNull();
-      // x should be centered on tray icon (1500 + 16 - 170 = 1346)
-      expect(position?.x).toBe(1346);
-      // y should sit right above taskbar (1040 - 460 = 580)
-      expect(position?.y).toBe(580);
-    });
-
-    /** Verifies tray popover clamping if tray icon is at screen edge */
-    it('clamps popover inside workArea boundaries if tray icon is at screen edge', () => {
-      const mockTray = {
-        getBounds: () => ({ x: 1910, y: 1040, width: 10, height: 40 })
-      } as any;
-
-      const mockScreen = {
-        getDisplayNearestPoint: () => ({
-          workArea: { x: 0, y: 0, width: 1920, height: 1040 }
-        })
-      };
-
-      const position = platform.getTrayPopoverPosition(
-        mockTray,
-        { width: 340, height: 460 },
-        mockScreen as any
-      );
-
-      expect(position).not.toBeNull();
-      // x must not exceed workArea width (1920 - 340 = 1580)
-      expect(position?.x).toBe(1580);
-    });
-
     /** Verifies Window Controls Overlay configuration on Windows */
     it('returns Window Controls Overlay configuration on Windows', () => {
       const options = platform.getWindowOptions();
@@ -202,12 +149,6 @@ describe('Electron Platform Adapters', () => {
       expect(fallback.timeoutType).toBe('default');
     });
 
-    /** Verifies Wayland floating window and blur behavior */
-    it('returns null for tray positioning and disables blur dismiss on Wayland', () => {
-      expect(platform.getTrayPopoverPosition()).toBeNull();
-      expect(platform.shouldDismissTrayOnBlur()).toBe(false);
-    });
-
     /** Verifies log rotation and size limit configuration */
     it('configures log file rotation with 5MB maxSize on Linux', () => {
       const mockApp = {
@@ -282,29 +223,6 @@ describe('Electron Platform Adapters', () => {
     /** Verifies macOS window all closed behavior */
     it('does not quit application when all windows are closed on macOS', () => {
       expect(platform.shouldQuitOnWindowAllClosed()).toBe(false);
-    });
-
-    /** Verifies top menubar popover positioning */
-    it('positions tray popover directly below top menubar status item', () => {
-      const mockTray = {
-        getBounds: () => ({ x: 1200, y: 0, width: 24, height: 24 })
-      } as any;
-
-      const mockScreen = {
-        getDisplayNearestPoint: () => ({
-          workArea: { x: 0, y: 24, width: 1440, height: 876 }
-        })
-      };
-
-      const position = platform.getTrayPopoverPosition(
-        mockTray,
-        { width: 340, height: 460 },
-        mockScreen as any
-      );
-
-      expect(position).not.toBeNull();
-      expect(position?.y).toBe(24);
-      expect(platform.shouldDismissTrayOnBlur()).toBe(true);
     });
 
     /** Verifies macOS application menu structure */

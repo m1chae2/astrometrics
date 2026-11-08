@@ -23,6 +23,7 @@ from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import AstrometricsError, ProcessingError
 from astrometricslib.models.quality.gate_result import GateResult, unchecked_gate
 from astrometricslib.models.target import Target
+from astrometricslib.pipelines.stacking.stage_progress import LoopProgress, stage_window
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 if TYPE_CHECKING:
@@ -30,6 +31,14 @@ if TYPE_CHECKING:
     from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
 
 logger = logging.getLogger(__name__)
+
+#: Where each long check sits inside the frame-check stage, as (start, span)
+#: fractions of the stage. Rough guesses from which checks read every frame
+#: (the cloud and trailing check reads all of them, the full measurement up to
+#: 40 more, the sky check one pass); they only shape the job's progress bar.
+QUARANTINE_WINDOW = (0.02, 0.43)
+QUALITY_ROWS_WINDOW = (0.45, 0.35)
+BACKGROUND_WINDOW = (0.80, 0.20)
 
 __all__ = [
     "FrameScreening",
@@ -233,6 +242,7 @@ def _quarantine_bad_frames(
     )
 
     if has_spectral:
+        logger.info("Skipping the cloud and trailing check: spectral frames are not checked.")
         screening.gate_results.append(
             unchecked_gate(
                 QUARANTINE_GATE_NAME, "spectral frames are not checked: their streaks are the spectra"
@@ -240,6 +250,7 @@ def _quarantine_bad_frames(
         )
         return
     if not get_configuration().get_quarantine_bad_frames_enabled():
+        logger.info("Skipping the cloud and trailing check: it is turned off in the settings.")
         screening.gate_results.append(
             unchecked_gate(QUARANTINE_GATE_NAME, "frame quarantine is turned off in the settings")
         )
@@ -251,15 +262,22 @@ def _quarantine_bad_frames(
     )
 
     frames_checked_by_quarantine = screening.frames
-    screening.frames, quarantine_report = quarantine_bad_frames(target, screening.frames)
-    record_frame_quality(
-        target,
-        screening.frames,
-        quarantine_report,
-        frames_checked_by_quarantine,
-        measured_at,
-        quality_recording,
+    logger.info(
+        "Checking %d frames for clouds and trailed stars (this reads every frame)\u2026",
+        len(screening.frames),
     )
+    with stage_window(*QUARANTINE_WINDOW):
+        screening.frames, quarantine_report = quarantine_bad_frames(target, screening.frames)
+    logger.info("Measuring the frames that have no stored quality numbers yet\u2026")
+    with stage_window(*QUALITY_ROWS_WINDOW):
+        record_frame_quality(
+            target,
+            screening.frames,
+            quarantine_report,
+            frames_checked_by_quarantine,
+            measured_at,
+            quality_recording,
+        )
     screening.excluded_frames.extend(
         ExcludedFrame(path=path, reason=reason)
         for path, reason in quarantine_report.reasons_by_path().items()
@@ -300,7 +318,10 @@ def _drop_background_outliers(target: Target, screening: FrameScreening) -> None
 
     background_check_enabled = get_configuration().get_background_homogeneity_check_enabled()
     frames_before_background_check = screening.frames
+    if not background_check_enabled:
+        logger.info("Skipping the sky background check: it is turned off in the settings.")
     if background_check_enabled:
+        logger.info("Checking the sky background of %d frames\u2026", len(screening.frames))
         from astrometricslib.pipelines.shared.quality.background_measurement import (
             measure_frame_background_level,
         )
@@ -308,6 +329,7 @@ def _drop_background_outliers(target: Target, screening: FrameScreening) -> None
             find_dominant_background_subset_by_exposure,
         )
 
+        background_progress = LoopProgress("Sky background measured for", len(screening.frames))
         for frame in screening.frames:
             try:
                 # Computed once, recorded onto the FrameRecord (which
@@ -319,6 +341,9 @@ def _drop_background_outliers(target: Target, screening: FrameScreening) -> None
             except (AstrometricsError, *FITS_READ_ERRORS, *DATA_ERRORS) as exc:
                 logger.debug("Skipping background/saturation measurement for '%s': %s", frame.path, exc)
                 continue
+            finally:
+                with stage_window(*BACKGROUND_WINDOW):
+                    background_progress.tick()
 
         # Throw out frames with a different background level. If we
         # accidentally use a washed-out frame as the main reference for

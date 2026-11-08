@@ -4,13 +4,14 @@ Description: Builds made-up stored rows for several targets, with the odd-even
 difference rows, the per-aperture record's path, the line-pattern scatters and
 the master noise rows, and checks:
 
-* the run record reads the new rows (decision D21, D22);
+* the run record reads the new rows (issue #134);
 * the account of a run names the shape that its per-aperture record shows and
   says how much the master flat and dark explain;
 * the loss account's "cause unknown" text names the shape;
 * a target with no fixed-pattern noise of its own starts from the median share
   of other targets of the same camera, optic and flat set, only with at least
-  3 of them, never from another flat set, and the statement says so (D23).
+  3 of them, never from another flat set, and the statement says so (issue
+  #134).
 """
 
 from datetime import UTC, datetime, timedelta

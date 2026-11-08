@@ -9,60 +9,37 @@
  * Old stylesheets that still hold raw values are listed in `LEGACY_STYLESHEETS`.
  * That list may only shrink: clean a file, then delete its line. Never add a
  * file to it. A new or changed stylesheet must pass without an entry.
+ *
+ * The list exempts a file from the value rules only. Selector ownership
+ * (`build/stylelint/selector-ownership.mjs`) applies to every stylesheet: the
+ * shared controls in `ui/common/components/` are styled only in their own CSS.
  */
 
 /**
  * Stylesheets that predate the token rules and still hold raw colors, font
- * sizes or radii. Remove an entry when the file is cleaned; never add one.
+ * sizes or radii. Empty now: every stylesheet is checked. Never add an entry.
  */
-const LEGACY_STYLESHEETS = [
-  'ui/App.css',
-  'ui/astronomyManager/styles/astronomyManager.css',
-  'ui/astronomyManager/styles/astronomyViewer.css',
-  'ui/astronomyManager/styles/timeline.css',
-  'ui/commandConsole/commandConsole.css',
-  'ui/common/components/customSelect.css',
-  'ui/common/components/tabView.css',
-  'ui/common/fitsViewer/imageViewer/imageViewer.css',
-  'ui/common/styles/ConfirmDialog.css',
-  'ui/common/styles/addTargetModal.css',
-  'ui/common/styles/animations.css',
-  'ui/common/styles/button.css',
-  'ui/common/styles/emptyState.css',
-  'ui/common/styles/entry.css',
-  'ui/common/styles/index.css',
-  'ui/common/styles/ingestFramesModal.css',
-  'ui/common/styles/listCommon.css',
-  'ui/common/styles/manager.css',
-  'ui/common/styles/metrics.css',
-  'ui/common/styles/modal.css',
-  'ui/common/styles/panels.css',
-  'ui/common/styles/scrollbars.css',
-  'ui/common/styles/segmentedToggle.css',
-  'ui/common/styles/tables.css',
-  'ui/common/styles/toast.css',
-  'ui/imageProcessingDisplay/imageProcessingDisplay.css',
-  'ui/imageViewerDisplay/imageViewerDisplay.css',
-  'ui/observationManager/executionQueue.css',
-  'ui/observationManager/observationManager.css',
-  'ui/observatoryManager/panels/IndiDevicePanel.css',
-  'ui/observatoryManager/panels/IndiPropertyItem.css',
-  'ui/planetariumDisplay/styles/planetariumDisplay.css',
-  'ui/statusBar/statusBar.css',
-  'ui/statusHeader/statusHeader.css',
-  'ui/statusHeader/terminal.css',
-  'ui/titleBar/titleBar.css',
-  'ui/trayPopover/trayPopover.css',
-];
+const LEGACY_STYLESHEETS = [];
 
 /** Values that are never a raw design value, so the strict-value rule lets them through. */
 const NEUTRAL_VALUES = ['inherit', 'initial', 'unset', 'revert', '0', 'none', 'transparent', 'currentColor', '50%', '100%'];
 
+/** The value rules, switched off for the legacy stylesheets. */
+const LEGACY_RULE_OFFS = {
+  'color-no-hex': null,
+  'color-named': null,
+  'function-disallowed-list': null,
+  'scale-unlimited/declaration-strict-value': null,
+};
+
 export default {
   files: ['ui/**/*.css'],
-  ignoreFiles: ['**/node_modules/**', 'ui/coverage/**', 'ui/common/styles/theme.css', ...LEGACY_STYLESHEETS],
-  plugins: ['stylelint-declaration-strict-value'],
+  ignoreFiles: ['**/node_modules/**', 'ui/coverage/**', 'ui/common/styles/theme.css'],
+  plugins: ['stylelint-declaration-strict-value', './build/stylelint/selector-ownership.mjs'],
+  overrides: [{ files: LEGACY_STYLESHEETS, rules: LEGACY_RULE_OFFS }],
   rules: {
+    // Shared controls are styled only in their own component stylesheet.
+    'astrometrics/selector-ownership': true,
     // No raw colors: hex, named, or rgb()/hsl() functions.
     'color-no-hex': true,
     'color-named': 'never',

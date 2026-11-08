@@ -28,6 +28,17 @@ class CorrectionConfig(BaseModel):
     alignment_convergence_tolerance_arcsec: float = Field(default=30.0, gt=0.0)
     alignment_iteration_limit: int = Field(default=3, gt=0)
     alignment_divergence_tolerance_arcsec: float = Field(default=5.0, gt=0.0)
+    # Exposure of a centering frame when the equipment's measurements are not
+    # used or cannot give one (`tasks.control_tasks.centering_exposure`). 5 s:
+    # the shortest ladder step whose star count the model puts well above the
+    # solver's 10 for a 75 mm f/5.4 telescope with the ASI533MM Pro at gain 0
+    # under a dark sky (about 1.9 arcsec per pixel, 1.6 degree field). Design
+    # estimate: the model uses a photometric zero point that is still being
+    # checked (issue #161); the real-data check is register entry WAY-D122.
+    alignment_exposure_seconds: float = Field(default=5.0, gt=0.0)
+    # Off until the exposure model passes its real-data check (WAY-D122,
+    # issue #161). Until then centering uses `alignment_exposure_seconds`.
+    alignment_exposure_from_equipment: bool = False
 
     # Focus
     focus_sample_count: int = Field(default=9, gt=0)

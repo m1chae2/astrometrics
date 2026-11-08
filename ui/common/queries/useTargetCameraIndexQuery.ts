@@ -17,4 +17,5 @@ export const useTargetCameraIndexQuery = () =>
         // older backend without this method), try once and fall back to an
         // empty index instead of re-sending the failing request.
         retry: false,
+        refetchOnWindowFocus: false,
     });

@@ -13,21 +13,24 @@ from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import Response
 
 from astrometricslib.exceptions import ConfigurationError, ErrorInfo, InvalidArgumentError, to_error_info
 from astrometricslib.jobs import log_context, new_request_id
 from backend.container import container
 from backend.public_interface import RPC_METHODS
 from backend.services.infrastructure.frontend_log import log_frontend_message
+from backend.services.infrastructure.heavy_lane import run_heavy
 from backend.services.rpc_protocol import (
     RPCMethodNotFoundError,
     RPCRequest,
+    encode_rpc_success_body,
     make_rpc_error_response,
-    make_rpc_success_response,
 )
 
 logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/api", tags=["rpc"])
 
@@ -40,6 +43,7 @@ _DECLARED_METHODS = frozenset(RPC_METHODS)
 _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # System, settings and notifications
     "system:health": ("maintenance_service", "check_health"),
+    "system:static_mounts": ("settings_service", "get_static_mounts"),
     "system:frontend_log": log_frontend_message,
     "system:completions": ("scripting_service", "get_completions"),
     "system:get_config": ("config_service", "get_all_config"),
@@ -124,8 +128,12 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "observatory:set_active_camera": ("equipment_service", "set_active_camera"),
     "observatory:get_active_telescope": ("equipment_service", "get_active_telescope"),
     "observatory:set_active_telescope": ("equipment_service", "set_active_telescope"),
+    "observatory:get_source": ("observatory_source_service", "get_source"),
+    "observatory:set_source": ("observatory_source_service", "set_source"),
     "observatory:enter_monitoring_mode": ("equipment_service", "enter_monitoring_mode"),
     "observatory:enter_controller_mode": ("equipment_service", "enter_controller_mode"),
+    "observatory:record_guider_calibration": ("wayfinder.control.guiding", "record_calibration"),
+    "observatory:record_focus_model": ("wayfinder.control.imaging", "record_focus_model"),
     # Ingestion of new frames
     "ingestion:start": ("ingestion_service", "start_ingestion_by_args"),
     "ingestion:status": ("ingestion_service", "get_ingestion_status"),
@@ -224,6 +232,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # Camera capture
     "imaging:capture": ("imaging_service", "capture_sequence"),
     "imaging:get_active_jobs": ("imaging_service", "get_active_capture_jobs"),
+    "imaging:stop_capture": ("imaging_service", "stop_capture"),
     # Images and FITS files
     "images:get_target_frame": ("image_service", "get_target_frame_by_id"),
     "images:get_light_frame_data": ("image_service", "get_light_frame_data_by_id"),
@@ -295,6 +304,52 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "sequencer:abort": ("target_imaging_executor", "abort_imaging"),
     "sequencer:modify": ("target_imaging_executor", "modify_queue_item"),
 }
+
+#: Methods that spend seconds of pure Python work on a large library: they
+#: scan every night, target, frame or catalog row. Python lets one thread run
+#: Python code at a time (the global interpreter lock), so every extra busy
+#: thread adds a wait of up to 5 ms each time the event loop or a light call
+#: needs the lock. Thirty such calls at once, as when a view opens, made a
+#: call that takes a millisecond wait more than a second (TPM run
+#: 20261106-205416). These methods therefore share the places of the heavy lane
+#: (`HEAVY_LANE_SLOTS` in `heavy_lane`) and the others run freely. Add a
+#: method here when a trace shows it busy for more than about 100 ms of CPU.
+HEAVY_METHODS = frozenset({
+    "history:nights",
+    "history:night_quality",
+    "history:target_changes",
+    "advisory:target_report",
+    "advisory:tonight",
+    "advisory:depth_goal",
+    "astronomy:list",
+    "astronomy:visible",
+    "target:get_targets",
+    "target:get_frames_grouped",
+    "planetarium:get_sources",
+    "planetarium:get_catalog_sources",
+})
+
+
+async def run_in_lane(method: str, function: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Run blocking work in a worker thread, in the lane the method belongs to.
+
+    Parameters
+    ----------
+    method : `str`
+        The RPC method name, which picks the lane.
+    function : callable
+        The blocking function.
+    *args, **kwargs
+        Passed to `function`.
+
+    Returns
+    -------
+    result : `~typing.Any`
+        What `function` returns.
+    """
+    if method in HEAVY_METHODS:
+        return await run_heavy(function, *args, **kwargs)
+    return await run_in_threadpool(function, *args, **kwargs)
 
 
 class RPCHandlerRegistry:
@@ -415,9 +470,7 @@ class RPCHandlerRegistry:
         if inspect.iscoroutinefunction(handler):
             result = await handler(**kwargs)
         else:
-            from fastapi.concurrency import run_in_threadpool
-
-            result = await run_in_threadpool(handler, **kwargs)
+            result = await run_in_lane(method, handler, **kwargs)
 
         return result
 
@@ -447,7 +500,13 @@ def _text_param(params: dict[str, Any], name: str) -> str | None:
 
 #: Error codes that mean the caller or the current state is at fault. They are
 #: logged without a traceback, because the cause is already in the message.
-_EXPECTED_CODES = frozenset({"invalid_argument", "not_found", "conflict", "permission_denied"})
+_EXPECTED_CODES = frozenset({
+    "invalid_argument",
+    "not_found",
+    "conflict",
+    "permission_denied",
+    "configuration",
+})
 
 
 def _log_rpc_failure(method: str, exc: Exception, info: ErrorInfo) -> None:
@@ -471,7 +530,7 @@ def _log_rpc_failure(method: str, exc: Exception, info: ErrorInfo) -> None:
 
 
 @router.post("/rpc")
-async def handle_rpc(request: RPCRequest) -> JSONResponse:
+async def handle_rpc(request: RPCRequest) -> Response:
     """Serve the unified entrypoint for all frontend JSON-RPC calls.
 
     Invokes the appropriate service method and envelopes the result.
@@ -483,8 +542,9 @@ async def handle_rpc(request: RPCRequest) -> JSONResponse:
 
     Returns
     -------
-    response : `~fastapi.responses.JSONResponse`
-        A JSON-RPC success or error envelope.
+    response : `~fastapi.responses.Response`
+        A JSON-RPC success or error envelope. A success reply is encoded in
+        a worker thread, so a large result does not stall the event loop.
     """
     request_id = new_request_id()
     with log_context(
@@ -495,7 +555,10 @@ async def handle_rpc(request: RPCRequest) -> JSONResponse:
     ):
         try:
             result = await rpc_registry.execute(request.method, request.params)
-            return make_rpc_success_response(result, request.id)
+            # Encoding is not heavy-lane work: a finished result must not wait
+            # behind queued heavy builds, so it uses the ordinary thread pool.
+            body = await run_in_threadpool(encode_rpc_success_body, result, request.id)
+            return Response(content=body, status_code=200, media_type="application/json")
         except RPCMethodNotFoundError as exc:
             logger.warning("RPC method not found: %s", request.method)
             info = ErrorInfo(code="not_found", message=f"Method not found: {exc!s}", request_id=request_id)

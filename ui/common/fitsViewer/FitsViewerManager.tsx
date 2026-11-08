@@ -47,6 +47,10 @@ interface Props {
   onStarClick?: (star: AstrometryOverlayStar) => void;
   /** Currently selected star identifier for overlay highlighting. */
   selectedStarId?: string | null;
+  /** Small stretched picture shown while the full FITS image loads; see `FitsRenderer`. */
+  previewBlob?: Blob | null;
+  /** Whether this viewer keeps pictures decoded ahead of time. */
+  acceptPrefetch?: boolean;
 }
 
 /**
@@ -68,7 +72,9 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
   overlayStars,
   showOverlay,
   onStarClick,
-  selectedStarId
+  selectedStarId,
+  previewBlob,
+  acceptPrefetch
 }, ref) => {
   // REQ: IMG-3: Image Visualization
   // REQ: IMG-3.1: The display SHALL render FITS format images directly in the browser.
@@ -76,7 +82,7 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
   // REQ: IMG-3.4: The display SHALL show FITS header metadata (Object object).
   // REQ: IMG-3.5: The display SHALL automatically load and display any new cooling/progress images.
   // Prefer the client-side FITS renderer if an image URL or blob is provided.
-  if (imageUrl || imageBlob) {
+  if (imageUrl || imageBlob || previewBlob) {
     return (
       <FitsRenderer
         ref={ref}
@@ -95,6 +101,8 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
         showOverlay={showOverlay}
         onStarClick={onStarClick}
         selectedStarId={selectedStarId}
+        previewBlob={previewBlob ?? null}
+        acceptPrefetch={acceptPrefetch}
       />
     );
   }

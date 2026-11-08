@@ -18,6 +18,8 @@ The storage reads only what each question needs. Summary rows come from the
 indexed columns, so no full star record is loaded to list or count stars.
 """
 
+import threading
+import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -134,6 +136,8 @@ class StarQuery:
     include_unresolved : `bool`
         Keep the single-frame photometry detections (see
         `is_unresolved_detection`). They are hidden by default.
+    image_path : `str` or `None`
+        For ``detail="overlay"`` only: the image to place the stars on.
     """
 
     ids: list[str] | None = None
@@ -150,6 +154,7 @@ class StarQuery:
     spectral_class: str | None = None
     search: str | None = None
     include_unresolved: bool = False
+    image_path: str | None = None
 
     def selector(self) -> str | None:
         """Name the one selector given.
@@ -224,12 +229,80 @@ def summary_row(star: Any) -> dict[str, Any]:
     }
 
 
+_STAR_ID_INDEX_LOCK = threading.Lock()
+_STAR_ID_INDEXES: weakref.WeakKeyDictionary[Any, tuple[int, dict[str, str]]] = weakref.WeakKeyDictionary()
+"""For each catalog storage: the star catalog's write count and the map from
+a spelling-free id to the first stored id that has it."""
+
+
+def _spelling_free(star_id: str) -> str:
+    """Strip an id to what `find_star` compares.
+
+    That is the id without spaces, underscores or capital letters.
+
+    Parameters
+    ----------
+    star_id : `str`
+        A star id.
+
+    Returns
+    -------
+    key : `str`
+        The id in lower case without spaces and underscores.
+    """
+    return star_id.lower().replace(" ", "").replace("_", "")
+
+
+def _spelling_free_index(storage: Any) -> dict[str, str]:
+    """Give the map from spelling-free id to stored id.
+
+    The map is rebuilt only after a write to the star catalog.
+
+    Reading every star id takes about half a second in a library of a few
+    hundred thousand stars, and the Planetarium asks for one star every ten
+    seconds. The map is kept per storage, together with the star catalog's
+    write count (`get_dataset_version`), and is rebuilt when that count has
+    changed. A storage that cannot report the count gets a fresh map every
+    time, so it never answers from stale data.
+
+    Parameters
+    ----------
+    storage : `AbstractCatalogAccess`
+        The catalog storage.
+
+    Returns
+    -------
+    index : `dict` [`str`, `str`]
+        The first stored id for each spelling-free id, in the storage's order.
+    """
+    get_version = getattr(storage, "get_dataset_version", None)
+    version = get_version("stellar_catalog") if callable(get_version) else None
+    if not isinstance(version, int):
+        version = None
+    with _STAR_ID_INDEX_LOCK:
+        cached = _STAR_ID_INDEXES.get(storage) if version is not None else None
+        if cached is not None and cached[0] == version:
+            return cached[1]
+    index: dict[str, str] = {}
+    for candidate_id in storage.list_star_ids():
+        index.setdefault(_spelling_free(candidate_id), candidate_id)
+    if version is not None:
+        with _STAR_ID_INDEX_LOCK:
+            try:
+                _STAR_ID_INDEXES[storage] = (version, index)
+            except TypeError:  # a storage that cannot be weakly referenced is not cached
+                pass
+    return index
+
+
 def find_star(storage: Any, star_id: str) -> StellarObject | None:
     """Find one star by id, allowing small differences in spelling.
 
     An exact id is tried first, which is fast. If that fails, the ids are
-    compared ignoring spaces, underscores and capital letters. Only the id
-    column is read for that comparison, never the stars' full records.
+    compared ignoring spaces, underscores and capital letters, using a map
+    of the ids that is kept until the star catalog is next written to (see
+    `_spelling_free_index`). Only the id column is read to build it, never
+    the stars' full records.
 
     Parameters
     ----------
@@ -246,12 +319,11 @@ def find_star(storage: Any, star_id: str) -> StellarObject | None:
     exact = storage.get_by_ids("stellar_catalog", [star_id])
     if exact:
         return exact[0]
-    normalized = star_id.lower().replace(" ", "").replace("_", "")
-    for candidate_id in storage.list_star_ids():
-        if candidate_id.lower().replace(" ", "").replace("_", "") == normalized:
-            matches = storage.get_by_ids("stellar_catalog", [candidate_id])
-            return matches[0] if matches else None
-    return None
+    candidate_id = _spelling_free_index(storage).get(_spelling_free(star_id))
+    if candidate_id is None:
+        return None
+    matches = storage.get_by_ids("stellar_catalog", [candidate_id])
+    return matches[0] if matches else None
 
 
 def _find_all_by_name(storage: Any, name: str) -> list[StellarObject]:
@@ -713,6 +785,8 @@ def run_star_query(
     from astrometricslib.pipelines.shared.star_overlay import build_overlay
 
     selector = query.selector()
+    if query.image_path is not None and detail != "overlay":
+        raise InvalidArgumentError("image_path is used only with detail='overlay'.")
     if detail in ("stats", "class_counts", "target_counts"):
         _refuse_unused(detail, {"order": order is not None, "offset": bool(offset)})
         return _whole_library_answer(storage, query, selector, detail)
@@ -747,8 +821,10 @@ def run_star_query(
             },
         )
         cap = None if limit is None else max(1, min(int(limit), QUERY_LIMITS["overlay"]))
-        overlay = build_overlay(storage, query.target_id, cap)
-        return StarQueryResult(detail=detail, total_matching=len(overlay), offset=0, overlay=overlay)
+        overlay, reason = build_overlay(storage, query.target_id, cap, query.image_path)
+        return StarQueryResult(
+            detail=detail, total_matching=len(overlay), offset=0, overlay=overlay, overlay_reason=reason
+        )
     # The radius cap protects a capped answer, meant to be read in full.
     # A program that asks for every match (limit=None), such as the sky
     # map, may search a wider circle.

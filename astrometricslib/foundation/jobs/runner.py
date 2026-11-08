@@ -190,6 +190,28 @@ class JobHandle:
         if not self.reached_terminal_status:
             self.mark("running", progress_current, message=message)
 
+    def report_count(self, done: int, total: int, message: str) -> None:
+        """Report how many items the job has finished, as real counts.
+
+        Unlike `stage`, which gives a percent out of 100, this stores the
+        counts themselves as the job's progress, so a reader gets "24 of 40"
+        from the job record and need not read the message text. The message
+        is still written to the log and kept as the job's status line. Does
+        nothing to the status once the job has finished.
+
+        Parameters
+        ----------
+        done : `int`
+            How many items are finished.
+        total : `int`
+            How many items the job has in all.
+        message : `str`
+            A short description, such as "Measured 24 of 40 frames".
+        """
+        self.info(message)
+        if not self.reached_terminal_status:
+            self.mark("running", done, progress_total=total, message=message)
+
     def info(self, message: str) -> None:
         """Write an informational line to this job's log.
 
@@ -273,6 +295,12 @@ class JobHandle:
             logger.debug("Could not update job '%s' to '%s': %s", self.job_id, status, update_error)
 
 
+#: The (job id, absolute log file path) pairs that have a file sink right now,
+#: so a run nested inside a job does not open a second handler on the job's
+#: own file, which would write every line twice.
+_open_log_files: set[tuple[str, str]] = set()
+_open_log_files_lock = threading.Lock()
+
 #: The library packages whose messages reach a job's log even when the work
 #: that wrote them lost the job's log context, such as a worker thread that
 #: was started without copying it.
@@ -319,29 +347,46 @@ def capture_job_logs(
         The block runs with the job's log context.
     """
     sinks: list[logging.Handler] = []
+    file_key: tuple[str, str] | None = None
     if log_file_path:
-        log_directory = os.path.dirname(log_file_path)
-        if log_directory:
-            os.makedirs(log_directory, exist_ok=True)
-        file_handler = logging.FileHandler(log_file_path)
-        file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-        sinks.append(file_handler)
-    if job_store is not None and job_id not in active_job_ids():
-        sinks.append(DbLogHandler(job_store, job_id=job_id))
-
-    # The router sends each record that carries this job's id to the sinks.
-    # Nothing is attached to a shared logger, so nothing can be left behind.
+        candidate_key = (job_id, os.path.abspath(log_file_path))
+        with _open_log_files_lock:
+            # A nested capture for the same job and file adds nothing: the
+            # outer capture already writes there, and a second handler would
+            # write each line twice.
+            if candidate_key not in _open_log_files:
+                _open_log_files.add(candidate_key)
+                file_key = candidate_key
+    sink_key = None
     router = get_job_log_router()
-    sink_key = router.register(job_id, sinks, JOB_LOG_PACKAGES)
+    # Everything after the key is claimed sits in the try, so a failure while
+    # opening the log file still frees the key.
     try:
+        if log_file_path and file_key is not None:
+            log_directory = os.path.dirname(log_file_path)
+            if log_directory:
+                os.makedirs(log_directory, exist_ok=True)
+            file_handler = logging.FileHandler(log_file_path)
+            file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+            sinks.append(file_handler)
+        if job_store is not None and job_id not in active_job_ids():
+            sinks.append(DbLogHandler(job_store, job_id=job_id))
+
+        # The router sends each record that carries this job's id to the sinks.
+        # Nothing is attached to a shared logger, so nothing is left behind.
+        sink_key = router.register(job_id, sinks, JOB_LOG_PACKAGES)
         with log_context(job_id=job_id):
             yield
     finally:
-        for handler in router.unregister(sink_key):
-            try:
-                handler.close()
-            except OSError as close_error:
-                logger.debug("Could not close a job log handler: %s", close_error)
+        if sink_key is not None:
+            for handler in router.unregister(sink_key):
+                try:
+                    handler.close()
+                except OSError as close_error:
+                    logger.debug("Could not close a job log handler: %s", close_error)
+        if file_key is not None:
+            with _open_log_files_lock:
+                _open_log_files.discard(file_key)
 
 
 def _create_job_row(*, job_type: str, target_id: str, log_file: str | None) -> tuple[str, str, JobStore]:
@@ -593,6 +638,58 @@ def registered_job(
                 handle.info(completed_message)
         finally:
             _current_job.reset(job_token)
+
+
+@contextmanager
+def running_as_job(
+    job_id: str,
+    job_store: JobStore,
+    *,
+    job_type: str,
+    target_id: str,
+    log_file_path: str | None = None,
+) -> Generator[JobHandle]:
+    """Run the enclosed work as a job row that its caller already made.
+
+    The backend makes its own job row, then calls library work with
+    ``register_job=False``. Without this, the library has no current job, so
+    its stage progress never reaches the row. Inside this block the row is
+    the current job, so `get_current_job` gives its handle and progress
+    reaches the store.
+
+    This does not create a row and does not decide how the job ends. The
+    caller still marks the job completed or failed.
+
+    Parameters
+    ----------
+    job_id : `str`
+        Id of the existing job row.
+    job_store : `JobStore`
+        The store that holds the row.
+    job_type : `str`
+        What kind of job this is, such as "stacking".
+    target_id : `str`
+        Which target the job is working on.
+    log_file_path : `str`, optional
+        The job's log file, kept on the handle for readers.
+
+    Yields
+    ------
+    handle : `JobHandle`
+        The handle of the existing job.
+    """
+    handle = JobHandle(
+        job_id=job_id,
+        log_file_path=log_file_path,
+        job_store=job_store,
+        job_type=job_type,
+        target_id=target_id,
+    )
+    token = _current_job.set(handle)
+    try:
+        yield handle
+    finally:
+        _current_job.reset(token)
 
 
 def _to_plain(value: Any) -> Any:

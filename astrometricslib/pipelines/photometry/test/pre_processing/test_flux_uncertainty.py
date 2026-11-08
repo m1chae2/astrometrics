@@ -1,4 +1,4 @@
-"""Purpose: Test the flux uncertainties attached to each flux (review item S8).
+"""Purpose: Test the flux uncertainties attached to each flux.
 
 Description: The CCD equation (the noise budget of a sensor) gives the
 1-sigma uncertainty of a star's flux from its own counts, the sky, the read

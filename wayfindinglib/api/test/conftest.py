@@ -11,6 +11,7 @@ import pytest
 
 from astrometricslib import AppConfiguration
 from wayfindinglib import ObservatoryControl
+from wayfindinglib.analytics import capture_history, night_index
 from wayfindinglib.api.test.capture_night_helpers import Library
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.tasks.control_tasks import night_analysis
@@ -68,6 +69,22 @@ def library(control: ObservatoryControl, monkeypatch: pytest.MonkeyPatch) -> Lib
     monkeypatch.setattr(
         night_analysis,
         "capture_library",
-        lambda context, telescope_name, camera_name, cache: synthetic.frames,
+        lambda context, telescope_name, camera_name, cache, targets=None: synthetic.frames,
+    )
+    # The list of nights reads the same frames through the night index.
+    monkeypatch.setattr(
+        night_index,
+        "read_night_frames",
+        lambda context: [
+            night_index.NightFrame(capture_history.night_of(frame), frame.target_id, frame.path)
+            for frame in synthetic.frames
+        ],
+    )
+    monkeypatch.setattr(
+        night_index,
+        "subjects_with_background",
+        lambda context, target_ids: frozenset(
+            frame.path for frame in synthetic.frames if frame.background_adu is not None
+        ),
     )
     return synthetic

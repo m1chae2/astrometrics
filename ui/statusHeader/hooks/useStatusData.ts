@@ -1,7 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAstrometrics } from '../../common/context/AstrometricsContext';
 import { emitToast } from '../../common/utils/emitToast';
+import { isBackendRestarting } from '../../common/services/backendApi';
+import { isAppReady } from '../../common/utils/appBootReadiness';
+import { isTrackingStatus } from '../../common/utils/isTrackingStatus';
 import { normalizeAppMode } from '../../common/utils/normalizeAppMode';
+import { useGuidingRms } from './useGuidingRms';
+
+/** How long after the camera last exposed a capture still counts as in progress (covers the gap between frames). */
+const CAPTURE_GAP_MS = 10000;
 
 export interface StatusTelemetry {
     altitude: string;
@@ -95,27 +102,53 @@ export const useStatusData = () => {
 
         // Tracking Transitions
         const prevTrack = prevTelescopeTracking.current;
-        const newIsTracking = /\btracking\b/i.test(trackStatus);
-        const prevIsTracking = typeof prevTrack === 'string' && /\btracking\b/i.test(prevTrack);
+        const newIsTracking = isTrackingStatus(trackStatus);
+        const prevIsTracking = isTrackingStatus(prevTrack);
 
-        if (prevTrack !== null && prevTrack !== trackStatus) {
-            if (!prevIsTracking && newIsTracking) {
-                emitToast('Telescope began tracking', 'success', 'telescope');
-            } else if (prevIsTracking && !newIsTracking) {
-                emitToast('Telescope stopped tracking', 'info', 'telescope');
-            }
-        }
+        // Tracking starting or stopping is a status the chip shows; no toast.
         prevTelescopeTracking.current = trackStatus;
 
         // Connection Transitions
         const prevConn = prevTelescopeConnection.current;
-        if (prevConn !== null && prevConn !== connBool) {
-            if (connBool) emitToast('Telescope connected', 'success', 'telescope');
-            else emitToast('Telescope disconnected', 'error', 'telescope');
+        // An offline telescope is a status, and the status chip shows it. Only a
+        // mount that drops while it was tracking (a night is under way) needs the
+        // user, so only that is a warning, and never during start-up.
+        if (prevConn !== null && prevConn !== connBool && isAppReady()) {
+            // Coming back online is a status the chip shows; no toast.
+            // A backend restart the user asked for (a source switch) drops the mount on purpose; that is no warning.
+            if (!connBool && prevIsTracking && !isBackendRestarting()) {
+                emitToast('Telescope disconnected while tracking', 'warning', 'telescope', { notify: true });
+            }
         }
         prevTelescopeConnection.current = connBool;
 
     }, [telescope]);
+
+    // Guiding lost: guiding was running and its samples stopped while a capture was
+    // in progress. The app has no Start/Stop Guiding buttons, so it cannot tell a stop
+    // the user wanted (for example in Ekos) from a lost guide star. A stop between
+    // captures is therefore quiet. A capture is in progress while the camera is
+    // exposing or reading out, and for a few seconds after, which covers the gap
+    // between frames. This hook is always mounted, so the alert fires whichever
+    // display is on screen.
+    const guidingRms = useGuidingRms(telescope.guidingHistory);
+    const guidingActive = guidingRms !== null;
+    const prevGuidingActive = useRef<boolean | null>(null);
+    const lastCaptureMs = useRef<number | null>(null);
+    const cameraStatusText = telescope.cameraStatus ?? '';
+    useEffect(() => {
+        if (/expos|download|reading/i.test(cameraStatusText)) lastCaptureMs.current = Date.now();
+    }, [cameraStatusText]);
+    useEffect(() => {
+        const wasActive = prevGuidingActive.current;
+        prevGuidingActive.current = guidingActive;
+        if (guidingActive) return;
+        const capturing =
+            lastCaptureMs.current !== null && Date.now() - lastCaptureMs.current <= CAPTURE_GAP_MS;
+        if (wasActive === true && isAppReady() && capturing) {
+            emitToast('Guiding lost. Check the guide star and the guider.', 'warning', 'guiding', { notify: true });
+        }
+    }, [guidingActive]);
 
     const chooseMode = (mode: string): void => {
         setSelectedMode(mode);

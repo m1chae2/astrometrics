@@ -701,7 +701,7 @@ def refresh_ranking_packages(
 
     The top `per_use` ranked targets of each use get a suggested package with
     no rows, labeled as a design estimate, tied to tonight. The order is the
-    ranking's: a target whose count is only provisional (decision D11) sits
+    ranking's: a target whose count is only provisional (issue #134) sits
     below one of about the same gain, and its reason says so. A ranking package
     whose night has ended is deleted. When the ranking is known and a package
     of tonight fell out of the top, it is deleted. When the ranking could not

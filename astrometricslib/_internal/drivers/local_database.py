@@ -13,6 +13,7 @@ import sqlite3
 import time
 from typing import TYPE_CHECKING, Any
 
+from astrometricslib.foundation.storage.data_versions import TARGETS_KIND, bump_data_version
 from astrometricslib.foundation.storage.local_database import connect_db as _connect_db
 from astrometricslib.foundation.storage.local_database import safe_json_dumps as _safe_json_dumps
 
@@ -125,6 +126,7 @@ def save_target(app_config: AppConfiguration | None = None, target: Target | Non
         """,
             (target.id, target.common_name, target.ra, target.dec, _safe_json_dumps(target.serialize())),
         )
+        bump_data_version(conn, TARGETS_KIND)
         conn.commit()
     except Exception:
         logger.exception("Error saving target to SQLite")

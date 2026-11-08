@@ -7,7 +7,7 @@
       "category": "planning-sessions",
       "disposition": "withhold",
       "interim_block": "",
-      "note": "Closes a session and records it. Stays separate from the read tools (section 4.2)."
+      "note": "Closes a session and records it."
     },
     "execution_advance_session": {
       "tool_class": "actuate",
@@ -93,6 +93,20 @@
       "interim_block": "",
       "note": "Commanding a device (mount, cameras, focuser, filter wheel, enclosure) is out of scope. Reading from them and from the Pi is allowed."
     },
+    "observatory_guiding_query_calibrations": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Lists every saved guider calibration, for all telescope and camera pairings (status reads only the active one). No device needed."
+    },
+    "observatory_guiding_record_calibration": {
+      "tool_class": "change-data",
+      "category": "observatory-status",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Saves a guider calibration record to the database. It sends nothing to a device, but the delegation rules trust the record, and the AI is read-only. Read the saved one with observatory_guiding_status."
+    },
     "observatory_guiding_refit_spectrum": {
       "tool_class": "change-data",
       "category": "observatory-status",
@@ -135,6 +149,20 @@
       "interim_block": "",
       "note": "Commanding a device (mount, cameras, focuser, filter wheel, enclosure) is out of scope. Reading from them and from the Pi is allowed."
     },
+    "observatory_imaging_query_focus_models": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Lists every saved focus model, for all telescope and camera pairings (status reads only the active one). No device needed."
+    },
+    "observatory_imaging_record_focus_model": {
+      "tool_class": "change-data",
+      "category": "observatory-status",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Saves a focus model record to the database. It sends nothing to a device, but the delegation rules trust the record, and the AI is read-only. Read the saved one with observatory_imaging_status."
+    },
     "observatory_imaging_set_filter": {
       "tool_class": "actuate",
       "category": "observatory-control",
@@ -149,6 +177,13 @@
       "interim_block": "The filters and focuser sections return [] and 0 because the MCP process has no hardware connection. Use app_status with the telescope section (focuser position, filter, pier side, tracking).",
       "note": "Reads the filter names, the focuser position and the saved focus model."
     },
+    "observatory_imaging_stop_capture": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Commanding a device (mount, cameras, focuser, filter wheel, enclosure) is out of scope. Reading from them and from the Pi is allowed."
+    },
     "observatory_mount_abort_motion": {
       "tool_class": "safe-stop",
       "category": "observatory-control",
@@ -162,6 +197,13 @@
       "disposition": "drop",
       "interim_block": "",
       "note": "Stops a centering run by aborting the mount, so it is dropped with the other hardware tools."
+    },
+    "observatory_mount_get_centering_exposure": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-08. Works out the plate-solve centering exposure from the library's zero point and star width, the camera profile, the sky model and the Gaia catalog. Reads only; nothing is stored and nothing moves. The first call may fit the sky model and be slow."
     },
     "observatory_mount_get_polar_alignment": {
       "tool_class": "unclassified",
@@ -533,6 +575,34 @@
       "disposition": "keep",
       "interim_block": "",
       "note": "Slow: reads every session and target twice."
+    },
+    "review_get_sky_rate_prediction": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-07. Predicts the sky background rate from the sky model fitted to the library's own frames. Reads only; nothing is stored. The first call fits the model and is slow."
+    },
+    "review_measure_focus_temperature_coefficient": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-07. Fits the focus-versus-temperature slope on recorded autofocus runs and frame headers. Reads only; nothing is stored. Slow when it reads every frame record."
+    },
+    "review_measure_guiding_spectrum": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-07. The guiding spectrum worked out from the recorded samples, with nights optionally left out. Unlike observatory_guiding_refit_spectrum it stores nothing."
+    },
+    "review_measure_unguided_mount_error": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-07. Reads the recorded guide samples and guiding runs and fits the mount's own error (periodic error, drift, jitter). Nothing is stored or sent. Slow on a long history."
     },
     "review_query": {
       "tool_class": "compute",

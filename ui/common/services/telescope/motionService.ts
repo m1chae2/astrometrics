@@ -6,6 +6,7 @@
 
 import { callBackend } from '../backendApi';
 import { reportError } from '../../utils/reportError';
+import { emitToast } from '../../utils/emitToast';
 
 /**
  * Initiates a light frame synchronization task from a remote observatory source.
@@ -44,8 +45,30 @@ export async function isSyncing(objectId: string): Promise<boolean> {
  */
 export async function slewTelescope(ra: number, dec: number): Promise<boolean> {
     try {
-        return await callBackend("telescope:slew_coordinates", { ra, dec });
+        const accepted = await callBackend("telescope:slew_coordinates", { ra, dec });
+        // A refusal that raised an error was already shown with its own reason. This is the one message for a
+        // slew the mount simply did not accept.
+        if (!accepted) emitToast('The mount did not accept the slew. Check the hardware connection.', 'error', 'API:telescope:slew_coordinates');
+        return accepted;
     } catch {
+        // callBackend has already shown the specific reason once.
+        return false;
+    }
+}
+
+/**
+ * Commands the telescope mount to slew to a target in the library. The backend looks up the target's
+ * coordinates, so the caller needs only the target's id.
+ * @param targetName The id of the library target, as the target list shows it.
+ * @return True if the mount accepted the slew, false if it did not or the request failed.
+ */
+export async function slewToTarget(targetName: string): Promise<boolean> {
+    try {
+        const accepted = await callBackend("telescope:slew_target", { target_name: targetName });
+        if (!accepted) emitToast('The mount did not accept the slew. Check the hardware connection.', 'error', 'API:telescope:slew_target');
+        return accepted;
+    } catch {
+        // callBackend has already shown the specific reason once.
         return false;
     }
 }

@@ -13,6 +13,10 @@ Description: Two groups of paths live here.
 """
 
 import os
+import tomllib
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
 
 
 def _cache_root() -> str:
@@ -147,28 +151,20 @@ def catalog_cache_directory() -> str:
     return catalog_path
 
 
-# The folder on the backup remote, below the remote's name, that holds one
-# subfolder per database snapshot.
-REMOTE_BACKUP_FOLDER = "Library/_backup"
+def backup_directory() -> str:
+    """Give the local folder that holds the database snapshots.
 
-
-def remote_snapshot_path(remote: str, snapshot_name: str = "") -> str:
-    """Build the rclone path of a database snapshot folder on the backup.
-
-    Parameters
-    ----------
-    remote : `str`
-        Remote name including the colon, for example ``drive:``.
-    snapshot_name : `str`, optional
-        Snapshot folder name. Empty gives the folder that holds all snapshots.
+    This is ``backup`` inside the scratch folder. It is not uploaded
+    anywhere.
 
     Returns
     -------
-    remote_path : `str`
-        The rclone path.
+    backup_path : `str`
+        The absolute path of the folder, which exists when this returns.
     """
-    suffix = f"/{snapshot_name}" if snapshot_name else ""
-    return f"{remote}{REMOTE_BACKUP_FOLDER}{suffix}"
+    backup_path = os.path.join(scratch_directory(), "backup")
+    os.makedirs(backup_path, exist_ok=True)
+    return backup_path
 
 
 def mount_path_variants(path: str) -> set[str]:
@@ -242,3 +238,129 @@ def is_path_inside(root: str, path: str) -> bool:
             except ValueError:
                 continue
     return False
+
+
+@dataclass(frozen=True)
+class LibraryFolders:
+    """The library folders that one settings file names.
+
+    ``config_file`` is the settings file that was read. ``library``,
+    ``frames``, ``stacks`` and ``wayfinding`` are the image library, its
+    frames, the folder for stacks and other derived files, and the wayfinding
+    library, as the settings file names them (or their defaults). All are
+    `pathlib.Path` objects.
+    """
+
+    config_file: Path
+    library: Path
+    frames: Path
+    stacks: Path
+    wayfinding: Path
+
+
+def resolve_library_setting(text: str, project_root: Path, search_package: bool = False) -> Path:
+    """Turn the text of a folder setting into an absolute path.
+
+    This is the one rule for the folder settings of ``[Image Library]`` and
+    ``[Wayfinding Library]``. `AppConfiguration` and `library_folders` both
+    use it, so a program that wants to know which folders the app writes to
+    gets the app's own answer.
+
+    Parameters
+    ----------
+    text : `str`
+        The setting, not empty.
+    project_root : `pathlib.Path`
+        The project folder, against which a relative path is taken.
+    search_package : `bool`, optional
+        If `True`, a relative path is first looked for inside the
+        ``astrometricslib`` folder, where an older install kept the library,
+        and used there when it exists. Default: `False`.
+
+    Returns
+    -------
+    path : `pathlib.Path`
+        The absolute path. Nothing is created.
+    """
+    path = Path(text)
+    if path.is_absolute():
+        return path.absolute()
+    if search_package:
+        in_package = project_root / "astrometricslib" / path
+        if in_package.exists():
+            return in_package.absolute()
+    return (project_root / path).absolute()
+
+
+def _setting_text(settings: Mapping, section: str, key: str) -> str:
+    """Read one folder setting from parsed settings.
+
+    Parameters
+    ----------
+    settings : `~collections.abc.Mapping`
+        The parsed settings.
+    section, key : `str`
+        Where the folder is named.
+
+    Returns
+    -------
+    text : `str`
+        The setting with spaces trimmed, or an empty string when the section
+        or the key is missing.
+    """
+    value = settings.get(section, {})
+    return str(value.get(key, "")).strip() if isinstance(value, Mapping) else ""
+
+
+def library_folders(
+    config_file: str | os.PathLike, default_data_home: str | os.PathLike | None = None
+) -> LibraryFolders:
+    """Find the library folders that one settings file names.
+
+    It reads the file (read only) and creates nothing. It does not look at
+    the environment, so it works for any settings file: the one in use, the
+    user's real one, or one that belongs to a throwaway library. It follows
+    the same rules as `AppConfiguration.get_library_path`,
+    `~AppConfiguration.get_frames_path` and
+    `~AppConfiguration.get_stacks_path` (through `resolve_library_setting`),
+    so it names the folders the app would write to.
+
+    Parameters
+    ----------
+    config_file : `str` or `os.PathLike`
+        The settings file.
+    default_data_home : `str` or `os.PathLike`, optional
+        The folder whose ``astrometrics`` subfolder holds the libraries when
+        the file does not name them. Default: ``~/.local/share``.
+
+    Returns
+    -------
+    folders : `LibraryFolders`
+        The folders. A missing or damaged settings file gives the defaults.
+    """
+    path = Path(config_file)
+    data_home = Path(default_data_home) if default_data_home is not None else Path.home() / ".local" / "share"
+    try:
+        settings = tomllib.loads(path.read_text(encoding="utf-8"))
+    except OSError, ValueError:
+        settings = {}
+    root = Path(__file__).resolve().parents[2]
+    default_library = data_home / "astrometrics"
+
+    text = _setting_text(settings, "Image Library", "path")
+    library = resolve_library_setting(text, root, search_package=True) if text else default_library
+
+    text = _setting_text(settings, "Image Library", "frames_path")
+    if text:
+        frames = resolve_library_setting(text, root, search_package=True)
+        if not frames.exists():
+            frames = Path(resolve_mounted_path(str(frames)))
+    else:
+        frames = library / "frames"
+
+    text = _setting_text(settings, "Image Library", "stacks_path")
+    stacks = resolve_library_setting(text, root) if text else frames
+
+    text = _setting_text(settings, "Wayfinding Library", "path")
+    wayfinding = resolve_library_setting(text, root) if text else default_library / "wayfinding"
+    return LibraryFolders(path, library, frames, stacks, wayfinding)

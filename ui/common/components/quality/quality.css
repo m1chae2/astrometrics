@@ -11,10 +11,6 @@
 .statement-item__setting { color: var(--text-dim); }
 .statement-item__message { margin: 6px 0 0; font-size: var(--label-font-size); line-height: 1.4; }
 .statement-item__buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.confidence-chip { border: 1px solid var(--border-color); border-radius: var(--radius-pill); padding: 0 8px; font-size: var(--section-label-size); }
-.confidence-chip--measured { border-color: var(--success-green); }
-.confidence-chip--partly_measured { border-style: dashed; }
-.confidence-chip--design_estimate { border-style: dotted; }
 .quality-state { color: var(--text-dim); padding: 8px; display: flex; gap: 8px; align-items: center; }
 .quality-state--error { border: 1px solid var(--danger-red); border-radius: var(--radius-sm); }
 .quality-button:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }

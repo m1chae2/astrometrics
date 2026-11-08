@@ -1,7 +1,7 @@
 """Purpose: Check every quality rule for plain wording and a produces value.
 
 Description: The user interface shows only the plain message of a statement
-(issue 96, decision D8). These checks walk `ALL_RULES`, the one list of every
+(issue #96). These checks walk `ALL_RULES`, the one list of every
 rule, so a new rule cannot be added without plain wording:
 
 * every rule has a plain template;

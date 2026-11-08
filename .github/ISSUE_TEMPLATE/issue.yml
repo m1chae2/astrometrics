@@ -11,7 +11,8 @@ body:
         for defining the problem and how to know it's solved.
 
         Every issue also needs three labels: which subsystem it affects, which kind of code
-        it touches, and whether it's a new capability or something that needs fixing. A bot
+        it touches, and whether it's a new capability or something that needs fixing. An
+        optional Display label says which part of the app's screen it changes. A bot
         double-checks the title, the two sections below, and all three labels after you
         submit, and will flag the issue if anything is missing.
 
@@ -51,6 +52,26 @@ body:
         - problem
     validations:
       required: true
+
+  - type: dropdown
+    id: display
+    attributes:
+      label: Display
+      description: >-
+        Which part of the app's screen does this change? Select every option that applies.
+        Leave it empty for work with nothing on screen (most library work).
+      multiple: true
+      options:
+        - Observatory Manager
+        - Observation Manager
+        - Image Processing
+        - Image Viewer
+        - Planetarium
+        - Astronomy Manager
+        - Status Header
+        - Settings
+    validations:
+      required: false
 
   - type: textarea
     id: problem

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { fetchTargetFiles } from '../../common/services/targetService';
 import { deleteFiles } from '../../common/services/imaging/imageService';
 import { emitToast } from '../../common/utils/emitToast';
+import { useOnValueChange } from './useOnValueChange';
 import { matchesQuery } from '../../common/utils/searchLogic';
 import { FileItem } from '../fileBrowser/FileBrowser';
 
@@ -71,9 +72,23 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
     }, []);
 
 
-    useEffect(() => {
+    // Forget the previous target's files while rendering, before any effect runs.
+    // A reset done in an effect would come one commit late, and in that commit the
+    // old stack path and the old picked file would be asked for again under the
+    // new target (including when a paused display is shown again after a switch).
+    // Showing the display again with the same target changes nothing here.
+    const [filesOwnerTarget, setFilesOwnerTarget] = useState(selectedTarget);
+    if (filesOwnerTarget !== selectedTarget) {
+        setFilesOwnerTarget(selectedTarget);
         setStackedImage(null);
         setStackedSpectralTarget(null);
+        setSelectedFile(null);
+        setAllFiles([]);
+        setExposureCounts({});
+        setTotalExposure(0);
+    }
+
+    useEffect(() => {
         if (!selectedTarget || !shouldFetch) {
             setAllFiles([]);
             return;
@@ -107,6 +122,12 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
 
     // Multi-selection state for batch operations (delete, process, analyze)
     const [checkedFiles, setCheckedFiles] = useState<Set<string>>(new Set());
+
+    // Ticked frames belong to one target. Switching targets clears them, so a
+    // stack, analysis or delete never acts on frames picked for another target.
+    useOnValueChange(selectedTarget, () => {
+        setCheckedFiles(new Set());
+    });
 
     const toggleFile = useCallback((path: string | null) => {
         if (!path) return;

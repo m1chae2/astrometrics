@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import '../imageProcessingDisplay.css';
-import { LoadingSpinner } from '../../common/components/LoadingSpinner';
+import { Button } from '../../common/components/Button';
 
 /**
  * Props for the ImageDetailsManager component.
@@ -16,10 +16,6 @@ export interface ImageDetailsManagerProps {
   setPendingTarget?: (v: string) => void;
   /** Optional callback for triggering a reload of parent state. */
   setReloadKey?: (n: number | ((n: number) => number)) => void;
-  /** RA coordinate string. */
-  ra?: string;
-  /** DEC coordinate string. */
-  dec?: string;
   /** Callback to start a processing operation. */
   onProcess?: () => void;
   /** Callback to cancel a processing operation. */
@@ -46,10 +42,6 @@ export interface ImageDetailsManagerProps {
   hasMultipleFilters?: boolean;
   /** List of filters currently selected. */
   selectedFilters?: string[];
-  /** Callback to open Ingest Frames modal. */
-  onIngest?: () => void;
-  /** Whether ingestion is disabled (e.g. no remote frames). */
-  isIngestDisabled?: boolean;
   /** Callback to open Siril GUI. */
   onOpenSiril?: () => void;
   /** Callback to reindex target. */
@@ -67,8 +59,6 @@ export const ImageDetailsManager: React.FC<ImageDetailsManagerProps> = ({
   catalogId,
   setPendingTarget,
   setReloadKey,
-  ra,
-  dec,
   onProcess,
   onCancel,
   onAddImages,
@@ -82,8 +72,6 @@ export const ImageDetailsManager: React.FC<ImageDetailsManagerProps> = ({
   isAnalyzing,
   hasMultipleFilters,
   selectedFilters,
-  onIngest,
-  isIngestDisabled,
   onOpenSiril,
   onReindex,
   onSetStackedProperty,
@@ -103,88 +91,64 @@ export const ImageDetailsManager: React.FC<ImageDetailsManagerProps> = ({
         <div className="image-details-manager__controls">
           <div className="image-details-manager__toolbar">
             {onAnalyze && !isAnalyzing && (
-              <button
-                className="btn"
-                // REQ: IMG-4.1: The display SHALL provide an "Analyze Target" command.
-                // REQ: IMG-4.3: The display SHALL present analysis results, including HFR and star counts.
+              <Button
                 onClick={() => {
                   if (!isAnalyzing && !isProcessing) {
                     onAnalyze();
                   }
                 }}
                 disabled={hasNoFiles || isProcessing}
-                type="button"
                 title="Analyze Target"
               >
                 Analyze Target
-              </button>
+              </Button>
             )}
 
             {onAnalyzeTemporalVariation && !isAnalyzing && (
-              <button
-                className="btn"
+              <Button
                 onClick={() => {
                   if (!isAnalyzing && !isProcessing) {
                     onAnalyzeTemporalVariation();
                   }
                 }}
                 disabled={isProcessing}
-                type="button"
                 title="Follow how each star's spectrum changes across the raw frames. Analyze the master stack first."
               >
                 Analyze Temporal Variation
-              </button>
+              </Button>
             )}
 
             {isAnalyzing && onCancel && (
-              <button
-                className="btn btn--danger"
+              <Button
+                variant="danger"
                 onClick={onCancel}
-                type="button"
               >
                 Cancel
-              </button>
-            )}
-
-            {onIngest && (
-              <button
-                className="btn"
-                onClick={onIngest}
-                type="button"
-                disabled={isIngestDisabled}
-                title={isIngestDisabled ? "No remote frames found for this target" : "Ingest from Remote/Local"}
-              >
-                Download Frames
-              </button>
+              </Button>
             )}
 
             {onProcess && !isProcessing && (
-              <button
-                className="btn"
+              <Button
                 onClick={onProcess}
-                type="button"
                 disabled={hasMultipleCameras || hasNoFiles || isAnalyzing}
                 title={hasMultipleCameras ? `Mixed Sensors: ${selectedCameras?.join(', ')}` : "Stack the frames"}
               >
                 {hasMultipleCameras ? "⚠️ Stacking requires matching cameras" : "Stack Frames"}
-              </button>
+              </Button>
             )}
             {isProcessing && onCancel && (
-              <button
-                className="btn btn--danger"
+              <Button
+                variant="danger"
                 onClick={onCancel}
-                type="button"
               >
                 Cancel
-              </button>
+              </Button>
             )}
-            <button
-              className="btn"
+            <Button
               onClick={handleOpenSiril}
-              type="button"
             >
               Open Siril
-            </button>
+            </Button>
           </div>
         </div>
       </div>

@@ -12,7 +12,7 @@ Terms are in the [glossary](../Glossary.md).
 
 This paper indexes the code; theory stays in [Wayfinding_Library_Architecture.md](Wayfinding_Library_Architecture.md). Module paths are relative to `wayfindinglib/` unless a path starts with another folder.
 
-The package root is the one supported entry point. It loads its names on first use, so importing it loads no hardware code. Its 7 names are `Wayfinder` (sub-APIs `control`, `planning`, `execution`, `review`), the four sub-API classes, `ObservationSession` and `ObservationPackage`. `exceptions.py` and `reports.py` are public. The rest is private.
+The package root is the one supported entry point. It loads names on first use, so importing it loads no hardware code. Its 8 names are `Wayfinder` (sub-APIs `control`, `planning`, `execution`, `review`), the four sub-API classes, `ObservationSession`, `ObservationPackage` and `FrameEndDetector`. `exceptions.py` and `reports.py` are public. The rest is private.
 
 <!-- impl: wayfindinglib.Wayfinder -->
 <!-- impl: wayfindinglib.api.control.control.ObservatoryControl -->
@@ -64,7 +64,7 @@ Each command in `tasks/control_tasks/hardware_operations.py` starts with `_requi
 | `PLATE_SOLVE_ALIGNMENT` | `sync_mount` |
 | `AUTOGUIDING` | `pulse`, `guide_expose` |
 | `AUTOFOCUS` | `focus_move` |
-| `CAPTURE_ORCHESTRATION` | `set_filter`, `capture_image` |
+| `CAPTURE_ORCHESTRATION` | `set_filter`, `capture_image`, `stop_capture` |
 | `OBSERVATORY_SAFETY` | `open_enclosure`, `close_enclosure` |
 
 `tasks/control_tasks/capability_promotion.py` holds `apply_promotion_decision`, `summarize_divergence_evidence` (Architecture Equation (2)) and `set_all_capabilities`.
@@ -119,7 +119,7 @@ The phase is the combination of states `DelegationPolicy` holds, not a type. `Co
 
 - **Equipment catalog.** `data_access/equipment_catalog_reader.py` builds the `EquipmentCatalog`. `equipment_activation.py` validates an id before recording the active choice. `EquipmentConfiguration` uses `PLATE_SCALE_CONSTANT` (206.265, Architecture Equation (1)).
 - **Site.** `data_access/site_profile_reader.py` reads `[Observatory.Location]`, falls back to `FALLBACK_SITE` (Denver: 39.7392, -104.9903, 1600 m) with a warning, and seeds the default `SiteProfile`. Control uses `hardware_operations.observer_location` (mount first), so the rule holds for planning only.
-- **Storage.** `drivers/butler.py` holds `DiskButler`, the one storage path: `AbstractButler` from `astrometricslib`, one table per dataset type in `wayfinding.db`. `ControlRecordStore` keeps `alignment_attempts`, `guiding_samples` and `polar_alignments`. An alignment attempt from a frame names it in `source_frame`, so the same frame brought in or solved again updates its one row; `remove_repeated_alignment_attempts` reports, and with `apply=True` deletes, rows stored twice.
+- **Storage.** `drivers/butler.py` holds `DiskButler`, the one storage path: `AbstractButler` from `astrometricslib`, one table per dataset type in `wayfinding.db`. `ControlRecordStore` keeps `alignment_attempts`, `guiding_samples` and `polar_alignments`. An alignment attempt from a frame names it in `source_frame`, so the same frame brought in or solved again updates one row; `remove_repeated_alignment_attempts` reports, and with `apply=True` deletes, rows stored twice.
 
 <!-- impl: wayfindinglib.data_access.equipment_catalog_reader.get_equipment_catalog -->
 <!-- impl: wayfindinglib.tasks.control_tasks.equipment_activation.set_active_telescope -->
@@ -166,7 +166,7 @@ Folder: `tasks/execution_tasks/`. Facade: `ObservationExecution` (`api/execution
 - **Queue advancement (Architecture Table 4).** `session_runner.py`: `advance_session`, `abort_session`, `dispose_action`, `ActionDisposition`, `SessionRunnerDependencies` (hardware steps are callables). `queue_runner.py`: `run_queue`. `SafetyAssessment.permits_observing` gates each advance.
 - **Imaging queue.** `imaging_queue.py`: `imaging_dependencies` supplies only a slew and a capture.
 - **Divergence and recovery.** `divergence_recording.py` (`record_divergence`), `meridian_flip.py` (`execute_meridian_flip`, `MeridianFlipSteps`), `fault_recovery.py` (`attempt_recovery`, `recover_fault`), `guide_star_loss_recovery.py` (`attempt_guide_star_recovery`).
-- **Recording.** `session_recorder.py` (`ObservationSessionRecorder`), `post_session_reconciliation.py` (`compute_calibration_stats`, `attach_target_session_ids`, `reconcile_session`).
+- **Recording.** `session_recorder.py` (`ObservationSessionRecorder`), `post_session_reconciliation.py` (`attach_target_session_ids`, `reconcile_session`).
 
 <!-- impl: wayfindinglib.tasks.execution_tasks.session_runner.SessionRunnerDependencies -->
 <!-- impl: wayfindinglib.tasks.execution_tasks.session_runner.ActionDisposition -->
@@ -223,7 +223,12 @@ The `kind` values of `review.query` are `capture`, `guiding`, `sky_coverage`, `r
 
 `Telescope.guiding_protocol` picks the guiding driver (`build_guiding_driver_registry`): `phd2`, `internal` or `simulator`. Only the simulator runs the guide loop. `validate_altitude_limits` and `validate_hour_angle_limits` in `drivers/indi/mount_controller.py` run before each slew. Only the altitude range falls back to `[Observatory.Constraints]`.
 
+When PHD2 runs on the observatory computer (`[Observatory.Guiding] phd2_location`, default `observatory` with the `stellarmate` transfer driver), its event server accepts only local connections, so the backend reaches it through an `SshPortForward` (`drivers/ssh_port_forward.py`) to `phd2_port` (default 4400). A `local` PHD2 uses `localhost:phd2_port`. Only the backend opens a forward (`open_port_forwards=True`); scripts and MCP servers use the mount's guide pulses. Under `setpriv --pdeathsig KILL`, when installed, ssh ends with the app. `StellarMateInterface.port_forward_command` rebuilds the command on each restart. A dead ssh restarts after 5 s (the `PHD2Client` cooldown); the forward counts as up only when its local port accepts a connection; ssh ends a silent link after 45 s (`ServerAliveInterval=15`, `ServerAliveCountMax=3`). These are design estimates, not yet measured.
+
+A failing ``.local`` lookup does not drop a working link. `KnownHostAddress` (`drivers/host_resolver.py`) keeps the last resolved address; while the lookup fails, INDI connects to it and ssh and rsync get `-o HostName=<address> -o HostKeyAlias=<name>`, so `known_hosts` is still checked under the name. A changed host name clears it. A connected INDI client is replaced only when its connection is down or `MAX_CONSECUTIVE_PROBE_FAILURES` (3) handshakes at least 5 s apart fail; a failed lookup never counts. The limit is a design estimate, not yet measured.
+
 <!-- impl: wayfindinglib.drivers.interfaces.registry.build_guiding_driver_registry -->
+<!-- impl: wayfindinglib.drivers.ssh_port_forward.SshPortForward -->
 <!-- impl: wayfindinglib.drivers.indi_interface.IndiInterface -->
 <!-- impl: wayfindinglib.drivers.simulators.indi_simulator.SimulatorIndiInterface -->
 <!-- impl: wayfindinglib.drivers.stellarmate_interface.StellarMateInterface -->
@@ -248,7 +253,7 @@ All in `tasks/control_tasks/` unless noted.
 - **Guiding (Equations (6) and (7)).** `guiding_correction.py`: `compute_guiding_correction` (`GuidingCorrection`), with `_signed_pulse_ms` and the feed-forward terms.
 - **Focus (Equations (8) and (9)).** `focus_correction.py`: `sample_focus_curve`, `compute_focus_correction` returning a `FocusCorrection`.
 - **Calibration.** `guider_calibration_tasks.py`, `focus_model_tasks.py`, `calibration_routines.py` (`run_guider_calibration`, `run_backlash_calibration`; `GuiderCalibrationSteps`).
-- **Centering.** `centering.py`: `center_on`, behind `slew(center=True)`.
+- **Centering.** `centering.py` (`center_on`, behind `slew(center=True)`) and `centering_exposure.py`.
 
 <!-- impl: wayfindinglib.models.session.correction_result.PointingCorrection -->
 <!-- impl: wayfindinglib.models.session.correction_result.GuidingCorrection -->
@@ -256,6 +261,7 @@ All in `tasks/control_tasks/` unless noted.
 <!-- impl: wayfindinglib.tasks.control_tasks.guider_calibration_tasks -->
 <!-- impl: wayfindinglib.tasks.control_tasks.focus_model_tasks -->
 <!-- impl: wayfindinglib.tasks.control_tasks.calibration_routines.GuiderCalibrationSteps -->
+<!-- impl: wayfindinglib.tasks.control_tasks.centering_exposure -->
 
 **Table 7.** Correction settings, all in `CorrectionConfig` (`models/session/correction_config.py`).
 
@@ -313,6 +319,22 @@ All in `tasks/control_tasks/` unless noted.
 
 `guiding_log_ingestion.py` (`fetch_and_ingest_new_guide_logs`) stores the periodic-error and backlash analysis as standing mount state. `pointing_log_ingestion.py` fits a session pointing model and never stores it. `analyze_guiding_telemetry` (`analytics/guiding_spectrum.py`) runs Lomb-Scargle on each guiding stretch. Bulk modes: Section 2.3.
 
+<!-- impl: wayfindinglib.analytics.unguided_mount_error.measure_run -->
+<!-- impl: wayfindinglib.analytics.unguided_mount_error.reconstruct_unguided_error -->
+<!-- impl: wayfindinglib.tasks.control_tasks.mount_error_tasks.measure_unguided_mount_error -->
+<!-- impl: wayfindinglib.tasks.control_tasks.mount_error_tasks.measure_guiding_spectrum -->
+<!-- impl: wayfindinglib.tasks.control_tasks.focus_model_tasks.measure_focus_temperature_coefficient -->
+<!-- impl: wayfindinglib.tasks.control_tasks.sky_rate_tasks.get_sky_rate_prediction -->
+<!-- impl: wayfindinglib.drivers.phd2.guide_log_parser.parse_guide_log_file -->
+
+<!-- impl: wayfindinglib.analytics.unguided_mount_error.MINIMUM_PERIOD_SECONDS -->
+<!-- impl: wayfindinglib.analytics.unguided_mount_error.MAXIMUM_PERIOD_SECONDS -->
+<!-- impl: wayfindinglib.analytics.unguided_mount_error.MINIMUM_FIT_SAMPLES -->
+<!-- impl: wayfindinglib.analytics.unguided_mount_error.MINIMUM_AMPLITUDE_SIGNIFICANCE -->
+<!-- impl: wayfindinglib.tasks.control_tasks.focus_model_tasks.MINIMUM_FOCUS_PAIRS -->
+<!-- impl: wayfindinglib.tasks.control_tasks.focus_model_tasks.MINIMUM_TEMPERATURE_SPAN_C -->
+<!-- impl: wayfindinglib.tasks.control_tasks.focus_model_tasks.MINIMUM_FILTER_SHARE_PAIRS -->
+
 <!-- impl: wayfindinglib.tasks.control_tasks.guiding_log_ingestion.fetch_and_ingest_new_guide_logs -->
 <!-- impl: wayfindinglib.analytics.guiding_spectrum.SEGMENT_BREAK_SECONDS -->
 <!-- impl: wayfindinglib.analytics.guiding_spectrum.MINIMUM_CYCLES -->
@@ -363,7 +385,7 @@ All in `tasks/control_tasks/` unless noted.
 | Fewest frames behind a star width; sessions behind a baseline | 20; 5 | `MINIMUM_IMAGE_QUALITY_SAMPLES`, `MINIMUM_BASELINE_SESSIONS` | One night of one target; a spread of fewer than five values is unstable. |
 | Fewest samples for a session; for a run's error | 100; 20 | `MINIMUM_SAMPLES_PER_SESSION`, `MINIMUM_SAMPLES_PER_RUN` | About six minutes of guiding. |
 | Guide-scale agreement | 2% | `GUIDE_SCALE_AGREEMENT_FRACTION` | Above log rounding, below a real optics change. |
-| Excursion size | larger of 5 × the guiding-error limit and one guide pixel | `EXCURSION_SIGMA_MULTIPLE` | A 5σ event is very rare for Gaussian noise. |
+| Excursion size | larger of 5 × the guiding-error limit and one guide pixel | `EXCURSION_SIGMA_MULTIPLE` | A 5σ event is rare for Gaussian noise. |
 | Percentile for fraction limits | 90th (nearest rank) | `BASELINE_FRACTION_PERCENTILE` | Most nights have none. |
 | Shortest run for a Dec correction rate | 600 s | `MINIMUM_RUN_SECONDS_FOR_CORRECTION_RATE` | Longer than a worm period (8 to 10 min); not measured. |
 | Guide-star brightness limit | earlier-night median × exp(-3 × robust log spread) | `guide_star_mass_low_limit` | Same rule as the SNR limit. |
@@ -393,7 +415,7 @@ All in `tasks/control_tasks/` unless noted.
 
 The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (Architecture Section 6.11). Planning and Control share the vocabulary in `models/quality/`; the judging code is in `analytics/result_quality/` (see its README). Entry points: `review.get_advisory` (kinds `quality`, `result`), `planning.get_tonight_advice`, `planning.get_calibration_advice` and `review.query` (kinds `night_quality`, `nights`, `target_changes`). A rule's confidence is its register entry's status label (see [WAY-01](validation/wayfinding.md#way-01)).
 
-Roles (user decision, 2026-11-01; `documentation/plans/VERDICT_REMOVAL_PLAN.md`): all gates and measurements stay in `astrometricslib`; every reading of good or bad is a suggestion in `wayfindinglib`. These rules compare a stored number with a copy of the library's limit, and a test pins each copy: `stack_rejected_fraction_high` ([STK-24](validation/stacking.md#stk-24)) and `stack_sharpness_poor` ([STK-25](validation/stacking.md#stk-25)) in `rules.py` and `judge_results.py`; `spectral_type_poor_match`, `spectral_class_ambiguous` and `spectral_subtype_ambiguous` ([SPE-16, SPE-18](validation/spectroscopy.md#spe-18)) in `star_result_rules.py`. `scripts/shadow_compare_verdicts.py` lists where the rules and the stored flags disagree.
+Roles (decided 2026-11-01, issue #97): all gates and measurements stay in `astrometricslib`; every reading of good or bad is a suggestion in `wayfindinglib`. These rules compare a stored number with a copy of the library's limit, and a test pins each copy: `stack_rejected_fraction_high` ([STK-24](validation/stacking.md#stk-24)) and `stack_sharpness_poor` ([STK-25](validation/stacking.md#stk-25)) in `rules.py` and `judge_results.py`; `spectral_type_poor_match`, `spectral_class_ambiguous` and `spectral_subtype_ambiguous` ([SPE-16, SPE-18](validation/spectroscopy.md#spe-18)) in `star_result_rules.py`. `scripts/shadow_compare_verdicts.py` lists where the rules and the stored flags disagree.
 
 **Table 12.** Where each part of the judgment lives. Paths are relative to `wayfindinglib/`. Register entries hold the evidence; WAY-D rows hold Table 13's settings.
 

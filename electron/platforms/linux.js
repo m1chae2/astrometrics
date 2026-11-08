@@ -131,26 +131,6 @@ export class LinuxPlatform extends BasePlatform {
   }
 
   /**
-   * On Wayland, compositor abstracts coordinate spaces; return null to let
-   * window manager handle placement.
-   *
-   * @returns {null}
-   */
-  getTrayPopoverPosition() {
-    return null;
-  }
-
-  /**
-   * On Linux/Wayland, focus transition events are async and drop clicks;
-   * blur auto-dismissal is disabled in favor of explicit dismissal.
-   *
-   * @returns {boolean}
-   */
-  shouldDismissTrayOnBlur() {
-    return false;
-  }
-
-  /**
    * Kills the backend process and its child processes (e.g. Uvicorn, Python pools, INDI)
    * to ensure no orphaned processes leak CPU or drain laptop battery.
    *

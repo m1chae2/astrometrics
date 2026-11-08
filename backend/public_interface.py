@@ -11,6 +11,11 @@ It has two parts:
 * `ROUTES`, the few HTTP and WebSocket routes for what RPC cannot carry:
   the event and terminal WebSockets, the image and FITS file folders, the
   Matplotlib figure pages, and the start-up routes.
+* The launcher contract: the names and the choice file that a program which
+  starts the backend (a launcher, such as ``simulator.launch``) shares with
+  it. The code is in `backend.launch_contract`, which imports only the
+  standard library; this module re-exports it, so a launcher imports
+  everything it needs from here and starts none of the app.
 
 The RPC router refuses to register a method that is not in `RPC_METHODS`,
 and a test checks that every declared method has a handler. Another test
@@ -23,11 +28,65 @@ and route paths, so the app cannot call or wait for anything else.
 from dataclasses import dataclass
 from typing import Literal
 
+from backend.launch_contract import (
+    ACTIVE_SOURCE_VARIABLE,
+    CHOICE_FILE_NAME,
+    LAUNCH_ERROR_VARIABLE,
+    LAUNCH_NOTES_VARIABLE,
+    LAUNCHER_VARIABLE,
+    MISSING_PROGRAMS_VARIABLE,
+    NO_TELESCOPE,
+    REAL,
+    REAL_CONFIG_HOME_VARIABLE,
+    REAL_CONFIG_PATH_VARIABLE,
+    REAL_DATA_HOME_VARIABLE,
+    REAL_STATE_HOME_VARIABLE,
+    RESTART_EXIT_CODE,
+    SIMULATED,
+    SOURCES,
+    SourceChoice,
+    choice_file_path,
+    normalize_source,
+    read_choice,
+    write_choice,
+)
+
+__all__ = [
+    "ACTIVE_SOURCE_VARIABLE",
+    "CHOICE_FILE_NAME",
+    "LAUNCHER_VARIABLE",
+    "LAUNCH_ERROR_VARIABLE",
+    "LAUNCH_NOTES_VARIABLE",
+    "MISSING_PROGRAMS_VARIABLE",
+    "NO_TELESCOPE",
+    "REAL",
+    "REAL_CONFIG_HOME_VARIABLE",
+    "REAL_CONFIG_PATH_VARIABLE",
+    "REAL_DATA_HOME_VARIABLE",
+    "REAL_STATE_HOME_VARIABLE",
+    "RESTART_EXIT_CODE",
+    "ROUTES",
+    "RPC_METHODS",
+    "SIMULATED",
+    "SOURCES",
+    "UI_EVENTS",
+    "Route",
+    "RouteKind",
+    "SourceChoice",
+    "UiEvent",
+    "choice_file_path",
+    "normalize_source",
+    "read_choice",
+    "route_path",
+    "write_choice",
+]
+
 #: Every RPC method the backend serves, grouped by the part of the app that
 #: uses it.
 RPC_METHODS: tuple[str, ...] = (
     # System, settings and notifications
     "system:health",
+    "system:static_mounts",
     "system:frontend_log",
     "system:completions",
     "system:get_config",
@@ -104,8 +163,12 @@ RPC_METHODS: tuple[str, ...] = (
     "observatory:set_active_camera",
     "observatory:get_active_telescope",
     "observatory:set_active_telescope",
+    "observatory:get_source",
+    "observatory:set_source",
     "observatory:enter_monitoring_mode",
     "observatory:enter_controller_mode",
+    "observatory:record_guider_calibration",
+    "observatory:record_focus_model",
     # Ingestion of new frames
     "ingestion:start",
     "ingestion:status",
@@ -192,6 +255,7 @@ RPC_METHODS: tuple[str, ...] = (
     # Camera capture
     "imaging:capture",
     "imaging:get_active_jobs",
+    "imaging:stop_capture",
     # Images and FITS files
     "images:get_target_frame",
     "images:get_light_frame_data",
@@ -278,6 +342,23 @@ UI_EVENTS: tuple[UiEvent, ...] = (
         "quality:measured",
         "A frame measurement job stored new quality rows. The payload is "
         "{targetId, framesMeasured, rowsWritten, observingNightIds}.",
+    ),
+    UiEvent(
+        "library:frames_updated",
+        "A frame sync (the Download Frames button, an automatic download or an AI tool) copied new frames "
+        "into the library, before they are measured. The payload is "
+        "{targetId, framesAdded}.",
+    ),
+    UiEvent(
+        "calibration:measured",
+        "The background measuring of new dark and bias frames (it starts after an ingest or a calibration "
+        "folder sync) has ended. The payload is empty. The calibration library reads the set health again.",
+    ),
+    UiEvent(
+        "library:guiding_updated",
+        "A guide log sync (the sync button or the automatic download) stored guiding samples. The "
+        "payload is {nightIds, samplesStored}, where nightIds lists the observing nights the samples "
+        "belong to. Past-night guiding views read again.",
     ),
     UiEvent(
         "plan:changed",

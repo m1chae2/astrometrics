@@ -16,6 +16,7 @@ import { safeParse, formatRA, formatDec, formatNumber } from '../utils/coordinat
 import { formatCatalogMagnitude } from '../layers/StarOverlay';
 import { navigateToElement } from '../../common/utils/displayCoordinator';
 import { useTargetPackage } from '../hooks/useTargetPackage';
+import { Button } from '../../common/components/Button';
 
 /**
  * Props for PlanetariumInfoCard.
@@ -132,9 +133,9 @@ export const PlanetariumInfoCard: React.FC<Props> = ({
             </div>
           </div>
         </div>
-        <button className="planetarium-info-card__close" onClick={onClose} aria-label="Close panel">
+        <Button variant="ghost" size="square" className="planetarium-info-card__close" onClick={onClose} aria-label="Close panel">
           &times;
-        </button>
+        </Button>
       </div>
 
       <div className="planetarium-info-card__content">
@@ -175,30 +176,29 @@ export const PlanetariumInfoCard: React.FC<Props> = ({
           </tbody>
         </table>
 
-        <button
-          type="button"
+        <Button
           className="planetarium-info-card__add-package-btn"
           onClick={() => void addToPackage()}
           disabled={isWorking}
           aria-disabled={isWorking}
         >
           Add to observation package
-        </button>
+        </Button>
         {refusal !== null && (
           <div role="alert" className="planetarium-info-card__refusal">
             {refusal}
-            <button type="button" onClick={dismissRefusal}>Dismiss</button>
+            <Button variant="secondary" size="small" onClick={dismissRefusal}>Dismiss</Button>
           </div>
         )}
 
         {!isTarget && (source.hasSpectra || source.hasPhotometry) && (
-          <button
-            type="button"
+          <Button
+            variant="secondary"
             className="planetarium-info-card__view-in-astronomy-btn"
             onClick={() => viewInAstronomyManager(source)}
           >
             View in Astronomy Manager
-          </button>
+          </Button>
         )}
       </div>
     </div>

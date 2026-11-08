@@ -5,8 +5,11 @@ questions about recorded observing nights (the capture, guiding and
 sky-coverage analyses, findings that recur, Ekos session records, guiding
 runs and the pointing model), reports how the session in progress is
 going, groups plate-solve alignment attempts into one session per target,
-matches each light frame to the guide error during its exposure, and works
-out the performance limits of the active equipment. Only
+matches each light frame to the guide error during its exposure, works
+out the performance limits of the active equipment, and measures what the
+recorded nights say about the equipment itself: the mount's unguided error,
+the guiding spectrum, the focus-versus-temperature slope and the sky
+background. Only
 `save_ekos_session_context` writes. The analyses live in
 `tasks.control_tasks.night_analysis` and `night_history`.
 
@@ -26,6 +29,7 @@ from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from astrometricslib.jobs import background_job, get_current_job, registered_job
 from wayfindinglib.analytics.alignment_sessions import group_alignment_attempts
 from wayfindinglib.api.control.context import ControlChild
+from wayfindinglib.models.equipment_and_site.focus_temperature_fit import FocusSource, FocusTemperatureFit
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
 from wayfindinglib.models.planning.target_report import TargetDatasetReport
 from wayfindinglib.models.quality.statements import TargetStatement
@@ -36,11 +40,14 @@ from wayfindinglib.models.session.live_session_status import LiveSessionStatus
 from wayfindinglib.models.session.night_list import NightListEntry, TargetChange
 from wayfindinglib.models.session.night_quality import NightQuality
 from wayfindinglib.models.session.review_query import ReviewQueryResult
+from wayfindinglib.models.session.sky_rate_prediction import SkyRatePrediction
 from wayfindinglib.models.session.telemetry import (
     AlignmentAttempt,
     AlignmentSessionsResult,
+    GuidingSpectrumAnalysis,
     PolarAlignmentStatus,
 )
+from wayfindinglib.models.session.unguided_mount_error import UnguidedMountError
 
 if TYPE_CHECKING:
     from wayfindinglib.api.control.control import ObservatoryControl
@@ -530,7 +537,10 @@ class ObservationReview(ControlChild):
         )
 
     def get_performance_envelope(
-        self, blur_tolerance_fraction: float | None = None, before_night: str | None = None
+        self,
+        blur_tolerance_fraction: float | None = None,
+        before_night: str | None = None,
+        exclude_nights: list[str] | None = None,
     ) -> PerformanceEnvelope | None:
         """Work out the performance limits for the equipment in use now.
 
@@ -549,6 +559,11 @@ class ObservationReview(ControlChild):
             Use only this equipment's nights earlier than this one (such as
             ``"2026-09-24"``) for the baseline limits. Every recorded night
             when omitted.
+        exclude_nights : `list` [`str`], optional
+            Nights to leave out of every source of the limits (guiding,
+            session records, frames and plate solves), such as
+            ``["2026-09-24"]``. Use it to fit the equipment without one
+            night, then compare that night with the result.
 
         Returns
         -------
@@ -563,12 +578,165 @@ class ObservationReview(ControlChild):
 
         contexts, runs = night_analysis.recorded_sessions(self._context)
         envelope = night_analysis.performance_envelope(
-            self._context, blur_tolerance_fraction, before_night, contexts, runs, {}
+            self._context,
+            blur_tolerance_fraction,
+            before_night,
+            contexts,
+            runs,
+            {},
+            exclude_nights=exclude_nights,
         )
         if envelope is None:
             return None
-        risk = performance_envelope_tasks.tracking_risk_map(self._context)
+        risk = performance_envelope_tasks.tracking_risk_map(self._context, exclude_nights)
         return envelope.model_copy(update={"tracking_risk": risk})
+
+    def measure_unguided_mount_error(
+        self, session_id: str | None = None, exclude_nights: list[str] | None = None
+    ) -> UnguidedMountError:
+        """Measure the mount's own error from the recorded guide logs.
+
+        A guide log holds the error the guide star showed and every
+        correction the guider sent. Adding the corrections back (signed pulse
+        length times the guide rate) gives the error the mount would have made
+        unguided. This fits, for each guiding run, the mount's periodic error
+        in right ascension (period, amplitude and phase, each with its
+        uncertainty) and, on both axes, the slow drift and the random jitter
+        that remain. It then pools the runs. Nothing is stored.
+
+        The numbers are what a simulated mount needs: amplitudes are zero to
+        peak in arcseconds on the sky, periods are in seconds, phases are in
+        radians, drifts are in arcseconds per minute. The size of the
+        reconstructed error rests on the guide rate the log states (PHD2
+        measures it at calibration). The random terms include the guide
+        star's measurement noise, so they are upper bounds on the mount's
+        own jitter.
+
+        Parameters
+        ----------
+        session_id : `str`, optional
+            Measure only this observing night, such as ``"2026-09-24"``.
+            Every recorded night when omitted.
+        exclude_nights : `list` [`str`], optional
+            Nights to leave out, for a leave-one-out check.
+
+        Returns
+        -------
+        result : `UnguidedMountError`
+            ``runs`` (one entry per guiding run with samples and guide
+            rates), ``summary`` (the pooled repeating error and the pooled
+            drift and random terms) and ``excluded_nights``. A run too short
+            or too sparse for a repeating-error fit says so in its ``notes``.
+        """
+        from wayfindinglib.tasks.control_tasks import mount_error_tasks
+
+        return mount_error_tasks.measure_unguided_mount_error(self._context, session_id, exclude_nights)
+
+    def measure_guiding_spectrum(
+        self, session_id: str | None = None, exclude_nights: list[str] | None = None
+    ) -> GuidingSpectrumAnalysis:
+        """Work out the guiding spectrum, storing nothing.
+
+        This is the analysis `control.guiding.refit_spectrum` runs, without
+        saving the result as the mount's periodic error model. It shows what
+        the guider left uncorrected, not the mount's unguided error (use
+        `measure_unguided_mount_error` for that).
+
+        Parameters
+        ----------
+        session_id : `str`, optional
+            Use only this observing night. Every recorded night when omitted.
+        exclude_nights : `list` [`str`], optional
+            Nights to leave out, for a leave-one-out check.
+
+        Returns
+        -------
+        analysis : `GuidingSpectrumAnalysis`
+            The repeating-error size, the dominant periods and the Dec
+            backlash estimate. Its ``message`` says when there were too few
+            samples.
+        """
+        from wayfindinglib.tasks.control_tasks import mount_error_tasks
+
+        return mount_error_tasks.measure_guiding_spectrum(self._context, session_id, exclude_nights)
+
+    def measure_focus_temperature_coefficient(
+        self, exclude_nights: list[str] | None = None, source: FocusSource = "both"
+    ) -> FocusTemperatureFit:
+        """Fit how the best focus moves with temperature.
+
+        Uses the active telescope and camera's own history: the position Ekos
+        chose in each recorded autofocus run, and the focuser position and
+        temperature in the light-frame headers each time the position
+        changed. Each filter gets its own offset and all share one slope.
+        Nothing is stored.
+
+        Parameters
+        ----------
+        exclude_nights : `list` [`str`], optional
+            Nights to leave out, for a leave-one-out check.
+        source : `str`, optional
+            ``"autofocus_runs"``, ``"frames"`` or ``"both"`` (the default: a
+            night with autofocus runs uses them, and frame headers fill the
+            other nights).
+
+        Returns
+        -------
+        fit : `FocusTemperatureFit`
+            The slope in focuser steps per degree Celsius with its
+            uncertainty, the pairs and nights used, and the temperature range
+            it covers. With too little history the slope is `None` and
+            ``message`` says why. An unknown `source` raises
+            `InvalidArgumentError`.
+        """
+        from wayfindinglib.tasks.control_tasks import focus_model_tasks
+
+        return focus_model_tasks.measure_focus_temperature_coefficient(self._context, exclude_nights, source)
+
+    def get_sky_rate_prediction(
+        self,
+        epoch_seconds: float,
+        ra_deg: float,
+        dec_deg: float,
+        filter_name: str | None = None,
+        exclude_nights: list[str] | None = None,
+    ) -> SkyRatePrediction:
+        """Predict the sky background rate for a pointing and a time.
+
+        Uses the sky model fitted to the sky rates of the active telescope
+        and camera's own frames: a dark-sky level, an airmass term and a
+        Moon term. The prediction is a model, labeled with its error on
+        nights it was not fitted to. Nothing is stored.
+
+        Parameters
+        ----------
+        epoch_seconds : `float`
+            The time, in seconds since the Unix epoch.
+        ra_deg : `float`
+            Right ascension the telescope points at, in degrees.
+        dec_deg : `float`
+            Declination the telescope points at, in degrees.
+        filter_name : `str`, optional
+            The filter. The setting with the most fitted nights when omitted.
+        exclude_nights : `list` [`str`], optional
+            Nights whose frames are left out of the model, for a
+            leave-one-out check.
+
+        Returns
+        -------
+        prediction : `SkyRatePrediction`
+            The rate in electrons per second per pixel and in ADU per second
+            per pixel (through the camera profile's gain), the Moon-free
+            rate, and the model's error. When there is no model, or the
+            target is below the horizon, the rates are `None` and
+            ``message`` says why. A declination outside -90 to 90 degrees
+            raises `InvalidArgumentError`.
+        """
+        from wayfindinglib.tasks.control_tasks import sky_rate_tasks
+
+        return sky_rate_tasks.get_sky_rate_prediction(
+            self._context, epoch_seconds, ra_deg, dec_deg, filter_name, exclude_nights
+        )
 
     def get_advisory(
         self,

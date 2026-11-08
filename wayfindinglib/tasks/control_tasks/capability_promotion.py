@@ -177,6 +177,7 @@ def set_all_capabilities(
     evidence_note: str = "",
     has_guider_calibration: bool = False,
     has_focus_model: bool = False,
+    shadow_first: bool = False,
 ) -> BulkDelegationOutcome:
     """Move every capability toward `target_state`, one at a time.
 
@@ -206,6 +207,12 @@ def set_all_capabilities(
         A human-readable note recorded on every successful transition.
     has_guider_calibration, has_focus_model : `bool`, optional
         Passed through to each capability's validation.
+    shadow_first : `bool`, optional
+        With `AUTHORITATIVE` as the target, first move each correction
+        capability that is still `DELEGATED` to `SHADOWED`, the step the
+        rules require before `AUTHORITATIVE`. The rules are not relaxed: a
+        capability that still fails (for example a missing calibration)
+        is rejected with that reason.
 
     Returns
     -------
@@ -213,6 +220,26 @@ def set_all_capabilities(
         Which capabilities reached `target_state`, and why any that
         didn't were rejected.
     """
+    shadow_errors: dict[ObservatoryCapability, str] = {}
+    if shadow_first and target_state == DelegationState.AUTHORITATIVE:
+        for capability in _AUTHORITATIVE_ORDER:
+            if capability in (ObservatoryCapability.OBSERVATORY_SAFETY, ObservatoryCapability.MOUNT_CONTROL):
+                continue
+            if capability == ObservatoryCapability.CAPTURE_ORCHESTRATION:
+                continue
+            if get_delegation_policy(butler).state_for(capability) != DelegationState.DELEGATED:
+                continue
+            try:
+                apply_promotion_decision(
+                    butler,
+                    capability,
+                    DelegationState.SHADOWED,
+                    evidence_note=evidence_note,
+                    has_guider_calibration=has_guider_calibration,
+                    has_focus_model=has_focus_model,
+                )
+            except DelegationPolicyValidationError as validation_error:
+                shadow_errors[capability] = str(validation_error)
     order = _AUTHORITATIVE_ORDER if target_state == DelegationState.AUTHORITATIVE else _DELEGATED_ORDER
 
     applied: dict[ObservatoryCapability, DelegationState] = {}
@@ -229,6 +256,6 @@ def set_all_capabilities(
             )
             applied[capability] = policy.state_for(capability)
         except DelegationPolicyValidationError as validation_error:
-            rejected[capability] = str(validation_error)
+            rejected[capability] = shadow_errors.get(capability, str(validation_error))
 
     return BulkDelegationOutcome(applied=applied, rejected=rejected)

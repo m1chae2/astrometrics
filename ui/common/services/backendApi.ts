@@ -36,6 +36,7 @@ import {
 
 import {
     PlanetariumSource,
+    CatalogSourcesResult,
     PlanetariumTarget,
     ObserverLocation,
     ConstellationLineSegment
@@ -153,7 +154,7 @@ export interface ActionRegistry {
     // Targets
     "target:list": { payload: Record<string, never>; response: TargetObject[] };
     "target:get": { payload: { target_id: string }; response: TargetObject | null };
-    "target:get_targets": { payload: { target_id?: string }; response: TargetObject[] | TargetObject | null };
+    "target:get_targets": { payload: { target_id?: string; detail?: "full" | "summary" }; response: TargetObject[] | TargetObject | null };
     "target:create": { payload: { target_id: string; ra?: string; dec?: string }; response: TargetObject | null };
     "target:update": { payload: { target_id: string; updates: Partial<TargetObject> }; response: TargetObject | null };
     "target:delete": { payload: { target_id: string }; response: boolean };
@@ -176,7 +177,7 @@ export interface ActionRegistry {
     "astronomy:delete": { payload: { star_id: string }; response: boolean };
     "astronomy:save": { payload: Record<string, never>; response: void };
     "astronomy:get_stellar_objects": { payload: { target_id?: string }; response: Spectrum[] };
-    "astronomy:get_overlay_stars": { payload: { target_id: string; limit?: number }; response: any[] };
+    "astronomy:get_overlay_stars": { payload: { target_id: string; limit?: number; image_path?: string }; response: { stars: any[]; reason: string | null } };
     "astronomy:target_data_availability": { payload: Record<string, never>; response: Record<string, { hasSpectra: boolean; hasPhotometry: boolean; starCount: number }> };
     "astronomy:spectral_class_summary": { payload: Record<string, never>; response: { spectralClass: string; label: string; count: number }[] };
     "astronomy:stars_by_spectral_class": { payload: { spectral_class: string }; response: { id: string; name: string; ra: number | null; dec: number | null; magnitude: number | null; spectralType: string; hasSpectra: boolean; hasPhotometry: boolean; selfDeterminedSpectralTypeRms: number | null }[] };
@@ -184,7 +185,7 @@ export interface ActionRegistry {
     "planetarium:get_targets": { payload: Record<string, never>; response: PlanetariumTarget[] };
     "planetarium:get_visibility": { payload: { objects: Array<{ id: string; type?: string }>; time?: string; end?: string; include?: string[] }; response: ObjectVisibility[] };
     "planetarium:get_observer_location": { payload: Record<string, never>; response: ObserverLocation };
-    "planetarium:get_catalog_sources": { payload: { ra: number; dec: number; radius: number; enabled_drivers: string[]; limiting_magnitude?: number }; response: PlanetariumSource[] };
+    "planetarium:get_catalog_sources": { payload: { ra: number; dec: number; radius: number; enabled_drivers: string[]; limiting_magnitude?: number }; response: CatalogSourcesResult };
     "planetarium:get_deep_catalog_status": { payload: Record<string, never>; response: DeepCatalogStatus };
     "planetarium:list_catalog_drivers": { payload: Record<string, never>; response: Array<{ driver_name: string; display_name: string; maximum_query_radius_degrees: number }> };
     "planetarium:get_constellation_lines": { payload: Record<string, never>; response: ConstellationLineSegment[] };
@@ -200,18 +201,52 @@ export interface ActionRegistry {
         payload: { capability: string; new_state: string; evidence_note?: string };
         response: Record<string, any>;
     };
+    "observatory:get_source": { payload: Record<string, never>; response: import('./observatoryService').ObservatorySourceState };
+    "observatory:set_source": {
+        payload: { source: string };
+        response: { restarting: boolean; source: string };
+    };
     "observatory:enter_monitoring_mode": {
         payload: { evidence_note?: string };
         response: BulkDelegationOutcome;
     };
     "observatory:enter_controller_mode": {
-        payload: { evidence_note?: string };
+        payload: { evidence_note?: string; shadow_first?: boolean };
         response: BulkDelegationOutcome;
+    };
+    "observatory:record_guider_calibration": {
+        payload: {
+            calibration_id: string;
+            camera_id: string;
+            telescope_id: string;
+            arcsec_per_pixel: number;
+            camera_angle_deg: number;
+            ra_rate_arcsec_per_sec: number;
+            dec_rate_arcsec_per_sec: number;
+            source_note: string;
+            calibrated_at?: string;
+        };
+        response: Record<string, unknown>;
+    };
+    "observatory:record_focus_model": {
+        payload: {
+            focus_model_id: string;
+            camera_id: string;
+            telescope_id: string;
+            backlash_steps: number;
+            approach_direction: "inward" | "outward";
+            source_note: string;
+            thermal_coefficient_steps_per_c?: number;
+            filter_offsets?: Record<string, number>;
+            calibrated_at?: string;
+        };
+        response: Record<string, unknown>;
     };
 
     // System
     "system:save": { payload: Record<string, never>; response: void };
     "system:health": { payload: Record<string, never>; response: SystemHealth };
+    "system:static_mounts": { payload: Record<string, never>; response: StaticMount[] };
     "system:completions": { payload: { text: string }; response: string[] };
     "system:get_config": { payload: Record<string, never>; response: Record<string, Record<string, any>> };
     "system:save_config": { payload: { config: Record<string, Record<string, any>> }; response: boolean };
@@ -287,7 +322,7 @@ export interface ActionRegistry {
     // Ingestion
     "ingestion:start": { payload: { type: 'local' | 'remote'; sourcePath: string; targetName?: string; telescope?: string; selectedFiles?: string[] }; response: { jobId: string } };
     "ingestion:status": { payload: { job_id: string }; response: { status: string; progress: string; logs: string[] } };
-    "ingestion:scan": { payload: Record<string, never>; response: { folders: string[] } };
+    "ingestion:scan": { payload: Record<string, never>; response: { folders: string[]; reachable?: boolean } };
     "ingestion:stats": { payload: { folder: string }; response: { fileCount: number; resolvedFolder?: string } };
     "ingestion:list_files": { payload: { folder: string }; response: { files: string[]; resolvedFolder?: string } };
     "ingestion:reindex": { payload: Record<string, never>; response: string };
@@ -297,7 +332,7 @@ export interface ActionRegistry {
     "processing:siril_open": { payload: { target_id: string }; response: boolean };
     "processing:cancel": { payload: { target_id: string }; response: ProcessStatus | null };
     "processing:status": { payload: { target_id: string }; response: { processing: boolean } };
-    "processing:list_jobs": { payload: { target_id?: string; job_type?: string; limit?: number }; response: ProcessingJob[] };
+    "processing:list_jobs": { payload: { target_id?: string; job_type?: string; limit?: number; before?: string }; response: ProcessingJob[] };
     "processing:get_job": { payload: { job_id: string }; response: ProcessingJob | null };
     "processing:delete_job": { payload: { job_id: string }; response: boolean };
     "processing:jobs_for_target": { payload: { target_id: string }; response: ProcessingJob[] };
@@ -336,6 +371,7 @@ export interface ActionRegistry {
     // a call typed against it failed on a missing target_id.
     "imaging:capture": { payload: { target_id: string; exposure_seconds: number; count: number; image_type?: string; filter_name?: string; delay_seconds?: number; dither?: boolean }; response: string };
     "imaging:get_active_jobs": { payload: Record<string, never>; response: ProcessingJob[] };
+    "imaging:stop_capture": { payload: Record<string, never>; response: boolean };
 
     // Images
     "images:get_target_frame": { payload: { target_id: string; iso: string; exposure: string; index?: number }; response: string };
@@ -423,9 +459,21 @@ export type ActionRegistryMatchesBackend = MustBeTrue<SameKeys<keyof ActionRegis
 
 /**
  * Resolves the backend base URL according to defined priority rules.
+ *
+ * Priority: the address Electron's main process gave the preload bridge (it knows the real port),
+ * then the `backendUrl` override in local storage, then the `BACKEND_URL` and `VITE_BACKEND_URL`
+ * variables, then the default port.
  * @return The base URL without a trailing slash.
  */
 export function getBackendBase(): string {
+    // The address Electron's main process gave the preload script (from ASTROMETRICS_PORT).
+    try {
+        const electronBase = typeof window !== 'undefined' ? window.astrometrics?.backend?.baseUrl : '';
+        if (electronBase) return electronBase.replace(/\/$/, '');
+    } catch {
+        // Ignore errors reading the bridge.
+    }
+
     try {
         const stored =
             typeof window !== 'undefined'
@@ -456,6 +504,7 @@ export function getBackendBase(): string {
         return String(import.meta.env.VITE_BACKEND_URL).replace(/\/$/, '');
     }
 
+    // Plain browser or dev server with no Electron bridge: the backend's default port.
     return 'http://127.0.0.1:5000';
 }
 
@@ -684,6 +733,7 @@ async function executeRpcAttempt<A extends keyof ActionRegistry>(
             });
         }
 
+        backendReadySeen = true;
         if (body.result && body.result.status === 'success') {
             return body.result.data;
         }
@@ -701,6 +751,83 @@ async function executeRpcAttempt<A extends keyof ActionRegistry>(
             clearTimeout(timeoutId);
         }
     }
+}
+
+/** True while the backend is restarting on purpose (an observatory source switch). */
+let backendRestarting = false;
+
+/**
+ * Tells the client the backend is restarting on purpose, so failed calls show no toasts.
+ * It stays set until the page reloads, or until a caller clears it after a failed restart.
+ *
+ * @param {boolean} restarting - True when a restart starts, false to clear it.
+ */
+export function setBackendRestarting(restarting: boolean): void {
+    backendRestarting = restarting;
+}
+
+/**
+ * Says whether the backend is restarting on purpose, so callers can treat a lost connection as expected.
+ *
+ * @return {boolean} True between {@link setBackendRestarting}(true) and the page reload or a clear.
+ */
+export function isBackendRestarting(): boolean {
+    return backendRestarting;
+}
+
+/** Longest the readiness gate waits for the backend to finish starting, in milliseconds. */
+export const BACKEND_READY_TIMEOUT_MS = 60000;
+
+/** Pause between readiness checks while the backend is still starting, in milliseconds. */
+const BACKEND_READY_POLL_MS = 500;
+
+/** The one readiness wait that every call made during start-up shares. */
+let backendReadyPromise: Promise<void> | null = null;
+
+/** True once the backend has answered `/api/ready` with success during this page load. */
+let backendReadySeen = false;
+
+/**
+ * Forgets that the backend was ready, so the next call waits again.
+ * Used by tests and after a deliberate backend restart.
+ */
+export function resetBackendReadiness(): void {
+    backendReadyPromise = null;
+    backendReadySeen = false;
+}
+
+/**
+ * Waits until the backend says it is ready (`/api/ready`), or until a timeout.
+ *
+ * Every call made while the app starts shares one wait, so nothing is sent
+ * before the backend can answer. It never rejects: after the timeout the call
+ * goes ahead and fails (or succeeds) on its own. Only the Electron app uses the
+ * gate, because only there does the window open before the backend is up.
+ *
+ * @returns {Promise<void>} Resolves when the backend is ready or the wait times out.
+ */
+export function waitForBackendReady(): Promise<void> {
+    if (backendReadySeen || typeof window === 'undefined' || !window.astrometrics?.backend?.baseUrl) {
+        return Promise.resolve();
+    }
+    if (!backendReadyPromise) {
+        backendReadyPromise = (async () => {
+            const deadline = Date.now() + BACKEND_READY_TIMEOUT_MS;
+            while (Date.now() < deadline) {
+                try {
+                    const response = await fetch(getBackendUrl(BACKEND_ROUTES.ready));
+                    if (response.ok) {
+                        backendReadySeen = true;
+                        return;
+                    }
+                } catch {
+                    // The backend is not listening yet; try again below.
+                }
+                await new Promise((resolve) => setTimeout(resolve, BACKEND_READY_POLL_MS));
+            }
+        })();
+    }
+    return backendReadyPromise;
 }
 
 /**
@@ -721,6 +848,8 @@ async function callBackendInternal<A extends keyof ActionRegistry>(
     const timeoutMs = options?.timeoutMs ?? defaultTimeout;
     const maxRetries = options?.maxRetries ?? (isIdempotent ? 1 : 0);
 
+    await waitForBackendReady();
+
     let attempt = 0;
     while (true) {
         try {
@@ -736,9 +865,17 @@ async function callBackendInternal<A extends keyof ActionRegistry>(
                 continue;
             }
 
+            // While the backend restarts on purpose, every failed call is expected. A background
+            // read that times out or cannot connect is a status (the connection chip shows it),
+            // not an error. Only the throw below tells the caller.
+            const isNetworkFailure = error?.name === 'TypeError' || /failed to fetch|networkerror|network request failed/i.test(String(error?.message ?? ''));
+            // A read that cannot connect is quiet (above). A user-requested action that fails still shows its error,
+            // even before the backend has first answered.
+            const quiet = options?.silent || backendRestarting || (isIdempotent && (error?.didTimeout || isNetworkFailure));
+
             if (error?.didTimeout) {
                 const msg = `Request timed out for ${action}`;
-                if (!options?.silent) {
+                if (!quiet) {
                     emitToast(msg, 'error', `API:${action}`);
                 }
                 throw new Error(msg, { cause: error });
@@ -749,7 +886,10 @@ async function callBackendInternal<A extends keyof ActionRegistry>(
             }
 
             if (error instanceof BackendError) {
-                if (!options?.silent) {
+                // A background read that fails because a device or remote computer is
+                // unreachable is a status (the status chips show it), not an error.
+                const isUnavailableRead = isIdempotent && error.code === 'external_service';
+                if (!quiet && !isUnavailableRead) {
                     const presentation = presentBackendError(error);
                     emitToast(presentation.text, presentation.kind, `API:${action}`);
                 }
@@ -757,7 +897,7 @@ async function callBackendInternal<A extends keyof ActionRegistry>(
             }
 
             const msg = error?.message || String(error);
-            if (!options?.silent) {
+            if (!quiet) {
                 emitToast(msg, 'error', `API:${action}`);
             }
             throw error;
@@ -929,10 +1069,58 @@ export async function withSessionToken(wsUrl: string): Promise<string> {
     return `${wsUrl}${separator}token=${encodeURIComponent(token)}`;
 }
 
+/** One folder the backend serves and the URL prefix it serves it under. */
+export interface StaticMount {
+    root: string;
+    urlPrefix: string;
+}
+
+let staticMounts: StaticMount[] | null = null;
+let staticMountsRequest: Promise<void> | null = null;
+
 /**
- * Helper to dynamically resolve astronomical stretched images based on the running environment.
- * If running inside Electron (window.astrometricsIPC is defined), resolves to direct local disk 'file://' paths.
- * Otherwise, falls back to the static HTTP assets server path via the network.
+ * Asks the backend once which folders it serves and under which URL prefix.
+ *
+ * `resolveImageSrc` needs this table to turn a file path into a URL when the
+ * app runs in a browser or on a phone. Call it (and wait) before resolving.
+ * A failed request is not an error screen: the table stays empty and the next
+ * call asks again, so a backend that is still starting does no harm.
+ */
+export async function loadStaticMounts(): Promise<void> {
+    if (staticMounts) return;
+    staticMountsRequest ??= callBackend('system:static_mounts', {}, { silent: true })
+        .then((mounts) => {
+            staticMounts = Array.isArray(mounts) ? mounts : null;
+        })
+        .catch(() => {
+            staticMounts = null;
+        })
+        .finally(() => {
+            staticMountsRequest = null;
+        });
+    await staticMountsRequest;
+}
+
+/**
+ * Replaces the served-folder table. Only tests need this.
+ *
+ * @param mounts The table, or null to forget it.
+ */
+export function setStaticMountsForTesting(mounts: StaticMount[] | null): void {
+    staticMounts = mounts;
+}
+
+/**
+ * Turns a file path on the backend's computer into a URL a client can load.
+ *
+ * Inside Electron under `file://` the path is opened directly. Otherwise the
+ * backend's own table of served folders (`loadStaticMounts`) decides the URL:
+ * the longest folder that starts the path is swapped for its URL prefix. The
+ * app never guesses from folder names.
+ *
+ * @param absolutePath Absolute path of the file on the backend's computer.
+ * @return The URL, or an empty string when no served folder holds the file
+ *     (or the table has not been loaded yet).
  */
 export function resolveImageSrc(absolutePath: string | null | undefined): string {
     if (!absolutePath) return '';
@@ -943,40 +1131,22 @@ export function resolveImageSrc(absolutePath: string | null | undefined): string
         return `file://${absolutePath.replace(/\\/g, '/')}`;
     }
 
-    // Remote mobile client (Wi-Fi) fallback:
-    // Resolve to the correct static mount based on content type.
-    const base = getBackendBase();
-
     // If it's already a URL or base64, return it
     if (/^(https?|file|data):/i.test(absolutePath)) {
         return absolutePath;
     }
 
-    const parts = absolutePath.replace(/\\/g, '/').split('/');
-
-    // Frame roots live under the external library (served at /static/frames/).
-    // Library roots live under library (served at /static/).
-    const frameRoots = ['_Astrophotography', 'lights', 'darks', 'biases', 'flats', 'processed', 'spectrum'];
-    const libraryRoots = ['library'];
-    const allRoots = [...frameRoots, ...libraryRoots];
-
-    let relPath = absolutePath.replace(/\\/g, '/');
-    if (relPath.startsWith('/')) {
-        relPath = relPath.substring(1);
-    }
-
-    let isFramePath = false;
-    for (let i = 0; i < parts.length; i++) {
-        if (allRoots.includes(parts[i])) {
-            relPath = parts.slice(i).join('/');
-            isFramePath = frameRoots.includes(parts[i]);
-            break;
+    const path = absolutePath.replace(/\\/g, '/');
+    let best: { root: string; urlPrefix: string } | null = null;
+    for (const mount of staticMounts ?? []) {
+        const root = mount.root.replace(/\\/g, '/').replace(/\/+$/, '');
+        if (path.startsWith(`${root}/`) && (!best || root.length > best.root.length)) {
+            best = { root, urlPrefix: mount.urlPrefix };
         }
     }
-
-    const prefix = `${isFramePath ? BACKEND_ROUTES.staticFrames : BACKEND_ROUTES.staticLibrary}/`;
-    const rawUrl = `${base}${prefix}${relPath}`;
-    return encodeURI(decodeURI(rawUrl));
+    if (!best) return '';
+    const relativePath = path.slice(best.root.length + 1);
+    return encodeURI(decodeURI(`${getBackendBase()}${best.urlPrefix}/${relativePath}`));
 }
 
 /**

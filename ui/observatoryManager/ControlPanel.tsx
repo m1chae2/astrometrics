@@ -1,13 +1,8 @@
 import React from 'react';
-import { DirectionalControl } from './panels/DirectionalControl';
-import { TelescopeControl } from './panels/TelescopeControl';
-import { TrackingSettings } from './panels/TrackingSettings';
-import { LimitSettings } from './panels/LimitSettings';
+import { TelescopeControlPanel, type TelescopeCapabilityGates } from './panels/TelescopeControlPanel';
 import { GuidingTrendsPlot } from './panels/GuidingStatusPanel';
 import { AlignmentGuidingTabs } from './panels/AlignmentGuidingTabs';
 import { GuidingSample, AlignmentAttempt } from '../common/types/backendTypes';
-import { SectionPanel } from '../common/components/SectionPanel';
-import { CommandGate, WhyUnavailableButton } from './CommandGate';
 import { CalibrationLibraryPanel } from './calibration/CalibrationLibraryPanel';
 import { CameraProfilesPanel } from './equipment/CameraProfilesPanel';
 import type { CameraProfile } from '../common/hooks/useEquipmentConfiguration';
@@ -23,9 +18,17 @@ export interface ControlPanelProps {
     onStopMove: (direction: string) => void;
     onSetSlewRate: (rate: number) => void;
     onStop: () => void;
-    onSetTracking: (enabled: boolean) => void;
-    onPark: () => void;
-    onUnpark: () => void;
+    onSetTracking: (enabled: boolean) => Promise<unknown> | void;
+    onPark: () => Promise<unknown> | void;
+    onUnpark: () => Promise<unknown> | void;
+    /** Starts the open-ended capture on the target the telescope points at. */
+    onStartCapture?: () => Promise<boolean> | boolean | void;
+    /** Stops the capture the app started. */
+    onStopCapture?: () => Promise<boolean> | boolean | void;
+    /** True while a capture job runs. */
+    isCapturing?: boolean;
+    /** The target the telescope points at, if any. */
+    captureTargetName?: string;
     guidingHistory: GuidingSample[];
     alignmentAttempts?: AlignmentAttempt[];
 
@@ -40,18 +43,20 @@ export interface ControlPanelProps {
     guidingGain?: number;
     onGuidingExposureChange?: (value: number) => void;
     onGuidingGainChange?: (value: number) => void;
-    onGuideStart?: (exposure: number, gain: number) => void;
-    onGuideStop?: () => void;
 
     // Alignment control
-    onStartAlignment?: () => void;
-    onStopAlignment?: () => void;
+    onStartAlignment?: () => Promise<unknown> | void;
+    onStopAlignment?: () => Promise<unknown> | void;
+    /** Why Start Alignment is greyed while no target is picked. Null or empty when it can run. */
+    startAlignmentBlockedReason?: string | null;
     isAligningActive?: boolean;
 
     /** True when the app may not command the equipment. The command controls are then greyed out. */
     commandsDisabled?: boolean;
     /** Why commands are off; shown when the user hovers a greyed control. */
     commandsDisabledReason?: string;
+    /** Per-capability gates for the Telescope Control panel. */
+    capabilityGates?: TelescopeCapabilityGates;
 
     /** The camera profiles shown in the Camera Profiles panel. */
     cameras: CameraProfile[];
@@ -80,6 +85,10 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     onSetTracking,
     onPark,
     onUnpark,
+    onStartCapture,
+    onStopCapture,
+    isCapturing = false,
+    captureTargetName,
     guidingHistory,
     alignmentAttempts = [],
     accuracy,
@@ -90,13 +99,13 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     guidingGain,
     onGuidingExposureChange,
     onGuidingGainChange,
-    onGuideStart,
-    onGuideStop,
     onStartAlignment,
     onStopAlignment,
+    startAlignmentBlockedReason,
     isAligningActive = false,
     commandsDisabled = false,
     commandsDisabledReason = '',
+    capabilityGates,
     cameras,
     camerasLoading,
     camerasError,
@@ -104,76 +113,52 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
 }) => {
     return (
         <div className="panel-group">
-            {/* Top Row: Telescope Control | Tracking Settings | Calibration Library */}
-            <div className="panel__row flex-auto observatory-top-row">
-                <SectionPanel title="Telescope Control" className="observatory-top-row__fit" headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}>
-                    <CommandGate disabled={commandsDisabled} reason={commandsDisabledReason}>
-                        <TelescopeControl
-                            disabled={commandsDisabled}
-                            isTracking={isTracking}
-                            isParked={isParked}
-                            onSetTracking={onSetTracking}
-                            onPark={onPark}
-                            onUnpark={onUnpark}
-                            onStartAlignment={onStartAlignment}
-                            onStopAlignment={onStopAlignment}
-                            isAligningActive={isAligningActive}
-                        />
-                    </CommandGate>
-                </SectionPanel>
-
-                <SectionPanel title="Tracking Settings" className="observatory-top-row__fit" headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}>
-                    <CommandGate
-                        disabled={commandsDisabled}
-                        reason={commandsDisabledReason}
-                        renderChildren={(reasonId) => (
-                            <TrackingSettings
-                                disabled={commandsDisabled}
-                                disabledReasonId={reasonId}
-                                accuracy={accuracy}
-                                settleTime={settleTime}
-                                onAccuracyChange={onAccuracyChange}
-                                onSettleTimeChange={onSettleTimeChange}
-                                guidingExposure={guidingExposure}
-                                guidingGain={guidingGain}
-                                onGuidingExposureChange={onGuidingExposureChange}
-                                onGuidingGainChange={onGuidingGainChange}
-                                onGuideStart={onGuideStart}
-                                onGuideStop={onGuideStop}
-                            />
-                        )}
-                    />
-                </SectionPanel>
-
-                {/* Calibration Library takes the rest of the row. The Darks table scrolls inside it. */}
-                <CalibrationLibraryPanel />
-            </div>
-
-            {/* Middle Row: Camera Profiles | Manual Guide | Safety Limits */}
-            <div className="panel__row flex-auto observatory-middle-row">
-                {/* Camera Profiles, where Focuser used to be. It scrolls inside itself. */}
-                <CameraProfilesPanel
-                    cameras={cameras}
-                    loading={camerasLoading}
-                    error={camerasError}
-                    onRetry={onRetryCameras}
+            {/* Top block, a grid: Telescope Control (with the manual-slew pad on its Manual tab) over Camera
+                Profiles, with the Calibration Library on the right spanning both rows. */}
+            <div className="observatory-top-block">
+                <TelescopeControlPanel
+                    isTracking={isTracking}
+                    isParked={isParked}
+                    onSetTracking={onSetTracking}
+                    onPark={onPark}
+                    onUnpark={onUnpark}
+                    onStartAlignment={onStartAlignment}
+                    onStopAlignment={onStopAlignment}
+                    startAlignmentBlockedReason={startAlignmentBlockedReason}
+                    isAligningActive={isAligningActive}
+                    onStartCapture={onStartCapture}
+                    onStopCapture={onStopCapture}
+                    isCapturing={isCapturing}
+                    captureTargetName={captureTargetName}
+                    onStartMove={onStartMove}
+                    onStopMove={onStopMove}
+                    onSetSlewRate={onSetSlewRate}
+                    onStop={onStop}
+                    accuracy={accuracy}
+                    settleTime={settleTime}
+                    onAccuracyChange={onAccuracyChange}
+                    onSettleTimeChange={onSettleTimeChange}
+                    guidingExposure={guidingExposure}
+                    guidingGain={guidingGain}
+                    onGuidingExposureChange={onGuidingExposureChange}
+                    onGuidingGainChange={onGuidingGainChange}
+                    commandsDisabled={commandsDisabled}
+                    commandsDisabledReason={commandsDisabledReason}
+                    capabilityGates={capabilityGates}
                 />
 
-                {/* Manual Guide */}
-                <SectionPanel title="Manual Guide" headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}>
-                    <CommandGate disabled={commandsDisabled} reason={commandsDisabledReason}>
-                        <DirectionalControl
-                            disabled={commandsDisabled}
-                            onStartMove={onStartMove}
-                            onStopMove={onStopMove}
-                            onSetSlewRate={onSetSlewRate}
-                            onStop={onStop}
-                        />
-                    </CommandGate>
-                </SectionPanel>
+                {/* Camera Profiles sits under Telescope Control. It scrolls inside itself. */}
+                <div className="observatory-camera-profiles">
+                    <CameraProfilesPanel
+                        cameras={cameras}
+                        loading={camerasLoading}
+                        error={camerasError}
+                        onRetry={onRetryCameras}
+                    />
+                </div>
 
-                {/* Safety Limits: owns its panel, because Apply sits in the panel header. */}
-                <LimitSettings disabled={commandsDisabled} reason={commandsDisabledReason} />
+                {/* Calibration Library is tall: it spans both rows. Its table scrolls inside it. */}
+                <CalibrationLibraryPanel />
             </div>
 
             {/* Guiding Row: Trends | Alignment and Guiding (two tabs) */}

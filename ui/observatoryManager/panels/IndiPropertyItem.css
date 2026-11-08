@@ -5,7 +5,7 @@
 
 .indi-property__label {
     font-weight: bold;
-    font-size: 14px;
+    font-size: var(--control-font-size);
     margin-bottom: 4px;
 }
 
@@ -14,7 +14,7 @@
 }
 
 .indi-property__value {
-    font-size: 12px;
+    font-size: var(--section-label-size);
     color: var(--text-dim);
 }
 
@@ -25,34 +25,12 @@
     margin-top: 4px;
 }
 
-/* Uses global .input class for the actual input field */
-
-.indi-property__apply {
-    width: auto;
-    font-size: var(--control-font-size);
-}
+/* Uses the shared .entry class for the actual input field */
 
 .indi-property__switches {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-}
-
-.indi-property__switch {
-    width: auto;
-    font-size: 12px;
-    padding: 6px;
-    min-height: auto;
-    background-color: var(--grey-light);
-    color: var(--white);
-    border: 1px solid var(--grey-lighter);
-}
-
-.indi-property__switch--active {
-    background-color: var(--success-green);
-    border-color: var(--success-green);
-    color: var(--white);
-    font-weight: bold;
 }
 
 .indi-property__lights {

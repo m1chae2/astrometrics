@@ -26,6 +26,7 @@ from wayfindinglib._internal.control import SkyPosition
 from wayfindinglib.drivers.butler import DiskButler
 
 EXPECTED_EXPORTS = frozenset({
+    "FrameEndDetector",
     "ObservationExecution",
     "ObservationPackage",
     "ObservationPlanning",
@@ -37,9 +38,18 @@ EXPECTED_EXPORTS = frozenset({
 """What `from wayfindinglib import ...` offers."""
 
 EXPECTED_MODULE_NAMES = {
+    "wayfindinglib.drivers": frozenset({
+        "PHD2Client",
+        "PHD2Session",
+    }),
     "wayfindinglib.exceptions": frozenset({
         "DelegationPolicyValidationError",
         "PlanRevisionConflictError",
+    }),
+    "wayfindinglib.logs": frozenset({
+        "SavedCapture",
+        "ekos_utc_offset_hours",
+        "read_ekos_captures",
     }),
     "wayfindinglib.reports": frozenset({
         "DepthGoalState",
@@ -104,6 +114,11 @@ REVIEW_MEMBERS = frozenset({
     "get_live_session_status",
     "frame_guiding",
     "get_performance_envelope",
+    # What the recorded nights say about the equipment itself.
+    "measure_unguided_mount_error",
+    "measure_guiding_spectrum",
+    "measure_focus_temperature_coefficient",
+    "get_sky_rate_prediction",
 })
 """The public members of `ObservationReview`."""
 
@@ -117,11 +132,20 @@ work rather than on a child. Nothing else may join this set without the same
 argument.
 """
 
+ROOT_READS = frozenset({"library_path"})
+"""Read-only properties on `control` itself, outside the operation count.
+
+`library_path` names the folder of the wayfinding library, so a program that
+writes records can check where they go. It reads one path and does nothing
+to the observatory.
+"""
+
 CHILDREN = {
     "mount": {
         "status",
         "poll_external_alignment",
         "get_polar_alignment",
+        "get_centering_exposure",
         "slew",
         "park",
         "unpark",
@@ -134,11 +158,16 @@ CHILDREN = {
     "imaging": {
         "status",
         "capture_image",
+        "stop_capture",
         "set_filter",
         "focus_move",
+        "query_focus_models",
+        "record_focus_model",
     },
     "guiding": {
         "status",
+        "query_calibrations",
+        "record_calibration",
         "expose",
         "refit_spectrum",
         "run_loop",
@@ -241,8 +270,8 @@ def test_background_jobs_can_skip_registering_a_job() -> None:
 
 
 def test_control_root_holds_only_the_drivers_and_the_children(control: ObservatoryControl) -> None:
-    """The root offers only the children and `close`."""
-    assert _public_names(control) == ROOT_LIFECYCLE | set(CHILDREN)
+    """The root offers only the children, `close` and `library_path`."""
+    assert _public_names(control) == ROOT_LIFECYCLE | ROOT_READS | set(CHILDREN)
 
 
 @pytest.mark.parametrize("child", sorted(CHILDREN))

@@ -239,3 +239,62 @@ def test_a_rescan_reports_the_health_of_new_dark_and_bias_sets(
 def test_a_rescan_with_nothing_new_reports_no_assessments(catalog: CalibrationCatalog) -> None:
     """A second rescan of an unchanged folder judges nothing."""
     assert catalog.reindex_frames("bias").assessments == []
+
+
+def _count_judgements(catalog: CalibrationCatalog, monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Count how often the sets are really judged.
+
+    Returns
+    -------
+    calls : `list` [`int`]
+        One entry is added per real judgement.
+    """
+    calls: list[int] = []
+    judge = catalog._judge_dark_or_bias_sets
+
+    def counted(*arguments: object) -> object:
+        """Count the call and judge.
+
+        Returns
+        -------
+        health : `list`
+            The judgement.
+        """
+        calls.append(1)
+        return judge(*arguments)
+
+    monkeypatch.setattr(catalog, "_judge_dark_or_bias_sets", counted)
+    return calls
+
+
+def test_an_unchanged_library_is_judged_once(
+    catalog: CalibrationCatalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unchanged library is answered from memory the second time."""
+    catalog.measure_frames(register_job=False)
+    calls = _count_judgements(catalog, monkeypatch)
+    first = catalog.assess("dark", register_job=False)
+    second = catalog.assess("dark", register_job=False)
+    assert len(calls) == 1
+    assert first == second
+    assert first is not second
+
+
+def test_new_numbers_or_a_new_file_judge_again(
+    catalog: CalibrationCatalog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A measuring run and a new calibration file each judge again."""
+    calls = _count_judgements(catalog, monkeypatch)
+    (before,) = catalog.assess("bias", register_job=False)
+    assert before.measured_frame_count == 0
+    catalog.measure_frames(register_job=False)
+    (measured,) = catalog.assess("bias", register_job=False)
+    assert len(calls) == 2
+    assert measured.measured_frame_count == FRAMES_PER_SET
+
+    _write(tmp_path / "frames" / "biases" / "Bias_new.fits", 999, BIAS_LEVEL_ADU, EXPTIME=0.0)
+    catalog.reindex_frames("bias")
+    judged_before = len(calls)
+    (grown,) = catalog.assess("bias", register_job=False)
+    assert len(calls) == judged_before + 1
+    assert grown.frame_count == FRAMES_PER_SET + 1

@@ -18,6 +18,7 @@ import numpy as np
 from astropy.coordinates import SkyCoord
 
 from astrometricslib import Astrometrics, StellarObject, Target
+from astrometricslib.drivers import network_is_offline
 from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError
 from wayfindinglib._internal.errors import DATA_ERRORS, ONLINE_QUERY_ERRORS
 from wayfindinglib.drivers.catalog import (
@@ -372,6 +373,10 @@ def global_catalog(
     """
     results: list[Target | StellarObject] = []
 
+    if network_is_offline():
+        logger.debug("The SIMBAD region search was skipped: this launch sends nothing off the computer.")
+        return results
+
     try:
         from astroquery.simbad import Simbad
     except ImportError:
@@ -463,7 +468,7 @@ def query_online_catalogs(
     radius_degrees: float,
     enabled_driver_names: list[str],
     magnitude_limit: float | None = None,
-) -> list[tuple[str, StellarObject]]:
+) -> tuple[list[tuple[str, StellarObject]], bool, list[str]]:
     """Query one or more registered online catalog drivers in parallel.
 
     Each driver runs concurrently via a thread pool. Failures in individual
@@ -489,9 +494,17 @@ def query_online_catalogs(
 
     Returns
     -------
-    List[Tuple[str, StellarObject]]
+    tagged : `list` [`tuple` [`str`, `StellarObject`]]
         Tagged (driver_name, StellarObject) pairs, deduplicated by source ID.
         Results are transient and must never be recorded to the database.
+    truncated : `bool`
+        True when any driver left stars out of its answer (for example the
+        Gaia driver's cap), so the list may be missing the faintest stars.
+    failed_catalogs : `list` [`str`]
+        Names of the drivers whose query failed, in the order they were
+        asked. An empty list means every driver answered. A failure is a
+        status, not an error: it is logged as a warning, and the other
+        drivers' stars are still returned.
 
     REQ: PLN-3.1, PLN-3.2
     """
@@ -501,31 +514,39 @@ def query_online_catalogs(
         if name in sky._catalog_driver_registry
     ]
     if not active_drivers:
-        return []
+        return [], False, []
 
     tagged_results: list[tuple[str, StellarObject]] = []
     seen_ids: set = set()
+    truncated_by_any_driver = False
+    failed_driver_names: set[str] = set()
 
-    def _query_driver(driver: CatalogDriver) -> list[tuple[str, StellarObject]]:
+    def _query_driver(driver: CatalogDriver) -> tuple[list[tuple[str, StellarObject]], bool, bool]:
         effective_radius = min(radius_degrees, driver.maximum_query_radius_degrees)
         try:
-            objects = driver.query_region(
+            objects, truncated = driver.query_region_with_status(
                 ra_degrees, dec_degrees, effective_radius, magnitude_limit=magnitude_limit
             )
-            return [(driver.driver_name, obj) for obj in objects]
+            # A radius cut to the driver's limit also leaves stars out.
+            truncated = truncated or effective_radius < radius_degrees
+            return [(driver.driver_name, obj) for obj in objects], truncated, False
         except (AstrometricsError, sqlite3.Error, *ONLINE_QUERY_ERRORS) as driver_error:
             logger.warning(
                 "Catalog driver '%s' query failed: %s",
                 driver.driver_name,
                 driver_error,
             )
-            return []
+            return [], False, True
 
     with ThreadPoolExecutor(max_workers=len(active_drivers)) as executor:
         futures = {executor.submit(_query_driver, driver): driver.driver_name for driver in active_drivers}
         for future in as_completed(futures):
             try:
-                for driver_name, stellar_object in future.result():
+                driver_results, driver_truncated, driver_failed = future.result()
+                if driver_failed:
+                    failed_driver_names.add(futures[future])
+                truncated_by_any_driver = truncated_by_any_driver or driver_truncated
+                for driver_name, stellar_object in driver_results:
                     if stellar_object.id not in seen_ids:
                         seen_ids.add(stellar_object.id)
                         tagged_results.append((driver_name, stellar_object))
@@ -535,5 +556,9 @@ def query_online_catalogs(
                 # else is a bug in one driver, so it is logged with its
                 # traceback and the other drivers' results are still used.
                 logger.exception("Unexpected error collecting results from driver '%s'", futures[future])
+                failed_driver_names.add(futures[future])
 
-    return tagged_results
+    failed_catalogs = [
+        driver.driver_name for driver in active_drivers if driver.driver_name in failed_driver_names
+    ]
+    return tagged_results, truncated_by_any_driver, failed_catalogs

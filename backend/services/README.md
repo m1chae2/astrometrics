@@ -9,7 +9,7 @@ Terms are defined in the [glossary](../../documentation/Glossary.md). This file 
 - `analysis/` runs the analysis jobs.
 - `data/` serves targets, stars, images and the deletion archive.
 - `infrastructure/` holds shared plumbing: settings, sockets, the scripting terminal, the handoff state and the safety guards.
-- `observatory/` serves the telescope, equipment, guiding, imaging, planning and the sequencer.
+- `observatory/` serves the telescope, equipment, guiding, imaging, planning and the sequencer. `imaging_service.py` runs `imaging:capture` as a `capture` job on a thread, and `imaging:stop_capture` hands the stop to `control.imaging.stop_capture` (it returns `false` when nothing runs). `observatory_source_service.py` reports and changes the Observatory source setting. The backend builds, starts and removes no world: a launcher (`simulator/launch.py`) does that and runs the backend as its child with `ASTROMETRICS_LAUNCHER` set. `observatory:get_source` reports the source the launcher started the backend with (`ASTROMETRICS_OBSERVATORY_SOURCE`, or `real`), the saved choice, `available` and `unavailable_reason` (false when no launcher runs the backend, or programs are missing, from `ASTROMETRICS_LAUNCH_MISSING_PROGRAMS`), and the failure reason; `commands` is `null`, `running` is `false` and `library_copy` is empty. `observatory:set_source` writes the choice and the backend ends with exit code 75 (`RESTART_EXIT_CODE`) after it stops its services (`backend/observatory_source.py`); the launcher starts the next session with the saved choice. Without a launcher the change is refused. The choice file code and the launch variable names live in `backend/launch_contract.py`, public through `backend/public_interface.py`; that is the one backend module the simulator layer imports. When the simulator fails to start, `source` is `no_telescope` (an older launcher's `offline` is read the same way). `observatory:get_source` also reports `launch`, the read-only `[Launch]` section of the settings in use (`label`, `live_hardware`, `disposable_library`, `offline`, `locked_keys`), or `null` without one; the backend only reports it. `SettingsService` refuses a save that changes a key in `locked_keys`, or the `[Launch]` section; a save that sends the same value back is not a change.
 - `processing/` serves ingestion, stacking and image processing, jobs, the frame quality measurement run and the slow stack reviews (`stack_review_service.py`, which starts a preview remake or a stack comparison as a background job and answers with the result or the job to follow).
 
 ## Planning services (`observatory/`)
@@ -35,6 +35,38 @@ Every RPC call runs on one of a fixed set of worker threads. A slow whole-catalo
 - Only a few heavy reads run at the same time. A read that cannot get a place within a short wait fails at once with a retryable "busy, try again" conflict error.
 - Identical requests that arrive together share one computation. A later request waits for the answer of the one already running.
 
-The star catalog listings and counts use it (`data/stellar_service.py`). The numbers (reads at once, wait times) are constants at the top of the module. They are sized so that most of the workers stay free and so that a wait ends before the client's own time limit.
+The star catalog listings and counts use it (`data/stellar_service.py`). The numbers (reads at once, wait times) are constants at the top of the module. The per-target star counts and class counts are kept until the catalog changes, but an empty answer is never kept: the library may not have been filled yet at start-up, and a kept empty answer showed "0 stars" for every target until it expired. They are sized so that most of the workers stay free and so that a wait ends before the client's own time limit.
+
+## Heavy lane for RPC methods
+
+Python lets only one thread run Python code at a time. When a view opens and a dozen calls that scan the whole library run together, every call, even a light one, waits behind them each time it needs a turn. A TPM run measured calls that should take a millisecond waiting more than a second. `backend/routers/rpc_router.py` lists these scanning methods in `HEAVY_METHODS` (for example `history:nights` and `astronomy:list`). Only `HEAVY_LANE_SLOTS` of them run at once, and the rest wait without taking a worker thread. All other methods run freely. Add a method to the list when a trace shows it busy for more than about 100 ms.
+
+The lane itself lives in `infrastructure/heavy_lane.py`, so the start-up warm-ups can use it too. Encoding a finished reply (`encode_rpc_success_body` in `rpc_protocol.py`) does not use the lane. It runs in the ordinary thread pool, so a finished result never waits behind queued heavy builds.
 
 For exact behavior, read the code.
+
+## Start-up warm-ups
+
+After the app is ready, `backend/startup.py` fills caches in the background, one step after another (the steps are chained in `_warm_up_in_order` in `backend/main_backend.py`). None of them delays `/api/ready`, except the first group.
+
+1. `warm_start_up_caches` loads the star catalog, the Earth-orientation table and the stellar summaries side by side. The splash screen waits for these.
+2. `warm_depth_goals` builds the depth goal status of up to three targets, one at a time, by calling the same function as `advisory:depth_goal`. The first target is the one the telescope points at, when the telemetry loop already knows it. The others are the targets with a stacked picture, newest imaged first, which is the target the Image Processing screen opens on. A target appears once. A failure is logged at debug level and skipped.
+3. `warm_night_reviews` builds the three newest night reviews.
+
+Each step runs in the heavy lane (`run_heavy`), so a warm-up never adds to the user's first heavy calls. Leaving the app cancels the warm-up before the next step starts. The target the telescope points at is looked up in the library first; a name that is not a library target is skipped.
+
+A failed step only makes the first visit slower, so it is logged as a warning, not an error. The steps read and never write.
+
+## Host check and CORS
+
+`infrastructure/host_check.py` refuses any request whose `Host` header is not one the backend serves. This stops DNS rebinding, where a hostile page makes the browser treat the backend as its own site. `localhost`, `127.0.0.1` and `[::1]` pass with any port. When the backend is bound to a network address (`run_backend.sh --lan`), private-network addresses, `.local` names and this computer's host name pass too. The RPC route sets no CORS headers of its own: the CORS middleware in `main_backend.py` allows only the origins in `session_auth.py`.
+
+## Restart check
+
+Changing the observatory source restarts the backend, so it first asks `Container._running_work` what is running. Stacking jobs, frame downloads, the guide log copy, a target imaging session and automatic downloads that wait for their timer all block the restart. If the check itself fails, the backend counts as busy.
+
+## Measuring new dark and bias frames
+
+The library's rescan of calibration frames does not measure darks and biases, so a new set would stay "Not checked". `ImageProcessingService.measure_new_calibration_frames` starts that measuring (`calibration:measure_frames`, not forced, so only new or changed files are read) as a background job. It is the one place that starts it. Two callers use it: `IngestionService`, after a rescan that added darks or biases, and `SyncService`, after a Bias, Dark or Flat folder sync that filed darks or biases. Adding only lights or flats starts nothing.
+
+Only one such job runs at a time. A request that arrives while one runs is remembered, and the job starts one more pass when it ends, so late frames are not missed. The job writes its own log in the job list. When a pass ends, the service sends `calibration:measured`, and the Calibration Library panel reads its health again.

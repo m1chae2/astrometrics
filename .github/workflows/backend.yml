@@ -8,7 +8,8 @@ on:
   push:
     branches: [ main, master ]
     # astrometricslib/** and wayfindinglib/** are included because backend
-    # imports both directly. mcp_servers/**, build/mcp/** and ui/mcp/** are included
+    # imports both directly. simulator/** is included because the simulator runs the backend as its
+    # child. mcp_servers/**, build/mcp/** and ui/mcp/** are included
     # because backend/tests/test_client_configs.py checks the generated MCP
     # client configurations against the server manifests. build/codegen/** and
     # ui/common/types/** are included because test_generated_types_current.py
@@ -25,6 +26,7 @@ on:
       - 'astrometricslib/**'
       - 'wayfindinglib/**'
       - 'mcp_servers/**'
+      - 'simulator/**'
       - 'build/mcp/**'
       - 'ui/mcp/**'
       - 'pyproject.toml'

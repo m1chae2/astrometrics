@@ -1,5 +1,7 @@
 # imageViewerDisplay
 
+The selected target is shared by the Image Viewer, Image Processing and Observatory Manager through `TargetContext` and is kept in `localStorage`. `useTargetListLogic` (in `ui/common/hooks/`) picks the default when there is none, or when the kept one is no longer in the library: the most recently imaged target that has a processed image (`pickDefaultTargetId`).
+
 This folder implements the "Image Viewer" / Target Manager UI. It follows a
 three-column layout:
 
@@ -56,4 +58,39 @@ unit) and their picture files with `quality:resolve_rows`, which also names the 
 ids the library no longer has. A row with a file has an Open image button. The button
 draws the frame with `images:convert_fits` (`useOpenedFrame.ts`) and the center viewer
 shows it until the user picks a target or clears the list. A row without a file shows
-the reason the library gives, as text.
+the reason the library gives, as text. The list is asked for with the `showFrames`
+hand-off (see `ui/common/utils/README.md`); `citedFramesStore.ts` keeps the request for
+as long as the banner shows it.
+
+The viewer's pictures are kept in `hooks/targetImageCache.ts`, not in the display.
+The Image Viewer can be paused while it is hidden, and a pause must not free the
+picture's URL. The cache is cleared when the library changes (`targetsUpdated`).
+
+Loading, preview and neighbors
+
+While a picture loads, the viewer shows the spinner and keeps its canvas hidden.
+`FitsRenderer` does not read status words for this. `useFitsLoader` reports a
+`phase` (`idle`, `fetching`, `parsing`, `decoding`, `ready` or `error`), and the
+spinner stays until the drawer reports the first real draw. Only `error` replaces
+the spinner.
+
+A stacked target's main picture is a large stretched FITS file
+(`<stack>_processed.fits`). Next to it the stacking pipeline saves a small JPEG
+preview (`<stack>_preview.jpg`). `fetchProcessedImage` starts the preview fetch
+together with the FITS fetch and hands the preview over through `onPreview`;
+`useTargetImage` returns it as `previewBlob`. `FitsRenderer` draws the preview as
+soon as it is decoded, then draws the FITS image over it when that is ready. The
+canvas is not cleared between the two, and the zoom is rescaled by the size ratio,
+so the picture does not jump. A target with no preview file shows the spinner until
+the FITS image is drawn. Star overlays use FITS pixel positions, so they wait for
+the full image and are never drawn on the preview.
+
+`hooks/useNeighborPrefetch.ts` prepares the two targets directly above and below
+the selected one in the list (as filtered and sorted). It starts only when the
+selected picture has loaded, the browser is idle (`requestIdleCallback`, or a short
+timer where it is missing) and the window is visible. For each neighbor it fetches
+the picture into `targetImageCache` and asks the viewer to decode it with
+`prefetchDecode`, so the viewer's decoded-image cache (5 entries) already holds it
+when the user selects it. Moving the selection, or hiding the window, cancels the
+work under way. No other target is ever prefetched: loading every stack would need
+about 2 GB.

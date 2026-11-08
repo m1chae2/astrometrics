@@ -9,6 +9,13 @@ suggestion refresh uses. `read_chosen_level` and `store_chosen_level` keep the
 chosen level in wayfindinglib's own database (the ``target_depth_goal`` dataset
 type), never in the configuration file. Register row WAY-D94 holds the level
 values.
+
+`cached_depth_goal_status` keeps each target's status until the target's own
+data, the data of the cameras it used, the chosen level, the equipment or the
+configuration change. The slow camera-wide parts of the forecast (the frames
+of the camera, the sky model) are kept on their own by camera, in
+`LibraryInputs`, so a restack of one target does not refit them. A display
+that asks again for an unchanged target gets its answer at once.
 """
 
 from collections.abc import Callable
@@ -16,8 +23,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from astrometricslib import Target
+from astrometricslib.drivers import VersionedCache
 from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError
 from astrometricslib.reports import SubjectLevel
+from wayfindinglib.analytics.data_versions import depth_goal_data_version
 from wayfindinglib.analytics.depth_goal import (
     DEFAULT_DEPTH_LEVEL,
     DEPTH_METRICS,
@@ -48,6 +57,16 @@ from wayfindinglib.models.planning.depth_goal import (
 from wayfindinglib.models.planning.target_report import RecommendedAdditionalFramesStatus
 from wayfindinglib.models.quality.statements import StatementKind
 
+DEPTH_GOAL_CACHE_MAXIMUM_ENTRIES = 64
+"""How many depth goal statuses are kept (one per target).
+
+Design estimate WAY-D107 (see ``validation/wayfinding.md``): the library has
+dozens of targets and a status is a few kilobytes, so 64 of them stay well
+under a megabyte. Not measured."""
+
+_DEPTH_GOAL_CACHE = VersionedCache(maximum_entries=DEPTH_GOAL_CACHE_MAXIMUM_ENTRIES)
+"""The built statuses, each kept until the data behind it changes."""
+
 LIBRARY_STACK_EXCLUDED_MARKERS = ("#group-", "/groups/")
 """Parts of a stack id that mark an exposure-group stack."""
 
@@ -64,9 +83,7 @@ FIXED_PATTERN_CAUSE_SENTENCES = {
     FixedPatternCause.BANDING: "The frames carry a fixed stripe pattern.",
     FixedPatternCause.GRADIENT: "The sky brightness has a slope across the frame that stays in every frame.",
     FixedPatternCause.CALIBRATION_MASTERS: "Noise in the calibration frames is the same in every frame.",
-    FixedPatternCause.SKY_STRUCTURE: (
-        "The sky has fixed structure, likely faint light or a slope in the background."
-    ),
+    FixedPatternCause.SKY_STRUCTURE: "The sky has fixed structure, likely faint light in the background.",
     FixedPatternCause.UNPLACED: "The noise has a fixed part we can't place yet.",
 }
 """One plain sentence for each cause of fixed-pattern noise (row WAY-D94).
@@ -531,3 +548,83 @@ def _build_status(
         provisional=provisional,
         message=f"About {time_text(seconds)} more integration needed{suffix}.",
     )
+
+
+def cached_depth_goal_status(
+    target_id: str,
+    *,
+    config: Any,
+    astrometrics: Any,
+    butler: Any,
+    report_for_noise_ratio: Callable[[float], Any],
+) -> DepthGoalStatus:
+    """Build a target's depth goal status, or give the one built before.
+
+    Building the status can take two seconds on a large library, because the
+    forecast builds a target report. The status is kept until a sign says an
+    input changed: the target's own frames, stacks and measurements, the
+    chosen level, the data of the cameras the target used, the wayfinding
+    records the report reads, the equipment and the configuration (see
+    `depth_goal_data_version`). A new frame, a new
+    stack or a new level always gives a fresh status. The caller gets its own
+    copy.
+
+    The key has no time bound, unlike the target report's one-hour bound. The
+    report is built for "now", but the depth goal status reads none of the
+    parts that depend on the time: the report uses the time only for its
+    starting point (a target with no frames) and its ``generatedAt`` stamp,
+    and the status reads neither. The one time-based input, the end of the
+    night that closes the camera's finished nights, is already in the data
+    version, so the status is rebuilt when the night rolls over.
+
+    Parameters
+    ----------
+    target_id : `str`
+        The target.
+    config : `AppConfiguration`
+        The configuration, for the data version.
+    astrometrics : `Astrometrics`
+        The science library handle.
+    butler : `DiskButler`
+        The storage layer, for the chosen level.
+    report_for_noise_ratio : `Callable`
+        Builds the target report aimed at a noise ratio.
+
+    Returns
+    -------
+    status : `DepthGoalStatus`
+        The status, with the sentence for a novice in ``message``.
+    """
+    try:
+        library = str(config.get_library_path())
+    except AttributeError, OSError, TypeError, ValueError:
+        library = None
+
+    def version() -> Any:
+        """Work out the version of the status's inputs.
+
+        Returns
+        -------
+        version : `Any`
+            The version, or `None` when it cannot be worked out.
+        """
+        found = depth_goal_data_version(config, butler, target_id)
+        if found is None:
+            return None
+        return (found, read_chosen_level(butler, target_id))
+
+    def build() -> DepthGoalStatus:
+        """Build the status without the cache.
+
+        Returns
+        -------
+        status : `DepthGoalStatus`
+            The status.
+        """
+        return build_depth_goal_status(
+            target_id, astrometrics=astrometrics, butler=butler, report_for_noise_ratio=report_for_noise_ratio
+        )
+
+    if library is None:
+        return build()
+    return _DEPTH_GOAL_CACHE.get_or_build(("depth_goal", library, target_id), version, build)

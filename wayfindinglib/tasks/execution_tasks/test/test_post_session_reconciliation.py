@@ -1,12 +1,10 @@
 """Purpose: Unit tests for post_session_reconciliation.
 
-Description: Verifies calibration-frame folding counts only completed
-calibration-type requests on terminal sessions, is idempotent when
-recomputed, target_session_ids attach only for completed entries whose
-target has matching frames, and reconcile_session raises for a
-non-terminal session and records both results for a terminal one --
-the behavior `Wayfinding_Library_Architecture.md` Section 5.7 describes
-(running the reconciliation twice yields identical CalibrationStats).
+Description: Verifies target_session_ids attach only for completed entries
+whose target has matching frames, and reconcile_session raises for a
+non-terminal session and records the reconciled session for a terminal
+one -- the behavior `Wayfinding_Library_Architecture.md` Section 5.7
+describes. It no longer writes a calibration_stats record.
 """
 
 from dataclasses import dataclass
@@ -29,7 +27,6 @@ from wayfindinglib.models.session.observation_session import (
 )
 from wayfindinglib.tasks.execution_tasks.post_session_reconciliation import (
     attach_target_session_ids,
-    compute_calibration_stats,
     reconcile_session,
 )
 
@@ -63,109 +60,6 @@ def _session(
         camera_id=camera_id,
         queue=entries,
     )
-
-
-def test_compute_calibration_stats_counts_completed_calibration_frames() -> None:
-    """Verify calibration-type requests on COMPLETED entries are counted."""
-    entry = _entry(
-        "entry-1",
-        "M 81",
-        QueueEntryStatus.COMPLETED,
-        [ExposureRequest(frame_type=FrameType.DARK, exposure_sec=300.0, count=20)],
-    )
-    session = _session("session-1", "cam-1", SessionStatus.COMPLETED, [entry])
-
-    stats = compute_calibration_stats("cam-1", [session])
-
-    assert len(stats.darks) == 1
-    assert stats.darks[0].count == 20
-    assert stats.darks[0].exposure_sec == pytest.approx(300.0)
-
-
-def test_compute_calibration_stats_ignores_light_frames() -> None:
-    """Verify LIGHT frame requests are never counted as calibration."""
-    entry = _entry(
-        "entry-1",
-        "M 81",
-        QueueEntryStatus.COMPLETED,
-        [ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=300.0, count=20)],
-    )
-    session = _session("session-1", "cam-1", SessionStatus.COMPLETED, [entry])
-
-    stats = compute_calibration_stats("cam-1", [session])
-
-    assert stats.darks == []
-    assert stats.biases == []
-    assert stats.flats == []
-
-
-def test_compute_calibration_stats_ignores_non_completed_entries() -> None:
-    """Verify calibration requests on a FAILED entry are not counted."""
-    entry = _entry(
-        "entry-1",
-        "M 81",
-        QueueEntryStatus.FAILED,
-        [ExposureRequest(frame_type=FrameType.BIAS, exposure_sec=0.001, count=50)],
-    )
-    session = _session("session-1", "cam-1", SessionStatus.COMPLETED, [entry])
-
-    stats = compute_calibration_stats("cam-1", [session])
-
-    assert stats.biases == []
-
-
-def test_compute_calibration_stats_ignores_non_terminal_sessions() -> None:
-    """Verify a still-RUNNING session's frames are not counted."""
-    entry = _entry(
-        "entry-1",
-        "M 81",
-        QueueEntryStatus.COMPLETED,
-        [ExposureRequest(frame_type=FrameType.FLAT, exposure_sec=1.0, count=15)],
-    )
-    session = _session("session-1", "cam-1", SessionStatus.RUNNING, [entry])
-
-    stats = compute_calibration_stats("cam-1", [session])
-
-    assert stats.flats == []
-
-
-def test_compute_calibration_stats_recompute_is_idempotent() -> None:
-    """Verify recomputing from the same sessions twice is idempotent."""
-    entry = _entry(
-        "entry-1",
-        "M 81",
-        QueueEntryStatus.COMPLETED,
-        [ExposureRequest(frame_type=FrameType.DARK, exposure_sec=300.0, count=20)],
-    )
-    session = _session("session-1", "cam-1", SessionStatus.COMPLETED, [entry])
-
-    first = compute_calibration_stats("cam-1", [session])
-    second = compute_calibration_stats("cam-1", [session])
-
-    assert first == second
-
-
-def test_compute_calibration_stats_sums_across_multiple_sessions() -> None:
-    """Verify counts accumulate across multiple terminal sessions."""
-    entry_a = _entry(
-        "entry-a",
-        "M 81",
-        QueueEntryStatus.COMPLETED,
-        [ExposureRequest(frame_type=FrameType.DARK, exposure_sec=300.0, count=10)],
-    )
-    entry_b = _entry(
-        "entry-b",
-        "NGC 7000",
-        QueueEntryStatus.COMPLETED,
-        [ExposureRequest(frame_type=FrameType.DARK, exposure_sec=300.0, count=15)],
-    )
-    session_a = _session("session-a", "cam-1", SessionStatus.COMPLETED, [entry_a])
-    session_b = _session("session-b", "cam-1", SessionStatus.ABORTED, [entry_b])
-
-    stats = compute_calibration_stats("cam-1", [session_a, session_b])
-
-    assert len(stats.darks) == 1
-    assert stats.darks[0].count == 25
 
 
 @dataclass
@@ -291,8 +185,8 @@ def test_reconcile_session_raises_for_non_terminal_session(butler: DiskButler) -
         reconcile_session(butler, session, _FakeAstrometrics({}))
 
 
-def test_reconcile_session_persists_calibration_stats_and_session(butler: DiskButler) -> None:
-    """Verify a terminal session's reconciliation records both results."""
+def test_reconcile_session_persists_the_session_and_writes_no_calibration_stats(butler: DiskButler) -> None:
+    """Verify a terminal session's reconciliation records the session only."""
     entry = _entry(
         "entry-1",
         "M 81",
@@ -304,9 +198,7 @@ def test_reconcile_session_persists_calibration_stats_and_session(butler: DiskBu
 
     reconcile_session(butler, session, _FakeAstrometrics({}))
 
-    stats = butler.get("calibration_stats", {"camera_id": "cam-1"})
-    assert stats is not None
-    assert stats.darks[0].count == 20
+    assert butler.get("calibration_stats", {"camera_id": "cam-1"}) is None
 
     reloaded_session = butler.get("observation_session", {"session_id": "session-1"})
     assert reloaded_session is not None

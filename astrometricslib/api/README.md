@@ -20,7 +20,7 @@ The rules:
 - **Only `astrometricslib` itself may import `_internal`.** `wayfindinglib`, the backend and the MCP servers use the root and the four public modules only. Tests of the libraries are the one exception.
 - **A result model is private, and its fields are not.** A call returns a Pydantic model (a Python class with typed, validated fields) such as `TargetQueryResult` or `StackResult`. A caller reads the fields by name and does not import the class. The API reference page lists the fields of each result without an import path.
 - **A caller reaches a sub-API through `Astrometrics`.** Build one `Astrometrics` and use `astrometrics.targets`, `astrometrics.processing` and the rest, so all of them read and write the same storage.
-- **Old names have no alias.** Every rename of the cleanup is listed in [API renames](../../documentation/plans/API_RENAMES_134.md).
+- **Old names have no alias.**
 
 Terms are defined in the [glossary](../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
@@ -42,7 +42,7 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
 
 `TargetCatalog` creates, reads, saves and deletes targets.
 
-- `get` returns a `Target` for code to work with.
+- `get` returns a `Target` for code to work with. With `refresh=True` it first brings that one target up to date with storage (see `pipelines/shared/target_records.py`): nothing is read when the library write counter has not moved, one row is read when it has, and every target is read only when this catalog does not hold the target yet. `list` skips its read the same way. Unsaved edits to a held target are kept. A lock keeps threads from refreshing at the same time.
 - `query` returns short records for people and AI clients. `detail="cameras"` adds the cameras used. `detail="camera_index"` adds each target's frames per configured camera, built by `pipelines/shared/target_camera_index.py`.
 - `get_stars(target)` returns every star the library holds for a target, as full `StellarObject` records in id order. It is the short form of `stars.query(target_id=..., detail="objects", limit=None)`; use `stars.query` for a filter, an order or a smaller answer.
 - `get_header` returns a target's file header as text cards. `read_frame_header` reads the first header of any FITS file by path and returns it with typed values. It reads no pixels. The backend and wayfindinglib use it instead of opening FITS files themselves.
@@ -61,12 +61,12 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
 - `get` returns one star's full record.
 - `get_spectrum(star_id)` returns a star's `SpectroscopyResult` from the star itself, or `None`. Older libraries also hold a copy of the star under an id ending in `::spectroscopy`. `get_spectrum` reads that copy when the star has no spectrum of its own, and accepts that id, so scripts never need to build or test for it.
 - `query` answers every read about many stars. It selects by ids, name, target, sky region or position, with a cap on the size of the answer.
-  - `detail` picks what comes back: ids, summaries, analysis records, full records, class counts, per-target counts, library statistics, or the stars placed in pixels on a target's stacked image (`detail="overlay"`, built by `pipelines/shared/star_overlay.py`).
+  - `detail` picks what comes back: ids, summaries, analysis records, full records, class counts, per-target counts, library statistics, or the stars placed in pixels on a target's stacked image, or on any image named by `image_path` (`detail="overlay"`, built by `pipelines/shared/star_overlay.py`).
   - Filters cover magnitude (the astronomer's brightness scale, where larger numbers are fainter), whether a star has a spectrum or photometry, spectral class, and a search text. The spectral class is the letter of the star's type in the O, B, A, F, G, K, M sequence, hottest to coolest. A full type such as `G2V` counts as `G`.
   - A filter on "real catalog magnitude" keeps stars whose magnitude came from a published catalog. A zero, a missing value, or an instrumental magnitude (one measured by this library's photometry, on its own uncalibrated scale) does not count.
   - `order` sorts by id, by usefulness (stars with spectra first, then named stars, then stars with photometry, then brightest first), or by spectrum match (stars whose own spectrum best matches a reference spectrum first).
 - Single-frame detections are hidden unless `include_unresolved=True`. Photometry (brightness measurement) saves each point source it finds in one frame under an id ending in `:Star_<n>`. These are working records, not catalog stars, so a normal query leaves them out.
-- `dataset_version` counts the star catalog writes this process has made. A cache of a whole-catalog answer compares it to the number it saw last, to know whether to rebuild.
+- `dataset_version` counts the star catalog writes made by any program. The count is kept in the library database, so it also sees a write by a maintenance script and survives a restart. A cache of a whole-catalog answer compares it to the number it saw last, to know whether to rebuild. `astrometricslib.drivers.get_library_data_version` gives the counters of every kind of data (targets, quality, stars) for a cache that depends on more than the stars.
 - Every other method on `StellarCatalog` changes star records.
 
 ### `processing.py`
@@ -94,14 +94,14 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
 
 - `query` reports counts, or how a target's light frames (frames of the sky) match the darks.
 - `camera_profile(camera_name)` returns the stored `CameraProfile` for a camera, matched in any spelling the profile lists (case, spaces and punctuation are ignored). It carries the camera's saturation limits with their sources and its gain and read noise for each sensor setting. A missing or unlisted name gives the generic fallback profile (`is_generic_fallback` is `True`). The profile describes the camera model, not calibration frames, but the call sits here because it reads the same configuration and no other sub-API fits better.
-- `reindex_frames("flat")` rescans one kind and reports what it found. `report.assessments` holds one `CalibrationSetHealth` (the record `assess` returns) for each set that gained frames. A new flat set is measured: enough frames, bright enough but not too bright, and a master flat (the combination of the set) that is not too noisy. A dark or bias set is not measured by the rescan; it is judged from the numbers `measure_frames` stored, so a new frame with no numbers yet shows checks that are `not_checked`, with the reason.
+- `reindex_frames("flat")` rescans one kind and reports what it found. `report.assessments` holds one `CalibrationSetHealth` (the record `assess` returns) for each set that gained frames. A new flat set is measured: enough frames, bright enough but not too bright, and a master flat (the combination of the set) that is not too noisy. A dark or bias set is not measured by the rescan; it is judged from the numbers `measure_frames` stored, so a new frame with no numbers yet shows checks that are `not_checked`, with the reason. The app starts `measure_frames` by itself after it ingests or downloads dark or bias frames; a script must call it.
 - `assess(kind, ...)` judges the sets of one kind (`"dark"`, `"bias"` or `"flat"`) already in the library. It gives one record for each set, with one check per condition, each passed, failed or `not_checked` with the reason. A dark or bias set is judged from the numbers stored for each of its frames, so it needs `measure_frames` to have run. A flat set is measured when asked. A check with no reference (for example a bias level the camera profile does not hold) is `not_checked`, never judged against a default. Nothing is written.
 - `measure_frames(kind=None, camera_id=None, force=False)` measures the dark and bias frames that are new or changed and stores their numbers. It runs as a background job, because a first pass over a large library takes a long time (about half a second per frame). It never changes a frame file.
 - `measure_sensor_noise(camera_id, gain, offset, binning)` measures the camera's conversion gain (electrons per ADU, one step of the stored pixel value) and its read noise (the electronic noise added when a frame is read out) from the flat and bias frames in the library at exactly that setting. It pairs the frames in file-name order, so it needs at least 5 flat pairs and 3 bias pairs that share one setting, one flat exposure and one temperature. If it cannot measure, the result says why and holds no numbers. Reading never writes. With `save=True` a measured result goes into the camera profile in the configuration file, after a backup. The result's `provenance` sentence is stored as the value's source. Set `exposure_seconds`, `temperature_c`, `telescope` or `filter_name` to choose among flats of several kinds. It runs as a background job. Its result matched a hand measurement (measured; see [STK-35](../../documentation/library_design/validation/stacking.md#stk-35)).
 
 ### `quality.py`
 
-`QualityRecords` is reached as `astrometrics.quality`. It is the start of every quality read, whether the numbers were stored by an earlier run or are measured now. Nothing it does changes data.
+`QualityRecords` is reached as `astrometrics.quality`. It is the start of every quality read, whether the numbers were stored by an earlier run or are measured now. Only `record_frame_measurements` and `forget` change stored data.
 
 Stored reads:
 
@@ -113,6 +113,7 @@ Stored reads:
 
 Recorded reads:
 
+- `forget(subject_ids)` removes the stored measurements of frames that no longer exist, and returns how many it removed. It touches only frame measurements (a stack or run row is never removed), also removes a frame's weight rows inside subset stacks, ignores an id with no measurement, and creates no file in a library with no quality database. `targets.delete_images(paths, target=...)` calls it for the deleted frames of the target it is given, so deleting a frame, on a real night too, drops its numbers; without a `target` the numbers stay, because a frame is named by its target.
 - `record_frame_measurements(target)` measures a target's light frames and stores the numbers in the quality database (read them with `query`). It reads each frame once and measures the stars' width and stretch, the sky and its noise in electrons, the read noise and the temperatures. A value it cannot measure is stored as `not_measured` with the reason. A frame whose file has not changed since its last measurement is skipped, so a second call measures nothing again. A frame that fails, for any reason, is counted and tried again next time. It never moves or changes a frame file. Only one run measures a target at a time, and one run reads frames at a time; a second call for the same target returns at once with `already_running` set. A sync measures only the frames it added, at about 11 s per frame. It runs as a background job of type `quality` and returns a `FrameMeasurementSummary`. A sync that adds frames starts it by itself. See [frame measurement](../pipelines/stacking/README.md#frame-measurement). The star measurements are a design estimate (see [AST-17](../../documentation/library_design/validation/astrometry.md#ast-17)).
 
 Live checks:
@@ -127,6 +128,7 @@ Live checks:
     - every saturated patch, that is, pixels at the sensor's maximum value, where the true brightness is lost.
 
     Given `predict_exposure_seconds`, it scales the measured peaks to that exposure and says whether the spectrum would saturate ("clip") at that exposure. `exposure_seconds` and `predict_exposure_seconds` apply to this kind only; giving them with another kind raises `InvalidArgumentError`.
+- `measure_folder(folder_path, limit=20, bias_level_adu=None, camera=None)` measures any folder of `*.fits` frames with the same `frame.*` metrics that `record_frame_measurements` stores (star width in pixels and arcseconds, elongation, sky rate in electrons per second per pixel, sky noise, background, saturation) and returns the numbers and their medians. It stores nothing and moves nothing, and the folder need not be in the library, so it checks tonight's staging folder or frames a camera simulator drew (their header card `SYNTHETC` raises a notice). The sky rate needs the bias level of the camera setting: it comes from the calibration library, or from `bias_level_adu` when the library has none. A frame takes about 12 seconds.
 - `measure_stack` measures a stack (star width, the share of rejected pixels, frame registration) and compares it with the previous stack or another stack file. The comparison reports the sky level, the noise in empty sky (the target report's `stacking.empty_aperture_noise_normalized`), the flatness and the star width, with one sentence for each and a reason for any number it could not measure.
 
 ### `visualization.py`

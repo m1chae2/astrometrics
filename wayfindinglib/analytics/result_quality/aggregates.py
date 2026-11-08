@@ -4,7 +4,7 @@ Description: Combines the per-frame results of `efficiency` into the
 shapes the reports show: the loss account, the summary of each capture
 setting, and the summary of a night or a whole target. Nothing here is
 stored; the target report and the night view call these functions each
-time they are read (decision 18).
+time they are read. The stored rows hold no night or target level.
 
 The loss account keeps two parts apart: the frames the stacker set aside
 (their whole exposure time is lost) and the efficiency deficit of the kept
@@ -68,7 +68,7 @@ class MeasuredNoiseCheck(BaseModel):
     ``odd_even_difference``, built by `from_odd_even_difference`). Otherwise it
     is compared with the noise its frames are expected to have, below.
 
-    This is the independent measure of efficiency (decision S15): the
+    This is the independent measure of efficiency (issue #95): the
     expected noise comes from the frames' sky and read noise
     (``stacking.expected_empty_aperture_noise_stack_unit``), and the
     measured noise from empty apertures
@@ -99,7 +99,7 @@ class MeasuredNoiseCheck(BaseModel):
         basis; ``None`` on the model basis.
     fixed_pattern_account : `FixedPatternAccount` or `None`
         Where the stack's fixed pattern is (the four shape tests) and how much
-        of it the master flat and master dark explain (decisions D21, D22).
+        of it the master flat and master dark explain (issue #134).
         The loss account names these in place of "no listed cause accounts
         for it". ``None`` when the stack has no per-aperture record or no
         master noise.

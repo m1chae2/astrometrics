@@ -40,14 +40,16 @@ from __future__ import annotations
 import logging
 import math
 import sqlite3
+import time
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from astrometricslib import Target
-from astrometricslib.exceptions import AstrometricsError
-from astrometricslib.reports import CaptureSetting, QualityMeasurement, SubjectLevel
+from astrometricslib.drivers import VersionedCache, get_camera_data_versions
+from astrometricslib.exceptions import AstrometricsError, NotFoundError
+from astrometricslib.reports import CaptureSetting, QualityMeasurement, SubjectLevel, observing_night_id
 from wayfindinglib.analytics.capture_history import normalize_name
 from wayfindinglib.analytics.result_quality.efficiency import (
     READ_NOISE_METRIC,
@@ -76,6 +78,27 @@ from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.quality.efficiency import EfficiencyReference
 
 logger = logging.getLogger(__name__)
+
+SKY_MODEL_CACHE_MAXIMUM_ENTRIES = 16
+"""How many fitted sky models the cache keeps. A model is a few small tables,
+and a library has a few cameras, so 16 is plenty. Design estimate, register
+row WAY-D106."""
+
+_SKY_MODEL_CACHE = VersionedCache(maximum_entries=SKY_MODEL_CACHE_MAXIMUM_ENTRIES)
+"""The fitted sky models, by library, equipment key and site. Each is kept
+until the finished-night measurements of its camera change
+(`get_camera_data_versions` with ``finished_before_night``). A frame of the
+night in progress does not change them (register row WAY-D107)."""
+
+CAMERA_OBSERVATIONS_CACHE_MAXIMUM_ENTRIES = 8
+"""How many cameras' frame observations the cache keeps. A library has a few
+cameras and one camera's observations are a few thousand small records, so 8
+stay well under a few megabytes. Design estimate, register row WAY-D107."""
+
+_CAMERA_OBSERVATIONS_CACHE = VersionedCache(maximum_entries=CAMERA_OBSERVATIONS_CACHE_MAXIMUM_ENTRIES)
+"""The frame observations of each camera, by library and camera. Each is
+kept until the finished-night measurements of its camera change; the night in
+progress is not read (register row WAY-D107)."""
 
 DEFAULT_SITE_PROFILE_ID = "default"
 """The id of the stored default site."""
@@ -430,6 +453,24 @@ class ReferenceChoice:
     physical_reason: str | None
 
 
+class _IncompleteReadError(Exception):
+    """A read of a camera's frames failed in part.
+
+    Raised inside the cache builder so the cache keeps nothing, and caught by
+    `LibraryInputs.camera_observations`, which uses the partial result once.
+
+    Parameters
+    ----------
+    observations : `list` [`FrameObservation`]
+        What could be read.
+    """
+
+    def __init__(self, observations: list[FrameObservation]) -> None:
+        """Hold the partial result."""
+        super().__init__("The frames of a camera could only be read in part.")
+        self.observations = observations
+
+
 @dataclass
 class LibraryInputs:
     """What the whole library knows about the equipment, read once and kept.
@@ -449,6 +490,10 @@ class LibraryInputs:
         The configuration, for the telescopes and the site.
     known_site : `SiteProfile`, optional
         A site the caller already has. It is used instead of reading one.
+    now : `float`, optional
+        The moment that decides which observing night is not finished yet, as
+        seconds since the Unix epoch. Defaults to the present, read each time
+        it is needed.
 
     Attributes
     ----------
@@ -461,6 +506,7 @@ class LibraryInputs:
     config: Any
     known_site: SiteProfile | None = None
     notes: list[str] = field(default_factory=list)
+    now: float | None = None
     _targets: dict[str, Target] | None = field(default=None, init=False, repr=False)
     _observations: dict[str, list[FrameObservation]] = field(default_factory=dict, init=False, repr=False)
     _rows: dict[str, list[QualityMeasurement]] = field(default_factory=dict, init=False, repr=False)
@@ -468,6 +514,9 @@ class LibraryInputs:
         default_factory=dict, init=False, repr=False
     )
     _models: dict[str, tuple[SkyModel | None, str | None]] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _camera_versions: dict[tuple[str, str], tuple[str | int, ...] | None] = field(
         default_factory=dict, init=False, repr=False
     )
     _site: SiteProfile | None = field(default=None, init=False, repr=False)
@@ -517,7 +566,9 @@ class LibraryInputs:
             rows.
         """
         try:
-            listed = self.astrometrics.quality.set_aside_frames(target_id)
+            # A target already listed spares the library another listing.
+            known = self._targets.get(target_id) if self._targets else None
+            listed = self.astrometrics.quality.set_aside_frames(known or target_id)
         except (AstrometricsError, OSError, sqlite3.Error) as error:
             self.notes.append(f"The set-aside frames of {target_id} could not be listed: {error}")
             listed = []
@@ -546,17 +597,37 @@ class LibraryInputs:
         Returns
         -------
         target : `Target` or `None`
-            The target, or ``None`` when the library has none by that id.
+            The target, or ``None`` when the library has none by that id or
+            the lookup failed. A failed lookup leaves a note, so the read it
+            belongs to counts as incomplete and is not kept.
         """
         if self._targets is not None:
             return self._targets.get(target_id)
         try:
             return self.astrometrics.targets.get(target_id)
-        except AstrometricsError:
+        except NotFoundError:
             return None
+        except (AstrometricsError, OSError, sqlite3.Error) as error:
+            self.notes.append(f"The target {target_id} could not be read: {error}")
+            return None
+
+    @property
+    def unfinished_night_id(self) -> str:
+        """Name the observing night that is not finished yet.
+
+        The camera-wide inputs (`camera_observations`, the efficiency
+        baseline and the sky model) read only the frames of nights before
+        this one, because they describe what the camera usually does and a
+        night in progress is not representative (register row WAY-D107).
+        """
+        return observing_night_id(time.time() if self.now is None else self.now)
 
     def camera_rows(self, camera: str) -> list[QualityMeasurement]:
         """Read the width, sky rate and read noise rows of a camera's frames.
+
+        Only finished nights are read. A frame of the night in progress
+        (`unfinished_night_id`) is left out. So is a frame row with no night,
+        because it may be from tonight.
 
         Parameters
         ----------
@@ -579,11 +650,19 @@ class LibraryInputs:
                     )
                 except (AstrometricsError, sqlite3.Error) as error:
                     self.notes.append(f"The library's {metric} rows for {camera} could not be read: {error}")
-            self._rows[camera] = rows
+            unfinished = self.unfinished_night_id
+            self._rows[camera] = [
+                row
+                for row in rows
+                if row.subject.observing_night_id is not None and row.subject.observing_night_id < unfinished
+            ]
         return self._rows[camera]
 
     def camera_observations(self, camera: str) -> list[FrameObservation]:
         """Build an observation for every library frame of a camera.
+
+        Only finished nights are read: frames of the night in progress
+        (`unfinished_night_id`) are left out.
 
         Parameters
         ----------
@@ -598,18 +677,92 @@ class LibraryInputs:
             targets.
         """
         if camera not in self._observations:
-            rows = self.camera_rows(camera)
-            ids = sorted({row.subject.capture_setting_id for row in rows if row.subject.capture_setting_id})
-            settings = dict(self.astrometrics.quality.capture_settings(ids=ids)) if ids else {}
-            owners = (
-                self.target(target_id)
-                for target_id in sorted({row.subject.target_id for row in rows if row.subject.target_id})
-            )
-            epochs, directions = times_and_directions(owner for owner in owners if owner is not None)
-            self._observations[camera] = frame_observations_from_measurements(
-                rows, settings, start_epoch_by_frame=epochs, direction_by_frame=directions
-            )
+            try:
+                library = str(self.config.get_library_path())
+            except AttributeError, OSError, TypeError, ValueError:
+                library = None
+            if library is None:
+                observations = self._read_camera_observations(camera)
+            else:
+                try:
+                    # The observations are frozen records, so the cache hands
+                    # out the same ones; the list is copied below.
+                    observations = _CAMERA_OBSERVATIONS_CACHE.get_or_build(
+                        ("camera_observations", library, camera),
+                        lambda: self.camera_data_version(camera),
+                        lambda: self._read_camera_observations(camera, keep_only_complete=True),
+                        copy_result=False,
+                    )
+                except _IncompleteReadError as incomplete:
+                    observations = incomplete.observations
+            self._observations[camera] = list(observations)
         return self._observations[camera]
+
+    def camera_data_version(self, camera: str) -> tuple[str | int, ...] | None:
+        """Work out the version of the data an equipment baseline reads.
+
+        Parameters
+        ----------
+        camera : `str`
+            The camera name.
+
+        Returns
+        -------
+        version : `tuple` or `None`
+            Changes when a measurement of a finished night or a calibration
+            record of this camera is written, and not when a frame of the
+            night in progress or another camera's record is (see
+            `get_camera_data_versions`). `None` when it cannot be read. It is
+            read once for each camera and night in the life of this object.
+        """
+        night = self.unfinished_night_id
+        key = (camera, night)
+        if key not in self._camera_versions:
+            # One object serves one report, so the version is read once for it,
+            # and the sky model and the camera's frames both use that reading.
+            versions = get_camera_data_versions(self.config, [camera], finished_before_night=night)
+            self._camera_versions[key] = None if versions is None else versions[camera]
+        return self._camera_versions[key]
+
+    def _read_camera_observations(
+        self, camera: str, *, keep_only_complete: bool = False
+    ) -> list[FrameObservation]:
+        """Read the observations of a camera's frames from the library.
+
+        Parameters
+        ----------
+        camera : `str`
+            The camera name.
+        keep_only_complete : `bool`, optional
+            When true and a read failed (a note was added), raise
+            `_IncompleteReadError` with the partial result, so the cache keeps
+            nothing.
+
+        Returns
+        -------
+        observations : `list` [`FrameObservation`]
+            One for each frame with a width, sky rate or read noise row.
+
+        Raises
+        ------
+        _IncompleteReadError
+            If ``keep_only_complete`` is true and a read failed.
+        """
+        notes_before = len(self.notes)
+        rows = self.camera_rows(camera)
+        ids = sorted({row.subject.capture_setting_id for row in rows if row.subject.capture_setting_id})
+        settings = dict(self.astrometrics.quality.capture_settings(ids=ids)) if ids else {}
+        owners = (
+            self.target(target_id)
+            for target_id in sorted({row.subject.target_id for row in rows if row.subject.target_id})
+        )
+        epochs, directions = times_and_directions(owner for owner in owners if owner is not None)
+        observations = frame_observations_from_measurements(
+            rows, settings, start_epoch_by_frame=epochs, direction_by_frame=directions
+        )
+        if keep_only_complete and len(self.notes) > notes_before:
+            raise _IncompleteReadError(observations)
+        return observations
 
     def reference_choice(
         self, setting: CaptureSetting, exclude_night_id: str | None = None
@@ -737,7 +890,7 @@ class LibraryInputs:
             The frames.
         goal : `ScienceGoal` or `Callable`
             The goal, or a function that gives the goal of a capture setting
-            (user decision U2: the goal is chosen for each setting).
+            (user decision, issue #95: the goal is chosen for each setting).
         exclude_night_id : `str`, optional
             A night left out of the baseline.
 
@@ -772,13 +925,19 @@ class LibraryInputs:
             )
         return notes
 
-    def sky_model_for(self, setting: CaptureSetting) -> tuple[SkyModel | None, str | None]:
+    def sky_model_for(
+        self, setting: CaptureSetting, exclude_nights: Collection[str] = ()
+    ) -> tuple[SkyModel | None, str | None]:
         """Fit the sky model of a capture setting's equipment key.
 
         Parameters
         ----------
         setting : `CaptureSetting`
             The capture setting.
+        exclude_nights : `Collection` [`str`], optional
+            Nights whose frames are left out of the fit, for a leave-one-out
+            check. A model fitted without nights is kept apart from the
+            model fitted with every night.
 
         Returns
         -------
@@ -786,32 +945,84 @@ class LibraryInputs:
             The model, or ``None`` and the reason there is none.
         """
         key = baseline_key(setting)
-        if key not in self._models:
-            samples = [
-                SkyRateSample(
-                    frame_id=observation.frame_id,
-                    night_id=observation.night_id,
-                    epoch_seconds=observation.start_epoch_seconds,
-                    ra_deg=observation.ra_deg,
-                    dec_deg=observation.dec_deg,
-                    sky_rate_e_per_s_per_px=observation.sky_rate_e_per_s_per_px,
-                )
-                for observation in self.camera_observations(setting.camera)
-                if baseline_key(observation.capture_setting) == key
-                and observation.set_aside_reason is None
-                and observation.night_id is not None
-                and observation.start_epoch_seconds is not None
-                and observation.ra_deg is not None
-                and observation.dec_deg is not None
-                and observation.sky_rate_e_per_s_per_px
-            ]
+        excluded = tuple(sorted(set(exclude_nights)))
+        model_key = key if not excluded else f"{key}|without:{','.join(excluded)}"
+        if model_key not in self._models:
             site = self.site
             try:
-                outcome = fit_sky_model(samples, key, site.latitude_deg, site.longitude_deg, site.elevation_m)
-                self._models[key] = (outcome.model, outcome.reason)
-            except ValueError as error:
-                self._models[key] = (None, f"The sky model could not be fitted: {error}")
-        return self._models[key]
+                cache_key = (
+                    "sky_model",
+                    str(self.config.get_library_path()),
+                    model_key,
+                    site.latitude_deg,
+                    site.longitude_deg,
+                    site.elevation_m,
+                )
+            except AttributeError, OSError, TypeError, ValueError:
+                cache_key = None
+            # The fit reads every frame of the camera in the library, so it is
+            # the same for every target and is kept until its camera changes.
+            version = None if cache_key is None else (lambda: self.camera_data_version(setting.camera))
+
+            def fit() -> tuple[SkyModel | None, str | None]:
+                """Fit the model, leaving out the nights asked for.
+
+                Returns
+                -------
+                model, reason : `tuple`
+                    The model, or ``None`` and the reason there is none.
+                """
+                if not excluded:
+                    return self._fit_sky_model(setting, key)
+                return self._fit_sky_model(setting, key, frozenset(excluded))
+
+            self._models[model_key] = _SKY_MODEL_CACHE.get_or_build(cache_key, version, fit)
+        return self._models[model_key]
+
+    def _fit_sky_model(
+        self, setting: CaptureSetting, key: str, exclude_nights: frozenset[str] = frozenset()
+    ) -> tuple[SkyModel | None, str | None]:
+        """Fit the sky model of an equipment key from the camera's frames.
+
+        Parameters
+        ----------
+        setting : `CaptureSetting`
+            A capture setting of the equipment, which names the camera.
+        key : `str`
+            The equipment key of `setting`.
+        exclude_nights : `frozenset` [`str`], optional
+            Nights to leave out of the fit.
+
+        Returns
+        -------
+        model, reason : `tuple`
+            The model, or ``None`` and the reason there is none.
+        """
+        samples = [
+            SkyRateSample(
+                frame_id=observation.frame_id,
+                night_id=observation.night_id,
+                epoch_seconds=observation.start_epoch_seconds,
+                ra_deg=observation.ra_deg,
+                dec_deg=observation.dec_deg,
+                sky_rate_e_per_s_per_px=observation.sky_rate_e_per_s_per_px,
+            )
+            for observation in self.camera_observations(setting.camera)
+            if baseline_key(observation.capture_setting) == key
+            and observation.set_aside_reason is None
+            and observation.night_id is not None
+            and observation.night_id not in exclude_nights
+            and observation.start_epoch_seconds is not None
+            and observation.ra_deg is not None
+            and observation.dec_deg is not None
+            and observation.sky_rate_e_per_s_per_px
+        ]
+        site = self.site
+        try:
+            outcome = fit_sky_model(samples, key, site.latitude_deg, site.longitude_deg, site.elevation_m)
+        except ValueError as error:
+            return None, f"The sky model could not be fitted: {error}"
+        return outcome.model, outcome.reason
 
     def all_sky_models(self) -> tuple[dict[str, SkyModel], list[str]]:
         """Fit a sky model for each piece of equipment in the library.

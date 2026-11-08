@@ -29,10 +29,10 @@ A second ratchet in this file keeps the wall clock out of the pipelines
 that reads the clock instead of a frame's own capture time fabricates
 timestamps. See `KNOWN_WALL_CLOCK_SITES`.
 
-A third ratchet keeps unseeded randomness out of the pipelines (review item
-S20). A random generator with no seed gives a different answer on every run,
-so a detection threshold or a preview could change between two runs on the
-same frame. See `KNOWN_UNSEEDED_RANDOM_SITES`.
+A third ratchet keeps unseeded randomness out of the pipelines. A random
+generator with no seed gives a different answer on every run, so a detection
+threshold or a preview could change between two runs on the same frame. See
+`KNOWN_UNSEEDED_RANDOM_SITES`.
 
 A fourth ratchet keeps imports pointing down the layers (issue #78). The
 library's layer rule (see Appendix A and Table 8 of
@@ -151,7 +151,7 @@ def test_the_known_list_has_no_stale_entries() -> None:
 
 # Files under `pipelines/` that call `datetime.now()` or `datetime.utcnow()`
 # on purpose. Each entry needs a reason. A pipeline must never use the clock
-# to stamp a frame or a measurement (review item S5); it may use it to date
+# to stamp a frame or a measurement; it may use it to date
 # its own bookkeeping.
 KNOWN_WALL_CLOCK_SITES = frozenset({
     # Writes the time a rejected frame was moved into quarantine, in the
@@ -233,7 +233,7 @@ def test_the_wall_clock_list_has_no_stale_entries() -> None:
 
 
 # Files under `pipelines/` that use unseeded randomness on purpose. Each
-# entry needs a reason. It is empty: the two sites found by review item S20
+# entry needs a reason. It is empty: the two sites found in review
 # (the source detector's background subsample and the preview scaler's
 # percentile sample) now take fixed seeds.
 KNOWN_UNSEEDED_RANDOM_SITES: frozenset[str] = frozenset()

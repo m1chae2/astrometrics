@@ -17,11 +17,11 @@ Rules the helpers keep:
   assumption) and for a self-check (where it is the check's own detail).
 - A value that is NaN or infinite is never stored. It becomes a
   ``not_measured`` record with the reason "the value was not finite", so a bad
-  number in a summary cannot stop the record step (plan section 3.5).
+  number in a summary cannot stop the record step.
 - A measurement carries the registered ``definition_version`` of its metric,
   so a pipeline never repeats it.
 - Storing is best effort. A storage failure is logged and never stops the
-  science run (plan section 3.5).
+  science run.
 - Nothing here reads the clock. The caller supplies ``measured_at``.
 """
 
@@ -415,7 +415,7 @@ def record_run_measurements(measurements: Sequence[QualityMeasurement], *, confi
 
     Notes
     -----
-    A `StorageError` is logged as a warning and swallowed (plan section 3.5).
+    A `StorageError` is logged as a warning and swallowed.
     A measurement that breaks a registry rule is a programming error; its
     `AstrometricsError` is logged as an error and also swallowed, because a
     quality row must never stop a science result.

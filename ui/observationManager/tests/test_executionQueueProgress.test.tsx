@@ -20,7 +20,7 @@ vi.mock('../../common/services/sequencerService', () => ({ beginImagingSession: 
 /** What the mocked policy answers; tests change it. */
 const availability = vi.hoisted(() => ({ canCommand: true, reason: 'Checking whether Ekos is in control…' }));
 vi.mock('../../common/hooks/useCommandAvailability', () => ({
-    useCommandAvailability: () => ({ ...availability, delegations: [], isChecking: false }),
+    useCommandAvailability: () => ({ ...availability, delegations: [], isChecking: false, canCommandCapability: () => availability.canCommand, reasonForCapability: () => availability.reason }),
 }));
 
 const queue: SequenceObject[] = [
@@ -105,7 +105,7 @@ describe('ExecutionQueue progress', () => {
         const { unmount } = render(
             <ExecutionQueue queue={queue} removeFromQueue={vi.fn()} onEdit={vi.fn()} reorderQueue={vi.fn()} isSessionLoading />
         );
-        expect(screen.getByText('Loading progress…')).toHaveAttribute('aria-busy', 'true');
+        expect(screen.getByText('Reading progress')).toHaveAttribute('aria-busy', 'true');
         unmount();
         renderQueue({ session: null, sessionError: 'boom', onRetrySession });
         expect(screen.getByRole('alert')).toHaveTextContent('Could not load progress.');

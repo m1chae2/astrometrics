@@ -142,7 +142,10 @@ def get_metric_registry() -> MetricRegistry:
     registry : `MetricRegistry`
         The registry of the frame metrics and every pipeline's metrics.
     """
-    specs = [*FRAME_METRICS, *CALIBRATION_FRAME_METRICS]
+    # Imported here: `frame_notices` needs `notices`, which needs this module.
+    from astrometricslib.pipelines.shared.quality.frame_notices import FRAME_NOTICE_METRICS
+
+    specs = [*FRAME_METRICS, *CALIBRATION_FRAME_METRICS, *FRAME_NOTICE_METRICS]
     for pipeline in PIPELINES_WITH_METRICS:
         specs.extend(load_pipeline_metrics(pipeline))
     return MetricRegistry(tuple(specs))

@@ -26,6 +26,7 @@ with the network down does not wait for a timeout on every star of every
 frame.
 """
 
+import contextvars
 import logging
 import os
 import tempfile
@@ -40,6 +41,7 @@ import numpy as np
 
 from astrometricslib._internal.drivers.interfaces.gaia_xp_driver import GaiaXpDownloadError, GaiaXpDriver
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
+from astrometricslib.foundation.offline import OfflineModeError, require_online
 from astrometricslib.foundation.paths import catalog_cache_directory
 from astrometricslib.utilities.exceptions import ONLINE_QUERY_ERRORS
 
@@ -188,6 +190,11 @@ class AstroqueryGaiaXpDriver(GaiaXpDriver):
         cached = self._read_cache(source_id)
         if cached is not None:
             return cached if cached[0].size else None
+        try:
+            require_online("the Gaia archive")
+        except OfflineModeError as offline_error:
+            # Not a failed download: nothing was tried, so no pause starts.
+            raise GaiaXpDownloadError(str(offline_error)) from offline_error
         if time.monotonic() < self._skip_downloads_until:
             raise GaiaXpDownloadError("Gaia XP downloads are paused after an earlier failure")
         with self._download_lock:
@@ -324,7 +331,9 @@ class AstroqueryGaiaXpDriver(GaiaXpDriver):
             except _DOWNLOAD_ERRORS as fetch_error:
                 answer["error"] = fetch_error
 
-        worker = threading.Thread(target=fetch, name=f"gaia-xp-{source_id}", daemon=True)
+        worker = threading.Thread(
+            target=contextvars.copy_context().run, args=(fetch,), name=f"gaia-xp-{source_id}", daemon=True
+        )
         worker.start()
         worker.join(DOWNLOAD_TIMEOUT_SECONDS)
         if worker.is_alive():

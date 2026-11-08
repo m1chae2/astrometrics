@@ -871,12 +871,12 @@ def test_remote_methods_delegate_to_the_task_module(
         "measurements": [],
     }
     remote_transfer_tasks.download_remote_targets.assert_called_once_with(
-        context, "M 81", local_path="/local/M81", measurement_summaries=[]
+        context, "M 81", local_path="/local/M81", measurement_summaries=[], on_copied=None
     )
     assert control.remote.sync_frames("Dark").model_dump() == {"success": True}
     remote_transfer_tasks.sync_calibration_folder.assert_called_once_with(context, "Dark")
     assert control.remote.sync_frames("M 81", dry_run=True).model_dump() == {"dry_run": True}
-    remote_transfer_tasks.sync_target_frames.assert_called_once_with(context, "M 81", True)
+    remote_transfer_tasks.sync_target_frames.assert_called_once_with(context, "M 81", True, None)
     assert control.remote.sync_frames(register_job=False).model_dump() == {"succeeded": []}
     remote_transfer_tasks.sync_all_remote_folders.assert_called_once_with(context, None, False)
 
@@ -1156,6 +1156,50 @@ def test_focuser_and_filter_wheel_end_to_end_against_simulator(control: Observat
     assert control.imaging.status(include=["focuser"]).focuser_position == 0
     assert control.imaging.set_filter("Luminance") is True
     assert "Luminance" in control.imaging.status(include=["filters"]).filter_names
+
+
+def test_stop_capture_ends_a_running_capture_against_simulator(control: ObservatoryControl) -> None:
+    """`control.imaging.stop_capture` ends a long run started by the app.
+
+    The run is on a thread with 30 s exposures. The stop must return at
+    once, the run must end as stopped, and a second stop must do nothing.
+    """
+    import threading
+    import time
+
+    from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
+    from wayfindinglib.models.policy.delegation import CapabilityDelegation, DelegationPolicy
+
+    control._driver = SimulatorIndiInterface(config=control._context.config)
+    control._context.butler.put(
+        DelegationPolicy(
+            id="default",
+            capability_delegations=[
+                CapabilityDelegation(
+                    capability=ObservatoryCapability.CAPTURE_ORCHESTRATION,
+                    state=DelegationState.AUTHORITATIVE,
+                ),
+            ],
+        ),
+        "delegation_policy",
+        {"id": "default"},
+    )
+    assert control.imaging.stop_capture() is False
+    results: list = []
+    thread = threading.Thread(
+        target=lambda: results.append(control.imaging.capture_image(30.0, count=5, register_job=False))
+    )
+    thread.start()
+    deadline = time.monotonic() + 5.0
+    while not control._context.capture_runs.is_running() and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    assert control.imaging.stop_capture() is True
+    thread.join(timeout=5.0)
+
+    assert not thread.is_alive()
+    assert results[0].stopped is True
+    assert control.imaging.stop_capture() is False
 
 
 def test_focuser_and_filter_wheel_commands_refused_when_not_authoritative(
@@ -1496,3 +1540,129 @@ def test_apply_configuration_tells_the_session_to_read_the_hostname_again(
     control.equipment.apply_configuration()
 
     driver.sync_configuration.assert_called_once_with()
+
+
+def test_record_calibration_saves_a_record_with_its_source_note(control: ObservatoryControl) -> None:
+    """A guider calibration made elsewhere is saved and read back whole."""
+    recorded = control.guiding.record_calibration(
+        calibration_id="phd2-1",
+        camera_id="CamA",
+        telescope_id="Rig A",
+        arcsec_per_pixel=2.0,
+        camera_angle_deg=12.5,
+        ra_rate_arcsec_per_sec=14.0,
+        dec_rate_arcsec_per_sec=13.0,
+        source_note="PHD2 calibration of 2026-11-01",
+    )
+
+    saved = {record.id: record for record in control._context.butler.get_all("guider_calibration")}
+    assert saved["phd2-1"] == recorded
+    assert saved["phd2-1"].source_note == "PHD2 calibration of 2026-11-01"
+    assert saved["phd2-1"].camera_angle_deg == pytest.approx(12.5)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"arcsec_per_pixel": 0.0},
+        {"camera_angle_deg": 200.0},
+        {"ra_rate_arcsec_per_sec": -1.0},
+        {"source_note": "  "},
+        {"calibration_id": ""},
+    ],
+)
+def test_record_calibration_refuses_invalid_values(control: ObservatoryControl, changes: dict) -> None:
+    """A value the record does not allow, or a missing note, saves nothing."""
+    arguments = {
+        "calibration_id": "bad",
+        "camera_id": "CamA",
+        "telescope_id": "Rig A",
+        "arcsec_per_pixel": 2.0,
+        "camera_angle_deg": 0.0,
+        "ra_rate_arcsec_per_sec": 10.0,
+        "dec_rate_arcsec_per_sec": 10.0,
+        "source_note": "test",
+        **changes,
+    }
+
+    with pytest.raises(InvalidArgumentError):
+        control.guiding.record_calibration(**arguments)
+
+    assert [r.id for r in control._context.butler.get_all("guider_calibration")] == []
+
+
+def test_record_focus_model_saves_a_record_with_filter_offsets(control: ObservatoryControl) -> None:
+    """A focus model made elsewhere is saved with its offsets and note."""
+    recorded = control.imaging.record_focus_model(
+        focus_model_id="focus-9",
+        camera_id="CamA",
+        telescope_id="Rig A",
+        backlash_steps=40,
+        approach_direction="inward",
+        thermal_coefficient_steps_per_c=-3.5,
+        filter_offsets={"L": 0, "Ha": 12},
+        source_note="Autofocus run of 2026-11-01",
+    )
+
+    saved = {record.id: record for record in control._context.butler.get_all("focus_model")}
+    assert saved["focus-9"] == recorded
+    assert saved["focus-9"].offset_for_filter("Ha") == 12
+    assert saved["focus-9"].source_note == "Autofocus run of 2026-11-01"
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [{"backlash_steps": -1}, {"approach_direction": "sideways"}, {"source_note": ""}],
+)
+def test_record_focus_model_refuses_invalid_values(control: ObservatoryControl, changes: dict) -> None:
+    """A value the record does not allow, or a missing note, saves nothing."""
+    arguments = {
+        "focus_model_id": "bad",
+        "camera_id": "CamA",
+        "telescope_id": "Rig A",
+        "backlash_steps": 0,
+        "approach_direction": "inward",
+        "source_note": "test",
+        **changes,
+    }
+
+    with pytest.raises(InvalidArgumentError):
+        control.imaging.record_focus_model(**arguments)
+
+    assert control._context.butler.get_all("focus_model") == []
+
+
+def test_the_query_reads_list_every_saved_record_oldest_first(control: ObservatoryControl) -> None:
+    """The three query reads list all pairings, not only the active one."""
+    assert control.guiding.query_calibrations() == []
+    assert control.imaging.query_focus_models() == []
+    for day, camera in ((3, "Cam B"), (1, "Cam A")):
+        control.guiding.record_calibration(
+            calibration_id=f"cal-{day}",
+            camera_id=camera,
+            telescope_id="Scope",
+            arcsec_per_pixel=3.0,
+            camera_angle_deg=0.0,
+            ra_rate_arcsec_per_sec=7.0,
+            dec_rate_arcsec_per_sec=7.0,
+            source_note="test",
+            calibrated_at=datetime(2026, 10, day, tzinfo=UTC),
+        )
+        control.imaging.record_focus_model(
+            focus_model_id=f"focus-{day}",
+            camera_id=camera,
+            telescope_id="Scope",
+            backlash_steps=10,
+            approach_direction="inward",
+            source_note="test",
+            calibrated_at=datetime(2026, 10, day, tzinfo=UTC),
+        )
+
+    assert [record.id for record in control.guiding.query_calibrations()] == ["cal-1", "cal-3"]
+    assert [record.id for record in control.imaging.query_focus_models()] == ["focus-1", "focus-3"]
+
+
+def test_library_path_is_the_configured_wayfinding_folder(control: ObservatoryControl) -> None:
+    """`library_path` names the folder that holds `wayfinding.db`."""
+    assert control.library_path == control._context.butler.library_path
+    assert control.library_path.is_dir()

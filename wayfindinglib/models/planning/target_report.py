@@ -7,7 +7,8 @@ starting point when the target has no frames yet, and whether the earlier
 forecasts of "take N more" came true.
 
 The report is recomputed on each read and never stored
-(`QUALITY_METRICS_PLAN.md` Section 6.2). The shared statement shapes live in
+(`Wayfinding_Quality_Judgment.md` Section 2). The shared statement shapes live
+in
 `wayfindinglib.models.quality`.
 """
 

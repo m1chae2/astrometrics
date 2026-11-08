@@ -2,7 +2,7 @@
 
 Description: `build_night_quality` is the work behind
 `review.query(kind="night_quality", session_id=...)`
-(`QUALITY_METRICS_PLAN.md` Section 6.1, use case UC1). For each target imaged
+(use case UC1 in `Wayfinding_Quality_Use_Cases.md`). For each target imaged
 that night it states where the time went: frames set aside, and the efficiency
 lost in the frames kept, against the user's own best nights with the same
 equipment (the baseline) or, when there are too few nights, against the
@@ -566,7 +566,7 @@ def review_night_quality(context: ControlContext, night_id: str) -> NightQuality
         goal_target = target if target else Target(id=target_id)
         target_goal = science_goal_for_target(goal_target)
 
-        goal_for_setting = partial(science_goal_for_setting, goal_target)  # user decision U2
+        goal_for_setting = partial(science_goal_for_setting, goal_target)  # user decision, issue #95
         target_observations = [o for o in night_observations if o.target_id == target_id]
         set_aside = _unobserved_set_aside(
             night_frame_rows, target_id, night_id, reasons, observed_ids, capture_settings
@@ -646,7 +646,7 @@ def _summary_by_goal(
 ) -> tuple[DataSummary, ScienceGoal]:
     """Summarize a target's night, each capture setting for its own goal.
 
-    The user decided on 2026-10-24 (issue #95, decision U2) that the goal is
+    The user decided on 2026-10-24 (issue #95) that the goal is
     chosen for each capture setting. The settings are split into groups that
     share a goal, each group is summarized, and the groups are added up. When
     the goals differ, the whole-target loss account is left out (it would have

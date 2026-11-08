@@ -1,9 +1,9 @@
-"""Purpose: Test the fit of the INDI simulators' settings (phase S3).
+"""Purpose: Test the fit of the INDI simulators' settings (`simulator.fit`).
 
 Description: Checks, with synthetic measurements, that each conversion of
-section 5 of the simulator plan gives the number the INDI 2.2.5 drivers need,
+the table in simulator/README.md gives the number the INDI 2.2.5 drivers need,
 that a value without data falls back one step, that every value is clamped to
-its property's range and says so, that the results file holds what the plan
+its property's range and says so, that the results file holds what the README
 requires, that a truncated reply is refused, and that the exposure driver
 reads the properties from the same file. The INDI simulators are not started
 here; the live checks are in `test_fit_live.py`.
@@ -427,7 +427,7 @@ def test_the_best_source_in_the_fallback_order_wins() -> None:
 
 
 def test_a_row_without_data_falls_back_one_step() -> None:
-    """Zero where the plan says zero; the simulator's default otherwise."""
+    """Zero where the README says zero; the simulator's default otherwise."""
     result = fit_values(Measurements(), _setup())
     assert _written(result, MAIN_CAMERA, SETTINGS, "SIM_PEMAX") == pytest.approx(0.0)
     assert _written(result, GUIDE_CAMERA, SETTINGS, "SIM_PE_MAX") == pytest.approx(0.0)
@@ -494,7 +494,7 @@ def _full_result() -> FitResult:
     return fit_values(measurements, _setup())
 
 
-def test_the_results_file_holds_what_the_plan_requires(tmp_path: Path) -> None:
+def test_the_results_file_holds_what_the_readme_requires(tmp_path: Path) -> None:
     """Each value has its call, nights, source, date, property and clamp."""
     path = tmp_path / RESULTS_FILE_NAME
     fingerprint = fingerprint_library_copy(tmp_path)
@@ -718,7 +718,7 @@ def _fake_wayfinder(**overrides: Any) -> SimpleNamespace:
 
 
 def test_collect_reads_every_row_and_names_the_public_calls() -> None:
-    """Each row gets a candidate from the call the plan names."""
+    """Each row gets a candidate from the library call the README names."""
     measurements = collect_measurements(_fake_wayfinder(), 250.4, 36.46, 1_790_000_000.0)
     rows = measurements.candidates
     assert rows["guide_rate"][0].kind == "newest real record"

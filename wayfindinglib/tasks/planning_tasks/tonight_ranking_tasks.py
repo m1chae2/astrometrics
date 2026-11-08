@@ -2,7 +2,8 @@
 
 Description: `rank_tonight` is the work behind
 `ObservationPlanning.get_tonight_advice(at=...)`
-(`QUALITY_METRICS_PLAN.md` Section 4.2, use cases UC6 and UC12). For each
+(`Wayfinding_Quality_Judgment.md` Section 11, use cases UC6 and UC12 in
+`Wayfinding_Quality_Use_Cases.md`). For each
 library target that is above the horizon at the planning time, it asks: if the
 user spent the next clock hour on this target, by how much would the noise of
 its stack fall? The answer comes from the same forward model as "take N more"
@@ -129,9 +130,9 @@ TONIGHT_RANKING_ENTRY = "WAY-72"
 GAIN_TIE_DIGITS = 2
 """Two gains that agree to this many decimals (the whole percent the reason
 text shows) count as tied for the provisional rule. Among targets tied this
-way, one whose recommended additional frames are only provisional (decision
-D11,
-2026-10-26) ranks after the others; otherwise the larger gain ranks first."""
+way, one whose recommended additional frames are only provisional
+(issue #134, 2026-10-26) ranks after the others; otherwise the larger gain
+ranks first."""
 
 PROVISIONAL_RANKING_REMARK = (
     "Its count of recommended additional frames is provisional: it rests on a check made from frames "
@@ -230,7 +231,7 @@ def _use_of_goal(goal: ScienceGoal) -> RankedUse:
 def classify_uses(target: Target, settings: Iterable[CaptureSetting]) -> list[RankedUse] | None:
     """Say every ranked list a target belongs to, one for each kind of setting.
 
-    The user decided on 2026-10-24 (issue #95, decision U2) that the goal is
+    The user decided on 2026-10-24 (issue #95) that the goal is
     chosen for each capture setting, and that a target is listed in every use
     list its settings belong to. A target with a grating setting and an
     imaging setting is in the spectroscopy list and the imaging list. A
@@ -822,7 +823,7 @@ def rank_tonight(
         except ConfigurationError:
             return None
 
-    # One library-wide read, not one per target (decision D17).
+    # One library-wide read, not one per target (issue #134).
     noise_history = read_noise_history(astrometrics, config)
     noise_model_errors = noise_history.model_errors
     wanted = set(candidate_target_ids) if candidate_target_ids is not None else None
@@ -876,7 +877,7 @@ def rank_tonight(
             electrons_per_adu=electrons_per_adu_for(dominant) if dominant is not None else None,
         )
         # A target in several lists is scored once for each, on the frames of
-        # that use's settings (user decision U2, 2026-10-24).
+        # that use's settings (user decision 2026-10-24, issue #95).
         for use in classify_uses(target, {o.capture_setting for o in all_observations}) or []:
             observations = [
                 o

@@ -7,7 +7,7 @@
       "category": "planning-sessions",
       "disposition": "withhold",
       "interim_block": "",
-      "note": "Closes a session and records it. Stays separate from the read tools (section 4.2)."
+      "note": "Closes a session and records it."
     },
     "execution_advance_session": {
       "tool_class": "actuate",

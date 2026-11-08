@@ -219,8 +219,8 @@ def build_camera_profile(section_name: str, section: dict) -> CameraProfile:
     if BIAS_LEVELS_KEY in section:
         kwargs["bias_levels"] = tuple(_build_setting_bias_level(entry) for entry in section[BIAS_LEVELS_KEY])
     if any(key in section for key in LEGACY_NOISE_KEYS):
-        # Old layout: one value with no setting. It is not applied (decision 7
-        # of the quality-metrics plan), only flagged.
+        # Old layout: one value with no setting. It is not applied (nobody
+        # recorded the setting it was measured at), only flagged.
         kwargs["has_unkeyed_noise_values"] = True
         _warn_once_about_unkeyed_noise(camera_name)
     return CameraProfile(**kwargs)

@@ -556,7 +556,7 @@ def _aperture_detail_safely(
 ) -> OddEvenDetail:
     """Write the per-aperture record and measure the line pattern safely.
 
-    Both are by-products of the odd–even difference (decision D21): a failure
+    Both are by-products of the odd–even difference: a failure
     here must not lose the difference's own rows.
 
     Parameters

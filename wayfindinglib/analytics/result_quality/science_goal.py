@@ -2,7 +2,7 @@
 
 Description: Efficiency depends on what the data is for. A galaxy gains depth
 from a softer night, a faint star does not (`efficiency`). The goal is read
-from the target itself, never asked of the user (decision S6):
+from the target itself, never asked of the user (issue #95):
 
 * spectral frames make a slitless spectroscopy target;
 * otherwise a target with a photometry quality record is a bright-star
@@ -13,7 +13,7 @@ from the target itself, never asked of the user (decision S6):
 The rule is a design estimate (register row WAY-D74): a catalog number does not
 say whether the user imaged the whole galaxy or one star in it.
 
-The user decided on 2026-10-24 (issue #95, decision U2) that the goal is chosen
+The user decided on 2026-10-24 (issue #95) that the goal is chosen
 for each capture setting, not for the whole target. One target can have a
 grating setting and imaging settings, and each is judged for its own goal:
 

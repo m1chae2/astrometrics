@@ -122,7 +122,7 @@ def test_predict_weighting_mode_follows_the_stacker_rule() -> None:
 
 
 # -----------------------------------------------------------------------------
-# Exposure-group stacks (decision D7)
+# Exposure-group stacks (issue #134)
 # -----------------------------------------------------------------------------
 
 CAMERA_GAIN = 0.8
@@ -317,7 +317,7 @@ def test_frame_noise_comes_back_from_the_stored_group_weight() -> None:
 def test_predicted_group_frame_noise_converts_electrons_to_adu() -> None:
     """The M 27 60 s frame: 933 ADU of sky, gain 0.783, read noise 3.8 e-.
 
-    The plan (section 3.6.1) gives 35.1 ADU; the function gives 34.9, within
+    Issue #134 records 35.1 ADU; the function gives 34.9, within
     the 1 percent the sky level is known to.
     """
     frame = _frame(sky=933.0 * 0.783 / 60.0, read=3.8)
@@ -466,12 +466,12 @@ def _new_copies(template: list[StackFrame], count: int, exposure: float) -> list
 
 
 # -----------------------------------------------------------------------------
-# The fixed-pattern noise of one stack (decision D8)
+# The fixed-pattern noise of one stack (issue #134)
 # -----------------------------------------------------------------------------
 
 # Measured and random noise of the validation stacks, in stack units
-# (plan section 3.6.1, after the D9 normalization scale). The aperture count
-# is the one that gives the plan's 11.7 percent error.
+# (issue #134, after Siril's normalization scale). The aperture count
+# is the one that gives the 11.7 percent error recorded there.
 APERTURES_FOR_11_7_PERCENT = 100
 
 
@@ -491,7 +491,7 @@ def test_m81_has_no_fixed_pattern_noise_at_two_sigma() -> None:
     """M 81: 1.126e-3 measured against 0.921e-3 random is within 2 sigma."""
     fixed_pattern = ng.measure_stack_fixed_pattern_noise(1.126e-3, 0.921e-3, APERTURES_FOR_11_7_PERCENT)
     assert not fixed_pattern.fixed_pattern_noise_detected
-    # 1.03 standard errors is just inside the "possible" band (decision D18).
+    # 1.03 standard errors is just inside the "possible" band (issue #134).
     assert fixed_pattern.possible
     assert fixed_pattern.sigmas == pytest.approx(1.03, abs=0.01)
 
@@ -671,7 +671,7 @@ def test_the_group_ratio_leaves_the_mean_exposure_scale_out() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Folded groups (decision D10, option B)
+# Folded groups (issue #134)
 # ---------------------------------------------------------------------------
 
 
@@ -1060,7 +1060,7 @@ def test_the_statements_name_the_basis_of_the_fixed_pattern_noise() -> None:
     assert "measured from the odd and even half stacks" in statement.message
 
 
-# -- D17: the noise model's error measured from odd-even differences ---------
+# -- The noise model's error measured from odd-even differences ---------
 
 
 def _samples(log_variance_ratios: list[float], apertures: int = 100) -> list[ng.NoiseModelErrorSample]:
@@ -1130,7 +1130,7 @@ def test_fewer_apertures_remove_more_scatter() -> None:
     assert few.relative_error < many.relative_error
 
 
-# -- D18: a graded answer between 1 and 2 sigma -------------------------------
+# -- A graded answer between 1 and 2 sigma -------------------------------
 
 
 def _m13_like_fixed_pattern(sigmas: float) -> ng.StackFixedPatternNoise:

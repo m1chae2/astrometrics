@@ -9,6 +9,7 @@ Explanation pages say how the software works and why it is built that way. The l
 - [Astrometrics library architecture](library_design/Astrometrics_Library_Architecture.md): the theory behind stacking, astrometry, photometry, spectroscopy and asteroid detection.
 - [Wayfinding library architecture](library_design/Wayfinding_Library_Architecture.md): the theory behind observation planning and observatory control.
 - [Wayfinding quality judgment](library_design/Wayfinding_Quality_Judgment.md): the theory of how the library judges quality and recommends the next observation: statements, efficiency, the loss account, the forecast check and tonight's ranking.
+- [Wayfinding quality use cases](library_design/Wayfinding_Quality_Use_Cases.md): how the observer uses the quality displays, step by step, in fourteen use cases.
 - [Desktop app architecture](user_interface/technical_reference/User_Interface_Architecture.md): how the desktop app is built and how it talks to the Python backend.
 
 ```{toctree}
@@ -19,5 +20,6 @@ library_design/pipelines/index
 library_design/Astrometrics_Library_Architecture
 library_design/Wayfinding_Library_Architecture
 library_design/Wayfinding_Quality_Judgment
+library_design/Wayfinding_Quality_Use_Cases
 user_interface/technical_reference/User_Interface_Architecture
 ```

@@ -17,12 +17,12 @@ runs unaware of simulation. One session goes like this:
    as a child with the world's settings and folders. If the world cannot be
    built or started, an offline world (no telescope) is built in its place and
    the reason is passed to the backend, which shows "SIMULATOR FAILED".
-4. Operator step (decision D11 of the simulator plan). Until the app can
+4. Operator step (see simulator/README.md). Until the app can
    command PHD2 and the camera by itself, the launcher plays the operator for
    one thing: once the backend answers ``/api/ready`` it records the
    calibrations, then lets the app take command of the simulated devices,
    through the backend's public RPC methods. The log says so in lines that
-   start with ``OPERATOR STEP (D11)``.
+   start with ``OPERATOR STEP``.
 5. Connection guard. Every few seconds the launcher lists the backend's TCP
    and UDP sockets. One to an address beyond this computer ends the session,
    and so do three failed checks in a row. The guard acts after the fact; the
@@ -35,7 +35,7 @@ runs unaware of simulation. One session goes like this:
    exits with it. SIGTERM or SIGINT stops the backend first, then cleans up.
 
 The backend has no world code of its own: without this launcher it runs on
-the real telescope and cannot change its source (phase L3).
+the real telescope and cannot change its source.
 
 Usage::
 
@@ -138,7 +138,7 @@ POLL_SECONDS = 0.25
 READY_TIMEOUT_SECONDS = 600.0
 #: Seconds the calibration step may take.
 CALIBRATION_TIMEOUT_SECONDS = 300.0
-#: Seconds the fit step (S3) may take. It opens the library copy, so the first
+#: Seconds the fit step may take. It opens the library copy, so the first
 #: load of the star catalog dominates.
 FIT_TIMEOUT_SECONDS = 600.0
 #: The note the operator step keeps with the change of control mode.
@@ -404,7 +404,7 @@ def build_world(
         (from the newest PHD2 run in the library copy), else PHD2's own.
     backend_port : `int`, optional
         The port the backend will listen on. The exposure driver uses it to
-        deliver real frames (S4). Default: none, so every frame is the
+        deliver real frames. Default: none, so every frame is the
         simulator's.
     fitter : `~collections.abc.Callable`, optional
         ``fitter(root, config_path, variables, environ)`` runs the fit and
@@ -551,7 +551,7 @@ def run_operator_step(
     targets: list[tuple[str, float, float]],
     call: Callable[..., object] = call_rpc,
 ) -> dict:
-    """Play the operator (decision D11) once the backend is ready.
+    """Play the operator once the backend is ready.
 
     In order: add the targets the simulated mount points at (a frame is
     downloaded only for a target the library knows), record the guider
@@ -579,7 +579,7 @@ def run_operator_step(
         off) from the change of control mode, and ``error`` (`str` or
         `None`).
     """
-    logger.info("OPERATOR STEP (D11): the launcher plays the operator for the simulated devices.")
+    logger.info("OPERATOR STEP: the launcher plays the operator for the simulated devices.")
     for name, right_ascension, declination in targets:
         try:
             if call(port, "target:get", {"target_id": name}) is None:
@@ -592,15 +592,15 @@ def run_operator_step(
                         "dec": _sexagesimal(declination, False),
                     },
                 )
-                logger.info("OPERATOR STEP (D11): added the target %s.", name)
+                logger.info("OPERATOR STEP: added the target %s.", name)
         except RuntimeError, OSError, ValueError:
-            logger.warning("OPERATOR STEP (D11): could not add the target %s.", name, exc_info=True)
+            logger.warning("OPERATOR STEP: could not add the target %s.", name, exc_info=True)
     for method, parameters in calibration_calls:
         try:
             call(port, method, parameters)
-            logger.info("OPERATOR STEP (D11): %s recorded.", method)
+            logger.info("OPERATOR STEP: %s recorded.", method)
         except RuntimeError, OSError, ValueError:
-            logger.warning("OPERATOR STEP (D11): %s failed.", method, exc_info=True)
+            logger.warning("OPERATOR STEP: %s failed.", method, exc_info=True)
     try:
         result = call(
             port,
@@ -608,15 +608,15 @@ def run_operator_step(
             {"evidence_note": OPERATOR_EVIDENCE_NOTE, "shadow_first": True},
         )
     except (RuntimeError, OSError, ValueError) as error:
-        logger.warning("OPERATOR STEP (D11): the app could not take command of the simulator.", exc_info=True)
+        logger.warning("OPERATOR STEP: the app could not take command of the simulator.", exc_info=True)
         return {"allowed": [], "off": {}, "error": f"{type(error).__name__}: {error}"}
     result = result if isinstance(result, dict) else {}
     allowed = sorted(result.get("applied", {}))
     off = {str(name): str(reason) for name, reason in result.get("rejected", {}).items()}
-    logger.info("OPERATOR STEP (D11): simulator commands are on for: %s.", ", ".join(allowed) or "nothing")
+    logger.info("OPERATOR STEP: simulator commands are on for: %s.", ", ".join(allowed) or "nothing")
     if off:
         logger.warning(
-            "OPERATOR STEP (D11): simulator commands stay off for: %s.",
+            "OPERATOR STEP: simulator commands stay off for: %s.",
             "; ".join(f"{name} ({reason})" for name, reason in off.items()),
         )
     return {"allowed": allowed, "off": off, "error": None}
@@ -658,16 +658,16 @@ def work_out_calibrations(world: World, environment: dict[str, str]) -> list[tup
         )
         if completed.returncode != 0:
             logger.warning(
-                "OPERATOR STEP (D11): the calibration values could not be worked out: %s",
+                "OPERATOR STEP: the calibration values could not be worked out: %s",
                 completed.stderr.strip() or f"exit code {completed.returncode}",
             )
             return []
         report = json.loads(completed.stdout.strip().splitlines()[-1])
     except OSError, ValueError, IndexError, subprocess.TimeoutExpired:
-        logger.warning("OPERATOR STEP (D11): the calibration values could not be worked out.", exc_info=True)
+        logger.warning("OPERATOR STEP: the calibration values could not be worked out.", exc_info=True)
         return []
     logger.info(
-        "OPERATOR STEP (D11): guider calibration from %s; focus model from %s.",
+        "OPERATOR STEP: guider calibration from %s; focus model from %s.",
         report.get("guider_source"),
         report.get("focus_source"),
     )
@@ -957,7 +957,7 @@ class Launcher:
                 break
             time.sleep(POLL_SECONDS)
         else:
-            logger.warning("OPERATOR STEP (D11): the backend was not ready in time; no operator step.")
+            logger.warning("OPERATOR STEP: the backend was not ready in time; no operator step.")
             return
         # These steps run in the launcher's own process, not in the backend
         # child, so they get the world's offline identity here: nothing below
@@ -966,7 +966,7 @@ class Launcher:
             with offline_identity(world.config_path):
                 self.operator_outcome = self.operator(self.port, calls, world.pointed_targets())
         except Exception:  # the app stays usable for watching; the log says what failed
-            logger.exception("OPERATOR STEP (D11) failed")
+            logger.exception("OPERATOR STEP failed")
         if world.phd2 is None:
             return
         # Guiding comes last: the settings are written, the app has taken
@@ -978,7 +978,7 @@ class Launcher:
                     world.phd2, lambda: child.poll() is not None or self.stop_requested.is_set()
                 )
         except Exception:  # a status, not a crash: the app runs without guiding
-            logger.warning("OPERATOR STEP (D11): guiding failed.", exc_info=True)
+            logger.warning("OPERATOR STEP: guiding failed.", exc_info=True)
 
     def _tear_down(self, world: World) -> None:
         """Stop the stand-ins and remove the library copy.

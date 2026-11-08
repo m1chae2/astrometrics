@@ -2,8 +2,9 @@
 
 Issue #97 moves judgments out of `astrometricslib` into `wayfindinglib`. Before
 any reader switches, this script runs both sides on every target and lists
-each place where they disagree (`QUALITY_METRICS_PLAN.md`, safeguard 4, and
-`VERDICT_REMOVAL_PLAN.md`, phase 1). A person then marks each difference as a
+each place where they disagree (issues #93 and #97: a reader
+switches only after a person has reviewed every disagreement). A person then
+marks each difference as a
 bug fixed or a change approved.
 
 The old side is what the stored pipeline summaries say: each gate's outcome
@@ -22,7 +23,7 @@ star. A rule is tied to a gate when the rule reads the gate's metric
 rule. Detection labels (period, transit, spectral feature verdicts) stay in
 `astrometricslib` and are not compared.
 
-Phase 1b of `VERDICT_REMOVAL_PLAN.md` adds a second check, the warnings
+Issue #97 adds a second check, the warnings
 check: no warning may be lost. Every stored flag reason must appear as a
 warning row in the measurement table (a stored quality row whose check
 failed), the rows `Jobs.query(detail="warnings")` lists for a job. The check
@@ -96,8 +97,8 @@ NEW_ROWS_SINCE = datetime(2026, 11, 2, tzinfo=UTC)
 
 A stored summary whose pipeline rows are all older than this was made before
 the notice rows existed, so a flag reason that is not a gate has no row to
-match. The date is the day after the notice rows were written (issue 97,
-phase 1b); change it with ``--new-rows-since``.
+match. The date is the day after the notice rows were written (issue #97);
+change it with ``--new-rows-since``.
 """
 
 # Difference kinds, in the order the report lists them.

@@ -336,9 +336,9 @@ class SettingBiasLevel(BaseModel):
 
 
 # The reason given for a frame when the profile still holds the single,
-# setting-less gain and read noise of the old file layout. Decision 7 of the
-# quality-metrics plan: such a value is never applied, because nobody recorded
-# the setting it was measured at. The profile migration script fixes it.
+# setting-less gain and read noise of the old file layout. Such a value is
+# never applied, because nobody recorded the setting it was measured at. The
+# profile migration script fixes it.
 UNMIGRATED_NOISE_REASON = "camera profile has no setting-keyed gain and read noise; run the profile migration"
 
 

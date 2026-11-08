@@ -5,8 +5,7 @@ repository. They give every agent the same few commands, so the commands can be 
 they keep two promises: heavy work never runs more than a set number of jobs at once, and
 real-data scripts reach only copies of the library.
 
-They were written during issue #94 and are described in `documentation/plans/QUALITY_METRICS_PLAN.md`
-section 9.1.
+They were written during issue #94. The full test suites are left to continuous integration.
 
 ## Scripts
 

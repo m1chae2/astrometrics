@@ -374,9 +374,7 @@ DECISIONS = {
     "planning_build_deep_star_catalog": ToolDecision(
         "withhold", "Downloads from Gaia for hours and writes the catalog database."
     ),
-    "execution_abort_session": ToolDecision(
-        "withhold", "Closes a session and records it. Stays separate from the read tools (section 4.2)."
-    ),
+    "execution_abort_session": ToolDecision("withhold", "Closes a session and records it."),
     "execution_reconcile_session": ToolDecision(
         "withhold", "Writes the calibration counts and the session after a night."
     ),

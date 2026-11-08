@@ -820,7 +820,7 @@ def test_a_worthless_doubling_gives_the_stop_warning_in_the_new_shape() -> None:
 
 
 def test_a_possible_fixed_pattern_gives_a_range_and_says_the_low_end_is_not_proven() -> None:
-    """D18: 44 frames at 30 s cut the noise by about 13% to 29%."""
+    """44 frames at 30 s cut the noise by about 13% to 29%."""
     result = TakeMoreResult(
         frames_needed=44,
         predicted_noise_ratio=0.707,

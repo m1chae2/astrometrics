@@ -11,8 +11,7 @@ are given for how it fits the system's structure, now and as it grows.
 
 - Read-only. Never edit, create or delete a file, and never run a command that changes anything.
   Use Bash only for read-only commands such as `git diff`, `git log`, `grep` and `ls`.
-- Read `.claude/CLAUDE.md` (the layering rules), `documentation/plans/ARCHITECTURE_PLAN.md` (the
-  target public API shape and its rules), the import-linter contracts in `pyproject.toml`, and
+- Read `.claude/CLAUDE.md` (the layering rules and the public API rules), the import-linter contracts in `pyproject.toml`, and
   `astrometricslib/__init__.py` (the public surface).
 - Check every claim against the code and the contracts. Name files and contract names.
 

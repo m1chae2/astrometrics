@@ -1,6 +1,6 @@
 ---
 name: change-control-board
-description: Run a change control board review of a plan, design document, branch or pull request in the Astrometrics repository. Three read-only reviewers (an observational astronomer, a software engineer and a technical architect) review in parallel; then this session checks their claims against the code, groups the findings, separates settled fixes from the user's decisions, and folds the agreed changes into the document. Use when the user asks for a review board, change control board, design review or plan review.
+description: Run a change control board review of a GitHub issue, design document, branch or pull request in the Astrometrics repository. Three read-only reviewers (an observational astronomer, a software engineer and a technical architect) review in parallel; then this session checks their claims against the code, groups the findings, separates settled fixes from the user's decisions, and folds the agreed changes into the document. Use when the user asks for a review board, change control board, design review or plan review.
 ---
 
 # Change control board
@@ -12,8 +12,9 @@ what only the user can decide.
 
 ## Steps
 
-1. **Name the target.** A plan or design document (a path, usually under
-   `documentation/plans/`), a branch (review `git diff main...<branch>`), or a pull request. If the
+1. **Name the target.** A GitHub issue (its problem statement and its `## Analysis and Plan`
+   section), a design document (a path), a branch (review `git diff main...<branch>`), or a pull
+   request. If the
    user's request leaves it unclear, ask. Note any concern the user wants the board to weigh.
 
 2. **Choose the reviewers.** The core board is always the three agents below. Add a reviewer only
@@ -44,14 +45,15 @@ what only the user can decide.
    decided earlier, is a decision for the user. List the decisions, each with options and a
    recommendation, and ask. Never fold in a decision the user has not made.
 
-7. **Fold in the result.** Once the user has decided, update the target document:
-   - apply the settled fixes and the user's decisions where they belong;
-   - record each decision with its date in the document's decisions section;
-   - add or update an appendix, "Review board changes", with one row per finding: the finding,
-     who raised it, and where it landed;
-   - list any rejected finding below the table, with the reason.
+7. **Fold in the result.** Once the user has decided, record the outcome where the target lives:
+   - for an issue, a branch or a pull request, write it into the issue or pull request
+     description and its comments (the `## Analysis and Plan` section holds the settled fixes
+     and the user's decisions, each with its date), and apply the code changes;
+   - for a design document, apply the settled fixes and decisions in the document;
+   - give one row per finding: the finding, who raised it, and where it landed;
+   - list any rejected finding, with the reason.
 
-   Then run the checks the repository requires for that file, and commit only if the user has
+   Do not create a plan file in the repository. Then run the checks the repository requires for that file, and commit only if the user has
    asked for commits.
 
 ## Rules

@@ -45,6 +45,7 @@ The site has seven sections, one per kind of document plus a section about the d
 | [Astrometrics library architecture](library_design/Astrometrics_Library_Architecture.md) | Explanation | Anyone learning the methods | Hand-written | `test_documentation_rules.py`, `test_architecture_doc_claims.py`, `test_documentation_notation.py` |
 | [Wayfinding library architecture](library_design/Wayfinding_Library_Architecture.md) | Explanation | Anyone learning the methods | Hand-written | `wayfindinglib/test/test_documentation_papers.py` |
 | [Wayfinding quality judgment](library_design/Wayfinding_Quality_Judgment.md) | Explanation | Anyone learning how quality is judged | Hand-written | `wayfindinglib/test/test_documentation_papers.py`, `test_documentation_rules.py` |
+| [Wayfinding quality use cases](library_design/Wayfinding_Quality_Use_Cases.md) | Explanation | Observers and contributors | Hand-written | Docs build, Vale, markdownlint |
 | [Desktop app architecture](user_interface/technical_reference/User_Interface_Architecture.md) | Explanation | Developers | Hand-written | Docs build, Vale, markdownlint |
 | [API reference](api/index.rst) | Reference | Programmers | Generated from docstrings (sphinx-automodapi) | Docs build, ruff docstring rules |
 | [User manual](user_interface/user_guides/User_Manual.md) | Reference | Observers | Hand-written | Docs build, Vale, markdownlint |

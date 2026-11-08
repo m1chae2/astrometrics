@@ -874,7 +874,7 @@ def stop_capture(context: ControlContext) -> bool:
     """Stop the capture run this app started. Requires `CAPTURE_ORCHESTRATION`.
 
     Monitor mode refuses a stop too, whether or not a run is going (the
-    same rule as `cancel_centering`, decision U4 of 2026-10-24), so the
+    same rule as `cancel_centering`, decision of 2026-10-24, issue #95), so the
     check comes before anything else.
 
     Parameters

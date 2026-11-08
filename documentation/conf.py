@@ -78,10 +78,9 @@ source_suffix = {
 
 # Template and static paths
 templates_path = ["_templates"]
-# plans/ holds working plans for the people and AI agents changing the code,
-# not user documentation, so Sphinx does not build them. evidence/ holds raw
-# measurement records that code comments cite, so it is not built either.
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "README.md", ".venv", "plans", "evidence"]
+# evidence/ holds raw measurement records that code comments cite, so Sphinx
+# does not build it.
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "README.md", ".venv", "evidence"]
 
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]

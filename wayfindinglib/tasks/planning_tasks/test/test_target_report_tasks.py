@@ -1310,7 +1310,7 @@ def test_the_clipping_note_names_the_linearity_limit_when_there_is_one(
 def test_an_agreeing_earlier_nights_check_shows_a_provisional_count(
     isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch, camera_gain: float
 ) -> None:
-    """Decision D11: a subset check gives a provisional count."""
+    """A subset check gives a provisional count."""
     report = _report_with_checks(
         _Library(runs=TWO_RUNS),
         isolated_butler,
@@ -1460,7 +1460,7 @@ def test_the_fixed_pattern_sentence_points_at_calibration_advice_in_the_same_rep
 
 
 def test_a_provisional_status_keeps_its_sentence_on_the_doubling_statement() -> None:
-    """The D11 sentence and count basis go on the doubling statement too."""
+    """The provisional sentence and count basis go on the doubling one."""
     [marked] = target_report_tasks._mark_provisional([_fixed_pattern_statement()])
 
     assert target_report_tasks.PROVISIONAL_COUNT_SENTENCE in marked.message

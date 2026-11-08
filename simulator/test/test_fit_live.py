@@ -1,4 +1,4 @@
-"""Purpose: Live test of the fitted settings against the INDI simulators (S3).
+"""Purpose: Live test of the fitted settings against the INDI simulators.
 
 Description: Starts the stand-ins of a simulated world (the INDI server with
 the simulators, the stand-in guider and the exposure driver) in a temporary

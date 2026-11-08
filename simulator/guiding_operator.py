@@ -1,6 +1,6 @@
 """Purpose: Play the operator for guiding in the simulated observatory.
 
-Description: Decision D11 of the simulator plan: until the app can command
+Description: The operator step: until the app can command
 PHD2 itself, the launcher plays the operator for one job, bringing the real
 PHD2 to guiding. This module does that job once per session, after the app is
 ready and the guide controller settings were written into PHD2's profile
@@ -22,7 +22,7 @@ The steps, in order:
 Every outcome is a status in the log, never an exception: a PHD2 that is
 missing, a mount that does not track, a field with no star and a calibration
 that fails all end with a ``WARNING`` line and a `GuidingOutcome`. Each log
-line starts with ``OPERATOR STEP (D11)``, as the launcher's other operator
+line starts with ``OPERATOR STEP``, as the launcher's other operator
 lines do.
 
 Safety: the module connects only to ``127.0.0.1`` (the PHD2 client refuses
@@ -363,14 +363,14 @@ def _run_guiding_step(
         What happened.
     """
     logger.info(
-        "OPERATOR STEP (D11): the launcher plays the operator for guiding (PHD2 instance %d, port %d).",
+        "OPERATOR STEP: the launcher plays the operator for guiding (PHD2 instance %d, port %d).",
         phd2.instance,
         phd2.event_port,
     )
     session = _open_session(phd2, should_stop, sleep, clock)
     if session is None:
         outcome = GuidingOutcome(FAILED, f"PHD2 did not answer on port {phd2.event_port}.")
-        logger.warning("OPERATOR STEP (D11): guiding not started. %s", outcome.detail)
+        logger.warning("OPERATOR STEP: guiding not started. %s", outcome.detail)
         return outcome
     try:
         with session:
@@ -393,7 +393,7 @@ def _run_guiding_step(
     except (ExternalServiceError, OSError, ValueError) as error:
         outcome = GuidingOutcome(FAILED, f"{type(error).__name__}: {error}")
     if outcome.status == GUIDING:
-        logger.info("OPERATOR STEP (D11): %s", outcome.detail)
+        logger.info("OPERATOR STEP: %s", outcome.detail)
     else:
-        logger.warning("OPERATOR STEP (D11): guiding %s. %s", outcome.status, outcome.detail)
+        logger.warning("OPERATOR STEP: guiding %s. %s", outcome.status, outcome.detail)
     return outcome

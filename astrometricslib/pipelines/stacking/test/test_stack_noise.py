@@ -1675,7 +1675,7 @@ def test_a_record_for_a_set_that_is_gone_is_ignored_and_survives_other_writes(tm
 def test_a_library_stack_measures_the_noise_against_aperture_size_and_a_subset_does_not(
     tmp_path: Path,
 ) -> None:
-    """D20: only a stack that may choose apertures does the extra pass."""
+    """Only a stack that may choose apertures does the extra pass."""
     apertures = str(tmp_path / APERTURE_FILE_NAME)
     first = _write(tmp_path / "first.fits", _sky_image(2.0, seed=1), _sky_header())
     second = _write(tmp_path / "second.fits", _sky_image(2.0, seed=2), _sky_header())

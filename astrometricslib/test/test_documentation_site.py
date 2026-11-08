@@ -32,7 +32,7 @@ SECTION_PAGES = ("get_started", "tutorials", "how_to/index", "explanation", "ref
 # Folders and files Sphinx does not build into the website (conf.py
 # exclude_patterns; papers.rst starts the PDF only), plus the API pages
 # sphinx-automodapi generates and links itself.
-SKIPPED = ("_build/", "plans/", "evidence/", "api/generated/", ".venv/", "papers.rst")
+SKIPPED = ("_build/", "evidence/", "api/generated/", ".venv/", "papers.rst")
 SUFFIXES = (".md", ".rst", ".ipynb")
 RST_TOCTREE = re.compile(r"^\.\. toctree::\n((?:[ \t]+.*\n|\n)*)", re.MULTILINE)
 MYST_TOCTREE = re.compile(r"^```\{toctree\}\n(.*?)^```", re.MULTILINE | re.DOTALL)

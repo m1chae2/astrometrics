@@ -59,7 +59,7 @@ describe('QualityChip', () => {
         expect(screen.getByText('Choose a target')).toBeTruthy();
     });
 
-    /** Evidence and calibration actions are wired (user decision D5). */
+    /** The Evidence and Show in calibration library actions are offered. */
     it('offers Evidence and Show in calibration library', async () => {
         callBackendMock.mockResolvedValue([
             { ...calibrationStatement, evidence: [{ rowId: 7 }] },

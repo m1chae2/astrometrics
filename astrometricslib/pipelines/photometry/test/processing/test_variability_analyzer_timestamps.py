@@ -3,7 +3,7 @@
 Description: A frame's capture time comes from its FITS ``DATE-OBS`` card.
 When the card is missing or unreadable, the frame must be left out of every
 light curve and the analyzer must record why. It must never stamp the frame
-with the current time (review item S5). These tests run the real analyzer on
+with the current time. These tests run the real analyzer on
 small synthetic star fields written to FITS files, including the case where
 the reference (first) frame is the bad one.
 """

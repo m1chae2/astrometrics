@@ -5,7 +5,7 @@ airmass and altitude, the Moon's altitude, separation and illumination, the
 guide error during the exposure, the pointing error, the dew risk, and the
 polar-alignment error that the rotation of the field shows. They are
 conditions, not judgments. No rule turns one into advice unless its metric is
-registered as non-exploratory (decision S12).
+registered as non-exploratory (issue #95).
 
 The polar-alignment error is labeled exploratory. It comes from the rotation
 that frame registration finds between frames

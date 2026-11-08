@@ -206,10 +206,10 @@ STACKING_ODD_EVEN_DIFFERENCE_SHARED_EVEN_WEIGHT_FRACTION = (
     "stacking.odd_even_difference_shared_frame_even_weight_fraction"
 )
 
-# Added with the noise breakdown (decisions D20 to D22 of the imaged-target
-# suggestions plan): how the measured noise compares with the prediction, how
-# it grows with the aperture size, where the odd–even difference's fixed
-# pattern sits, and the calibration frames' predicted noise.
+# Added with the noise breakdown (issue #134): how the
+# measured noise compares with the prediction, how it grows with the aperture
+# size, where the odd–even difference's fixed pattern sits, and the calibration
+# frames' predicted noise.
 STACKING_MEASURED_TO_PREDICTED_NOISE_RATIO = "stacking.measured_to_predicted_noise_ratio"
 STACKING_EMPTY_APERTURE_NOISE_SIZE_EXPONENT = "stacking.empty_aperture_noise_size_exponent"
 STACKING_POINT_SOURCE_DEPTH_5SIGMA_MAG = "stacking.point_source_depth_5sigma_mag"
@@ -390,7 +390,7 @@ def _context_metric(
         The filter the value applies to.
     definition_version : `int`, optional
         The version of the metric's estimator, sample and constants. Raise it
-        when any of them changes (plan section 3.4).
+        when any of them changes.
     decisions : `tuple` [`str`], optional
         The decisions the value informs (documentation only).
     exploratory_question : `str`, optional
@@ -876,7 +876,7 @@ _APERTURE_SET_NUMBER_ESTIMATOR = (
 
 _DEPTH_PURPOSE_REASON = (
     "Space missions state depth in magnitudes. A depth in magnitudes lets the suggestions compare a "
-    "stack with a goal for each kind of object (plan decision D1), without reading stack units."
+    "stack with a goal for each kind of object without reading stack units."
 )
 _DEPTH_UNCERTAINTY = (
     "Statistical, 1 sigma: the standard error of the median zero point (1.2533 x 1.4826 x the median "
@@ -1063,8 +1063,8 @@ _NOISE_AND_WEIGHT_METRICS: tuple[MetricSpec, ...] = (
 )
 
 _NIGHT_PURPOSE_REASON = (
-    "Each night's contribution shows which nights helped a target and which did not (plan decision "
-    "17). Nothing decides from it yet: the forecast check and the planner read it as context."
+    "Each night's contribution shows which nights helped a target and which did not. "
+    "Nothing decides from it yet: the forecast check and the planner read it as context."
 )
 _NIGHT_SAMPLE = (
     "One row for each observing night of the frames in the target's library stack. The subject is "
@@ -2041,7 +2041,7 @@ _SCIENCE_METRICS: tuple[MetricSpec, ...] = (
 )
 
 # Six months after the metrics below were first measured (2026-10-23): the
-# science plan's default review date for an exploratory metric.
+# usual review date for an exploratory metric.
 _FRAME_SHAPE_REVIEW_DATE = datetime.date(2027, 4, 30)
 
 _FRAME_ROW_SAMPLE = (
@@ -2848,8 +2848,7 @@ _NOISE_BREAKDOWN_METRICS: tuple[MetricSpec, ...] = (
             "square root of the area), 1.0 means fully correlated pixels (noise grows with the area). "
             "Registration resampling and fixed-pattern noise push it above 0.5. Only apertures that "
             "stay clear of stars and faint sources at the largest radius are used for every radius; "
-            "the per-radius noises are in the row's reason. The prediction is not changed by it "
-            "(decision D20)."
+            "the per-radius noises are in the row's reason. The prediction is not changed by it."
         ),
         (
             "The apertures of `stacking.empty_aperture_noise_stack_unit` that stay at least 17 px from "

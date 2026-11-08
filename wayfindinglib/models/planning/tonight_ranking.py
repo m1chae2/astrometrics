@@ -2,7 +2,8 @@
 
 Description: `get_tonight_advice(at=...)` ranks the targets the user
 could image at a chosen time by how much one hour of real clock time would
-help each one (`QUALITY_METRICS_PLAN.md` Section 4.2, use cases UC6 and UC12).
+help each one (`Wayfinding_Quality_Judgment.md` Section 11, use cases UC6 and
+UC12 in `Wayfinding_Quality_Use_Cases.md`).
 The ranking is recomputed on each request and never stored.
 
 A target with no data yet is marked "new" and is not ranked, because it has no

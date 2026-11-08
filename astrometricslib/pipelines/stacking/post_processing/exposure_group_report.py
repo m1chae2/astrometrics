@@ -106,8 +106,8 @@ def measure_group_saturation(
 class GroupPeak:
     """How close the brightest star of an exposure group is to the ceiling.
 
-    This replaces the single exposure the stage used to recommend (decision 18
-    of the quality-metrics plan: the library measures and never advises). It
+    This replaces the single exposure the stage used to recommend (the library
+    measures and never advises). It
     states what was seen at the exposure that was used. A reader who wants to
     know what another exposure would do can scale the peak, which grows in
     proportion to the exposure. The field names are those of

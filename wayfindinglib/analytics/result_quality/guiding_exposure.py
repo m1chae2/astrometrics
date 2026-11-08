@@ -2,10 +2,10 @@
 
 Description: A longer exposure gives the guiding more time to wander, so a
 smaller share of frames stays sharp. This module answers, for one capture
-setting: "At 120 s only 40% of frames stay sharp; at 60 s, 85%." (plan section
-6.6, the item "Guiding limits exposure").
+setting: "At 120 s only 40% of frames stay sharp; at 60 s, 85%." (the
+"Guiding limits exposure" item of the decision catalog, issue #93).
 
-The user decided on 2026-10-24 (issue #95, decision U3) that this rule is
+The user decided on 2026-10-24 (issue #95) that this rule is
 built now. The steps are:
 
 1. The star-width budget gives the largest guide error a frame can have and

@@ -6,7 +6,7 @@ without a telescope. It owns these pieces, all on this computer:
 * an INDI server (``indiserver``) with the INDI simulators, on a free port;
 * the guider on a free port: the real PHD2 (`phd2_launch`) for the interactive
   simulation mode, or the stand-in PHD2 (`mock_phd2`) for the TPM runs and the
-  replay (decision D6). If the real PHD2 is not installed, or does not start,
+  replay. If the real PHD2 is not installed, or does not start,
   the stand-in plays it and the world reports a note (a status, not an error);
 * a folder that plays the telescope computer (``<root>/standin/home``) and an
   ``ssh`` stand-in (`standin_ssh.sh`) that the app's transfer code reaches by
@@ -1066,8 +1066,8 @@ class SimulatedObservatory:
         -------
         arguments : `list` [`str`]
             ``--guide-log`` with the stand-in guider, ``--backend-port`` when
-            the launcher gave the backend's port (real frames, S4), and
-            ``--fitted-settings`` when the fit wrote its file (S3).
+            the launcher gave the backend's port (real frames), and
+            ``--fitted-settings`` when the fit wrote its file.
         """
         arguments: list[str] = []
         guide_log = self._driver_guide_log()

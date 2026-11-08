@@ -1,10 +1,10 @@
-"""Purpose: Fit the INDI simulators' settings to the recorded nights (S3).
+"""Purpose: Fit the INDI simulators' settings to the recorded nights.
 
 Description: The simulated telescope should behave like the user's telescope.
 This package reads what the recorded nights say about the equipment, through
 the libraries' public API, and turns each measurement into the setting of an
-INDI simulator property or a PHD2 profile value (section 5 of the simulator
-plan):
+INDI simulator property or a PHD2 profile value (the table in
+simulator/README.md, "Fitted settings"):
 
 * `measurements`: asks a `Wayfinder` (opened on the world's library copy) for
   the guide rate, the mount's unguided error, the polar alignment, the Dec
@@ -15,7 +15,8 @@ plan):
   no start-up loop of exposures is needed.
 * `ranges`: the valid range and unit of each property, from the INDI 2.2.5
   source; every value is clamped to it.
-* `fitting`: the conversions and the fallback order of decision D3.
+* `fitting`: the conversions and the fallback order (newest real record,
+  history fit, envelope, default).
 * `results`: the one results file, ``fit_results.json``, with each value's
   source, and the readers the exposure driver and the launcher use.
 

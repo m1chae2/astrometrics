@@ -97,7 +97,7 @@ DARK_CEILING_SHARE_CHECK_NAME = "dark_ceiling_share"
 # the noise of one frame divided by the square root of N to every light, which
 # in the worst case (read noise dominates) is a share 1/N of the noise
 # variance: 10 percent at N = 10. A design estimate, not a measured limit
-# (register entry STK-53, decision D9 of issue 134). The existing minimum of
+# (register entry STK-53). The existing minimum of
 # the configuration (default 3) stays the limit for "too few".
 THIN_SET_FRAME_COUNT = 10
 

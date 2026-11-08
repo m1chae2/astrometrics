@@ -2,7 +2,8 @@
 
 Description: Efficiency (written eta) is the effective exposure time of a set
 of frames divided by the time a reference frame would need for the same
-result, from 0 to 1 (`QUALITY_METRICS_PLAN.md` section 4). This module builds
+result, from 0 to 1 (`Wayfinding_Quality_Judgment.md` Section 4). This module
+builds
 the two named references, finds the factors for each frame, combines them,
 and splits the lost time among the causes.
 
@@ -65,7 +66,7 @@ from wayfindinglib.models.quality.efficiency import (
 
 # Names of the registered metrics this module reads. Each is pinned to the
 # definition version this code was written for. A row of another version is
-# not used (decision S13): the frame is reported as "remeasure" instead.
+# not used (issue #95): the frame is reported as "remeasure" instead.
 PIXEL_BLUR_FWHM_SQUARED_FACTOR = 2.0 * math.log(2.0) / 3.0
 """The squared width, in pixel sides, that a square pixel adds to a star.
 
@@ -90,8 +91,8 @@ PINNED_METRIC_VERSIONS: dict[str, int] = {
 
 The sky rate went from 2 to 3, the sky noise from 2 to 3 and the read noise
 from 1 to 2 without a change of formula: the raise only makes frames be
-measured again that had no gain entry before the offset fallback (decision
-D7). The formulas here are unchanged."""
+measured again that had no gain entry before the offset fallback (issue #134).
+The formulas here are unchanged."""
 
 # --- Reference names and versions. Bump the version when the way a reference
 # is built changes.
@@ -130,15 +131,16 @@ ARCSEC_PER_RADIAN = 206264.806
 # --- Goals and exponents
 SEEING_EXPONENT_POINT_SOURCE = 2.0
 """Faint point source: the time to reach a signal-to-noise ratio scales as the
-star's area, which scales as width squared (`QUALITY_METRICS_PLAN.md` section 4
-table). Derived."""
+star's area, which scales as width squared (`Wayfinding_Quality_Judgment.md`
+Section 4.2). Derived."""
 
 SEEING_EXPONENT_ASTROMETRY_SKY_LIMITED = 4.0
 """Astrometric precision, sky-limited: the position error scales as the star
 width
-over its signal-to-noise ratio (`QUALITY_METRICS_PLAN.md` section 4 table), so
+over its signal-to-noise ratio (`Wayfinding_Quality_Judgment.md` Section 4.2),
+so
 the time to reach a given error scales with the width to the fourth power.
-Taken from the plan; register entry WAY-20."""
+Taken from the quality-judgment paper; register entry WAY-20."""
 
 SEEING_EXPONENT_ASTROMETRY_OTHER = 2.0
 """Astrometric precision, not sky-limited: no sky-limited argument holds, so
@@ -196,10 +198,10 @@ CAUSE_SKY_OTHER = "sky_brightness_other"
 CAUSE_UNKNOWN = "cause_unknown"
 
 TRANSPARENCY_NOT_INCLUDED_REASON = (
-    "Cloud and haze need a zero point that is not exploratory. The catalog zero point of the "
-    "science plan does not exist yet, so transparency is left out and no value is invented."
+    "Cloud and haze need a zero point that is not exploratory. The catalog zero point that the "
+    "quality measurements need does not exist yet, so transparency is left out and no value is invented."
 )
-"""Why transparency is never part of eta (decision S12)."""
+"""Why transparency is never part of eta (issue #95)."""
 
 _MODEL_CONFIG = ConfigDict(populate_by_name=True, alias_generator=to_camel)
 
@@ -466,7 +468,7 @@ def physical_reference(
     is "not included" with that reason. The
     sky brightness and the transparency are "not included": the library has
     no dark-sky value and no throughput it could use without inventing
-    numbers (decision S2).
+    numbers (issue #95).
 
     Parameters
     ----------
@@ -550,7 +552,7 @@ def baseline_key(setting: CaptureSetting) -> str:
 
     The key holds the camera, telescope, filter, gain setting, offset and
     binning. It does not hold the exposure time: star width and sky rate
-    per second do not depend on it (decision S3).
+    per second do not depend on it (issue #95).
 
     Parameters
     ----------
@@ -634,7 +636,7 @@ def baseline_reference(nights: Sequence[BaselineNight], key: str) -> ReferenceOu
     The reference width and sky rate are the 10th percentile of the
     per-night medians. Each needs at least three nights that have it; a
     value with fewer nights is "not included", and with neither the result
-    is "no baseline yet" (decision S3).
+    is "no baseline yet" (issue #95).
 
     Parameters
     ----------
@@ -1274,7 +1276,7 @@ def frame_observations_from_measurements(
     Only frame-level rows of the four metrics in `PINNED_METRIC_VERSIONS`
     are read. For each frame and metric the newest row is used. A row of
     another definition version is not used; the field is then missing with
-    the reason "remeasure" (decision S13). A ``not_measured`` row leaves the
+    the reason "remeasure" (issue #95). A ``not_measured`` row leaves the
     field missing with the row's reason. An ``assumed`` row is used, and the
     field is listed in `assumed_fields`, except for the read noise: an
     assumed read noise is not a measurement, so the field stays missing.

@@ -2,7 +2,7 @@
 
 Description: The sky background (`frame.sky_rate_e_per_s_per_px`) depends on
 the Moon and on how low the target is. One model, fitted to the sky rates of
-the user's own frames, serves three readers (decision S16): the loss account
+the user's own frames, serves three readers (issue #95): the loss account
 uses it to say how much of the sky-brightness loss the Moon caused, the
 starting point for a new target uses it, and tonight's ranking uses it to
 predict a target's efficiency.
@@ -38,7 +38,7 @@ because no dark frame is subtracted, the sensor's dark current.
 
 The model is model-derived and labeled so. It has not been checked on a
 photometric night; the target's own extinction is not modeled separately
-(decision S16). The fit reports its error on nights held out of the fit, as
+(issue #95). The fit reports its error on nights held out of the fit, as
 the median over nights of each night's root-mean-square relative error, so
 that one odd night does not set the number. With fewer than
 `MINIMUM_NIGHTS_FOR_SKY_MODEL` nights no model is made.

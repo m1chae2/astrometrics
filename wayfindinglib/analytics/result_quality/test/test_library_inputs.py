@@ -5,7 +5,7 @@ direction, the set-aside reasons, the dominant setting and the science goal;
 the reviewed night being left out of its own baseline; the telescope coming
 from the capture setting; the observing site being read and never stored; and
 that the copy of the unknown-setting camera name agrees with the efficiency
-module (decision C2 of the code board).
+module (settled in review).
 """
 
 from datetime import UTC, datetime

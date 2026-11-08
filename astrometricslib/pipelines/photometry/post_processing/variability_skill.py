@@ -45,9 +45,10 @@ MINIMUM_UNLISTED_STARS = 30
 
 # The AUC the variability score must reach on the catalogued variables of a
 # field, whatever the group sizes. A design choice, not a measurement: it is
-# the "lifts the AUC above 0.7" success level of review item S18, and sits
-# well above the 0.46 to 0.49 the CV gave on the library. A field that falls
-# below it has a score that cannot be trusted to rank variables.
+# the "lifts the AUC above 0.7" success level of a review of the variability
+# score, and sits well above the 0.46 to 0.49 the CV gave on the library. A
+# field that falls below it has a score that cannot be trusted to rank
+# variables.
 MINIMUM_DISCRIMINATION_AUC = 0.7
 
 # The one-sided 5% point of the standard normal distribution. The AUC must

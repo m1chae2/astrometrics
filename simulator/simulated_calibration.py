@@ -24,8 +24,8 @@ sidereal rate, on both axes. The plate scale is the active guide train's
 The focus model is the most recent real `FocusModel` in the library (copied,
 with the equipment names changed to the active ones), or else the INDI
 focuser simulator's behavior: no backlash. Its thermal coefficient of 0 is a
-placeholder until the simulator is fitted to real data (step S3 of the
-simulator plan); with 0, the autofocus never sees a temperature drift to
+placeholder until the simulator is fitted to real data (the fit in
+`simulator.fit`); with 0, the autofocus never sees a temperature drift to
 follow.
 
 Each record carries a ``source_note`` that says it is for the simulator and

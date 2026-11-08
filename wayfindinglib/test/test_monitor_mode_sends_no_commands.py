@@ -1,8 +1,8 @@
 """Purpose: Prove that monitor mode sends no motion or capture command.
 
 Description: In monitor mode every capability is `DELEGATED`: the app
-watches and computes but commands nothing (plan decision 20). The user
-decided on 2026-10-24 (issue #95, settled decision S10) that:
+watches and computes but commands nothing (issue #95). The user
+decided on 2026-10-24 that:
 
 * every motion and capture command stays refused (the 15 guarded
   operations of `hardware_operations`, including `abort_motion`);

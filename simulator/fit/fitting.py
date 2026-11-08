@@ -3,13 +3,13 @@
 Description: `fit_values` takes the candidates that
 `simulator.fit.measurements` found and the facts about the simulated cameras
 (`simulator.fit.world_setup`), and produces one `FittedValue` for each
-property of section 5 of the simulator plan, plus the guide controller
-settings for PHD2.
+property of the table in simulator/README.md ("Fitted settings"), plus
+the guide controller settings for PHD2.
 
-For every row the best candidate in the fallback order wins (decision D3):
+For every row the best candidate in the fallback order wins:
 the newest real record, a fit to the recorded history, the performance
 envelope, then the simulator's own default. A row without any candidate falls
-back one step: where the plan says "zero" (periodic error, polar error,
+back one step: where the README says "zero" (periodic error, polar error,
 go-to error and Dec backlash) the property is written as zero, where it
 says "simulator default" nothing is written and the INDI simulator keeps
 its own value. Each value is clamped to its property's range
@@ -119,7 +119,7 @@ class FittedValue:
     Attributes
     ----------
     row : `str`
-        The row of section 5 of the plan, such as ``"sky_glow"``.
+        The row of the table in simulator/README.md, such as ``"sky_glow"``.
     label : `str`
         A short name for people.
     device, property_name, element : `str`
@@ -596,7 +596,7 @@ def _mount_model(measurements: Measurements, result: FitResult) -> None:
                 0.0,
                 None,
                 "always zero: only a constant offset is simulated",
-                note="Not simulated: the app's pointing model is not used (see the plan).",
+                note="Not simulated: the app's pointing model is not used (see simulator/README.md).",
             )
         )
 

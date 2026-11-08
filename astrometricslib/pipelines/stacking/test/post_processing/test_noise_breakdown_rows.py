@@ -1,4 +1,4 @@
-"""Tests for the noise ratio and the master dark's noise (D22)."""
+"""Tests for the noise ratio and the master dark's noise."""
 
 import math
 from datetime import UTC, datetime

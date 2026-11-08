@@ -4,9 +4,9 @@ Description: `collect_measurements` asks a `Wayfinder` (opened on the
 simulator world's library copy) for what the recorded nights say about the
 equipment, and returns plain `Candidate` records. Every candidate names the
 public call and parameters that produced it, the nights it rests on, a source
-kind from the fallback order (decision D3), and a date. Nothing is stored and
-the library is not written (the calls pass ``register_job=False`` where they
-could record a job).
+kind from the fallback order (newest real record, history fit, envelope,
+default), and a date. Nothing is stored and the library is not written
+(the calls pass ``register_job=False`` where they could record a job).
 
 The fallback order is, from best to worst: the newest real record, a fit to
 the recorded history, the performance envelope, then the simulator's own
@@ -49,7 +49,7 @@ __all__ = [
 ]
 
 SourceKind = Literal["newest real record", "history fit", "performance envelope", "simulator default"]
-#: The fallback order of decision D3, best first.
+#: The fallback order, best first.
 SOURCE_ORDER: tuple[SourceKind, ...] = (
     "newest real record",
     "history fit",

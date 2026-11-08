@@ -1,4 +1,4 @@
-"""Tests for the odd–even difference's bias measurement by injection (D16).
+"""Tests for the odd–even difference's bias measurement by injection.
 
 The Siril stacks themselves are not run here. The pieces that make the
 simulated frames, work out the noise to inject and combine the repeats are

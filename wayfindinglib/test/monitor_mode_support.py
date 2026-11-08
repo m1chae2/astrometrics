@@ -50,7 +50,7 @@ MANIFEST_PATH = Path(__file__).resolve().parents[2] / "mcp_servers" / "wayfindin
 COMMAND_TOOL_CLASSES = frozenset({"actuate", "safe-stop"})
 """Manifest classes whose tools command hardware. ``safe-stop`` is
 included because `abort_motion` is a motion command the user wants
-refused in monitor mode (decision 2026-10-24)."""
+refused in monitor mode (decision of 2026-10-24, issue #95)."""
 
 ALLOWED_IN_MONITOR_MODE = frozenset({
     "observatory_equipment_connect",
@@ -59,7 +59,7 @@ ALLOWED_IN_MONITOR_MODE = frozenset({
 })
 """Commands that stay allowed in monitor mode.
 
-The user decided this on 2026-10-24 (issue #95, settled decision S10):
+The user decided this on 2026-10-24 (issue #95):
 every motion and capture command stays refused while delegated, but
 device settings (`set_device_property`, the backend's
 ``telescope:set_indi_property``) and the app's own INDI connect and

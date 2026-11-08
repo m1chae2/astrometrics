@@ -16,9 +16,9 @@ below 1 means the difference reads low; the value is entered as
 `pipelines/stacking/post_processing/difference_noise.py`. How the simulation
 works and what the ratio contains are in `pipelines/stacking/odd_even_bias.py`.
 
-Decision D16 of the imaged-target suggestions plan: run it once for each
-camera, and again whenever the stacker's rejection settings change. Run it on
-a copy of the library (``build/agent_tools/realrun.sh``):
+Run it once for each camera, and again whenever the stacker's rejection
+settings change. Run it on a copy of the library
+(``build/agent_tools/realrun.sh``):
 
     python -m astrometricslib.scripts.measure_odd_even_bias "M 13" \
         --work-folder /path/to/scratch --repeats 3 --json bias_zwo.json

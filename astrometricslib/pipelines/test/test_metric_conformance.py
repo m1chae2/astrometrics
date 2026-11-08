@@ -4,8 +4,8 @@ A metric that names a function that does not exist, a unit nobody knows, or a
 register entry that is not there cannot be audited. These static checks keep
 new declarations honest. They read the source with ``ast`` and the registry
 itself, and do not depend on other tests. They cover the astrometricslib side
-of the plan: the checks on rules (`requires`, action classes, purpose held by
-rules) belong in ``wayfindinglib/test/`` once the rules exist.
+of the metric rules: the checks on rules (`requires`, action classes, purpose
+held by rules) belong in ``wayfindinglib/test/`` once the rules exist.
 
 The last tests run the checkers on deliberately broken input, so each checker
 is shown to go red.
@@ -258,7 +258,7 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
     return [*rows, *notice_rows]
 
 
-# Phase 3 (plan section 3.7): a pipeline listed here produces every metric it
+# Phase 3: a pipeline listed here produces every metric it
 # declares. Each entry maps the pipeline to a function that runs its record
 # step on a fixed run and returns the measurements. A pipeline joins this
 # table when its record step is built; the others are still on phase 2.

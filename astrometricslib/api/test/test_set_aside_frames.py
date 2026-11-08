@@ -2,9 +2,8 @@
 
 Two things are checked:
 
-1. The quarantine rows of a moved frame carry the action taken (decision 1 of
-   the quality plan: a processing decision is stored as its measurement plus
-   the action taken).
+1. The quarantine rows of a moved frame carry the action taken (a processing
+   decision is stored as its measurement plus the action taken).
 2. `QualityRecords.set_aside_frames` lists the frames in `_excluded` folders
    with a reason and says whether it came from a stored row, from the
    manifest, or only from the folder.

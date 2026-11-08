@@ -188,7 +188,7 @@ MODE="$LIBRARY"
 # (flow.mjs checks). The harness builds the simulator world with the simulator layer, which writes the launch identity
 # (the [Launch] section, label "SIMULATOR") into the settings file the backend starts with. The backend reports it in
 # observatory:get_source and the header draws the chip from its label. Other runs have no chip to look for.
-# Until the UI reads the identity (the UI part of phase L1 in documentation/plans/SIMULATOR_FROM_REAL_DATA_PLAN.md),
+# Until the UI reads the identity (open work, issue #160),
 # the chip shows only for the app's own simulator source.
 if [ "$LIBRARY" = "simulation" ]; then EXPECT_SIMULATOR_CHIP=1; else EXPECT_SIMULATOR_CHIP=0; fi
 if [ -z "$OBSERVATORY_PROFILE" ]; then

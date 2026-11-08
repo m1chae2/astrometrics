@@ -24,7 +24,7 @@ a fixed pattern adds to the sum. A fitted plane is first taken out of the sums
 and of the differences, so a gradient (tested on its own, shape 2) does not
 leak into the radial and near-target tests.
 
-Four shapes are tested (decision D21). Each test gives a significance in
+Four shapes are tested (issue #134). Each test gives a significance in
 standard errors, and a shape counts as found at `SHAPE_SIGMAS`:
 
 1. Radial trend. The Spearman rank correlation of ``e_i`` with the aperture's
@@ -61,7 +61,7 @@ excess is called "near the target" and the radial finding is marked ambiguous
 and left out of the advice, because asking for new flats for faint real light
 would waste an evening.
 
-Calibration frames as a known part (decision D22). The master flat's noise and
+Calibration frames as a known part (issue #134). The master flat's noise and
 the master dark's noise enter every frame alike, so they are fixed-pattern
 noise that the library predicts. `explain_with_calibration_masters` says how
 much of the measured fixed-pattern variance they explain and what is left.
@@ -101,7 +101,7 @@ the test that found the fixed-pattern noise use one width. Four shapes are
 tested, so on a stack with no pattern the chance that some shape passes by
 luck is about 4 times 2.3 percent (about 9 percent) one-sided, a little more
 for the two-sided radial test; the advice is a recommendation to look, not an
-order. Design estimate (decision D21, 2026-10-26); not tuned on data, register
+order. Design estimate (issue #134, 2026-10-26); not tuned on data, register
 row to be added."""
 
 STRIPE_SIGMAS = SHAPE_SIGMAS

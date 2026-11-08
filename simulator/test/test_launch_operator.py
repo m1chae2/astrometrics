@@ -102,7 +102,7 @@ def test_the_operator_leaves_an_existing_target_alone() -> None:
 
 
 def test_the_operator_logs_what_stays_off(caplog: pytest.LogCaptureFixture) -> None:
-    """Rejected capabilities are logged with reasons, under the D11 label."""
+    """Rejected capabilities are logged with reasons, as operator steps."""
     recorder = Recorder({
         "observatory:enter_controller_mode": {
             "applied": {"MOUNT_CONTROL": "authoritative"},
@@ -113,7 +113,7 @@ def test_the_operator_logs_what_stays_off(caplog: pytest.LogCaptureFixture) -> N
         outcome = run_operator_step(5100, [], [], recorder)
     assert outcome["off"] == {"AUTOFOCUS": "no focus model"}
     text = caplog.text
-    assert "OPERATOR STEP (D11)" in text
+    assert "OPERATOR STEP" in text
     assert "on for: MOUNT_CONTROL" in text
     assert "AUTOFOCUS (no focus model)" in text
 

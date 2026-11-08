@@ -1057,13 +1057,13 @@ def main() -> int:
         "--fitted-settings",
         type=Path,
         default=None,
-        help="The fit's results file (fit_results.json): the simulators are set to its values (S3).",
+        help="The fit's results file (fit_results.json): the simulators are set to its values.",
     )
     parser.add_argument(
         "--backend-port",
         type=int,
         default=None,
-        help="The world's backend port. With it, a target the user has imaged gets real frames (S4).",
+        help="The world's backend port. With it, a target the user has imaged gets real frames.",
     )
     arguments = parser.parse_args()
     # No check on the backend port: the launcher passes its own child's port,

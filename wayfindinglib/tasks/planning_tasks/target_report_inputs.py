@@ -228,8 +228,8 @@ def read_noise_history(astrometrics: Any, config: Any | None = None) -> NoiseHis
     kept), one read of the capture settings and one read of the calibration
     records. From them it pools the odd–even differences of each capture
     setting group (camera, optic, gain setting, offset, binning) into the
-    noise model's own error (decision D17), and it collects each target's
-    measured fixed-pattern share by camera, optic and flat set (decision D23).
+    noise model's own error (issue #134), and it collects each target's
+    measured fixed-pattern share by camera, optic and flat set (issue #134).
     The target report and tonight's ranking both call it once, so neither
     queries per target.
 
@@ -289,7 +289,7 @@ def read_noise_model_errors(astrometrics: Any) -> dict[Any, Any]:
     kept) and one read of the capture settings, then
     `noise_model_errors_by_setting_group` pools the odd–even differences of
     each capture setting group (camera, optic, gain setting, offset,
-    binning). Decision D17. `read_noise_history` does this and also gathers
+    binning). `read_noise_history` does this and also gathers
     the fixed-pattern history; use it when both are wanted.
 
     Parameters

@@ -62,7 +62,7 @@ STAGE_BY_SOURCE_FILE = {
 }
 
 # The one unit a checkpoint uses for a yes/no verdict. Verdicts are not
-# measurements (plan section 3.5), so they have no declared metric.
+# measurements, so they have no declared metric.
 VERDICT_UNIT = "flag"
 
 # Checkpoint metrics whose name is built from a variable, so the scan below

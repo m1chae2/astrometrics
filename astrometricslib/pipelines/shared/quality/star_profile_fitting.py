@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 
 # The number of grid cells over the field. One star is taken from each cell, so
-# this is the largest sample (the plan asks for up to about 200). 14 x 14 = 196
+# this is the largest sample (about 200 at most). 14 x 14 = 196
 # cells give a star for each 0.5 percent of the frame area, which is
 # enough to see a tilt or a coma pattern across the field and few enough that
 # the fits finish in seconds.
@@ -145,7 +145,7 @@ MOMENT_APERTURE_MINIMUM_RADIUS_PX = 3.0
 # 2 sqrt(2 ln 2) sigma, so FWHM_eff^2 = FWHM^2 + 8 ln 2 * p^2 / 12 =
 # FWHM^2 + (2 ln 2 / 3) * p^2, and the multiple is 2 ln 2 / 3 = 0.4621 (the
 # decimal 2.3548^2 / 12 gives the same). It is a theoretical value, not fitted
-# (user decision of 2026-10-23, science plan section 2.1); the register entry
+# (user decision of 2026-10-23); the register entry
 # AST-18 states what the Gaussian-core assumption leaves out.
 PIXEL_BLUR_FWHM_SQUARED_FACTOR = 2.0 * math.log(2.0) / 3.0
 

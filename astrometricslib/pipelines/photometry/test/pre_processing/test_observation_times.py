@@ -1,4 +1,4 @@
-"""Purpose: Test the mid-exposure BJD_TDB times (review item S9).
+"""Purpose: Test the mid-exposure BJD_TDB times.
 
 Description: BJD_TDB is the exposure's middle, on a uniform time scale, as
 seen from the solar system barycenter (the center of mass of the solar

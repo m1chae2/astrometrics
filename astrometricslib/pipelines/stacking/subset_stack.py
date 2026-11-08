@@ -1,7 +1,7 @@
 """Purpose: Stack exactly the frames given into a scratch folder only.
 
 Description: The noise-against-frame-count and each-night's-contribution
-measurements (plan decisions 17 and 6.5) compare the library stack with stacks
+measurements compare the library stack with stacks
 of some of its frames. Those smaller stacks must never replace the library
 stack. `stage.stack_frames` cannot make them, because it always records the
 stack on the target, moves frames it finds bad, keeps the previous stack, makes

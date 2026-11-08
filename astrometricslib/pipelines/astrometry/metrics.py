@@ -89,7 +89,7 @@ ASTROMETRY_GATE_CATALOG_LOOKUP = "astrometry.gate_catalog_lookup"
 
 # A value read from the one stacked image (its stars, its solution, its pixel
 # scale) belongs to that stack. A count of what the run did (solver uploads,
-# online lookups) and each self-check belong to the run (plan section 3.1).
+# online lookups) and each self-check belong to the run.
 _STACK_ONLY = (SubjectLevel.STACK,)
 _RUN_ONLY = (SubjectLevel.RUN,)
 _FRAME_BAND = (

@@ -356,12 +356,12 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "wayfindinglib/drivers/indi/test/test_switch_controller.py" = ["invalid-function-name"] # fake powerbox device/client mocks PyIndi's camelCase interface
 "wayfindinglib/drivers/indi/test/test_weather_controller.py" = ["invalid-function-name"] # fake powerbox device mocks PyIndi's camelCase getNumber
 
-# Layer rules from .claude/CLAUDE.md and documentation/plans/ARCHITECTURE_PLAN.md, checked by
-# `lint-imports`. `ignore_imports` lists the violations that exist today.
-# Each phase of the plan removes entries; the list ends empty.
+# Layer rules from .claude/CLAUDE.md section 2 ("Architecture & Unidirectional Layering Rules"),
+# checked by `lint-imports`. `ignore_imports` lists the violations that exist today.
+# An entry goes when its code is fixed; the list ends empty.
 
-# Existing violations of the error, logging, and import rules from the architecture plan
-# sections 7 and 9. Each phase of the plan empties part of this list. Do not add to it.
+# Existing violations of the error, logging, and import rules (.claude/CLAUDE.md sections 1
+# and 2). An entry goes when its code is fixed. Do not add to it.
 ".claude/hooks/guard_destructive.py" = ["print"]
 "astrometricslib/utilities/test/test_parallel_batch.py" = ["print"]
 "backend/services/infrastructure/scripting_service.py" = ["print"]
@@ -433,8 +433,8 @@ ignore_imports = [
 [[tool.importlinter.contracts]]
 name = "the simulator uses only the public API of astrometricslib and wayfindinglib"
 type = "forbidden"
-# The simulator is a layer around the app (decision D16 of
-# SIMULATOR_FROM_REAL_DATA_PLAN.md), so it sees the libraries as any other
+# The simulator is a layer around the app (the core never
+# imports it; see simulator/README.md), so it sees the libraries as any other
 # program does. Its tests (`simulator.test`) may reach into the libraries to
 # set up a case.
 source_modules = ["simulator"]
@@ -457,8 +457,7 @@ ignore_imports = [
 [[tool.importlinter.contracts]]
 name = "the simulator imports only the backend's public interface"
 type = "forbidden"
-# The backend owns the launcher contract (decision D19 of
-# SIMULATOR_FROM_REAL_DATA_PLAN.md) and declares it in
+# The backend owns the launcher contract (see simulator/README.md) and declares it in
 # `backend.public_interface`. That one module is all the simulator may import
 # from the backend; it needs the choice file, the launch variables and the
 # restart exit code, and nothing of the app. `backend.public_interface`
@@ -804,8 +803,7 @@ forbidden_modules = [
 [[tool.importlinter.contracts]]
 name = "the core never imports the simulator"
 type = "forbidden"
-# The simulator is a layer around the app (decision D16 of
-# SIMULATOR_FROM_REAL_DATA_PLAN.md). The libraries, the MCP servers and every
+# The simulator is a layer around the app (see simulator/README.md). The libraries, the MCP servers and every
 # layer of wayfindinglib never reach it, Planning and Foundation least of all.
 source_modules = [
     "wayfindinglib",

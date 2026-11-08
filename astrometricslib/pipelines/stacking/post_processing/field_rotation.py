@@ -7,7 +7,7 @@ mount whose polar axis is not exactly on the sky's pole turns the field slowly
 as the night goes on, so the frame-to-frame change of this angle is the raw
 material for a polar-alignment estimate. This file only stores the angle of
 each frame. The conversion to a polar-alignment error belongs to the
-`wayfindinglib` library (plan section 2.1), and nothing here judges the value.
+`wayfindinglib` library, and nothing here judges the value.
 
 The angle is the rotation of the polar decomposition of the 2 x 2 part: the
 part is written as a rotation followed by a stretch, and the rotation's angle

@@ -1,8 +1,8 @@
 """Purpose: Build the target dataset report for one target.
 
 Description: The report tells the user what is wrong with the data already
-taken on one target, and what to take next (`QUALITY_METRICS_PLAN.md` section
-6). It is recomputed on every read and never stored. It joins:
+taken on one target, and what to take next (`Wayfinding_Quality_Judgment.md`).
+It is recomputed on every read and never stored. It joins:
 
 * a summary of each capture setting, with its loss account (``aggregates``);
 * the statements of the rule table: the plain rules (``judge_results``) and
@@ -636,16 +636,16 @@ MORE_FRAMES_NOT_CHECKED_REASON = (
     "frames and stack them; then the report compares the forecast with what the stack did, and once "
     "one check agrees, it will say how many more frames to take."
 )
-"""Why "take N more" is hidden. The user decided on 2026-10-24 (issue #95,
-decision U1) that the number of frames is shown for a target only after one of
-THAT target's forecast checks came out as forecast."""
+"""Why "take N more" is hidden. The user decided on 2026-10-24 (issue #95)
+that the number of frames is shown for a target only after one of THAT
+target's forecast checks came out as forecast."""
 
 
 PROVISIONAL_COUNT_SENTENCE = (
     "It rests on a check made from frames already taken; the next real stack will confirm it or withdraw it."
 )
 """What a "take N more" statement says when only an earlier-nights check
-agreed. The user decided on 2026-10-26 (issue #134, decision D11) that such a
+agreed. The user decided on 2026-10-26 (issue #134) that such a
 count is shown, marked provisional, and ranked below a count that a real later
 stack confirmed."""
 
@@ -911,7 +911,7 @@ def _more_frames_for_setting(
 
     The new frames copy the setting's past frames. When the past frames were
     limited by read noise, the new frames use the exposure at which the sky
-    dominates instead (plan section 6.4), and the reason says so.
+    dominates instead, and the reason says so.
 
     The number comes from the model the forecast check used. When the newest
     stack that holds the setting's frames was combined from exposure groups,
@@ -950,7 +950,7 @@ def _more_frames_for_setting(
     fixed_pattern_history : `Mapping`, optional
         Other targets' fixed-pattern shares by setup (`read_noise_history`).
         A target with no fixed-pattern noise of its own starts from their
-        median, and the statement says so (decision D23).
+        median, and the statement says so (issue #134).
     target_id : `str`, optional
         The target, left out of its own borrowed median.
     target_noise_ratio : `float`, optional
@@ -1242,9 +1242,9 @@ def _quality_statements_of_settings(
         The stored Ekos session records, for the download times.
     forecast_checks : `Sequence` [`ForecastCheck`], optional
         The target's own forecast checks. The recommended additional frames are
-        shown only when one came out as forecast (user decision U1,
+        shown only when one came out as forecast (user decision, issue #95,
         2026-10-24). When only a check made from frames already taken agreed,
-        the count is marked provisional (decision D11, 2026-10-26).
+        the count is marked provisional (issue #134, 2026-10-26).
     has_frame_weights : `bool`, optional
         Whether the target has any ``stacking.frame_weight`` rows; when it
         has none, the "take N more" reason says to restack.
@@ -1443,7 +1443,7 @@ def _add_fixed_pattern_accounts(
     that text in the message and are added to the reason, so the statement
     names the shape that was found and what the master flat and dark explain,
     in place of only saying the cause is probably the flats or calibration
-    (decisions D21 and D22). The "take N more" and "will not help"
+    (issue #134). The "take N more" and "will not help"
     statements of a setting with an account also carry the cause code
     (`fixed_pattern_cause`) in ``values["fixed_pattern_cause"]``.
 
@@ -1705,7 +1705,7 @@ def _guiding_exposure_statements(
 def _state_goals(statements: Sequence[TargetStatement], summaries: Sequence[Any]) -> list[TargetStatement]:
     """Put the science goal into each statement that is about one setting.
 
-    The user decided on 2026-10-24 (issue #95, decision U2) that each
+    The user decided on 2026-10-24 (issue #95) that each
     statement states its goal. The goal goes in ``values["science_goal"]``. A
     statement about the whole target gets it only when every setting has the
     same goal.
@@ -2287,7 +2287,7 @@ def _build_target_dataset_report(
     now = at or datetime.now(UTC)
     target_rows = read_target_rows(astrometrics, target.id)
     rows = target_rows.rows
-    # The goal is chosen for each capture setting (user decision U2).
+    # The goal is chosen for each capture setting (user decision, issue #95).
     lights = [frame for frame in target.frames if str(frame.role).upper().endswith("LIGHT")]
 
     def goal_for_setting(setting: CaptureSetting) -> ScienceGoal:

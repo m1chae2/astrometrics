@@ -5,7 +5,7 @@ facts about the simulated cameras: the frame size, the gain the simulator runs
 at, the bias level the frames must sit at, the read noise and the clip
 ceiling. They come from the camera profiles in the world's settings file (a
 copy of the real settings), read the way `simulator.device_settings` reads
-them, so the fit and the S0 geometry settings agree. Nothing here talks to a
+them, so the fit and the geometry settings agree. Nothing here talks to a
 server or to the library.
 """
 

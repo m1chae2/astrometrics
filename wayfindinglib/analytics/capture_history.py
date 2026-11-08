@@ -17,7 +17,7 @@ is read from the stored quality measurements with `astrometrics.quality.query`,
 never from the frame record's `measurements` object. Each metric is pinned to
 the definition version this code was written for (`PINNED_FRAME_METRICS`). A
 stored row of another version is not used, so the frame shows that value as
-missing; remeasuring the frames brings it back (decision S13 of issue #95).
+missing; remeasuring the frames brings it back (issue #95).
 """
 
 import re

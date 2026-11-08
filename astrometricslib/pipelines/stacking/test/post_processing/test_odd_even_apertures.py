@@ -1,4 +1,4 @@
-"""Tests for the per-aperture record and the line pattern (D21)."""
+"""Tests for the per-aperture record and the line pattern."""
 
 import json
 import math

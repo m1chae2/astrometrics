@@ -1,4 +1,4 @@
-"""Purpose: Test the real-frame source (phase S4).
+"""Purpose: Test the real-frame source .
 
 Description: Frames are tiny FITS files in a temporary folder. An in-process
 fake library answers the backend calls the source makes (list a target's

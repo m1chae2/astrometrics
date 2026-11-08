@@ -1,6 +1,6 @@
 """Purpose: Injection test and AUC measurement for the variability indices.
 
-Description: Review item S18 found that the coefficient of variation (CV) of
+Description: A review found that the coefficient of variation (CV) of
 normalized flux, with a field-wide cutoff, had no power to tell variables
 from constants (AUC 0.46 to 0.49 against catalog variables). These tests
 build synthetic fields with `make_variability_field`: constant stars across

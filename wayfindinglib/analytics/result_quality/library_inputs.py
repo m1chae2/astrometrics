@@ -890,7 +890,7 @@ class LibraryInputs:
             The frames.
         goal : `ScienceGoal` or `Callable`
             The goal, or a function that gives the goal of a capture setting
-            (user decision U2: the goal is chosen for each setting).
+            (user decision, issue #95: the goal is chosen for each setting).
         exclude_night_id : `str`, optional
             A night left out of the baseline.
 

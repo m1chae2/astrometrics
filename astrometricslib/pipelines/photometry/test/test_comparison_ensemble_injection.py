@@ -1,6 +1,6 @@
 """Purpose: Injection tests for the comparison set and the weighted ensemble.
 
-Description: Review item S10 found that the comparison signal was the median
+Description: A review found that the comparison signal was the median
 of raw fluxes of stars of very different brightness, that no comparison star
 was checked for constancy, and that detrending a star's own flux against
 airmass could absorb a transit or half a pulsation cycle. These tests inject

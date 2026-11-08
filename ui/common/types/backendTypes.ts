@@ -4374,7 +4374,8 @@ export interface ChecklistReturn {
  * loss_account : `LossAccount` or `None`
  * Where the time went. ``None`` when it cannot be built.
  * science_goal : `ScienceGoal` or `None`
- * The goal this setting's efficiency is judged for (user decision U2,
+ * The goal this setting's efficiency is judged for (user decision, issue
+ * #95,
  * 2026-10-24: the goal is chosen for each capture setting). ``None``
  * when the summary was built without one.
  */
@@ -4640,7 +4641,7 @@ export enum RecommendedAdditionalFramesStatus {
  * The target.
  * goal : `ScienceGoal`
  * The goal that holds most of the target's captured time. The goal is
- * chosen for each capture setting (decision U2), so when the settings
+ * chosen for each capture setting (issue #95), so when the settings
  * differ, each ``capture_settings`` entry states its own goal.
  * frames_taken : `int`
  * Frames of the night, kept and set aside.

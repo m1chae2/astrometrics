@@ -7,8 +7,8 @@ by `simulator.phd2_launch`. Then the guiding step (`run_guiding_step`) brings
 PHD2 to guiding, the public PHD2 client reads real guide steps, and after PHD2
 quits the guide log it wrote is parsed with the app's own parser.
 
-This is the acceptance check of phase S2: the guide steps and the guide log
-come from the real PHD2, not from a stand-in.
+This is the acceptance check for the real PHD2: the guide steps and the
+guide log come from the real PHD2, not from a stand-in.
 
 Safety: PHD2 runs with ``HOME`` inside the temporary world, never the user's
 home, and on its own virtual display (``xvfb-run``) when one is installed, so

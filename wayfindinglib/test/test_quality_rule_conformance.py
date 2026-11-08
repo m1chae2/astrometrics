@@ -4,7 +4,7 @@ Description: The rule table (`RESULT_QUALITY_RULES`) reads metrics that
 astrometricslib registers and cites validation register entries. These
 checks keep the two sides in step, so a rule cannot depend on a metric that
 was renamed, redefined or dropped, and a rule's confidence cannot differ
-from the evidence behind it (plan section 3.7 and 6.7, decisions S12 and S13):
+from the evidence behind it (issue #95):
 
 * every requirement names a registered metric at its current definition
   version, and no requirement is an exploratory metric;
@@ -60,7 +60,7 @@ KNOWN_COMPUTING_MODULES = {
     "recommend_for_sky": "issue 95 wave D1",
 }
 
-# The items of the decision catalog (plan section 6.6) and the rule or
+# The items of the decision catalog (issue #93) and the rule or
 # deferred entry that covers each.
 DECISION_CATALOG = {
     "Overexposed setting": "overexposed_setting",
@@ -237,7 +237,7 @@ def test_rule_names_are_unique() -> None:
 def test_every_requirement_names_a_registered_metric_at_its_current_version(
     registry: dict[str, MetricSpec],
 ) -> None:
-    """A requirement pins the version the registry holds now (decision S13)."""
+    """A requirement pins the version the registry holds now (issue #95)."""
     for rule in ALL_RULES:
         for requirement in rule.requires:
             assert requirement.name in registry, f"{rule.name} reads unregistered {requirement.name}"
@@ -249,7 +249,7 @@ def test_every_requirement_names_a_registered_metric_at_its_current_version(
 
 
 def test_no_requirement_is_an_exploratory_metric(registry: dict[str, MetricSpec]) -> None:
-    """An exploratory metric never drives a rule (decision S12)."""
+    """An exploratory metric never drives a rule (issue #95)."""
     for rule in ALL_RULES:
         for requirement in rule.requires:
             assert registry[requirement.name].purpose != MetricPurpose.EXPLORATORY, (

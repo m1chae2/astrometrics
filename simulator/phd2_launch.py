@@ -1,7 +1,7 @@
 """Purpose: Start the real PHD2 for the simulated observatory.
 
 Description: PHD2 is the guiding program the user's telescope runs. In the
-interactive simulation mode (phase S2 of the simulator plan) the simulated
+interactive simulation mode the simulated
 telescope runs the real PHD2 too, not a stand-in, against the INDI guide
 camera and telescope simulators. This module prepares that PHD2 and builds
 the command that starts it:

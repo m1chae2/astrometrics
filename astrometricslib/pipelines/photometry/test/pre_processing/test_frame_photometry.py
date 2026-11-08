@@ -7,15 +7,15 @@ extracted from `variability_analyzer`.
 Two groups of tests use synthetic frames whose true answer is known
 (`astrometricslib.test.synthetic`):
 
-* Aperture placement (review item S2). A star's flux must not depend on
+* Aperture placement (sub-pixel centering). A star's flux must not depend on
   where inside a pixel the star sits, and each star must be re-centered on
   its own centroid in every frame of a drifting sequence.
-* Capture times (review item S5). A frame with a missing or unreadable
+* Capture times (capture time). A frame with a missing or unreadable
   ``DATE-OBS`` must be rejected with a reason. A readable one must come
   back as the right UTC instant, whether it has no suffix (INDI and Ekos),
   a ``Z``, or a UTC offset. Neither case may use the wall clock.
 
-The alignment anchors (review item S2) are tested on a sparse field, where
+The alignment anchors are tested on a sparse field, where
 the detections ranked 50 to 100 are noise.
 """
 
@@ -297,7 +297,7 @@ def test_calculate_frame_alignment_is_zero_when_too_few_stars_located() -> None:
     assert not alignment.includes_similarity
 
 
-# --- S2: the aperture follows the star, not the pixel grid -------------------
+# --- Sub-pixel centering: the aperture follows the star ---
 
 
 def test_flux_is_the_same_at_a_half_pixel_and_a_whole_pixel_position() -> None:
@@ -672,7 +672,7 @@ def test_worker_stamps_a_date_with_an_offset_as_utc(tmp_path: Path) -> None:
     assert result[0] == datetime(2026, 5, 24, 4, 58, 30, 570000)
 
 
-# --- S2: alignment anchors are real stars, not noise peaks ------------------
+# --- Alignment anchors are real stars, not noise peaks ------------------
 
 SPARSE_FIELD_SHAPE = (600, 600)
 SPARSE_FIELD_STAR_COUNT = 12

@@ -23,7 +23,7 @@ The rules:
 - **A result model is private, and its fields are not.** A call returns a Pydantic model (a Python class with typed, validated fields). A caller reads the fields by name and does not import the class. The API reference page lists the fields of each result without an import path.
 - **The library uses only public `astrometricslib` names.** It reaches the science library through the `Astrometrics` handle that `Wayfinder` holds.
 - **Calls take plain values.** A simple value is an argument. A group of options or a list of items is a dictionary, and the library checks it.
-- **Old names have no alias.** Every rename is listed in [API renames](../../documentation/plans/API_RENAMES_134.md).
+- **Old names have no alias.** A renamed call or field keeps no copy under its old name.
 
 ## The sub-APIs
 

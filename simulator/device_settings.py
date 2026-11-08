@@ -7,7 +7,7 @@ the settings file of the world (a copy of the real settings, see
 simulators match the real equipment's geometry (they do not make the frames
 realistic: the sky brightness, noise, star width and star brightness stay at
 INDI's defaults, so noise, signal-to-noise and depth checks are not valid on
-the frames until the fitted settings of step S3 of the simulator plan):
+the frames until the fitted settings of `simulator.fit` are applied):
 
 * the main camera simulator's resolution and pixel size (``SIM_XRES``,
   ``SIM_YRES``, ``SIM_XSIZE``, ``SIM_YSIZE``), from the primary camera's
@@ -80,7 +80,7 @@ FALLBACK_FOCAL_RATIO = 5.4
 #: GSC stars, 6.39 arcsec per pixel): 2.4 pixels gave "Star lost - low HFD"
 #: during calibration; 3.5 pixels gave a half-flux diameter of 2.2 pixels and
 #: a signal-to-noise ratio of 62, and PHD2 calibrated and guided. Design
-#: estimate: simulator plan S4, guide seeing row.
+#: estimate, tried on the running INDI simulators.
 GUIDE_MINIMUM_STAR_FWHM_PIXELS = 3.5
 #: How close a read-back value must be to the value that was set, relative.
 READ_BACK_TOLERANCE = 1e-3

@@ -2,7 +2,8 @@
 
 Description: Builds made-up histories of stack runs with known noise and
 weights, and checks that the three numbers (planned, given the frames taken,
-measured), their tolerance and the outcome come out as the plan describes.
+measured), their tolerance and the outcome come out as the forecast design
+describes.
 Covers equal weights, a moonlit night under equal weights, star-width
 weights, an unknown weighting mode, a missing noise value, a paired
 tolerance, the run grouping, the stop signal, and the pinned metric versions.
@@ -1115,7 +1116,7 @@ _SETTING = CaptureSetting(
 
 
 def test_the_model_error_is_measured_only_from_five_targets_of_a_setting_group() -> None:
-    """Four targets keep the stand-in; five give the measured error (D17)."""
+    """Four targets keep the stand-in; five give the measured error."""
     settings = {1: _SETTING}
     multipliers = [0.7, 0.85, 1.0, 1.15, 1.3]
 
@@ -1618,7 +1619,7 @@ def test_a_run_that_made_several_stacks_has_no_group_link() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Folded groups (decision D10, option B)
+# Folded groups (issue #134)
 # ---------------------------------------------------------------------------
 
 
@@ -1764,7 +1765,8 @@ def test_a_folded_group_whose_reference_exposure_row_was_not_measured_is_not_che
 
 
 # ---------------------------------------------------------------------------
-# Decision D11: the earlier-nights subset as the earlier member of a pair
+# Provisional count (issue #134): the earlier-nights subset as the earlier
+# member of a pair
 # ---------------------------------------------------------------------------
 
 

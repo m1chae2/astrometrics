@@ -446,12 +446,12 @@ def measure_photometry(
     This calls `_measure_aperture_flux`, the one function that does the
     aperture sum, at each detected position. Fluxes are in ADU per second.
 
-    Before item S2 of the review plan, the function rounded every position
+    Before sub-pixel aperture centering, the function rounded every position
     to a whole pixel. Rounding the position here reproduces that behaviour
     with the current code, so the ``photometry_pre_S2`` pins keep guarding
     the aperture sum and the background ring. With
     ``whole_pixel_centres=False`` the apertures sit on the exact detected
-    position, which is what the pipeline does after S2.
+    position, which is what the pipeline does now.
 
     Parameters
     ----------

@@ -131,7 +131,7 @@ three times that. Design estimate, register row WAY-D65."""
 
 SHARPNESS_KEEP_FRACTION = 0.7
 """The share of frames kept when the sharpness trade-off is worked out. The
-example of plan section 6.4 keeps the sharpest 70 percent. Design estimate,
+example in the design keeps the sharpest 70 percent. Design estimate,
 register row WAY-D66."""
 
 SHARPNESS_MINIMUM_GAIN = 0.05
@@ -538,7 +538,8 @@ def seeing_limit_statements(
         The frames of the target. Frames the stacker set aside are skipped.
     goal : `ScienceGoal` or `Callable`
         The science goal, or a function that gives the goal of a capture
-        setting (user decision U2: the goal is chosen for each setting).
+        setting (user decision, issue #95: the goal is chosen for each
+        setting).
     reference_for : `Callable`
         Gives the efficiency reference of a capture setting, or ``None``.
     star_width_evidence : `Mapping` [`str`, `MeasurementReference`]
@@ -627,7 +628,7 @@ def guiding_limits_statements(
 ) -> list[TargetStatement]:
     """Say when the guiding keeps too few frames sharp at the exposure used.
 
-    The user decided on 2026-10-24 (issue #95, decision U3) that this rule is
+    The user decided on 2026-10-24 (issue #95) that this rule is
     built. It fires when the share of sharp windows at the exposure the
     setting used is below `TARGET_SHARP_FRACTION`. It proposes the longest
     exposure whose share reaches the target, when there is one. The numbers
@@ -1491,7 +1492,7 @@ def _fixed_pattern_basis_sentence(result: TakeMoreResult) -> str:
 
 
 def _setup_history_sentence(result: TakeMoreResult) -> str:
-    """Say that the forecast borrowed its fixed-pattern share (decision D23).
+    """Say that the forecast borrowed its fixed-pattern share (issue #134).
 
     Parameters
     ----------
@@ -1720,8 +1721,9 @@ def _with_possible_range(
 ) -> tuple[str, str, str]:
     """Turn the noise cut of a recommendation into a range.
 
-    Used when the stack has possible, unproven fixed-pattern noise (decision
-    D18). The high end is the cut with no fixed-pattern noise (the count's own
+    Used when the stack has possible, unproven fixed-pattern noise (issue
+    #134). The high end is the cut with no fixed-pattern noise (the count's
+    own
     cut); the low end assumes the possible fixed-pattern noise is real.
 
     Parameters
@@ -1843,7 +1845,7 @@ new flats are a step the user can take. A rise near the target, a gradient and
 banding have none: they are explained in the loss account and nothing is asked
 for, because no calibration frame removes real light and the app has no step
 that removes a gradient (GraXpert runs on the preview only) or a line pattern
-from the science stack (decision D21, changed 2026-10-27)."""
+from the science stack (issue #134, changed 2026-10-27)."""
 
 FIXED_PATTERN_SHAPE_NOTES = {
     FixedPatternShape.RADIAL_TREND: "Retake flats.",

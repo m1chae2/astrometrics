@@ -1,4 +1,4 @@
-"""Tests for the noise of empty apertures at several sizes (decision D20)."""
+"""Tests for the noise of empty apertures at several sizes."""
 
 import math
 from datetime import UTC, datetime

@@ -69,7 +69,7 @@ __all__ = [
 
 #: Marks a frame the simulator delivered. It is not ``SYNTHETC``.
 DELIVERED_KEYWORD = "SIMDELIV"
-#: Marks a frame a camera simulator drew (D21).
+#: Marks a frame a camera simulator drew (simulator/README.md, "Design rules").
 SYNTHETIC_KEYWORD = "SYNTHETC"
 #: The ``INSTRUME`` names of the camera simulators. Frames they drew before
 #: `SYNTHETIC_KEYWORD` existed carry only this name.
@@ -335,8 +335,8 @@ def restore_origin(path: Path, origin: tuple[str, str] | None) -> None:
     """Put a frame's own ``ORIGIN`` back after `night_replay.copy_frame`.
 
     ``copy_frame`` stamps ``ORIGIN = ASTROMETRICS-SIMULATOR`` on its copy. A
-    delivered frame is real data and keeps its own ``ORIGIN`` (the plan leaves
-    that keyword alone and marks the frame with ``SIMDELIV`` instead).
+    delivered frame is real data and keeps its own ``ORIGIN`` (the simulator
+    leaves that keyword alone and marks the frame with ``SIMDELIV`` instead).
 
     Parameters
     ----------

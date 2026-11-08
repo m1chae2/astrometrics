@@ -1,4 +1,4 @@
-"""Tests for the odd–even bias script (D16): output and JSON file."""
+"""Tests for the odd–even bias script: output and JSON file."""
 
 import json
 from pathlib import Path

@@ -17,7 +17,10 @@ from datetime import datetime
 
 # The night is named after the date 12 hours before the moment, in local
 # time. 12 hours puts the change of date at local noon, which falls in
-# daylight, so no real observing session can straddle it.
+# daylight, so no real observing session can straddle it. "Local" is the
+# computer's time zone: the app assumes the computer and the telescope are in
+# the same time zone (decided 2026-11-08, issue #159 closed). A computer set to
+# another zone, such as UTC, would move the change of night into the dark.
 SECONDS_BEFORE_MOMENT_FOR_NIGHT_NAME = 43200
 
 

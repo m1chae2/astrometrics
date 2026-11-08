@@ -3,7 +3,8 @@
 Description: `ObservationReview.get_advisory(kind="result", target=...,
 object_id=...)` tells
 the user how far to trust a spectrum's classification or a variable star's
-period (`QUALITY_METRICS_PLAN.md` Sections 3.3 and 6.1, use case UC5). The
+period (use case UC5 in `Wayfinding_Quality_Use_Cases.md`; confidence in
+`Wayfinding_Quality_Judgment.md` Section 3.3). The
 numbers sit in the star's record, not in the measurement store, so a per-star
 result has no row id. A statement points at it by star, run and statistic
 (`StarResultReference`).

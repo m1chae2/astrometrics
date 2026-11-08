@@ -1076,7 +1076,7 @@ def test_sums_saved_in_other_apertures_are_not_paired_with_a_subset(tmp_path: Pa
     assert all("other apertures" in row.reason and "v3-someotherset" in row.reason for row in rows)
 
 
-# -- The stack of the earlier nights (decision D11) ---------------------------
+# -- The stack of the earlier nights ---------------------------
 
 
 def _earlier_nights(library: _Library, **keywords: Any) -> Any:

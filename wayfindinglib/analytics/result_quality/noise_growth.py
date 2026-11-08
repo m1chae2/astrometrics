@@ -1,7 +1,7 @@
 """Purpose: Forward model of a stack's noise as frames are added.
 
 Description: This module is the one place where "how much better will the
-stack be with N more frames" is worked out (decision S15). The target report
+stack be with N more frames" is worked out (issue #95). The target report
 (forecast and "take N more") and tonight's ranking both use it.
 
 The forward model
@@ -132,7 +132,7 @@ standard errors. The error is the loss account's
 (`total_variance_ratio_error`): the aperture error of the measured noise (see
 below, applied to the variance) and the expected-noise model's own error (11
 percent, STK-36), added in quadrature, so one error budget serves both.
-Validation (plan section 3.6.1): M 27 60 s has clear fixed-pattern noise, M 81
+Validation (issue #134): M 27 60 s has clear fixed-pattern noise, M 81
 has none at 2 sigma.
 
 The forecast carries the fixed-pattern noise as a fraction ``f`` of the random
@@ -214,7 +214,7 @@ TARGET_NOISE_RATIO = 1.0 / math.sqrt(2.0)
 """The step "take N more" aims for: the noise falls to 0.707 of today's, which
 is
 the effect of doubling the effective time (noise falls as the square root of
-time) and is the smallest change the eye sees. From the plan, section 6.4."""
+time) and is the smallest change the eye sees."""
 
 PRACTICAL_TIME_FACTOR = 4.0
 """A "take N more" count is given only when reaching the target needs at most
@@ -261,7 +261,7 @@ assumed; the forecast gives the gain both with it and without it, and the
 advice is a range. Below this, the stack agrees with the random noise, as
 before. One standard error is the usual "worth a second look" level: chance
 alone gives it about 16 percent of the time (one-sided), so most stacks with no
-pattern fall below it. Design estimate (user decision D18, 2026-10-26);
+pattern fall below it. Design estimate (user decision 2026-10-26, issue #134);
 evidence M 13, whose significance moved from 2.2 to 1.9 between two runs on
 the same frames and moved the advice from about 13 to about 29 percent
 (validation register entry WAY-76). Register row to be added."""
@@ -272,7 +272,8 @@ when at least this many targets of one capture setting group have one;
 otherwise the stand-in `EXPECTED_NOISE_MODEL_RELATIVE_ERROR` is used and the
 statement says so. Five samples give the scatter of the log ratios a relative
 error of about 1 / sqrt(2 x 4) = 35 percent, enough to tell 0.05 from 0.15 but
-not to claim more. User decision D17, 2026-10-26; design estimate, register row
+not to claim more. User decision of 2026-10-26 (issue #134); design estimate,
+register row
 to be added."""
 
 MODEL_AGREEMENT_SIGMAS = 2.0
@@ -298,14 +299,15 @@ FIXED_PATTERN_BASIS_SETUP_HISTORY = "setup_history"
 """The ways fixed-pattern noise is found (`StackFixedPatternNoise.basis`). The
 first three measure the target's own stack. ``setup_history`` measures nothing
 on the target: the share is the median of other targets of the same camera,
-optic and flat set (decision D23)."""
+optic and flat set (issue #134)."""
 
 MINIMUM_HISTORY_TARGETS = 3
 """A target with no fixed-pattern measurement of its own borrows the median
 fixed-pattern share of other targets of its setup (camera, optic and flat set)
 only when at least this many other targets have one. The median of 3 is the
 smallest median that a single odd target cannot move; with 2 it is their mean.
-User decision D23, 2026-10-26; design estimate, register row to be added."""
+User decision of 2026-10-26 (issue #134); design estimate, register row to be
+added."""
 
 FIXED_PATTERN_BASIS_TEXT = {
     FIXED_PATTERN_BASIS_ODD_EVEN_DIFFERENCE: "measured from the odd and even half stacks",
@@ -736,7 +738,7 @@ class TakeMoreResult(BaseModel):
     new_exposure_seconds : `float` or `None`
         The exposure of the new frames.
     confidence : `Confidence`
-        Always ``design_estimate`` (decision S15).
+        Always ``design_estimate`` (issue #95).
     register_entry : `str`
         The register row behind the estimate.
     reason : `str` or `None`
@@ -1139,7 +1141,7 @@ def _take_more_result_graded(
     is `_take_more_result` with the fixed-pattern noise applied or not, as
     always.
     Between them (``fixed_pattern.possible``) the forecast is made twice, with
-    no fixed-pattern noise and with the estimated one (decision D18):
+    no fixed-pattern noise and with the estimated one (issue #134):
 
     * The count and the practical-limit decision come from the case without
       it, so a possible pattern never withholds or inflates the count by
@@ -1574,7 +1576,7 @@ def measure_noise_model_error(
     ``sqrt(var(model)) / 2``. The scatter is taken about the mean, so a steady
     bias (the model always a little high) is reported separately and does not
     count as error; the bias is not applied. Planck (ESA) checked its noise
-    model against half-ring differences the same way; plan section 3.13, D17.
+    model against half-ring differences the same way (issue #134).
 
     Parameters
     ----------
@@ -2718,7 +2720,7 @@ def predict_group_frame_noise_adu(frames: Sequence[StackFrame], electrons_per_ad
     the result is divided by the camera gain: this is the one place where a
     `StackFrame` (electrons) is converted to the combine's units. Validated
     on one 60 s M 27 frame: 35.1 ADU predicted, 37.7 measured (+7 percent,
-    plan section 3.6.1). Only ratios of group weights matter, and the
+    issue #134). Only ratios of group weights matter, and the
     prediction is used only for planned groups.
 
     Parameters

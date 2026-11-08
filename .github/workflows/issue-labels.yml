@@ -10,7 +10,10 @@
 #          in the issue form (.github/ISSUE_TEMPLATE/issue.yml) and applies
 #          the matching labels automatically -- this only does anything for
 #          issues filed through the web UI, since that form is the only
-#          place those dropdowns are rendered.
+#          place those dropdowns are rendered. The optional Display dropdown
+#          (Observatory Manager, Planetarium, Status Header, Settings and so
+#          on) becomes display labels the same way; the second job does not
+#          require one, because most library work changes nothing on screen.
 #
 #          The second is the actual backstop: it runs on every issue however
 #          it was created, including ones filed with `gh issue create` or
@@ -50,12 +53,14 @@ jobs:
               "astrometricslib", "wayfindinglib", "ui",
               "api", "pipelines", "drivers", "infrastructure",
               "enhancement", "problem",
+              "Observatory Manager", "Observation Manager", "Image Processing",
+              "Image Viewer", "Planetarium", "Astronomy Manager", "Status Header", "Settings",
             ]);
             const body = context.payload.issue.body || "";
             // Issue forms render each dropdown as a "### <Label>" heading
             // followed by the selected option(s), comma-separated when the
             // dropdown allows more than one.
-            const sectionPattern = /### (Subsystem|Component|Type)\r?\n+([^\n#][^\n]*)/g;
+            const sectionPattern = /### (Subsystem|Component|Type|Display)\r?\n+([^\n#][^\n]*)/g;
             const found = new Set();
             let match;
             while ((match = sectionPattern.exec(body)) !== null) {

@@ -1,21 +1,8 @@
-# Quality Use Cases
+# Wayfinding quality use cases
 
-This document describes how the user is expected to use the quality metrics, the target dataset
-report and the new displays, step by step. It is the agreement the other plans build toward. If a
-use case here is wrong, the plans are wrong too. Each "Done right when" line becomes an acceptance
-test.
+*Status: current*
 
-It is the user-facing companion of two plans:
-
-- `QUALITY_METRICS_PLAN.md`: the measurements, efficiency, and the target dataset report (its
-  section 6);
-- `QUALITY_SCIENCE_PLAN.md`: the new science metrics.
-
-## Status
-
-Status on 2026-10-17: agreed with the user. Section 6 records the points settled while writing it.
-The change control board reviewed it a second time on 2026-10-17, and its changes are folded in
-(appendix A).
+This page describes how the observer uses the quality measurements, the target dataset report and the quality displays, step by step. The displays and the AI companion follow it. Each "Done right when" line is an acceptance test. The theory behind the statements is in the [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) paper.
 
 ## 1. The user and the setting
 
@@ -41,7 +28,7 @@ The change control board reviewed it a second time on 2026-10-17, and its change
 3. **"Not enough data" is an answer.** The app says when it cannot judge something, and why. It
    never fills the gap with a default.
 4. **Recommendations are worked out fresh** each time they are shown, from the stored
-   measurements. Only the measurements and the user's own plan are saved.
+   measurements. Only the measurements and the user's own night plan are saved.
 5. **Limits come from the user's equipment** and its earlier nights. This happens on its own, with
    nothing for the user to do: after an equipment change, limits that depend on earlier nights
    start fresh and say "no baseline yet", while limits from physics and the camera profile apply at
@@ -87,8 +74,8 @@ them the same way.
     Kept 3.2 h, worth 2.6 h effective: Moon 0.4 h (model-derived), cause unknown 0.2 h.
     Transparency: not included yet."
     Seeing is not counted as lost time for an extended object such as a galaxy, since a softer
-    night still adds depth. Transparency shows as "not included" until the zero point from the
-    science plan exists. The Moon's share comes from a sky model and is labeled model-derived;
+    night still adds depth. Transparency shows as "not included" until the catalog zero point
+    is measured. The Moon's share comes from a sky model and is labeled model-derived;
   - a "needs attention" count for each target that has warnings, and how serious the top one is;
   - guiding over the night, with the stretches where it failed;
   - focus against temperature;
@@ -197,7 +184,7 @@ them the same way.
     accounts for 90 s frames gaining more per minute than the 30 s frames in UC2.
   - "Image above 35° altitude; frames lower down lost 35%."
   - "Refocus every 1.4 °C. Stars widen 0.7 px per °C, and the allowed widening is 1 px."
-  - Advice on dither size comes later, once the science plan measures it.
+  - Advice on dither size comes later, once a dither measurement exists.
 - **What the user does:** chooses "Add to plan" on a capture recommendation, which puts its exact
   values in the night plan. If the plan already holds the same or a clashing setting, the library
   merges the two or refuses with the reason. Other recommendations join the night plan as a
@@ -291,9 +278,7 @@ them the same way.
   the public quality calls and explains them. It cannot change settings, run the camera
   measurement of UC13, or command devices. When its tools cannot answer, it reports the gap.
 
-## 6. Points agreed
-
-Agreed with the user on 2026-10-17:
+## 6. Settled points
 
 1. **The night review lives in Observation Execution.** It has a night selector that defaults to
    tonight and can show any earlier night from the stored data (UC1).
@@ -313,15 +298,15 @@ Agreed with the user on 2026-10-17:
    themselves are still worked out fresh. A ticked item comes back as a recommendation if the next
    measurements show it did not work, and it says why ("ticked Oct 12; stars still 28% wider Oct
    15").
-6. **Syncs stay manual** (second board review, 2026-10-17). "Sync now" on Observation Execution
+6. **Syncs stay manual** . "Sync now" on Observation Execution
    fetches the Ekos logs and the frames. Target changes are read from the Ekos analyze log after
    each sync. A staleness line shows the time of the last sync. Automatic syncing may come later
    and is not designed now (UC11).
-7. **No special night theme** (second board review). Observation Execution uses the same theme as
+7. **No special night theme**. Observation Execution uses the same theme as
    the rest of the app. The basics of access still apply: how serious an item is shows by icon and
    words, not color alone; every screen works from the keyboard; charts have a text alternative;
    and summary text can be selected and copied.
-8. **Popped-out windows are not restored** (second board review). The user sets up the second
+8. **Popped-out windows are not restored**. The user sets up the second
    monitor once per session. The app does not save or reopen popped-out windows.
 
 ## 7. Not use cases
@@ -336,44 +321,4 @@ Agreed with the user on 2026-10-17:
   asteroid searches are a regular part of the user's nights.
 - A special night or red theme (section 6).
 - Scheduling spectral standard stars at a matching altitude, and checking that asteroid reports
-  are ready for the Minor Planet Center (including clock timing). These are later items in
-  `QUALITY_SCIENCE_PLAN.md`.
-
-## Appendix A. Review board changes
-
-The board met a second time on 2026-10-17. Four reviewers took part: an astronomer, a software
-engineer, a technical architect and a user-experience reviewer. Each finding below touched this
-document. No findings were rejected.
-
-| Finding | Raised by | Where it landed |
-| :--- | :--- | :--- |
-| The screens must only show what the libraries return | Architect, UX | Section 2, rule 6 |
-| Observing advice belongs in `wayfindinglib`; `astrometricslib` only measures | Architect, astronomer | Section 2, rule 7 |
-| Statement types and confidence labels, told apart by icon and word | UX, architect | Section 2, rule 8 |
-| Loss account: set-aside frames apart from kept-frame efficiency; goal and reference; seeing not lost time for extended objects; transparency not included yet; Moon model-derived | Astronomer | UC1 |
-| Loss causes must be checked on nights with a known cause | Astronomer, engineer | UC1 |
-| "Open in Planner" and a needs-attention badge in the night review | UX, architect | UC1 |
-| UC2 and UC7 examples contradicted each other; counts in effective time with overheads | Astronomer | UC2, UC7 |
-| Forecast check: three numbers with tolerances, the stacker's real weights, noise floor only from two or more steps | Astronomer, engineer | UC3 |
-| Evidence opens the Image Viewer on the cited frames, reusing an open window | UX | UC4 |
-| Quality chip in the Astronomy Manager; "not reachable at this resolution" | UX, architect, astronomer | UC5 |
-| Ranking from `wayfindinglib`, in clock time with overheads, per use, stop signal at zero, thin-dataset note, labeled sky model | Astronomer, architect | UC6, UC12 |
-| Planning time shown as "Now" or a fixed time in both windows; "Show on sky" and "Send to plan" | UX, architect | UC6 |
-| Refocus advice states its tolerance; dither size advice comes later | Astronomer | UC7 |
-| Sequence summary rows mirror Ekos fields and screens; copy and "done in Ekos"; values and clashes checked by the library | Engineer, UX, architect | UC7 |
-| Framing worked out by `wayfindinglib`; first version may be read-only | Architect | UC8 |
-| Calibration match includes gain, offset, binning and temperature; link to the exact library row; one rule set | Engineer, architect | UC2, UC9 |
-| Monitor mode is the existing delegation policy | Architect, engineer | UC11 |
-| Manual "Sync now", target changes from the analyze log, staleness line (decision D1) | Engineer, UX | UC11, section 6 |
-| At night, show ruined frames from the live status, not set-aside reasons | Engineer | UC11 |
-| Screen order: quality strip, one live verdict, frame list | UX | UC11 |
-| "Switch to" on re-ranked candidates | UX | UC12 |
-| The camera measurement is a write, kept from the read-only companion | Engineer | UC14 |
-| "Is tonight photometric?" for L photometry (decision D2) | Astronomer | Removed on 2026-10-24 |
-| Starting point for a new target from sky, read noise and bright stars | Astronomer | Section 6, point 2 |
-| A returning checklist item says why it came back | Architect, UX | Section 6, point 5 |
-| No special night theme; access basics kept (decision D3) | UX | Sections 6 and 7 |
-| Popped-out windows are not restored (decision D5) | UX, engineer | Section 6 |
-| No filter-sharing use case; spectral standards and Minor Planet Center readiness are later science items (decision D2) | Astronomer | Section 7 |
-| Asteroid completeness and null search deferred (decision D4) | Astronomer | Section 7 |
-| "Done right when" lines become acceptance tests | UX | Introduction |
+  are ready for the Minor Planet Center (including clock timing). These come later.

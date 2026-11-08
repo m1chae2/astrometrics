@@ -3,7 +3,8 @@
 Description: A recommendation such as "20 more 90 s frames cut the noise by
 about 29%" is a forecast. When the user takes more frames and stacks them, this
 module rebuilds the forecast from the run before and compares it with what the
-new stack measured (`QUALITY_METRICS_PLAN.md` Section 6.5, use case UC3). It
+new stack measured (`Wayfinding_Quality_Judgment.md` Section 6.3, use case UC3
+in `Wayfinding_Quality_Use_Cases.md`). It
 stores nothing: the history of stack runs is already in the measurement store,
 so any forecast can be rebuilt on each read.
 
@@ -63,7 +64,7 @@ and stacking-algorithm versions), the heaviest exposure group, or a switch
 between one group and several. A run with no aperture identity or no
 calibration record counts as confounded. Frames added to the later stack that
 were taken before the earlier stack was made are not new (`_new_frame_reason`).
-The sensor-temperature band that the plan names for the uncooled Nikon is not
+The sensor-temperature band of the uncooled Nikon is not
 stored, so it is not checked.
 
 A target with two or more observing nights also has an earlier-nights subset
@@ -85,7 +86,7 @@ history. The stop signal uses the fixed-pattern noise
 alone.
 
 The noise model's own relative error is measured from the library's odd–even
-differences, not borrowed (decision D17). `noise_model_error_sample` turns one
+differences, not borrowed (issue #134). `noise_model_error_sample` turns one
 run into a sample (its odd–even random noise against its predicted noise), and
 `noise_model_errors_by_setting_group` pools the samples of one capture setting
 group (`noise_model_setting_key`: camera, optic, gain setting, offset and
@@ -416,7 +417,7 @@ ODD_EVEN_DIFFERENCE_DETAIL_METRICS = frozenset({
     ODD_EVEN_SUM_COLUMN_SCATTER_METRIC,
 })
 """The odd–even difference job's rows about where the fixed pattern is (the
-per-aperture record and the four line-pattern scatters, decision D21). They are
+per-aperture record and the four line-pattern scatters; issue #134). They are
 joined to the run like the rows below, but a missing one is not a problem of
 the noise comparison, so they are read apart."""
 
@@ -1616,7 +1617,7 @@ def single_stack_fixed_pattern_noise(
     flux. Otherwise the fixed-pattern noise falls back to the noise model: the
     expected noise is version 2 of
     ``stacking.expected_empty_aperture_noise_stack_unit``, which includes
-    Siril's normalization scale (plan decision D9), and the test counts the
+    Siril's normalization scale (issue #134), and the test counts the
     model's own error too (`measure_stack_fixed_pattern_noise`).
 
     Parameters
@@ -1706,7 +1707,7 @@ def fixed_pattern_noise_for_runs(
     history : `Mapping`, optional
         The fixed-pattern share of each target by setup
         (`fixed_pattern_shares_by_setup`). Used only when the target has no
-        measured fixed-pattern noise of its own (decision D23).
+        measured fixed-pattern noise of its own (issue #134).
     target_id : `str`, optional
         The target, so its own share is left out of its borrowed median.
 
@@ -1735,7 +1736,7 @@ def fixed_pattern_noise_for_runs(
 
 SetupKey = tuple[str | None, str | None, tuple[FileIdentity, ...]]
 """What a fixed-pattern history is keyed by: the camera, the optic and the set
-of flat masters the stack used (decision D23). A new flat master changes the
+of flat masters the stack used (issue #134). A new flat master changes the
 key, so a new flat set starts with no history."""
 
 
@@ -1953,11 +1954,11 @@ def fixed_pattern_account_for_run(
 ) -> FixedPatternAccount | None:
     """Say where a run's fixed-pattern noise is and what explains it.
 
-    The shape tests (decision D21) run only for a fixed-pattern noise that was
+    The shape tests (issue #134) run only for a fixed-pattern noise that was
     found, never for one that is merely possible, because a pattern that is not
     proven has no shape to name. They read the per-aperture record the
     odd–even difference job wrote beside the stack. The calibration account
-    (decision D22) runs for a found or possible fixed-pattern noise measured
+    (issue #134) runs for a found or possible fixed-pattern noise measured
     on this stack in stack units.
 
     Parameters

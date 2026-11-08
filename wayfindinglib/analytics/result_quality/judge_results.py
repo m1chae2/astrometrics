@@ -14,7 +14,7 @@ Three promises hold for every statement:
   measurement for a capture setting, the rule makes an ``insufficient_data``
   statement that names the metric, says why it is missing and how to get it.
   A row measured under another definition version of the metric is not used
-  (decision S13), and the statement says to measure again.
+  (issue #95), and the statement says to measure again.
 * **Nothing is stored.** Statements are recomputed on each read.
 
 `order_statements` sorts statements for display, and `needs_attention` counts

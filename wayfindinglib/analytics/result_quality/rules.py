@@ -18,12 +18,12 @@ Two kinds of row exist:
   still here so the whole rule set can be read, tested and audited in one
   place.
 
-`DEFERRED_RULES` lists the items of the decision catalog (plan section
-6.6) that have no row yet, each with the reason. A rule never reads an
-exploratory metric (decision S12), so items whose metrics are exploratory
+`DEFERRED_RULES` lists the items of the decision catalog (issue #93)
+that have no row yet, each with the reason. A rule never reads an
+exploratory metric (issue #95), so items whose metrics are exploratory
 wait there until the metric is promoted.
 
-The library never advises hardware (decision 11). When only new hardware
+The library never advises hardware (issue #93). When only new hardware
 would help, a row makes a ``constraint`` statement and proposes nothing.
 
 Every number below carries the place it comes from. Numbers that are design
@@ -215,7 +215,7 @@ class DeferredRule(BaseModel):
     name : `str`
         A short stable name, such as ``"polar_alignment"``.
     catalog_item : `str`
-        The item's name in the decision catalog (plan section 6.6).
+        The item's name in the decision catalog (issue #93).
     reason : `str`
         Why there is no rule yet, in plain words.
     unblocked_by : `str`
@@ -784,7 +784,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         purpose=(
             "A longer exposure gives the guiding more time to wander. The share of frames whose guide "
             "error keeps the stars within the width budget falls with the exposure; the rule names the "
-            "longest exposure that keeps enough of them sharp (user decision U3, 2026-10-24)."
+            "longest exposure that keeps enough of them sharp (user decision 2026-10-24, issue #95)."
         ),
         computed_by="report_rules",
     ),
@@ -830,7 +830,7 @@ DEFERRED_RULES: tuple[DeferredRule, ...] = (
         catalog_item="Polar alignment",
         reason=(
             "Its input, the field rotation of each frame (stacking.frame_registration_rotation_deg), is an "
-            "exploratory metric (STK-43), and an exploratory metric never drives a rule (decision S12). "
+            "exploratory metric (STK-43), and an exploratory metric never drives a rule (issue #95). "
             "The polar error is shown to the user as an observing value, labeled exploratory."
         ),
         unblocked_by="Promoting the field rotation metric after the review of STK-43.",
@@ -841,7 +841,7 @@ DEFERRED_RULES: tuple[DeferredRule, ...] = (
         reason=(
             "A transparency rule needs a photometric zero point that is not exploratory. The catalog zero "
             "points (photometry.catalog_zero_point_*) are exploratory (PHO-15), and no night is known to be "
-            "photometric (decision S12)."
+            "photometric (issue #95)."
         ),
         unblocked_by="Promoting a zero point metric after the review of PHO-15.",
     ),
@@ -864,7 +864,7 @@ DEFERRED_RULES: tuple[DeferredRule, ...] = (
         name="spectrum_snr",
         catalog_item="Spectrum SNR",
         reason=(
-            "The class gap against the signal-to-noise ratio has not been calibrated (plan section 6.4), "
+            "The class gap against the signal-to-noise ratio has not been calibrated, "
             "so the rule could not say how many more spectra reach a subtype."
         ),
         unblocked_by="Degrading high-SNR spectra with added noise to measure the class gap against SNR.",
@@ -885,7 +885,7 @@ DEFERRED_RULES: tuple[DeferredRule, ...] = (
         reason=(
             "Its inputs, the star widths at the center and the four corners (frame.star_width_center_px "
             "and the corner metrics), are exploratory metrics (AST-18), and an exploratory metric never "
-            "drives a rule (decision S12)."
+            "drives a rule (issue #95)."
         ),
         unblocked_by="Promoting the corner widths after the review of AST-18.",
     ),

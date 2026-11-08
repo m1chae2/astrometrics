@@ -1,7 +1,7 @@
 """Purpose: List the connections of a process tree that leave this computer.
 
 Description: While the app runs against the simulator, nothing it opens may
-reach beyond this computer (decision D17 of the simulator plan). Two
+reach beyond this computer (see "Design rules" in simulator/README.md). Two
 programs check this with the same code: the launcher (`simulator.launch`)
 looks every few seconds and stops the session if it finds one, and the TPM
 harness (``build/tpm/seal_guard.py``) checks once at the end of a run.

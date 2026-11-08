@@ -726,7 +726,7 @@ def test_the_halves_stack_the_right_frames_and_are_deleted_afterwards(tmp_path: 
     assert result.shared_frame == library.reference
     assert len(library.slot_entries) == 2
     assert not list((folder / "_subsets").glob("*half*"))
-    # The one new file is the per-aperture record, named for the run (D21).
+    # The one new file is the per-aperture record, named for the run.
     assert sorted(path.name for path in folder.iterdir() if path.name != "_subsets") == sorted([
         *(name for name in before if name != "_subsets"),
         "M99_L_Stacked_odd_even_apertures.json",
@@ -1083,7 +1083,7 @@ def test_the_library_stack_and_the_target_are_left_alone(tmp_path: Path) -> None
     target_before = library.target.model_dump()
     library.run()
     after = {str(path.relative_to(folder)): path.read_bytes() for path in folder.rglob("*") if path.is_file()}
-    # The per-aperture record (D21) is the only file added; none changes.
+    # The per-aperture record is the only file added; none changes.
     assert after.pop("M99_L_Stacked_odd_even_apertures.json")
     assert after == before
     assert library.target.model_dump() == target_before
@@ -1111,7 +1111,7 @@ def test_two_stacks_on_different_grids_are_refused(tmp_path: Path) -> None:
 
 
 def test_the_per_aperture_record_and_the_line_pattern_are_stored(tmp_path: Path) -> None:
-    """D21: the aperture record file and the line rows are stored."""
+    """The aperture record file and the line rows are stored."""
     from astrometricslib.pipelines.stacking.metrics import (
         STACKING_ODD_EVEN_DIFFERENCE_APERTURE_RECORD_COUNT,
         STACKING_ODD_EVEN_DIFFERENCE_COLUMN_AVERAGE_SCATTER_STACK_UNIT,
@@ -1181,7 +1181,7 @@ def test_the_detail_rows_say_why_when_the_difference_was_not_measured(tmp_path: 
 
 
 def test_the_bias_divides_the_noise_and_its_uncertainty_but_not_the_aperture_sums(tmp_path: Path) -> None:
-    """D16: `measure_difference_noise` applies the bias."""
+    """`measure_difference_noise` applies the bias."""
     library = _Library(tmp_path)
     folder = tmp_path / "pair"
     odd, even = str(folder / "odd.fits"), str(folder / "even.fits")
@@ -1207,7 +1207,7 @@ def test_a_bias_that_is_not_positive_is_refused(tmp_path: Path) -> None:
 
 
 def test_the_shipped_bias_is_one_until_it_has_been_measured() -> None:
-    """D16: no correction without a measurement (a Design estimate)."""
+    """No correction without a measurement (a Design estimate)."""
     from astrometricslib.pipelines.stacking.post_processing.difference_noise import (
         ODD_EVEN_DIFFERENCE_NOISE_BIAS,
     )

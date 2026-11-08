@@ -20,7 +20,7 @@ The rules:
 - **Only `astrometricslib` itself may import `_internal`.** `wayfindinglib`, the backend and the MCP servers use the root and the four public modules only. Tests of the libraries are the one exception.
 - **A result model is private, and its fields are not.** A call returns a Pydantic model (a Python class with typed, validated fields) such as `TargetQueryResult` or `StackResult`. A caller reads the fields by name and does not import the class. The API reference page lists the fields of each result without an import path.
 - **A caller reaches a sub-API through `Astrometrics`.** Build one `Astrometrics` and use `astrometrics.targets`, `astrometrics.processing` and the rest, so all of them read and write the same storage.
-- **Old names have no alias.** Every rename of the cleanup is listed in [API renames](../../documentation/plans/API_RENAMES_134.md).
+- **Old names have no alias.**
 
 Terms are defined in the [glossary](../../documentation/Glossary.md). This document also defines each term the first time it appears.
 

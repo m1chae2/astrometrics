@@ -7,7 +7,7 @@
       "category": "app",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-03. Navigate and notify only; pause and resume are not offered."
+      "note": "Built 2026-10-03. Navigate only; pause, resume and notify are not offered."
     },
     "app_status": {
       "tool_class": "observe",
@@ -73,13 +73,6 @@
       "note": "Console variable viewer. Has no use without the code runner."
     },
     "ui_navigate_mode": {
-      "tool_class": "ui-control",
-      "category": "app",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Replaced by app_controls."
-    },
-    "ui_show_notification": {
       "tool_class": "ui-control",
       "category": "app",
       "disposition": "drop",

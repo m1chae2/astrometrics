@@ -167,7 +167,7 @@ def test_a_failed_section_is_reported_as_error_info(
     ("arguments", "message"),
     [
         ({"action": "navigate"}, "needs mode"),
-        ({"action": "notify", "title": "Hi"}, "needs title and body"),
+        ({"action": "notify"}, "action must be one of"),
         ({"action": "pause"}, "action must be one of"),
     ],
 )

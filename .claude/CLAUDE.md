@@ -46,7 +46,7 @@ The MCP servers live in `mcp_servers/` (the UI server in `ui/mcp/`). Claude Code
 ### Server Hierarchy
 1. **`astrometricslib-core`**: Pure domain library functions (catalog targets, FITS image processing, stacking, astrometry/plate-solving, photometry, spectroscopy, and star catalogs).
 2. **`wayfindinglib-core`**: Observatory control, telescope status, tracking, slewing, focusing, guiding, and observation planning.
-3. **`astrometrics-backend`**: Live backend status (`app_status`), view switching and notifications (`app_controls`), and documentation (`docs_get`). `backend_call_rpc` and `electron_run_python` are withheld from every profile.
+3. **`astrometrics-backend`**: Live backend status (`app_status`), view switching (`app_controls`), and documentation (`docs_get`). `backend_call_rpc` and `electron_run_python` are withheld from every profile.
 4. **`astrometrics-ui`**: Frontend TypeScript diagnostics, Vitest runners, build checks, and accessibility audits.
 5. **`astrometrics-gaps`**: Where an agent reports what its tools cannot do.
 

@@ -6,7 +6,6 @@ import { Button } from '../../common/components/Button';
 import { Skeleton } from '../../common/components/Skeleton';
 /**
  * Component for displaying real-time processing logs.
- * REQ: IMG-5.4: The display SHALL indicate the current state of processing.
  */
 export interface ProcessingStatusProps {
     isProcessing: boolean;

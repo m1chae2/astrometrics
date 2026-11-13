@@ -87,7 +87,6 @@ export const ImageDetailsManager: React.FC<ImageDetailsManagerProps> = ({
   return (
     <div className="image-details-manager">
       <div className="image-details-manager__controls-frame">
-        {/* REQ: IMG-4: Image Analysis Tools */}
         <div className="image-details-manager__controls">
           <div className="image-details-manager__toolbar">
             {onAnalyze && !isAnalyzing && (

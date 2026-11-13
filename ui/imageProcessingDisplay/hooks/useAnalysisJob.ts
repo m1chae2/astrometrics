@@ -1,7 +1,6 @@
 /**
  * @file useAnalysisJob.ts
  * @description Hook for managing variability analysis jobs and results.
- * REQ: IMG-4: Data Analysis Workflow
  */
 import { useState, useEffect, useRef } from 'react';
 import { analyzeTarget, fetchAnalysisResults, streamJobLog } from '../../common/services/imaging/processingService';

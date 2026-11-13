@@ -355,7 +355,7 @@ class ImageProcessingService(BaseBackgroundService):
                     "logFile": job.log_file_path or log_file,
                 }
 
-        # REQ: IMG-5.3: Persistent job history
+        # Persistent job history
         job_id = self._submit_job(
             target_id,
             "stacking",

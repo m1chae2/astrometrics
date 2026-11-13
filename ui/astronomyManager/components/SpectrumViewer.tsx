@@ -56,7 +56,6 @@ const ASSUMED_PLOT_WIDTH = 700;
 // Space kept above the plot for things other than labels, and the plot's normal top margin.
 const PLOT_TOP_MARGIN = 20;
 
-// REQ: AST-2: Spectroscopy Visualization
 export const SpectrumViewer: React.FC<Props> = ({
     astronomyData,
     loading,
@@ -178,7 +177,6 @@ export const SpectrumViewer: React.FC<Props> = ({
             yTitle: 'Intensity'
         });
 
-        // REQ: AST-2.6: The display SHALL overlay vertical lines spanning the height of the plot for selections.
         const selectionColor = getVar('--plot-selection', '#ff4444');
         const selectionShapes = selections.map(sel => ({
             type: 'line',
@@ -329,7 +327,6 @@ export const SpectrumViewer: React.FC<Props> = ({
                 data={plotData}
                 className="astronomy-viewer__plot astronomy-plot astronomy-plot-container"
                 layout={layout}
-                // REQ: AST-2.5: The display SHALL provide zoom and pan capabilities for detailed inspection of spectral lines.
                 config={{ responsive: true, displayModeBar: false }}
                 onClick={handleChartClick}
             />
@@ -353,7 +350,6 @@ export const SpectrumViewer: React.FC<Props> = ({
                         top: Math.max(4, sel.top),
                     }}
                 >
-                    {/* REQ: AST-2.3: The display SHALL show a tooltip with precise Wavelength and Intensity values for selected points. */}
                     <Button
                         variant="ghost"
                         size="square"

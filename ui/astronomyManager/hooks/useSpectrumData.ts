@@ -71,7 +71,7 @@ export function useSpectrumData(
                 const fetched = (await fetchAstronomyData(pendingId, controller.signal)) as Spectrum | null;
                 if (cancelled || !fetched) return;
 
-                // REQ: BKD-7.1: Use canonical plotData from backend to eliminate client-side guessing
+                // Use canonical plotData from backend to eliminate client-side guessing
                 const plotData = fetched.plotData || { wavelengths: [], intensities: [] };
 
                 const result: ParsedAstronomyData = {

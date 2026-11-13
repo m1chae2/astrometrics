@@ -2,7 +2,6 @@
 #
 # fetch_aladin.sh
 # Download Aladin Lite v3 offline assets into the local public directory.
-# REQ: PLN-2.1
 #
 
 set -euo pipefail

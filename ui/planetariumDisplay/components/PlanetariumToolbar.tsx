@@ -5,8 +5,6 @@
  * Renders a row of labelled checkboxes for toggling sky map overlays, a Date and
  * Time button to open the simulation time modal, and a live FOV readout.
  * The session picker is the shared SessionPicker.
- *
- * REQ: PLN-2.1, REQ: PLN-2.2
  */
 
 import React from 'react';

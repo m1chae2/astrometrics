@@ -1,8 +1,6 @@
 /**
  * @file ImageProcessingContext.tsx
  * @description Context Provider for Image Processing feature state.
- * REQ: IMG-1: Image Management Interface
- * REQ: IMG-5: Automated Stacking Pipeline
  */
 import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import { useImageProcessing, UseImageProcessingResult } from '../hooks/useImageProcessing';

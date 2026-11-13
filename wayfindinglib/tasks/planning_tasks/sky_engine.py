@@ -162,8 +162,6 @@ class SkyEngine:
     def get_constellation_lines(self) -> list[dict[str, Any]]:
         """Delegate get_constellation_lines to constellation_operations.
 
-        REQ: PLN-3.3
-
         Returns
         -------
         line_segments : `list` [`dict`]

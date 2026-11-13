@@ -65,10 +65,7 @@ class SystemPulse(BaseModel):
 
 
 class SystemStatusService:
-    """Service responsible for aggregating system-wide status.
-
-    REQ: BKD-SystemPulse (New)
-    """
+    """Service responsible for aggregating system-wide status."""
 
     def __init__(self, astrometrics_service: AstrometricsService) -> None:
         self._astrometrics_service = astrometrics_service

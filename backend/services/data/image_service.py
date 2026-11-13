@@ -41,9 +41,6 @@ def _viewer_payload(picture: Any | None) -> dict[str, Any] | None:
 class ImageService:
     """Draw FITS frames, read FITS headers and delete frame files.
 
-    REQ: SR-2.2: The system SHALL store captured images with associated
-    metadata (FITS Headers).
-
     Parameters
     ----------
     target_service : `TargetService`

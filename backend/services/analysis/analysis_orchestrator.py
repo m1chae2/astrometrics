@@ -21,11 +21,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# REQ: IMG-4: Scientific Analysis Pipeline
-# REQ: IMG-4.1: The system SHALL provide automated photometry and
-# spectroscopy extraction.
-
-
 # How many stars are measured in the master stacked spectral image. It has
 # the best signal-to-noise ratio of any spectral image, so the brightest
 # ten stars are enough to set the baseline without spending time on faint
@@ -121,7 +116,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
             Dict with `"status"` (`"started"` or
             `"already_running"`), `"jobId"`, and `"logFile"`.
         """
-        # REQ: IMG-5.3: Isolated log file per job
+        # Isolated log file per job
         safe_target = target_id.replace(" ", "_").replace("/", "_")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_dir = self._config_service.get_logs_path()

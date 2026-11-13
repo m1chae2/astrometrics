@@ -1,8 +1,6 @@
 /**
  * @file useTargetActions.ts
  * @description Shared hook for target-related actions (save, delete, create).
- * REQ: TGT-1.5: The display SHALL allow saving changes made to target metadata.
- * REQ: TGT-1.4: The display SHALL allow deletion of existing targets from the catalog.
  */
 import { useTargetContext } from '../context/TargetContext';
 import { fetchTargetObject, updateTargetById, deleteObject, createTarget } from '../services/targetService';
@@ -24,7 +22,6 @@ export function useTargetActions() {
 
     /**
      * Saves changes made to the currently selected target.
-     * REQ: TGT-1.5: The display SHALL allow saving changes made to target metadata.
      */
     const saveTarget = async (): Promise<void> => {
         if (!activeTarget) {
@@ -73,7 +70,6 @@ export function useTargetActions() {
 
     /**
      * Deletes the currently selected target.
-     * REQ: TGT-1.4: The display SHALL allow deletion of existing targets from the catalog.
      */
     const confirmDeleteTarget = async (): Promise<void> => {
         if (!activeTarget) return;

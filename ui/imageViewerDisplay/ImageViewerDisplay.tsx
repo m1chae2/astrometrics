@@ -21,9 +21,6 @@ import './imageViewerDisplay.css';
 /**
  * Main component for the target display view.
  * Coordinates target selection, viewing, and detail management.
- * REQ: TGT-1: Target Management
- * REQ: TGT-2: Target Visualization
- * REQ: TGT-3: Target Metadata Editor
  */
 export const ImageViewerDisplay: React.FC = () => {
   const {
@@ -72,7 +69,6 @@ export const ImageViewerDisplay: React.FC = () => {
   const { openedFrame, openFrame, closeFrame } = useOpenedFrame();
 
   const handleDeleteTarget = () => {
-    // REQ: TGT-1.4: The display SHALL allow deletion of existing targets from the catalog.
     if (activeTarget) setShowDeleteConfirm(true);
   };
 
@@ -92,14 +88,12 @@ export const ImageViewerDisplay: React.FC = () => {
     <RadioListManager
       className="target-display__targets-manager"
       title="Targets"
-      // REQ: TGT-1.1: The display SHALL present a selectable list of all targets in the catalog.
       items={items}
       selectedId={selectedTarget}
       pendingId={pendingTarget}
       onSelect={handleTargetSelect}
       topPanel={<TargetListFilterPanel {...filterPanel} />}
       topPanelTitle="Filter Targets"
-      // REQ: TGT-1.2: The display SHALL allow filtering of the target list by text search.
       filterText={filterText}
       onFilterTextChange={setFilterText}
       highlightedIds={highlightedIds}
@@ -110,7 +104,6 @@ export const ImageViewerDisplay: React.FC = () => {
   );
 
   const centerPanel = (
-    // REQ: TGT-2.1: The display SHALL present the most recently captured image for the selected target.
     <TargetViewerManager
       imageUrl={openedFrame ? openedFrame.imageUrl : imageUrl}
       imageBlob={openedFrame ? openedFrame.imageBlob : imageBlob}

@@ -1,9 +1,4 @@
-"""Orchestrates frame ingestion from Local or Remote sources.
-
-REQ: BKD-3.4: The backend SHALL support ingestion of files from local and
-remote directories. REQ: BKD-5.3: The backend SHALL manage a file index of
-captured frames associated with targets.
-"""
+"""Orchestrates frame ingestion from Local or Remote sources."""
 
 import logging
 import os
@@ -32,12 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 class IngestionService(BaseBackgroundService):
-    """Orchestrates frame ingestion from Local or Remote sources.
-
-    REQ: BKD-3.4: The backend SHALL support ingestion of files from local and
-    remote directories. REQ: BKD-5.3: The backend SHALL manage a file index of
-    captured frames associated with targets.
-    """
+    """Orchestrates frame ingestion from Local or Remote sources."""
 
     def __init__(
         self,
@@ -128,8 +118,6 @@ class IngestionService(BaseBackgroundService):
 
     def get_remote_stats(self, folder: str) -> dict[str, Any]:
         """Return file count for a remote folder resolving the name first.
-
-        REQ: IMG-6.1
 
         Returns
         -------
@@ -274,7 +262,7 @@ class IngestionService(BaseBackgroundService):
             for job in active_jobs:
                 return job.id
 
-        # REQ: IMG-5.3: Isolated log file per job
+        # Isolated log file per job
         safe_target = target_name.replace(" ", "_").replace("/", "_")
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -287,8 +275,6 @@ class IngestionService(BaseBackgroundService):
 
     def start_reindex(self) -> str:
         """Start a full library re-indexing background task.
-
-        REQ: BKD-5.3
 
         Returns
         -------
@@ -309,7 +295,7 @@ class IngestionService(BaseBackgroundService):
                         job.id, status="failed", status_message="Backend restarted while job was running."
                     )
 
-        # REQ: IMG-5.3: Isolated log file per job
+        # Isolated log file per job
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_dir = self._config_service.get_logs_path()

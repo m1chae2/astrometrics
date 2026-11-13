@@ -3,8 +3,6 @@
 Each concrete driver encapsulates the query logic for one online catalog
 service and returns transient StellarObject instances that are NEVER
 recorded to the local astrometrics database.
-
-REQ: PLN-3.1
 """
 
 import abc
@@ -21,8 +19,6 @@ class CatalogDriver(abc.ABC):
     Each subclass implements query_region() for a specific online service
     (SIMBAD, GAIA, VizieR, etc.). Drivers are stateless singletons — they
     hold no per-query mutable state and are safe to call concurrently.
-
-    REQ: PLN-3.1
     """
 
     @property

@@ -3,8 +3,6 @@
 Routes every RPC call through the one ``POST /api/rpc`` route. Each method
 must be declared in `backend.public_interface.RPC_METHODS`; this module
 only says which container service method serves it.
-# REQ: BKD-5.3, BKD-5.2, IMG-5.3, IMG-5.2, AST-1.1, BKD-7.2, BKD-7.1,
-# AGENT-1.1, AGENT-1.3, AGENT-1.5, HDR-6.4
 """
 
 import inspect

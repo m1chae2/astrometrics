@@ -26,15 +26,6 @@ import { useHandoffConsumer } from '../common/utils/displayHandoffStore';
 /**
  * Main component for the image processing view.
  * Composes target list, FITS viewer, and processing details.
- * REQ: IMG-1: Image Management Interface
- * REQ: IMG-1.1: The display SHALL present a searchable list of images associated with the selected target.
- * REQ: IMG-1.2: The display SHALL show a summary of frame counts per filter/type.
- * REQ: IMG-1.3: The display SHALL allow manual addition of a new target.
- * REQ: IMG-1.4: The display SHALL allow deletion of an existing target.
- * REQ: IMG-1.5: The display SHALL allow manual association of local image files to a target.
- * REQ: IMG-5.1: The display SHALL provide a "Process Target" command to initiate stacking.
- * REQ: IMG-5.2: The display SHALL allow cancellation of an active processing job.
- * REQ: IMG-5.4: The display SHALL indicate the current state of processing.
  */
 export const ImageProcessingDisplay: React.FC = () => {
   const {
@@ -322,7 +313,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
     // useViewerState now listens to selectedFile from context
   };
 
-  // REQ: Auto-select highest exposure file when list loads
+  // Auto-select highest exposure file when list loads
   // When I select a radio button (Target/Filter), the fits viewer should show the first item in the list with the highest exposure time
   React.useEffect(() => {
     // If no files, nothing to do
@@ -402,7 +393,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
       className="image-processing-display__left"
       title="Targets"
       actionsTitle="Target Controls"
-      // REQ: IMG-1.1 - Searchable target list with grouping
+      // Searchable target list with grouping
       items={allItems}
       selectedId={selectedTarget}
       pendingId={pendingTarget}
@@ -415,7 +406,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
       isLoading={isTargetListLoading}
       loadingMessage="Loading targets"
       emptyMessage="No targets in the catalog."
-      // REQ: IMG-1.4 - Target management actions enclosed in a consistent panel
+      // Target management actions enclosed in a consistent panel
       actions={
         <ListActions>
           <Button onClick={saveTarget}>Save Target</Button>

@@ -3,7 +3,6 @@
  * @description Single source of truth for remote target availability.
  * Shares useRemoteTargetsQuery()'s cached, periodically-refreshed result
  * across all consumers.
- * REQ: IMG-6.1: The system SHALL indicate if remote images are available.
  */
 import React, { createContext, useContext, useMemo, ReactNode } from 'react';
 import { useRemoteTargetsQuery } from '../queries/useRemoteTargetsQuery';

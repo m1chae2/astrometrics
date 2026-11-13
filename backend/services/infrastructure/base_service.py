@@ -218,8 +218,6 @@ class BaseBackgroundService:
     def stream_log(self, job_id: str, log_file: str) -> Iterator[str]:
         """Yield log lines from `log_file` as they are written.
 
-        REQ: IMG-5.3
-
         Yields
         ------
         line : `str`

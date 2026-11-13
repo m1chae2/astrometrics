@@ -232,7 +232,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     keepViewOnResizeRef.current = false;
   }, [currentKey]);
 
-  // REQ: IMG-3.6: Disable automatic stretching for stacked images.
+  // Disable automatic stretching for stacked images.
   const isStacked = disableStretch ?? (
     (imageUrl?.toLowerCase().includes('stacked') ?? false) ||
     (frameInfo?.objectId?.toLowerCase().includes('stacked') ?? false)

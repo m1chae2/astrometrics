@@ -284,8 +284,6 @@ class MountController:
     def validate_altitude_limits(self, telescope: Any, ra: float, dec: float) -> None:
         """Calculate and validate the altitude of a slew destination.
 
-        REQ: OBS-1.1
-
         Parameters
         ----------
         telescope : `Any`
@@ -357,8 +355,6 @@ class MountController:
 
     def validate_hour_angle_limits(self, telescope: PyIndi.BaseDevice, ra: float) -> None:
         """Calculate and validate hour angle for a target right ascension.
-
-        REQ: OBS-1.1
 
         Raises
         ------

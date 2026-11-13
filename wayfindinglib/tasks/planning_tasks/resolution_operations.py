@@ -269,8 +269,6 @@ def get_online_catalog_sources(
         True when a driver left stars out of its answer.
     failed_catalogs : `list` [`str`]
         Names of the drivers whose query failed.
-
-    REQ: PLN-3.1, PLN-3.2
     """
     from wayfindinglib.tasks.planning_tasks import catalog_operations
 

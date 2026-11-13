@@ -2095,10 +2095,7 @@ class IndiInterface(IndiClient):
     def guide_expose(self, exposure_seconds: float, gain: float | None = None) -> bool:
         """Take an exposure with the guide camera.
 
-        REQ: BKD-1.3: The backend SHALL provide a generic interface
-        for camera control (Exposure, Gain, Cooling). Returns the
-        blob or data if available, or just initiates it. For now,
-        initiates.
+        Starts the exposure and returns without waiting for the image.
 
         Returns
         -------

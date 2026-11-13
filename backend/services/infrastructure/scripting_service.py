@@ -3,7 +3,7 @@
 Allows users to execute scripts that interact with the backend
 services and scientific libraries, providing workspace manifests,
 code completions, figure exports, script recipes, documentation,
-and run scope loading. REQ: AGENT-1.1, AGENT-3.1
+and run scope loading.
 """
 
 import code

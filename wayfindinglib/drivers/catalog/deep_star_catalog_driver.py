@@ -7,8 +7,6 @@ a local database read, so it takes milliseconds and never touches the
 internet.
 
 Until that download has been run, this driver simply returns no stars.
-
-REQ: PLN-3.2
 """
 
 import logging
@@ -96,8 +94,6 @@ class DeepStarCatalogDriver(CatalogDriver):
     star_source : `DeepStarSource`, optional
         Where to read the downloaded stars from. Without one, no stars are
         ever returned.
-
-    REQ: PLN-3.2
     """
 
     def __init__(self, star_source: DeepStarSource | None = None) -> None:

@@ -462,7 +462,7 @@
   white-space: nowrap;
   overflow: visible;
   text-overflow: clip;
-  color: var(--white); /* REQ: HDR-4.1 - Coordinates/Telemetry default to white */
+  color: var(--white); /* Coordinates/Telemetry default to white */
   display: flex;
   align-items: center;
   font-variant-numeric: tabular-nums; /* Prevent jitter when numbers change */
@@ -508,7 +508,7 @@
   width: 18px;
   height: 18px;
   vertical-align: middle;
-  margin-right: 4px; /* REQ: HDR-4.1 - Tighten spacing to match reference */
+  margin-right: 4px; /* Tighten spacing to match reference */
   fill: currentColor;
   opacity: 1;
 }

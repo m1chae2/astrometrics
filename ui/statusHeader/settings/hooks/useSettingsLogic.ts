@@ -79,7 +79,7 @@ export const useSettingsLogic = (open: boolean, closing: boolean, onClose: () =>
                 const { getIngestionJobStatus } = await import('../../../common/services/ingestionService');
                 const status = await getIngestionJobStatus(reindexingJobId);
 
-                // REQ: IMG-5.6 - Prefer message (which contains counts) over raw progress string
+                // Prefer message (which contains counts) over raw progress string
                 setReindexingStatus(status.message || status.progress);
                 if (status.progressCurrent !== undefined) {
                     setReindexingProgress(status.progressCurrent);

@@ -85,7 +85,7 @@
     "lighthouse": "13.6.0",
     "puppeteer-core": "25.16.0",
     "stylelint": "^18.0.0",
-    "stylelint-declaration-strict-value": "^1.12.1",
+    "stylelint-declaration-strict-value": "^1.13.0",
     "ts-node": "^10.9.2",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vite": "^8.3.6",

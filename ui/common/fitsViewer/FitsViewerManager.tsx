@@ -76,11 +76,6 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
   previewBlob,
   acceptPrefetch
 }, ref) => {
-  // REQ: IMG-3: Image Visualization
-  // REQ: IMG-3.1: The display SHALL render FITS format images directly in the browser.
-  // REQ: IMG-3.3: The display SHALL provide pan and zoom capabilities for image inspection.
-  // REQ: IMG-3.4: The display SHALL show FITS header metadata (Object object).
-  // REQ: IMG-3.5: The display SHALL automatically load and display any new cooling/progress images.
   // Prefer the client-side FITS renderer if an image URL or blob is provided.
   if (imageUrl || imageBlob || previewBlob) {
     return (
@@ -108,7 +103,6 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
   }
 
   // Fallback to the standard image viewer for PNG/JPEG or empty states.
-  // REQ: IMG-3.2: The display SHALL display standard image formats (JPG, PNG) using a standard viewer.
   return (
     <ImageViewer
       imageUrl={imageUrl}

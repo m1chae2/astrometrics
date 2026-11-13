@@ -60,7 +60,7 @@ export const useStatusData = () => {
     const prevTelescopeTracking = useRef<string | null>(null);
 
     useEffect(() => {
-        // REQ: HDR-5.1 - Round all telemetry to whole numbers
+        // Round all telemetry to whole numbers
         const normalize = (v?: string) => (!v || /^unknown$/i.test(v)) ? '-' : v;
         const stripDecimals = (v: string): string => {
             if (!v || v === '-') return v;

@@ -5,8 +5,6 @@
  * Consolidates safeParse, formatRA, formatDec, and formatNumber in a single location
  * so that PlanetariumDisplay, CelestialSkyMap, and PlanetariumInfoCard all use the
  * same implementation.
- *
- * REQ: PLN-1.1, REQ: PLN-2.1, REQ: PLN-2.3
  */
 
 /**

@@ -908,7 +908,7 @@
   margin-left: 2px;
 }
 
-/* REQ: IMG-3.6: Separator for analysis results */
+/* Separator for analysis results */
 .analysis-separator td {
   height: 8px;
   padding: 0 !important;

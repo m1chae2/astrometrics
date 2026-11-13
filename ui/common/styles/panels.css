@@ -58,7 +58,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    border-bottom: 1px solid var(--grey-light); /* REQ: GEN-1.2 */
+    border-bottom: 1px solid var(--grey-light);
     padding-bottom: 6px;
 }
 

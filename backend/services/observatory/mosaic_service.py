@@ -5,8 +5,6 @@ Description: The UI previews a mosaic grid, then creates it. Both ask
 `create_mosaic` adds one library target per panel. The create reply is one
 item per panel in the shape the app's sequencer queue takes, so the UI can
 queue the panels straight away.
-
-REQ: BKD-4.3
 """
 
 import uuid

@@ -1,8 +1,6 @@
 /**
  * @file useStackingJob.ts
  * @description Hook for managing image stacking jobs and frame summaries.
- * REQ: IMG-1.2: The display SHALL show a summary of frame counts.
- * REQ: IMG-5.1: The display SHALL provide a "Process Target" command.
  */
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { processTarget, cancelProcessing, fetchAllProcesses, fetchJobs, fetchJobLogTail, streamJobLog, openSiril } from '../../common/services/imaging/processingService';

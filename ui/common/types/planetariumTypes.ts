@@ -3,15 +3,12 @@
  *
  * TypeScript interfaces for the Planetarium view.
  * Separated from backendTypes.ts to prevent overwrites by the Python codegen script.
- *
- * REQ: PLN-1.1, REQ: PLN-2.1, REQ: PLN-2.2, REQ: PLN-2.3
  */
 
 /**
  * PlanetariumSource Interface
  *
  * Defines a stellar library object positioned for the sky overlay.
- * REQ: PLN-1.1, REQ: PLN-2.1
  */
 export interface PlanetariumSource {
   id: string;

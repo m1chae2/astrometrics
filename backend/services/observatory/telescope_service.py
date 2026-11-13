@@ -22,7 +22,7 @@ class TelescopeService:
     """Service responsible for telescope control and telemetry.
 
     Acts as the gateway to hardware devices via the Wayfinder
-    high-level interface. REQ: BKD-1: Hardware Abstraction & Control
+    high-level interface.
     """
 
     def __init__(
@@ -156,8 +156,6 @@ class TelescopeService:
             Current telescope status fields, including a fallback
             payload if the hardware query fails.
         """
-        # REQ: BKD-1.5: The backend SHALL broadcast hardware status
-        # updates to connected clients via WebSocket.
         import logging
 
         logger = logging.getLogger(__name__)
@@ -296,8 +294,6 @@ class TelescopeService:
         InvalidArgumentError
             If the hardware driver rejects an argument of the slew command.
         """
-        # REQ: BKD-1.2: The backend SHALL provide a generic interface
-        # for Telescope control (Slew, Sync, Park, Track).
         try:
             position = {"ra_deg": (float(ra) * 15.0) % 360.0, "dec_deg": float(dec)}
             return self.wayfinder.control.mount.slew(position)
@@ -306,8 +302,6 @@ class TelescopeService:
 
     def slew_target(self, target_name: str) -> bool:
         """Resolve a target name from the library and slew to it.
-
-        REQ: AGENT-2.1
 
         Returns
         -------
@@ -446,8 +440,6 @@ class TelescopeService:
         InvalidArgumentError
             If the hardware driver rejects the number of steps.
         """
-        # REQ: BKD-1.4: The backend SHALL provide a generic interface
-        # for Focuser control (Move, Position).
         try:
             return self.wayfinder.control.imaging.focus_move(steps)
         except ValueError as e:
@@ -502,8 +494,6 @@ class TelescopeService:
         location : `dict`
             Geographic coordinate dictionary containing ``"latitude"``,
             ``"longitude"``, and ``"elevation"``.
-
-        REQ: PLN-2.3
         """
         try:
             geo = self.wayfinder.control.equipment.status(include=["observer_location"]).observer_location

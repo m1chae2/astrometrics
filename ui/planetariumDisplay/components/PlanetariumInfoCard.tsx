@@ -6,8 +6,6 @@
  * rise/set times, and meridian flip status for selected stars and targets.
  * Also renders a button that hands a star off to the Astronomy Manager for
  * its spectroscopy/photometry plots, rather than rendering them inline here.
- *
- * REQ: PLN-2.4, REQ: PLN-2.5
  */
 
 import React from 'react';

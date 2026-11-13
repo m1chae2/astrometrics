@@ -1,7 +1,7 @@
 """Thin service adapter managing target metadata and catalog sync.
 
 Delegates all core astronomical and storage operations directly to the
-Astrometrics library. # REQ: BKD-5: Data Persistence
+Astrometrics library.
 """
 
 import logging
@@ -45,7 +45,7 @@ class TargetService:
     """Thin service layer orchestrating Target CRUD and catalog queries.
 
     Strictly delegates all business logic and FITS directory scanning to
-    astrolib high-level interfaces. # REQ: BKD-5
+    astrolib high-level interfaces.
     """
 
     def __init__(self, config: Any, astrometrics: Any = None) -> None:
@@ -171,7 +171,7 @@ class TargetService:
         """Generate a new target, scan physical frames, and record it.
 
         Accepts either a target_id (str) or a pre-instantiated Target
-        object. # REQ: BKD-5.2
+        object.
 
         Returns
         -------

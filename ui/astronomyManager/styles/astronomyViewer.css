@@ -1,4 +1,4 @@
-/* REQ: AST-2, AST-3: Shared Astronomy Viewer Styles */
+/* Shared Astronomy Viewer Styles */
 
 .astronomy-viewer-root {
   color: var(--text-color, var(--text-light));

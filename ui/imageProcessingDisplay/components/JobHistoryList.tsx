@@ -3,7 +3,6 @@
  * @description Lists the processing jobs for a target. It shows the current observing night
  * (local noon to local noon) with any running job pinned on top. Older nights load only when
  * the user asks, a page at a time, each under its own night heading.
- * REQ: IMG-5: Automated Stacking Pipeline
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { ProcessingJob } from '../../common/types/backendTypes';

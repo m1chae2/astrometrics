@@ -54,7 +54,6 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
   const cacheRef = useRef<Map<string, unknown>>(new Map());
   const cacheVersionRef = useRef<number>(getTargetsUpdatedVersion());
 
-  // REQ: TGT-3: Target Metadata Editor
   const updateTargetState = React.useCallback(async (obj: any) => {
     setCamera(obj.mainCamera ?? '');
     setTelescope(obj.mainScope ?? '');

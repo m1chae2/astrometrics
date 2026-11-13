@@ -641,8 +641,6 @@ class StellarService:
         -------
         result : `StellarObject` or `None`
             The matching stellar object, or `None` if not found.
-
-        REQ: BKD-7.2
         """
         return self.astrometrics.stars.get(search_term)
 
@@ -826,8 +824,6 @@ class StellarService:
         targets : `list` [`dict`]
             One `SkySource` per target, with the Planetarium's camelCase
             keys.
-
-        REQ: PLN-2.2
         """
         whole_sky_radius_deg = 180.0
         result = self.wayfinder.planning.query_sources(
@@ -873,8 +869,6 @@ class StellarService:
             different view instead of reusing this answer. ``failedCatalogs``
             names the drivers that could not answer (empty when all did), so
             an empty ``sources`` list is not mistaken for empty sky.
-
-        REQ: PLN-3.1, PLN-3.2
         """
         result = self.wayfinder.planning.query_sources(
             ra_deg=ra,
@@ -920,8 +914,6 @@ class StellarService:
         List[dict]
             One entry per driver with keys: driver_name, display_name,
             maximum_query_radius_degrees.
-
-        REQ: PLN-3.1
         """
         return [driver.model_dump() for driver in self.wayfinder.planning.query_catalogs()]
 
@@ -938,8 +930,6 @@ class StellarService:
         -------
         result : `list` of `dict`
             Constellation stick-figure line segments.
-
-        REQ: PLN-3.3
         """
         return [segment.model_dump() for segment in self.wayfinder.planning.get_constellation_lines()]
 

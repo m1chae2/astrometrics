@@ -6,8 +6,6 @@
  * to a pixel click position by projecting each source into screen space and
  * computing Euclidean distance. Extracted from CelestialSkyMap to keep the
  * engine component free of overlay-specific sizing knowledge (reticle radii, etc.).
- *
- * REQ: PLN-2.1, REQ: PLN-2.5
  */
 
 import { PlanetariumSource, PlanetariumTarget } from '../../common/types/planetariumTypes';

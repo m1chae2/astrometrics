@@ -1,7 +1,4 @@
-"""Service for performing periodic system maintenance tasks.
-
-REQ: SYS-1.0: Periodic maintenance and cleanup.
-"""
+"""Service for performing periodic system maintenance tasks."""
 
 import asyncio
 import logging

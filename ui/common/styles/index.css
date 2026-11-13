@@ -73,7 +73,7 @@ input:focus {
   border-color: var(--primary-blue) !important;
 }
 
-/* REQ: UI-STYLE-1: Standard Select/Dropdown Style */
+/* Standard Select/Dropdown Style */
 select {
   margin-right: 8px;
   padding: 6px;

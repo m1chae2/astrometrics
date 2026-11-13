@@ -132,8 +132,6 @@ const TIME_SPEED_OPTIONS = [1, 5, 25, 100, 1000].map((speed) => ({ id: String(sp
  * @func CelestialSkyMap
  * @param {Props} props - Component props.
  * @returns {React.ReactElement} The canvas container with time controller.
- *
- * REQ: PLN-2.1, REQ: PLN-2.2, REQ: PLN-2.3, REQ: PLN-2.4, REQ: PLN-2.5
  */
 export const CelestialSkyMap: React.FC<Props> = ({
   center,
@@ -659,7 +657,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
     trackingMode, observerLat, observerLon, overlays, getOffsetMinutesAt
   ]);
 
-  // Click handler to select sources. REQ: PLN-2.5
+  // Click handler to select sources.
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -681,7 +679,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
     }
   };
 
-  // Context menu handler. REQ: PLN-2.5
+  // Context menu handler.
   const handleCanvasContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     e.stopPropagation();

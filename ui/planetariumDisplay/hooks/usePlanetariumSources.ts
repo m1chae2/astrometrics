@@ -11,8 +11,6 @@
  * dozens of times in a couple of seconds; without this, each step sent its own
  * request and the backend queued them all, so the final view took about ten seconds
  * to arrive after the gesture ended.
- *
- * REQ: PLN-1.1, REQ: PLN-2.1
  */
 
 import { useState, useEffect, useRef } from 'react';

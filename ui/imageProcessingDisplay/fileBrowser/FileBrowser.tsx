@@ -188,7 +188,6 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
     onToggleAll,
     selectedCamera
 }) => {
-    // REQ: IMG-2: File Browsing & Filtering
     const [sortField, setSortField] = useState<SortField>('date'); // Default sort by date
     const [sortDirection, setSortDirection] = useState<SortDirection>('desc'); // Newer first
 
@@ -207,7 +206,6 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
         });
     };
 
-    // REQ: IMG-2.3: The display SHALL allow sorting of the file list by any column.
     const handleSort = (field: SortField) => {
         if (sortField === field) {
             setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
@@ -230,7 +228,6 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
             result = result.filter(file => file.camera === selectedCamera);
         }
 
-        // REQ: IMG-2.4: The display SHALL provide an advanced search filter supporting property syntax.
         // Filter
         if (searchTerm) {
             result = result.filter(file => matchesQuery(file, searchTerm));
@@ -261,8 +258,6 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
     return (
         <div className="file-browser">
             <div className="file-browser__list">
-                {/* REQ: IMG-2.1: The display SHALL list all image files associated with the selected target. */}
-                {/* REQ: IMG-2.2: The display SHALL provide columns for Filename, Camera, ISO/Gain, Exposure Time, and Status. */}
                 <table className="data-table">
                     <thead>
                         <tr>

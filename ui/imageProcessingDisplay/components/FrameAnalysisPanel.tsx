@@ -38,7 +38,6 @@ interface FrameAnalysisPanelProps {
 /**
  * Component for the right-hand side panel of the Image Processing Display.
  * Handles frame analysis results, exposure statistics, and image controls.
- * REQ: IMG-1.2: The display SHALL show a summary of frame counts per filter/type.
  */
 export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
   allFiles, filteredFiles, checkedFiles, stackedImage, stackedSpectralTarget, totalExposure,

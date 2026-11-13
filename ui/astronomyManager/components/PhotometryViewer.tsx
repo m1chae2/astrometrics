@@ -40,7 +40,6 @@ function computePhaseArray(timestamps: string[], periodDays: number): number[] {
     });
 }
 
-// REQ: AST-3: Photometry Visualization
 export const PhotometryViewer: React.FC<Props> = ({
     astronomyData,
     loading,

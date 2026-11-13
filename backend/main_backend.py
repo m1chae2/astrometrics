@@ -23,7 +23,6 @@ from typing import Any
 import uvicorn
 
 # Suppress noisy Astropy FITS warnings
-# REQ: SYS-1.4: Maintain clean logs
 from astropy.utils.exceptions import AstropyDeprecationWarning, AstropyWarning
 from astropy.wcs import FITSFixedWarning
 from fastapi import FastAPI, Request
@@ -47,7 +46,6 @@ from backend.services.infrastructure.session_auth import ALLOWED_ORIGINS, LAN_OR
 from backend.services.infrastructure.socket_manager import SocketLoggingHandler
 
 # Configure Logging
-# REQ: SYS-1.4: Maintain clean logs
 app_configuration = get_configuration()
 configure_logging(
     "backend", level=getattr(logging, os.environ.get("ASTROMETRICS_LOG_LEVEL", "INFO").upper(), logging.INFO)

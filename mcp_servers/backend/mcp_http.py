@@ -14,7 +14,7 @@ from astrometricslib.exceptions import ExternalServiceError, PermissionDeniedErr
 
 API_BASE = os.getenv("ASTROMETRICS_API_BASE", "http://127.0.0.1:5000")
 
-# REQ: SEC-1.1: Restrict MCP tools to non-destructive HTTP methods.
+# Restrict MCP tools to non-destructive HTTP methods.
 ALLOWED_HTTP_METHODS = {"GET", "POST"}
 
 

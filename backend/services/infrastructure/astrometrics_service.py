@@ -3,8 +3,6 @@
 Aggregates active status updates from all services into a single,
 unified source of truth and broadcasts state changes automatically to
 connected UI clients.
-
-REQ: SYS-1.0, BKD-5.3
 """
 
 import asyncio

@@ -96,8 +96,6 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
     errorMessage,
     onRetry,
 }) => {
-    // REQ: GEN-1.1 - Consistent container structure
-
     const content = (
         <>
             {/* Filtering Section - Only render if handlers are provided */}

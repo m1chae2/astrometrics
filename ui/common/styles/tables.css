@@ -37,7 +37,7 @@
 }
 
 .data-table tr:hover:not(.selected) {
-    background-color: var(--grey-medium); /* REQ: GEN-1.1 */
+    background-color: var(--grey-medium);
 }
 
 /* Status Colors */

@@ -9,8 +9,6 @@ Line data is derived from d3-celestial (https://github.com/ofrohn/d3-celestial),
 Copyright (c) 2015 Olaf Frohn, BSD-3-Clause license. Each line segment's
 RA/Dec endpoints are already resolved in the source data, so no star-catalog
 lookup is needed here.
-
-REQ: PLN-3.3
 """
 
 import json
@@ -46,8 +44,6 @@ class ConstellationLineLibrary:
     from a static JSON file. There is no spatial or magnitude filtering —
     the whole dataset is small enough to return in one shot and let the
     frontend project/cull it client-side against the current viewport.
-
-    REQ: PLN-3.3
     """
 
     def __init__(self, data_path: Path | None = None) -> None:
@@ -104,7 +100,5 @@ def get_constellation_line_segments(sky: SkyEngine) -> list[dict[str, Any]]:
     List[Dict[str, Any]]
         One entry per line segment: {"constellation", "ra1", "dec1",
         "ra2", "dec2"}.
-
-    REQ: PLN-3.3
     """
     return sky._constellation_lines.get_all_line_segments()

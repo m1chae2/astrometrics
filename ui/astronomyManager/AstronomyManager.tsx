@@ -54,7 +54,6 @@ const readHandedOffStar = (): string => {
  *
  * Main component for the astronomy display view.
  * Coordinates selection and data fetching for spectral and photometry plots.
- * REQ: AST-1: Data Management
  */
 export const AstronomyManager: React.FC = () => {
   const [selectedSpectrum, setSelectedSpectrum] = useState<string>(() => {
@@ -181,7 +180,6 @@ export const AstronomyManager: React.FC = () => {
   const hasPhotometry = selectLightCurveSeries(astronomyData?.photometry).values.length > 0;
 
   // Extract all available timestamps from both photometry and spectroscopy
-  // REQ: AST-1.3: The display SHALL present a timeline for time-series data.
   const availableTimestamps = useMemo(() => {
     const times = new Set<string>();
     if (astronomyData?.photometry?.timestamps) {
@@ -286,13 +284,11 @@ export const AstronomyManager: React.FC = () => {
       <RadioListManager
         title={starListTitle}
         className="astronomy-display__star-list"
-        // REQ: AST-1.1: The display SHALL present a selectable list of all identified stellar objects.
         items={starList.items}
         selectedId={selectedSpectrum}
         pendingId={pendingId}
         onSelect={isSpectralClassScoped ? setPendingId : starsByTarget.selectStar}
         onFilterOptionChange={() => {}}
-        // REQ: AST-1.2: The display SHALL allow filtering of the data list by text search.
         filterText={starList.filterText}
         onFilterTextChange={starList.setFilterText}
         legend={
@@ -379,7 +375,6 @@ export const AstronomyManager: React.FC = () => {
         </SectionPanel>
       ) : (
         <SectionPanel title="Photometry">
-          {/* REQ: AST-1.5: Selecting a star SHALL simultaneously display both plots. */}
           <PhotometryViewer
             astronomyData={astronomyData}
             loading={loading}

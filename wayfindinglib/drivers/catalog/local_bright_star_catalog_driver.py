@@ -10,8 +10,6 @@ and is complete and reliable down to about V = 9, including the brightest.
 
 See wayfindinglib/scripts/catalog_management/build_local_bright_star_catalog.py
 for the one-time download that populates the catalog file this driver reads.
-
-REQ: PLN-3.2
 """
 
 import logging
@@ -58,8 +56,6 @@ class LocalBrightStarCatalogDriver(CatalogDriver):
     skylib.catalog_operations), distinct from the live TAP-backed
     GaiaCatalogDriver ('gaia', intended for small viewport-scoped deep
     queries).
-
-    REQ: PLN-3.2
     """
 
     def __init__(self, catalog_path: Path | None = None) -> None:

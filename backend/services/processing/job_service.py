@@ -1,7 +1,4 @@
-"""Service for managing processing job lifecycle and state.
-
-REQ: IMG-5.6: Persistent job history tracking.
-"""
+"""Service for managing processing job lifecycle and state."""
 
 import logging
 import os
@@ -204,8 +201,6 @@ class JobService:
 
     def delete_job(self, job_id: str) -> bool:
         """Permanently delete a job record and its associated log file.
-
-        REQ: IMG-5.7
 
         Returns
         -------

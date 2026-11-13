@@ -448,8 +448,6 @@ def list_catalog_driver_metadata(sky: SkyEngine) -> list[dict[str, Any]]:
     List[Dict[str, Any]]
         One entry per driver with keys: driver_name, display_name,
         maximum_query_radius_degrees.
-
-    REQ: PLN-3.1
     """
     return [
         {
@@ -505,8 +503,6 @@ def query_online_catalogs(
         asked. An empty list means every driver answered. A failure is a
         status, not an error: it is logged as a warning, and the other
         drivers' stars are still returned.
-
-    REQ: PLN-3.1, PLN-3.2
     """
     active_drivers = [
         sky._catalog_driver_registry[name]

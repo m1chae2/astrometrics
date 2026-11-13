@@ -32,6 +32,8 @@ describe('emitToast desktop notifications', () => {
     showNotification.mockReset();
     (window as unknown as { astrometrics: unknown }).astrometrics = { app: { showNotification, reportAppFullyLoaded: vi.fn() } };
     vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // The user is away (the window has no focus). jsdom 31 reports focus by default, so say so.
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false);
   });
 
   afterEach(() => {

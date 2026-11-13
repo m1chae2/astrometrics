@@ -187,7 +187,7 @@ CLASSIFICATION_RULES = (
         "Freezes or thaws background jobs (Siril, plate solver). Affects running work.",
     ),
     _rule(
-        r"^ui_(show_notification|navigate_mode|editor_sync)$",
+        r"^ui_(navigate_mode|editor_sync)$",
         "ui-control",
         "medium",
         "Changes what the person sees in the app.",

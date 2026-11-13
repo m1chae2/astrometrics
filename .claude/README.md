@@ -37,7 +37,7 @@ The project runs five MCP (Model Context Protocol) servers. For an AI client the
 |---|---|---|
 | `astrometricslib-core` | `.venv/bin/python -m mcp_servers.astrometrics_core` | Lookups and calculations on targets, stars, calibration, stacks and frames |
 | `wayfindinglib-core` | `.venv/bin/python -m mcp_servers.wayfinding_core` | Observatory status, equipment state, past-night analysis, planning. No device commands |
-| `astrometrics-backend` | `.venv/bin/python -m mcp_servers.backend` | Backend health, documentation, change the view, show a notification |
+| `astrometrics-backend` | `.venv/bin/python -m mcp_servers.backend` | Backend health, documentation, change the view |
 | `astrometrics-gaps` | `.venv/bin/python -m mcp_servers.gaps` | Report what the tools cannot do |
 | `astrometrics-ui` | `node ui/mcp/dist/index.js` | Developer profile only: UI tests, type check, build, accessibility |
 

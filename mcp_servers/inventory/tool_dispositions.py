@@ -259,7 +259,7 @@ DECISIONS = {
     ),
     "app_status": ToolDecision("keep", "Built 2026-10-03. Reads health, connections, resources and jobs."),
     "app_controls": ToolDecision(
-        "keep", "Built 2026-10-03. Navigate and notify only; pause and resume are not offered."
+        "keep", "Built 2026-10-03. Navigate only; pause, resume and notify are not offered."
     ),
     "observatory_remote_frame_status": ToolDecision(
         "keep",
@@ -708,7 +708,6 @@ DECISIONS = {
     "target_list": ToolDecision("drop", "Replaced by target_query."),
     "backend_health_check": ToolDecision("drop", "Replaced by app_status."),
     "ui_navigate_mode": ToolDecision("drop", "Replaced by app_controls."),
-    "ui_show_notification": ToolDecision("drop", "Replaced by app_controls."),
 }
 """Tool name -> the decision about it. Every served tool has one."""
 
@@ -716,7 +715,7 @@ CATEGORY_RULES = (
     (
         re.compile(
             r"^(electron_run_python|backend_call_rpc|terminal_.+|backend_health_check|docs_get|app_status|app_controls"
-            r"|ui_(show_notification|navigate_mode|pause_pipelines|resume_pipelines|editor_sync"
+            r"|ui_(navigate_mode|pause_pipelines|resume_pipelines|editor_sync"
             r"|inspect_variable))$"
         ),
         "app",

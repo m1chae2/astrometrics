@@ -349,52 +349,6 @@ async def tool_backend_health_check() -> dict[str, Any]:
 
 
 @tool(
-    "ui_show_notification",
-    "Post a native desktop toast notification to inform or alert the user.",
-    {
-        "type": "object",
-        "properties": {
-            "title": {"type": "string", "description": "Notification headline."},
-            "body": {"type": "string", "description": "Notification details."},
-            "urgency": {
-                "type": "string",
-                "enum": ["low", "normal", "critical"],
-                "description": "Urgency level.",
-                "default": "normal",
-            },
-        },
-        "required": ["title", "body"],
-    },
-)
-async def tool_ui_show_notification(title: str, body: str, urgency: str = "normal") -> dict[str, Any]:
-    """Post native desktop notification via backend WebSocket/event dispatch.
-
-    Parameters
-    ----------
-    title : `str`
-        Notification title or summary.
-    body : `str`
-        Detailed notification message body.
-    urgency : `str`, optional
-        Notification urgency level ('low', 'normal', 'critical').
-
-    Returns
-    -------
-    result : `dict[str, Any]`
-        Dictionary containing dispatch status and notification details.
-    """
-    logging.getLogger("mcp.ui").info("AI Notification: %s - %s (urgency=%s)", title, body, urgency)
-    await execute_rpc(
-        "events:broadcast",
-        {
-            "event": "notification",
-            "data": {"title": title, "body": body, "urgency": urgency},
-        },
-    )
-    return {"status": "success", "posted": True, "title": title}
-
-
-@tool(
     "electron_run_python",
     "Execute Python code against astrometrics and wayfinder public APIs inside the supervised runtime.",
     {
@@ -654,9 +608,10 @@ GUIDING_SAMPLE_KEYS = ("time", "dra", "ddec", "pulseRa", "pulseDec", "snr", "rms
 MAXIMUM_INDI_PROPERTIES = 80
 """Most INDI properties one device answer lists."""
 
-APP_CONTROL_ACTIONS = ("navigate", "notify")
+APP_CONTROL_ACTIONS = ("navigate",)
 """What an AI may do in the app. Pausing and resuming pipelines freeze or
-thaw Siril and the plate solver, so they are not offered."""
+thaw Siril and the plate solver, so they are not offered. Notifications are
+not offered either: the AI tells the person in its own reply."""
 
 
 @tool(
@@ -952,14 +907,14 @@ async def _active_jobs() -> Any:
 
 @tool(
     "app_controls",
-    "Do what the person can do in the app: switch the view, or show a notification.",
+    "Do what the person can do in the app: switch the view.",
     {
         "type": "object",
         "properties": {
             "action": {
                 "type": "string",
                 "enum": list(APP_CONTROL_ACTIONS),
-                "description": "navigate: switch to a view (and select a target). notify: show a toast.",
+                "description": "navigate: switch to a view (and select a target).",
             },
             "mode": {
                 "type": "string",
@@ -973,9 +928,6 @@ async def _active_jobs() -> Any:
                 "description": "For navigate: the view to show.",
             },
             "target": {"type": "string", "description": "For navigate: a target to select."},
-            "title": {"type": "string", "description": "For notify: the headline."},
-            "body": {"type": "string", "description": "For notify: the details."},
-            "urgency": {"type": "string", "enum": ["low", "normal", "critical"], "default": "normal"},
         },
         "required": ["action"],
     },
@@ -984,24 +936,17 @@ async def tool_app_controls(
     action: str,
     mode: str | None = None,
     target: str | None = None,
-    title: str | None = None,
-    body: str | None = None,
-    urgency: str = "normal",
 ) -> dict[str, Any]:
-    """Switch the app's view or show a notification.
+    """Switch the app's view.
 
     Parameters
     ----------
     action : `str`
-        ``"navigate"`` or ``"notify"``.
+        ``"navigate"``.
     mode : `str`, optional
         The view, for ``navigate``.
     target : `str`, optional
         A target to select, for ``navigate``.
-    title, body : `str`, optional
-        The notification text, for ``notify``.
-    urgency : `str`, optional
-        The notification urgency.
 
     Returns
     -------
@@ -1018,10 +963,6 @@ async def tool_app_controls(
         if not mode:
             raise InvalidArgumentError("action='navigate' needs mode.")
         return await tool_ui_navigate_mode(mode, target)
-    if action == "notify":
-        if not title or not body:
-            raise InvalidArgumentError("action='notify' needs title and body.")
-        return await tool_ui_show_notification(title, body, urgency)
     raise InvalidArgumentError(
-        f"action must be one of {list(APP_CONTROL_ACTIONS)}. Pausing jobs is not offered."
+        f"action must be one of {list(APP_CONTROL_ACTIONS)}. Pausing jobs and notifications are not offered."
     )

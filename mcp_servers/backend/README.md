@@ -1,6 +1,6 @@
 # Backend MCP server
 
-This folder holds the `astrometrics-backend` MCP server. MCP (Model Context Protocol) is a standard way to give an AI program a list of tools it can call. This server lets an AI check on the running app: its health, the telescope, guiding, INDI devices (the drivers that talk to the observatory hardware), running jobs and documentation. It can also switch the app's view or show a notification.
+This folder holds the `astrometrics-backend` MCP server. MCP (Model Context Protocol) is a standard way to give an AI program a list of tools it can call. This server lets an AI check on the running app: its health, the telescope, guiding, INDI devices (the drivers that talk to the observatory hardware), running jobs and documentation. It can also switch the app's view.
 
 Every tool calls the running backend through its `/api/rpc` route, the same route the app's window uses. The server never loads the backend inside its own process, so start the backend first (`build/linux/run_backend.sh start`). The `ASTROMETRICS_API_BASE` environment variable sets the backend's address; the default is `http://127.0.0.1:5000`.
 
@@ -20,7 +20,7 @@ When the server starts, it removes every tool that the manifest does not allow f
 The investigator profile offers three backend tools:
 
 - `app_status` reports health, connections, system resources, the telescope, guiding, INDI devices and properties, and running jobs. The running jobs come from the `processing:active_jobs` RPC method. A section that fails holds an error record, and the other sections still answer.
-- `app_controls` switches the view or shows a notification.
+- `app_controls` switches the view.
 - `docs_get` reads a documentation topic.
 
 It does not offer `electron_run_python` (which runs AI-written Python) or `backend_call_rpc` (which reaches every backend method). The rules live in `mcp_servers/common/profile.py`. `test/test_profile.py` fails if a tool has no manifest entry.

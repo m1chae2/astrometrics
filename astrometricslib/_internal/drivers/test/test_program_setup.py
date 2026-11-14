@@ -6,8 +6,9 @@ check that a matching zip is unpacked and its setting saved, that an
 installer package is unpacked with ``msiexec /a`` into the folder, that a
 file whose checksum does not match is refused and deleted, that a zip holding
 a path outside its folder is refused, that Linux refuses, and that the setup
-script keeps a program the settings already name and goes on to the next
-program when one fails. The system is chosen by patching ``on_windows``.
+script keeps a program the user installed, moves its own older copy to the
+pinned release, and goes on to the next program when one fails. The system
+is chosen by patching ``on_windows``.
 """
 
 import contextlib
@@ -256,15 +257,24 @@ def test_the_pinned_releases_are_siril_and_graxpert_over_https() -> None:
 
 
 @pytest.fixture
-def windows_script(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Run the setup script as on Windows, path reader included."""
+def windows_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Run the setup script as on Windows, path reader included.
+
+    Returns
+    -------
+    data : `pathlib.Path`
+        The data folder the script sets programs up in.
+    """
+    data = tmp_path / "data"
+    data.mkdir()
     monkeypatch.setattr(setup_script, "on_windows", lambda: True)
     monkeypatch.setattr(platform_tools, "on_windows", lambda: True)
-    monkeypatch.setattr(setup_script, "installed_program", lambda release: None)
+    monkeypatch.setattr(program_setup, "data_directory", lambda: str(data))
+    return data
 
 
 def test_the_script_keeps_programs_the_settings_already_name(
-    windows_script: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    windows_script: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Someone with their own Siril and GraXpert keeps them."""
     own = tmp_path / "My Tools"
@@ -287,8 +297,36 @@ def test_the_script_keeps_programs_the_settings_already_name(
     assert "Keeping the Siril" in output and "Keeping the GraXpert" in output
 
 
+def test_the_script_moves_its_own_older_copy_to_the_pinned_release(
+    windows_script: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An older copy this script made is set up again at the pinned version."""
+    old_siril = windows_script / "Siril" / "1.0.0" / "siril" / "bin" / "siril-cli.exe"
+    old_siril.parent.mkdir(parents=True)
+    old_siril.write_bytes(b"")
+    settings = _Settings({"Processing.Siril": {"siril_executable": str(old_siril)}})
+    monkeypatch.setattr(setup_script, "get_configuration", lambda: settings)
+    set_up: list[str] = []
+
+    def record(config: object, release: program_setup.ProgramRelease, progress: object = None) -> Path:
+        """Record which program is set up.
+
+        Returns
+        -------
+        program : `pathlib.Path`
+            A made-up program path.
+        """
+        set_up.append(release.name)
+        return Path("program.exe")
+
+    monkeypatch.setattr(setup_script, "set_up_program", record)
+    assert setup_script.main([]) == 0
+    assert set_up == ["Siril", "GraXpert"]
+    assert "Keeping the Siril" not in capsys.readouterr().out
+
+
 def test_the_script_goes_on_after_a_failure(
-    windows_script: None, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    windows_script: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A failed Siril setup does not stop GraXpert's; the exit code is 1."""
     monkeypatch.setattr(setup_script, "get_configuration", lambda: _Settings())

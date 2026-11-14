@@ -165,6 +165,33 @@ def installed_program(release: ProgramRelease) -> Path | None:
     return program if program.is_file() else None
 
 
+def set_up_by_this_script(setting: str, release: ProgramRelease) -> bool:
+    """Say whether a program setting names a copy this setup made.
+
+    Such a setting is replaced by the pinned release when the pinned version
+    changes. A program the user installed elsewhere is never replaced.
+
+    Parameters
+    ----------
+    setting : `str`
+        The setting, such as a full path to ``siril-cli.exe``.
+    release : `ProgramRelease`
+        Which program.
+
+    Returns
+    -------
+    ours : `bool`
+        `True` if the program lies in ``<data folder>/<name>``.
+    """
+    parts = split_program_command(setting)
+    if not parts:
+        return False
+    try:
+        return Path(parts[0]).resolve().is_relative_to((Path(data_directory()) / release.name).resolve())
+    except OSError, ValueError:
+        return False
+
+
 def program_exists(setting: str) -> bool:
     """Say whether a program setting names a program that can be found.
 

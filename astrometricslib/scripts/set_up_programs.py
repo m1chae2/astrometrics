@@ -9,9 +9,11 @@ program's setting (``siril_executable``, ``graxpert_executable``). No
 administrator rights are needed. The pinned releases are listed in
 ``astrometricslib/_internal/drivers/program_setup.py``.
 
-A setting that already names an existing program is left alone, so someone
-with their own Siril or GraXpert keeps it (``--force`` sets up the pinned one
-anyway). Running it again does nothing once the programs are set up. On Linux
+A setting that names a program the user installed elsewhere is left alone, so
+someone with their own Siril or GraXpert keeps it (``--force`` sets up the
+pinned one anyway). A setting that names a copy this script made is moved to
+the pinned release, so an update that pins a newer version sets it up. Running
+it again downloads nothing once the pinned programs are set up. On Linux
 it does nothing: the programs come from the package manager there.
 
 Run::
@@ -27,8 +29,8 @@ from astrometricslib._internal.drivers.program_setup import (
     PINNED_RELEASES,
     ProgramRelease,
     current_setting,
-    installed_program,
     program_exists,
+    set_up_by_this_script,
     set_up_program,
 )
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
@@ -95,8 +97,7 @@ def _set_up_one(config: AppConfiguration, release: ProgramRelease, force: bool) 
         the user's own kept); `False` when the setup failed.
     """
     current = current_setting(config, release)
-    ours = installed_program(release)
-    if not force and current and program_exists(current) and (ours is None or str(ours) != current):
+    if not force and current and program_exists(current) and not set_up_by_this_script(current, release):
         print(f"Keeping the {release.name} already set in {release.key}: {current}")
         return True
     try:

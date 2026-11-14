@@ -170,6 +170,13 @@ Stop the app with `./astrometrics.sh stop`.
 3. Run `./build/linux/setup_venv.sh` again, then `npm install`.
 4. Start the app with `./astrometrics.sh start`.
 
+On Windows, in PowerShell:
+
+1. Close the app, or stop its services with `build\windows\run_astrometrics.ps1 -Stop`.
+2. Get the new code with `git pull`.
+3. Run `build\windows\setup_windows.ps1` again. It updates the Python and Node packages and rebuilds the UI MCP server. When the new code pins a newer Siril or GraXpert, it sets that version up. It never replaces a Siril or GraXpert you installed yourself.
+4. Start the app from its shortcut.
+
 The setup script never overwrites an existing configuration file. If a new version adds settings, compare your file with `astrometricslib/astrometrics.config.example.toml`.
 
 ## Uninstall
@@ -182,6 +189,16 @@ No uninstall script exists. To remove the app by hand:
 4. Optional: if you ran `build/linux/install_backup_timer.sh`, disable its systemd user units and delete them from `~/.config/systemd/user`. If you ran `build/linux/install_desktop_icon.sh`, delete the launcher it wrote to `~/.local/share/applications`.
 
 The system packages stay installed. Remove them with `apt` only if no other program needs them. Your frames are in the `frames_path` folder, which the steps above leave alone.
+
+On Windows:
+
+1. Close the app, then run `build\windows\run_astrometrics.ps1 -Stop`.
+2. Delete the `Astrometrics` shortcuts from the Desktop and the Start menu, and unpin it from the taskbar.
+3. Delete the repository folder. This also removes `.venv-win` and `node_modules`.
+4. Optional: delete `%LOCALAPPDATA%\Astrometrics`. It holds your databases (`Data`), the Siril and GraXpert that setup installed, the logs (`State`), the scratch files (`Cache`) and the app's browser profile (`Electron`). Back up `Data` first if you may want the databases again.
+5. Optional: delete `~\.config\astrometrics`, which holds the settings, and the link handler the app registered, with `reg delete HKCU\Software\Classes\astrometrics /f`.
+
+Your frames, and any database copies in `backup_path`, are in folders that the steps above leave alone.
 
 ## Troubleshooting
 

@@ -89,12 +89,15 @@ def _shipped_camera_sections_toml() -> str:
 
 
 test_config_path = TEST_TEMP_DIR / "astrometrics.config.toml"
+# Paths are single-quoted (literal) TOML strings, so the backslashes of a
+# Windows path are not read as escapes. The file is UTF-8 on every system.
 test_config_path.write_text(
     f'["Image Library"]\n'
-    f'path = "{test_library_path}"\n'
-    f'frames_path = "{test_frames_path}"\n\n'
+    f"path = '{test_library_path}'\n"
+    f"frames_path = '{test_frames_path}'\n\n"
     f'["Wayfinding Library"]\n'
-    f'path = "{test_wayfinding_path}"\n\n' + _shipped_camera_sections_toml()
+    f"path = '{test_wayfinding_path}'\n\n" + _shipped_camera_sections_toml(),
+    encoding="utf-8",
 )
 os.environ["ASTROMETRICS_CONFIG"] = str(test_config_path)
 os.environ["ASTROMETRICS_CONFIG_PATH"] = str(test_config_path)

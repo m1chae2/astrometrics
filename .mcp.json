@@ -1,9 +1,9 @@
 {
   "mcpServers": {
     "astrometricslib-core": {
-      "command": ".venv/bin/python",
+      "command": "node",
       "args": [
-        "-m",
+        "build/mcp/run_python_server.mjs",
         "mcp_servers.astrometrics_core"
       ],
       "env": {
@@ -12,9 +12,9 @@
       }
     },
     "wayfindinglib-core": {
-      "command": ".venv/bin/python",
+      "command": "node",
       "args": [
-        "-m",
+        "build/mcp/run_python_server.mjs",
         "mcp_servers.wayfinding_core"
       ],
       "env": {
@@ -23,22 +23,21 @@
       }
     },
     "astrometrics-backend": {
-      "command": ".venv/bin/python",
+      "command": "node",
       "args": [
-        "-m",
+        "build/mcp/run_python_server.mjs",
         "mcp_servers.backend"
       ],
       "env": {
         "ASTROMETRICS_API_BASE": "http://127.0.0.1:5000",
         "ASTROMETRICS_MCP_PROFILE": "investigator",
-        "MPLCONFIGDIR": "/tmp/matplotlib",
         "PYTHONPATH": "."
       }
     },
     "astrometrics-gaps": {
-      "command": ".venv/bin/python",
+      "command": "node",
       "args": [
-        "-m",
+        "build/mcp/run_python_server.mjs",
         "mcp_servers.gaps"
       ],
       "env": {

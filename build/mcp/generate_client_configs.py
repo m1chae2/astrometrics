@@ -61,6 +61,14 @@ project MCP servers from the project folder, and it did not reliably expand
 leave out ``cwd``.
 """
 
+PYTHON_LAUNCHER = "build/mcp/run_python_server.mjs"
+"""The Node script that starts a Python server with the right Python program.
+
+The Python program is ``.venv/bin/python`` on Linux and
+``.venv-win\\Scripts\\python.exe`` on Windows, so the configs call the script
+instead of naming either.
+"""
+
 EXAMPLE_ROOT = "/path/to/astrometrics"
 """The placeholder used in the tracked example file."""
 
@@ -121,11 +129,8 @@ SERVERS = (
         "astrometrics-backend",
         python_module="mcp_servers.backend",
         manifest="mcp_servers/backend/tool_manifest.json",
-        extra_environment={
-            "ASTROMETRICS_API_BASE": "http://127.0.0.1:5000",
-            # The server process writes here. This script creates nothing.
-            "MPLCONFIGDIR": "/tmp/matplotlib",  # ruff: ignore[hardcoded-temp-file]
-        },
+        # The launcher sets MPLCONFIGDIR to a folder in the system's temp folder.
+        extra_environment={"ASTROMETRICS_API_BASE": "http://127.0.0.1:5000"},
     ),
     ServerSpec(
         "astrometrics-gaps",
@@ -286,9 +291,11 @@ def server_entry(
     environment: dict[str, str] = {**spec.extra_environment, "PYTHONPATH": root_text}
     if profile:
         environment["ASTROMETRICS_MCP_PROFILE"] = profile
+    # The launcher finds the Python program, which is in a different place on
+    # Windows and Linux, so one config works on both.
     return {
-        "command": project_path(".venv/bin/python"),
-        "args": ["-m", spec.python_module],
+        "command": "node",
+        "args": [project_path(PYTHON_LAUNCHER), spec.python_module],
         **location,
         "env": dict(sorted(environment.items())),
     }

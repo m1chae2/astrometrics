@@ -35,6 +35,7 @@ from astrometricslib.pipelines.stacking.stage_progress import (
     begin_stage,
     finish_stages,
     skip_remaining_stages,
+    skip_stage,
     track_stages,
 )
 from astrometricslib.utilities.exceptions import DATA_ERRORS
@@ -225,10 +226,10 @@ def _stack_frames_guarded(
         )
         _prepare_stack(run)  # run.engine, stack_weight, expected_path, inputs_record
         if _stack_is_unchanged(run):
-            skip_remaining_stages("the stack is already up to date")
             # An up-to-date stack made before the solution was saved still
             # needs one for the viewer's star names.
             _save_stack_plate_solution(run, run.stacked_path)
+            _remake_preview_if_out_of_date(run)
             finish_stages()
             return run.stacked_path
         begin_stage(
@@ -870,6 +871,31 @@ def _make_preview(run: StackRun, stacked_path: str) -> None:
     )
     if run.preview_path:
         record_preview_as_processed_image(run.target, run.has_spectral, stacked_path, run.preview_path)
+
+
+def _remake_preview_if_out_of_date(run: StackRun) -> None:
+    """Skip the stages after an up-to-date stack; remake its picture if needed.
+
+    The stack is kept. Its preview picture is made again when it is missing
+    or the picture settings changed since it was made (see
+    `stack_preview.preview_is_out_of_date`); otherwise every stage left is
+    skipped.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run, with an up-to-date stack at ``run.stacked_path``.
+    """
+    from astrometricslib.pipelines.stacking.post_processing.stack_preview import preview_is_out_of_date
+
+    reason = preview_is_out_of_date(run.stacked_path)
+    if reason is None:
+        skip_remaining_stages("the stack is already up to date")
+        return
+    for key in (STACKING_STAGE, SUMMARIZE_STAGE, QUALITY_STAGE):
+        skip_stage(key, "the stack is already up to date")
+    begin_stage(PREVIEW_STAGE, f"making the preview picture again: {reason}")
+    _make_preview(run, run.stacked_path)
 
 
 def _save_stack_inputs(run: StackRun, stacked_path: str) -> None:

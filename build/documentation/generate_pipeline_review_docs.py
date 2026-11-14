@@ -3535,7 +3535,9 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
    quarantine (imaging only), and the background test.
 2. **Skip unchanged.** `stack_inputs.py` takes a fingerprint of the frames, calibration frames,
    settings and stacking code: a short code that changes whenever any of them changes. A match
-   with the last run keeps the stack on disk, unless `force=True`.
+   with the last run keeps the stack on disk, unless `force=True`. A kept stack still gets a new
+   preview image when its image is missing or the preview settings changed since it was made
+   (`stack_preview.preview_is_out_of_date`).
 3. **Previous-stack staging.** The current stack moves to a staging folder. On success it
    becomes the single `_previous` version (`previous_stack.py`), which a person can swap back or
    discard.

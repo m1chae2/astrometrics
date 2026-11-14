@@ -1127,14 +1127,74 @@ def _copy_observation_header(stacked_path: str, processed_path: str) -> None:
         logger.warning("Could not copy the stack's header into '%s': %s.", processed_path, error)
 
 
+def preview_configuration() -> dict[str, Any]:
+    """Give the saved settings that shape a stack's preview picture.
+
+    These are the settings `_picture_script` reads: the GraXpert and Cosmic
+    Clarity programs, the denoise strength, the colour calibration, Remove
+    Green Noise and star toning. Program paths are kept as text, with an
+    empty string for a program that is not set up.
+
+    Returns
+    -------
+    configuration : `dict` [`str`, `Any`]
+        Setting name -> value, ready to save as JSON.
+    """
+    configuration = get_configuration()
+    return {
+        "graxpert_executable": str(configuration.get_graxpert_executable() or ""),
+        "cosmic_clarity_executable": str(configuration.get_cosmic_clarity_denoise_executable() or ""),
+        "cosmic_clarity_strength": float(configuration.get_cosmic_clarity_denoise_strength()),
+        "colour_calibration": bool(configuration.get_preview_colour_calibration_enabled()),
+        "colour_calibration_method": str(configuration.get_preview_colour_calibration_method()),
+        "remove_green_noise": bool(configuration.get_preview_remove_green_noise_enabled()),
+        "star_toning": bool(configuration.get_preview_star_tone_enabled()),
+    }
+
+
+def preview_is_out_of_date(stacked_path: str) -> str | None:
+    """Say whether an up-to-date stack's preview picture should be made again.
+
+    The picture is made again when it is missing, or when the picture
+    settings saved in its record differ from the settings now in force. A
+    picture made with choices for one run (``custom`` in its record) is
+    never replaced this way, and neither is a picture whose record is
+    missing or older than the saved settings: nothing shows what made it.
+
+    Parameters
+    ----------
+    stacked_path : `str`
+        The stack.
+
+    Returns
+    -------
+    reason : `str` or `None`
+        A plain sentence saying why the picture is made again, or `None`
+        when it is kept.
+    """
+    if not os.path.isfile(preview_path_for(stacked_path)):
+        return "the stack has no preview picture"
+    record = read_preview_settings(stacked_path)
+    if record is None or record.get("custom") or not isinstance(record.get("configuration"), dict):
+        return None
+    saved = record["configuration"]
+    changed = sorted(name for name, value in preview_configuration().items() if saved.get(name) != value)
+    if not changed:
+        return None
+    return "the picture settings changed (" + ", ".join(name.replace("_", " ") for name in changed) + ")"
+
+
 def write_preview_settings(
     stacked_path: str, settings: PreviewSettings, settings_used: dict[str, Any], steps_run: list[str]
 ) -> None:
     """Save a small record of what made a stack's preview picture.
 
     The record sits beside the stack. It is not part of the stack's inputs
-    (see `stack_inputs`) and the restack decision never reads it. A failure
-    to write is logged and does not fail the preview.
+    (see `stack_inputs`): a change it shows never restacks. It does hold the
+    picture settings in force (`preview_configuration`), so that a stack
+    found up to date still gets a new picture when those settings changed
+    (see `preview_is_out_of_date`). A failure to write is logged and does
+    not fail the preview.
 
     Parameters
     ----------
@@ -1152,6 +1212,7 @@ def write_preview_settings(
         "settings_used": settings_used,
         "steps_run": steps_run,
         "custom": settings != PreviewSettings(),
+        "configuration": preview_configuration(),
     }
     try:
         with open(preview_settings_path_for(stacked_path), "w", encoding="utf-8") as record_file:
@@ -1171,8 +1232,9 @@ def read_preview_settings(stacked_path: str) -> dict[str, Any] | None:
     Returns
     -------
     record : `dict` or `None`
-        The record (``made_at``, ``settings_used``, ``steps_run``, ``custom``),
-        or `None` if the file is missing or unreadable. `None` means unknown:
+        The record (``made_at``, ``settings_used``, ``steps_run``, ``custom``
+        and, for pictures made since it was added, ``configuration``), or
+        `None` if the file is missing or unreadable. `None` means unknown:
         a picture made before the record existed has none.
     """
     try:

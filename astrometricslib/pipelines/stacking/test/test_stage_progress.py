@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from astrometricslib.pipelines.stacking import stage, stage_progress
+from astrometricslib.pipelines.stacking.post_processing import stack_preview
 from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import find_frames_to_quarantine
 from astrometricslib.pipelines.stacking.stage_progress import (
     LOOP_LOG_EVERY_FRAMES,
@@ -74,8 +75,19 @@ def stage_lines(caplog: pytest.LogCaptureFixture) -> list[str]:
     return [r.getMessage() for r in caplog.records if r.getMessage().startswith("Stage ")]
 
 
-def stub_steps(monkeypatch: pytest.MonkeyPatch, *, unchanged: bool, makes_stack: bool) -> None:
-    """Replace the work of every stage with a stand-in that does nothing."""
+def stub_steps(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    unchanged: bool,
+    makes_stack: bool,
+    preview_reason: str | None = None,
+    previews: list[str] | None = None,
+) -> None:
+    """Replace the work of every stage with a stand-in that does nothing.
+
+    `preview_reason` is what the check of an up-to-date stack's picture
+    answers; each preview made is added to `previews` when it is given.
+    """
 
     def choose(run: Any) -> None:
         """Offer 40 frames."""
@@ -99,7 +111,6 @@ def stub_steps(monkeypatch: pytest.MonkeyPatch, *, unchanged: bool, makes_stack:
         "_record_provenance",
         "_save_registration_record",
         "_store_stack_quality",
-        "_make_preview",
         "_save_stack_inputs",
         "_log_finished_stack",
     ):
@@ -107,6 +118,14 @@ def stub_steps(monkeypatch: pytest.MonkeyPatch, *, unchanged: bool, makes_stack:
     monkeypatch.setattr(stage, "_stack_is_unchanged", lambda run: unchanged)
     monkeypatch.setattr(stage, "_run_stacking_engine", run_engine)
     monkeypatch.setattr(stage, "_summarize_stack", lambda run: SimpleNamespace())
+
+    def make_preview(run: Any, stacked_path: str) -> None:
+        """Count a preview instead of making one."""
+        if previews is not None:
+            previews.append(stacked_path)
+
+    monkeypatch.setattr(stage, "_make_preview", make_preview)
+    monkeypatch.setattr(stack_preview, "preview_is_out_of_date", lambda stacked_path: preview_reason)
 
 
 def run_fake_stack(monkeypatch: pytest.MonkeyPatch, job: FakeJob) -> None:
@@ -162,6 +181,42 @@ def test_an_unchanged_stack_skips_the_later_stages(
     assert lines[6] == "Stage 7 of 7: skipped, the stack is already up to date."
     assert job.percents == sorted(job.percents)
     assert job.percents[-1] == 100
+
+
+def test_an_unchanged_stack_with_new_picture_settings_remakes_only_the_picture(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An up-to-date stack skips stages 4 to 6 and makes its picture again."""
+    previews: list[str] = []
+    stub_steps(
+        monkeypatch,
+        unchanged=True,
+        makes_stack=True,
+        preview_reason="the picture settings changed (graxpert executable)",
+        previews=previews,
+    )
+    job = FakeJob()
+    with caplog.at_level(logging.INFO, logger=PROGRESS_LOGGER):
+        run_fake_stack(monkeypatch, job)
+
+    lines = stage_lines(caplog)
+    assert len(lines) == 7
+    assert lines[3] == "Stage 4 of 7: skipped, the stack is already up to date."
+    assert lines[5] == "Stage 6 of 7: skipped, the stack is already up to date."
+    assert lines[6] == (
+        "Stage 7 of 7: making the preview picture again: the picture settings changed (graxpert executable)…"
+    )
+    assert len(previews) == 1
+    assert job.percents == sorted(job.percents)
+    assert job.percents[-1] == 100
+
+
+def test_an_unchanged_stack_with_a_current_picture_makes_no_preview(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An up-to-date stack whose picture is current is left alone."""
+    previews: list[str] = []
+    stub_steps(monkeypatch, unchanged=True, makes_stack=True, previews=previews)
+    run_fake_stack(monkeypatch, FakeJob())
+    assert previews == []
 
 
 def test_a_missing_stack_skips_the_quality_and_preview_stages(

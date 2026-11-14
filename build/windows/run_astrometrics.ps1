@@ -16,7 +16,7 @@
     the taskbar's Jump List runs this script with it.
 
     Usage:
-        run_astrometrics.ps1 [-Mode "Planetarium"] [-Lan] [-Port 5173] [-File path.fits]
+        run_astrometrics.ps1 [-Mode "Planetarium"] [-Lan] [-Port 5173] [-File path.fits] [-Url astrometrics://...]
         run_astrometrics.ps1 -Stop      # stop the backend and Vite, whoever started them
 #>
 param(
@@ -24,7 +24,9 @@ param(
     [switch]$Lan,
     [int]$Port = 5173,
     [string]$File = "",
-    [switch]$Stop
+    [switch]$Stop,
+    # An astrometrics:// link. Windows runs this script with one when a link is opened.
+    [string]$Url = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -148,6 +150,7 @@ try {
     # Also as an argument: when the app is already open, this Electron hands it to the open
     # window and quits (the second-instance event), which never sees the URL above.
     if ($Mode) { $electronArgs += '--mode="' + $Mode + '"' }
+    if ($Url) { $electronArgs += '"' + $Url + '"' }
     if ($File) { $electronArgs += '"' + (Resolve-Path $File).Path + '"' }
     $electronProc = Start-Process $Electron -ArgumentList $electronArgs -WorkingDirectory $Root `
         -PassThru -RedirectStandardOutput (Join-Path $LogDir "electron.log") `

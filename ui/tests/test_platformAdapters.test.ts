@@ -81,6 +81,21 @@ describe('Electron Platform Adapters', () => {
       expect(tasks[2].arguments).toContain('-Mode "Image Processing"');
     });
 
+    /** Verifies astrometrics:// links start the launcher, with the link as -Url */
+    it('registers the launcher as the astrometrics:// handler on Windows', () => {
+      const mockApp = {
+        setAsDefaultProtocolClient: vi.fn(),
+        getAppPath: vi.fn(() => 'C:/src/astrometrics')
+      } as any;
+
+      platform.registerProtocolClient(mockApp);
+      const [scheme, program, args] = mockApp.setAsDefaultProtocolClient.mock.calls[0];
+      expect(scheme).toBe('astrometrics');
+      expect(program).toMatch(/powershell\.exe$/);
+      expect(args).toContain(path.join('C:/src/astrometrics', 'build', 'windows', 'run_astrometrics.ps1'));
+      expect(args[args.length - 1]).toBe('-Url');
+    });
+
     /** Verifies notification option adapting for Windows Toast */
     it('adapts notification options and action buttons for Windows', () => {
       const mockApp = {

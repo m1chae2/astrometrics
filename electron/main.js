@@ -128,13 +128,7 @@ let queuedModeToOpen = extractModeArg(process.argv);
 let queuedUrlToOpen = extractUrlArg(process.argv);
 
 // Register Custom URL Protocol (astrometrics://)
-if (process.defaultApp) {
-  if (process.argv.length >= 2) {
-    app.setAsDefaultProtocolClient('astrometrics', process.execPath, [path.resolve(process.argv[1])]);
-  }
-} else {
-  app.setAsDefaultProtocolClient('astrometrics');
-}
+platform.registerProtocolClient(app);
 
 // Configure OS user tasks / Jump Lists / Dock
 platform.setupUserTasks(app);

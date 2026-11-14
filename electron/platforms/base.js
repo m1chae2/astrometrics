@@ -5,6 +5,7 @@
  */
 
 import path from 'path';
+import process from 'process';
 
 /**
  * Base platform adapter providing default cross-platform behavior.
@@ -27,6 +28,23 @@ export class BasePlatform {
    */
   configureIdentity(app) {
     app.name = 'astrometrics';
+  }
+
+  /**
+   * Registers the app as the handler of `astrometrics://` links. A source run
+   * (`process.defaultApp`) registers Electron with the app's folder; an installed app
+   * registers itself.
+   *
+   * @param {Electron.App} app - The Electron app instance.
+   */
+  registerProtocolClient(app) {
+    if (process.defaultApp) {
+      if (process.argv.length >= 2) {
+        app.setAsDefaultProtocolClient('astrometrics', process.execPath, [path.resolve(process.argv[1])]);
+      }
+    } else {
+      app.setAsDefaultProtocolClient('astrometrics');
+    }
   }
 
   /**

@@ -44,6 +44,21 @@ export function windowsStateFolder(app) {
 }
 
 /**
+ * Gives the command that starts the app the way its desktop shortcut does: Windows PowerShell
+ * running `build\windows\run_astrometrics.ps1` from the app's folder, with no window.
+ *
+ * @param {Electron.App} app
+ * @returns {{ program: string, args: string[] }}
+ */
+export function launcherCommand(app) {
+  const launcher = path.join(app.getAppPath(), 'build', 'windows', 'run_astrometrics.ps1');
+  const program = path.join(
+    process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'
+  );
+  return { program, args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', launcher] };
+}
+
+/**
  * Windows-specific platform implementation.
  */
 export class WindowsPlatform extends BasePlatform {
@@ -75,6 +90,20 @@ export class WindowsPlatform extends BasePlatform {
   }
 
   /**
+   * Registers the launcher, `build\windows\run_astrometrics.ps1`, as the handler of
+   * `astrometrics://` links, as the desktop shortcut and the Jump List use it. The app runs
+   * from its source folder, where `electron.exe` alone would start without the Vite server.
+   * Windows adds the link after the arguments, so it arrives as the launcher's `-Url`. When
+   * the app is already open, the new Electron hands the link to the open window.
+   *
+   * @param {Electron.App} app
+   */
+  registerProtocolClient(app) {
+    const { program, args } = launcherCommand(app);
+    app.setAsDefaultProtocolClient('astrometrics', program, [...args, '-Url']);
+  }
+
+  /**
    * Configures the Windows Jump List tasks on the taskbar icon.
    *
    * Each task runs the same launcher as the desktop shortcut,
@@ -86,16 +115,14 @@ export class WindowsPlatform extends BasePlatform {
    * @param {Electron.App} app
    */
   setupUserTasks(app) {
-    const appPath = app.getAppPath();
-    const launcher = path.join(appPath, 'build', 'windows', 'run_astrometrics.ps1');
-    const powershell = path.join(
-      process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'
-    );
-    const icon = path.join(appPath, 'assets', 'orbit.ico');
+    const { program, args } = launcherCommand(app);
+    // Paths are quoted, since a folder name may hold a space.
+    const quoted = args.map((arg) => (/[\s\\/]/.test(arg) ? `"${arg}"` : arg)).join(' ');
+    const icon = path.join(app.getAppPath(), 'assets', 'orbit.ico');
     try {
       app.setUserTasks(JUMP_LIST_MODES.map(([mode, title, description]) => ({
-        program: powershell,
-        arguments: `-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${launcher}" -Mode "${mode}"`,
+        program,
+        arguments: `${quoted} -Mode "${mode}"`,
         title,
         description,
         iconPath: icon,

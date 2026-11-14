@@ -3,6 +3,7 @@
 Ensures that scripts are continually tested against API changes.
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -84,7 +85,7 @@ def test_script_reindex_all_targets(tmp_path: Path) -> None:
     frames_path = library_path / "frames"
     config_path = tmp_path / "astrometrics.config.toml"
     config_path.write_text(
-        f'["Image Library"]\npath = "{library_path}"\nframes_path = "{frames_path}"\n\n'
+        f"[\"Image Library\"]\npath = '{library_path}'\nframes_path = '{frames_path}'\n\n"
         '["Observatory.Camera.Generic unlisted camera"]\n'
         'is_generic_fallback = "true"\n'
         'clip_ceiling_adu = { value = 65535.0, kind = "assumed", source = "Test fixture." }\n'
@@ -140,7 +141,8 @@ def test_script_reindex_all_targets(tmp_path: Path) -> None:
     finally:
         conn.close()
     assert data_json is not None, "Reindexing should not have removed the target itself."
-    assert str(frame_path) in data_json[0], (
+    # The path as JSON writes it: a Windows path's backslashes are doubled.
+    assert json.dumps(str(frame_path))[1:-1] in data_json[0], (
         "prune_missing=True should not have removed a frame whose file still exists on disk."
     )
 

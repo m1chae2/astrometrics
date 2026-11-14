@@ -13,7 +13,7 @@ This module is the Python side of it, so code that writes a record and
 code that later reads it back always agree on the night's name.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 # The night is named after the date 12 hours before the moment, in local
 # time. 12 hours puts the change of date at local noon, which falls in
@@ -35,6 +35,14 @@ def observing_night_id(timestamp: float) -> str:
     Returns
     -------
     night_id : `str`
-        The local date on which that night began, as ``YYYY-MM-DD``.
+        The local date on which that night began, as ``YYYY-MM-DD``. For a
+        moment before 1970 on Windows, which cannot convert it to local
+        time, the UTC date.
     """
-    return datetime.fromtimestamp(timestamp - SECONDS_BEFORE_MOMENT_FOR_NIGHT_NAME).strftime("%Y-%m-%d")
+    shifted = timestamp - SECONDS_BEFORE_MOMENT_FOR_NIGHT_NAME
+    try:
+        return datetime.fromtimestamp(shifted).strftime("%Y-%m-%d")
+    except OSError, OverflowError, ValueError:
+        # Windows cannot give the local time of a moment before 1970, which
+        # only made-up test data has; Linux can. Name such a night in UTC.
+        return (datetime(1970, 1, 1, tzinfo=UTC) + timedelta(seconds=shifted)).strftime("%Y-%m-%d")

@@ -7,6 +7,8 @@ Python rule matches the SQL rule the log database uses.
 import sqlite3
 from datetime import datetime
 
+import pytest
+
 from astrometricslib.utilities.observing_night import observing_night_id
 
 
@@ -49,3 +51,26 @@ def test_python_rule_matches_the_sql_rule_used_by_the_log_database() -> None:
             "SELECT strftime('%Y-%m-%d', ? - 43200, 'unixepoch', 'localtime')", (timestamp,)
         ).fetchone()
         assert observing_night_id(timestamp) == sql_night
+
+
+def test_a_moment_windows_cannot_convert_is_named_in_utc(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A moment Windows cannot make local (before 1970) is named in UTC."""
+    from astrometricslib.utilities import observing_night
+
+    class _WindowsDatetime(datetime):
+        """A datetime that fails to convert, as Windows does before 1970."""
+
+        @classmethod
+        def fromtimestamp(cls, timestamp: float, tz: object = None) -> datetime:  # type: ignore[override]
+            """Refuse, like Windows does.
+
+            Raises
+            ------
+            OSError
+                Always.
+            """
+            raise OSError(22, "Invalid argument")
+
+    monkeypatch.setattr(observing_night, "datetime", _WindowsDatetime)
+    assert observing_night_id(1000.0) == "1969-12-31"
+    assert observing_night_id(86400.0 * 2 + 43200) == "1970-01-03"

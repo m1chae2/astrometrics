@@ -316,8 +316,10 @@ def config_in_tmp_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AppCo
     wayfinding_path.mkdir()
     own_config_path = tmp_path / "astrometrics.config.toml"
     own_config_path.write_text(
-        f'["Image Library"]\npath = "{library_path}"\n\n'
-        f'["Wayfinding Library"]\npath = "{wayfinding_path}"\n\n' + _shipped_camera_sections_toml(),
+        # Literal TOML strings ('...'): the backslashes of a Windows path stay
+        # as they are instead of being read as escape codes.
+        f"[\"Image Library\"]\npath = '{library_path}'\n\n"
+        f"[\"Wayfinding Library\"]\npath = '{wayfinding_path}'\n\n" + _shipped_camera_sections_toml(),
         encoding="utf-8",
     )
     monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: own_config_path)

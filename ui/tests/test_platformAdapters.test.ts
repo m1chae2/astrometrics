@@ -27,22 +27,43 @@ describe('Electron Platform Adapters', () => {
   describe('WindowsPlatform', () => {
     const platform = new WindowsPlatform();
 
-    /** Verifies app identity configuration */
-    it('sets app.name and app.setAppUserModelId on Windows', () => {
+    /** Verifies app identity configuration and the local (not roaming) Electron folder */
+    it('sets app.name, app.setAppUserModelId and a local userData folder on Windows', () => {
+      vi.stubEnv('LOCALAPPDATA', 'C:/Users/u/AppData/Local');
       const mockApp = {
         name: '',
-        setAppUserModelId: vi.fn()
+        setAppUserModelId: vi.fn(),
+        setPath: vi.fn(),
+        getPath: vi.fn(() => 'C:/Users/u')
       } as any;
 
       platform.configureIdentity(mockApp);
       expect(mockApp.name).toBe('astrometrics');
       expect(mockApp.setAppUserModelId).toHaveBeenCalledWith('astrometrics');
+      expect(mockApp.setPath).toHaveBeenCalledWith(
+        'userData', path.join('C:/Users/u/AppData/Local', 'Astrometrics', 'Electron')
+      );
+      vi.unstubAllEnvs();
+    });
+
+    /** Verifies Electron's log sits next to the backend's logs in the state folder */
+    it('writes the Electron log into the state folder on Windows', () => {
+      vi.stubEnv('XDG_STATE_HOME', '');
+      vi.stubEnv('LOCALAPPDATA', 'C:/Users/u/AppData/Local');
+      const mockLog = { transports: { file: {} as any }, hooks: [] } as any;
+      const mockApp = { getPath: vi.fn(() => 'C:/Users/u') } as any;
+
+      const logPath = platform.configureLogging(mockApp, mockLog);
+      expect(logPath).toBe(path.join('C:/Users/u/AppData/Local', 'Astrometrics', 'State', 'logs', 'main.log'));
+      expect(mockLog.transports.file.resolvePathFn()).toBe(logPath);
+      vi.unstubAllEnvs();
     });
 
     /** Verifies Windows user tasks (Jump List) registration */
     it('registers user tasks for Planetarium, Observatory, and Image Processing', () => {
       const mockApp = {
-        setUserTasks: vi.fn()
+        setUserTasks: vi.fn(),
+        getAppPath: vi.fn(() => 'C:/src/astrometrics')
       } as any;
 
       platform.setupUserTasks(mockApp);
@@ -52,6 +73,12 @@ describe('Electron Platform Adapters', () => {
       expect(tasks[0].title).toBe('Open Planetarium');
       expect(tasks[1].title).toBe('Observatory Manager');
       expect(tasks[2].title).toBe('Image Processing');
+      // Each task runs the launcher with its workspace, not a bare electron.exe.
+      const launcher = path.join('C:/src/astrometrics', 'build', 'windows', 'run_astrometrics.ps1');
+      expect(tasks[0].program).toMatch(/powershell\.exe$/);
+      expect(tasks[0].arguments).toContain(`-File "${launcher}"`);
+      expect(tasks[0].arguments).toContain('-Mode "Planetarium"');
+      expect(tasks[2].arguments).toContain('-Mode "Image Processing"');
     });
 
     /** Verifies notification option adapting for Windows Toast */

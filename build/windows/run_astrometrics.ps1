@@ -9,8 +9,11 @@
     The backend's process id goes to `.run_pids\backend.pid`, which Electron reads to notice a
     backend that died while starting. A backend or Vite server that is already running is
     reused. When the Electron window closes, only the processes this run started are stopped.
-    Logs go to `.run_logs\`; `launcher.log` there has the time of each start-up step. Errors
-    show in a message box, because the desktop shortcut runs this script in a hidden window.
+    Logs go to `logs\run` in the state folder (`%LOCALAPPDATA%\Astrometrics\State`, or
+    `$XDG_STATE_HOME\astrometrics` when that is set), next to the app's own logs, as on Linux;
+    `launcher.log` there has the time of each start-up step. Errors show in a message box,
+    because the desktop shortcut runs this script in a hidden window. `-Mode` opens a workspace;
+    the taskbar's Jump List runs this script with it.
 
     Usage:
         run_astrometrics.ps1 [-Mode "Planetarium"] [-Lan] [-Port 5173] [-File path.fits]
@@ -27,7 +30,9 @@ param(
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 Set-Location $Root
-$LogDir = Join-Path $Root ".run_logs"
+$StateDir = if ($env:XDG_STATE_HOME) { Join-Path $env:XDG_STATE_HOME "astrometrics" } else {
+    Join-Path $env:LOCALAPPDATA "Astrometrics\State" }
+$LogDir = Join-Path $StateDir "logs\run"
 New-Item -ItemType Directory -Force $LogDir | Out-Null
 $BackendPort = 5000
 $PidDir = Join-Path $Root ".run_pids"
@@ -129,7 +134,7 @@ try {
         $started += $vite
         Write-Step "Vite started"
         # Electron loads its pages from Vite, so Vite must listen first (about 1.5 s).
-        if (-not (Wait-Port $Port 30 $vite)) { throw "Vite did not start; see .run_logs\vite.err.log" }
+        if (-not (Wait-Port $Port 30 $vite)) { throw "Vite did not start; see $LogDir\vite.err.log" }
         Write-Step "Vite listening"
     }
 
@@ -140,6 +145,9 @@ try {
     $env:SKIP_BACKEND = "1"
     $env:NODE_ENV = "development"
     $electronArgs = @(".", "--remote-debugging-port=9222")
+    # Also as an argument: when the app is already open, this Electron hands it to the open
+    # window and quits (the second-instance event), which never sees the URL above.
+    if ($Mode) { $electronArgs += '--mode="' + $Mode + '"' }
     if ($File) { $electronArgs += '"' + (Resolve-Path $File).Path + '"' }
     $electronProc = Start-Process $Electron -ArgumentList $electronArgs -WorkingDirectory $Root `
         -PassThru -RedirectStandardOutput (Join-Path $LogDir "electron.log") `

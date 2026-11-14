@@ -10,53 +10,97 @@ import process from 'process';
 import { execSync } from 'child_process';
 import { BasePlatform } from './base.js';
 
+/** The workspaces the taskbar's Jump List opens, as `--mode` names and their descriptions. */
+const JUMP_LIST_MODES = [
+  ['Planetarium', 'Open Planetarium', 'Navigate the celestial sphere'],
+  ['Observatory Manager', 'Observatory Manager', 'Mount, guider, and equipment controls'],
+  ['Image Processing', 'Image Processing', 'FITS stacking, astrometry, and spectroscopy']
+];
+
+/**
+ * Gives the app's own folder, `%LOCALAPPDATA%\Astrometrics`, as the Python side does.
+ *
+ * Local, not Roaming (`%APPDATA%`): its files belong to this computer, and caches and logs
+ * should not be copied to other computers with the user's profile.
+ *
+ * @param {Electron.App} app
+ * @returns {string}
+ */
+export function windowsAppFolder(app) {
+  const localAppData = process.env.LOCALAPPDATA || path.join(app.getPath('home'), 'AppData', 'Local');
+  return path.join(localAppData, 'Astrometrics');
+}
+
+/**
+ * Gives the state folder, which holds the logs: `$XDG_STATE_HOME/astrometrics` when that is
+ * set (as on Linux), otherwise `%LOCALAPPDATA%\Astrometrics\State`, as the Python side does.
+ *
+ * @param {Electron.App} app
+ * @returns {string}
+ */
+export function windowsStateFolder(app) {
+  if (process.env.XDG_STATE_HOME) return path.join(process.env.XDG_STATE_HOME, 'astrometrics');
+  return path.join(windowsAppFolder(app), 'State');
+}
+
 /**
  * Windows-specific platform implementation.
  */
 export class WindowsPlatform extends BasePlatform {
   /**
-   * Sets AppUserModelId for taskbar grouping and notification routing.
+   * Sets AppUserModelId for taskbar grouping and notification routing, and keeps Electron's
+   * own files (its browser caches, window position) in `%LOCALAPPDATA%\Astrometrics\Electron`.
+   * Electron's default is the Roaming profile, which Windows copies between computers.
    *
    * @param {Electron.App} app
    */
   configureIdentity(app) {
     app.name = 'astrometrics';
     app.setAppUserModelId('astrometrics');
+    app.setPath('userData', path.join(windowsAppFolder(app), 'Electron'));
+  }
+
+  /**
+   * Writes Electron's log next to the backend's, in the state folder's `logs`, as on Linux.
+   *
+   * @param {Electron.App} app
+   * @param {Object} log
+   * @returns {string}
+   */
+  configureLogging(app, log) {
+    super.configureLogging(app, log);
+    const logPath = path.join(windowsStateFolder(app), 'logs', 'main.log');
+    log.transports.file.resolvePathFn = () => logPath;
+    return logPath;
   }
 
   /**
    * Configures the Windows Jump List tasks on the taskbar icon.
    *
+   * Each task runs the same launcher as the desktop shortcut,
+   * `build\windows\run_astrometrics.ps1`, with `-Mode`. The app runs from its source folder,
+   * where `electron.exe` alone would open an empty Electron window. When the app is already
+   * open, the launcher reuses its backend and Vite server, and the new Electron hands the mode
+   * to the open window (the `second-instance` event).
+   *
    * @param {Electron.App} app
    */
   setupUserTasks(app) {
+    const appPath = app.getAppPath();
+    const launcher = path.join(appPath, 'build', 'windows', 'run_astrometrics.ps1');
+    const powershell = path.join(
+      process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'
+    );
+    const icon = path.join(appPath, 'assets', 'orbit.ico');
     try {
-      app.setUserTasks([
-        {
-          program: process.execPath,
-          arguments: '--mode="Planetarium"',
-          title: 'Open Planetarium',
-          description: 'Navigate the celestial sphere',
-          iconPath: process.execPath,
-          iconIndex: 0
-        },
-        {
-          program: process.execPath,
-          arguments: '--mode="Observatory Manager"',
-          title: 'Observatory Manager',
-          description: 'Mount, guider, and equipment controls',
-          iconPath: process.execPath,
-          iconIndex: 0
-        },
-        {
-          program: process.execPath,
-          arguments: '--mode="Image Processing"',
-          title: 'Image Processing',
-          description: 'FITS stacking, astrometry, and spectroscopy',
-          iconPath: process.execPath,
-          iconIndex: 0
-        }
-      ]);
+      app.setUserTasks(JUMP_LIST_MODES.map(([mode, title, description]) => ({
+        program: powershell,
+        arguments: `-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${launcher}" -Mode "${mode}"`,
+        title,
+        description,
+        iconPath: icon,
+        iconIndex: 0
+      })));
     } catch {
       // User tasks may fail if taskbar is unavailable during headless tests
     }

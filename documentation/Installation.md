@@ -122,7 +122,7 @@ The app chooses at start. It cannot switch cards while it runs, so plugging in o
 
 ### Storage layout
 
-Astrometrics keeps each kind of file in its own place. The library folders follow your settings. The other folders follow the Linux standard for program files (the XDG Base Directory layout), so a backup tool can skip the disposable ones and a cache can be wiped in one step. On Windows they are `Data`, `State` and `Cache` inside `%LOCALAPPDATA%\Astrometrics`, the folder Windows keeps for each user's program files. Settings stay in `~\.config\astrometrics`.
+Astrometrics keeps each kind of file in its own place. The library folders follow your settings. The other folders follow the Linux standard for program files (the XDG Base Directory layout), so a backup tool can skip the disposable ones and a cache can be wiped in one step. On Windows they are `Data`, `State` and `Cache` inside `%LOCALAPPDATA%\Astrometrics`, the folder Windows keeps for each user's program files on this computer. Logs, including the launcher's `logs\run`, go to `State`. The Electron app's browser profile goes to `Electron` in the same folder, not to the roaming profile (`%APPDATA%`), which Windows copies between computers. Settings stay in `~\.config\astrometrics`.
 
 | Tier | What it holds | Example location | Setting |
 | --- | --- | --- | --- |

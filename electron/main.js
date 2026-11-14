@@ -3,7 +3,6 @@
  * Orchestrates application lifecycle, window management, and backend services.
  */
 import { app, ipcMain, protocol, BrowserWindow, Notification, Tray, Menu, nativeImage, session, nativeTheme, screen, dialog, powerMonitor, shell } from 'electron';
-import squirrelStartup from 'electron-squirrel-startup';
 import path from 'path';
 import fs from 'fs';
 import process from 'process';
@@ -27,11 +26,6 @@ import { harnessWebPreferences, harnessWindowOptions, showMainWindow } from './h
 
 const platform = getPlatform();
 const pythonTerminalManager = new PythonTerminalManager({ platform });
-
-// Handle squirrel startup for Windows
-if (squirrelStartup) {
-  app.quit();
-}
 
 // Early platform command-line arguments (e.g. Wayland window decorations)
 platform.initCommandLine(app);
@@ -309,7 +303,7 @@ function dismissSplashAndShowMainWindow() {
 function backendStartAdvice(platform) {
   if (platform === 'win32') {
     return 'Start Astrometrics again from its shortcut (build\\windows\\run_astrometrics.ps1). ' +
-      'If it stops again, check .run_logs\\backend.err.log in the Astrometrics folder, then retry.';
+      'If it stops again, check logs\\run\\backend.err.log in %LOCALAPPDATA%\\Astrometrics\\State, then retry.';
   }
   return 'Start it with build/linux/run_backend.sh start ' +
     '(check ~/.local/state/astrometrics/logs/run/backend.log if it stops), then retry.';

@@ -99,7 +99,7 @@ def _find_driver_construction_sites() -> set[str]:
             function = node.func
             called_name = function.id if isinstance(function, ast.Name) else getattr(function, "attr", None)
             if called_name in BUILT_IN_DRIVER_CLASSES:
-                files_with_construction.add(str(module_path.relative_to(PIPELINES_ROOT)))
+                files_with_construction.add(module_path.relative_to(PIPELINES_ROOT).as_posix())
                 break
 
     return files_with_construction
@@ -177,7 +177,7 @@ def _find_constructions_without_drivers() -> list[str]:
                 continue
             if any(keyword.arg in ("drivers", None) for keyword in node.keywords):
                 continue
-            sites.append(f"{path.relative_to(PIPELINES_ROOT)} {_called_name(node)}")
+            sites.append(f"{path.relative_to(PIPELINES_ROOT).as_posix()} {_called_name(node)}")
     return sorted(set(sites))
 
 

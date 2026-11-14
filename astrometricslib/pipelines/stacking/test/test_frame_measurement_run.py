@@ -562,6 +562,8 @@ def mountain_time() -> Iterator[None]:
     None
         Control to the test, with the zone set to Mountain time.
     """
+    if not hasattr(time, "tzset"):
+        pytest.skip("Windows cannot change the time zone of a running program (no time.tzset)")
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv("TZ", "America/Denver")
         time.tzset()

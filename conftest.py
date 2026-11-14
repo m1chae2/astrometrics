@@ -64,6 +64,94 @@ test_targets_path.mkdir(parents=True, exist_ok=True)
 test_calibration_path.mkdir(parents=True, exist_ok=True)
 
 
+# Tests of parts that exist only on Linux, which Windows does not collect at
+# all. Each Windows difference these parts have is tested on its own (see
+# `astrometricslib/foundation/platform_tools.py` and the "windows CI"
+# workflow). Path (relative to the project, with "/") -> why.
+LINUX_ONLY_TEST_PATHS = {
+    "simulator/": "the simulator runs INDI, which is not available on Windows",
+    "build/tpm/": "the TPM harness runs the simulator and Linux shell tools",
+    "astrometricslib/_internal/drivers/test/test_siril_command_synchronisation.py": (
+        "Siril's Linux pipes are FIFOs; the Windows named pipes are tested in test_siril_windows.py"
+    ),
+    "astrometricslib/_internal/drivers/test/test_siril_process_cleanup.py": (
+        "the cleanup uses fuser, pgrep and process groups; Windows uses taskkill (test_platform_tools.py)"
+    ),
+    "backend/tests/test_copy_path_guard.py": "it tests the Linux-only real-data runs of build/agent_tools",
+    "wayfindinglib/test/test_bright_star_catalog_read_only.py": "it uses Unix file owners and modes",
+    "wayfindinglib/drivers/test/test_indi_property_dispatch.py": "INDI is not available on Windows",
+    "wayfindinglib/drivers/test/test_indi_property_state.py": "INDI is not available on Windows",
+    "wayfindinglib/drivers/test/test_indi_worker.py": "INDI is not available on Windows",
+}
+
+
+def _project_path(path: Path) -> str:
+    """Give a path relative to the project, written with "/".
+
+    Parameters
+    ----------
+    path : `pathlib.Path`
+        A path inside the project.
+
+    Returns
+    -------
+    relative : `str`
+        The path from the project folder, with "/" between parts, and a
+        "/" at the end of a folder.
+    """
+    relative = path.resolve().relative_to(Path(__file__).resolve().parent).as_posix()
+    return relative + "/" if path.is_dir() else relative
+
+
+def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:
+    """Leave out the tests of Linux-only parts on Windows.
+
+    Returns
+    -------
+    ignore : `bool` or `None`
+        `True` on Windows for a path in `LINUX_ONLY_TEST_PATHS`; `None`
+        (no opinion) otherwise.
+    """
+    if sys.platform != "win32":
+        return None
+    try:
+        relative = _project_path(collection_path)
+    except ValueError:
+        return None
+    return True if any(relative.startswith(path) for path in LINUX_ONLY_TEST_PATHS) else None
+
+
+def pytest_report_header(config: pytest.Config) -> list[str] | None:
+    """Say which Linux-only tests a Windows run leaves out.
+
+    Returns
+    -------
+    lines : `list` [`str`] or `None`
+        One line per left-out path on Windows; `None` on Linux.
+    """
+    if sys.platform != "win32":
+        return None
+    return [f"Not collected on Windows: {path} ({why})" for path, why in LINUX_ONLY_TEST_PATHS.items()]
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register the ``linux_only`` marker."""
+    config.addinivalue_line(
+        "markers", "linux_only(reason): the test checks Linux-only behavior and is skipped on Windows"
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Skip the tests marked ``linux_only`` on Windows, with their reason."""
+    if sys.platform != "win32":
+        return
+    for item in items:
+        marker = item.get_closest_marker("linux_only")
+        if marker is not None:
+            reason = marker.args[0] if marker.args else marker.kwargs.get("reason", "Linux only")
+            item.add_marker(pytest.mark.skip(reason=f"Linux only: {reason}"))
+
+
 def _shipped_camera_sections_toml() -> str:
     """Read the real camera sections out of the shipped config template.
 
@@ -333,15 +421,27 @@ def setup_root_test_environment() -> collections.abc.Generator[None]:
     SQLite connections can lazily create -wal/-shm files after the last
     query, which occasionally races the folder removal and raises ENOTEMPTY,
     so the removal is tried again once after a short pause.
+
+    Windows does not delete a file that is still open, and a log handler the
+    tests made may still hold its log file. On Windows the log handlers are
+    closed first, and anything still held after the second try is left for
+    the system's temporary-file cleanup instead of failing the run.
     """
     yield
     import time
 
+    if sys.platform == "win32":
+        logging.shutdown()
     try:
         _test_tmp_dir.cleanup()
     except OSError:
         time.sleep(0.5)
-        _test_tmp_dir.cleanup()
+        if sys.platform == "win32":
+            import shutil
+
+            shutil.rmtree(_test_tmp_dir.name, ignore_errors=True)
+        else:
+            _test_tmp_dir.cleanup()
 
 
 @pytest.fixture(autouse=True)

@@ -162,6 +162,7 @@ def test_an_image_outside_the_library_is_refused(tmp_path: Path) -> None:
     assert calls == []
 
 
+@pytest.mark.linux_only("it makes a symbolic link, which Windows allows only in Developer Mode")
 def test_a_link_out_of_the_library_is_refused(tmp_path: Path) -> None:
     """A link in the library that points outside it is refused."""
     library = tmp_path / "library"

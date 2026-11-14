@@ -310,7 +310,7 @@ def test_stack_subset_passes_the_frames_and_the_library_stack(
 
     bare = Target(id="Bare Target", frames=[])
     stack_subset(_pipelines(), bare, [], label="x")
-    assert seen["stack_path"].endswith("Bare Target/Bare_Target_Stacked.fits")
+    assert Path(seen["stack_path"]).as_posix().endswith("Bare Target/Bare_Target_Stacked.fits")
 
 
 def test_arguments_of_another_kind_are_refused() -> None:

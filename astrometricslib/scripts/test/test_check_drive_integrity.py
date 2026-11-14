@@ -67,6 +67,12 @@ def fake_rclone(tmp_path: Path) -> Callable:
         code_file.write_text(str(exit_code))
 
     set_listing.executable = str(program)
+    if sys.platform == "win32":
+        # Windows does not run a script by its "#!" line: a .cmd file starts
+        # the same script with this Python.
+        wrapper = tmp_path / "fake_rclone.cmd"
+        wrapper.write_text(f'@"{sys.executable}" "{program}" %*\n')
+        set_listing.executable = str(wrapper)
     return set_listing
 
 

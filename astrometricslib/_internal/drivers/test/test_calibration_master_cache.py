@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 from astrometricslib._internal.drivers import siril_interface
 from astrometricslib._internal.drivers.siril_interface import CALIBRATION_MASTER_CACHE_DIRECTORY_NAME
 from astrometricslib._internal.drivers.siril_interface.staging import _calibration_source_fingerprint
+from astrometricslib.foundation.platform_tools import stage_file
 
 
 def _make_processor(tmp_path: Path):  # ruff: ignore[missing-return-type-private-function]
@@ -28,8 +29,11 @@ def _make_processor(tmp_path: Path):  # ruff: ignore[missing-return-type-private
     return processor
 
 
-def _stage_frames(target_folder, subdirectory, library_directory, count) -> str:  # ruff: ignore[missing-type-function-argument]
-    """Symlink `count` library frames into a staging subdirectory.
+def _stage_frames(target_folder: str, subdirectory: str, library_directory: str, count: int) -> str:
+    """Stage `count` library frames into a staging folder, as the app does.
+
+    The frames are staged with `stage_file`: a symbolic link on Linux, a
+    hard link on Windows.
 
     Skips writing a library frame that already has the expected content,
     rather than rewriting it unconditionally: `_calibration_source_fingerprint`
@@ -56,11 +60,11 @@ def _stage_frames(target_folder, subdirectory, library_directory, count) -> str:
             with open(library_frame) as handle:
                 already_current = handle.read() == content
         if already_current:
-            os.symlink(library_frame, os.path.join(staging, f"staged_{index:05d}.fits"))
+            stage_file(library_frame, os.path.join(staging, f"staged_{index:05d}.fits"))
             continue
         with open(library_frame, "w") as handle:
             handle.write(content)
-        os.symlink(library_frame, os.path.join(staging, f"staged_{index:05d}.fits"))
+        stage_file(library_frame, os.path.join(staging, f"staged_{index:05d}.fits"))
     return staging
 
 

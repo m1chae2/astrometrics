@@ -444,6 +444,7 @@ def test_every_rsync_transfer_has_the_tools_own_stall_timeout(tmp_path: Path) ->
     assert "--timeout=60" in command
 
 
+@pytest.mark.linux_only("the stand-in rsync is a script run by its #! line, which Windows does not do")
 def test_a_transfer_past_the_overall_limit_ends_rsync_and_its_helper(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

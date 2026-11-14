@@ -81,7 +81,7 @@ def test_the_sync_command_carries_every_safety_option() -> None:
     command = upload.build_sync_command(
         "rclone", Path("/lib"), "drive:Library", "drive:Library_deleted/x", 100, False
     )
-    assert command[:4] == ["rclone", "sync", "/lib", "drive:Library"]
+    assert command[:4] == ["rclone", "sync", str(Path("/lib")), "drive:Library"]
     assert command[command.index("--backup-dir") + 1] == "drive:Library_deleted/x"
     assert command[command.index("--max-delete") + 1] == "100"
     assert "--track-renames" in command

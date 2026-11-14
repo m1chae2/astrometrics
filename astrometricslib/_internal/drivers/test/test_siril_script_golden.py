@@ -334,6 +334,7 @@ def _run_case(name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dic
     })
 
 
+@pytest.mark.linux_only("the stored scripts are the Linux ones; Windows quotes its Siril paths")
 @pytest.mark.parametrize("name", sorted(CASES))
 def test_process_target_matches_stored_scripts_and_records(
     name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

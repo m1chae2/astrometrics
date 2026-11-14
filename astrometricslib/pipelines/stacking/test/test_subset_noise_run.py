@@ -414,7 +414,7 @@ def _folder_listing(folder: Path) -> dict[str, bytes]:
         The bytes of each file, by path relative to the folder.
     """
     return {
-        str(path.relative_to(folder)): path.read_bytes()
+        path.relative_to(folder).as_posix(): path.read_bytes()
         for path in sorted(folder.rglob("*"))
         if path.is_file()
     }

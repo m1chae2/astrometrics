@@ -6,7 +6,6 @@ tests check that, that colour sensors and cached masters are left alone, and
 that the master flat's cache key changes with the smoothing recipe.
 """
 
-import os
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +18,7 @@ from astrometricslib._internal.drivers.siril_interface.staging import (
     _calibration_source_fingerprint,
     _master_recipe,
 )
+from astrometricslib.foundation.platform_tools import stage_file
 from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import assess_flats
 
 SIZE = 96
@@ -142,7 +142,7 @@ def test_the_recipe_changes_the_fingerprint_of_the_same_frames(tmp_path: Path) -
     library_frame.write_text("frame")
     staging = tmp_path / "staging"
     staging.mkdir()
-    os.symlink(library_frame, staging / "staged_00000.fits")
+    stage_file(str(library_frame), str(staging / "staged_00000.fits"))
     plain = _calibration_source_fingerprint(str(staging))
     assert _calibration_source_fingerprint(str(staging), "") == plain
     assert _calibration_source_fingerprint(str(staging), "flat-recipe-2") != plain

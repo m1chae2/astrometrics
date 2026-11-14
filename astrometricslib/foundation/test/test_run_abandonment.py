@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from astrometricslib.foundation.platform_tools import stop_windows_process_tree
 from astrometricslib.foundation.run_abandonment import (
     RunAbandonedError,
     RunAbandonment,
@@ -57,6 +58,14 @@ def process_exists(process_id: int) -> bool:
     exists : `bool`
         `True` if the process can still be signalled and is not a zombie.
     """
+    if sys.platform == "win32":
+        # os.kill(pid, 0) ends the process on Windows; ask the process list.
+        import psutil
+
+        try:
+            return psutil.Process(process_id).status() != psutil.STATUS_ZOMBIE
+        except psutil.NoSuchProcess:
+            return False
     try:
         os.kill(process_id, 0)
     except ProcessLookupError:
@@ -132,7 +141,10 @@ def test_launch_registered_without_a_bound_run_starts_the_process_plainly() -> N
     try:
         assert process.poll() is None
     finally:
-        os.killpg(os.getpgid(process.pid), 9)
+        if sys.platform == "win32":
+            stop_windows_process_tree(process)
+        else:
+            os.killpg(os.getpgid(process.pid), 9)
         process.wait()
 
 

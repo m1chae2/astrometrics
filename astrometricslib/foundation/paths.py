@@ -17,15 +17,12 @@ Description: Two groups of paths live here.
   as the same place.
 """
 
-import logging
 import os
 import sys
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-
-logger = logging.getLogger(__name__)
 
 WINDOWS_APP_FOLDER = "Astrometrics"
 """The folder in ``%LOCALAPPDATA%`` for this program's files on Windows."""
@@ -123,25 +120,8 @@ def siril_work_directory() -> str:
     return work_path
 
 
-def _legacy_windows_data_folder() -> str:
-    r"""Give the data folder older Windows installs used.
-
-    Returns
-    -------
-    folder : `str`
-        ``~\.local\share\astrometrics``, the Linux default, which older
-        versions also used on Windows.
-    """
-    return os.path.join(os.path.expanduser("~"), ".local", "share", "astrometrics")
-
-
 def default_data_path(use_environment: bool = True) -> str:
     r"""Give the folder for this program's durable data, without creating it.
-
-    On Windows a data folder left at the old place (see
-    `_legacy_windows_data_folder`) is used until the backend has moved it
-    (`move_legacy_windows_data`), so no program looks at an empty new
-    folder.
 
     Parameters
     ----------
@@ -158,52 +138,9 @@ def default_data_path(use_environment: bool = True) -> str:
     """
     if use_environment and os.environ.get("XDG_DATA_HOME"):
         return _user_folder("XDG_DATA_HOME", (".local", "share"), "Data")
-    if not _on_windows():
-        return os.path.join(os.path.expanduser("~"), ".local", "share", "astrometrics")
-    data_path = os.path.join(_windows_app_folder(), "Data")
-    legacy_path = _legacy_windows_data_folder()
-    if not os.path.exists(data_path) and os.path.isdir(legacy_path):
-        return legacy_path
-    return data_path
-
-
-def move_legacy_windows_data() -> bool:
-    """Move the data folder of an older Windows install to its new place, once.
-
-    Only the backend calls this, first thing at start, before it opens any
-    database. Every other program (scripts, MCP servers, a dry run) only
-    reads `default_data_path`, which keeps naming the old folder until the
-    move is done. Moving it from any program would pull the folder from
-    under a backend that is running from it, and that backend would then
-    make a new, empty one at the old place.
-
-    The folder is renamed in one step, so it is either moved whole or not at
-    all. The rename fails while another program has a file in it open
-    (Windows does not allow it) or when the two places are on different
-    drives; the old folder is then kept and used, and the next start tries
-    again.
-
-    Returns
-    -------
-    moved : `bool`
-        `True` if the folder was moved by this call.
-    """
-    if not _on_windows() or os.environ.get("XDG_DATA_HOME"):
-        return False
-    new_path = os.path.join(_windows_app_folder(), "Data")
-    legacy_path = _legacy_windows_data_folder()
-    if os.path.exists(new_path) or not os.path.isdir(legacy_path):
-        return False
-    os.makedirs(os.path.dirname(new_path), exist_ok=True)
-    try:
-        os.rename(legacy_path, new_path)
-    except OSError as error:
-        # Expected while another program has a file there open: a status,
-        # not a failure. The data stays usable where it is.
-        logger.info("Kept the data folder at %s for now; moving it failed: %s", legacy_path, error)
-        return False
-    logger.info("Moved the data folder from %s to %s", legacy_path, new_path)
-    return True
+    if _on_windows():
+        return os.path.join(_windows_app_folder(), "Data")
+    return os.path.join(os.path.expanduser("~"), ".local", "share", "astrometrics")
 
 
 def data_directory() -> str:
@@ -211,9 +148,7 @@ def data_directory() -> str:
 
     This is ``~/.local/share/astrometrics`` on Linux and
     ``%LOCALAPPDATA%\Astrometrics\Data`` on Windows. Unlike the cache
-    folder, nothing here may be deleted to free space. On Windows a data
-    folder at the old place is used until the backend has moved it
-    (`move_legacy_windows_data`).
+    folder, nothing here may be deleted to free space.
 
     Returns
     -------

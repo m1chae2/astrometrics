@@ -15,8 +15,7 @@ checks for a mounted drive, the launch identity (`LaunchIdentity`,
 `read_launch_identity`) and the offline switch it carries (`require_online`,
 `require_local_host`, `is_loopback_host` and the ``ASTROMETRICS_OFFLINE``
 variable name `OFFLINE_VARIABLE`), the folders a settings file names
-(`library_folders`), the one-time move of an older Windows install's data
-folder that the backend makes at start (`move_legacy_windows_data`),
+(`library_folders`),
 and `stop_process_group`, which ends a program and the helpers it started.
 The private driver code (Siril, catalog
 access, camera profiles) lives in `astrometricslib._internal.drivers`.
@@ -40,7 +39,6 @@ from astrometricslib.foundation.paths import (
     is_path_inside,
     library_folders,
     locks_directory,
-    move_legacy_windows_data,
     resolve_mounted_path,
     scratch_directory,
 )
@@ -87,7 +85,6 @@ __all__ = [
     "launch_identity_from_settings",
     "library_folders",
     "locks_directory",
-    "move_legacy_windows_data",
     "network_is_offline",
     "read_data_versions",
     "read_launch_identity",

@@ -2,10 +2,9 @@ r"""Purpose: Tests for where the capability gap database lives.
 
 Description: The gap server cannot import the library, so it repeats the data
 folder rule: ``$XDG_DATA_HOME/astrometrics``, ``~/.local/share/astrometrics``
-on Linux and ``%LOCALAPPDATA%\Astrometrics\Data`` on Windows. On Windows
-the older folder is used while the new one does not exist yet, so the app's
-one-time move of that folder is not blocked. The tests choose the system by
-patching ``sys.platform`` and the home folder, so they run the same on both.
+on Linux and ``%LOCALAPPDATA%\Astrometrics\Data`` on Windows. The tests
+choose the system by patching ``sys.platform`` and the home folder, so they
+run the same on both.
 """
 
 import sys
@@ -56,20 +55,6 @@ def test_windows_uses_local_app_data(home: Path, monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(sys, "platform", "win32")
     expected = home / "AppData" / "Local" / "Astrometrics" / "Data" / DATABASE_NAME
     assert default_database_path() == expected
-
-
-def test_windows_keeps_the_older_folder_until_the_app_moves_it(
-    home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The older folder is used while the new one is missing."""
-    monkeypatch.setattr(sys, "platform", "win32")
-    legacy = home / ".local" / "share" / "astrometrics"
-    legacy.mkdir(parents=True)
-    assert default_database_path() == legacy / DATABASE_NAME
-
-    new_folder = home / "AppData" / "Local" / "Astrometrics" / "Data"
-    new_folder.mkdir(parents=True)
-    assert default_database_path() == new_folder / DATABASE_NAME
 
 
 def test_windows_without_local_app_data_uses_the_default_place(

@@ -45,22 +45,15 @@ def default_database_path() -> Path:
         ``$XDG_DATA_HOME/astrometrics/capability_gaps.db``. Without
         ``XDG_DATA_HOME``: ``~/.local/share/astrometrics/capability_gaps.db``
         on Linux, and ``capability_gaps.db`` in
-        ``%LOCALAPPDATA%\Astrometrics\Data`` on Windows. On Windows the old
-        folder, ``~\.local\share\astrometrics``, is used while the new one
-        does not exist yet: the app moves the whole old folder there once, and
-        making the new folder first would stop that move.
+        ``%LOCALAPPDATA%\Astrometrics\Data`` on Windows.
     """
     xdg_root = os.environ.get("XDG_DATA_HOME")
     if xdg_root:
         return Path(xdg_root) / "astrometrics" / "capability_gaps.db"
-    legacy_folder = Path.home() / ".local" / "share" / "astrometrics"
     if sys.platform != "win32":
-        return legacy_folder / "capability_gaps.db"
+        return Path.home() / ".local" / "share" / "astrometrics" / "capability_gaps.db"
     local_app_data = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-    data_folder = Path(local_app_data) / "Astrometrics" / "Data"
-    if not data_folder.exists() and legacy_folder.is_dir():
-        return legacy_folder / "capability_gaps.db"
-    return data_folder / "capability_gaps.db"
+    return Path(local_app_data) / "Astrometrics" / "Data" / "capability_gaps.db"
 
 
 TIERS = ("astrometricslib", "wayfindinglib", "backend", "ui")

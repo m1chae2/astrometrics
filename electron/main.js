@@ -301,6 +301,21 @@ function dismissSplashAndShowMainWindow() {
 }
 
 /**
+ * Says how to start the backend and where its log is, for the "backend not running" dialog.
+ *
+ * @param {string} platform The value of `process.platform`.
+ * @returns {string} The advice for that system.
+ */
+function backendStartAdvice(platform) {
+  if (platform === 'win32') {
+    return 'Start Astrometrics again from its shortcut (build\\windows\\run_astrometrics.ps1). ' +
+      'If it stops again, check .run_logs\\backend.err.log in the Astrometrics folder, then retry.';
+  }
+  return 'Start it with build/linux/run_backend.sh start ' +
+    '(check ~/.local/state/astrometrics/logs/run/backend.log if it stops), then retry.';
+}
+
+/**
  * Opens the main window once the backend has finished loading its star catalog.
  *
  * The backend's "ready" signal can arrive more than once (it is matched against
@@ -319,9 +334,7 @@ async function openMainWindowWhenBackendIsWarm() {
       type: 'error',
       title: 'Astrometrics backend not running',
       message: 'The Astrometrics backend is not running.',
-      detail:
-        `Nothing answered on ${backendBaseUrl()}. Start it with ` +
-        'build/linux/run_backend.sh start (check ~/.local/state/astrometrics/logs/run/backend.log if it stops), then retry.',
+      detail: `Nothing answered on ${backendBaseUrl()}. ${backendStartAdvice(process.platform)}`,
       buttons: ['Retry', 'Quit'],
       defaultId: 0,
       cancelId: 1,

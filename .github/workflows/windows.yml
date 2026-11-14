@@ -1,16 +1,14 @@
 # ==============================================================================
-# Purpose: Check the Windows-only code paths on a Windows runner.
+# Purpose: Run the test suites on a Windows runner.
 #
-# Ubuntu is the main system and the full test suites run there (the other
-# workflows). This workflow runs only the tests of the code that behaves
-# differently on Windows: the platform rules (program paths, path quoting,
-# frame staging by hard link or copy, taskkill, "spawn" workers), the Windows
-# data folders, Siril over Windows named pipes, the Siril and GraXpert setup, the database
-# backups, the observatory source on Windows, the MCP client configs, the
-# INDI stand-in, the Electron Windows adapter and the FITS viewer at display
-# scaling. Each of these was a real Windows break that the Ubuntu jobs could
-# not see. Many other tests still assume Linux (FIFOs, process groups,
-# symlinks, /proc), so the whole suite is not run here.
+# Ubuntu is the main system and its own workflows stay the main check. This
+# workflow runs the same Python suites on Windows, so a change that works on
+# Linux but breaks on Windows (a path written with "/", a symbolic link, a
+# Linux-only call such as os.nice or os.kill(pid, 0)) is caught before it
+# merges. Tests of Linux-only parts (the simulator, the TPM harness, INDI,
+# Siril's FIFOs) are not collected on Windows, and single tests of Linux-only
+# behavior carry a `linux_only` marker; the root conftest.py lists both, with
+# their reasons. The frontend job runs the Windows-sensitive UI tests.
 # ==============================================================================
 
 name: windows CI
@@ -67,26 +65,13 @@ jobs:
           python -m pip install --upgrade pip hatchling editables setuptools_scm Cython numpy
           python -m pip install --no-build-isolation -e ".[mcp,dev]"
 
-      - name: Run the Windows-sensitive tests
+      # The whole suite, as on Linux, with one worker per processor core.
+      - name: Run the test suites
+        timeout-minutes: 60
         env:
           PYTHONPATH: .
           ASTROMETRICS_TESTING: "1"
-        run: >-
-          python -m pytest -q -p no:cacheprovider
-          astrometricslib/foundation/test/test_platform_tools.py
-          astrometricslib/foundation/test/test_scratch_paths.py
-          astrometricslib/foundation/test/test_launch_identity.py
-          astrometricslib/_internal/drivers/test/test_siril_windows.py
-          astrometricslib/_internal/drivers/test/test_program_setup.py
-          astrometricslib/pipelines/stacking/test/test_fwhm_degradation_sampling.py
-          astrometricslib/scripts/test/test_backup_library_databases.py
-          astrometricslib/test/test_public_surface.py
-          backend/tests/test_observatory_source.py
-          backend/tests/test_library_backup_service.py
-          backend/tests/test_client_configs.py
-          mcp_servers/gaps
-          wayfindinglib/drivers/indi/test/test_pyindi_stub.py
-          wayfindinglib/drivers/test/test_indi_reconnect.py
+        run: python -m pytest -n auto -q -p no:cacheprovider -o addopts="" -m "not trio" -rfE
 
   frontend:
     name: Run Windows Frontend Tests

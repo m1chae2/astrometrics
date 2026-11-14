@@ -164,6 +164,10 @@ The scripts are:
 
 - `validate_asteroid_detection.py` — measures the asteroid detector. It reports the share of injected synthetic movers it recovers at each brightness and speed, and the tracks it confirms in fields with no mover. Read-only, it also counts the confirmed movers on real frames of targets far from the ecliptic (the band of sky around the plane of the Earth's orbit, where most asteroids appear). There, almost all of them are false. Results: [MOV-01](../../documentation/library_design/validation/asteroid_detection.md#mov-01) to [MOV-04](../../documentation/library_design/validation/asteroid_detection.md#mov-04).
 
+## Setup
+
+- `set_up_siril.py` — sets up Siril, the stacking program, on Windows. `build/windows/setup_windows.ps1` runs it, the way it installs the Python and Node packages. It downloads the pinned portable Siril (`SIRIL_RELEASE` in `_internal/drivers/siril_setup.py`) from Siril's own site, checks the file against the recorded size and SHA-256 checksum (a mismatch is deleted and nothing is unpacked), unpacks it into `%LOCALAPPDATA%\Astrometrics\Data\Siril\<version>` and sets `siril_executable`. No administrator rights are needed. A `siril_executable` that already names an existing Siril is kept (`--force` replaces it). On Linux it does nothing: Siril comes from the package manager. To move to a newer Siril, change the version, address, size and checksum in `SIRIL_RELEASE` together.
+
 ## Demos and one-off tools
 
 - `seed_local_star_catalog.py` — fills the local Gaia DR3 cache so later batch runs need no network access.

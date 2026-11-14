@@ -309,6 +309,8 @@ The step then records the FITS file as the target's processed image (`processed_
 
 **Raw frames on a network drive.** The raw frames can sit on a network drive. The pipeline does not copy them first. Siril reads each frame once through a symlink and writes its working files to `~/.cache/astrometrics/siril` on the local disk. Set `frames_mount_point` in the same section to the folder where that drive mounts. While nothing is mounted there, downloads and file sorting stop with an error instead of writing frames to the local disk. The pipeline never rewrites a raw frame.
 
+**On Windows.** Windows allows symlinks only with administrator rights or Developer Mode, which the app does not ask for. So each frame is hard-linked instead (a second name for the same file, which costs no space or time) when it is on the same NTFS drive as the work folder, and copied otherwise, for example from a Google Drive or network folder. The stack log says when frames are copied, because copying takes time and disk space. The work folder is `%LOCALAPPDATA%\Astrometrics\Cache\siril`. Siril talks to the app through Windows named pipes (`\\.\pipe\...`), which Siril creates itself, and paths in Siril commands are quoted, because Siril for Windows stops reading an unquoted path at its first space. The Windows setup (`build/windows/setup_windows.ps1`) installs Siril's portable version (`scripts/set_up_siril.py`). Linux keeps symlinks and is unchanged.
+
 ## Settings
 
 Each setting is described in the section named in the last column. A setting with the status design estimate links to [stacking design estimates](../../../documentation/library_design/validation/stacking.md#design-estimates).

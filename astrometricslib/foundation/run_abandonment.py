@@ -37,6 +37,7 @@ import time
 from collections.abc import Callable, Generator, Sequence
 
 from astrometricslib.foundation.errors import ProcessingError
+from astrometricslib.foundation.platform_tools import on_windows, stop_windows_process_tree
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +151,10 @@ def stop_process_group(process: subprocess.Popen) -> None:
     process : `subprocess.Popen`
         The process to stop.
     """
+    if on_windows():
+        # No process groups or signals of this kind on Windows: taskkill.
+        stop_windows_process_tree(process)
+        return
     if process.poll() is not None:
         return
     try:

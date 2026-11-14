@@ -1,11 +1,20 @@
 # Installation
 
-*Version 2.0 · 2026-10-15 · Status: current*
+*Version 2.1 · 2026-11-14 · Status: current*
 
-This page shows how to install the Astrometrics desktop app from source on Linux, check that it works, update it, and remove it. It is for people who want to run the app. To use only the Python library, see the [library quick start](how_to/library_quick_start.md).
+This page shows how to install the Astrometrics desktop app from source on Linux, check that it works, update it, and remove it. Windows 11 has its own setup, described in the note below. It is for people who want to run the app. To use only the Python library, see the [library quick start](how_to/library_quick_start.md).
 
 :::{note}
-Windows is not supported. The install scripts are written for Ubuntu and use the `apt` package manager.
+Ubuntu is the main supported system, and the rest of this page is written for it. Windows 11 runs the app from source for work on frames that are already on disk: viewing, stacking with Siril and the quality measurements. Run `build\windows\setup_windows.ps1` once in PowerShell. It needs Python 3.14 and Node.js, sets up a Python environment and the Node packages, and downloads Siril from siril.org (checked against a pinned checksum, with no administrator rights needed). Then start the app with `build\windows\run_astrometrics.ps1`, or from the shortcut that `build\windows\install_desktop_icon.ps1` makes.
+
+These parts do not work on Windows yet:
+
+- Telescope control and the simulated observatory. Both need INDI, which is not available on Windows.
+- Downloading frames from the telescope computer, which uses `rsync`.
+- The local plate solver. Plate solving uses the online astrometry.net service instead, which needs an API key.
+- A packaged installer. Windows runs from a copy of the source code.
+
+Keep the frames on a local drive if you can. Siril then reads them through hard links, which cost no space. Frames in a Google Drive or network folder are copied before each stack, which takes time and disk space.
 :::
 
 ## What you need

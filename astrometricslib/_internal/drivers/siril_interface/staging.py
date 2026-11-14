@@ -29,6 +29,7 @@ from astrometricslib._internal.drivers.calibration_library import (
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_data, read_header
 from astrometricslib._internal.drivers.frame_prefetch import prefetch_frames
 from astrometricslib._internal.drivers.siril_interface.session import SirilSession
+from astrometricslib.foundation.platform_tools import STAGED_BY_COPY, on_windows, stage_file
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +193,11 @@ def _calibration_source_fingerprint(frames_directory: str, recipe: str = "") -> 
     """Fingerprint the calibration frames staged in a directory.
 
     Each staged frame is a symlink into the shared calibration library,
-    so the *link targets* are fingerprinted, not the links.
+    so the *link targets* are fingerprinted, not the links. Windows stages
+    by hard link or copy instead (see `stage_file`), so there the frame's
+    file number on its drive identifies it: a hard link shares the library
+    frame's number, and a copy gets a new one, so its master is rebuilt
+    rather than wrongly reused.
 
     Parameters
     ----------
@@ -226,7 +231,11 @@ def _calibration_source_fingerprint(frames_directory: str, recipe: str = "") -> 
             # stat() follows the symlink, so this describes the real
             # library frame rather than the link this run just made.
             stat_result = os.stat(frame_path)
-            digest.update(os.path.realpath(frame_path).encode("utf-8"))
+            if on_windows():
+                identity = f"{stat_result.st_dev}:{stat_result.st_ino}"
+            else:
+                identity = os.path.realpath(frame_path)
+            digest.update(identity.encode("utf-8"))
             digest.update(str(stat_result.st_size).encode("utf-8"))
             digest.update(str(int(stat_result.st_mtime)).encode("utf-8"))
         except OSError:
@@ -749,6 +758,32 @@ class SirilStaging(SirilSession):
             self.last_run_diagnostics.setdefault(CALIBRATION_MATCH_BLOCKING_FLAGS_KEY, []).append(flag)
         return selection.frames
 
+    def _stage_frame(self, source: str, destination: str, log: Callable[[str], Any]) -> None:
+        """Put one frame in the work folder; say once if frames are copied.
+
+        On Linux the frame is linked (a symbolic link). On Windows it is
+        hard-linked when the frame and the work folder are on the same NTFS
+        drive, and copied otherwise; the first copy in a run is written to
+        the stack log, because copying costs time and disk space.
+
+        Parameters
+        ----------
+        source : `str`
+            The library frame.
+        destination : `str`
+            Its name in the work folder.
+        log : `~collections.abc.Callable`
+            Writes a line to the stack log.
+        """
+        if stage_file(source, destination) == STAGED_BY_COPY and not self.last_run_diagnostics.get(
+            "frames_copied_into_work_folder"
+        ):
+            self.last_run_diagnostics["frames_copied_into_work_folder"] = True
+            log(
+                "Copying frames into the work folder: they cannot be linked from here "
+                "(another drive, or a synced or network folder). This takes extra time and disk space."
+            )
+
     def build_directories(
         self,
         id: str,
@@ -877,7 +912,7 @@ class SirilStaging(SirilSession):
 
                 dst_name = f"light_source_{light_idx:05d}.fits"
                 try:
-                    os.symlink(path, os.path.join(target_folder, "lights", dst_name))
+                    self._stage_frame(path, os.path.join(target_folder, "lights", dst_name), log)
                     # Tracked so the per-frame .lst star lists
                     # (0-indexed in the same symlink order) can be
                     # matched back to their original submitted paths
@@ -939,7 +974,9 @@ class SirilStaging(SirilSession):
                         log(f"Skipping corrupted/unreadable dark frame: {item}")
                         continue
                     try:
-                        os.symlink(item, os.path.join(target_folder, "darks", f"dark_{dark_idx:05d}.fits"))
+                        self._stage_frame(
+                            item, os.path.join(target_folder, "darks", f"dark_{dark_idx:05d}.fits"), log
+                        )
                         dark_idx += 1
                         # Kept for the calibration record: the darks applied.
                         self.last_run_diagnostics.setdefault(DARK_FRAME_PATHS_KEY, []).append(item)
@@ -958,7 +995,9 @@ class SirilStaging(SirilSession):
                         log(f"Skipping corrupted/unreadable bias frame: {item}")
                         continue
                     try:
-                        os.symlink(item, os.path.join(target_folder, "biases", f"bias_{bias_idx:05d}.fits"))
+                        self._stage_frame(
+                            item, os.path.join(target_folder, "biases", f"bias_{bias_idx:05d}.fits"), log
+                        )
                         bias_idx += 1
                         # The library file behind the link, for the quality
                         # step (the flat-to-light match reads the bias level
@@ -983,7 +1022,9 @@ class SirilStaging(SirilSession):
                         log(f"Skipping corrupted/unreadable flat frame: {item}")
                         continue
                     try:
-                        os.symlink(item, os.path.join(target_folder, "flats", f"flat_{flat_idx:05d}.fits"))
+                        self._stage_frame(
+                            item, os.path.join(target_folder, "flats", f"flat_{flat_idx:05d}.fits"), log
+                        )
                         flat_idx += 1
                         # The library file behind the link, so the quality
                         # step can rebuild the flat's dust map from it (the
@@ -1008,9 +1049,10 @@ class SirilStaging(SirilSession):
                         log(f"Skipping corrupted/unreadable flat bias frame: {item}")
                         continue
                     try:
-                        os.symlink(
+                        self._stage_frame(
                             item,
                             os.path.join(target_folder, "flat_biases", f"flat_bias_{flat_bias_idx:05d}.fits"),
+                            log,
                         )
                         flat_bias_idx += 1
                         self.last_run_diagnostics.setdefault(FLAT_BIAS_FRAME_PATHS_KEY, []).append(item)

@@ -54,7 +54,6 @@ import json
 import logging
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import tempfile
@@ -72,6 +71,7 @@ from astrometricslib._internal.drivers.siril_interface import siril_process_lock
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import NotFoundError, StorageError
 from astrometricslib.foundation.paths import siril_work_directory
+from astrometricslib.foundation.platform_tools import split_program_command
 from astrometricslib.foundation.run_abandonment import run_registered
 from astrometricslib.pipelines.shared.image_scaling import AUTOSTRETCH_SHADOWS_CLIP_SIGMA
 from astrometricslib.pipelines.shared.stack_preview_path import (
@@ -464,7 +464,7 @@ def run_preview_script(directory: str, commands: list[str], siril_executable: st
     script_path = os.path.join(directory, f"stack_preview{os.getpid()}.ssf")
     with open(script_path, "w", encoding="utf-8") as script_file:
         script_file.write("\n".join(commands) + "\n")
-    parts = shlex.split(siril_executable)
+    parts = split_program_command(siril_executable)
     if "flatpak" in parts[0] and "run" in parts:
         parts.insert(parts.index("run") + 1, "--filesystem=host")
     try:
@@ -499,7 +499,7 @@ def flatten_background(graxpert_executable: str, input_path: str, output_stem: s
         `True` if GraXpert exited without an error code.
     """
     arguments = [
-        *shlex.split(graxpert_executable),
+        *split_program_command(graxpert_executable),
         "-cli",
         "-cmd",
         "background-extraction",

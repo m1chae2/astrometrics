@@ -22,6 +22,7 @@ from astrometricslib._internal.drivers.siril_interface.run_models import (
 )
 from astrometricslib._internal.drivers.siril_interface.script_builders import SIRIL_SCRIPT_PREAMBLE
 from astrometricslib._internal.drivers.siril_interface.staging import SirilStaging
+from astrometricslib.foundation.platform_tools import quote_siril_path
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +234,7 @@ class SirilSpectralStacker(SirilStaging):
         stack_status_queue: queue.Queue[str] = queue.Queue()
         stack_script = [
             *SIRIL_SCRIPT_PREAMBLE,
-            f"cd {aligned_directory}",
+            f"cd {quote_siril_path(aligned_directory)}",
             f"convert {ALIGNED_SIRIL_SEQUENCE_NAME} -out=.",
             f"stack {ALIGNED_SIRIL_SEQUENCE_NAME} " + " ".join(stack_options),
         ]

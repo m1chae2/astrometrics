@@ -5,7 +5,7 @@
 # workflows). This workflow runs only the tests of the code that behaves
 # differently on Windows: the platform rules (program paths, path quoting,
 # frame staging by hard link or copy, taskkill, "spawn" workers), the Windows
-# data folders, Siril over Windows named pipes, the Siril setup, the database
+# data folders, Siril over Windows named pipes, the Siril and GraXpert setup, the database
 # backups, the observatory source on Windows, the MCP client configs, the
 # INDI stand-in, the Electron Windows adapter and the FITS viewer at display
 # scaling. Each of these was a real Windows break that the Ubuntu jobs could
@@ -77,7 +77,7 @@ jobs:
           astrometricslib/foundation/test/test_scratch_paths.py
           astrometricslib/foundation/test/test_launch_identity.py
           astrometricslib/_internal/drivers/test/test_siril_windows.py
-          astrometricslib/_internal/drivers/test/test_siril_setup.py
+          astrometricslib/_internal/drivers/test/test_program_setup.py
           astrometricslib/pipelines/stacking/test/test_fwhm_degradation_sampling.py
           astrometricslib/scripts/test/test_backup_library_databases.py
           astrometricslib/test/test_public_surface.py

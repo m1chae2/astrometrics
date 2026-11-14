@@ -4,9 +4,9 @@
 
 .DESCRIPTION
     Creates `.venv-win` (not `.venv`, which the Ubuntu/WSL side of this checkout may already use),
-    installs the project into it, seeds the local config file, sets up Siril (the stacking
-    program, downloaded from siril.org and checked against a pinned checksum), runs
-    `npm install`, and builds the UI MCP server in ui\mcp.
+    installs the project into it, seeds the local config file, sets up Siril and GraXpert
+    (the stacking and gradient-removal programs, each downloaded from its own project and checked
+    against a pinned checksum), runs `npm install`, and builds the UI MCP server in ui\mcp.
     Astrometrics needs Python 3.14 or newer. Run it from anywhere:
 
         powershell -ExecutionPolicy Bypass -File build\windows\setup_windows.ps1
@@ -54,12 +54,13 @@ if (-not (Test-Path $Config) -and (Test-Path $Template)) {
     Write-Host "Created $Config - edit it to set frames_path." -ForegroundColor Yellow
 }
 
-# 5. Siril, the stacking program: the portable version from siril.org, checked against its pinned
-# checksum and set as siril_executable. A Siril already named in the settings is kept.
-Write-Host "Setting up Siril..." -ForegroundColor Yellow
+# 5. Siril (stacking) and GraXpert (gradient removal): each downloaded from its own project,
+# checked against its pinned checksum, unpacked into the data folder and set in the settings.
+# A program already named in the settings is kept.
+Write-Host "Setting up Siril and GraXpert..." -ForegroundColor Yellow
 $env:PYTHONPATH = $ProjectRoot
-& $VenvPython -m astrometricslib.scripts.set_up_siril
-if ($LASTEXITCODE -ne 0) { throw "Siril setup failed." }
+& $VenvPython -m astrometricslib.scripts.set_up_programs
+if ($LASTEXITCODE -ne 0) { throw "Setting up Siril or GraXpert failed." }
 
 # 6. Node packages.
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {

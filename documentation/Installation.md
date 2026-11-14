@@ -5,7 +5,7 @@
 This page shows how to install the Astrometrics desktop app from source on Linux, check that it works, update it, and remove it. Windows 11 has its own setup, described in the note below. It is for people who want to run the app. To use only the Python library, see the [library quick start](how_to/library_quick_start.md).
 
 :::{note}
-Ubuntu is the main supported system, and the rest of this page is written for it. Windows 11 runs the app from source for work on frames that are already on disk: viewing, stacking with Siril and the quality measurements. Run `build\windows\setup_windows.ps1` once in PowerShell. It needs Python 3.14 and Node.js, sets up a Python environment and the Node packages, and downloads Siril from siril.org (checked against a pinned checksum, with no administrator rights needed). Then start the app with `build\windows\run_astrometrics.ps1`, or from the shortcut that `build\windows\install_desktop_icon.ps1` makes.
+Ubuntu is the main supported system, and the rest of this page is written for it. Windows 11 runs the app from source for work on frames that are already on disk: viewing, stacking with Siril and the quality measurements. Run `build\windows\setup_windows.ps1` once in PowerShell. It needs Python 3.14 and Node.js, sets up a Python environment and the Node packages, and downloads Siril (stacking) and GraXpert (removes the sky's gradient from the preview picture) from their own projects, each checked against a pinned checksum, with no administrator rights needed. Then start the app with `build\windows\run_astrometrics.ps1`, or from the shortcut that `build\windows\install_desktop_icon.ps1` makes.
 
 These parts do not work on Windows yet:
 

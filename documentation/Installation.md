@@ -136,7 +136,7 @@ The working library is on the local disk, so frames and stacks open at disk spee
 
 To work on the app with your telescope off, open **Settings**, then **Observatory**, and set **Observatory source** to **Simulated**. The app then shows a temporary copy of your library and a fake telescope on this computer. New simulated frames download, analyze and review with the normal code. Your real library is only read: every change goes to a temporary folder in `~/.local/share/astrometrics-simulator`, which is deleted when you switch back to **Real**.
 
-Switching restarts the backend and waits until the fake telescope is up. A **SIMULATOR** chip stays in the top bar; **SIMULATOR FAILED** means it could not start, and the app then has no telescope at all (never your real one). It needs `fuse-overlayfs`, `indiserver`, the `indi_simulator_*` drivers and `rsync`, and does not run in the packaged app.
+Switching restarts the backend and waits until the fake telescope is up. A **SIMULATOR** chip stays in the top bar; **SIMULATOR FAILED** means it could not start, and the app then has no telescope at all (never your real one). It needs `fuse-overlayfs`, `indiserver`, the `indi_simulator_*` drivers and `rsync`, and does not run in the packaged app. It does not run on Windows either, where INDI is not available: the **Simulated** button is turned off, and its tooltip says why.
 
 ## Check that it works
 

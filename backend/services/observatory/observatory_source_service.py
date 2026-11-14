@@ -16,6 +16,7 @@ service
 
 import logging
 import os
+import sys
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -38,6 +39,25 @@ from backend.launch_contract import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: Why the simulator cannot be chosen on Windows. It runs the INDI server and
+#: the INDI simulators, which exist only for Linux, and the backend's INDI
+#: client (PyIndi) is not available on Windows either.
+WINDOWS_REASON = "The simulator needs INDI, which is not available on Windows."
+
+
+def _on_windows() -> bool:
+    """Say whether the backend runs on Windows.
+
+    A function, not a constant, so tests can choose the system.
+
+    Returns
+    -------
+    windows : `bool`
+        `True` on Windows.
+    """
+    return sys.platform == "win32"
+
 
 #: Why the source cannot change when no launcher runs the backend.
 NOT_LAUNCHED_REASON = (
@@ -127,8 +147,11 @@ class ObservatorySourceService:
         -------
         reason : `str` or `None`
             `None` when a launcher runs the backend and the simulator's
-            programs are present.
+            programs are present. On Windows it is always `WINDOWS_REASON`:
+            the simulator cannot run there at all.
         """
+        if _on_windows():
+            return WINDOWS_REASON
         if not observatory_source.launched_by_launcher(self._environ):
             return NOT_LAUNCHED_REASON
         missing = self._missing_programs()
@@ -220,12 +243,14 @@ class ObservatorySourceService:
         InvalidArgumentError
             If the source is unknown (the app has no replay source).
         ConfigurationError
-            If no launcher runs the backend, the simulator's programs are
-            missing, or a job, a stack or a download is running (the restart
-            would cut it off).
+            If the simulator is chosen on Windows, no launcher runs the
+            backend, the simulator's programs are missing, or a job, a
+            stack or a download is running (the restart would cut it off).
         """
         if source not in SOURCES:
             raise InvalidArgumentError(f"The observatory source must be one of {SOURCES}.")
+        if source == SIMULATED and _on_windows():
+            raise ConfigurationError(WINDOWS_REASON)
         if not observatory_source.launched_by_launcher(self._environ):
             raise ConfigurationError(NOT_LAUNCHED_REASON)
         busy = self._busy_probe()

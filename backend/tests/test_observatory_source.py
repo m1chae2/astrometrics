@@ -30,11 +30,18 @@ from backend.public_interface import (
     read_choice,
     write_choice,
 )
-from backend.services.observatory.observatory_source_service import ObservatorySourceService
+from backend.services.observatory import observatory_source_service as source_module
+from backend.services.observatory.observatory_source_service import WINDOWS_REASON, ObservatorySourceService
 
 SIMULATOR_IDENTITY = LaunchIdentity(
     label="SIMULATOR", live_hardware=False, disposable_library=True, offline=True, locked_keys=("A.b",)
 )
+
+
+@pytest.fixture(autouse=True)
+def linux_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run every test as on Linux, where the simulator can run."""
+    monkeypatch.setattr(source_module, "_on_windows", lambda: False)
 
 
 @pytest.fixture
@@ -244,3 +251,24 @@ def test_launch_notes_are_reported_and_never_block_a_source_change(environment: 
     assert state["notes"] == ["gsc (star catalog): stars are not drawn"]
     assert state["missing_programs"] == []
     assert state["available"] is True
+
+
+def test_windows_reports_that_the_simulator_needs_indi(
+    environment: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On Windows the settings button is off, and its tooltip says why."""
+    monkeypatch.setattr(source_module, "_on_windows", lambda: True)
+    state = _service(environment).get_source()
+    assert state["available"] is False
+    assert state["unavailable_reason"] == WINDOWS_REASON
+
+
+def test_windows_refuses_the_simulator(environment: dict[str, str], monkeypatch: pytest.MonkeyPatch) -> None:
+    """Choosing the simulator on Windows is refused and saves nothing."""
+    monkeypatch.setattr(source_module, "_on_windows", lambda: True)
+    restarts: list[object] = []
+    service = _service(environment, restarts=restarts)
+    with pytest.raises(ConfigurationError, match="INDI"):
+        service.set_source(SIMULATED)
+    assert read_choice(environment).source == REAL
+    assert restarts == []

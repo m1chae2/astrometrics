@@ -5,6 +5,7 @@ nights is judged against all of them, and it compares the stack with the
 width its inputs predict.
 """
 
+import sys
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -14,6 +15,13 @@ from astrometricslib.models.quality.quality_summary import StackingPipelineQuali
 from astrometricslib.pipelines.stacking import fwhm_sampling
 
 MEASURE = "astrometricslib.pipelines.astrometry.pre_processing.fwhm.measure_image_fwhm"
+
+
+_SPAWNED_WORKERS_SKIP = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows starts workers with spawn, which imports the real function, not the patched one",
+)
+"""Parallel tests patch the measurer; only forked workers inherit it."""
 
 
 @pytest.fixture(autouse=True)
@@ -148,6 +156,7 @@ def fake_width_by_name(path: str) -> float | None:
     return None if path == "none" else float(path)
 
 
+@_SPAWNED_WORKERS_SKIP
 def test_parallel_measurement_keeps_order_and_skips_failures() -> None:
     """Worker processes give the same ordered widths as a serial loop."""
     paths = ["1.5", "bad", "3.5", "none", "2.5", "4.5"]
@@ -158,6 +167,7 @@ def test_parallel_measurement_keeps_order_and_skips_failures() -> None:
     assert parallel == serial
 
 
+@_SPAWNED_WORKERS_SKIP
 def test_parallel_widths_give_the_same_summary_as_serial() -> None:
     """The median and expected width do not depend on the worker count."""
     frames = [SimpleNamespace(path=str(1 + index / 10)) for index in range(12)]

@@ -15,6 +15,9 @@ gives exactly the Linux behavior when the program does not run on Windows:
   Developer Mode, which the app does not ask for, so it makes a hard link
   (the same file under a second name, free and instant, but only on one
   NTFS drive) and copies the file when that is not possible.
+* `worker_process_context` gives the way worker processes start: "fork"
+  on Linux, as the callers chose there, and "spawn" on Windows, which has no
+  "fork".
 * `stop_windows_process_tree` stops a program and everything it started on
   Windows with ``taskkill /T /F``; Linux signals the process group instead
   (`astrometricslib.foundation.run_abandonment.stop_process_group`).
@@ -22,6 +25,7 @@ gives exactly the Linux behavior when the program does not run on Windows:
 
 import contextlib
 import logging
+import multiprocessing
 import os
 import shlex
 import shutil
@@ -126,6 +130,23 @@ def stage_file(source: str, destination: str) -> str:
         logger.debug("No hard link for %s (%s); copying it", source, link_error)
     shutil.copy2(source, destination)
     return STAGED_BY_COPY
+
+
+def worker_process_context() -> multiprocessing.context.BaseContext:
+    """Give the way a process pool starts its workers.
+
+    The callers use "fork" on Linux: Python 3.14's default there
+    ("forkserver") re-imports the entry script, which fails for a script run
+    as ``python script.py``. Windows has no "fork", so there it is "spawn",
+    which starts each worker fresh and imports the worker function by name;
+    the workers must therefore be module-level functions.
+
+    Returns
+    -------
+    context : `multiprocessing.context.BaseContext`
+        The "fork" context on Linux, the "spawn" context on Windows.
+    """
+    return multiprocessing.get_context("spawn" if on_windows() else "fork")
 
 
 def stop_windows_process_tree(process: subprocess.Popen) -> None:

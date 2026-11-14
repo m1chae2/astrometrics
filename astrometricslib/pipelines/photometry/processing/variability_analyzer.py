@@ -29,7 +29,6 @@ has it.
 
 import logging
 import math
-import multiprocessing
 import os
 import statistics
 from concurrent.futures import ProcessPoolExecutor
@@ -44,6 +43,7 @@ from scipy.stats import median_abs_deviation
 from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_header_and_data
 from astrometricslib.foundation.observatory_site import ObservatorySite
+from astrometricslib.foundation.platform_tools import worker_process_context
 from astrometricslib.models.quality.photometry_quality import InputQualityAssessment
 from astrometricslib.models.quality.quality_summary import ExcludedFrame, FrameEnsembleComposition
 from astrometricslib.models.stellar_source import (
@@ -1050,8 +1050,10 @@ class VariabilityAnalyzer:
             # process instead, sidestepping that re-import entirely; it's
             # safe here because none of the pool workers touch the
             # SIMBAD/Gaia locks held by other threads in the parent.
+            # Windows has no 'fork' and uses 'spawn' (see
+            # `worker_process_context`).
             with ProcessPoolExecutor(
-                max_workers=max_workers, mp_context=multiprocessing.get_context("fork")
+                max_workers=max_workers, mp_context=worker_process_context()
             ) as executor:
                 results = list(executor.map(_process_single_frame_worker, worker_arguments))
 

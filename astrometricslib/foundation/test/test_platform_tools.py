@@ -155,3 +155,14 @@ def test_windows_stops_a_process_tree_with_taskkill(
     monkeypatch.setattr(platform_tools.subprocess, "run", fake_run)
     run_abandonment.stop_process_group(process)  # type: ignore[arg-type]
     assert calls == [["taskkill", "/PID", "4242", "/T", "/F"]]
+
+
+def test_worker_processes_fork_on_linux_and_spawn_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Linux keeps "fork"; Windows, which has no "fork", uses "spawn"."""
+    asked: list[str] = []
+    monkeypatch.setattr(platform_tools.multiprocessing, "get_context", lambda method: asked.append(method))
+    monkeypatch.setattr(platform_tools, "on_windows", lambda: False)
+    platform_tools.worker_process_context()
+    monkeypatch.setattr(platform_tools, "on_windows", lambda: True)
+    platform_tools.worker_process_context()
+    assert asked == ["fork", "spawn"]

@@ -98,15 +98,18 @@ def _measure_sample_fwhms(paths: list[str], worker_count: int) -> list[float | N
         skipped.
     """
     if worker_count > 1 and len(paths) > 1:
-        import multiprocessing
         from concurrent.futures import ProcessPoolExecutor
         from concurrent.futures.process import BrokenProcessPool
+
+        from astrometricslib.foundation.platform_tools import worker_process_context
 
         try:
             # 'fork' like the photometry pool: 'spawn' re-imports the entry
             # script, which fails for scripts run as `python script.py`.
+            # Windows has no 'fork' and uses 'spawn' (see
+            # `worker_process_context`).
             with ProcessPoolExecutor(
-                max_workers=worker_count, mp_context=multiprocessing.get_context("fork")
+                max_workers=worker_count, mp_context=worker_process_context()
             ) as executor:
                 return list(executor.map(_measure_one_frame_fwhm, paths))
         except (BrokenProcessPool, OSError) as pool_error:

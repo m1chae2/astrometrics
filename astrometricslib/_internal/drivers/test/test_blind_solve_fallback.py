@@ -28,8 +28,26 @@ def solver() -> AstrometryNetPlateSolveDriver:
     return AstrometryNetPlateSolveDriver()
 
 
+@pytest.fixture
+def image_path(tmp_path: Path) -> str:
+    """Give an image file that exists, as the app's images always do.
+
+    The local solve links the image into a scratch folder first. A Linux
+    symbolic link may point at a missing file; a Windows hard link or copy
+    needs a real one.
+
+    Returns
+    -------
+    path : `str`
+        A small file standing in for the image.
+    """
+    path = tmp_path / "image.fits"
+    path.write_bytes(b"image")
+    return str(path)
+
+
 def test_a_failed_hinted_solve_is_retried_blind(
-    solver: AstrometryNetPlateSolveDriver, monkeypatch: pytest.MonkeyPatch
+    solver: AstrometryNetPlateSolveDriver, image_path: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The regression: a bad hint must not be the end of the attempt."""
     commands = []
@@ -44,7 +62,7 @@ def test_a_failed_hinted_solve_is_retried_blind(
     monkeypatch.setattr(AstrometryNetPlateSolveDriver, "_run_solve_field", _fake_run)
 
     header = solver._solve_locally(
-        "/nonexistent/image.fits",
+        image_path,
         scale_units="arcsecperpix",
         scale_lower=2.54,
         scale_upper=2.81,
@@ -58,7 +76,7 @@ def test_a_failed_hinted_solve_is_retried_blind(
 
 
 def test_position_hints_alone_also_trigger_the_blind_retry(
-    solver: AstrometryNetPlateSolveDriver, monkeypatch: pytest.MonkeyPatch
+    solver: AstrometryNetPlateSolveDriver, image_path: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A wrong RA/Dec constrains the search just as fatally as scale."""
     commands = []
@@ -69,12 +87,12 @@ def test_position_hints_alone_also_trigger_the_blind_retry(
 
     monkeypatch.setattr(AstrometryNetPlateSolveDriver, "_run_solve_field", _fake_run)
 
-    assert solver._solve_locally("/nonexistent/image.fits", center_ra=10.0, center_dec=41.0) is not None
+    assert solver._solve_locally(image_path, center_ra=10.0, center_dec=41.0) is not None
     assert len(commands) == 2
 
 
 def test_a_successful_hinted_solve_does_not_retry(
-    solver: AstrometryNetPlateSolveDriver, monkeypatch: pytest.MonkeyPatch
+    solver: AstrometryNetPlateSolveDriver, image_path: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Hints are usually right; a second solve would double the cost."""
     calls = []
@@ -84,15 +102,13 @@ def test_a_successful_hinted_solve_does_not_retry(
         return fits.Header({"CRVAL1": 10.7})
 
     monkeypatch.setattr(AstrometryNetPlateSolveDriver, "_run_solve_field", _fake_run)
-    solver._solve_locally(
-        "/nonexistent/image.fits", scale_units="arcsecperpix", scale_lower=2.0, scale_upper=2.1
-    )
+    solver._solve_locally(image_path, scale_units="arcsecperpix", scale_lower=2.0, scale_upper=2.1)
 
     assert len(calls) == 1
 
 
 def test_an_unhinted_solve_is_attempted_only_once(
-    solver: AstrometryNetPlateSolveDriver, monkeypatch: pytest.MonkeyPatch
+    solver: AstrometryNetPlateSolveDriver, image_path: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """With no hints to blame, a failure is the field's, not the window's."""
     calls = []
@@ -103,7 +119,7 @@ def test_an_unhinted_solve_is_attempted_only_once(
 
     monkeypatch.setattr(AstrometryNetPlateSolveDriver, "_run_solve_field", _fake_run)
 
-    assert solver._solve_locally("/nonexistent/image.fits") is None
+    assert solver._solve_locally(image_path) is None
     assert len(calls) == 1
 
 

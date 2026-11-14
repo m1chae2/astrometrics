@@ -14,6 +14,7 @@ exhaustively.
 """
 
 import http.client
+from pathlib import Path
 from typing import Never
 
 import pytest
@@ -192,7 +193,9 @@ def test_solve_still_tries_the_local_solver_with_enough_sources(monkeypatch: pyt
     assert result is header
 
 
-def test_hinted_solve_exhausting_its_timeout_skips_the_blind_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_hinted_solve_exhausting_its_timeout_skips_the_blind_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A hinted solve that searched its full budget does not retry blind.
 
     Regression test for the M 13 incident: the hinted attempt used
@@ -210,15 +213,21 @@ def test_hinted_solve_exhausting_its_timeout_skips_the_blind_retry(monkeypatch: 
         lambda command, working_directory, timeout: run_solve_field_calls.append(command) or None,
     )
 
+    # The local solve links the image into a scratch folder; on Windows that
+    # is a hard link or a copy, which needs a file that exists.
+    image = tmp_path / "image.fits"
+    image.write_bytes(b"image")
     result = solver._solve_locally(
-        "/fake/image.fits", scale_units="arcsecperpix", scale_lower=1.0, scale_upper=2.0, solve_timeout=300
+        str(image), scale_units="arcsecperpix", scale_lower=1.0, scale_upper=2.0, solve_timeout=300
     )
 
     assert result is None
     assert len(run_solve_field_calls) == 1
 
 
-def test_hinted_solve_failing_quickly_still_retries_blind(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_hinted_solve_failing_quickly_still_retries_blind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A hinted solve that fails fast still gets the blind retry.
 
     Likely a hint mismatch, not an exhaustive search -- this is the
@@ -234,8 +243,12 @@ def test_hinted_solve_failing_quickly_still_retries_blind(monkeypatch: pytest.Mo
         lambda command, working_directory, timeout: run_solve_field_calls.append(command) or None,
     )
 
+    # The local solve links the image into a scratch folder; on Windows that
+    # is a hard link or a copy, which needs a file that exists.
+    image = tmp_path / "image.fits"
+    image.write_bytes(b"image")
     result = solver._solve_locally(
-        "/fake/image.fits", scale_units="arcsecperpix", scale_lower=1.0, scale_upper=2.0, solve_timeout=300
+        str(image), scale_units="arcsecperpix", scale_lower=1.0, scale_upper=2.0, solve_timeout=300
     )
 
     assert result is None

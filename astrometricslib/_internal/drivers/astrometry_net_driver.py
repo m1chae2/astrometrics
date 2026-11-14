@@ -42,6 +42,7 @@ from astrometricslib._internal.drivers.interfaces.plate_solve_driver import Plat
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
 from astrometricslib.foundation.offline import OfflineModeError, require_online
 from astrometricslib.foundation.paths import scratch_directory
+from astrometricslib.foundation.platform_tools import stage_file
 from astrometricslib.foundation.run_abandonment import run_registered
 from astrometricslib.foundation.run_tally import RunTally, add_to_bound_tally, bind_tally
 
@@ -408,10 +409,12 @@ class AstrometryNetPlateSolveDriver(PlateSolveDriver):
 
             try:
                 original_path = os.path.abspath(os.path.expanduser(image_path))
-                # Use a symlink in the temp dir to the image to keep the
-                # output files isolated avoid spaces in path issues too.
+                # Put the image in the temp dir under a plain name, which keeps
+                # the output files isolated and avoids spaces in the path:
+                # a symlink on Linux, a hard link or copy on Windows, which
+                # allows symlinks only in Developer Mode (`stage_file`).
                 working_path = os.path.join(tmp_dir, "input_image.fits")
-                os.symlink(original_path, working_path)
+                stage_file(original_path, working_path)
 
                 # 1. Base command with robust parameters
                 cmd = [

@@ -14,6 +14,7 @@ import pytest
 from astropy.io import fits
 from scipy.ndimage import gaussian_filter
 
+from astrometricslib.foundation.platform_tools import stage_file
 from astrometricslib.pipelines.stacking.pre_processing import flat_calibration as fc
 
 SIZE = 160
@@ -157,7 +158,7 @@ def test_a_flat_listed_twice_counts_once_and_is_not_noiseless(tmp_path: Path) ->
     """The same file listed twice is one frame, not a noiseless flat."""
     path = write_flat(tmp_path / "flat.fits", level=0.01, noise=0.045, seed=30)
     link = tmp_path / "link.fits"
-    link.symlink_to(path)
+    stage_file(path, str(link))
     assessment = fc.assess_flats([path, path, str(link)])
     assert assessment.frame_count == 1
     assert assessment.noise_fraction == pytest.approx(0.045, rel=0.15)

@@ -139,9 +139,11 @@ def _process_is_alive(process_id: int) -> bool:
     if process_id <= 0:
         return False
     if sys.platform == "win32":
-        # os.kill(pid, 0) would terminate the process on Windows; skip the
-        # check there and treat the record as live.
-        return True
+        # os.kill(pid, 0) would terminate the process on Windows, so ask the
+        # system's process list instead.
+        import psutil
+
+        return psutil.pid_exists(process_id)
     try:
         os.kill(process_id, 0)
     except ProcessLookupError:

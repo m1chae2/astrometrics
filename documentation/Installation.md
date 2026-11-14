@@ -122,6 +122,15 @@ On Linux, a laptop with an Intel card and an NVIDIA card can draw the app window
 
 The app chooses at start. It cannot switch cards while it runs, so plugging in or unplugging the charger changes nothing until you restart the app. The start-up log (`electron.log`) says which card was asked for and which one the window got. If NVIDIA was chosen but the window did not get it, the app restarts once on Intel.
 
+On Windows the `gpu` setting does nothing. Windows chooses the card for each program, and it often picks the power-saving Intel card. To draw the app on the NVIDIA card:
+
+1. Open Settings, then **System** > **Display** > **Graphics**.
+2. Under **Add an app**, choose **Desktop app**, then **Browse**, and pick `node_modules\electron\dist\electron.exe` in the Astrometrics folder. The app runs from the source folder, so this is the program that draws its window.
+3. Select the new entry, choose **Options**, then **High performance** (the NVIDIA card), and save.
+4. Restart the app.
+
+The start-up log, `main.log` in `%LOCALAPPDATA%\Astrometrics\State\logs`, names the card the window got, on the line that starts with `GPU:`.
+
 ### Storage layout
 
 Astrometrics keeps each kind of file in its own place. The library folders follow your settings. The other folders follow the Linux standard for program files (the XDG Base Directory layout), so a backup tool can skip the disposable ones and a cache can be wiped in one step. On Windows they are `Data`, `State` and `Cache` inside `%LOCALAPPDATA%\Astrometrics`, the folder Windows keeps for each user's program files on this computer. Logs, including the launcher's `logs\run`, go to `State`. The Electron app's browser profile goes to `Electron` in the same folder, not to the roaming profile (`%APPDATA%`), which Windows copies between computers. Settings stay in `~\.config\astrometrics`.

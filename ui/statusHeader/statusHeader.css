@@ -523,6 +523,11 @@
   display: flex;
   align-items: stretch;
   z-index: 9999;
+  /* The title bar and the status header under this overlay are window-drag
+     areas. Electron gives clicks in a drag area to the window, even when
+     something is drawn on top, so the close button over them did nothing.
+     Turning dragging off here lets every click reach the settings panel. */
+  -webkit-app-region: no-drag;
 }
 
 .overlay__backdrop {

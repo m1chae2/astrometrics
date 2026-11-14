@@ -102,8 +102,14 @@ $Targets = @(
     (Join-Path ([Environment]::GetFolderPath("Programs")) "Astrometrics.lnk")
 )
 # A taskbar pin is its own copy of the shortcut; update it if the user already pinned one.
-$Pinned = Join-Path $env:APPDATA "Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\Astrometrics.lnk"
-if (Test-Path $Pinned) { $Targets += $Pinned }
+# Windows names a new pin "Astrometrics (2).lnk" when the name is taken, so the pin is found by
+# the app ID it carries, not by its file name. No new pin is made: pinning is the user's choice.
+$PinFolder = Join-Path $env:APPDATA "Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"
+$ShellApp = New-Object -ComObject Shell.Application
+Get-ChildItem $PinFolder -Filter *.lnk -ErrorAction SilentlyContinue | ForEach-Object {
+    $pinId = $ShellApp.Namespace($_.DirectoryName).ParseName($_.Name).ExtendedProperty("System.AppUserModel.ID")
+    if ($pinId -eq $AppId) { $Targets += $_.FullName }
+}
 
 foreach ($path in $Targets) {
     $lnk = $Shell.CreateShortcut($path)

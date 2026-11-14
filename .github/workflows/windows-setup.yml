@@ -1,0 +1,99 @@
+# ==============================================================================
+# Purpose: Run the Windows setup script on a fresh Windows runner.
+#
+# build/windows/setup_windows.ps1 is what a new Windows user runs first. The
+# "windows CI" workflow only copies its pip lines, so this workflow runs the
+# real script, start to finish: it finds Python with the `py` launcher, makes
+# .venv-win, creates the config file, downloads Siril and GraXpert from their
+# own projects and checks their pinned checksums, installs the Node packages
+# and Electron, and builds the UI MCP server. Then it checks the result.
+#
+# The downloads are about 330 MB, so it runs only when the setup or what it
+# installs changes, and by hand.
+# ==============================================================================
+
+name: windows setup
+
+on:
+  push:
+    branches: [ main, master ]
+    paths: &paths
+      - 'build/windows/**'
+      - 'astrometricslib/_internal/drivers/program_setup.py'
+      - 'astrometricslib/scripts/set_up_programs.py'
+      - 'astrometricslib/astrometrics.config.example.toml'
+      - 'pyproject.toml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'ui/mcp/package.json'
+      - 'ui/mcp/package-lock.json'
+      - '.github/workflows/windows-setup.yml'
+  pull_request:
+    branches: [ main, master ]
+    paths: *paths
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# The job only reads the repository.
+permissions:
+  contents: read
+
+jobs:
+  setup:
+    name: Run the Windows Setup Script
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      # The script finds Python through the `py` launcher, as on a user's PC.
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Run setup_windows.ps1
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File build\windows\setup_windows.ps1
+
+      - name: Check what the setup made
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $python = ".venv-win\Scripts\python.exe"
+          if (-not (Test-Path $python)) { throw "No .venv-win was made." }
+          if (-not (Test-Path "astrometricslib\astrometrics.config.toml")) { throw "No config file was made." }
+          if (-not (Test-Path "ui\mcp\dist\index.js")) { throw "The UI MCP server was not built." }
+          if (-not (Test-Path "node_modules\electron\dist\electron.exe")) { throw "Electron was not downloaded." }
+          $env:PYTHONPATH = (Get-Location).Path
+          $siril = & $python -c "from astrometricslib.foundation.config import get_configuration as g; print(g().get_siril_executable() or '')"
+          $graxpert = & $python -c "from astrometricslib.foundation.config import get_configuration as g; print(g().get_graxpert_executable() or '')"
+          Write-Host "Siril: $siril"
+          Write-Host "GraXpert: $graxpert"
+          if (-not $siril -or -not (Test-Path $siril)) { throw "The settings do not name a Siril that exists." }
+          if (-not $graxpert -or -not (Test-Path $graxpert)) { throw "The settings do not name a GraXpert that exists." }
+          & $siril --version
+          if ($LASTEXITCODE -ne 0) { throw "Siril does not start." }
+
+      # Running it again must download nothing: the programs it set up are
+      # found and kept, so their files are not written again.
+      - name: Run the program setup again
+        shell: powershell
+        run: |
+          $env:PYTHONPATH = (Get-Location).Path
+          $python = ".venv-win\Scripts\python.exe"
+          $programs = & $python -c "from astrometricslib.foundation.config import get_configuration as g; c = g(); print(c.get_siril_executable()); print(c.get_graxpert_executable())"
+          $before = $programs | ForEach-Object { (Get-Item $_).LastWriteTimeUtc.Ticks }
+          & $python -m astrometricslib.scripts.set_up_programs
+          if ($LASTEXITCODE -ne 0) { throw "The second run failed." }
+          $after = $programs | ForEach-Object { (Get-Item $_).LastWriteTimeUtc.Ticks }
+          if (Compare-Object $before $after) { throw "The second run set up a program again." }

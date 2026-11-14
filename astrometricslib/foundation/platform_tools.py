@@ -18,6 +18,9 @@ gives exactly the Linux behavior when the program does not run on Windows:
 * `worker_process_context` gives the way worker processes start: "fork"
   on Linux, as the callers chose there, and "spawn" on Windows, which has no
   "fork".
+* `lower_process_priority` lets a worker process give way to the rest of
+  the computer: ``os.nice`` on Linux; Windows has no ``os.nice``, so there
+  the process gets the "below normal" priority class.
 * `stop_windows_process_tree` stops a program and everything it started on
   Windows with ``taskkill /T /F``; Linux signals the process group instead
   (`astrometricslib.foundation.run_abandonment.stop_process_group`).
@@ -147,6 +150,29 @@ def worker_process_context() -> multiprocessing.context.BaseContext:
         The "fork" context on Linux, the "spawn" context on Windows.
     """
     return multiprocessing.get_context("spawn" if on_windows() else "fork")
+
+
+def lower_process_priority(niceness: int) -> None:
+    """Lower this process's scheduling priority.
+
+    Linux adds `niceness` with ``os.nice``. Windows has no ``os.nice``; its
+    priorities come in classes, so any positive `niceness` there sets the
+    "below normal" class, the nearest match to the niceness of 10 the
+    callers use.
+
+    Parameters
+    ----------
+    niceness : `int`
+        How much to lower the priority, as on Linux. 0 leaves it unchanged.
+    """
+    if not niceness:
+        return
+    if not on_windows():
+        os.nice(niceness)
+        return
+    import psutil
+
+    psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
 
 
 def stop_windows_process_tree(process: subprocess.Popen) -> None:

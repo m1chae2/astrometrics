@@ -166,3 +166,35 @@ def test_worker_processes_fork_on_linux_and_spawn_on_windows(monkeypatch: pytest
     monkeypatch.setattr(platform_tools, "on_windows", lambda: True)
     platform_tools.worker_process_context()
     assert asked == ["fork", "spawn"]
+
+
+def test_linux_lowers_priority_with_nice(linux: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Linux adds the niceness with os.nice, as before."""
+    calls: list[int] = []
+    monkeypatch.setattr(platform_tools.os, "nice", calls.append, raising=False)
+    platform_tools.lower_process_priority(10)
+    platform_tools.lower_process_priority(0)
+    assert calls == [10]
+
+
+def test_windows_lowers_priority_with_the_below_normal_class(
+    windows: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows has no os.nice; the process gets the below-normal class."""
+    import psutil
+
+    classes: list[object] = []
+
+    class _Process:
+        """Stand-in for psutil.Process that records the class it is given."""
+
+        def nice(self, value: object) -> None:
+            """Record the priority class."""
+            classes.append(value)
+
+    monkeypatch.setattr(psutil, "Process", _Process)
+    monkeypatch.setattr(psutil, "BELOW_NORMAL_PRIORITY_CLASS", "below normal", raising=False)
+    monkeypatch.delattr(platform_tools.os, "nice", raising=False)
+    platform_tools.lower_process_priority(10)
+    platform_tools.lower_process_priority(0)
+    assert classes == ["below normal"]

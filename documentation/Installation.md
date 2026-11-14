@@ -122,14 +122,9 @@ On Linux, a laptop with an Intel card and an NVIDIA card can draw the app window
 
 The app chooses at start. It cannot switch cards while it runs, so plugging in or unplugging the charger changes nothing until you restart the app. The start-up log (`electron.log`) says which card was asked for and which one the window got. If NVIDIA was chosen but the window did not get it, the app restarts once on Intel.
 
-On Windows the `gpu` setting does nothing. Windows chooses the card for each program, and it often picks the power-saving Intel card. To draw the app on the NVIDIA card:
+On Windows the `gpu` setting does nothing. The app asks Windows for the high-performance card (the NVIDIA or AMD card next to an Intel one) every time it starts, on battery too. On a computer with one card this changes nothing. The start-up log, `main.log` in `%LOCALAPPDATA%\Astrometrics\State\logs`, names the card the window got, on the line that starts with `GPU:`.
 
-1. Open Settings, then **System** > **Display** > **Graphics**.
-2. Under **Add an app**, choose **Desktop app**, then **Browse**, and pick `node_modules\electron\dist\electron.exe` in the Astrometrics folder. The app runs from the source folder, so this is the program that draws its window.
-3. Select the new entry, choose **Options**, then **High performance** (the NVIDIA card), and save.
-4. Restart the app.
-
-The start-up log, `main.log` in `%LOCALAPPDATA%\Astrometrics\State\logs`, names the card the window got, on the line that starts with `GPU:`.
+GraXpert, which removes the sky's gradient from the preview picture, chooses its card on its own. On Windows it uses the graphics card through DirectML, Microsoft's interface for running AI models on any graphics card.
 
 ### Storage layout
 

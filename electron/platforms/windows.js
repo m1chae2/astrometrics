@@ -63,6 +63,18 @@ export function launcherCommand(app) {
  */
 export class WindowsPlatform extends BasePlatform {
   /**
+   * Asks Windows for the high-performance graphics card (an NVIDIA or AMD card next to an
+   * Intel one), so the Planetarium and the image viewer draw on it. Windows otherwise often
+   * picks the power-saving card. On a computer with one card this changes nothing. Unlike
+   * Linux's `auto` choice, it does not switch to the power-saving card on battery.
+   *
+   * @param {Electron.App} app
+   */
+  initCommandLine(app) {
+    app.commandLine.appendSwitch('force_high_performance_gpu');
+  }
+
+  /**
    * Sets AppUserModelId for taskbar grouping and notification routing, and keeps Electron's
    * own files (its browser caches, window position) in `%LOCALAPPDATA%\Astrometrics\Electron`.
    * Electron's default is the Roaming profile, which Windows copies between computers.

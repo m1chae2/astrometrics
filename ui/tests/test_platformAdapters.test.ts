@@ -81,6 +81,14 @@ describe('Electron Platform Adapters', () => {
       expect(tasks[2].arguments).toContain('-Mode "Image Processing"');
     });
 
+    /** Verifies the app asks Windows for the high-performance graphics card */
+    it('asks for the high-performance graphics card on Windows', () => {
+      const mockApp = { commandLine: { appendSwitch: vi.fn() } } as any;
+
+      platform.initCommandLine(mockApp);
+      expect(mockApp.commandLine.appendSwitch).toHaveBeenCalledWith('force_high_performance_gpu');
+    });
+
     /** Verifies astrometrics:// links start the launcher, with the link as -Url */
     it('registers the launcher as the astrometrics:// handler on Windows', () => {
       const mockApp = {

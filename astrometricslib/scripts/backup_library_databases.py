@@ -22,7 +22,6 @@ Run::
 """
 
 import argparse
-import fcntl
 import json
 import logging
 import re
@@ -36,6 +35,7 @@ from typing import IO
 from astrometricslib._internal.drivers.local_database import snapshot_sqlite_database
 from astrometricslib.foundation.launch_identity import read_launch_identity
 from astrometricslib.foundation.paths import backup_directory, data_directory
+from astrometricslib.foundation.storage.process_locks import lock_open_file, unlock_open_file
 
 logger = logging.getLogger(__name__)
 
@@ -233,11 +233,26 @@ def acquire_lock(lock_path: Path) -> IO[str] | None:
     """
     lock_file = open(lock_path, "w")
     try:
-        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        # `flock` on Linux, `msvcrt` on Windows.
+        lock_open_file(lock_file, blocking=False)
     except OSError:
         lock_file.close()
         return None
     return lock_file
+
+
+def release_lock(lock_file: IO[str]) -> None:
+    """Release the lock taken by `acquire_lock` and close its file.
+
+    Parameters
+    ----------
+    lock_file : `typing.IO`
+        The file `acquire_lock` returned.
+    """
+    try:
+        unlock_open_file(lock_file)
+    finally:
+        lock_file.close()
 
 
 def read_state(state_path: Path) -> dict:
@@ -390,7 +405,7 @@ def main(argv: list[str] | None = None) -> int:
         apply_retention(backup_root, snapshot_name, dry_run)
         return 0
     finally:
-        lock_file.close()
+        release_lock(lock_file)
 
 
 if __name__ == "__main__":

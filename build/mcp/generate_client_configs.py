@@ -129,7 +129,7 @@ SERVERS = (
         "astrometrics-backend",
         python_module="mcp_servers.backend",
         manifest="mcp_servers/backend/tool_manifest.json",
-        # The launcher sets MPLCONFIGDIR to a folder in the system's temp folder.
+        # The launcher sets MPLCONFIGDIR inside the system's temp folder.
         extra_environment={"ASTROMETRICS_API_BASE": "http://127.0.0.1:5000"},
     ),
     ServerSpec(

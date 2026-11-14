@@ -1,32 +1,44 @@
-# PowerShell script to run Astrometrics on Windows
-# Usage: .\scripts\windows\run_windows.ps1
+<#
+.SYNOPSIS
+    Starts Astrometrics from built web pages, with Electron starting the backend.
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = Resolve-Path "$ScriptDir\..\.."
+.DESCRIPTION
+    Builds the web pages and runs `npm start`, so Electron starts the backend
+    itself (electron/platforms/windows.js picks `.venv-win\Scripts\python.exe`).
+    This is how the installed app starts, so use it to check that path. For
+    day-to-day work use run_astrometrics.ps1, which runs the Vite dev server
+    and starts the backend separately.
 
+    Usage:
+        build\windows\run_windows.ps1
+#>
+
+$ErrorActionPreference = "Stop"
+$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 Set-Location $ProjectRoot
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "Starting Astrometrics..." -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
-# Check for .venv
-if (-not (Test-Path ".venv")) {
-    Write-Host "Error: Virtual environment not found. Please run .\scripts\windows\setup_windows.ps1 first." -ForegroundColor Red
+if (-not (Test-Path ".venv-win\Scripts\python.exe")) {
+    Write-Host "Not set up yet. Run build\windows\setup_windows.ps1 first." -ForegroundColor Red
     exit 1
 }
-
-# Check for node_modules
 if (-not (Test-Path "node_modules")) {
-    Write-Host "Error: node_modules not found. Please run .\scripts\windows\setup_windows.ps1 first." -ForegroundColor Red
+    Write-Host "node_modules not found. Run build\windows\setup_windows.ps1 first." -ForegroundColor Red
     exit 1
 }
 
-# Set environment variables for electron
+# Electron writes its own log lines to the console as well.
 $env:ELECTRON_ENABLE_LOGGING = "true"
 
-Write-Host "Building application..." -ForegroundColor Cyan
+Write-Host "Building the web pages..." -ForegroundColor Cyan
 npm run build
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Web page build failed." -ForegroundColor Red
+    exit 1
+}
 
-Write-Host "Launching with npm start..." -ForegroundColor Green
+Write-Host "Starting Electron..." -ForegroundColor Green
 npm start

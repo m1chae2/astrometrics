@@ -4,6 +4,8 @@
  * blur dismissal, Linux Wayland decorators, and macOS menubar/dock behaviors.
  */
 
+import fs from 'fs';
+import path from 'path';
 import { describe, it, expect, vi } from 'vitest';
 import { BasePlatform } from '../../electron/platforms/base.js';
 import { WindowsPlatform } from '../../electron/platforms/windows.js';
@@ -80,6 +82,32 @@ describe('Electron Platform Adapters', () => {
         symbolColor: '#e0e0e0',
         height: 48
       });
+    });
+
+    /** Verifies the dev backend uses the Windows virtual environment that setup_windows.ps1 makes */
+    it('starts the dev backend from .venv-win before .venv', () => {
+      const exists = vi.spyOn(fs, 'existsSync').mockImplementation(() => true);
+      try {
+        const resolved = platform.resolveBackendExecutable('C:\\app', false);
+        expect(resolved.command).toBe(path.join('C:\\app', '.venv-win', 'Scripts', 'python.exe'));
+        expect(resolved.args).toEqual(['-m', 'backend.main_backend']);
+        expect(resolved.isBinary).toBe(false);
+      } finally {
+        exists.mockRestore();
+      }
+    });
+
+    /** Verifies a checkout with only a plain .venv still finds its Python */
+    it('falls back to .venv when .venv-win is missing', () => {
+      const exists = vi.spyOn(fs, 'existsSync').mockImplementation(
+        candidate => !String(candidate).includes('.venv-win')
+      );
+      try {
+        const resolved = platform.resolveBackendExecutable('C:\\app', false);
+        expect(resolved.command).toBe(path.join('C:\\app', '.venv', 'Scripts', 'python.exe'));
+      } finally {
+        exists.mockRestore();
+      }
     });
   });
 

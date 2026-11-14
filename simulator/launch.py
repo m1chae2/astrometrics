@@ -44,7 +44,6 @@ Usage::
 """
 
 import argparse
-import fcntl
 import json
 import logging
 import os
@@ -58,6 +57,11 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
+
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
 
 from astrometricslib.drivers import OFFLINE_VARIABLE
 from simulator import phd2_launch
@@ -198,9 +202,10 @@ class World:
 def acquire_world_lock(root: Path) -> int | None:
     """Take the exclusive lock of a simulator folder, without waiting.
 
-    The lock is an ``flock`` on ``<root>/launcher.lock``. The system drops it
-    when the process ends, even after a crash, so it never goes stale. The
-    descriptor is not inherited by child processes.
+    The lock is on ``<root>/launcher.lock``: an ``flock`` on Linux, a
+    one-byte ``msvcrt`` lock on Windows, which has no ``flock``. The system
+    drops it when the process ends, even after a crash, so it never goes
+    stale. The descriptor is not inherited by child processes.
 
     Parameters
     ----------
@@ -216,13 +221,51 @@ def acquire_world_lock(root: Path) -> int | None:
     root.mkdir(parents=True, exist_ok=True)
     descriptor = os.open(root / LOCK_FILE_NAME, os.O_RDWR | os.O_CREAT, 0o600)
     try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
+        _lock_descriptor(descriptor)
+    except OSError:
+        # Another launcher holds it: `BlockingIOError` from `flock`, or
+        # `PermissionError` from `msvcrt` on Windows.
         os.close(descriptor)
         return None
-    os.ftruncate(descriptor, 0)
+    if sys.platform == "win32":
+        # The locked first byte cannot be cut or written past on Windows, so
+        # the process number goes after it.
+        os.lseek(descriptor, 1, os.SEEK_SET)
+        os.ftruncate(descriptor, 1)
+    else:
+        os.ftruncate(descriptor, 0)
     os.write(descriptor, f"{os.getpid()}\n".encode())
     return descriptor
+
+
+def _lock_descriptor(descriptor: int) -> None:
+    """Lock an open file at once, or raise `OSError` if it is held elsewhere.
+
+    Parameters
+    ----------
+    descriptor : `int`
+        An open file descriptor.
+    """
+    if sys.platform == "win32":
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+    else:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unlock_descriptor(descriptor: int) -> None:
+    """Release the lock taken by `_lock_descriptor`.
+
+    Parameters
+    ----------
+    descriptor : `int`
+        The locked file descriptor.
+    """
+    if sys.platform == "win32":
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+    else:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
 
 
 def release_world_lock(descriptor: int) -> None:
@@ -234,7 +277,7 @@ def release_world_lock(descriptor: int) -> None:
         The descriptor it returned.
     """
     try:
-        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        _unlock_descriptor(descriptor)
     finally:
         os.close(descriptor)
 

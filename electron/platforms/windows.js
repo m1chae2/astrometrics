@@ -111,9 +111,14 @@ export class WindowsPlatform extends BasePlatform {
       }
     }
 
-    // Dev or unpackaged fallback
-    const venvPython = path.join(appPath, '.venv', 'Scripts', 'python.exe');
-    if (fs.existsSync(venvPython)) {
+    // Dev or unpackaged fallback. build/windows/setup_windows.ps1 makes
+    // `.venv-win`, so a checkout shared with Linux (whose `.venv` is there too)
+    // keeps both. A plain `.venv` is still used when it is the only one.
+    const venvPython = [
+      path.join(appPath, '.venv-win', 'Scripts', 'python.exe'),
+      path.join(appPath, '.venv', 'Scripts', 'python.exe')
+    ].find(candidate => fs.existsSync(candidate));
+    if (venvPython) {
       return { command: venvPython, args: ['-m', 'backend.main_backend'], isBinary: false };
     }
 

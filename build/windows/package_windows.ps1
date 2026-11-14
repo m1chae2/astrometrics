@@ -1,44 +1,62 @@
-# PowerShell script to package Astrometrics for Windows
-# Usage: .\scripts\windows\package_windows.ps1
+<#
+.SYNOPSIS
+    Packages Astrometrics as a Windows installer.
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = Resolve-Path "$ScriptDir\..\.."
+.DESCRIPTION
+    Windows counterpart of `npm run electron-forge:make`. That npm script calls
+    `.venv/bin/pyinstaller`, a Linux path, so this script runs each step itself
+    with the Windows virtual environment (`.venv-win`, made by setup_windows.ps1):
+    the icon, the web pages (Vite), the backend program (PyInstaller), then the
+    installer (Electron Forge). Installers are written to the `out` folder.
 
+    Usage:
+        build\windows\package_windows.ps1
+#>
+
+$ErrorActionPreference = "Stop"
+$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 Set-Location $ProjectRoot
+
+$Python = Join-Path $ProjectRoot ".venv-win\Scripts\python.exe"
+
+# Stops the script with a message in red.
+function Stop-WithError([string]$Message) {
+    Write-Host $Message -ForegroundColor Red
+    exit 1
+}
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "Packaging Astrometrics for Windows..." -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
-# Check if orbit.ico exists
-if (-not (Test-Path "assets\orbit.ico")) {
-    Write-Host "Warning: assets\orbit.ico not found. Attempting to generate it..." -ForegroundColor Yellow
-    if (Test-Path ".venv\Scripts\python.exe") {
-        & ".\.venv\Scripts\python.exe" "scripts\windows\convert_icon.py"
-    }
-    else {
-        Write-Host "Error: Python venv not found. Cannot generate icon." -ForegroundColor Red
-        exit 1
-    }
+if (-not (Test-Path $Python)) {
+    Stop-WithError "Not set up yet. Run build\windows\setup_windows.ps1 first."
 }
 
-Write-Host "Building frontend (Vite)..." -ForegroundColor Yellow
-npm run build
+# The backend is bundled with PyInstaller, which is in the "dev" extras.
+& $Python -c "import PyInstaller" 2>$null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "Frontend build failed." -ForegroundColor Red
-    exit 1
+    Stop-WithError "PyInstaller is missing. Install it with: .venv-win\Scripts\python.exe -m pip install pyinstaller"
 }
 
-Write-Host "Running Electron Forge Make..." -ForegroundColor Green
-npm run electron-forge:make
+# The installer and the window use orbit.ico; make it from the PNG if it is missing.
+if (-not (Test-Path "assets\orbit.ico")) {
+    Write-Host "assets\orbit.ico not found. Making it from the PNG..." -ForegroundColor Yellow
+    & $Python (Join-Path $PSScriptRoot "convert_icon.py")
+    if ($LASTEXITCODE -ne 0) { Stop-WithError "Could not make assets\orbit.ico." }
+}
 
-if ($LASTEXITCODE -eq 0) {
-    Write-Host ""
-    Write-Host "Packaging complete!" -ForegroundColor Green
-    Write-Host "Installers can be found in the 'out' directory." -ForegroundColor Green
-}
-else {
-    Write-Host ""
-    Write-Host "Packaging failed." -ForegroundColor Red
-    exit 1
-}
+Write-Host "Building the web pages (Vite)..." -ForegroundColor Yellow
+npm run build
+if ($LASTEXITCODE -ne 0) { Stop-WithError "Web page build failed." }
+
+Write-Host "Building the backend program (PyInstaller)..." -ForegroundColor Yellow
+& $Python -m PyInstaller backend\backend.spec --noconfirm --clean
+if ($LASTEXITCODE -ne 0) { Stop-WithError "Backend build failed." }
+
+Write-Host "Making the installer (Electron Forge)..." -ForegroundColor Yellow
+npx electron-forge make
+if ($LASTEXITCODE -ne 0) { Stop-WithError "Packaging failed." }
+
+Write-Host ""
+Write-Host "Packaging complete. The installers are in the 'out' folder." -ForegroundColor Green

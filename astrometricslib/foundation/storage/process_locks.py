@@ -223,7 +223,7 @@ def describe_slot_holders(resource_name: str, max_slots: int = 1) -> str:
     )
 
 
-def _lock_file(fh: TextIO, blocking: bool) -> None:
+def lock_open_file(fh: TextIO, blocking: bool) -> None:
     """Take an exclusive lock on an open file.
 
     Parameters
@@ -253,8 +253,8 @@ def _lock_file(fh: TextIO, blocking: bool) -> None:
         fcntl.flock(fh, fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 
-def _unlock_file(fh: TextIO) -> None:
-    """Release the lock taken by `_lock_file`.
+def unlock_open_file(fh: TextIO) -> None:
+    """Release the lock taken by `lock_open_file`.
 
     Parameters
     ----------
@@ -299,7 +299,7 @@ def file_lock(lock_path: str, blocking: bool = False) -> Generator[TextIO]:
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)
     fh = open(lock_path, "w")
     try:
-        _lock_file(fh, blocking)
+        lock_open_file(fh, blocking)
         yield fh
     except BlockingIOError as e:
         raise DeviceInUseError(
@@ -307,7 +307,7 @@ def file_lock(lock_path: str, blocking: bool = False) -> Generator[TextIO]:
             details={"lock_path": lock_path},
         ) from e
     finally:
-        _unlock_file(fh)
+        unlock_open_file(fh)
         fh.close()
 
 

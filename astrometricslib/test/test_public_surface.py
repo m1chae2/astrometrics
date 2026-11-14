@@ -141,6 +141,7 @@ EXPECTED_MODULE_NAMES = {
         "launch_identity_from_settings",
         "library_folders",
         "locks_directory",
+        "move_legacy_windows_data",
         "network_is_offline",
         "read_data_versions",
         "read_launch_identity",

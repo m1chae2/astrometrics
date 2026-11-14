@@ -151,7 +151,8 @@ try {
     # window and quits (the second-instance event), which never sees the URL above.
     if ($Mode) { $electronArgs += '--mode="' + $Mode + '"' }
     if ($Url) { $electronArgs += '"' + $Url + '"' }
-    if ($File) { $electronArgs += '"' + (Resolve-Path $File).Path + '"' }
+    # -LiteralPath: a file name with [ or ] is a name, not a wildcard pattern.
+    if ($File) { $electronArgs += '"' + (Resolve-Path -LiteralPath $File).Path + '"' }
     $electronProc = Start-Process $Electron -ArgumentList $electronArgs -WorkingDirectory $Root `
         -PassThru -RedirectStandardOutput (Join-Path $LogDir "electron.log") `
         -RedirectStandardError (Join-Path $LogDir "electron.err.log")

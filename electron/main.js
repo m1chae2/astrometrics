@@ -46,8 +46,9 @@ platform.configureIdentity(app);
 function extractFilePath(args) {
   if (!Array.isArray(args)) return null;
   for (const arg of args) {
-    if (!arg || arg.startsWith('-') || arg === '.') continue;
-    if (arg.endsWith('electron') || arg.endsWith('electron.js') || arg.endsWith('main.js')) continue;
+    if (!arg || arg.startsWith('-') || arg === '.' || arg.startsWith('astrometrics://')) continue;
+    // The program itself: `electron` on Linux, `electron.exe` on Windows.
+    if (arg.endsWith('electron') || arg.endsWith('electron.exe') || arg.endsWith('electron.js') || arg.endsWith('main.js')) continue;
     return path.resolve(arg);
   }
   return null;

@@ -12,6 +12,10 @@
     in electron/platforms/windows.js. Windows uses that ID to match a pinned icon to the running
     window. Without it the shortcut counts as PowerShell, so the open app shows as a second icon
     next to the pinned one. A taskbar pin made before this fix is updated too.
+
+    It also adds "Open with Astrometrics" for .fits and .fit files, for the current user only (no
+    administrator rights). It does not make Astrometrics the default program for them: Windows
+    leaves that choice to the user ("Open with" > "Always").
 #>
 
 $ErrorActionPreference = "Stop"
@@ -100,5 +104,28 @@ foreach ($path in $Targets) {
     [ShortcutAppId]::Set($path, $AppId)
     Write-Host "Created $path"
 }
+# "Open with Astrometrics" for FITS files. A program ID describes how to open them (the launcher
+# with -File); each extension lists it under OpenWithProgids, which adds it to the "Open with"
+# menu without taking over the default program.
+$ProgId = "Astrometrics.FITS"
+$Classes = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey("Software\Classes")
+$PowerShell = (Get-Command powershell.exe).Source
+$progKey = $Classes.CreateSubKey($ProgId)
+$progKey.SetValue("", "FITS Image")
+$progKey.SetValue("FriendlyTypeName", "FITS Image")
+$progKey.CreateSubKey("DefaultIcon").SetValue("", "`"$Icon`",0")
+$progKey.CreateSubKey("shell\open").SetValue("FriendlyAppName", "Astrometrics")
+$progKey.CreateSubKey("shell\open\command").SetValue(
+    "", "`"$PowerShell`" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Launcher`" -File `"%1`"")
+foreach ($extension in @(".fits", ".fit")) {
+    $Classes.CreateSubKey("$extension\OpenWithProgids").SetValue($ProgId, "", [Microsoft.Win32.RegistryValueKind]::String)
+}
+# Tells Explorer that file associations changed, so the menu shows the entry at once.
+Add-Type -Namespace Astrometrics -Name Shell -MemberDefinition @"
+[DllImport("shell32.dll")] public static extern void SHChangeNotify(int eventId, uint flags, IntPtr item1, IntPtr item2);
+"@
+[Astrometrics.Shell]::SHChangeNotify(0x08000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
+Write-Host "Added Open with Astrometrics for .fits and .fit files."
+
 Write-Host "Done. Double-click Astrometrics on the Desktop to start it."
 Write-Host "If the taskbar still shows two icons, unpin Astrometrics and pin it again from the Start menu."

@@ -42,6 +42,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Both jobs only read the repository.
+permissions:
+  contents: read
+
 jobs:
   python:
     name: Run Windows Python Tests

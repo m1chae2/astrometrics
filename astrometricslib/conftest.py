@@ -96,7 +96,11 @@ def _seed_synthetic_test_library(directories: SimpleNamespace) -> None:
 
     app_config = AppConfiguration()
     resolved_library_path = Path(str(app_config.get_library_path())).resolve()
-    if directories.temp not in resolved_library_path.parents and resolved_library_path != directories.temp:
+    # Resolved like the library path, so both use the same spelling. Windows
+    # can name one folder two ways (a short RUNNER~1 form and the full
+    # runneradmin name on a CI runner), and only resolving makes them equal.
+    sandbox = Path(directories.temp).resolve()
+    if sandbox not in resolved_library_path.parents and resolved_library_path != sandbox:
         raise RuntimeError(
             "Refusing to seed synthetic test data: resolved library path "
             f"'{resolved_library_path}' is outside the sandboxed test directory "

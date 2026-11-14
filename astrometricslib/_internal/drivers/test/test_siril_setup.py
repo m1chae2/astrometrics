@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from astrometricslib._internal.drivers import siril_setup
+from astrometricslib.foundation import platform_tools
 from astrometricslib.foundation.errors import ConfigurationError, ExternalServiceError
 from astrometricslib.scripts import set_up_siril as setup_script
 
@@ -199,7 +200,10 @@ def test_the_script_keeps_a_siril_the_settings_already_name(
     own_siril = tmp_path / "My Siril" / "siril-cli.exe"
     own_siril.parent.mkdir()
     own_siril.write_bytes(b"")
+    # Windows everywhere, including the program-path reader: on Linux it
+    # would split this path at its space, as Linux rules say it should.
     monkeypatch.setattr(setup_script, "on_windows", lambda: True)
+    monkeypatch.setattr(platform_tools, "on_windows", lambda: True)
     monkeypatch.setattr(setup_script, "get_configuration", lambda: _Settings(str(own_siril)))
     monkeypatch.setattr(setup_script, "installed_siril_program", lambda: None)
 

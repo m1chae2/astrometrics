@@ -1,0 +1,106 @@
+# ==============================================================================
+# Purpose: Check the Windows-only code paths on a Windows runner.
+#
+# Ubuntu is the main system and the full test suites run there (the other
+# workflows). This workflow runs only the tests of the code that behaves
+# differently on Windows: the platform rules (program paths, path quoting,
+# frame staging by hard link or copy, taskkill, "spawn" workers), the Windows
+# data folders, Siril over Windows named pipes, the Siril setup, the database
+# backups, the observatory source on Windows, the MCP client configs, the
+# INDI stand-in, the Electron Windows adapter and the FITS viewer at display
+# scaling. Each of these was a real Windows break that the Ubuntu jobs could
+# not see. Many other tests still assume Linux (FIFOs, process groups,
+# symlinks, /proc), so the whole suite is not run here.
+# ==============================================================================
+
+name: windows CI
+
+on:
+  push:
+    branches: [ main, master ]
+    paths: &paths
+      - 'astrometricslib/**'
+      - 'wayfindinglib/**'
+      - 'backend/**'
+      - 'mcp_servers/**'
+      - 'build/mcp/**'
+      - 'build/windows/**'
+      - 'electron/**'
+      - 'ui/common/fitsViewer/**'
+      - 'ui/tests/test_platformAdapters.test.ts'
+      - 'conftest.py'
+      - 'pyproject.toml'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/windows.yml'
+  pull_request:
+    branches: [ main, master ]
+    paths: *paths
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Run Windows Python Tests
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+          cache: 'pip'
+
+      # The same install as build/windows/setup_windows.ps1, plus the dev
+      # extra for the test tools. No INDI: it is not available on Windows.
+      - name: Install the project
+        run: |
+          python -m pip install --upgrade pip hatchling editables setuptools_scm Cython numpy
+          python -m pip install --no-build-isolation -e ".[mcp,dev]"
+
+      - name: Run the Windows-sensitive tests
+        env:
+          PYTHONPATH: .
+          ASTROMETRICS_TESTING: "1"
+        run: >-
+          python -m pytest -q -p no:cacheprovider
+          astrometricslib/foundation/test/test_platform_tools.py
+          astrometricslib/foundation/test/test_scratch_paths.py
+          astrometricslib/foundation/test/test_launch_identity.py
+          astrometricslib/_internal/drivers/test/test_siril_windows.py
+          astrometricslib/_internal/drivers/test/test_siril_setup.py
+          astrometricslib/pipelines/stacking/test/test_fwhm_degradation_sampling.py
+          astrometricslib/scripts/test/test_backup_library_databases.py
+          astrometricslib/test/test_public_surface.py
+          backend/tests/test_observatory_source.py
+          backend/tests/test_library_backup_service.py
+          backend/tests/test_client_configs.py
+          mcp_servers/gaps
+          wayfindinglib/drivers/indi/test/test_pyindi_stub.py
+          wayfindinglib/drivers/test/test_indi_reconnect.py
+
+  frontend:
+    name: Run Windows Frontend Tests
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      # --ignore-scripts: the "prepare" script is POSIX shell, which Windows
+      # cannot run (build/windows/setup_windows.ps1 does the same).
+      - name: Install Node packages
+        run: npm ci --ignore-scripts
+
+      - name: Run the Windows-sensitive tests
+        run: npx vitest run ui/tests/test_platformAdapters.test.ts ui/common/fitsViewer/tests/test_canvasDrawerScaling.test.tsx --coverage.enabled=false

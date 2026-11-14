@@ -7,6 +7,7 @@
     installs the project into it, seeds the local config file, sets up Siril and GraXpert
     (the stacking and gradient-removal programs, each downloaded from its own project and checked
     against a pinned checksum), runs `npm install`, and builds the UI MCP server in ui\mcp.
+    At the end it warns when Windows long paths are turned off, and says how to turn them on.
     Astrometrics needs Python 3.14 or newer. Run it from anywhere:
 
         powershell -ExecutionPolicy Bypass -File build\windows\setup_windows.ps1
@@ -88,6 +89,18 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Building the UI MCP server failed." }
 } finally {
     Pop-Location
+}
+
+# 8. Long paths. Windows limits a path to 260 characters unless long paths are turned on, and a
+# library on Google Drive (G:\My Drive\Library\lights\<target>\<telescope>\<camera>\...) plus
+# Siril's file names can pass that. Turning them on needs administrator rights, so this only
+# warns and says how; it changes nothing.
+$LongPaths = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name LongPathsEnabled -ErrorAction SilentlyContinue).LongPathsEnabled
+if ($LongPaths -ne 1) {
+    Write-Host "Long paths are turned off on this computer. Paths longer than 260 characters," -ForegroundColor Yellow
+    Write-Host "for example deep folders in a Google Drive library, can then fail to open." -ForegroundColor Yellow
+    Write-Host "To turn them on, run this once in PowerShell as administrator, then restart:" -ForegroundColor Yellow
+    Write-Host '    New-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force' -ForegroundColor Yellow
 }
 
 Write-Host "Setup complete. Next: build\windows\install_desktop_icon.ps1" -ForegroundColor Green

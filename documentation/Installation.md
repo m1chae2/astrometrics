@@ -14,6 +14,8 @@ These parts do not work on Windows yet:
 - The local plate solver. Plate solving uses the online astrometry.net service instead, which needs an API key.
 - A packaged installer. Windows runs from a copy of the source code.
 
+Windows limits a path to 260 characters unless long paths are turned on, and a deep library folder, for example on Google Drive, can pass that. The setup script warns when they are off and prints the one-line command that turns them on. It needs administrator rights and a restart.
+
 Keep the frames on a local drive if you can. Siril then reads them through hard links, which cost no space. Frames in a Google Drive or network folder are copied before each stack, which takes time and disk space.
 :::
 

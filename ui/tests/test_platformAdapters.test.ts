@@ -34,12 +34,15 @@ describe('Electron Platform Adapters', () => {
         name: '',
         setAppUserModelId: vi.fn(),
         setPath: vi.fn(),
+        setToastActivatorCLSID: vi.fn(),
         getPath: vi.fn(() => 'C:/Users/u')
       } as any;
 
       platform.configureIdentity(mockApp);
       expect(mockApp.name).toBe('astrometrics');
       expect(mockApp.setAppUserModelId).toHaveBeenCalledWith('astrometrics');
+      // The fixed notification activator ID the Start menu shortcut also carries.
+      expect(mockApp.setToastActivatorCLSID).toHaveBeenCalledWith('{2CEFF8B0-F01F-4064-B293-17520A983AE2}');
       expect(mockApp.setPath).toHaveBeenCalledWith(
         'userData', path.join('C:/Users/u/AppData/Local', 'Astrometrics', 'Electron')
       );

@@ -199,7 +199,7 @@ The system packages stay installed. Remove them with `apt` only if no other prog
 On Windows:
 
 1. Close the app, then run `build\windows\run_astrometrics.ps1 -Stop`.
-2. Delete the `Astrometrics` shortcuts from the Desktop and the Start menu, and unpin it from the taskbar.
+2. Delete the `Astrometrics` shortcuts from the Desktop and the Start menu, and unpin it from the taskbar. Also delete the hidden `Electron.lnk` in `%APPDATA%\Microsoft\Windows\Start Menu\Programs`, which the app needs to show notifications.
 3. Delete the repository folder. This also removes `.venv-win` and `node_modules`.
 4. Optional: delete `%LOCALAPPDATA%\Astrometrics`. It holds your databases (`Data`), the Siril and GraXpert that setup installed, the logs (`State`), the scratch files (`Cache`) and the app's browser profile (`Electron`). Back up `Data` first if you may want the databases again.
 5. Optional: delete `~\.config\astrometrics`, which holds the settings, and the link handler the app registered, with `reg delete HKCU\Software\Classes\astrometrics /f`.

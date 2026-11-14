@@ -10,6 +10,12 @@ import process from 'process';
 import { execSync } from 'child_process';
 import { BasePlatform } from './base.js';
 
+/**
+ * The app's fixed notification activator ID (a COM class ID). It must match `$ToastActivatorId`
+ * in `build/windows/install_desktop_icon.ps1`, which writes it onto the Start menu shortcut.
+ */
+export const TOAST_ACTIVATOR_CLSID = '{2CEFF8B0-F01F-4064-B293-17520A983AE2}';
+
 /** The workspaces the taskbar's Jump List opens, as `--mode` names and their descriptions. */
 const JUMP_LIST_MODES = [
   ['Planetarium', 'Open Planetarium', 'Navigate the celestial sphere'],
@@ -84,6 +90,12 @@ export class WindowsPlatform extends BasePlatform {
   configureIdentity(app) {
     app.name = 'astrometrics';
     app.setAppUserModelId('astrometrics');
+    // The notification activator ID that the Start menu shortcut also carries
+    // (install_desktop_icon.ps1). Electron otherwise makes up a new one each run, finds no
+    // shortcut carrying it, and makes its own Start menu shortcut named "Electron".
+    if (typeof app.setToastActivatorCLSID === 'function') {
+      app.setToastActivatorCLSID(TOAST_ACTIVATOR_CLSID);
+    }
     app.setPath('userData', path.join(windowsAppFolder(app), 'Electron'));
   }
 

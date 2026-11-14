@@ -113,7 +113,7 @@ The app chooses at start. It cannot switch cards while it runs, so plugging in o
 
 ### Storage layout
 
-Astrometrics keeps each kind of file in its own place. The library folders follow your settings. The other folders follow the Linux standard for program files (the XDG Base Directory layout), so a backup tool can skip the disposable ones and a cache can be wiped in one step.
+Astrometrics keeps each kind of file in its own place. The library folders follow your settings. The other folders follow the Linux standard for program files (the XDG Base Directory layout), so a backup tool can skip the disposable ones and a cache can be wiped in one step. On Windows they are `Data`, `State` and `Cache` inside `%LOCALAPPDATA%\Astrometrics`, the folder Windows keeps for each user's program files. Settings stay in `~\.config\astrometrics`. An older Windows install's `~\.local\share\astrometrics` folder is moved to `Data` the first time the app starts with no file in it open.
 
 | Tier | What it holds | Example location | Setting |
 | --- | --- | --- | --- |
@@ -126,7 +126,9 @@ Astrometrics keeps each kind of file in its own place. The library folders follo
 
 The working library is on the local disk, so frames and stacks open at disk speed and work offline. Set `frames_mount_point` only when the library is on a drive that can be missing, such as a USB disk. Keep the databases on the local disk too. SQLite needs real file locking, and a network mount does not provide it reliably.
 
-**Backups.** Optional scripts keep two kinds of copy. One copies the library's frames to Google Drive with rclone, a command-line program that syncs files with cloud storage. The other saves snapshots of the databases to the local `backup/` folder only, to undo a change to the app that goes wrong; it never uploads them. The `build/linux/install_backup_timer.sh` script sets up the systemd user timers that run them. Each script, its limits and its options are described in `astrometricslib/scripts/README.md`.
+**Backups.** Optional scripts keep two kinds of copy. One copies the library's frames to Google Drive with rclone, a command-line program that syncs files with cloud storage. The other saves snapshots of the databases to the local `backup/` folder, to undo a change to the app that goes wrong. The `build/linux/install_backup_timer.sh` script sets up the systemd user timers that run them. Each script, its limits and its options are described in `astrometricslib/scripts/README.md`.
+
+**Database copies on a synced folder.** Set `backup_path` in `[Image Library]` to keep the database snapshots in a folder that a sync program copies off the computer, such as a Google Drive folder. The databases stay on the local disk. Each snapshot is made there and moved to `backup_path` only when it is complete, so the sync program never uploads a half-written copy. With `backup_path` set, the backend runs the backup every 4 hours while the app is open and once when it stops. This is the way to back up the databases on Windows, which has no systemd timer.
 
 **Cleanup.** `./build/linux/clean_caches.sh` deletes disposable files from `~/.cache/astrometrics`. Add `--dry-run` to list what it would remove first.
 

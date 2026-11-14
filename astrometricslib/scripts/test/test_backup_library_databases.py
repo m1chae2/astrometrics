@@ -52,9 +52,14 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     backup_root = tmp_path / "backup"
     # Point the observatory database at a folder that has none.
     monkeypatch.setattr(backup, "data_directory", lambda: str(tmp_path / "data"))
+    # The local folder for the lock and the half-made copy.
+    work_root = tmp_path / "local_backup"
+    work_root.mkdir()
+    monkeypatch.setattr(backup, "backup_directory", lambda: str(work_root))
     return {
         "library": library,
         "backup_root": backup_root,
+        "work_root": work_root,
         "arguments": [
             "--library-path", str(library),
             "--config-path", str(config),
@@ -110,18 +115,88 @@ def test_sqlite_copy_is_valid(environment: dict) -> None:
 
 def test_lock_stops_a_second_run(environment: dict) -> None:
     """While one backup holds the lock, another exits and makes nothing."""
-    environment["backup_root"].mkdir()
-    held = backup.acquire_lock(environment["backup_root"] / backup.LOCK_FILE_NAME)
+    # The lock lives in the local backup folder, whatever the destination.
+    lock_path = environment["work_root"] / backup.LOCK_FILE_NAME
+    held = backup.acquire_lock(lock_path)
     assert held is not None
     try:
-        assert backup.acquire_lock(environment["backup_root"] / backup.LOCK_FILE_NAME) is None
+        assert backup.acquire_lock(lock_path) is None
         assert backup.main(environment["arguments"]) == 0
         assert _snapshots(environment) == []
     finally:
-        held.close()
+        backup.release_lock(held)
     # Once released, a run goes ahead.
     assert backup.main(environment["arguments"]) == 0
     assert len(_snapshots(environment)) == 1
+
+
+def test_snapshot_is_made_locally_then_moved_whole_to_the_destination(environment: dict) -> None:
+    """The copy is made locally; the destination gets only whole snapshots."""
+    assert backup.main(environment["arguments"]) == 0
+    names = _snapshots(environment)
+    assert len(names) == 1 and not names[0].endswith(".partial")
+    # Nothing is left behind locally except the lock file.
+    assert [p.name for p in environment["work_root"].iterdir() if p.is_dir()] == []
+
+
+def test_a_destination_that_cannot_be_reached_fails_without_touching_the_library(
+    environment: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Drive folder that is not there makes the run fail; it tries later."""
+
+    def unreachable(*_arguments: object, **_keywords: object) -> None:
+        """Fail like a drive that is not mounted.
+
+        Raises
+        ------
+        OSError
+            Always.
+        """
+        raise OSError("The system cannot find the drive specified")
+
+    monkeypatch.setattr(backup.shutil, "copytree", unreachable)
+    assert backup.main(environment["arguments"]) == 1
+    assert _snapshots(environment) == []
+    assert [p.name for p in environment["work_root"].iterdir() if p.is_dir()] == []
+    assert (environment["library"] / "astrometrics.db").exists()
+
+
+def test_backup_path_setting_is_the_default_destination(
+    environment: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without --backup-root, copies go to backup_path from the settings."""
+    from astrometricslib.foundation import config as config_module
+
+    drive_folder = tmp_path / "drive"
+
+    class _Settings:
+        """Stand-in settings that name a backup folder."""
+
+        config_file_path = None
+
+        def get_library_path(self) -> Path:
+            """Give the test library.
+
+            Returns
+            -------
+            library : `pathlib.Path`
+                The library folder.
+            """
+            return environment["library"]
+
+        def get_backup_path(self) -> Path:
+            """Give the fake Drive folder.
+
+            Returns
+            -------
+            backup_path : `pathlib.Path`
+                The folder.
+            """
+            return drive_folder
+
+    monkeypatch.setattr(config_module, "get_configuration", lambda: _Settings())
+    assert backup.main(["--library-path", str(environment["library"])]) == 0
+    assert len([p for p in drive_folder.iterdir() if p.is_dir()]) == 1
 
 
 def test_unchanged_run_is_skipped_and_force_overrides(

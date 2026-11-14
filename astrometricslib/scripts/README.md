@@ -59,19 +59,21 @@ A script here may import astrometricslib's internal modules. It never imports an
 
 ## Backups
 
-The database backups stay on this computer. They are a safety net for changes to the app (a migration or restack that goes wrong), not an off-site copy. They are never uploaded. The frames are copied to Google Drive separately by `upload_library.py`.
+The database backups are a safety net for changes to the app (a migration or restack that goes wrong). By default they stay on this computer. Set `backup_path` in `[Image Library]` to keep them in a folder a sync program copies off the computer, such as a Google Drive folder; the scripts never upload anything themselves. The frames are copied to Google Drive separately by `upload_library.py`.
 
 ### `backup_library_databases.py`
 
-Makes a safe local copy of the databases.
+Makes a safe copy of the databases.
 
-- **What it copies.** It copies `astrometrics.db`, `astrometrics_log.db` and `wayfinding.db` with SQLite's online backup (a consistent copy even while the backend writes), then checks each copy's integrity. It adds `calibration_frames.json` and the configuration file. Everything goes to `~/.cache/astrometrics/backup/<timestamp>/`. It works with the backend running or stopped.
-- **One at a time.** A lock file (`.lock` in the backup folder) allows one backup at a time. A second run logs that another is running and exits at once.
+- **What it copies.** It copies `astrometrics.db`, `astrometrics_log.db` and `wayfinding.db` with SQLite's online backup (a consistent copy even while the backend writes), then checks each copy's integrity. It adds `calibration_frames.json` and the configuration file. It works with the backend running or stopped.
+- **Where it goes.** Into `<destination>/<timestamp>/`. The destination is `--backup-root`, else `backup_path`, else the local backup folder (`~/.cache/astrometrics/backup` on Linux, `%LOCALAPPDATA%\Astrometrics\Cache\backup` on Windows). The copy is always made in the local backup folder first and moved to the destination only when complete, so a sync program never uploads a half-written database. A destination that cannot be reached (Drive not running) makes the run fail with exit code 1 and leaves no partial copy; the next run tries again.
+- **One at a time.** A lock file (`.lock` in the local backup folder) allows one backup at a time. It stays local because a synced or network folder may not support file locks. A second run logs that another is running and exits at once.
 - **When it skips.** It does nothing when no source file changed since the last snapshot (`--force` overrides) and logs "Backup unchanged, skipped".
 - **What it keeps.** The newest 5 snapshots (`KEEP_SNAPSHOTS`, about 1.5 GB each). It deletes older ones after a good run, never the one it just made, and prints the space freed.
 - **Throwaway libraries.** A launch that sets `disposable_library = true` in the `[Launch]` section of the settings file (a simulator's temporary copy, for example) is skipped, with a log line. The switch is in the settings file the backup reads (`--config-path`), so the script needs no guess from a folder name. It reuses the launch identity instead of a second `[Backup]` key, because that section already says which libraries can be thrown away.
 - **Options.** `--dry-run` prints the actions only; `--backup-root` chooses another folder.
-- **When it runs.** `build/linux/install_backup_timer.sh` sets it up to run every 4 h. `run_backend.sh stop` also starts it in the background, because with the backend stopped the databases are quiet. That backup can never make `stop` fail or wait.
+- **When it runs.** `build/linux/install_backup_timer.sh` sets it up to run every 4 h. `run_backend.sh stop` also starts it in the background, because with the backend stopped the databases are quiet. That backup can never make `stop` fail or wait. When `backup_path` is set, the backend also runs it (`backend/services/infrastructure/library_backup_service.py`): 10 minutes after start, every 4 h, and once at a normal shutdown. This is how Windows, which has no systemd timer, gets its backups. A packaged backend has no Python to run the script with, so it skips the schedule.
+- **Restoring.** `restore_library_databases.py` lists and copies out snapshots from the same destination (`backup_path`, else the local folder).
 
 ### `upload_library.py`
 

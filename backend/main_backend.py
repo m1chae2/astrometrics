@@ -34,7 +34,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from astrometricslib import configure_logging, configure_offline_iers, get_configuration
-from astrometricslib.drivers import require_mounted_storage
+from astrometricslib.drivers import move_legacy_windows_data, require_mounted_storage
 from astrometricslib.exceptions import AstrometricsError, ErrorInfo, StorageNotMountedError, to_error_info
 from astrometricslib.jobs import DbLogHandler, close_interrupted_jobs, new_request_id
 from backend import startup
@@ -52,6 +52,11 @@ configure_logging(
 )
 
 logger = logging.getLogger(__name__)
+
+# On Windows, move an older install's data folder to %LOCALAPPDATA% once,
+# before anything opens a database in it. Only the backend does this, so no
+# program has the folder pulled from under it.
+move_legacy_windows_data()
 
 
 # Astropy must use its bundled Earth-rotation (IERS) table and never download

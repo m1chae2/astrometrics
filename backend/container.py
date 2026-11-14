@@ -72,6 +72,7 @@ class Container:
         self.job_repository = None
         self.job_service = None
         self.maintenance_service = None
+        self.library_backup_service = None
         self.target_imaging_executor = None
         self.execution_service = None
         self.stellar_service = None
@@ -131,7 +132,9 @@ class Container:
     def shutdown_resources(self) -> None:
         """Stop the background threads and processes the container started.
 
-        Stops the maintenance thread, the observatory control's background
+        Stops the maintenance thread, the library backup schedule (after one
+        last backup when ``backup_path`` is set), the observatory control's
+        background
         readers (such as the PHD2 event reader) and INDI worker process, and
         every Siril process the library started. Siril runs in a session of
         its own and the backend's exit runs no `atexit` handlers, so without
@@ -141,6 +144,13 @@ class Container:
         """
         if self.maintenance_service is not None:
             self.maintenance_service.stop()
+        if self.library_backup_service is not None:
+            # Stops the schedule and makes one last backup if one is set up.
+            try:
+                self.library_backup_service.stop()
+            except Exception:  # shutdown must go on to stop the rest
+                logger.exception("Could not make the backup at shutdown")
+            self.library_backup_service = None
         if self.auto_download_service is not None:
             self.auto_download_service.stop()
         if self.astrometrics is not None:
@@ -379,6 +389,12 @@ class Container:
         self.maintenance_service.system_status_service = self.system_status_service
         self.maintenance_service.telescope_service = self.telescope_service
         self.maintenance_service.start()
+
+        # Copies of the databases to backup_path (for example Google Drive).
+        from backend.services.infrastructure.library_backup_service import LibraryBackupService
+
+        self.library_backup_service = LibraryBackupService(self.config_service)
+        self.library_backup_service.start()
 
         self.initialized = True
 

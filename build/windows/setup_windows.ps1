@@ -4,7 +4,8 @@
 
 .DESCRIPTION
     Creates `.venv-win` (not `.venv`, which the Ubuntu/WSL side of this checkout may already use),
-    installs the project into it, seeds the local config file, and runs `npm install`.
+    installs the project into it, seeds the local config file, runs `npm install`, and builds
+    the UI MCP server in ui\mcp.
     Astrometrics needs Python 3.14 or newer. Run it from anywhere:
 
         powershell -ExecutionPolicy Bypass -File build\windows\setup_windows.ps1
@@ -65,6 +66,19 @@ if ($LASTEXITCODE -ne 0) { throw "npm install failed." }
 if (-not (Test-Path "node_modules\electron\dist\electron.exe")) {
     node node_modules\electron\install.js
     if ($LASTEXITCODE -ne 0) { throw "Electron download failed." }
+}
+
+# 6. The UI MCP server (ui/mcp) has its own packages and must be compiled; .mcp.json runs
+# ui\mcp\dist\index.js. Without this, Claude Code shows the "astrometrics-ui" server as failed.
+Write-Host "Building the UI MCP server..." -ForegroundColor Yellow
+Push-Location (Join-Path $ProjectRoot "ui\mcp")
+try {
+    npm ci --ignore-scripts --no-audit --no-fund
+    if ($LASTEXITCODE -ne 0) { throw "npm ci in ui\mcp failed." }
+    npm run build
+    if ($LASTEXITCODE -ne 0) { throw "Building the UI MCP server failed." }
+} finally {
+    Pop-Location
 }
 
 Write-Host "Setup complete. Next: build\windows\install_desktop_icon.ps1" -ForegroundColor Green

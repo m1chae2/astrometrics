@@ -1,4 +1,4 @@
-"""Purpose: Store the capability gaps that AI clients report.
+r"""Purpose: Store the capability gaps that AI clients report.
 
 Description: The project's MCP servers give an AI read-only tools. When the
 tools cannot do what the AI needs, the AI files a gap report instead of
@@ -7,7 +7,8 @@ whether to build a new tool.
 
 This module keeps the reports in a small SQLite database of their own,
 ``capability_gaps.db`` in the user's data folder
-(``$XDG_DATA_HOME/astrometrics``, or ``~/.local/share/astrometrics``). It
+(``$XDG_DATA_HOME/astrometrics``, or ``~/.local/share/astrometrics`` on
+Linux and ``%LOCALAPPDATA%\Astrometrics\Data`` on Windows). It
 is not the catalog or any other app database. Only the standard library is
 used, so the gap server starts fast and stays up when the rest of the app
 is down. Several AI sessions may write
@@ -22,6 +23,7 @@ import json
 import os
 import re
 import sqlite3
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -31,7 +33,7 @@ DATABASE_ENVIRONMENT_VARIABLE = "ASTROMETRICS_GAP_DATABASE"
 
 
 def default_database_path() -> Path:
-    """Give the database location used when the environment variable is unset.
+    r"""Give the database location used when the environment variable is unset.
 
     The folder is not created here; `GapStore` creates it on first use. This
     module does not import ``astrometricslib``, so it repeats the data folder
@@ -40,12 +42,25 @@ def default_database_path() -> Path:
     Returns
     -------
     database_path : `pathlib.Path`
-        ``$XDG_DATA_HOME/astrometrics/capability_gaps.db``, or
-        ``~/.local/share/astrometrics/capability_gaps.db`` if
-        ``XDG_DATA_HOME`` is unset.
+        ``$XDG_DATA_HOME/astrometrics/capability_gaps.db``. Without
+        ``XDG_DATA_HOME``: ``~/.local/share/astrometrics/capability_gaps.db``
+        on Linux, and ``capability_gaps.db`` in
+        ``%LOCALAPPDATA%\Astrometrics\Data`` on Windows. On Windows the old
+        folder, ``~\.local\share\astrometrics``, is used while the new one
+        does not exist yet: the app moves the whole old folder there once, and
+        making the new folder first would stop that move.
     """
-    data_root = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
-    return Path(data_root) / "astrometrics" / "capability_gaps.db"
+    xdg_root = os.environ.get("XDG_DATA_HOME")
+    if xdg_root:
+        return Path(xdg_root) / "astrometrics" / "capability_gaps.db"
+    legacy_folder = Path.home() / ".local" / "share" / "astrometrics"
+    if sys.platform != "win32":
+        return legacy_folder / "capability_gaps.db"
+    local_app_data = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+    data_folder = Path(local_app_data) / "Astrometrics" / "Data"
+    if not data_folder.exists() and legacy_folder.is_dir():
+        return legacy_folder / "capability_gaps.db"
+    return data_folder / "capability_gaps.db"
 
 
 TIERS = ("astrometricslib", "wayfindinglib", "backend", "ui")

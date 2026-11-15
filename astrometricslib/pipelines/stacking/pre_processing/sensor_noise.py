@@ -96,7 +96,6 @@ CENTRAL_REGION_SHAPE_PIXELS = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA}),
     register_entry="STK-35",
-    pending_conversion=True,
 )
 
 # The fewest flat pairs a measurement may use. The result is the median of the
@@ -149,7 +148,6 @@ MAXIMUM_TEMPERATURE_SPREAD_C = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA}),
     register_entry="STK-35",
-    pending_conversion=True,
 )
 
 # Two exposures count as the same when they differ by less than this
@@ -164,7 +162,6 @@ EXPOSURE_RELATIVE_TOLERANCE = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA}),
     register_entry="STK-35",
-    pending_conversion=True,
 )
 
 # The longest time between the two frames of a flat pair, in seconds. Flat

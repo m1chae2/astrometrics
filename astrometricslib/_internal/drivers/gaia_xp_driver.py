@@ -85,7 +85,6 @@ MINIMUM_SAMPLE_COUNT = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D29",
-    pending_conversion=True,
 )
 
 # The errors a download can raise: the online-query errors, a reply that is

@@ -85,7 +85,6 @@ DEFAULT_MERIDIAN_FLIP_DELAY_MIN = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="WAY-D131",
-    pending_conversion=True,
 )
 """Meridian-flip delay used when the configuration does not set one."""
 

@@ -64,7 +64,6 @@ MINIMUM_SAMPLES = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D127",
-    pending_conversion=True,
 )
 """Fewest samples in a stretch for its spectrum to be worked out."""
 
@@ -77,7 +76,6 @@ MINIMUM_STRETCH_SECONDS = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D127",
-    pending_conversion=True,
 )
 """Shortest stretch whose spectrum is worked out."""
 
@@ -90,7 +88,6 @@ MINIMUM_CYCLES = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D127",
-    pending_conversion=True,
 )
 """A stretch counts toward a period only if it holds at least this many cycles.
 
@@ -122,7 +119,6 @@ _LONGEST_MECHANICAL_PERIOD_SECONDS = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D127",
-    pending_conversion=True,
 )
 """The longest period attributed to the mount's gears.
 

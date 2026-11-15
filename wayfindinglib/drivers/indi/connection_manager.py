@@ -26,7 +26,7 @@ MAX_CONSECUTIVE_PROBE_FAILURES = TunedParameter(
     source=ParameterSource.PROCESSING_SETTING,
     equipment=frozenset({EquipmentKind.CAMERA}),
     register_entry="WAY-D134",
-    pending_conversion=True,
+    config_key=("Wayfinding.Control", "max_consecutive_probe_failures"),
 )
 """Failed handshakes in a row before a connected server counts as lost.
 

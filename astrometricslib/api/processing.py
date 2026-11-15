@@ -142,7 +142,6 @@ _EXPOSURE_MATCH_TOLERANCE_SECONDS = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA}),
     register_entry="STK-D07",
-    pending_conversion=True,
 )
 
 

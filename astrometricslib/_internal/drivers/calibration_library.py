@@ -82,7 +82,6 @@ DEFAULT_DARK_TEMPERATURE_TOLERANCE_C = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA}),
     register_entry="STK-06",
-    pending_conversion=True,
 )
 
 # The key in `ImageProcessing.last_run_diagnostics` that holds the blocking

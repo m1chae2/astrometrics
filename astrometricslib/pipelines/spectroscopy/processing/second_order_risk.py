@@ -47,7 +47,6 @@ SECOND_ORDER_MAXIMUM_PLAUSIBLE_FRACTION = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-26",
-    pending_conversion=True,
 )
 
 # The share of a wavelength's brightness that second-order light must be

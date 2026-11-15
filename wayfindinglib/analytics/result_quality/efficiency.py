@@ -129,7 +129,6 @@ REFERENCE_WAVELENGTH_NM = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.FILTER_OR_GRATING}),
     register_entry="WAY-D20",
-    pending_conversion=True,
 )
 """Wavelength used for the diffraction limit, in nanometers. 550 nm is the
 middle
@@ -148,7 +147,6 @@ AIRY_FWHM_FACTOR = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.FILTER_OR_GRATING}),
     register_entry="WAY-D20",
-    pending_conversion=True,
 )
 """Full width at half maximum of the Airy pattern of an unobstructed circular
 aperture, in units of wavelength over aperture diameter (1.029 lambda / D, from

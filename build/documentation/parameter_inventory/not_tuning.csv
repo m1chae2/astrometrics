@@ -54,6 +54,7 @@ astrometricslib/foundation/config.py,[Processing] prefetch_workers,Plumbing: wor
 astrometricslib/foundation/errors.py,RPC_CODES,Plumbing or protocol constant
 astrometricslib/foundation/logging.py,_LOG_FILES_KEPT,software plumbing
 astrometricslib/foundation/logging.py,_MAX_LOG_BYTES,software plumbing
+astrometricslib/foundation/parameter_context.py,DEFAULT_CONTEXT_REUSE_SECONDS,"Cache lifetime of the default parameter context, matching the config recheck interval; plumbing"
 astrometricslib/foundation/run_abandonment.py,REAP_TIMEOUT_SECONDS,Plumbing or protocol constant
 astrometricslib/foundation/run_abandonment.py,STOP_GRACE_SECONDS,Plumbing or protocol constant
 astrometricslib/foundation/storage/butler.py,_IDS_PER_QUERY,"Plumbing: query size, retry, report interval"

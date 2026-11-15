@@ -45,7 +45,7 @@ DEFAULT_NOISE_GOAL = TunedParameter(
     source=ParameterSource.PROCESSING_SETTING,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="WAY-D83",
-    pending_conversion=True,
+    config_key=("Wayfinding.Planning", "default_noise_goal"),
 )
 """The one noise goal for every target (no setting on screen).
 

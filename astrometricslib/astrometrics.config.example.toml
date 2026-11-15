@@ -127,11 +127,26 @@ focal_ratio = "5.6"
 # 2%), then, when the header has no FOCALLEN, by the camera's only setup, then
 # by an optic's name appearing in the file path. Otherwise it is "Unknown",
 # and a warning is logged.
+#
+# One setup is active: planning and telescope control use it. Processing uses
+# the setup each frame was taken with. A setup may name its mount and its
+# filters, which point at ["Observatory.Mount.<name>"] and
+# ["Observatory.Filter.<name>"] sections.
+#
+# Equipment values (issue #175): a tuned value that depends on the equipment
+# is written under its parameter name, in the section of the one kind of
+# equipment it depends on (camera, optic, mount or filter), or in the setup's
+# section when it depends on several. A missing value uses the code default,
+# and the run notes it. build/config/write_equipment_parameters.py writes the
+# code defaults for a setup.
 available = "ASI533 on Apertura, D5300 on Apertura, D5300 on Nikkor"
+active = "ASI533 on Apertura"
 
 ["Observatory.Setup.ASI533 on Apertura"]
 camera = "ZWO ASI533MM Pro"
 optic = "Apertura 75Q"
+mount = "Main Mount"
+filters = "L, SPEC"
 
 ["Observatory.Setup.D5300 on Apertura"]
 camera = "Nikon D5300"

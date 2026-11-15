@@ -106,7 +106,6 @@ MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA}),
     register_entry="STK-40",
-    pending_conversion=True,
 )
 
 # What the quality rows state about an estimated peak (register entry STK-41).
@@ -126,7 +125,6 @@ CHECKED_ESTIMATE_ERROR_FRACTION = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA}),
     register_entry="STK-40",
-    pending_conversion=True,
 )
 
 # The share of cases within that fraction, over the ZWO ASI 533MM Pro cases
@@ -140,7 +138,6 @@ CHECKED_ESTIMATE_SHARE_WITHIN_ERROR = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA}),
     register_entry="STK-40",
-    pending_conversion=True,
 )
 
 # The same cases measured against the truth: a star unclipped at the shorter
@@ -159,7 +156,6 @@ CHECKED_ESTIMATE_AGAINST_MEASURED_RATIOS = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA}),
     register_entry="STK-40",
-    pending_conversion=True,
 )
 
 # The largest peak-to-room ratio of an estimate that was checked, for each

@@ -43,6 +43,7 @@ from typing import TYPE_CHECKING, Any
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import ConflictError, InvalidArgumentError, ProcessingError
 from astrometricslib.foundation.jobs.runner import current_job_id, registered_job, report_started_jobs
+from astrometricslib.foundation.parameter_context import frames_parameter_context
 from astrometricslib.foundation.run_abandonment import RunAbandonedError, RunAbandonment, bind_abandonment
 from astrometricslib.foundation.run_tally import RunTally
 from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
@@ -288,10 +289,13 @@ def stack_frames_with_timeout(
 
     def _run_stacking() -> None:
         try:
+            # The thread does not inherit the caller's parameter context, so
+            # it sets the one of the frames' setup and filter itself.
             with (
                 siril_interface.bind_lock_wait(lock_wait),
                 bind_abandonment(abandonment),
                 report_started_jobs(lambda handle: stacking_job_ids.append(handle.job_id)),
+                frames_parameter_context(frames_to_stack),
             ):
                 outcome["path"] = _stack_with_job_tracking(
                     target, frames_to_stack, measured_at, quality_recording
@@ -449,9 +453,12 @@ def analyze_target(
         # such as a caller's batch job. With neither, the rows have no job.
         kwargs["job_id"] = job.job_id or kwargs.get("job_id") or current_job_id()
         kwargs["measured_at"] = measured_at
-        return _run_analysis_pipeline_match(
-            target, frames, pipeline_type, filter_type, catalog_access, path, **kwargs
-        )
+        # Parameters are read for the setup and filter of the frames analyzed
+        # (the target's own frames when none are given).
+        with frames_parameter_context(frames or target.frames or []):
+            return _run_analysis_pipeline_match(
+                target, frames, pipeline_type, filter_type, catalog_access, path, **kwargs
+            )
 
 
 def _run_analysis_pipeline_match(

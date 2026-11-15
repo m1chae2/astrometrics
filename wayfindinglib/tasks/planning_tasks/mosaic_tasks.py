@@ -52,7 +52,6 @@ DEFAULT_SENSOR_WIDTH_MM = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="WAY-D131",
-    pending_conversion=True,
 )
 """Sensor width used when the configuration gives none."""
 
@@ -65,7 +64,6 @@ DEFAULT_SENSOR_HEIGHT_MM = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="WAY-D131",
-    pending_conversion=True,
 )
 """Sensor height used when the configuration gives none."""
 
@@ -78,7 +76,6 @@ DEFAULT_FOCAL_LENGTH_MM = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="WAY-D131",
-    pending_conversion=True,
 )
 """Focal length used when the configuration gives none."""
 

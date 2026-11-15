@@ -147,7 +147,6 @@ NORMALIZATION_WINDOW_ANGSTROM = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D29",
-    pending_conversion=True,
 )
 
 # The wavelength the straight-line slope is quoted at: the middle of the
@@ -197,7 +196,6 @@ MINIMUM_COMPARED_SAMPLES = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D29",
-    pending_conversion=True,
 )
 MINIMUM_BAND_SAMPLES = TunedParameter(
     name="spectroscopy.minimum_band_samples",
@@ -208,7 +206,6 @@ MINIMUM_BAND_SAMPLES = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D29",
-    pending_conversion=True,
 )
 
 # The error floor on the ratio at every sample, as a fraction. XP's absolute
@@ -224,7 +221,6 @@ RATIO_ERROR_FLOOR_FRACTION = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D29",
-    pending_conversion=True,
 )
 
 # The wavelength shift is searched for within this many Angstroms either

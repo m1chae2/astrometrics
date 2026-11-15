@@ -47,7 +47,6 @@ B_WINDOW_ANGSTROM = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D46",
-    pending_conversion=True,
 )
 V_WINDOW_ANGSTROM = TunedParameter(
     name="spectroscopy.v_window_angstrom",
@@ -58,7 +57,6 @@ V_WINDOW_ANGSTROM = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D46",
-    pending_conversion=True,
 )
 
 # The fewest samples that must fall in each window for a colour to be read.
@@ -73,7 +71,6 @@ MINIMUM_SAMPLES_PER_WINDOW = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D46",
-    pending_conversion=True,
 )
 
 # Approximate intrinsic B-V of the bundled dwarf references, from standard

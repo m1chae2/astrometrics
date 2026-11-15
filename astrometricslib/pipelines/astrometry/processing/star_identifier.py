@@ -179,7 +179,6 @@ _COLOR_DETECTION_BIN_FACTOR = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA}),
     register_entry="AST-D03",
-    pending_conversion=True,
 )
 
 # SIMBAD's client configuration, request timeout and thread lock live in

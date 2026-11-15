@@ -144,7 +144,6 @@ CORE_RESOLUTION_FRACTION = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-22",
-    pending_conversion=True,
 )
 
 # The fewest indices that must be measurable for a type to be named. Chosen

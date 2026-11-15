@@ -113,7 +113,6 @@ DARK_EXPOSURE_MATCH_SECONDS = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA}),
     register_entry="STK-D07",
-    pending_conversion=True,
 )
 
 # Lights whose exposures round to the same 0.1 s are one batch, the batch the

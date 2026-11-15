@@ -160,7 +160,6 @@ DISPERSION_ANGLE_ROI_HALF_WIDTH_PX = TunedParameter(
         EquipmentKind.FILTER_OR_GRATING,
     }),
     register_entry="SPE-D33",
-    pending_conversion=True,
 )
 
 # The least `DISPERSION_ANGLE_ROI_HALF_WIDTH_PX` is ever shrunk to, so a very
@@ -181,7 +180,6 @@ DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX = TunedParameter(
         EquipmentKind.FILTER_OR_GRATING,
     }),
     register_entry="SPE-D33",
-    pending_conversion=True,
 )
 
 # Below this DAOStarFinder "sharpness" value, a detection is not compact
@@ -209,7 +207,6 @@ TRAIL_CONTAMINATION_MAXIMUM_SHARPNESS = TunedParameter(
         EquipmentKind.FILTER_OR_GRATING,
     }),
     register_entry="SPE-D33",
-    pending_conversion=True,
 )
 
 
@@ -233,7 +230,6 @@ DISPERSION_ANGLE_MAXIMUM_TILT_DEGREES = TunedParameter(
         EquipmentKind.FILTER_OR_GRATING,
     }),
     register_entry="SPE-D33",
-    pending_conversion=True,
 )
 
 # How many times the angle fit re-centres its strip on the previous fit
@@ -260,7 +256,6 @@ DISPERSION_ANGLE_BAND_LENGTH_PX = TunedParameter(
         EquipmentKind.FILTER_OR_GRATING,
     }),
     register_entry="SPE-D33",
-    pending_conversion=True,
 )
 
 # The brightness, in noise sigmas of a band's averaged profile, its peak must
@@ -281,7 +276,6 @@ DISPERSION_ANGLE_MINIMUM_BAND_SIGMA = TunedParameter(
         EquipmentKind.FILTER_OR_GRATING,
     }),
     register_entry="SPE-D33",
-    pending_conversion=True,
 )
 
 # How many candidate tilts the search tries before it starts following the
@@ -302,7 +296,6 @@ DISPERSION_ANGLE_SEED_SLOPE_COUNT = TunedParameter(
         EquipmentKind.FILTER_OR_GRATING,
     }),
     register_entry="SPE-D33",
-    pending_conversion=True,
 )
 
 # The fewest bands that must show the streak for an angle to be reported.
@@ -321,7 +314,6 @@ DISPERSION_ANGLE_MINIMUM_BAND_COUNT = TunedParameter(
         EquipmentKind.FILTER_OR_GRATING,
     }),
     register_entry="SPE-D33",
-    pending_conversion=True,
 )
 
 # The change in slope (across-pixels per along-pixel) below which the fit
@@ -357,7 +349,6 @@ DISPERSION_ANGLE_MINIMUM_TRAIL_CONTRAST_SIGMA = TunedParameter(
         EquipmentKind.FILTER_OR_GRATING,
     }),
     register_entry="SPE-D33",
-    pending_conversion=True,
 )
 
 

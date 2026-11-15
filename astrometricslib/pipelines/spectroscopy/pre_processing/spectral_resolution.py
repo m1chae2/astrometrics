@@ -89,7 +89,6 @@ FALLBACK_RESOLUTION_ELEMENT_ANGSTROM = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-05",
-    pending_conversion=True,
 )
 
 # A gaussian's full width at half its height (FWHM) is this many times its
@@ -140,7 +139,6 @@ MINIMUM_FITTED_TRAIL_WIDTH_FRACTION = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-05",
-    pending_conversion=True,
 )
 
 
@@ -261,7 +259,6 @@ RESOLUTION_PROFILE_BAND_ANGSTROM = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D37",
-    pending_conversion=True,
 )
 
 # The fewest working width fits a band needs to be used. Fewer than this and

@@ -36,7 +36,7 @@ FALLBACK_PIXEL_SIZE_UM = TunedParameter(
     source=ParameterSource.PROCESSING_SETTING,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D56",
-    pending_conversion=True,
+    config_key=("Processing.Spectroscopy", "fallback_pixel_size_um"),
 )
 FALLBACK_SENSOR_WIDTH_PX = TunedParameter(
     name="utilities.fallback_sensor_width_px",
@@ -47,7 +47,7 @@ FALLBACK_SENSOR_WIDTH_PX = TunedParameter(
     source=ParameterSource.PROCESSING_SETTING,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D56",
-    pending_conversion=True,
+    config_key=("Processing.Spectroscopy", "fallback_sensor_width_px"),
 )
 FALLBACK_SENSOR_HEIGHT_PX = TunedParameter(
     name="utilities.fallback_sensor_height_px",
@@ -58,7 +58,7 @@ FALLBACK_SENSOR_HEIGHT_PX = TunedParameter(
     source=ParameterSource.PROCESSING_SETTING,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D56",
-    pending_conversion=True,
+    config_key=("Processing.Spectroscopy", "fallback_sensor_height_px"),
 )
 FALLBACK_SENSOR_MIN_WAVELENGTH_NM = TunedParameter(
     name="utilities.fallback_sensor_min_wavelength_nm",
@@ -69,7 +69,7 @@ FALLBACK_SENSOR_MIN_WAVELENGTH_NM = TunedParameter(
     source=ParameterSource.PROCESSING_SETTING,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D56",
-    pending_conversion=True,
+    config_key=("Processing.Spectroscopy", "fallback_sensor_min_wavelength_nm"),
 )
 FALLBACK_SENSOR_MAX_WAVELENGTH_NM = TunedParameter(
     name="utilities.fallback_sensor_max_wavelength_nm",
@@ -80,7 +80,7 @@ FALLBACK_SENSOR_MAX_WAVELENGTH_NM = TunedParameter(
     source=ParameterSource.PROCESSING_SETTING,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D56",
-    pending_conversion=True,
+    config_key=("Processing.Spectroscopy", "fallback_sensor_max_wavelength_nm"),
 )
 FALLBACK_GRATING_LINES_PER_MM = TunedParameter(
     name="utilities.fallback_grating_lines_per_mm",
@@ -91,7 +91,7 @@ FALLBACK_GRATING_LINES_PER_MM = TunedParameter(
     source=ParameterSource.PROCESSING_SETTING,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D56",
-    pending_conversion=True,
+    config_key=("Processing.Spectroscopy", "fallback_grating_lines_per_mm"),
 )
 FALLBACK_GRATING_DISTANCE_MM = TunedParameter(
     name="utilities.fallback_grating_distance_mm",
@@ -102,7 +102,7 @@ FALLBACK_GRATING_DISTANCE_MM = TunedParameter(
     source=ParameterSource.PROCESSING_SETTING,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D56",
-    pending_conversion=True,
+    config_key=("Processing.Spectroscopy", "fallback_grating_distance_mm"),
 )
 FALLBACK_DISPERSION_ORIENTATION = "horizontal"
 FALLBACK_DISPERSION_DIRECTION = "negative"
@@ -120,7 +120,7 @@ DEFAULT_EXTRACTION_START_WAVELENGTH_NM = TunedParameter(
     source=ParameterSource.PROCESSING_SETTING,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D56",
-    pending_conversion=True,
+    config_key=("Processing.Spectroscopy", "default_extraction_start_wavelength_nm"),
 )
 
 

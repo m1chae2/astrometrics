@@ -74,7 +74,6 @@ MINIMUM_PERIOD_SECONDS = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="WAY-D120",
-    pending_conversion=True,
 )
 """Shortest repeating-error period searched, in seconds.
 
@@ -90,7 +89,6 @@ MAXIMUM_PERIOD_SECONDS = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="WAY-D120",
-    pending_conversion=True,
 )
 """Longest repeating-error period searched, in seconds.
 
@@ -108,7 +106,6 @@ MINIMUM_FIT_SAMPLES = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="WAY-D120",
-    pending_conversion=True,
 )
 """Fewest samples in a run for a repeating-error fit.
 
@@ -124,7 +121,6 @@ MINIMUM_SAMPLES_FOR_TERMS = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="WAY-D120",
-    pending_conversion=True,
 )
 """Fewest samples in a run for the drift and random terms. Design estimate,
 register row WAY-D120."""
@@ -138,7 +134,6 @@ MINIMUM_AMPLITUDE_SIGNIFICANCE = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="WAY-D120",
-    pending_conversion=True,
 )
 """A repeating error counts only if its amplitude is this many times its
 uncertainty. The period is searched on a grid, so a plain 3 sigma would let
@@ -161,7 +156,6 @@ _STEP_MAD_MULTIPLE = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="WAY-D120",
-    pending_conversion=True,
 )
 _STEP_MINIMUM_ARCSEC = TunedParameter(
     name="wayfinding.step_minimum_arcsec",
@@ -175,7 +169,6 @@ _STEP_MINIMUM_ARCSEC = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="WAY-D120",
-    pending_conversion=True,
 )
 """A change between two frames is a step (a dither) when it is more than 6
 robust standard deviations from the typical change and more than 1.5
@@ -192,7 +185,6 @@ _MINIMUM_PIECE_SAMPLES = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="WAY-D120",
-    pending_conversion=True,
 )
 """A piece between two steps with fewer samples than this is dropped."""
 
@@ -208,7 +200,6 @@ _MAXIMUM_AUTOCORRELATION = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="WAY-D120",
-    pending_conversion=True,
 )
 """Cap on the frame-to-frame correlation used to reduce the sample count, so
 one smooth run does not make the uncertainties unbounded."""
@@ -222,7 +213,6 @@ MINIMUM_PULSES_FOR_SIGN = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="WAY-D120",
-    pending_conversion=True,
 )
 """Fewest corrections on an axis for the direction of a pulse to be read from
 the run. An axis with fewer was not being guided. Design estimate, register
@@ -240,7 +230,6 @@ MINIMUM_SIGN_CORRELATION = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="WAY-D120",
-    pending_conversion=True,
 )
 """Smallest size of the correlation between the measured error and the pulses
 for the direction to be trusted. A guider that corrects what it measures gives

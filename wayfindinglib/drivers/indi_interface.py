@@ -67,7 +67,7 @@ _EXPOSURE_CLOCK_TOLERANCE_SECONDS = TunedParameter(
     source=ParameterSource.PROCESSING_SETTING,
     equipment=frozenset({EquipmentKind.CAMERA}),
     register_entry="WAY-D134",
-    pending_conversion=True,
+    config_key=("Wayfinding.Control", "exposure_clock_tolerance_seconds"),
 )
 
 

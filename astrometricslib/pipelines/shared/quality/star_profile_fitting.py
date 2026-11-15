@@ -229,7 +229,6 @@ MOFFAT_MINIMUM_FWHM_PX = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="AST-17",
-    pending_conversion=True,
 )
 
 MOFFAT_MAXIMUM_FWHM_PX = TunedParameter(
@@ -241,7 +240,6 @@ MOFFAT_MAXIMUM_FWHM_PX = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="AST-17",
-    pending_conversion=True,
 )
 
 # The fewest stars that give a median and a bootstrap uncertainty worth
@@ -851,7 +849,6 @@ STAR_FINDER_EXPECTED_FWHM_PX = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="AST-D01",
-    pending_conversion=True,
 )
 
 STAR_FINDER_THRESHOLD_SIGMA = TunedParameter(

@@ -20,6 +20,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from astrometricslib.foundation.config import EXPOSURE_GROUP_GAIN_TOLERANCE
 from astrometricslib.foundation.constants import FULL_SCALE_COUNTS
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.parameters import resolve
@@ -242,22 +243,11 @@ GAIN_BRIGHTEST_FRACTION = TunedParameter(
 # linear pair of groups agrees to well under 1% when the photon noise is small
 # (the unit tests reach 0.5%). 5% allows for noise in the 90,000 bright pixels
 # and for small flat-field residuals, and is far below the 35% disagreement
-# seen in the field. It is a design choice, not a validated limit;
-# `AppConfiguration.get_exposure_group_gain_tolerance` lets an observer change
-# it.
-DEFAULT_GAIN_DISAGREEMENT_TOLERANCE = TunedParameter(
-    name="stacking.default_gain_disagreement_tolerance",
-    default=0.05,
-    unit="fraction",
-    description=(
-        "Largest difference between the bright-end and mid-range gains, as a share of the gain, "
-        "before a group is left out as nonlinear."
-    ),
-    role=ParameterRole.JUDGMENT,
-    source=ParameterSource.PROCESSING_SETTING,
-    register_entry="STK-20",
-    pending_conversion=True,
-)
+# seen in the field. It is a design choice, not a validated limit. It is the
+# processing setting `[Processing.Siril] exposure_group_gain_tolerance`
+# (`foundation.config.EXPOSURE_GROUP_GAIN_TOLERANCE`), so an observer can
+# change it.
+DEFAULT_GAIN_DISAGREEMENT_TOLERANCE = EXPOSURE_GROUP_GAIN_TOLERANCE
 
 # With star fluxes (the star-flux gain below), the same tolerance bounds how
 # far the faintest or the brightest quarter of the stars may sit from the

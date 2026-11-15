@@ -68,7 +68,6 @@ MATCH_RADIUS_DEGREES = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D55",
-    pending_conversion=True,
 )
 """A pointing matches a library target only inside this distance, in degrees.
 Design estimate, register entry WAY-D55: a mount that has not been

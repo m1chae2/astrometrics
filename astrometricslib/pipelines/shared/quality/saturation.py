@@ -38,7 +38,6 @@ SATURATION_ADU = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA}),
     register_entry="STK-D41",
-    pending_conversion=True,
 )
 """Pixels at or above this value count as saturated when no camera profile
 gives a level (16-bit frames). See `resolve_saturation_threshold`."""

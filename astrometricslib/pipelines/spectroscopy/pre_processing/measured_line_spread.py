@@ -92,7 +92,6 @@ PROFILE_BAND_ANGSTROM = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D37",
-    pending_conversion=True,
 )
 
 # The fewest working width fits a band needs. A failed fit is stored as 0.0

@@ -84,7 +84,6 @@ MINIMUM_HOUR_ANGLE_SPAN_DEG = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D28",
-    pending_conversion=True,
 )
 """The polar-alignment fit separates its altitude and azimuth parts only when
 the
@@ -103,7 +102,6 @@ MINIMUM_POLAR_SAMPLES_PER_RUN = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D28",
-    pending_conversion=True,
 )
 """Fewest rotation samples in one guiding run for the polar-alignment fit. The
 fit
@@ -122,7 +120,6 @@ MINIMUM_COS_DECLINATION = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D28",
-    pending_conversion=True,
 )
 """The guided field rotation rate from a polar error scales with
 1/cos(declination), so the signal is largest near the pole. The limit is not

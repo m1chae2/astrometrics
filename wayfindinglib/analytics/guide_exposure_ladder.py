@@ -62,7 +62,6 @@ APERTURE_RADIUS_PIXELS = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA}),
     register_entry="WAY-D129",
-    pending_conversion=True,
 )
 """Radius, in pixels, of the circle used for a star's light and centre.
 

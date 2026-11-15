@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from astrometricslib.exceptions import ConfigurationError, ParameterUnavailableError
+from astrometricslib.foundation.parameter_context import parameter_context
 from astrometricslib.foundation.parameters import ParameterRegistry, collect_parameters, resolve
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
@@ -181,7 +182,7 @@ def clean_sys_path() -> Any:
 
 
 def test_collect_finds_declarations_and_skips_tests(tmp_path: Path, clean_sys_path: Any) -> None:
-    """Collection finds parameters and skips test, script and main modules."""
+    """Collection skips test, conftest, script and main modules."""
     _write_package(
         tmp_path,
         "collect_demo",
@@ -195,6 +196,7 @@ def test_collect_finds_declarations_and_skips_tests(tmp_path: Path, clean_sys_pa
             "scripts/__init__.py": "",
             "scripts/run.py": "raise RuntimeError('must not be imported')",
             "__main__.py": "raise RuntimeError('must not be imported')",
+            "conftest.py": "raise RuntimeError('must not be imported')",
         },
     )
     registry = collect_parameters("collect_demo")
@@ -270,13 +272,27 @@ def test_resolve_processing_setting_reads_a_tuple() -> None:
 
 
 def test_resolve_falls_back_with_a_notice_when_no_provider() -> None:
-    """With no provider the default is used and a notice says so."""
-    resolved = resolve(_parameter())
+    """With no equipment provider the default is used and a notice says so."""
+    parameter = _parameter(
+        source=ParameterSource.EQUIPMENT_PROFILE, config_key=None, equipment=frozenset({EquipmentKind.CAMERA})
+    )
+    with parameter_context() as context:
+        resolved = resolve(parameter)
     assert resolved.origin == "default"
     assert resolved.value == pytest.approx(0.005)
     assert resolved.notice == (
-        "stacking.flat_noise_fraction: no processing setting value; using the default 0.005 fraction"
+        "stacking.flat_noise_fraction: no equipment profile value; using the default 0.005 fraction"
     )
+    assert context.notices == [resolved.notice]
+
+
+def test_a_missing_processing_setting_uses_its_default_without_a_notice() -> None:
+    """A setting left out of the config uses its default, like any setting."""
+    with parameter_context() as context:
+        resolved = resolve(_parameter())
+    assert (resolved.origin, resolved.notice) == ("default", None)
+    assert resolved.value == pytest.approx(0.005)
+    assert context.notices == []
 
 
 @pytest.mark.parametrize("raw", ["not a number", "1,2", True])
@@ -284,7 +300,7 @@ def test_resolve_falls_back_when_the_value_cannot_be_converted(raw: Any) -> None
     """A value that cannot be read as a number counts as missing."""
     resolved = resolve(_parameter(), configuration=_Configuration(raw))
     assert resolved.origin == "default"
-    assert resolved.notice is not None
+    assert resolved.value == pytest.approx(0.005)
 
 
 def test_resolve_falls_back_when_setting_is_absent() -> None:
@@ -300,7 +316,20 @@ def test_resolve_equipment_profile() -> None:
     )
     assert resolve(parameter, equipment=_Equipment(0.01)).origin is ParameterSource.EQUIPMENT_PROFILE
     assert resolve(parameter, equipment=_Equipment(None)).origin == "default"
-    assert resolve(parameter).notice is not None
+    assert resolve(parameter, equipment=_Equipment("0.02")).value == pytest.approx(0.02)
+    with parameter_context():
+        assert resolve(parameter).notice is not None
+
+
+def test_resolve_reads_the_run_context() -> None:
+    """A call with no provider reads the context the run set."""
+    parameter = _parameter(
+        source=ParameterSource.EQUIPMENT_PROFILE, config_key=None, equipment=frozenset({EquipmentKind.CAMERA})
+    )
+    with parameter_context(equipment=_Equipment(0.01)) as context:
+        resolved = resolve(parameter)
+    assert (resolved.value, resolved.origin) == (0.01, ParameterSource.EQUIPMENT_PROFILE)
+    assert context.notices == []
 
 
 def _tuned_parameter(**overrides: object) -> TunedParameter:

@@ -13,14 +13,22 @@ optic that are really used. For example::
 
     [Observatory.Setups]
     available = ASI533 on Apertura
+    active = ASI533 on Apertura
 
     [Observatory.Setup.ASI533 on Apertura]
     camera = ZWO ASI533MM Pro
     optic = Apertura 75Q
+    mount = Sky-Watcher EQ6-R
+    filters = L, SPEC
 
 A camera can appear in several setups, and an optic can be used by several
-cameras. This module only reads the config. Deciding which setup a frame
-came from is done by `astrometricslib.pipelines.shared.frame_optics`.
+cameras. One setup is active: planning and telescope control use it.
+Processing uses the setup a frame was taken with. The mount and the filters
+are optional; they name the ``[Observatory.Mount.<name>]`` and
+``[Observatory.Filter.<name>]`` sections that hold their equipment values.
+
+This module only reads the config. Deciding which setup a frame came from is
+done by `astrometricslib.pipelines.shared.frame_optics`.
 """
 
 import logging
@@ -28,6 +36,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from astrometricslib.foundation.camera_names import normalize_camera_name
 from astrometricslib.foundation.warn_once import warn_once
 
 logger = logging.getLogger(__name__)
@@ -65,6 +74,12 @@ class SetupConfig(BaseModel):
         The camera, written in any spelling the camera profiles recognise.
     optic_name : `str`
         The name of an optic listed in the config.
+    mount_name : `str` or `None`
+        The mount, naming an ``[Observatory.Mount.<name>]`` section, or `None`
+        when the setup does not say.
+    filter_names : `tuple` [`str`, ...]
+        The filters and gratings used with this setup, each naming an
+        ``[Observatory.Filter.<name>]`` section.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -72,6 +87,8 @@ class SetupConfig(BaseModel):
     name: str = Field(min_length=1)
     camera_name: str = Field(min_length=1)
     optic_name: str = Field(min_length=1)
+    mount_name: str | None = None
+    filter_names: tuple[str, ...] = ()
 
 
 class ObservatorySetups(BaseModel):
@@ -84,12 +101,69 @@ class ObservatorySetups(BaseModel):
     setups : `tuple` [`SetupConfig`, ...]
         The pairings listed in the config. Each one refers to an optic that
         is in `optics`.
+    active_setup_name : `str` or `None`
+        The setup named by ``active`` in ``[Observatory.Setups]``, or `None`
+        when the config names none.
     """
 
     model_config = ConfigDict(frozen=True)
 
     optics: tuple[OpticConfig, ...] = ()
     setups: tuple[SetupConfig, ...] = ()
+    active_setup_name: str | None = None
+
+    def setup_named(self, setup_name: str) -> SetupConfig | None:
+        """Find a setup by name.
+
+        Parameters
+        ----------
+        setup_name : `str`
+            The name to look for.
+
+        Returns
+        -------
+        setup : `SetupConfig` or `None`
+            The setup, or `None` when no setup has that name.
+        """
+        return next((setup for setup in self.setups if setup.name == setup_name), None)
+
+    def setup_for(self, camera_name: str, optic_name: str) -> SetupConfig | None:
+        """Find the setup that pairs a camera with an optic.
+
+        Parameters
+        ----------
+        camera_name : `str`
+            The camera, in any spelling; spaces and case are ignored.
+        optic_name : `str`
+            The optic's name.
+
+        Returns
+        -------
+        setup : `SetupConfig` or `None`
+            The first setup with that camera and optic, or `None`.
+        """
+        camera_key = normalize_camera_name(camera_name)
+        return next(
+            (
+                setup
+                for setup in self.setups
+                if setup.optic_name == optic_name and normalize_camera_name(setup.camera_name) == camera_key
+            ),
+            None,
+        )
+
+    def active_setup(self) -> SetupConfig | None:
+        """Return the active setup.
+
+        Returns
+        -------
+        setup : `SetupConfig` or `None`
+            The setup named by ``active``; the only setup when the config
+            lists exactly one and names none; otherwise `None`.
+        """
+        if self.active_setup_name is not None:
+            return self.setup_named(self.active_setup_name)
+        return self.setups[0] if len(self.setups) == 1 else None
 
     def optic_named(self, optic_name: str) -> OpticConfig | None:
         """Find an optic by name.
@@ -203,6 +277,26 @@ def load_observatory_setups(app_config: Any) -> ObservatorySetups:
                 f"optic={optic_name!r}). The setup is ignored.",
             )
             continue
-        setups.append(SetupConfig(name=setup_name, camera_name=camera_name, optic_name=optic_name))
+        mount_name = (app_config.get_value(section, "mount", "") or "").strip() or None
+        filter_text = app_config.get_value(section, "filters", "") or ""
+        filter_names = tuple(name.strip() for name in str(filter_text).split(",") if name.strip())
+        setups.append(
+            SetupConfig(
+                name=setup_name,
+                camera_name=camera_name,
+                optic_name=optic_name,
+                mount_name=mount_name,
+                filter_names=filter_names,
+            )
+        )
 
-    return ObservatorySetups(optics=optics, setups=tuple(setups))
+    active_text = (app_config.get_value("Observatory.Setups", "active", "") or "").strip()
+    active_setup_name = active_text or None
+    if active_setup_name is not None and active_setup_name not in {setup.name for setup in setups}:
+        warn_once(
+            logger,
+            f"[Observatory.Setups] names {active_setup_name!r} as active, but no usable setup has that "
+            "name. No setup is active.",
+        )
+        active_setup_name = None
+    return ObservatorySetups(optics=optics, setups=tuple(setups), active_setup_name=active_setup_name)

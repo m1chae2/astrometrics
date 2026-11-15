@@ -81,7 +81,6 @@ DEFAULT_LATITUDE_DEG = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="WAY-D131",
-    pending_conversion=True,
 )
 """Latitude used by the pointing fits when no observer location is known."""
 

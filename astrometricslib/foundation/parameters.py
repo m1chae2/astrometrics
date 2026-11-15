@@ -7,15 +7,20 @@ the value to use for one parameter, with its origin, from the place its
 source names: the equipment profile, a processing setting, a tuned value,
 or the default.
 
-When a value is missing, a parameter that may fall back gets its default and
-a notice for the job to record. A parameter that must refuse (a hardware
-limit) raises `ParameterUnavailableError`.
+When a value is missing, a parameter that may fall back gets its default; a
+missing equipment-profile or tuned value also gets a notice for the job to
+record (a processing setting left out of the config simply uses its
+default). A parameter that must refuse (a hardware limit) raises
+`ParameterUnavailableError`.
 
-This phase ships the model and the resolver only. No class implements
-`EquipmentValues` or `TunedValues` yet.
+A call that passes no provider reads them from the run's
+`parameter_context.ParameterContext` (or, outside every run, from the config
+file and the active setup), and records any notice there. No class implements
+`TunedValues` yet.
 """
 
 import importlib
+import logging
 import pkgutil
 from collections.abc import Mapping
 from types import MappingProxyType
@@ -24,6 +29,8 @@ from typing import Any, Literal, Protocol
 from pydantic import BaseModel, ConfigDict
 
 from astrometricslib.foundation.errors import ParameterUnavailableError
+from astrometricslib.foundation.parameter_context import current_parameter_context, default_parameter_context
+from astrometricslib.foundation.warn_once import warn_once
 from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     ParameterValue,
@@ -31,8 +38,10 @@ from astrometricslib.models.tuned_parameter import (
     WhenMissing,
 )
 
+logger = logging.getLogger(__name__)
+
 # Module name parts that mark code that is not part of the product.
-_SKIPPED_MODULE_PARTS = frozenset({"test", "tests", "scripts"})
+_SKIPPED_MODULE_PARTS = frozenset({"test", "tests", "scripts", "conftest"})
 
 
 class ParameterRegistry:
@@ -94,7 +103,7 @@ class ParameterRegistry:
 
 
 def _is_skipped(module_name: str) -> bool:
-    """Say whether a module is a test, a script or a ``__main__`` entry.
+    """Say whether a module is a test, ``conftest``, script or ``__main__``.
 
     Parameters
     ----------
@@ -168,8 +177,8 @@ class ConfigurationValues(Protocol):
 class EquipmentValues(Protocol):
     """Anything that gives the value for the equipment in use."""
 
-    def equipment_value(self, parameter: TunedParameter) -> ParameterValue | None:
-        """Return the equipment's value for the parameter, or `None`."""
+    def equipment_value(self, parameter: TunedParameter) -> ParameterValue | str | None:
+        """Return the equipment's value (a number or its text), or `None`."""
         ...
 
 
@@ -326,7 +335,12 @@ def _lookup(
         if equipment is None:
             return None, f"no {label} value"
         raw = equipment.equipment_value(parameter)
-        return (raw, "") if raw is not None else (None, f"no {label} value")
+        if raw is None:
+            return None, f"no {label} value"
+        converted = _convert_to_default_type(raw, parameter.default)
+        if converted is None:
+            return None, f"the {label} value {raw!r} cannot be read as a number"
+        return converted, ""
     if tuned is None:
         return None, f"no {label} value"
     raw = tuned.tuned_value(parameter)
@@ -379,13 +393,24 @@ def resolve(
         # list the values that are pending, so no notice is needed here.
         return ResolvedValue(name=parameter.name, value=parameter.default, origin="default")
 
+    context = None
+    if configuration is None and equipment is None and tuned is None:
+        context = current_parameter_context() or default_parameter_context()
+        configuration, equipment, tuned = context.configuration, context.equipment, context.tuned
     value, reason = _lookup(parameter, configuration, equipment, tuned)
     if value is not None:
         return ResolvedValue(name=parameter.name, value=value, origin=parameter.source)
 
     if parameter.when_missing is WhenMissing.REFUSE:
         raise ParameterUnavailableError(f"{parameter.name}: {reason}, and this parameter has no safe default")
+    if parameter.source is ParameterSource.PROCESSING_SETTING:
+        # A setting left out of the config uses its default, as every other
+        # setting does; only missing equipment and tuned values need a notice.
+        return ResolvedValue(name=parameter.name, value=parameter.default, origin="default")
     notice = f"{parameter.name}: {reason}; using the default {_format_default(parameter)}"
+    if context is not None:
+        context.note(notice)
+        warn_once(logger, notice)
     return ResolvedValue(name=parameter.name, value=parameter.default, origin="default", notice=notice)
 
 

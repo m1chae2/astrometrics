@@ -7,11 +7,22 @@ software does with it (its role), where its value comes from (its source),
 which equipment it depends on and which register entry holds its evidence.
 `collect_parameters` gathers a library's declarations into a
 `ParameterRegistry`, and `resolve_parameter` finds the value to use, from the
-equipment, a tuning run, the configuration or the default. A script and
+equipment, a tuning run, the configuration or the default. A run sets a
+`ParameterContext` (`setup_parameter_context`, `frames_parameter_context`)
+naming the setup whose equipment values it reads. A script and
 `wayfindinglib` import these names from here. Each is imported from the module
 where its code lives today.
 """
 
+from astrometricslib.foundation.parameter_context import (
+    ParameterContext,
+    SetupEquipmentValues,
+    current_parameter_context,
+    equipment_values_to_write,
+    frames_parameter_context,
+    parameter_context,
+    setup_parameter_context,
+)
 from astrometricslib.foundation.parameters import (
     ConfigurationValues,
     EquipmentValues,
@@ -35,13 +46,20 @@ __all__ = [
     "EquipmentKind",
     "EquipmentValues",
     "HardcodedKind",
+    "ParameterContext",
     "ParameterRegistry",
     "ParameterRole",
     "ParameterSource",
     "ResolvedValue",
+    "SetupEquipmentValues",
     "TunedParameter",
     "TunedValues",
     "WhenMissing",
     "collect_parameters",
+    "current_parameter_context",
+    "equipment_values_to_write",
+    "frames_parameter_context",
+    "parameter_context",
     "resolve_parameter",
+    "setup_parameter_context",
 ]

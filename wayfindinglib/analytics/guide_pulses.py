@@ -47,7 +47,6 @@ GUIDE_RATE_ARCSEC_PER_S = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D128",
-    pending_conversion=True,
 )
 """Sky motion during a guide pulse at half the sidereal rate, in arcsec/s.
 
@@ -63,7 +62,6 @@ PULSE_MERGE_WINDOW_SECONDS = TunedParameter(
     source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D128",
-    pending_conversion=True,
 )
 """Pulses closer together than this belong to the same correction."""
 

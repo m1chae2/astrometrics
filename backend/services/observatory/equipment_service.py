@@ -82,7 +82,8 @@ class EquipmentService:
         limits : `dict`, optional
             New safety limits, such as ``min_altitude_deg`` or
             ``max_hour_angle_hours``. The library checks them and writes them
-            only to the telescope's existing config section.
+            only to an existing config section: the mount section of the
+            telescope's setup, or the telescope's own section.
 
         Returns
         -------

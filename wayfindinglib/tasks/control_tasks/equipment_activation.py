@@ -26,6 +26,8 @@ from wayfindinglib.data_access.equipment_catalog_reader import (
     ACTIVE_TELESCOPE_KEY,
     CAMERA_SECTION,
     TELESCOPE_SECTION,
+    camera_id_for,
+    camera_key,
     get_equipment_catalog,
     list_cameras,
     list_telescopes,
@@ -41,10 +43,59 @@ from wayfindinglib.models.equipment_and_site.equipment import Camera, EquipmentC
 logger = logging.getLogger(__name__)
 
 
+SETUPS_SECTION = "Observatory.Setups"
+ACTIVE_SETUP_KEY = "active"
+
+
+def _choose_setup(setups: Any, *, chosen_optic: str | None = None, chosen_camera: str | None = None) -> Any:
+    """Choose the setup to make active for a new telescope or camera choice.
+
+    Exactly one of ``chosen_optic`` and ``chosen_camera`` is given. The setup
+    that pairs the chosen item with the other item of the active setup wins;
+    otherwise the first setup that uses the chosen item.
+
+    Parameters
+    ----------
+    setups : `ObservatorySetups`
+        The configured setups.
+    chosen_optic : `str`, optional
+        The optic chosen as the active telescope.
+    chosen_camera : `str`, optional
+        The camera chosen as the active camera.
+
+    Returns
+    -------
+    setup : `SetupConfig` or `None`
+        The setup, or `None` when no setup uses the chosen item.
+    """
+    if chosen_optic is not None:
+        using = [setup for setup in setups.setups if setup.optic_name == chosen_optic]
+    else:
+        key = camera_key(chosen_camera or "")
+        using = [setup for setup in setups.setups if camera_key(setup.camera_name) == key]
+    active = setups.active_setup()
+    if active is not None:
+        active_camera = camera_key(active.camera_name)
+        keep = [
+            setup
+            for setup in using
+            if (chosen_optic is not None and camera_key(setup.camera_name) == active_camera)
+            or (chosen_camera is not None and setup.optic_name == active.optic_name)
+        ]
+        if keep:
+            return keep[0]
+    return using[0] if using else None
+
+
 def set_active_telescope(
     config: AppConfiguration, telescope_id: str, limits: dict[str, float | bool] | None = None
 ) -> bool:
     """Record the active telescope, and optionally its safety limits.
+
+    When the config has setups, the active setup changes instead: the one
+    that pairs this optic with the camera in use, or else the first setup
+    with this optic (which may bring another camera). Limits go to that
+    setup's mount section.
 
     Parameters
     ----------
@@ -82,7 +133,18 @@ def set_active_telescope(
     update: dict[str, dict[str, str]] = {}
     if limits:
         update = build_telescope_limits_update(config, telescope_id, limits)
-    update.setdefault(TELESCOPE_SECTION, {})[ACTIVE_TELESCOPE_KEY] = telescope_id
+    setups = config.get_observatory_setups()
+    if setups.setups:
+        setup = _choose_setup(setups, chosen_optic=telescope_id)
+        if setup is None:
+            logger.warning("set_active_telescope: no setup uses the optic '%s'", telescope_id)
+            return False
+        update.setdefault(SETUPS_SECTION, {})[ACTIVE_SETUP_KEY] = setup.name
+        # The setup may bring another camera; astrometricslib reads the
+        # primary camera from its own key.
+        update.setdefault(CAMERA_SECTION, {})[ACTIVE_CAMERA_KEY] = camera_id_for(config, setup.camera_name)
+    else:
+        update.setdefault(TELESCOPE_SECTION, {})[ACTIVE_TELESCOPE_KEY] = telescope_id
     config.update_config(update)
     logger.info("Active telescope set to '%s'", telescope_id)
     return True
@@ -90,6 +152,10 @@ def set_active_telescope(
 
 def set_active_camera(config: AppConfiguration, camera_id: str) -> bool:
     """Record a new active camera selection.
+
+    When the config has setups, the active setup changes instead: the one
+    that pairs this camera with the optic in use, or else the first setup
+    with this camera.
 
     Parameters
     ----------
@@ -108,7 +174,19 @@ def set_active_camera(config: AppConfiguration, camera_id: str) -> bool:
     if camera_id not in known_ids:
         logger.warning("set_active_camera: '%s' is not a known camera", camera_id)
         return False
-    config.update_config({CAMERA_SECTION: {ACTIVE_CAMERA_KEY: camera_id}})
+    setups = config.get_observatory_setups()
+    if setups.setups:
+        setup = _choose_setup(setups, chosen_camera=camera_id)
+        if setup is None:
+            logger.warning("set_active_camera: no setup uses the camera '%s'", camera_id)
+            return False
+        # astrometricslib still reads the primary camera from its own key.
+        config.update_config({
+            SETUPS_SECTION: {ACTIVE_SETUP_KEY: setup.name},
+            CAMERA_SECTION: {ACTIVE_CAMERA_KEY: camera_id},
+        })
+    else:
+        config.update_config({CAMERA_SECTION: {ACTIVE_CAMERA_KEY: camera_id}})
     logger.info("Active camera set to '%s'", camera_id)
     return True
 

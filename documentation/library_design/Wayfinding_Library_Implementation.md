@@ -1,6 +1,6 @@
 # Wayfinding library implementation
 
-*Version 2.5 · 2026-11-01 · Status: current*
+*Version 2.6 · 2026-11-15 · Status: current*
 
 ## Abstract
 
@@ -117,7 +117,7 @@ The phase is the combination of states `DelegationPolicy` holds, not a type. `Co
 
 ## 3. Foundation (Architecture Section 3)
 
-- **Equipment catalog.** `data_access/equipment_catalog_reader.py` builds the `EquipmentCatalog`. `equipment_activation.py` validates an id before recording the active choice. `EquipmentConfiguration` uses `PLATE_SCALE_CONSTANT` (206.265, Architecture Equation (1)).
+- **Equipment catalog.** `equipment_catalog_reader.py` builds the `EquipmentCatalog` from the setups: one `Telescope` per optic. `EquipmentConfiguration` uses `PLATE_SCALE_CONSTANT` (206.265, Equation (1)).
 - **Site.** `data_access/site_profile_reader.py` reads `[Observatory.Location]`, falls back to `FALLBACK_SITE` (Denver: 39.7392, -104.9903, 1600 m) with a warning, and seeds the default `SiteProfile`. Control uses `hardware_operations.observer_location` (mount first), so the rule holds for planning only.
 - **Storage.** `drivers/butler.py` holds `DiskButler`, the one storage path: `AbstractButler` from `astrometricslib`, one table per dataset type in `wayfinding.db`. `ControlRecordStore` keeps `alignment_attempts`, `guiding_samples` and `polar_alignments`. An alignment attempt from a frame names it in `source_frame`, so the same frame brought in or solved again updates one row; `remove_repeated_alignment_attempts` reports, and with `apply=True` deletes, rows stored twice.
 

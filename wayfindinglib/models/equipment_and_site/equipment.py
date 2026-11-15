@@ -2,10 +2,11 @@
 
 Description: Telescope and camera specifications, held in a catalog of
 which more than one may be configured with exactly one of each active.
-Per `Wayfinding_Library_Architecture.md` Section 3.2: a telescope's optics and
-its mount's safe pointing envelope are configured together, changed
-together, and meaningless apart, so `Telescope` is one flat record
-rather than separately swappable optics and mount components.
+Per `Wayfinding_Library_Architecture.md` Section 3.2: optics, cameras and
+mounts are configured once each and joined by the setups, one of which is
+active. A `Telescope` is the view the planning and control code uses: one
+optic joined with the safe pointing envelope of the mount that carries it
+in its setup.
 
 `meridian_flip_delay_min` is derived from `flip_hour_angle_deg` rather
 than independently stored, per `Wayfinding_Library_Architecture.md`

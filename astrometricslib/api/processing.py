@@ -1743,7 +1743,9 @@ class ProcessingPipelines:
         stages : `list` [`str`], optional
             For one target, which of ``"astrometry"``, ``"photometry"``,
             ``"spectroscopy"`` and ``"asteroids"`` to run. Defaults to the
-            first three. The asteroid search needs a stack.
+            first three. The asteroid search needs a stack. It is
+            experimental: its false-positive rate is not measured on real
+            data, so a person should check its results.
         astrometry : `dict`, optional
             Options for the astrometry stage: ``path`` (the image to plate
             solve; the stack by default).
@@ -1756,7 +1758,9 @@ class ProcessingPipelines:
             `None`, every usable identified star is processed. The user
             removed the top-10 default on 2026-11-01).
         asteroids : `dict`, optional
-            Options for the asteroid search: ``moving_object_config`` (a
+            Options for the asteroid search, which is experimental: its
+            false-positive rate is not measured on real data, so a person
+            should check its results. The option is ``moving_object_config`` (a
             dictionary of settings, such as
             ``{"detection_threshold_sigma": 4.0}``; a key left out keeps its
             default value, and a key that names no setting raises

@@ -530,6 +530,9 @@ def _detect_sources_in_one_frame(
 class AsteroidDetectionPipeline:
     """The main factory line for finding asteroids in our photos.
 
+    This search is experimental: its false-positive rate is not measured on
+    real data, so a person should check its results.
+
     Parameters
     ----------
     config : `MovingObjectConfig`, optional

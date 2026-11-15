@@ -54,7 +54,11 @@ COLUMNS = (
     "live_value",
     "impl_link",
     "impl_resolved",
+    "target_source",
+    "derive_from",
+    "check_kind",
 )
+CONVERSION_COLUMNS = ("target_source", "derive_from", "check_kind")
 EQUIPMENT_KINDS = ("mount", "telescope", "camera", "filter or grating")
 CELL_LIMIT = 80
 
@@ -589,6 +593,7 @@ def write_outputs(rows: list[dict[str, str]], out: Path) -> None:
         "equipment",
         "code_location",
         "live_value",
+        *(column for column in CONVERSION_COLUMNS if any(row[column] for row in rows)),
     )
     for register in (*REGISTER_FILES, "unassigned"):
         subset = [row for row in rows if row["register"] == register]
@@ -676,6 +681,51 @@ def summarize(rows: list[dict[str, str]]) -> list[str]:
     return lines
 
 
+def add_conversion_targets(rows: list[dict[str, str]], folder: Path) -> int:
+    """Fill the conversion columns from draft conversion lists.
+
+    A conversion list is a planning aid, not part of the register: one
+    ``conversion_<register>.csv`` per register file, with columns ``id``,
+    ``settings`` (names separated by ``; ``), ``target_source``,
+    ``derive_from`` and ``check_kind``. A row matches a table row with the
+    same register and ID whose setting is one of the listed names.
+
+    Parameters
+    ----------
+    rows : `list` [`dict` [`str`, `str`]]
+        All table rows; matched rows are filled in place.
+    folder : `pathlib.Path`
+        The folder that holds the conversion lists.
+
+    Returns
+    -------
+    filled : `int`
+        How many table rows got conversion columns.
+    """
+    targets: dict[tuple[str, str, str], dict[str, str]] = {}
+    for register in REGISTER_FILES:
+        path = folder / f"conversion_{register}.csv"
+        if not path.is_file():
+            continue
+        with path.open(encoding="utf-8", newline="") as handle:
+            for record in csv.DictReader(handle):
+                for setting in record.get("settings", "").split(";"):
+                    targets[register, record.get("id", "").strip(), setting.strip()] = record
+    filled = 0
+    for row in rows:
+        record = targets.get((row["register"], row["entry_id"], row["setting"]))
+        if record is None and row["source"] == "design estimate":
+            record = next(
+                (value for key, value in targets.items() if key[:2] == (row["register"], row["entry_id"])),
+                None,
+            )
+        if record is not None:
+            for column in CONVERSION_COLUMNS:
+                row[column] = record.get(column, "")
+            filled += 1
+    return filled
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the generator.
 
@@ -692,8 +742,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", required=True, type=Path, help="Folder for the generated files.")
     parser.add_argument("--repo", type=Path, default=DEFAULT_REPO, help="Repository root.")
+    parser.add_argument(
+        "--conversion-dir",
+        type=Path,
+        help="Folder of draft conversion_<register>.csv lists to add as columns.",
+    )
     args = parser.parse_args(argv)
     rows, backlog_found = build_rows(args.repo)
+    if args.conversion_dir is not None:
+        print(f"conversion targets added to {add_conversion_targets(rows, args.conversion_dir)} rows")
     if not backlog_found:
         print(f"note: {BACKLOG_RELATIVE_PATH} does not exist yet; the backlog source was skipped.")
     write_outputs(rows, args.out)

@@ -149,7 +149,7 @@ class SetupEquipmentValues:
 class ParameterContext:
     """The providers a run's parameters are read from, and its notices.
 
-    Attributes
+    Parameters
     ----------
     configuration : `Any` or `None`
         The processing settings (``get_value(section, key, fallback)``).

@@ -6,6 +6,7 @@ Paths are relative to the repository root. Theory is in the architecture papers,
 
 ## Start here
 
+- [Application overview](documentation/explanation.md): how the application fits together, seen as data models, algorithms and workflows.
 - [About these docs](documentation/About_These_Docs.md): the map of every document, its kind and what checks it.
 - [Documentation conventions](documentation/Documentation_Conventions.md): where each kind of content lives and the rules the documents follow.
 - [Glossary](documentation/Glossary.md): definitions of the terms used everywhere.

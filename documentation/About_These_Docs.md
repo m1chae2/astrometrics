@@ -1,6 +1,6 @@
 # About these docs
 
-*Version 1.1 · 2026-10-15 · Status: current*
+*Version 1.2 · 2026-11-15 · Status: current*
 
 ## Abstract
 
@@ -25,7 +25,7 @@ The site has seven sections, one per kind of document plus a section about the d
 | [Get started](get_started.md) | Installing the app, a first session with the desktop app, and a first call to the Python library |
 | [Tutorials](tutorials.md) | Guided lessons |
 | [How-to guides](how_to/index.md) | Recipes for one task each |
-| [Explanation](explanation.md) | The theory of each library and how the desktop app is built |
+| [Application Overview](explanation.md) | How the application fits together (data models, algorithms, workflows), the theory of each library and how the desktop app is built |
 | [Reference](reference.md) | The API, the user manual, the pipeline review guides and the implementation papers |
 | [Evidence](evidence.md) | The validation register and the generated audit report |
 | [About the docs](about.md) | This map and the conventions |

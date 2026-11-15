@@ -1,6 +1,6 @@
 # Documentation conventions
 
-*Version 1.2 · 2026-11-15 · Status: current*
+*Version 1.3 · 2026-11-15 · Status: current*
 
 ## Abstract
 
@@ -33,7 +33,7 @@ Rules:
 
 ### 1.1 The site's sections
 
-The Sphinx site has seven sections: Get started, Tutorials, How-to guides, Explanation, Reference, Evidence and About the docs. Each has a section page (`get_started.md`, `tutorials.md`, `how_to/index.md`, `explanation.md`, `reference.md`, `evidence.md`, `about.md`) that introduces the section and lists its pages; the root `index.rst` lists only the section pages.
+The Sphinx site has seven sections: Get started, Tutorials, How-to guides, Application Overview, Reference, Evidence and About the docs. Each has a section page (`get_started.md`, `tutorials.md`, `how_to/index.md`, `explanation.md`, `reference.md`, `evidence.md`, `about.md`) that introduces the section and lists its pages; the root `index.rst` lists only the section pages. The Application Overview section holds the explanation pages, and its section page opens with an overview of the whole application.
 
 - Each page belongs to exactly one section, chosen by its kind, and appears in exactly one toctree. A page reached only by links is marked `:orphan:`.
 - A page has one name. Toctree entries are bare paths, so the navigation shows the page's own title, and a section page links each page by that exact title.

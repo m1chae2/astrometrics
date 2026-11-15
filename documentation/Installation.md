@@ -16,7 +16,7 @@ These parts do not work on Windows yet:
 
 Windows limits a path to 260 characters unless long paths are turned on, and a deep library folder, for example on Google Drive, can pass that. The setup script warns when they are off and prints the one-line command that turns them on. It needs administrator rights and a restart.
 
-Keep the frames on a local drive if you can. Siril then reads them through hard links, which cost no space. Frames in a Google Drive or network folder are copied before each stack, which takes time and disk space.
+Keep the frames on the same drive as `%LOCALAPPDATA%`, usually `C:`. Siril reads them through hard links, which cost no space or time but work only within one NTFS drive. A stack of frames on another drive, or in a Google Drive or network folder, stops with an error that says so.
 :::
 
 ## What you need

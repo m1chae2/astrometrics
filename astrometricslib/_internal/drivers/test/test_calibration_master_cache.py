@@ -32,8 +32,8 @@ def _make_processor(tmp_path: Path):  # ruff: ignore[missing-return-type-private
 def _stage_frames(target_folder: str, subdirectory: str, library_directory: str, count: int) -> str:
     """Stage `count` library frames into a staging folder, as the app does.
 
-    The frames are staged with `stage_file`: a symbolic link, or a hard link
-    or copy where the system allows no symbolic link.
+    The frames are staged with `stage_file`: a symbolic link on Linux, a
+    hard link on Windows.
 
     Skips writing a library frame that already has the expected content,
     rather than rewriting it unconditionally: `_calibration_source_fingerprint`

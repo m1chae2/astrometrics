@@ -411,8 +411,8 @@ class AstrometryNetPlateSolveDriver(PlateSolveDriver):
                 original_path = os.path.abspath(os.path.expanduser(image_path))
                 # Put the image in the temp dir under a plain name, which keeps
                 # the output files isolated and avoids spaces in the path:
-                # a symbolic link, a hard link or a copy, whichever the system
-                # allows (`stage_file`).
+                # a symbolic link on Linux, a hard link on Windows
+                # (`stage_file`).
                 working_path = os.path.join(tmp_dir, "input_image.fits")
                 stage_file(original_path, working_path)
 

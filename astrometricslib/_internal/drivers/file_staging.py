@@ -1,56 +1,27 @@
 """Purpose: Put a frame into a work folder without changing the original.
 
 Description: A stacking or plate-solving run works in a scratch folder and
-must not touch the library's frames. This module gives the frame a second
-name in that folder. It tries the cheapest way first and falls back when the
-system refuses, so no part of the program asks which system it runs on:
+must not touch the library's frames. `stage_file` gives the frame a second
+name in that folder. Each system has one fixed way to do it, with no
+fallback, so a run never silently copies a library's worth of frames:
 
-1. A symbolic link. Free and instant. Linux always allows it; Windows allows
-   it only with Developer Mode or administrator rights.
-2. A hard link (the same file under a second name, also free and instant).
-   It needs no special rights, but both names must be on one drive, so a
-   Google Drive or network folder cannot hold one.
-3. A copy. Always possible, but it takes time and disk space.
+* Linux makes a symbolic link (`_staging_posix`). It is free and instant and
+  reaches frames on any drive, such as a mounted network or cloud folder.
+* Windows makes a hard link (`_staging_windows`): the same file under a
+  second name, also free and instant, and it needs no special rights (a
+  symbolic link needs Developer Mode). A hard link only works when the frames
+  are on the same NTFS drive as the work folder; elsewhere the run stops with
+  a `ConfigurationError` that says so.
+
+This module imports the right one once, the way
+`astrometricslib.foundation.system` does.
 """
 
-import logging
-import os
-import shutil
+import sys
 
-logger = logging.getLogger(__name__)
+if sys.platform == "win32":
+    from astrometricslib._internal.drivers._staging_windows import stage_file
+else:
+    from astrometricslib._internal.drivers._staging_posix import stage_file
 
-STAGED_BY_LINK = "link"
-"""`stage_file` made a link (symbolic or hard)."""
-
-STAGED_BY_COPY = "copy"
-"""`stage_file` copied the file, because no link was possible."""
-
-
-def stage_file(source: str, destination: str) -> str:
-    """Put a file into a work folder without changing the original.
-
-    Parameters
-    ----------
-    source : `str`
-        The original file.
-    destination : `str`
-        The new name in the work folder. It must not exist yet.
-
-    Returns
-    -------
-    method : `str`
-        `STAGED_BY_LINK` or `STAGED_BY_COPY`. An `OSError` comes through
-        when the file can be neither linked nor copied.
-    """
-    try:
-        os.symlink(source, destination)
-        return STAGED_BY_LINK
-    except OSError as symlink_error:
-        logger.debug("No symbolic link for %s (%s); trying a hard link", source, symlink_error)
-    try:
-        os.link(source, destination)
-        return STAGED_BY_LINK
-    except OSError as link_error:
-        logger.debug("No hard link for %s (%s); copying it", source, link_error)
-    shutil.copy2(source, destination)
-    return STAGED_BY_COPY
+__all__ = ["stage_file"]

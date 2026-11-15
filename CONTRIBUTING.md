@@ -49,7 +49,7 @@ def test_a_mounted_drive_passes(...):
 Linux runs every test, marked or not. Before you mark a test, check whether it can run on both systems. Most tests that fail on Windows assume something about Linux:
 
 - **A path written with `/`.** Compare with `Path(...).as_posix()`, or build the expected path with `os.path.join`.
-- **A symbolic link.** Windows makes these only in Developer Mode. Stage a file with `file_staging.stage_file` (`astrometricslib/_internal/drivers/file_staging.py`), as the app does: it tries a symbolic link, then a hard link, then a copy.
+- **A symbolic link.** Windows makes these only in Developer Mode. Stage a file with `file_staging.stage_file` (`astrometricslib/_internal/drivers/file_staging.py`), as the app does: a symbolic link on Linux, a hard link on Windows.
 - **A fake program written as a script.** Windows does not run a script by its `#!` line. Put a `.cmd` file in front of it that starts the script with `sys.executable`.
 - **`os.kill(pid, 0)` to see whether a process runs.** On Windows this ends the process. Use `psutil.pid_exists` there.
 - **A Windows path in TOML.** Put it in single quotes (`path = 'C:\...'`). In double quotes, `\U` is read as an escape.

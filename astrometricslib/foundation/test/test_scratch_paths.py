@@ -4,6 +4,7 @@ import os
 import sys
 from pathlib import Path
 
+import platformdirs
 import pytest
 
 from astrometricslib.foundation.paths import (
@@ -92,17 +93,20 @@ def test_data_directory_uses_xdg_data_home(tmp_path: Path, monkeypatch: pytest.M
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="the folders are in %LOCALAPPDATA% on Windows only")
-def test_windows_folders_are_in_local_app_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    r"""On Windows the folders are in ``%LOCALAPPDATA%\astrometrics``."""
-    local_app_data = tmp_path / "AppData" / "Local"
-    monkeypatch.setenv("LOCALAPPDATA", str(local_app_data))
+def test_windows_folders_are_in_local_app_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    r"""On Windows the folders are in ``%LOCALAPPDATA%\astrometrics``.
+
+    ``platformdirs`` asks Windows for the folder rather than reading the
+    ``LOCALAPPDATA`` variable, so the test compares with the real folder.
+    Only the functions that make no folder are called.
+    """
     for variable in ("XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME"):
         monkeypatch.delenv(variable, raising=False)
-    app_folder = local_app_data / "astrometrics"
-    assert Path(data_directory()) == app_folder
-    assert Path(state_directory()) == app_folder
-    assert Path(scratch_directory()) == app_folder / "Cache"
+    app_folder = Path(os.environ["LOCALAPPDATA"]) / "astrometrics"
+    assert Path(default_data_path()) == app_folder
     assert Path(config_directory()) == app_folder
+    assert Path(platformdirs.user_state_dir("astrometrics", appauthor=False)) == app_folder
+    assert Path(platformdirs.user_cache_dir("astrometrics", appauthor=False)) == app_folder / "Cache"
 
 
 def test_config_directory_uses_xdg_config_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -295,7 +295,7 @@ def test_the_script_builds_the_flat_bias_master_only_when_it_is_staged() -> None
     different = build_master_calibration_commands(
         "/w", StagedFrameCounts(5, 5, 5, 20, flat_biases=4), set(), False, None
     )
-    assert 'cd "/w/flat_biases"' in different
+    assert f'cd "{os.path.join("/w", "flat_biases")}"' in different
     assert "stack flatbias rej 3 3 -nonorm -out=flat_bias_stacked" in different
     assert "calibrate flat -bias=flat_bias_stacked" in different
     # The lights' own bias master is still built.

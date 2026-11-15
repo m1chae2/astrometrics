@@ -8,6 +8,7 @@ Windows). The Linux tests change ``HOME``; the Windows test runs only on
 Windows.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -33,8 +34,12 @@ def test_linux_uses_local_share(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="the folder is in %LOCALAPPDATA% on Windows only")
-def test_windows_uses_local_app_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    r"""On Windows the database is in ``%LOCALAPPDATA%\astrometrics``."""
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+def test_windows_uses_local_app_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    r"""On Windows the database is in ``%LOCALAPPDATA%\astrometrics``.
+
+    ``platformdirs`` asks Windows for the folder rather than reading the
+    ``LOCALAPPDATA`` variable, so the test compares with the real folder.
+    """
     monkeypatch.delenv("XDG_DATA_HOME", raising=False)
-    assert default_database_path() == tmp_path / "astrometrics" / DATABASE_NAME
+    local_app_data = Path(os.environ["LOCALAPPDATA"])
+    assert default_database_path() == local_app_data / "astrometrics" / DATABASE_NAME

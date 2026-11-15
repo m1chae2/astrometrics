@@ -78,9 +78,14 @@ def test_backslashes_are_kept_and_quotes_are_removed() -> None:
 
 
 def test_lowering_the_priority_sets_the_below_normal_class() -> None:
-    """A positive niceness gives the below-normal class; zero leaves it."""
+    """A positive niceness gives the below-normal class; zero leaves it.
+
+    A Windows child starts with its parent's class, so "left as it was"
+    means this test process's own class (an earlier test may have lowered
+    it), not always the normal class.
+    """
     assert priority_class_after_lowering(10) == psutil.BELOW_NORMAL_PRIORITY_CLASS
-    assert priority_class_after_lowering(0) == psutil.NORMAL_PRIORITY_CLASS
+    assert priority_class_after_lowering(0) == psutil.Process().nice()
 
 
 def test_stopping_a_process_tree_stops_the_child_and_its_grandchild() -> None:

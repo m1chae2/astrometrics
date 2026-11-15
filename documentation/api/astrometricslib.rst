@@ -1,7 +1,7 @@
 .. ==============================================================================
 .. Purpose: API Reference documentation for astrometricslib using automodapi.
 .. One section for the package root and one for each public module
-.. (exceptions, reports, jobs, drivers), then the fields of the results the
+.. (exceptions, reports, jobs, drivers, parameters), then the fields of the results the
 .. calls return. The results are built by the library-result-fields directive
 .. (build/documentation/library_result_fields.py).
 .. ==============================================================================
@@ -41,6 +41,13 @@ Storage and file tools: ``astrometricslib.drivers``
 ---------------------------------------------------
 
 .. automodapi:: astrometricslib.drivers
+   :no-inheritance-diagram:
+   :include-all-objects:
+
+Tuned parameters: ``astrometricslib.parameters``
+------------------------------------------------
+
+.. automodapi:: astrometricslib.parameters
    :no-inheritance-diagram:
    :include-all-objects:
 

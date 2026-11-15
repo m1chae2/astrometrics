@@ -2274,7 +2274,9 @@ export enum LimitTier {
   PHYSICAL_BUDGET = "physical_budget",
   DESIGN_ESTIMATE = "design_estimate",
   OWN_BASELINE = "own_baseline",
-  VALIDATED_DATASET = "validated_dataset"
+  VALIDATED_DATASET = "validated_dataset",
+  PROCESSING_SETTING = "processing_setting",
+  TUNED_PARAMETER = "tuned_parameter"
 }
 
 /**
@@ -2612,6 +2614,10 @@ export interface QualityRowResolution {
  * review_date : `datetime.date` or `None`
  * When an exploratory metric must be promoted or removed. Required for
  * exploratory.
+ * defined_by : `tuple` of `str`
+ * The names of the tuned parameters whose values define how the metric
+ * is measured. Changing one of those values means a new
+ * `definition_version`. Empty when the metric uses none.
  * limits : `tuple` of `QualityLimit`
  * The limits that decisions made from this metric apply to its values
  * (or to counts worked out from them), with the source of each. Empty
@@ -2638,6 +2644,7 @@ export interface MetricSpec {
   purposeReason?: string;
   exploratoryQuestion?: string;
   reviewDate?: string | null;
+  definedBy?: string[];
   limits?: QualityLimit[];
 }
 

@@ -7,10 +7,13 @@ uncertainty it has, and why it exists (its `MetricPurpose`). Readers such as
 interpret stored measurements.
 
 A `MetricSpec` is immutable. Changing a metric's estimator, sample or
-constants means raising its `definition_version`.
+constants means raising its `definition_version`. The same holds for the
+value of any tuned parameter named in `defined_by`: that value is part of how
+the metric is measured.
 """
 
 import datetime
+import re
 from enum import StrEnum
 from typing import Self
 
@@ -18,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from astrometricslib.models.quality.limit import QualityLimit
 from astrometricslib.models.quality.measurement import SubjectLevel
+from astrometricslib.models.tuned_parameter import _NAME_PATTERN
 
 
 class Checkpoint(StrEnum):
@@ -109,6 +113,10 @@ class MetricSpec(BaseModel):
     review_date : `datetime.date` or `None`
         When an exploratory metric must be promoted or removed. Required for
         exploratory.
+    defined_by : `tuple` of `str`
+        The names of the tuned parameters whose values define how the metric
+        is measured. Changing one of those values means a new
+        `definition_version`. Empty when the metric uses none.
     limits : `tuple` of `QualityLimit`
         The limits that decisions made from this metric apply to its values
         (or to counts worked out from them), with the source of each. Empty
@@ -137,7 +145,36 @@ class MetricSpec(BaseModel):
     purpose_reason: str = Field(default="", alias="purposeReason")
     exploratory_question: str = Field(default="", alias="exploratoryQuestion")
     review_date: datetime.date | None = Field(default=None, alias="reviewDate")
+    defined_by: tuple[str, ...] = Field(default=(), alias="definedBy")
     limits: tuple[QualityLimit, ...] = ()
+
+    @field_validator("defined_by")
+    @classmethod
+    def _check_defined_by(cls, names: tuple[str, ...]) -> tuple[str, ...]:
+        """Check that each parameter name is well formed and appears once.
+
+        Parameters
+        ----------
+        names : `tuple` of `str`
+            The parameter names as given.
+
+        Returns
+        -------
+        names : `tuple` of `str`
+            The same names.
+
+        Raises
+        ------
+        ValueError
+            If a name does not match the tuned parameter name pattern or a
+            name is repeated.
+        """
+        for name in names:
+            if not re.match(_NAME_PATTERN, name):
+                raise ValueError(f"defined_by name {name!r} is not a dotted parameter name")
+        if len(set(names)) != len(names):
+            raise ValueError("defined_by must not repeat a parameter name")
+        return names
 
     @field_validator("levels")
     @classmethod

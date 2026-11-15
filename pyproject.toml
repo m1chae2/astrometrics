@@ -221,16 +221,16 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 # Enforces the astrometricslib public-API boundary documented in
 # astrometricslib/api/__init__.py: everything outside astrometricslib
 # itself must import from the top-level `astrometricslib` namespace or its public modules
-# (`exceptions`, `reports`, `jobs`, `drivers`),
+# (`exceptions`, `reports`, `jobs`, `drivers`, `parameters`),
 # never from its internal subpackages. Exempted for astrometricslib's
 # own modules via per-file-ignores below, since Layer 1 (`api/`) is
 # meant to reach into its own lower layers directly.
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
-"astrometricslib.api".msg = "Internal. Import from `astrometricslib` or its public modules (`exceptions`, `reports`, `jobs`, `drivers`) instead."
-"astrometricslib.models".msg = "Internal. Import from `astrometricslib` or its public modules (`exceptions`, `reports`, `jobs`, `drivers`) instead."
-"astrometricslib.utilities".msg = "Internal. Import from `astrometricslib` or its public modules (`exceptions`, `reports`, `jobs`, `drivers`) instead."
+"astrometricslib.api".msg = "Internal. Import from `astrometricslib` or its public modules (`exceptions`, `reports`, `jobs`, `drivers`, `parameters`) instead."
+"astrometricslib.models".msg = "Internal. Import from `astrometricslib` or its public modules (`exceptions`, `reports`, `jobs`, `drivers`, `parameters`) instead."
+"astrometricslib.utilities".msg = "Internal. Import from `astrometricslib` or its public modules (`exceptions`, `reports`, `jobs`, `drivers`, `parameters`) instead."
 "astrometricslib.pipelines".msg = "Internal. Use the facade on `Astrometrics` instead."
-"astrometricslib.foundation".msg = "Internal. Import from `astrometricslib` or its public modules (`exceptions`, `reports`, `jobs`, `drivers`) instead."
+"astrometricslib.foundation".msg = "Internal. Import from `astrometricslib` or its public modules (`exceptions`, `reports`, `jobs`, `drivers`, `parameters`) instead."
 "astrometricslib.visualization".msg = "Internal. Use `Astrometrics.visualization` instead."
 "astrometricslib._internal".msg = "Private to astrometricslib. Use its public modules instead."
 # `wayfindinglib.drivers` itself is public (the PHD2 client); everything below it is not.
@@ -429,6 +429,7 @@ ignore_imports = [
     "wayfindinglib.** -> astrometricslib.reports",
     "wayfindinglib.** -> astrometricslib.jobs",
     "wayfindinglib.** -> astrometricslib.drivers",
+    "wayfindinglib.** -> astrometricslib.parameters",
     "wayfindinglib.test.** -> astrometricslib._internal.**",
     "wayfindinglib.**.test.** -> astrometricslib._internal.**",
     "wayfindinglib.test.** -> astrometricslib._internal",
@@ -451,6 +452,7 @@ ignore_imports = [
     "simulator.** -> astrometricslib.reports",
     "simulator.** -> astrometricslib.jobs",
     "simulator.** -> astrometricslib.drivers",
+    "simulator.** -> astrometricslib.parameters",
     "simulator.** -> wayfindinglib.drivers",
     "simulator.** -> wayfindinglib.exceptions",
     "simulator.** -> wayfindinglib.reports",
@@ -495,6 +497,7 @@ ignore_imports = [
     "mcp_servers.** -> astrometricslib.reports",
     "mcp_servers.** -> astrometricslib.jobs",
     "mcp_servers.** -> astrometricslib.drivers",
+    "mcp_servers.** -> astrometricslib.parameters",
     "mcp_servers.** -> wayfindinglib.drivers",
     "mcp_servers.** -> wayfindinglib.exceptions",
     "mcp_servers.** -> wayfindinglib.reports",
@@ -529,6 +532,7 @@ ignore_imports = [
     "backend.** -> astrometricslib.reports",
     "backend.** -> astrometricslib.jobs",
     "backend.** -> astrometricslib.drivers",
+    "backend.** -> astrometricslib.parameters",
     "backend.** -> wayfindinglib.drivers",
     "backend.** -> wayfindinglib.exceptions",
     "backend.** -> wayfindinglib.reports",

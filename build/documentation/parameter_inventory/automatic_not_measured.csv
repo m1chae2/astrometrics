@@ -406,7 +406,6 @@ stacking.dark_current_allowance_adu_per_second,STK-54,judgment,Partly measured
 stacking.dark_exposure_match_seconds,STK-D07,exclusion criteria,Design estimate
 stacking.darkest_sky_level,STK-29,measurement,Partly measured
 stacking.default_fwhm_degradation_ratio,STK-25,judgment,Partly measured
-stacking.default_gain_disagreement_tolerance,STK-20,judgment,Partly measured
 stacking.default_gap_ratio_threshold,STK-04,exclusion criteria,Partly measured
 stacking.default_growth_steps,STK-37,measurement,Design estimate
 stacking.default_rejected_fraction_flag_threshold,STK-24,judgment,Partly measured

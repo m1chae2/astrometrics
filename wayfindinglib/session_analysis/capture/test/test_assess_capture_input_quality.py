@@ -66,7 +66,7 @@ def test_a_frame_is_used_for_one_exposure_only(make_frame: Any, make_capture: An
 
 def test_frames_beyond_the_window_do_not_match(make_frame: Any, make_capture: Any) -> None:
     """Verify an exposure and a frame far apart in time do not match."""
-    frames = [make_frame(0, timestamp=make_frame(0).timestamp + MATCH_WINDOW_SECONDS + 5.0)]
+    frames = [make_frame(0, timestamp=make_frame(0).timestamp + MATCH_WINDOW_SECONDS.default + 5.0)]
 
     match = match_captures_to_frames([make_capture(0)], frames)
 

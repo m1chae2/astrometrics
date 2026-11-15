@@ -9,7 +9,15 @@ import logging
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.target import StretchParameters
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -20,18 +28,36 @@ logger = logging.getLogger(__name__)
 # Siril's own Autostretch display mode -- not something re-derived for
 # this codebase, but adopted so our stretch looks like the one users
 # already know from those tools.
-_AUTOSTRETCH_SHADOWS_CLIP_SIGMA = -2.8
+_AUTOSTRETCH_SHADOWS_CLIP_SIGMA = TunedParameter(
+    name="shared.autostretch_shadows_clip_sigma",
+    default=-2.8,
+    unit="sigma",
+    description="Offset of the autostretch black point from the sky median, in noise units.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D45",
+)
 
 # The same value under a public name, for code that asks Siril for this
 # stretch and needs the number to match.
-AUTOSTRETCH_SHADOWS_CLIP_SIGMA = _AUTOSTRETCH_SHADOWS_CLIP_SIGMA
+AUTOSTRETCH_SHADOWS_CLIP_SIGMA = resolve(_AUTOSTRETCH_SHADOWS_CLIP_SIGMA).value
 
 # The 0-1 brightness the image's own median is pushed to by the auto-
 # stretch's midtones step. 0.25 is the same PixInsight/Siril default as
 # `_AUTOSTRETCH_SHADOWS_CLIP_SIGMA`, chosen there to make faint real
 # structure visible without also lifting near-zero background noise into
 # visibility.
-_AUTOSTRETCH_TARGET_BACKGROUND = 0.25
+_AUTOSTRETCH_TARGET_BACKGROUND = TunedParameter(
+    name="shared.autostretch_target_background",
+    default=0.25,
+    unit="fraction",
+    description="Display brightness the autostretch gives the sky background.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D45",
+)
 
 # How many pixels the plain percentile stretch samples from a large image,
 # and the seed that picks them. The sample sets the black and white points,
@@ -53,12 +79,30 @@ _MAD_TO_SIGMA = 1.4826
 # 1e-6 is about ten times float32's machine epsilon (1.2e-7), i.e. below
 # what float32 arithmetic on the stack could meaningfully represent
 # relative to its brightest pixel. Not tuned beyond that one real stack.
-_AUTOSTRETCH_DUST_FRACTION_OF_PEAK = 1e-6
+_AUTOSTRETCH_DUST_FRACTION_OF_PEAK = TunedParameter(
+    name="shared.autostretch_dust_fraction_of_peak",
+    default=1e-6,
+    unit="fraction",
+    description="Fraction of the peak below which a pixel is ignored as dust in the sky statistics.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D45",
+)
 
 # The fewest populated pixels trusted to describe the background. Below
 # this, the whole image is used instead. Unvalidated beyond keeping a
 # median/MAD from resting on a handful of pixels.
-_AUTOSTRETCH_MINIMUM_POPULATED_PIXELS = 100
+_AUTOSTRETCH_MINIMUM_POPULATED_PIXELS = TunedParameter(
+    name="shared.autostretch_minimum_populated_pixels",
+    default=100,
+    unit="pixels",
+    description="Fewest populated pixels needed to measure the sky statistics from them alone.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D45",
+)
 
 # How many randomly chosen pixels stand in for the whole image when the sky
 # is measured from a sample (see `measure_sky`). The median's error shrinks
@@ -163,8 +207,10 @@ def measure_sky(arr: np.ndarray, sample_pixels: bool = False) -> tuple[float, fl
     if sample_pixels and arr.size > _AUTOSTRETCH_SKY_SAMPLE_COUNT:
         chosen = np.random.default_rng(0).integers(0, arr.size, _AUTOSTRETCH_SKY_SAMPLE_COUNT)
         sky_pixels = arr.flat[chosen]
-    populated = sky_pixels[np.abs(sky_pixels) > peak * _AUTOSTRETCH_DUST_FRACTION_OF_PEAK]
-    stats_source = populated if populated.size >= _AUTOSTRETCH_MINIMUM_POPULATED_PIXELS else sky_pixels
+    populated = sky_pixels[np.abs(sky_pixels) > peak * resolve(_AUTOSTRETCH_DUST_FRACTION_OF_PEAK).value]
+    stats_source = (
+        populated if populated.size >= resolve(_AUTOSTRETCH_MINIMUM_POPULATED_PIXELS).value else sky_pixels
+    )
     median = float(np.nanmedian(stats_source))
     sigma = float(np.nanmedian(np.abs(stats_source - median))) * _MAD_TO_SIGMA
     if not sigma > 0.0:
@@ -225,7 +271,17 @@ def midtones_balance_for(normalized_value: float, target_brightness: float) -> f
 # A pixel counts as white when the stretched picture is at least this fraction
 # of full brightness. 0.98 is grey 250 of 255, so a pixel that is merely
 # bright is not counted.
-_WHITE_FRACTION_OF_FULL_BRIGHTNESS = 0.98
+_WHITE_FRACTION_OF_FULL_BRIGHTNESS = TunedParameter(
+    name="shared.white_fraction_of_full_brightness",
+    default=0.98,
+    unit="fraction",
+    description="Display brightness at or above which a stretched pixel counts as white.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D59",
+    pending_conversion=True,
+)
 
 # Every n-th pixel in each direction is used to count white pixels. A share of
 # 1% of a 9-megapixel image is 90000 pixels, so one pixel in 16 still holds
@@ -261,7 +317,7 @@ def stretch_like_autostretch(values: np.ndarray, arr: np.ndarray, sky_level: flo
     if sky is None:
         return None
     median, sigma, peak = sky
-    black_point = max(median + _AUTOSTRETCH_SHADOWS_CLIP_SIGMA * sigma, float(np.nanmin(arr)))
+    black_point = max(median + resolve(_AUTOSTRETCH_SHADOWS_CLIP_SIGMA).value * sigma, float(np.nanmin(arr)))
     if peak <= black_point:
         return None
     normalized_median = (median - black_point) / (peak - black_point)
@@ -303,7 +359,7 @@ def white_fraction_after_autostretch(arr: np.ndarray, sky_level: float) -> float
     stretched = stretch_like_autostretch(sample, arr, sky_level)
     if stretched is None:
         return None
-    return float(np.mean(stretched >= _WHITE_FRACTION_OF_FULL_BRIGHTNESS))
+    return float(np.mean(stretched >= resolve(_WHITE_FRACTION_OF_FULL_BRIGHTNESS).value))
 
 
 def _autostretch_parameters(
@@ -333,13 +389,17 @@ def _autostretch_parameters(
         return None
     median, sigma, peak = sky
 
-    black_point = max(median + _AUTOSTRETCH_SHADOWS_CLIP_SIGMA * sigma, float(np.nanmin(arr)))
+    black_point = max(median + resolve(_AUTOSTRETCH_SHADOWS_CLIP_SIGMA).value * sigma, float(np.nanmin(arr)))
     if peak <= black_point:
         return None
     normalized_median = (median - black_point) / (peak - black_point)
     if not 0.0 < normalized_median < 1.0:
         return None
-    return black_point, peak, _solve_midtones_balance(normalized_median, _AUTOSTRETCH_TARGET_BACKGROUND)
+    return (
+        black_point,
+        peak,
+        _solve_midtones_balance(normalized_median, resolve(_AUTOSTRETCH_TARGET_BACKGROUND).value),
+    )
 
 
 def _scale_to_uint8_in_blocks(

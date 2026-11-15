@@ -70,12 +70,18 @@ class HardcodedKind(StrEnum):
 
 
 class EquipmentKind(StrEnum):
-    """A kind of equipment that a value can depend on."""
+    """What a value can depend on: a kind of equipment, or the observing site.
+
+    The site covers what changes when the observatory moves: its sky
+    brightness from local light pollution, its atmospheric extinction, its
+    horizon and the length of its nights.
+    """
 
     MOUNT = "mount"
     TELESCOPE = "telescope"
     CAMERA = "camera"
     FILTER_OR_GRATING = "filter or grating"
+    SITE = "site"
 
 
 class WhenMissing(StrEnum):
@@ -123,6 +129,13 @@ class TunedParameter(BaseModel):
     minimum_sample : `int`, optional
         The fewest measurements a tuned value may be derived from. Required
         for the ``tuned parameter`` source.
+    pending_conversion : `bool`, optional
+        True while the code still uses the default although the source says
+        the value should come from elsewhere. The resolver then gives the
+        default with no notice, so nothing changes until the value is
+        converted. Not allowed for a hardcoded value, whose default is its
+        final value. A pending value need not have its configuration key,
+        range or sample size yet.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -140,6 +153,7 @@ class TunedParameter(BaseModel):
     when_missing: WhenMissing = WhenMissing.FALL_BACK
     allowed_range: tuple[float, float] | None = None
     minimum_sample: int | None = None
+    pending_conversion: bool = False
 
     @model_validator(mode="after")
     def _check_source_rules(self) -> Self:
@@ -166,15 +180,21 @@ class TunedParameter(BaseModel):
                 )
         elif self.kind is not None:
             raise ValueError(f"{self.name}: only a hardcoded value has a kind")
+        if self.source is ParameterSource.HARDCODED and self.pending_conversion:
+            raise ValueError(f"{self.name}: a hardcoded value has nothing to convert to")
 
-        if self.source is ParameterSource.PROCESSING_SETTING and self.config_key is None:
+        if (
+            self.source is ParameterSource.PROCESSING_SETTING
+            and self.config_key is None
+            and not self.pending_conversion
+        ):
             raise ValueError(f"{self.name}: a processing setting needs a config_key")
 
         needs_equipment = (ParameterSource.EQUIPMENT_PROFILE, ParameterSource.TUNED_PARAMETER)
         if self.source in needs_equipment and not self.equipment:
             raise ValueError(f"{self.name}: a value from '{self.source}' needs at least one equipment kind")
 
-        if self.source is ParameterSource.TUNED_PARAMETER:
+        if self.source is ParameterSource.TUNED_PARAMETER and not self.pending_conversion:
             self._check_tuned_fields()
 
         if self.role is ParameterRole.HARDWARE_LIMIT and self.when_missing is not WhenMissing.REFUSE:

@@ -162,7 +162,7 @@ def test_the_guider_calibration_holds_the_simulators_own_values(
     assert (
         calibration.ra_rate_arcsec_per_sec
         == calibration.dec_rate_arcsec_per_sec
-        == GUIDE_RATE_ARCSEC_PER_S
+        == GUIDE_RATE_ARCSEC_PER_S.default
         == SIMULATED_GUIDE_RATE_ARCSEC_PER_SEC
     )
     assert calibration.source_note.startswith("Simulator value, not the real camera's")

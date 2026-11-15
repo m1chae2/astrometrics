@@ -1,17 +1,17 @@
-"""Purpose: Hold the register to the rule that automatic values are measured.
+"""Purpose: Hold the parameters to the rule that automatic values are measured.
 
-Description: ``.claude/skills/documentation-style/CONVENTIONS.md``
-Section 2 says a
-setting the software acts on with no person checking (an automatic role, see
-``validation/index.md`` Section 2.2) needs a Measured register entry. Most
-automatic settings are not measured yet, so they are listed in
+Description: ``.claude/skills/documentation-style/CONVENTIONS.md`` Section 2
+says a value the software acts on with no person checking (any role except
+``recommendation``) needs a Measured register entry. Most automatic
+parameters are not measured yet, so they are listed in
 ``build/documentation/parameter_inventory/automatic_not_measured.csv``. The
-list only shrinks: a new automatic setting must arrive measured, and a row
-whose setting is now measured, advisory or gone must be deleted.
+list only shrinks: a new automatic parameter must arrive with a Measured
+entry (a design-estimate row is never Measured), and a row whose parameter
+is now measured, advisory or gone must be deleted.
 
-The register rows come from the parameter table generator,
-``build/documentation/generate_parameter_table.py``, so this test reads the
-register the same way the review table does.
+The parameters come from the two registries and the entry status from the
+validation register, read by
+``build/documentation/generate_parameter_table.py``.
 """
 
 import csv
@@ -25,64 +25,62 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "build" / "documentation" / "generate_parameter_table.py"
 ALLOW_LIST = REPO_ROOT / "build" / "documentation" / "parameter_inventory" / "automatic_not_measured.csv"
+ALLOW_LIST_COLUMNS = ["parameter", "register_entry", "role", "status"]
 
 
 @pytest.fixture(scope="module")
-def unmeasured_automatic() -> set[tuple[str, str, str]]:
-    """List the automatic register settings that have no Measured entry.
+def unmeasured_automatic() -> list[dict[str, str]]:
+    """List the automatic parameters whose register entry is not Measured.
 
     Returns
     -------
-    keys : `set` [`tuple` [`str`, `str`, `str`]]
-        One (register, entry or row ID, setting) key per automatic setting
-        whose entry is not Measured. Design-estimate rows are never Measured.
+    rows : `list` [`dict` [`str`, `str`]]
+        One row per parameter name, with the columns of the allow-list.
     """
     spec = importlib.util.spec_from_file_location("generate_parameter_table", SCRIPT_PATH)
     assert spec is not None and spec.loader is not None
     generator: ModuleType = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = generator
     spec.loader.exec_module(generator)
-    rows, _ = generator.build_rows(REPO_ROOT)
-    return {
-        (row["register"], row["entry_id"], row["setting"])
-        for row in rows
-        if row["source"] != "backlog" and row["role"].startswith("automatic") and row["status"] != "Measured"
-    }
+    return generator.automatic_not_measured(generator.build_rows(REPO_ROOT))
 
 
 @pytest.fixture(scope="module")
-def allowed() -> list[tuple[str, str, str]]:
-    """Read the allow-list of automatic settings not measured yet.
+def allowed() -> list[dict[str, str]]:
+    """Read the allow-list of automatic parameters not measured yet.
 
     Returns
     -------
-    keys : `list` [`tuple` [`str`, `str`, `str`]]
-        One (register, ID, setting) key per row, in file order.
+    rows : `list` [`dict` [`str`, `str`]]
+        One row per parameter, in file order.
     """
     with ALLOW_LIST.open(newline="", encoding="utf-8") as handle:
-        return [(row["register"], row["id"], row["setting"]) for row in csv.DictReader(handle)]
+        reader = csv.DictReader(handle)
+        assert reader.fieldnames == ALLOW_LIST_COLUMNS
+        return list(reader)
 
 
-def test_every_unmeasured_automatic_setting_is_on_the_allow_list(
-    unmeasured_automatic: set[tuple[str, str, str]], allowed: list[tuple[str, str, str]]
+def test_every_unmeasured_automatic_parameter_is_on_the_allow_list(
+    unmeasured_automatic: list[dict[str, str]], allowed: list[dict[str, str]]
 ) -> None:
-    """A new automatic setting must arrive with a Measured entry."""
-    new = sorted(unmeasured_automatic - set(allowed))
+    """A new automatic parameter must arrive with a Measured entry."""
+    new = sorted({row["parameter"] for row in unmeasured_automatic} - {row["parameter"] for row in allowed})
     assert not new, (
-        "These automatic settings have no Measured register entry. Measure them before they act on data, "
-        "or mark them advisory if a person reads them before anything happens "
+        "These automatic parameters have no Measured register entry. Measure them before they act on data, "
+        "or give them the role recommendation if a person reads them before anything happens "
         f"(.claude/skills/documentation-style/CONVENTIONS.md, Section 2): {new}"
     )
 
 
 def test_the_allow_list_only_shrinks(
-    unmeasured_automatic: set[tuple[str, str, str]], allowed: list[tuple[str, str, str]]
+    unmeasured_automatic: list[dict[str, str]], allowed: list[dict[str, str]]
 ) -> None:
-    """A row whose setting is now measured, advisory or gone is deleted."""
-    done = sorted(set(allowed) - unmeasured_automatic)
+    """A measured or gone parameter leaves the list; no row repeats."""
+    names = [row["parameter"] for row in allowed]
+    done = sorted(set(names) - {row["parameter"] for row in unmeasured_automatic})
     assert not done, (
-        "These settings are now Measured, advisory or no longer in the register; delete their rows from "
+        "These parameters are now Measured, advisory or no longer declared; delete their rows from "
         f"build/documentation/parameter_inventory/automatic_not_measured.csv: {done}"
     )
-    repeated = sorted({key for key in allowed if allowed.count(key) > 1})
+    repeated = sorted({name for name in names if names.count(name) > 1})
     assert not repeated, f"These allow-list rows are repeated: {repeated}"

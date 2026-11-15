@@ -117,6 +117,13 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from astrometricslib.parameters import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from astrometricslib.reports import (
     EARLIER_NIGHTS_VARIANT,
     CaptureSetting,
@@ -184,7 +191,16 @@ FORECAST_CHECK_ENTRY = "WAY-70"
 FORECAST_CHECK_ROW = "WAY-D70"
 """Register row behind the agreement width and the star-width stand-in."""
 
-AGREEMENT_TOLERANCES = 2.0
+AGREEMENT_TOLERANCES = TunedParameter(
+    name="wayfinding.agreement_tolerances",
+    default=2.0,
+    unit="tolerances",
+    description="Two changes in noise agree when they differ by no more than this many tolerances.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D70",
+)
 """Two changes in noise agree when they differ by no more than this many
 tolerances. A tolerance is one standard error, and the test is one-sided (only
 a shortfall counts), so two of them is a false alarm of about 2.3 percent. It
@@ -259,7 +275,19 @@ PINNED_STACK_METRICS = {
 S13). A row of another version is not used. A test fails when the registry
 moves past one of these versions."""
 
-MINIMUM_EARLIER_NIGHTS_FRAMES = 8
+MINIMUM_EARLIER_NIGHTS_FRAMES = TunedParameter(
+    name="wayfinding.minimum_earlier_nights_frames",
+    default=8,
+    unit="frames",
+    description=(
+        "An earlier-nights forecast check counts only when the earlier-nights stack holds at least this "
+        "many frames (the stack's stored ``stacking.frames_stacked_count``)."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D70",
+)
 """An earlier-nights forecast check counts only when the earlier-nights stack
 holds at least this many frames (the stack's stored
 ``stacking.frames_stacked_count``). A smaller pair is not checkable, so it does
@@ -1882,7 +1910,7 @@ def history_fixed_pattern_noise(
     if key is None:
         return None
     others = [share for other, share in history.get(key, {}).items() if other != target_id]
-    if len(others) < MINIMUM_HISTORY_TARGETS:
+    if len(others) < resolve_parameter(MINIMUM_HISTORY_TARGETS).value:
         return None
     median_share = float(np.median(others))
     common = {
@@ -2722,11 +2750,11 @@ def _check_pair_unlabeled(
         held = (
             previous.frames_stacked if previous.frames_stacked is not None else len(previous.member_frame_ids)
         )
-        if held < MINIMUM_EARLIER_NIGHTS_FRAMES:
+        if held < resolve_parameter(MINIMUM_EARLIER_NIGHTS_FRAMES).value:
             return _not_checkable(
                 current,
                 f"The earlier-nights stack holds {held} frames, fewer than the "
-                f"{MINIMUM_EARLIER_NIGHTS_FRAMES} a check needs.",
+                f"{resolve_parameter(MINIMUM_EARLIER_NIGHTS_FRAMES).value} a check needs.",
                 mode_name,
                 evidence,
             )
@@ -2833,7 +2861,7 @@ def _check_pair_unlabeled(
             **numbers,
         )
     planned, given = forecast.planned, forecast.given
-    width = AGREEMENT_TOLERANCES * tolerance
+    width = resolve_parameter(AGREEMENT_TOLERANCES).value * tolerance
 
     if measured - planned <= width:
         return ForecastCheck(
@@ -3226,7 +3254,7 @@ def target_stop_signal(runs: Sequence[StackRunRecord]) -> StopSignal:
     ):
         ratio = fixed_pattern.fixed_pattern_to_random_variance_ratio
         gain = 1.0 - math.sqrt((0.5 + ratio) / (1.0 + ratio))
-        stopped = gain < MINIMUM_GAIN_FRACTION
+        stopped = gain < resolve_parameter(MINIMUM_GAIN_FRACTION).value
         return StopSignal(
             stopped=stopped,
             predicted_gain_fraction=gain,

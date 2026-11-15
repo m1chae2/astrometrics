@@ -42,7 +42,14 @@ import numpy as np
 from astrometricslib._internal.drivers.interfaces.gaia_xp_driver import GaiaXpDownloadError, GaiaXpDriver
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
 from astrometricslib.foundation.offline import OfflineModeError, require_online
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.paths import catalog_cache_directory
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.utilities.exceptions import ONLINE_QUERY_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -69,7 +76,17 @@ ANGSTROM_PER_NANOMETRE = 10.0
 
 # The fewest samples a downloaded spectrum must have to be believed. Gaia's
 # sampled spectra have 343 (336 to 1020 nm in 2 nm steps).
-MINIMUM_SAMPLE_COUNT = 10
+MINIMUM_SAMPLE_COUNT = TunedParameter(
+    name="internal.minimum_sample_count",
+    default=10,
+    unit="samples",
+    description="Fewest usable samples needed to compare a spectrum with Gaia XP.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D29",
+    pending_conversion=True,
+)
 
 # The errors a download can raise: the online-query errors, a reply that is
 # not a valid zip file, and astroquery's own RuntimeError, KeyError and
@@ -378,7 +395,7 @@ def _spectrum_from_files(files: object) -> tuple[np.ndarray, np.ndarray, np.ndar
     except (KeyError, TypeError) as column_error:
         raise ValueError("the Gaia XP table lacks a wavelength, flux or flux_error column") from column_error
     usable = np.isfinite(wavelength) & np.isfinite(flux) & np.isfinite(flux_error)
-    if usable.sum() < MINIMUM_SAMPLE_COUNT:
+    if usable.sum() < resolve(MINIMUM_SAMPLE_COUNT).value:
         raise ValueError("the Gaia XP table has too few usable samples")
     order = np.argsort(wavelength[usable])
     return wavelength[usable][order], flux[usable][order], flux_error[usable][order]

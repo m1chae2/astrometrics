@@ -70,9 +70,16 @@ from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib._internal.drivers.siril_interface import siril_process_lock
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import NotFoundError, StorageError
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.paths import siril_work_directory
 from astrometricslib.foundation.run_abandonment import run_registered
 from astrometricslib.foundation.system import split_program_command
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.image_scaling import AUTOSTRETCH_SHADOWS_CLIP_SIGMA
 from astrometricslib.pipelines.shared.stack_preview_path import (
     PREVIEW_JPEG_QUALITY,
@@ -132,7 +139,16 @@ _SCRATCH_ROOT = siril_work_directory()
 # step's result to be used. GraXpert can return not-a-number pixels for a
 # stack with large empty regions. 0.9 allows for blank borders and still
 # rejects an image that is mostly invalid. Not tuned beyond that.
-_MINIMUM_FINITE_FRACTION = 0.9
+_MINIMUM_FINITE_FRACTION = TunedParameter(
+    name="stacking.minimum_finite_fraction",
+    default=0.9,
+    unit="fraction",
+    description="Share of pixels that must be finite for a cleanup result to be used.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D56",
+)
 
 # A scratch folder older than this many seconds belongs to a run that was
 # killed, for example by a reboot, and is removed. A preview takes about a
@@ -625,7 +641,7 @@ def _is_usable_image(path: str) -> bool:
     except OSError, ValueError, KeyError, NotFoundError, StorageError:
         return False
     finite = np.isfinite(data)
-    if finite.mean() < _MINIMUM_FINITE_FRACTION:
+    if finite.mean() < resolve(_MINIMUM_FINITE_FRACTION).value:
         return False
     return bool(np.nanmax(data) > np.nanmin(data))
 
@@ -793,8 +809,10 @@ def _stretch_with_starnet(
         ``"stretched.fits"`` if StarNet and the blend worked, otherwise
         `None`. The reason is logged.
     """
-    strength = DEFAULT_STAR_STRENGTH if settings.star_strength is None else settings.star_strength
-    stretch = DEFAULT_STAR_STRETCH if settings.star_stretch is None else settings.star_stretch
+    strength = (
+        resolve(DEFAULT_STAR_STRENGTH).value if settings.star_strength is None else settings.star_strength
+    )
+    stretch = resolve(DEFAULT_STAR_STRETCH).value if settings.star_stretch is None else settings.star_stretch
 
     def fall_back(reason: str) -> None:
         """Log that StarNet failed and remember it for the caller."""

@@ -23,7 +23,15 @@ from photutils.background import Background2D, MedianBackground
 from scipy import optimize
 from scipy.spatial import cKDTree
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.camera_profile import CameraProfile
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.quality.frame_statistics import (
     BOOTSTRAP_RESAMPLE_COUNT,
     BOOTSTRAP_SEED,
@@ -48,13 +56,31 @@ logger = logging.getLogger(__name__)
 # cells give a star for each 0.5 percent of the frame area, which is
 # enough to see a tilt or a coma pattern across the field and few enough that
 # the fits finish in seconds.
-MOFFAT_GRID_CELL_COUNT = 196
+MOFFAT_GRID_CELL_COUNT = TunedParameter(
+    name="shared.moffat_grid_cell_count",
+    default=196,
+    unit="cells",
+    description="Number of grid cells over the field, one star taken from each.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="AST-17",
+)
 
 # The most candidates tried in one cell before the cell is given up. The
 # brightest star of a cell is tried first; when its fit is refused the next
 # brightest is tried. Three keeps a cell with one odd star from being empty
 # without letting a hopeless cell cost a dozen fits.
-MOFFAT_CANDIDATES_PER_CELL = 3
+MOFFAT_CANDIDATES_PER_CELL = TunedParameter(
+    name="shared.moffat_candidates_per_cell",
+    default=3,
+    unit="stars",
+    description="Most candidate stars tried in one grid cell before the cell is given up.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="AST-17",
+)
 
 # Half the side, in pixels, of the box a star is fitted in (a 21 x 21 box). The
 # box must hold the core and the start of the wings: 10 px is about 1.4 FWHM of
@@ -62,13 +88,33 @@ MOFFAT_CANDIDATES_PER_CELL = 3
 # absorbs the wings beyond the box, so a star wider than about 7 px reads a
 # little narrow. It matches `FWHM_FIT_BOX_RADIUS_PX` of the Gaussian fit in
 # `astrometry/pre_processing/fwhm.py`.
-MOFFAT_FIT_BOX_HALF_WIDTH_PX = 10
+MOFFAT_FIT_BOX_HALF_WIDTH_PX = TunedParameter(
+    name="shared.moffat_fit_box_half_width_px",
+    default=10,
+    unit="pixels",
+    description="Half the side of the box a star is fitted in.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-17",
+    pending_conversion=True,
+)
 
 # A star is isolated when no other detected source lies within this many pixels
 # of it. The fit box reaches 10 px (14 px along its diagonal), and a neighbor
 # just outside would still add its wing to the box corners. 14 px puts every
 # neighbor's core beyond the corner of the box.
-MOFFAT_ISOLATION_RADIUS_PX = 14.0
+MOFFAT_ISOLATION_RADIUS_PX = TunedParameter(
+    name="shared.moffat_isolation_radius_px",
+    default=14.0,
+    unit="pixels",
+    description="Radius within which no other source may lie for a star to count as isolated.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-17",
+    pending_conversion=True,
+)
 
 # A star is skipped when any pixel of its fit box reaches this fraction of the
 # camera's usable top level (the smaller of the saturation threshold and the
@@ -77,14 +123,32 @@ MOFFAT_ISOLATION_RADIUS_PX = 14.0
 # leaves a 10 percent margin; `FWHM_SATURATION_FRACTION` in `fwhm.py` uses 0.95
 # on a stack, and a raw frame needs more room because a bright pixel's noise
 # can push it over the line.
-MOFFAT_SATURATION_MARGIN_FRACTION = 0.9
+MOFFAT_SATURATION_MARGIN_FRACTION = TunedParameter(
+    name="shared.moffat_saturation_margin_fraction",
+    default=0.9,
+    unit="fraction",
+    description="Fraction of the camera's usable top level at which a star is skipped as near saturation.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="AST-17",
+)
 
 # Each pixel is modeled as the average of this many by this many sub-samples of
 # the continuous profile, which stands in for integrating the profile over the
 # pixel's area. With 3 x 3 the model error on the fitted width is below 1
 # percent for stars of 2 px FWHM and above (checked on synthetic stars, see the
 # tests); 1 x 1 reads 2 px stars about 5 percent wide.
-MOFFAT_SUBPIXEL_FACTOR = 3
+MOFFAT_SUBPIXEL_FACTOR = TunedParameter(
+    name="shared.moffat_subpixel_factor",
+    default=3,
+    unit="sub-samples per side",
+    description="Sub-samples per pixel side used to integrate the profile over a pixel.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="AST-17",
+)
 
 # The Moffat power index beta. A first pass fits it for every star; the median
 # of those values is then held fixed for a second pass. Beta and the scale
@@ -99,9 +163,27 @@ MOFFAT_SUBPIXEL_FACTOR = 3
 # background because its constant background term absorbs the wings. It is a
 # design choice, not a measured value. Above 8 the profile is a Gaussian to
 # within the fit's noise.
-MOFFAT_BETA_MINIMUM = 1.2
+MOFFAT_BETA_MINIMUM = TunedParameter(
+    name="shared.moffat_beta_minimum",
+    default=1.2,
+    unit="dimensionless",
+    description="Lowest Moffat power index a fit may use.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="AST-17",
+)
 
-MOFFAT_BETA_MAXIMUM = 8.0
+MOFFAT_BETA_MAXIMUM = TunedParameter(
+    name="shared.moffat_beta_maximum",
+    default=8.0,
+    unit="dimensionless",
+    description="Highest Moffat power index a fit may use.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="AST-17",
+)
 
 MOFFAT_BETA_START = 3.0
 
@@ -109,32 +191,98 @@ MOFFAT_BETA_START = 3.0
 # squared). Same value as `FWHM_MINIMUM_FIT_R_SQUARED` in `fwhm.py`, which was
 # chosen on the Bubble Nebula stack. It rejects stars with a bright neighbor
 # or a cosmic ray in the box.
-MOFFAT_MINIMUM_R_SQUARED = 0.8
+MOFFAT_MINIMUM_R_SQUARED = TunedParameter(
+    name="shared.moffat_minimum_r_squared",
+    default=0.8,
+    unit="fraction",
+    description="Smallest share of the variance in the fit box that a Moffat fit must explain.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="AST-17",
+)
 
 # The fitted center must stay within this many pixels of the detected one; a
 # fit that wanders further has locked onto a neighbor. Same as
 # `FWHM_MAXIMUM_CENTRE_SHIFT_PX` in `fwhm.py`.
-MOFFAT_MAXIMUM_CENTER_SHIFT_PX = 2.5
+MOFFAT_MAXIMUM_CENTER_SHIFT_PX = TunedParameter(
+    name="shared.moffat_maximum_center_shift_px",
+    default=2.5,
+    unit="pixels",
+    description="Farthest the fitted center may move from the detected one.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-17",
+    pending_conversion=True,
+)
 
 # A fitted width outside this range (in pixels, FWHM) is a fit gone wrong, not
 # a star: a cosmic ray or hot pixel is narrower than 0.8 px, and a width above
 # 25 px does not fit in the box at all.
-MOFFAT_MINIMUM_FWHM_PX = 0.8
+MOFFAT_MINIMUM_FWHM_PX = TunedParameter(
+    name="shared.moffat_minimum_fwhm_px",
+    default=0.8,
+    unit="pixels",
+    description="Narrowest fitted width accepted as a star.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-17",
+    pending_conversion=True,
+)
 
-MOFFAT_MAXIMUM_FWHM_PX = 25.0
+MOFFAT_MAXIMUM_FWHM_PX = TunedParameter(
+    name="shared.moffat_maximum_fwhm_px",
+    default=25.0,
+    unit="pixels",
+    description="Widest fitted width accepted as a star.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-17",
+    pending_conversion=True,
+)
 
 # The fewest stars that give a median and a bootstrap uncertainty worth
 # storing. With fewer, a resample has too few distinct medians to say anything.
-MOFFAT_MINIMUM_STAR_COUNT = 5
+MOFFAT_MINIMUM_STAR_COUNT = TunedParameter(
+    name="shared.moffat_minimum_star_count",
+    default=5,
+    unit="stars",
+    description="Fewest fitted stars that give a median width and a bootstrap uncertainty.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="AST-17",
+)
 
 # The aperture the second moments are taken in, as a multiple of the star's
 # fitted FWHM, and its limits in pixels. 1.5 FWHM holds about 90 percent of the
 # light of a Moffat star with beta = 3 and is small enough to keep neighbors
 # out. The window is elliptical, following the star's first-pass shape (see
 # `_measure_second_moments`), so a trailed star is not cut short.
-MOMENT_APERTURE_FWHM_MULTIPLE = 1.5
+MOMENT_APERTURE_FWHM_MULTIPLE = TunedParameter(
+    name="shared.moment_aperture_fwhm_multiple",
+    default=1.5,
+    unit="× FWHM",
+    description="Size of the window the second moments are taken in, as a multiple of the fitted width.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    register_entry="AST-17",
+)
 
-MOMENT_APERTURE_MINIMUM_RADIUS_PX = 3.0
+MOMENT_APERTURE_MINIMUM_RADIUS_PX = TunedParameter(
+    name="shared.moment_aperture_minimum_radius_px",
+    default=3.0,
+    unit="pixels",
+    description="Smallest radius of the window the second moments are taken in.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-17",
+    pending_conversion=True,
+)
 
 # The blur a square pixel adds to a star, as a multiple of the pixel side
 # squared (the "c" of the effective star width). A star is the sky's image
@@ -159,9 +307,27 @@ PIXEL_BLUR_FWHM_SQUARED_FACTOR = 2.0 * math.log(2.0) / 3.0
 # at most 16 and usually 5 to 12 in a sparse field). In every name below, x is
 # the column and y is the array row, with row 0 first (see
 # `metrics.REGION_XLOW_YLOW`).
-FIELD_GRID_CELLS_PER_SIDE = 14
+FIELD_GRID_CELLS_PER_SIDE = TunedParameter(
+    name="shared.field_grid_cells_per_side",
+    default=14,
+    unit="cells",
+    description="Number of cells per side in the grid used to map star width across the field.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="AST-18",
+)
 
-FIELD_REGION_CELLS_PER_SIDE = 4
+FIELD_REGION_CELLS_PER_SIDE = TunedParameter(
+    name="shared.field_region_cells_per_side",
+    default=4,
+    unit="cells",
+    description="Number of cells per side in each region of the field grid.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.PUBLISHED_CONSTANT,
+    register_entry="AST-18",
+)
 
 # The names of the five regions, in the order the metrics are emitted. A corner
 # is named by whether it lies at the low or the high end of the x axis (the
@@ -224,9 +390,10 @@ class CandidateRefusals:
             For example ``"412 sources detected; refused: 3 near the frame
             edge, 120 with a neighbor within 14 px, ...``.
         """
+        isolation_radius_px = resolve(MOFFAT_ISOLATION_RADIUS_PX).value
         return (
             f"{self.detected} sources detected; refused: {self.near_edge} near the frame edge, "
-            f"{self.near_neighbor} with a neighbor within {MOFFAT_ISOLATION_RADIUS_PX:g} px, "
+            f"{self.near_neighbor} with a neighbor within {isolation_radius_px:g} px, "
             f"{self.near_saturation} near saturation, {self.fit_refused} by the fit"
         )
 
@@ -391,6 +558,7 @@ class _SubpixelGrid:
     fine_x: np.ndarray
     fine_y: np.ndarray
     size: int
+    factor: int
 
 
 def _subpixel_grid(size: int) -> _SubpixelGrid:
@@ -407,10 +575,10 @@ def _subpixel_grid(size: int) -> _SubpixelGrid:
         Pixel-center coordinates of every sub-sample along one axis. Pixel
         ``i`` spans ``i - 0.5`` to ``i + 0.5``.
     """
-    factor = MOFFAT_SUBPIXEL_FACTOR
+    factor = resolve(MOFFAT_SUBPIXEL_FACTOR).value
     offsets = (np.arange(factor) + 0.5) / factor - 0.5
     axis = (np.arange(size)[:, None] + offsets[None, :]).ravel()
-    return _SubpixelGrid(fine_x=axis[None, :], fine_y=axis[:, None], size=size)
+    return _SubpixelGrid(fine_x=axis[None, :], fine_y=axis[:, None], size=size, factor=factor)
 
 
 def _moffat_model(parameters: np.ndarray, grid: _SubpixelGrid, fixed_beta: float | None) -> np.ndarray:
@@ -445,7 +613,7 @@ def _moffat_model(parameters: np.ndarray, grid: _SubpixelGrid, fixed_beta: float
     across = -delta_x * math.sin(angle) + delta_y * math.cos(angle)
     radius_squared = (along / alpha_major) ** 2 + (across / alpha_minor) ** 2
     fine = amplitude * (1.0 + radius_squared) ** (-beta)
-    factor = MOFFAT_SUBPIXEL_FACTOR
+    factor = grid.factor
     pixels = fine.reshape(grid.size, factor, grid.size, factor).mean(axis=(1, 3))
     return pixels + background
 
@@ -468,6 +636,12 @@ def _fit_moffat(cutout: np.ndarray, grid: _SubpixelGrid, fixed_beta: float | Non
         The accepted fit, or `None` when the fit failed or was refused (see the
         ``MOFFAT_*`` limits above).
     """
+    beta_minimum = resolve(MOFFAT_BETA_MINIMUM).value
+    beta_maximum = resolve(MOFFAT_BETA_MAXIMUM).value
+    minimum_r_squared = resolve(MOFFAT_MINIMUM_R_SQUARED).value
+    maximum_center_shift_px = resolve(MOFFAT_MAXIMUM_CENTER_SHIFT_PX).value
+    minimum_fwhm_px = resolve(MOFFAT_MINIMUM_FWHM_PX).value
+    maximum_fwhm_px = resolve(MOFFAT_MAXIMUM_FWHM_PX).value
     size = cutout.shape[0]
     half = size // 2
     background_start = float(np.median(cutout))
@@ -480,8 +654,8 @@ def _fit_moffat(cutout: np.ndarray, grid: _SubpixelGrid, fixed_beta: float | Non
     upper = [np.inf, half + 3.0, half + 3.0, size / 2.0, size / 2.0, math.pi]
     if fixed_beta is None:
         start.append(MOFFAT_BETA_START)
-        lower.append(MOFFAT_BETA_MINIMUM)
-        upper.append(MOFFAT_BETA_MAXIMUM)
+        lower.append(beta_minimum)
+        upper.append(beta_maximum)
     start.append(background_start)
     lower.append(-np.inf)
     upper.append(np.inf)
@@ -506,18 +680,18 @@ def _fit_moffat(cutout: np.ndarray, grid: _SubpixelGrid, fixed_beta: float | Non
     if total_variance <= 0.0:
         return None
     r_squared = 1.0 - float(np.sum(result.fun**2)) / total_variance
-    if r_squared < MOFFAT_MINIMUM_R_SQUARED:
+    if r_squared < minimum_r_squared:
         return None
     parameters = result.x
     beta = parameters[6] if fixed_beta is None else fixed_beta
     background = parameters[-1]
     center_shift = math.hypot(parameters[1] - half, parameters[2] - half)
-    if center_shift > MOFFAT_MAXIMUM_CENTER_SHIFT_PX:
+    if center_shift > maximum_center_shift_px:
         return None
     fwhm_a = _moffat_fwhm_px(parameters[3], beta)
     fwhm_b = _moffat_fwhm_px(parameters[4], beta)
     fwhm_major, fwhm_minor = max(fwhm_a, fwhm_b), min(fwhm_a, fwhm_b)
-    if not (MOFFAT_MINIMUM_FWHM_PX <= fwhm_minor and fwhm_major <= MOFFAT_MAXIMUM_FWHM_PX):
+    if not (minimum_fwhm_px <= fwhm_minor and fwhm_major <= maximum_fwhm_px):
         return None
     angle = parameters[5] if fwhm_a >= fwhm_b else parameters[5] + math.pi / 2.0
     return _FitResult(
@@ -558,6 +732,8 @@ def _measure_second_moments(cutout: np.ndarray, fit: _FitResult) -> tuple[float,
         ``b``, and the long axis points along half the angle of the vector.
         `None` when the weights sum to nothing.
     """
+    aperture_multiple = resolve(MOMENT_APERTURE_FWHM_MULTIPLE).value
+    aperture_minimum_px = resolve(MOMENT_APERTURE_MINIMUM_RADIUS_PX).value
     size = cutout.shape[0]
     rows, columns = np.mgrid[:size, :size]
     delta_x = columns - fit.center_x
@@ -565,8 +741,8 @@ def _measure_second_moments(cutout: np.ndarray, fit: _FitResult) -> tuple[float,
     cosine, sine = math.cos(fit.angle_rad), math.sin(fit.angle_rad)
     along = delta_x * cosine + delta_y * sine
     across = -delta_x * sine + delta_y * cosine
-    semi_major = max(MOMENT_APERTURE_FWHM_MULTIPLE * fit.fwhm_major_px, MOMENT_APERTURE_MINIMUM_RADIUS_PX)
-    semi_minor = max(MOMENT_APERTURE_FWHM_MULTIPLE * fit.fwhm_minor_px, MOMENT_APERTURE_MINIMUM_RADIUS_PX)
+    semi_major = max(aperture_multiple * fit.fwhm_major_px, aperture_minimum_px)
+    semi_minor = max(aperture_multiple * fit.fwhm_minor_px, aperture_minimum_px)
     inside = (along / semi_major) ** 2 + (across / semi_minor) ** 2 <= 1.0
     weights = np.where(inside, np.clip(cutout - fit.background, 0.0, None), 0.0)
     total = float(weights.sum())
@@ -666,27 +842,84 @@ def _bootstrap_angle_error_deg(
 # threshold are the defaults of `SourceDetector`, which finds stars for the
 # astrometry stage. Its roundness cut is the one setting that is not copied:
 # see `detect_stars_without_shape_cut`.
-STAR_FINDER_EXPECTED_FWHM_PX = 4.0
+STAR_FINDER_EXPECTED_FWHM_PX = TunedParameter(
+    name="shared.star_finder_expected_fwhm_px",
+    default=4.0,
+    unit="pixels",
+    description="Star width the star finder expects.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-D01",
+    pending_conversion=True,
+)
 
-STAR_FINDER_THRESHOLD_SIGMA = 5.0
+STAR_FINDER_THRESHOLD_SIGMA = TunedParameter(
+    name="shared.star_finder_threshold_sigma",
+    default=5.0,
+    unit="sigma",
+    description="Detection threshold above the noise for the star finder.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="AST-D01",
+)
 
 # The background map for the star finder uses boxes of this fraction of the
 # shorter side of the plane, limited to this range in pixels. The same numbers
 # as `SourceDetector`: boxes much larger than a star, small enough to follow
 # nebula-sized glow. Below three boxes per axis the map is not usable and one
 # global value is used instead.
-STAR_FINDER_BOX_FRACTION = 1.0 / 20.0
+STAR_FINDER_BOX_FRACTION = TunedParameter(
+    name="shared.star_finder_box_fraction",
+    default=1.0 / 20.0,
+    unit="× short side",
+    description="Size of the star finder's background box as a fraction of the frame's short side.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-16",
+    pending_conversion=True,
+)
 
-STAR_FINDER_BOX_MINIMUM_PX = 20
+STAR_FINDER_BOX_MINIMUM_PX = TunedParameter(
+    name="shared.star_finder_box_minimum_px",
+    default=20,
+    unit="pixels",
+    description="Smallest size of the star finder's background box.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-16",
+    pending_conversion=True,
+)
 
-STAR_FINDER_BOX_MAXIMUM_PX = 200
+STAR_FINDER_BOX_MAXIMUM_PX = TunedParameter(
+    name="shared.star_finder_box_maximum_px",
+    default=200,
+    unit="pixels",
+    description="Largest size of the star finder's background box.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-16",
+    pending_conversion=True,
+)
 
-STAR_FINDER_MINIMUM_BOXES_PER_AXIS = 3
+STAR_FINDER_MINIMUM_BOXES_PER_AXIS = TunedParameter(
+    name="shared.star_finder_minimum_boxes_per_axis",
+    default=3,
+    unit="boxes",
+    description="Fewest background boxes per axis for the star finder to use a background map.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-16",
+    pending_conversion=True,
+)
 
 
-def detect_stars_without_shape_cut(
-    plane: np.ndarray, expected_fwhm_px: float = STAR_FINDER_EXPECTED_FWHM_PX
-) -> list[dict]:
+def detect_stars_without_shape_cut(plane: np.ndarray, expected_fwhm_px: float | None = None) -> list[dict]:
     """Find the stars of a plane without refusing the stretched ones.
 
     `SourceDetector` keeps only sources whose DAOStarFinder roundness lies in
@@ -716,16 +949,18 @@ def detect_stars_without_shape_cut(
         The detected sources, brightest first, with ``x_centroid``,
         ``y_centroid`` and ``flux``.
     """
+    if expected_fwhm_px is None:
+        expected_fwhm_px = resolve(STAR_FINDER_EXPECTED_FWHM_PX).value
     box_size = int(
         np.clip(
-            min(plane.shape) * STAR_FINDER_BOX_FRACTION,
-            STAR_FINDER_BOX_MINIMUM_PX,
-            STAR_FINDER_BOX_MAXIMUM_PX,
+            min(plane.shape) * resolve(STAR_FINDER_BOX_FRACTION).value,
+            resolve(STAR_FINDER_BOX_MINIMUM_PX).value,
+            resolve(STAR_FINDER_BOX_MAXIMUM_PX).value,
         )
     )
     background: np.ndarray | float | None = None
     noise = 0.0
-    if min(plane.shape) >= box_size * STAR_FINDER_MINIMUM_BOXES_PER_AXIS:
+    if min(plane.shape) >= box_size * resolve(STAR_FINDER_MINIMUM_BOXES_PER_AXIS).value:
         try:
             estimate = Background2D(
                 plane,
@@ -744,7 +979,7 @@ def detect_stars_without_shape_cut(
         plane - background,
         noise=noise,
         expected_fwhm_px=expected_fwhm_px,
-        threshold_sigma=STAR_FINDER_THRESHOLD_SIGMA,
+        threshold_sigma=resolve(STAR_FINDER_THRESHOLD_SIGMA).value,
         roundness_range=None,
     )
 
@@ -784,12 +1019,16 @@ def _grid_candidates(
         refusals are added later by the caller.
     """
     rows, columns = shape
-    cell_side = math.sqrt(rows * columns / MOFFAT_GRID_CELL_COUNT)
+    cell_count = resolve(MOFFAT_GRID_CELL_COUNT).value
+    candidates_per_cell = resolve(MOFFAT_CANDIDATES_PER_CELL).value
+    isolation_radius_px = resolve(MOFFAT_ISOLATION_RADIUS_PX).value
+    saturation_margin = resolve(MOFFAT_SATURATION_MARGIN_FRACTION).value
+    cell_side = math.sqrt(rows * columns / cell_count)
     cells_x = max(round(columns / cell_side), 1)
     cells_y = max(round(rows / cell_side), 1)
     positions = np.array([[source["x_centroid"], source["y_centroid"]] for source in sources], dtype=float)
     tree = cKDTree(positions)
-    half = MOFFAT_FIT_BOX_HALF_WIDTH_PX
+    half = resolve(MOFFAT_FIT_BOX_HALF_WIDTH_PX).value
     cell_lists: dict[tuple[int, int], list[tuple[float, float]]] = {}
     near_edge = near_neighbor = near_saturation = 0
     for index, (x, y) in enumerate(positions):
@@ -797,18 +1036,18 @@ def _grid_candidates(
         if center_x < half or center_y < half or center_x + half >= columns or center_y + half >= rows:
             near_edge += 1
             continue
-        neighbors = tree.query_ball_point(positions[index], MOFFAT_ISOLATION_RADIUS_PX)
+        neighbors = tree.query_ball_point(positions[index], isolation_radius_px)
         if len(neighbors) > 1:
             near_neighbor += 1
             continue
         if top_level_adu is not None:
             box = plane[center_y - half : center_y + half + 1, center_x - half : center_x + half + 1]
-            if box.max() >= MOFFAT_SATURATION_MARGIN_FRACTION * top_level_adu:
+            if box.max() >= saturation_margin * top_level_adu:
                 near_saturation += 1
                 continue
         key = (min(int(x / columns * cells_x), cells_x - 1), min(int(y / rows * cells_y), cells_y - 1))
         cell = cell_lists.setdefault(key, [])
-        if len(cell) < MOFFAT_CANDIDATES_PER_CELL:
+        if len(cell) < candidates_per_cell:
             cell.append((float(x), float(y)))
     refusals = CandidateRefusals(
         detected=len(sources),
@@ -895,7 +1134,7 @@ def measure_star_profiles(
     fit but from second moments, which do not depend on the profile shape.
     """
     factor = BAYER_CELL_SIZE_PX if bayer_mosaic else 1
-    expected_fwhm_px = STAR_FINDER_EXPECTED_FWHM_PX / factor
+    expected_fwhm_px = resolve(STAR_FINDER_EXPECTED_FWHM_PX).value / factor
     field_shape_px = (plane.shape[0] - plane.shape[0] % factor, plane.shape[1] - plane.shape[1] % factor)
     if bayer_mosaic:
         plane = _sum_bayer_cells(plane)
@@ -912,7 +1151,8 @@ def measure_star_profiles(
     if top_level_adu is None:
         top_level_adu = plateau_saturation_level_adu(plane)
     cells, refusals = _grid_candidates(sources, plane.shape, plane, top_level_adu)
-    half = MOFFAT_FIT_BOX_HALF_WIDTH_PX
+    half = resolve(MOFFAT_FIT_BOX_HALF_WIDTH_PX).value
+    minimum_star_count = resolve(MOFFAT_MINIMUM_STAR_COUNT).value
     grid = _subpixel_grid(2 * half + 1)
 
     def cutout_at(x: float, y: float) -> np.ndarray:
@@ -939,18 +1179,22 @@ def measure_star_profiles(
                 break
     first_pass_refused = candidate_count - len(first_pass)
     refusals = replace(refusals, fit_refused=first_pass_refused)
-    if len(first_pass) < MOFFAT_MINIMUM_STAR_COUNT:
+    if len(first_pass) < minimum_star_count:
         return StarProfileResult(
             candidate_count=candidate_count,
             star_count=len(first_pass),
             refusals=refusals,
             reason=(
                 f"only {len(first_pass)} isolated, unsaturated stars fitted from {candidate_count} tried; "
-                f"at least {MOFFAT_MINIMUM_STAR_COUNT} are needed ({refusals.describe()})"
+                f"at least {minimum_star_count} are needed ({refusals.describe()})"
             ),
         )
     shared_beta = float(
-        np.clip(np.median([fit.beta for _, fit in first_pass]), MOFFAT_BETA_MINIMUM, MOFFAT_BETA_MAXIMUM)
+        np.clip(
+            np.median([fit.beta for _, fit in first_pass]),
+            resolve(MOFFAT_BETA_MINIMUM).value,
+            resolve(MOFFAT_BETA_MAXIMUM).value,
+        )
     )
     widths: list[float] = []
     samples: list[StarWidthSample] = []
@@ -976,14 +1220,14 @@ def measure_star_profiles(
         first_components.append(shape[1])
         second_components.append(shape[2])
     refusals = replace(refusals, fit_refused=first_pass_refused + len(first_pass) - len(widths))
-    if len(widths) < MOFFAT_MINIMUM_STAR_COUNT:
+    if len(widths) < minimum_star_count:
         return StarProfileResult(
             candidate_count=candidate_count,
             star_count=len(widths),
             refusals=refusals,
             reason=(
                 f"only {len(widths)} stars survived the second pass (shared beta {shared_beta:.2f}); "
-                f"at least {MOFFAT_MINIMUM_STAR_COUNT} are needed ({refusals.describe()})"
+                f"at least {minimum_star_count} are needed ({refusals.describe()})"
             ),
         )
     width_array = np.array(widths)
@@ -1047,8 +1291,8 @@ def _field_region_of(column_cell: int, row_cell: int) -> str | None:
         One of `FIELD_REGION_NAMES`, or `None` for a cell outside all five
         regions.
     """
-    side = FIELD_GRID_CELLS_PER_SIDE
-    block = FIELD_REGION_CELLS_PER_SIDE
+    side = resolve(FIELD_GRID_CELLS_PER_SIDE).value
+    block = resolve(FIELD_REGION_CELLS_PER_SIDE).value
     middle_start = (side - block) // 2
 
     def band(cell: int) -> str | None:
@@ -1101,7 +1345,7 @@ def measure_field_region_widths(result: StarProfileResult) -> list[RegionWidth]:
     members: dict[str, list[float]] = {name: [] for name in FIELD_REGION_NAMES}
     if result.field_shape_px is not None:
         rows, columns = result.field_shape_px
-        side = FIELD_GRID_CELLS_PER_SIDE
+        side = resolve(FIELD_GRID_CELLS_PER_SIDE).value
         for sample in result.samples:
             column_cell = min(side - 1, max(0, int(sample.x_px / columns * side)))
             row_cell = min(side - 1, max(0, int(sample.y_px / rows * side)))
@@ -1109,9 +1353,10 @@ def measure_field_region_widths(result: StarProfileResult) -> list[RegionWidth]:
             if region is not None:
                 members[region].append(sample.width_px)
     regions = []
+    minimum_star_count = resolve(MOFFAT_MINIMUM_STAR_COUNT).value
     for name in FIELD_REGION_NAMES:
         widths = np.array(members[name])
-        if len(widths) < MOFFAT_MINIMUM_STAR_COUNT:
+        if len(widths) < minimum_star_count:
             regions.append(RegionWidth(name, len(widths)))
             continue
         generator = np.random.default_rng(BOOTSTRAP_SEED)

@@ -39,6 +39,13 @@ from astrometricslib._internal.drivers.interfaces.stacking_driver import (
     StackingDriver,
     StackSettings,
 )
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import assess_flats
 from astrometricslib.pipelines.stacking.processing.spectral_frame_alignment import align_calibrated_frames
 from astrometricslib.utilities.exceptions import DATA_ERRORS
@@ -59,7 +66,16 @@ PIPELINE_STEPS = PipelineSteps(assess_flats=assess_flats, align_frames=align_cal
 # tolerated (a stray cloudy frame) while losing a third is not. On the Vega
 # session the standard detection registered 140 of 140 frames (100%) and the
 # relaxed one 94 of 140 (67%). It has not been tuned on other sessions.
-MINIMUM_REGISTERED_FRACTION = 0.9
+MINIMUM_REGISTERED_FRACTION = TunedParameter(
+    name="stacking.minimum_registered_fraction",
+    default=0.9,
+    unit="fraction",
+    description="Share of frames that must register for a spectral stack to be accepted.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-12",
+)
 
 # The star-detection settings to try for spectral frames, in order (see
 # `siril_interface.script_builders.SPECTRAL_STAR_DETECTION_COMMANDS`).
@@ -232,6 +248,7 @@ def _stack_one_batch(
         ``"spectral_star_detection"`` and ``"registered_fraction"`` added for
         spectral frames.
     """
+    minimum_registered_fraction = resolve(MINIMUM_REGISTERED_FRACTION).value
     image_files = [frame.model_dump() if hasattr(frame, "model_dump") else frame for frame in frames]
     modes = SPECTRAL_STAR_DETECTION_ORDER if is_spectral else (None,)
     settings = StackSettings(**stack_options)
@@ -270,7 +287,7 @@ def _stack_one_batch(
             diagnostics["spectral_star_detection"] = mode
             diagnostics["registered_fraction"] = fraction
         attempts.append((path, diagnostics, fraction))
-        if path and fraction >= MINIMUM_REGISTERED_FRACTION:
+        if path and fraction >= minimum_registered_fraction:
             break
         if mode is not None and attempt_index + 1 < len(modes):
             if path:
@@ -301,7 +318,7 @@ def _stack_one_batch(
         kept_path = os.path.join(os.path.dirname(kept[0]), output_file)
     else:
         kept_path = kept[0]
-    if is_spectral and kept[2] < MINIMUM_REGISTERED_FRACTION:
+    if is_spectral and kept[2] < minimum_registered_fraction:
         logger.warning(
             "Only %.0f%% of the %d frames for '%s' could be registered (%s star detection); "
             "the stack is built from the rest.",
@@ -337,7 +354,10 @@ def _is_stack_blank(stack_path: str) -> bool:
     )
 
     try:
-        return stack_data_fraction(np.asarray(read_data(stack_path))) < MINIMUM_STACK_DATA_FRACTION
+        return (
+            stack_data_fraction(np.asarray(read_data(stack_path)))
+            < resolve(MINIMUM_STACK_DATA_FRACTION).value
+        )
     except OSError:
         return False
 
@@ -473,6 +493,8 @@ def _describe_single_group(frames: list[Any], diagnostics: dict[str, Any], stack
     )
     from astrometricslib.pipelines.stacking.processing.group_gains import describe_group_clipping
 
+    clipping_floor_sigmas = resolve(CLIPPING_FLOOR_SIGMAS).value
+
     exposure = representative_exposure_seconds(frames)
     try:
         saturation = measure_group_saturation(frames)
@@ -503,7 +525,7 @@ def _describe_single_group(frames: list[Any], diagnostics: dict[str, Any], stack
                 entry["exposure_seconds"],
                 stacked_path,
                 100 * entry["frame_zero_fraction"],
-                CLIPPING_FLOOR_SIGMAS,
+                clipping_floor_sigmas,
             )
     diagnostics["exposure_group_summaries"] = [
         build_group_summary(
@@ -831,6 +853,8 @@ def _measure_group_stacks(
     from astrometricslib.pipelines.stacking.processing.group_derotation import derotate_groups_to_common_tilt
     from astrometricslib.pipelines.stacking.processing.group_gains import describe_group_clipping
 
+    clipping_floor_sigmas = resolve(CLIPPING_FLOOR_SIGMAS).value
+
     # Each group's own registration facts, read while its sequence file is
     # still next to its stack: the frame weights and the reference frame of
     # the combined stack are worked out per group (see
@@ -915,7 +939,7 @@ def _measure_group_stacks(
             entry["exposure_seconds"],
             target_id,
             100 * entry["frame_zero_fraction"],
-            CLIPPING_FLOOR_SIGMAS,
+            clipping_floor_sigmas,
         )
     if clipped_groups and len(clipped_groups) == len(kept_groups):
         logger.warning(
@@ -979,7 +1003,7 @@ def _align_and_screen_groups(
         result.weight = group_weight(result.count, result.exposure, result.frame_noise)
     reference_index = int(np.argmax([result.weight for result in results]))
     reference = results[reference_index]
-    crop_fraction = SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION if is_spectral else None
+    crop_fraction = resolve(SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION).value if is_spectral else None
     aligned_images, covered_masks, alignments = align_images_to_reference(
         [result.image for result in results],
         reference_index,
@@ -1193,6 +1217,8 @@ def _describe_groups(
     )
     from astrometricslib.pipelines.stacking.processing.group_gains import CLIPPED_FRAME_ZERO_FRACTION
 
+    clipped_frame_zero_fraction = resolve(CLIPPED_FRAME_ZERO_FRACTION).value
+
     summaries, details = [], []
     for result in results:
         try:
@@ -1209,7 +1235,7 @@ def _describe_groups(
                 result.diagnostics,
                 saturation,
                 stack_path=result.kept_path,
-                clipped_at_zero=result.frame_zero_fraction > CLIPPED_FRAME_ZERO_FRACTION,
+                clipped_at_zero=result.frame_zero_fraction > clipped_frame_zero_fraction,
                 alignment_shift_pixels=None
                 if alignment is None
                 else [round(alignment.shift_rows_pixels, 3), round(alignment.shift_columns_pixels, 3)],

@@ -21,6 +21,13 @@ import numpy as np
 from scipy.ndimage import binary_dilation, label, minimum_filter
 
 from astrometricslib.foundation.camera_names import normalize_camera_name
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.quality.saturation import (
     CLIP_CEILING_TOLERANCE_FRACTION,
     SATURATED_BLOB_MINIMUM_PIXELS,
@@ -30,14 +37,24 @@ from astrometricslib.pipelines.shared.quality.saturation import (
 # A pixel is at the ceiling when it is within this fraction of it. Saturated
 # frames pile up at exactly one value, so a small tolerance only allows for the
 # last count or two.
-CEILING_TOLERANCE_FRACTION = CLIP_CEILING_TOLERANCE_FRACTION
+CEILING_TOLERANCE_FRACTION = resolve(CLIP_CEILING_TOLERANCE_FRACTION).value
 
 
 # A star's peak is a real star, not a hot pixel, when its four nearest
 # neighbours are at least this fraction of the way from the sky to the peak.
 # A star with a FWHM of 2 px has neighbours at 50% of its peak; a hot pixel
 # has neighbours at the sky level.
-STAR_NEIGHBOUR_FRACTION = 0.2
+STAR_NEIGHBOUR_FRACTION = TunedParameter(
+    name="stacking.star_neighbour_fraction",
+    default=0.2,
+    unit="fraction",
+    description="Fraction of the way from sky to peak that the four neighbors must reach for a real star.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D60",
+    pending_conversion=True,
+)
 
 # When the brightest star is clipped, its peak is estimated from the unclipped
 # pixels around the clipped core. The star's profile is taken to be a Moffat
@@ -47,11 +64,30 @@ STAR_NEIGHBOUR_FRACTION = 0.2
 # high in a first attempt on real frames). beta = 3 is a typical seeing value
 # (2.5 to 4); the estimate is not sensitive to it for a small clipped core and
 # very sensitive for a large one, so the estimate is only an indication.
-MOFFAT_BETA = 3.0
+MOFFAT_BETA = TunedParameter(
+    name="stacking.moffat_beta",
+    default=3.0,
+    unit="none",
+    description="Shape exponent of the star profile used to estimate the peak of a clipped star.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D60",
+    pending_conversion=True,
+)
 
 # FWHM in pixels of the stars in these stacks: 2.8 to 3.8 (2026 ASI533
 # sessions), used when the frame's own FWHM is not known.
-DEFAULT_STAR_FWHM_PIXELS = 3.0
+DEFAULT_STAR_FWHM_PIXELS = TunedParameter(
+    name="stacking.default_star_fwhm_pixels",
+    default=3.0,
+    unit="pixels",
+    description="Star width used when the frame's own width is not known.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D61",
+)
 
 # An estimate from the wings is not believed when it puts the star's peak more
 # than this many times above the room between the sky and the ceiling. Checked
@@ -61,7 +97,17 @@ DEFAULT_STAR_FWHM_PIXELS = 3.0
 # sessions), while estimates above 100 times were off by 80% to more than a
 # hundred times (M 42 and NGC 7023 on the D5300). 100 separates the two sets;
 # it rests on those nine comparisons.
-MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO = 100.0
+MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO = TunedParameter(
+    name="stacking.maximum_reliable_peak_to_room_ratio",
+    default=100.0,
+    unit="ratio",
+    description="Largest ratio of estimated peak to the room below saturation that is believed.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-40",
+    pending_conversion=True,
+)
 
 # What the quality rows state about an estimated peak (register entry STK-41).
 # Two exposure lengths of one field were compared, star by star: the peak of
@@ -71,11 +117,31 @@ MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO = 100.0
 # comparisons, 2026-09-21; the same star's unclipped peaks at two exposures
 # differ by a median of 14% and a 90th percentile of 38% because of seeing,
 # pixel phase and transparency, so 66% leaves room for that and little more).
-CHECKED_ESTIMATE_ERROR_FRACTION = 0.66
+CHECKED_ESTIMATE_ERROR_FRACTION = TunedParameter(
+    name="stacking.checked_estimate_error_fraction",
+    default=0.66,
+    unit="fraction",
+    description="Relative error the quality rows state for an estimated peak.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-40",
+    pending_conversion=True,
+)
 
 # The share of cases within that fraction, over the ZWO ASI 533MM Pro cases
 # below the range that follows (1,009 star pairs from 10 targets, 2026-10-23).
-CHECKED_ESTIMATE_SHARE_WITHIN_ERROR = 0.97
+CHECKED_ESTIMATE_SHARE_WITHIN_ERROR = TunedParameter(
+    name="stacking.checked_estimate_share_within_error",
+    default=0.97,
+    unit="fraction",
+    description="Share of checked cases that lie within the stated error.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-40",
+    pending_conversion=True,
+)
 
 # The same cases measured against the truth: a star unclipped at the shorter
 # exposure has a measured peak, which times the exposure ratio is what the
@@ -84,7 +150,17 @@ CHECKED_ESTIMATE_SHARE_WITHIN_ERROR = 0.97
 # by that peak had a median of 0.48 and a 10th to 90th percentile range of
 # 0.22 to 2.7: the estimate is typically half the peak, and uncertain by a
 # factor of 2 to 5 either way.
-CHECKED_ESTIMATE_AGAINST_MEASURED_RATIOS = (0.22, 0.48, 2.7)
+CHECKED_ESTIMATE_AGAINST_MEASURED_RATIOS = TunedParameter(
+    name="stacking.checked_estimate_against_measured_ratios",
+    default=(0.22, 0.48, 2.7),
+    unit="ratio",
+    description="Measured ratios (low, middle, high) the estimate was checked against.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-40",
+    pending_conversion=True,
+)
 
 # The largest peak-to-room ratio of an estimate that was checked, for each
 # camera, by the camera profile's name with case, spaces and punctuation
@@ -125,8 +201,28 @@ def checked_estimate_range(camera_name: str | None) -> float:
 
 # How far outside the clipped core (in pixels) the pixels used for the
 # estimate lie, and how wide that band is.
-CORE_RING_OFFSET_PIXELS = 1
-CORE_RING_WIDTH_PIXELS = 1
+CORE_RING_OFFSET_PIXELS = TunedParameter(
+    name="stacking.core_ring_offset_pixels",
+    default=1,
+    unit="pixels",
+    description="Distance outside the clipped core at which pixels are used for the peak estimate.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D60",
+    pending_conversion=True,
+)
+CORE_RING_WIDTH_PIXELS = TunedParameter(
+    name="stacking.core_ring_width_pixels",
+    default=1,
+    unit="pixels",
+    description="Width of the band of pixels used for the peak estimate.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D60",
+    pending_conversion=True,
+)
 
 
 @dataclass
@@ -190,7 +286,7 @@ def _measured_peak_above_sky(frame: np.ndarray, sky: float) -> float | None:
     footprint = np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]], dtype=bool)
     neighbour_minimum = minimum_filter(data, footprint=footprint, mode="nearest")
     above_sky = data - sky
-    qualifies = (neighbour_minimum - sky) >= STAR_NEIGHBOUR_FRACTION * above_sky
+    qualifies = (neighbour_minimum - sky) >= resolve(STAR_NEIGHBOUR_FRACTION).value * above_sky
     qualifies &= above_sky > 0
     if not qualifies.any():
         return None
@@ -214,32 +310,35 @@ def _estimated_peak_from_wings(
         The estimated peak above the sky, or `None` if the ring is not above
         the sky or the core is a single pixel.
     """
+    core_ring_offset_pixels = resolve(CORE_RING_OFFSET_PIXELS).value
+    core_ring_width_pixels = resolve(CORE_RING_WIDTH_PIXELS).value
+    moffat_beta = resolve(MOFFAT_BETA).value
     largest = int(np.argmax(sizes)) + 1
     core = labels == largest
     rows, columns = np.nonzero(core)
-    if rows.size < SATURATED_BLOB_MINIMUM_PIXELS:
+    if rows.size < resolve(SATURATED_BLOB_MINIMUM_PIXELS).value:
         return None
     # The half-width across the core: for a filled ellipse, the semi-minor
     # axis is twice the standard deviation along the narrow direction.
     covariance = np.cov(np.vstack([rows, columns]).astype(np.float64))
     narrow_variance = float(np.min(np.linalg.eigvalsh(covariance)))
     half_width = 2.0 * np.sqrt(max(narrow_variance, 0.0))
-    inner = binary_dilation(core, iterations=CORE_RING_OFFSET_PIXELS)
-    outer = binary_dilation(core, iterations=CORE_RING_OFFSET_PIXELS + CORE_RING_WIDTH_PIXELS)
+    inner = binary_dilation(core, iterations=core_ring_offset_pixels)
+    outer = binary_dilation(core, iterations=core_ring_offset_pixels + core_ring_width_pixels)
     ring_values = np.asarray(frame)[outer & ~inner]
     if ring_values.size == 0:
         return None
     ring_above_sky = float(np.median(ring_values)) - sky
     if ring_above_sky <= 0:
         return None
-    ring_radius = half_width + CORE_RING_OFFSET_PIXELS + 0.5 * CORE_RING_WIDTH_PIXELS
+    ring_radius = half_width + core_ring_offset_pixels + 0.5 * core_ring_width_pixels
     # For a Moffat function, FWHM = 2 alpha sqrt(2^(1/beta) - 1).
-    alpha = fwhm_pixels / (2.0 * np.sqrt(2.0 ** (1.0 / MOFFAT_BETA) - 1.0))
-    return ring_above_sky * float((1.0 + (ring_radius / alpha) ** 2) ** MOFFAT_BETA)
+    alpha = fwhm_pixels / (2.0 * np.sqrt(2.0 ** (1.0 / moffat_beta) - 1.0))
+    return ring_above_sky * float((1.0 + (ring_radius / alpha) ** 2) ** moffat_beta)
 
 
 def measure_frame_saturation(
-    frame: np.ndarray, ceiling_adu: float, fwhm_pixels: float = DEFAULT_STAR_FWHM_PIXELS
+    frame: np.ndarray, ceiling_adu: float, fwhm_pixels: float | None = None
 ) -> FrameSaturation:
     """Measure how close the brightest star of a raw frame is to the ceiling.
 
@@ -254,12 +353,15 @@ def measure_frame_saturation(
     fwhm_pixels : `float`, optional
         The FWHM of a star in this frame, used to estimate a clipped star's
         peak.
+        If `None`, the value of `DEFAULT_STAR_FWHM_PIXELS` is used.
 
     Returns
     -------
     saturation : `FrameSaturation`
         Whether a star is clipped, the ceiling and sky, and the peak.
     """
+    if fwhm_pixels is None:
+        fwhm_pixels = resolve(DEFAULT_STAR_FWHM_PIXELS).value
     data = np.asarray(frame)
     if data.ndim == 3:
         data = data[0]
@@ -268,10 +370,10 @@ def measure_frame_saturation(
     # connected pixels are at it.
     own_maximum = float(data.max())
     labels, sizes = _clipped_blobs(data, own_maximum)
-    if sizes.size and sizes.max() >= SATURATED_BLOB_MINIMUM_PIXELS:
+    if sizes.size and sizes.max() >= resolve(SATURATED_BLOB_MINIMUM_PIXELS).value:
         ceiling = own_maximum
         peak = _estimated_peak_from_wings(data, labels, sizes, sky, fwhm_pixels)
-        if peak is not None and peak > MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO * (ceiling - sky):
+        if peak is not None and peak > resolve(MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO).value * (ceiling - sky):
             peak = None
         return FrameSaturation(True, ceiling, sky, peak, True)
     # Not clipped: the ceiling comes from the camera, and the peak is measured.
@@ -294,4 +396,4 @@ def group_is_saturated(frames: list[FrameSaturation]) -> bool:
     """
     if not frames:
         return False
-    return sum(frame.saturated for frame in frames) / len(frames) >= SATURATED_FRAME_FRACTION
+    return sum(frame.saturated for frame in frames) / len(frames) >= resolve(SATURATED_FRAME_FRACTION).value

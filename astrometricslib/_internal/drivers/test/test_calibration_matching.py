@@ -109,7 +109,7 @@ def test_temperature_is_binned_to_the_tolerance(
     temperature_c: float | None, expected_slot: float | None
 ) -> None:
     """A temperature rounds to the middle of a slot one tolerance wide."""
-    assert DEFAULT_DARK_TEMPERATURE_TOLERANCE_C == pytest.approx(3.0)
+    assert DEFAULT_DARK_TEMPERATURE_TOLERANCE_C.default == pytest.approx(3.0)
     assert temperature_slot_c(temperature_c) == expected_slot
 
 
@@ -289,7 +289,7 @@ def test_every_dark_in_the_master_counts_toward_the_temperature_check(tmp_path: 
         camera=CAMERA, exposure=30.0, iso="100", offset="30", temperature_c=-13.0
     )
 
-    assert abs(-10.4 - -13.0) <= DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
+    assert abs(-10.4 - -13.0) <= DEFAULT_DARK_TEMPERATURE_TOLERANCE_C.default
     assert len(selection.flags) == 1
     assert "-9.1 C" in selection.flags[0]
     assert "-10.4 to -7.7 C" in selection.flags[0]

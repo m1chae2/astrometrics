@@ -12,6 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.known_variability import (
     KnownVariability,
     catalogs_consulted,
@@ -35,6 +36,13 @@ from astrometricslib.models.quality.spectroscopy_quality import (
     StageQualityCheckpoint,
 )
 from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.models.wavelength_scale import WavelengthZeroPointRecord
 
 # Declares this module's own public surface. Without it, sphinx-automodapi
@@ -71,15 +79,43 @@ a star looks. Must match BRIGHTEST_CATALOG_MAGNITUDE in
 ui/planetariumDisplay/layers/StarOverlay.ts."""
 
 
-MINIMUM_POINTS_FOR_PERIOD_SEARCH = 5
+MINIMUM_POINTS_FOR_PERIOD_SEARCH = TunedParameter(
+    name="models.minimum_points_for_period_search",
+    default=5,
+    unit="points",
+    description="Fewest light-curve points for which a period search is offered.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-D30",
+)
 """Fewest brightness measurements the smooth-cycle (Lomb-Scargle) search
 accepts. A star with fewer gives no result, so it is not worth searching."""
 
-MINIMUM_POINTS_FOR_TRANSIT_SEARCH = 8
+MINIMUM_POINTS_FOR_TRANSIT_SEARCH = TunedParameter(
+    name="models.minimum_points_for_transit_search",
+    default=8,
+    unit="points",
+    description="Fewest light-curve points for which a transit search is offered.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-D30",
+)
 """Fewest brightness measurements the repeating-dip (box least squares)
 search accepts."""
 
-NO_GOOD_MATCH_RMS = 0.15
+NO_GOOD_MATCH_RMS = TunedParameter(
+    name="models.no_good_match_rms",
+    default=0.15,
+    unit="RMS",
+    description="Spectrum fit RMS above which no catalog star counts as a good match.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-16",
+    pending_conversion=True,
+)
 """Poor-match limit. Unit: relative RMS (the root-mean-square difference as a
 fraction of the spectrum's average brightness; 0.15 means a typical sample is
 15% off). A spectrum is a poor match ("no good match") when its closest
@@ -93,14 +129,34 @@ M0 at 0.086, and A2 matched as F2 at 0.048) score below this limit. The model
 field, the run gate and the checkpoint metric all compare the best reference's
 RMS with this one value."""
 
-UNRELIABLE_MATCH_RMS = 0.45
+UNRELIABLE_MATCH_RMS = TunedParameter(
+    name="models.unreliable_match_rms",
+    default=0.45,
+    unit="RMS",
+    description="Spectrum fit RMS above which the best match is called unreliable.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-17",
+    pending_conversion=True,
+)
 """No-match limit. Unit: relative RMS, as for `NO_GOOD_MATCH_RMS`. When even
 the closest reference is further away than this, the classifier names no type
 at all, because the least-bad reference would only invent one. Of 55 stars
 classified on 2026-09-24, 19 scored above 0.45, and 18 of those had no catalog
 type (they were matched to the wrong part of the sky)."""
 
-AMBIGUOUS_RMS_GAP = 0.02
+AMBIGUOUS_RMS_GAP = TunedParameter(
+    name="models.ambiguous_rms_gap",
+    default=0.02,
+    unit="RMS",
+    description="RMS gap between the best and second-best matches below which the match is ambiguous.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-18",
+    pending_conversion=True,
+)
 """Ambiguity limit. Unit: relative RMS (a difference between two RMS values,
 not a probability). The best match is ambiguous when the second-best
 reference is closer to the best one than this, that is, when
@@ -114,7 +170,16 @@ limit is applied to two gaps: `rms_gap_to_second_best` (the subtype level)
 and `rms_gap_to_next_class` (the best reference of another spectral class
 letter). The run gate fails only on the class-level one."""
 
-DIFFERS_FROM_CATALOG_SUBTYPES = 20.0
+DIFFERS_FROM_CATALOG_SUBTYPES = TunedParameter(
+    name="models.differs_from_catalog_subtypes",
+    default=20.0,
+    unit="subtypes",
+    description="Spectral subtype distance beyond which a star differs from its catalog entry.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="SPE-19",
+)
 """Catalog-disagreement limit. Unit: subtype steps on the O-to-M ladder (ten
 steps to a letter class, so 20 is two whole classes, such as B to F). A
 measured type more than this many steps from the catalog type is called
@@ -201,7 +266,7 @@ def types_differ_on_ladder(own_type: str | None, catalog_type: str | None) -> bo
     own_position, catalog_position = ladder_position(own_type), ladder_position(catalog_type)
     if own_position is None or catalog_position is None:
         return None
-    return abs(own_position - catalog_position) > DIFFERS_FROM_CATALOG_SUBTYPES
+    return abs(own_position - catalog_position) > resolve(DIFFERS_FROM_CATALOG_SUBTYPES).value
 
 
 def rms_gap_to_second_best(rms_values: Iterable[float]) -> float | None:
@@ -273,7 +338,7 @@ def is_rms_gap_ambiguous(gap: float | None) -> bool | None:
         is no gap (fewer than two references), which is not the same as
         "clearly separated".
     """
-    return None if gap is None else gap < AMBIGUOUS_RMS_GAP
+    return None if gap is None else gap < resolve(AMBIGUOUS_RMS_GAP).value
 
 
 def has_catalog_magnitude(magnitude: object) -> bool:
@@ -1253,7 +1318,7 @@ class StellarObject(BaseModel):
         measurements.
         """
         points = len(self.photometry.timestamps) if self.photometry else 0
-        return points >= MINIMUM_POINTS_FOR_PERIOD_SEARCH
+        return points >= resolve(MINIMUM_POINTS_FOR_PERIOD_SEARCH).value
 
     @computed_field(alias="canRunTransitSearch")
     @property
@@ -1264,7 +1329,7 @@ class StellarObject(BaseModel):
         measurements.
         """
         points = len(self.photometry.timestamps) if self.photometry else 0
-        return points >= MINIMUM_POINTS_FOR_TRANSIT_SEARCH
+        return points >= resolve(MINIMUM_POINTS_FOR_TRANSIT_SEARCH).value
 
     @computed_field(alias="hasPhotometry")
     @property

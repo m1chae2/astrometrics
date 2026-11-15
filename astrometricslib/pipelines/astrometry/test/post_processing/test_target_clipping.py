@@ -156,7 +156,7 @@ def test_the_peak_over_the_sky_separates_a_star_from_empty_sky() -> None:
     sky = 100.0 + generator.normal(0.0, 5.0, (SIZE, SIZE))
     star = sky + 300.0 * np.exp(-((rows - 50.0) ** 2 + (columns - 50.0) ** 2) / 8.0)
     assert peak_sigma_above_sky(star, 50.0, 50.0, 15.0) > 40.0
-    assert peak_sigma_above_sky(sky, 50.0, 50.0, 15.0) < MINIMUM_PEAK_SIGMA
+    assert peak_sigma_above_sky(sky, 50.0, 50.0, 15.0) < MINIMUM_PEAK_SIGMA.default
 
 
 def test_the_peak_check_gives_up_when_the_ring_is_too_small_or_flat() -> None:
@@ -191,7 +191,7 @@ def _profile(
         camera_name="Cam",
         is_generic_fallback=generic,
         clip_ceiling_adu=ProvenancedValue(
-            value=CLIP_ADU / (1.0 - CLIP_CEILING_TOLERANCE_FRACTION), provenance=provenance
+            value=CLIP_ADU / (1.0 - CLIP_CEILING_TOLERANCE_FRACTION.default), provenance=provenance
         ),
         saturation_threshold_adu=ProvenancedValue(value=CLIP_ADU, provenance=provenance),
         photometric_linearity_limit_adu=(

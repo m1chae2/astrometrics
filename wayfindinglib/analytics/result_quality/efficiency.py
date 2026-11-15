@@ -51,6 +51,14 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from astrometricslib.parameters import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from astrometricslib.reports import CaptureSetting, MeasurementStatus, QualityMeasurement
 from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
@@ -112,13 +120,36 @@ EFFICIENCY_MODEL_ENTRY = "WAY-20"
 """Register entry behind the factor formulas and the loss split."""
 
 # --- Reference width
-REFERENCE_WAVELENGTH_NM = 550.0
+REFERENCE_WAVELENGTH_NM = TunedParameter(
+    name="wayfinding.reference_wavelength_nm",
+    default=550.0,
+    unit="nm",
+    description="The wavelength used for the diffraction limit, in nanometers.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="WAY-D20",
+    pending_conversion=True,
+)
 """Wavelength used for the diffraction limit, in nanometers. 550 nm is the
 middle
 of the visible band, so it suits a luminance or color filter. A narrowband
 filter would use its own wavelength. Design estimate, register row WAY-D20."""
 
-AIRY_FWHM_FACTOR = 1.029
+AIRY_FWHM_FACTOR = TunedParameter(
+    name="wayfinding.airy_fwhm_factor",
+    default=1.029,
+    unit="wavelengths per aperture diameter",
+    description=(
+        "Full width at half maximum of the Airy pattern of an unobstructed circular aperture, in units "
+        "of wavelength over aperture diameter (1.029 lambda / D, from the Airy function)."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="WAY-D20",
+    pending_conversion=True,
+)
 """Full width at half maximum of the Airy pattern of an unobstructed circular
 aperture, in units of wavelength over aperture diameter (1.029 lambda / D, from
 the Airy function). A central obstruction narrows the core a little; that is
@@ -129,12 +160,36 @@ ARCSEC_PER_RADIAN = 206264.806
 
 
 # --- Goals and exponents
-SEEING_EXPONENT_POINT_SOURCE = 2.0
+SEEING_EXPONENT_POINT_SOURCE = TunedParameter(
+    name="wayfinding.seeing_exponent_point_source",
+    default=2.0,
+    unit="exponent",
+    description=(
+        "For a faint point source, the time to reach a signal-to-noise ratio scales as the star width to"
+        " this power."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.PUBLISHED_CONSTANT,
+    register_entry="WAY-20",
+)
 """Faint point source: the time to reach a signal-to-noise ratio scales as the
 star's area, which scales as width squared (`Wayfinding_Quality_Judgment.md`
 Section 4.2). Derived."""
 
-SEEING_EXPONENT_ASTROMETRY_SKY_LIMITED = 4.0
+SEEING_EXPONENT_ASTROMETRY_SKY_LIMITED = TunedParameter(
+    name="wayfinding.seeing_exponent_astrometry_sky_limited",
+    default=4.0,
+    unit="exponent",
+    description=(
+        "For sky-limited astrometry, the time to reach a given position error scales as the star width "
+        "to this power."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.PUBLISHED_CONSTANT,
+    register_entry="WAY-20",
+)
 """Astrometric precision, sky-limited: the position error scales as the star
 width
 over its signal-to-noise ratio (`Wayfinding_Quality_Judgment.md` Section 4.2),
@@ -142,13 +197,37 @@ so
 the time to reach a given error scales with the width to the fourth power.
 Taken from the quality-judgment paper; register entry WAY-20."""
 
-SEEING_EXPONENT_ASTROMETRY_OTHER = 2.0
+SEEING_EXPONENT_ASTROMETRY_OTHER = TunedParameter(
+    name="wayfinding.seeing_exponent_astrometry_other",
+    default=2.0,
+    unit="exponent",
+    description=(
+        "For astrometry that is not sky-limited, the time scales as the star width to this power (the "
+        "point source exponent)."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.PUBLISHED_CONSTANT,
+    register_entry="WAY-D23",
+)
 """Astrometric precision, not sky-limited: no sky-limited argument holds, so
 the
 faint point source exponent is used. Design estimate, register row WAY-D23."""
 
 # --- Noise regime
-SKY_LIMITED_VARIANCE_RATIO = 9.0
+SKY_LIMITED_VARIANCE_RATIO = TunedParameter(
+    name="wayfinding.sky_limited_variance_ratio",
+    default=9.0,
+    unit="ratio",
+    description=(
+        "A frame is sky-limited when the sky photon variance is at least this multiple of the read noise"
+        " variance."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D24",
+)
 """A frame is sky-limited when the sky photon variance is at least this
 multiple
 of the read noise variance. Derivation: the read-noise factor is eta_RN = s2 /
@@ -156,7 +235,19 @@ of the read noise variance. Derivation: the read-noise factor is eta_RN = s2 /
 RN^2. Used only to label the regime and the depth view, never to change eta.
 Register row WAY-D24."""
 
-SOURCE_LIMITED_VARIANCE_RATIO = 1.0
+SOURCE_LIMITED_VARIANCE_RATIO = TunedParameter(
+    name="wayfinding.source_limited_variance_ratio",
+    default=1.0,
+    unit="ratio",
+    description=(
+        "A frame is source-limited when the signal's photon variance (the signal in electrons) is at "
+        "least this multiple of the sky variance."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D24",
+)
 """A frame is source-limited when the signal's photon variance (the signal in
 electrons) is at least this multiple of the sky variance. At a ratio of 1 the
 source's own noise is as large as the sky's. Design estimate, register row
@@ -170,18 +261,50 @@ It is not a factor of eta. It tells a reader how far a night's width may sit
 from the baseline by ordinary night-to-night change. Present only when the
 width baseline is. Register row WAY-D22."""
 
-BASELINE_PERCENTILE = 10.0
+BASELINE_PERCENTILE = TunedParameter(
+    name="wayfinding.baseline_percentile",
+    default=10.0,
+    unit="percentile of the nightly medians",
+    description=(
+        "The baseline takes this percentile of the per-night medians, so it describes the equipment's "
+        "good nights (a night with the sharpest stars or the darkest sky) and not the average."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D22",
+)
 """The baseline takes this percentile of the per-night medians, so it describes
 the equipment's good nights (a night with the sharpest stars or the darkest
 sky) and not the average. Design estimate, register row WAY-D22."""
 
-MINIMUM_NIGHTS_FOR_BASELINE = 3
+MINIMUM_NIGHTS_FOR_BASELINE = TunedParameter(
+    name="wayfinding.minimum_nights_for_baseline",
+    default=3,
+    unit="nights of the equipment",
+    description="Fewest nights that make a baseline.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D22",
+)
 """Fewest nights that make a baseline. With two nights the 10th percentile is
 just
 the better night. With three, one outlier night cannot set the value alone.
 Design estimate, register row WAY-D22."""
 
-DEPTH_MAGNITUDES_PER_LOG_TIME = 1.25
+DEPTH_MAGNITUDES_PER_LOG_TIME = TunedParameter(
+    name="wayfinding.depth_magnitudes_per_log_time",
+    default=1.25,
+    unit="mag per log10 of time ratio",
+    description=(
+        "Depth lost, in magnitudes, per unit of log10 of the time ratio for a sky-limited point source."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.PUBLISHED_CONSTANT,
+    register_entry="WAY-20",
+)
 """Depth lost, in magnitudes, is 1.25 log10(1 / eta) for a sky-limited point
 source: the noise falls as the square root of time and a magnitude is 2.5 log10
 of a flux ratio, so a time ratio r is 2.5 log10(sqrt(r)) = 1.25 log10(r)
@@ -426,7 +549,7 @@ class EfficiencyAssessment(BaseModel):
 # -----------------------------------------------------------------------------
 
 
-def diffraction_fwhm_arcsec(aperture_mm: float, wavelength_nm: float = REFERENCE_WAVELENGTH_NM) -> float:
+def diffraction_fwhm_arcsec(aperture_mm: float, wavelength_nm: float | None = None) -> float:
     """Give the width of the diffraction-limited star for an aperture.
 
     Parameters
@@ -435,6 +558,7 @@ def diffraction_fwhm_arcsec(aperture_mm: float, wavelength_nm: float = REFERENCE
         The clear aperture, in millimeters. Must be above 0.
     wavelength_nm : `float`, optional
         The wavelength, in nanometers.
+        When omitted, `REFERENCE_WAVELENGTH_NM` is used.
 
     Returns
     -------
@@ -446,17 +570,19 @@ def diffraction_fwhm_arcsec(aperture_mm: float, wavelength_nm: float = REFERENCE
     ValueError
         If the aperture or the wavelength is not above 0.
     """
+    if wavelength_nm is None:
+        wavelength_nm = resolve_parameter(REFERENCE_WAVELENGTH_NM).value
     if aperture_mm <= 0.0 or wavelength_nm <= 0.0:
         raise ValueError("The aperture and the wavelength must be above 0.")
     wavelength_mm = wavelength_nm * 1.0e-6
-    return AIRY_FWHM_FACTOR * wavelength_mm / aperture_mm * ARCSEC_PER_RADIAN
+    return resolve_parameter(AIRY_FWHM_FACTOR).value * wavelength_mm / aperture_mm * ARCSEC_PER_RADIAN
 
 
 def physical_reference(
     aperture_mm: float | None,
     pixel_scale_arcsec: float | None,
     typical_seeing_fwhm_arcsec: float | None = None,
-    wavelength_nm: float = REFERENCE_WAVELENGTH_NM,
+    wavelength_nm: float | None = None,
 ) -> ReferenceOutcome:
     """Build the physical reference (best star width).
 
@@ -485,6 +611,7 @@ def physical_reference(
         seeing factor "not included" (register row WAY-D01).
     wavelength_nm : `float`, optional
         The wavelength for the diffraction limit.
+        When omitted, `REFERENCE_WAVELENGTH_NM` is used.
 
     Returns
     -------
@@ -492,6 +619,8 @@ def physical_reference(
         The reference (name ``physical``), or ``None`` with a reason when the
         aperture or the pixel scale is missing.
     """
+    if wavelength_nm is None:
+        wavelength_nm = resolve_parameter(REFERENCE_WAVELENGTH_NM).value
     if not aperture_mm or aperture_mm <= 0.0:
         return ReferenceOutcome(
             reason="The telescope's aperture is unknown (focal length or focal ratio missing or 0)."
@@ -663,18 +792,20 @@ def baseline_reference(nights: Sequence[BaselineNight], key: str) -> ReferenceOu
         (STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC, width_values, "star width"),
         (SKY_RATE_METRIC, rate_values, "sky rate"),
     ):
-        if len(values) >= MINIMUM_NIGHTS_FOR_BASELINE:
-            factors[name] = float(np.percentile(values, BASELINE_PERCENTILE))
+        if len(values) >= resolve_parameter(MINIMUM_NIGHTS_FOR_BASELINE).value:
+            factors[name] = float(np.percentile(values, resolve_parameter(BASELINE_PERCENTILE).value))
             if name == STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC:
                 factors[STAR_WIDTH_NIGHTLY_SPREAD_KEY] = float(np.std(values, ddof=1))
         else:
             not_included[name] = (
-                f"Only {len(values)} night(s) with a {label}; a baseline needs {MINIMUM_NIGHTS_FOR_BASELINE}."
+                f"Only {len(values)} night(s) with a {label}; a baseline needs "
+                f"{resolve_parameter(MINIMUM_NIGHTS_FOR_BASELINE).value}."
             )
     if not factors:
         return ReferenceOutcome(
             reason=(
-                f"No baseline yet for {key}: it needs {MINIMUM_NIGHTS_FOR_BASELINE} nights of "
+                f"No baseline yet for {key}: it needs "
+                f"{resolve_parameter(MINIMUM_NIGHTS_FOR_BASELINE).value} nights of "
                 "measured frames."
             )
         )
@@ -735,9 +866,9 @@ def noise_regime(
         )
     sky_variance = sky_noise_e**2
     if source_signal_e is not None and sky_variance > 0.0:
-        if source_signal_e >= SOURCE_LIMITED_VARIANCE_RATIO * sky_variance:
+        if source_signal_e >= resolve_parameter(SOURCE_LIMITED_VARIANCE_RATIO).value * sky_variance:
             return NoiseRegimeAssessment(regime=NoiseRegime.SOURCE_LIMITED)
-    if sky_variance >= SKY_LIMITED_VARIANCE_RATIO * read_noise_e**2:
+    if sky_variance >= resolve_parameter(SKY_LIMITED_VARIANCE_RATIO).value * read_noise_e**2:
         return NoiseRegimeAssessment(regime=NoiseRegime.SKY_LIMITED)
     return NoiseRegimeAssessment(regime=NoiseRegime.READ_NOISE_LIMITED)
 
@@ -766,7 +897,7 @@ def depth_loss_magnitudes(eta: float | None, goal: ScienceGoal, regime: NoiseReg
         return None
     if goal != ScienceGoal.FAINT_POINT_SOURCE or regime != NoiseRegime.SKY_LIMITED:
         return None
-    return DEPTH_MAGNITUDES_PER_LOG_TIME * math.log10(1.0 / eta)
+    return resolve_parameter(DEPTH_MAGNITUDES_PER_LOG_TIME).value * math.log10(1.0 / eta)
 
 
 # -----------------------------------------------------------------------------
@@ -823,9 +954,9 @@ def seeing_exponent(goal: ScienceGoal, regime: NoiseRegime) -> float | None:
         return None
     if goal == ScienceGoal.ASTROMETRIC_PRECISION:
         if regime == NoiseRegime.SKY_LIMITED:
-            return SEEING_EXPONENT_ASTROMETRY_SKY_LIMITED
-        return SEEING_EXPONENT_ASTROMETRY_OTHER
-    return SEEING_EXPONENT_POINT_SOURCE
+            return resolve_parameter(SEEING_EXPONENT_ASTROMETRY_SKY_LIMITED).value
+        return resolve_parameter(SEEING_EXPONENT_ASTROMETRY_OTHER).value
+    return resolve_parameter(SEEING_EXPONENT_POINT_SOURCE).value
 
 
 def _capped_factor(cause: str, raw_value: float, *, model_derived: bool = False) -> EfficiencyFactor:

@@ -81,7 +81,7 @@ def instrument_spectrum(spectral_type: str, profile: ResolutionProfile) -> tuple
         The blurred template inside `RESPONSE_RANGE_ANGSTROM`.
     """
     wavelength, flux = blurred_reference_spectrum(
-        spectral_type, FALLBACK_RESOLUTION_ELEMENT_ANGSTROM, profile
+        spectral_type, FALLBACK_RESOLUTION_ELEMENT_ANGSTROM.default, profile
     )
     inside = (wavelength >= RESPONSE_RANGE_ANGSTROM[0]) & (wavelength <= RESPONSE_RANGE_ANGSTROM[1])
     return wavelength[inside], flux[inside]
@@ -113,7 +113,7 @@ def index_table_by_type(profile: ResolutionProfile) -> dict[str, dict[str, float
     table : `dict` [`str`, `dict` [`str`, `float`]]
         Template label mapped to its index values by index name.
     """
-    types, table = reference_index_table(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM, profile)
+    types, table = reference_index_table(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM.default, profile)
     names = [line.name for line in LINE_INDICES]
     return {label: dict(zip(names, row, strict=True)) for label, row in zip(types, table, strict=True)}
 
@@ -250,7 +250,7 @@ def test_a_template_left_out_of_the_references_lands_near_its_neighbours(
     errors_array = np.array(errors)
     assert (errors_array <= 2).mean() >= 0.45
     assert (errors_array <= 5).mean() >= 0.65
-    assert errors_array.max() <= DIFFERS_FROM_CATALOG_SUBTYPES
+    assert errors_array.max() <= DIFFERS_FROM_CATALOG_SUBTYPES.default
 
 
 def test_light_noise_does_not_move_the_type_far(line_spread: ResolutionProfile) -> None:

@@ -28,6 +28,7 @@ from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, current_job_id, registered_job
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.storage.data_versions import QUALITY_KIND, get_library_data_version
 from astrometricslib.foundation.versioned_cache import VersionedCache
 from astrometricslib.models.calibration_ingest import (
@@ -55,6 +56,12 @@ from astrometricslib.models.quality.subset_stacks import (
 )
 from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasurement
 from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.api_arguments import (
     STACK_KINDS,
     StackKind,
@@ -126,7 +133,17 @@ _CURRENT_VERSIONS = {
 # Two dark exposures are the same set when they differ by less than this many
 # seconds. It is the tolerance the library uses to pick a dark for a light
 # (`select_dark_frames`).
-_EXPOSURE_MATCH_TOLERANCE_SECONDS = 0.05
+_EXPOSURE_MATCH_TOLERANCE_SECONDS = TunedParameter(
+    name="api.exposure_match_tolerance_seconds",
+    default=0.05,
+    unit="s",
+    description="Largest exposure time difference at which a calibration set still matches.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-D07",
+    pending_conversion=True,
+)
 
 
 def _calibration_set_matches(
@@ -167,12 +184,13 @@ def _calibration_set_matches(
     ):
         return False
     if temperature_c is not None and calibration_set.temperature_c != temperature_slot_c(
-        temperature_c, DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
+        temperature_c, resolve(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value
     ):
         return False
     return exposure_seconds is None or (
         calibration_set.exposure_seconds is not None
-        and abs(calibration_set.exposure_seconds - exposure_seconds) < _EXPOSURE_MATCH_TOLERANCE_SECONDS
+        and abs(calibration_set.exposure_seconds - exposure_seconds)
+        < resolve(_EXPOSURE_MATCH_TOLERANCE_SECONDS).value
     )
 
 
@@ -259,7 +277,7 @@ def _calibration_row_matches(
         kind == "dark"
         and temperature_c is not None
         and row.get("temperature_c")
-        != temperature_slot_c(temperature_c, DEFAULT_DARK_TEMPERATURE_TOLERANCE_C)
+        != temperature_slot_c(temperature_c, resolve(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value)
     )
 
 
@@ -421,7 +439,7 @@ class CalibrationCatalog:
                     kind=kind,
                     camera_totals=camera_totals,
                     matched_row_keys=matched,
-                    dark_temperature_tolerance_c=DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+                    dark_temperature_tolerance_c=resolve(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value,
                 )
             rows = keyed
             if kind is not None:
@@ -430,7 +448,7 @@ class CalibrationCatalog:
                 detail=detail,
                 kind=kind,
                 camera_totals=camera_totals,
-                dark_temperature_tolerance_c=DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+                dark_temperature_tolerance_c=resolve(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value,
                 **rows,
             )
         if target is None:
@@ -442,14 +460,14 @@ class CalibrationCatalog:
                 detail=detail,
                 target_id=resolved.id,
                 lights=lights,
-                dark_temperature_tolerance_c=DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+                dark_temperature_tolerance_c=resolve(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value,
             )
         groups = frame_statistics.get_frame_stats_grouped(resolved, self._calibration_library, camera_id)
         return CalibrationQueryResult(
             detail=detail,
             target_id=resolved.id,
             groups=groups,
-            dark_temperature_tolerance_c=DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+            dark_temperature_tolerance_c=resolve(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value,
         )
 
     def add_frames(self, paths: Sequence[str], *, telescope: str) -> list[str]:

@@ -46,6 +46,13 @@ from typing import Any
 from astrometricslib import Target
 from astrometricslib.drivers import VersionedCache
 from astrometricslib.exceptions import AstrometricsError
+from astrometricslib.parameters import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from astrometricslib.reports import (
     CaptureSetting,
     MeasurementReference,
@@ -197,19 +204,52 @@ from wayfindinglib.tasks.planning_tasks.target_report_inputs import (
 
 logger = logging.getLogger(__name__)
 
-MINIMUM_FRAMES_FOR_FORECAST = 10
+MINIMUM_FRAMES_FOR_FORECAST = TunedParameter(
+    name="wayfinding.minimum_frames_for_forecast",
+    default=10,
+    unit="frames",
+    description='Fewest usable frames of a setting for "take N more".',
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D61",
+)
 """Fewest usable frames of a setting for "take N more". The new frames copy the
 setting's past frames, so ten frames are the least that give a spread of sky
 rates to copy. Design estimate, register row WAY-D61."""
 
-EXPOSURE_ROUNDING_SECONDS = 10.0
+EXPOSURE_ROUNDING_SECONDS = TunedParameter(
+    name="wayfinding.exposure_rounding_seconds",
+    default=10.0,
+    unit="s",
+    description=(
+        "A proposed exposure that follows from the sky is rounded up to a multiple of this, because "
+        "nobody sets 47 s."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D61",
+)
 """A proposed exposure that follows from the sky is rounded up to a multiple of
 this, because nobody sets 47 s. Design estimate, register row WAY-D61."""
 
 STARTING_POINT_SAMPLE_STEP_HOURS = 0.5
 """The sky for the starting point is sampled this often over the next day."""
 
-STARTING_POINT_MINIMUM_ALTITUDE_DEG = 30.0
+STARTING_POINT_MINIMUM_ALTITUDE_DEG = TunedParameter(
+    name="wayfinding.starting_point_minimum_altitude_deg",
+    default=30.0,
+    unit="deg",
+    description=(
+        "The starting point uses the moonless sky at times the target stands at least this high (about "
+        "an airmass of 2), because that is when it would be imaged."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D67",
+)
 """The starting point uses the moonless sky at times the target stands at least
 this high (about an airmass of 2), because that is when it would be imaged.
 Design estimate, register row WAY-D67."""
@@ -461,7 +501,12 @@ def _measured_noise_checks(
         ):
             continue
         ratio = (measured.value / expected.value) ** 2
-        error = 2.0 * APERTURE_NOISE_ERROR_FACTOR / math.sqrt(measured.sample_count) * ratio
+        error = (
+            2.0
+            * resolve_parameter(APERTURE_NOISE_ERROR_FACTOR).value
+            / math.sqrt(measured.sample_count)
+            * ratio
+        )
         model_error = noise_model_error_for_setting(noise_model_errors, settings[setting_id])
         checks[settings[setting_id]] = MeasuredNoiseCheck(
             variance_ratio=ratio,
@@ -965,10 +1010,11 @@ def _more_frames_for_setting(
         what is missing, or the fixed-pattern noise warning.
     """
     frames, used, problems = _stack_frames(observations)
-    if len(frames) < MINIMUM_FRAMES_FOR_FORECAST:
+    if len(frames) < resolve_parameter(MINIMUM_FRAMES_FOR_FORECAST).value:
         reason = (
             f"{len(frames)} frames have an exposure, a sky rate and a read noise; the forecast needs "
-            f"{MINIMUM_FRAMES_FOR_FORECAST}. Measure the target's frames (QualityRecords.measure_frames)."
+            f"{resolve_parameter(MINIMUM_FRAMES_FOR_FORECAST).value}. Measure the target's frames "
+            f"(QualityRecords.measure_frames)."
         )
         if problems:
             reason += " First problem: " + problems[0]
@@ -1016,11 +1062,18 @@ def _more_frames_for_setting(
         if o.sky_rate_e_per_s_per_px
     )
     read_noise = median_or_none(o.read_noise_e for o in used)
-    if sky_noise is not None and read_noise and sky_noise / read_noise < MINIMUM_SKY_TO_READ_NOISE_RATIO:
+    if (
+        sky_noise is not None
+        and read_noise
+        and sky_noise / read_noise < resolve_parameter(MINIMUM_SKY_TO_READ_NOISE_RATIO).value
+    ):
         sky_rate = median_or_none(o.sky_rate_e_per_s_per_px for o in used)
         if sky_rate:
             wanted = sky_dominated_exposure_seconds(sky_rate, read_noise)
-            rounded = math.ceil(wanted / EXPOSURE_ROUNDING_SECONDS) * EXPOSURE_ROUNDING_SECONDS
+            rounded = (
+                math.ceil(wanted / resolve_parameter(EXPOSURE_ROUNDING_SECONDS).value)
+                * resolve_parameter(EXPOSURE_ROUNDING_SECONDS).value
+            )
             if rounded > new_exposure:
                 note = (
                     f"The earlier {new_exposure:g} s frames were limited by read noise, "
@@ -1037,7 +1090,7 @@ def _more_frames_for_setting(
             set(
                 fold_exposure_lengths([
                     *stack_lengths,
-                    *([new_exposure] * MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH),
+                    *([new_exposure] * resolve_parameter(MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH).value),
                 ])
             )
         )
@@ -1174,15 +1227,20 @@ def _with_full_wall_clock(
     """
     downloads_only = wall_clock_estimate(frame_count, exposure_seconds, overheads)
     without_focus = wall_clock_estimate(
-        frame_count, exposure_seconds, overheads, dither_every_frames=DITHER_EVERY_FRAMES
+        frame_count,
+        exposure_seconds,
+        overheads,
+        dither_every_frames=resolve_parameter(DITHER_EVERY_FRAMES).value,
     )
     # One autofocus run for each hour of imaging, counting a part hour as one.
-    focus_runs = max(1, math.ceil(without_focus.total_seconds / 3600.0 * AUTOFOCUS_RUNS_PER_HOUR))
+    focus_runs = max(
+        1, math.ceil(without_focus.total_seconds / 3600.0 * resolve_parameter(AUTOFOCUS_RUNS_PER_HOUR).value)
+    )
     full = wall_clock_estimate(
         frame_count,
         exposure_seconds,
         overheads,
-        dither_every_frames=DITHER_EVERY_FRAMES,
+        dither_every_frames=resolve_parameter(DITHER_EVERY_FRAMES).value,
         autofocus_runs=focus_runs,
     )
     old_text = duration_text(downloads_only.total_seconds) + " with downloads"
@@ -2021,7 +2079,7 @@ def _starting_point(
         rates = [
             prediction.moonless_sky_rate_e_per_s_per_px
             for geometry in geometries
-            if geometry.altitude_deg >= STARTING_POINT_MINIMUM_ALTITUDE_DEG
+            if geometry.altitude_deg >= resolve_parameter(STARTING_POINT_MINIMUM_ALTITUDE_DEG).value
             for prediction in [predict_sky_rate(model, geometry)]
             if prediction.moonless_sky_rate_e_per_s_per_px
         ]
@@ -2029,12 +2087,13 @@ def _starting_point(
             sky_rate = float(statistics.median(rates))
             sky_note = (
                 f"Sky: the sky model's moonless rate for {key} while the target is above "
-                f"{STARTING_POINT_MINIMUM_ALTITUDE_DEG:.0f} degrees in the next day "
+                f"{resolve_parameter(STARTING_POINT_MINIMUM_ALTITUDE_DEG).value:.0f} degrees in the next day "
                 "(a moonless sky gives the longest exposure the rule asks for)."
             )
         else:
             sky_note = (
-                f"The target does not rise above {STARTING_POINT_MINIMUM_ALTITUDE_DEG:.0f} "
+                f"The target does not rise above "
+                f"{resolve_parameter(STARTING_POINT_MINIMUM_ALTITUDE_DEG).value:.0f} "
                 "degrees in the next day."
             )
     if sky_rate is None:

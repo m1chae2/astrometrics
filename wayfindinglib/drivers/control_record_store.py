@@ -39,6 +39,13 @@ from typing import TYPE_CHECKING, Any
 
 from astrometricslib.drivers import bump_data_version, connect_db, read_data_versions
 from astrometricslib.exceptions import InvalidArgumentError, StorageError
+from astrometricslib.parameters import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from astrometricslib.reports import observing_night_id
 
 if TYPE_CHECKING:
@@ -153,7 +160,17 @@ _INSERT_GUIDING_SAMPLE_SQL = """
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
-SPURIOUS_ALIGNMENT_ERROR_ARCSEC = 0.5
+SPURIOUS_ALIGNMENT_ERROR_ARCSEC = TunedParameter(
+    name="wayfinding.spurious_alignment_error_arcsec",
+    default=0.5,
+    unit="arcseconds",
+    description="A sync with a smaller pointing error is treated as a tracking-loop echo and is not stored.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D124",
+    pending_conversion=True,
+)
 """A sync with a smaller pointing error is a tracking-loop echo, not a solve.
 
 Some mount drivers report each tracking update as a sync. Those updates
@@ -287,7 +304,7 @@ class ControlRecordStore:
             pointing_error = math.hypot(d_ra, d_dec)
         if (
             pointing_error is not None
-            and pointing_error < SPURIOUS_ALIGNMENT_ERROR_ARCSEC
+            and pointing_error < resolve_parameter(SPURIOUS_ALIGNMENT_ERROR_ARCSEC).value
             and not attempt.get("force_record")
         ):
             logger.debug("Ignoring a tracking-loop echo of %.3f arcsec.", pointing_error)

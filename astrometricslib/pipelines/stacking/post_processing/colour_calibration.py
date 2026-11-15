@@ -41,6 +41,14 @@ from photutils.detection import DAOStarFinder
 from photutils.utils.exceptions import NoDetectionsWarning
 
 from astrometricslib._internal.drivers.fits_access import read_data, read_header, write_image
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     MAD_TO_SIGMA,
     robust_sigma,
@@ -52,35 +60,103 @@ logger = logging.getLogger(__name__)
 # (405 mm, 3.9 micron pixels, about 2 arcseconds per pixel) are 2.5 to 3.5
 # pixels wide. The finder is not sensitive to a value within 30 percent of the
 # true width.
-FINDER_FWHM_PIXELS = 3.0
+FINDER_FWHM_PIXELS = TunedParameter(
+    name="stacking.finder_fwhm_pixels",
+    default=3.0,
+    unit="pixels",
+    description="Star width the star finder expects.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D17",
+    pending_conversion=True,
+)
 
 # A star must stand this many sky-noise widths above the sky to be found.
 # Chosen to give several hundred stars on a typical Nikon stack while keeping
 # noise peaks out. Not tuned beyond that.
-DETECTION_SIGMA = 8.0
+DETECTION_SIGMA = TunedParameter(
+    name="stacking.detection_sigma",
+    default=8.0,
+    unit="sigma",
+    description="Sky-noise widths above the sky a star must stand to be found.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D17",
+    pending_conversion=True,
+)
 
 # The radius of the circle that sums a star's light, in pixels. About 1.2
 # times the star's full width at half maximum catches most of its light and
 # keeps the noise down.
-APERTURE_RADIUS_PIXELS = 3.5
+APERTURE_RADIUS_PIXELS = TunedParameter(
+    name="stacking.aperture_radius_pixels",
+    default=3.5,
+    unit="pixels",
+    description="Radius of the circle that sums a star's light.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D17",
+    pending_conversion=True,
+)
 
 # The ring that measures the sky around a star, in pixels. It lies well
 # outside the star's wings. Sigma clipping drops any neighbouring star.
-ANNULUS_INNER_RADIUS_PIXELS = 7.0
-ANNULUS_OUTER_RADIUS_PIXELS = 11.0
+ANNULUS_INNER_RADIUS_PIXELS = TunedParameter(
+    name="stacking.annulus_inner_radius_pixels",
+    default=7.0,
+    unit="pixels",
+    description="Inner radius of the ring that measures the sky around a star.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D17",
+    pending_conversion=True,
+)
+ANNULUS_OUTER_RADIUS_PIXELS = TunedParameter(
+    name="stacking.annulus_outer_radius_pixels",
+    default=11.0,
+    unit="pixels",
+    description="Outer radius of the ring that measures the sky around a star.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D17",
+    pending_conversion=True,
+)
 
 # Only stars between these percentiles of total brightness are used. The
 # brightest stars may be saturated or leave the sensor's linear range, and
 # the faintest have noisy colours. The limits are design choices, not fitted
 # values; the result changes by less than the scatter between star subsets
 # when they move by 10 percentage points.
-BRIGHTNESS_PERCENTILE_RANGE = (30.0, 85.0)
+BRIGHTNESS_PERCENTILE_RANGE = TunedParameter(
+    name="stacking.brightness_percentile_range",
+    default=(30.0, 85.0),
+    unit="percentile",
+    description="Percentiles of total brightness between which stars are used for colour calibration.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-27",
+)
 
 # Fewer stars than this give a gain too uncertain to apply.
-MINIMUM_STARS = 40
+MINIMUM_STARS = TunedParameter(
+    name="stacking.minimum_stars",
+    default=40,
+    unit="stars",
+    description="Fewest stars that give a colour gain certain enough to apply.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-27",
+)
 
 # Stars closer than this to the image edge are skipped, so the ring is whole.
-_EDGE_MARGIN_PIXELS = int(ANNULUS_OUTER_RADIUS_PIXELS) + 2
+_EDGE_MARGIN_PIXELS = int(resolve(ANNULUS_OUTER_RADIUS_PIXELS).value) + 2
 
 
 @dataclass(frozen=True)
@@ -146,7 +222,9 @@ def _find_stars(summed: np.ndarray, noise: float) -> np.ndarray:
         An array of shape (n, 2) holding the x and y pixel positions of the
         stars away from the image edge. Empty if none were found.
     """
-    finder = DAOStarFinder(fwhm=FINDER_FWHM_PIXELS, threshold=DETECTION_SIGMA * noise)
+    finder = DAOStarFinder(
+        fwhm=resolve(FINDER_FWHM_PIXELS).value, threshold=resolve(DETECTION_SIGMA).value * noise
+    )
     with warnings.catch_warnings():
         # An image with no stars is an ordinary case, handled below.
         warnings.simplefilter("ignore", NoDetectionsWarning)
@@ -182,8 +260,12 @@ def _star_fluxes(channel: np.ndarray, positions: np.ndarray) -> np.ndarray:
         For each star, the sum of the light in the aperture minus the
         median sky of the surrounding ring times the aperture area.
     """
-    aperture = CircularAperture(positions, r=APERTURE_RADIUS_PIXELS)
-    ring = CircularAnnulus(positions, r_in=ANNULUS_INNER_RADIUS_PIXELS, r_out=ANNULUS_OUTER_RADIUS_PIXELS)
+    aperture = CircularAperture(positions, r=resolve(APERTURE_RADIUS_PIXELS).value)
+    ring = CircularAnnulus(
+        positions,
+        r_in=resolve(ANNULUS_INNER_RADIUS_PIXELS).value,
+        r_out=resolve(ANNULUS_OUTER_RADIUS_PIXELS).value,
+    )
     sky = ApertureStats(channel, ring, sigma_clip=SigmaClip(sigma=3.0, maxiters=5)).median
     total = ApertureStats(channel, aperture).sum
     return np.asarray(total) - np.asarray(sky) * aperture.area
@@ -217,6 +299,7 @@ def measure_gains(image: np.ndarray) -> ColourCalibration | None:
         the image as given; the sky is removed from it inside this function
         only to find the stars.
     """
+    minimum_stars = resolve(MINIMUM_STARS).value
     sky_levels = measure_sky_levels(image)
     flat = image - sky_levels[:, None, None]
     summed = flat.sum(axis=0)
@@ -224,14 +307,18 @@ def measure_gains(image: np.ndarray) -> ColourCalibration | None:
     if noise <= 0.0:
         return None
     positions = _find_stars(summed, noise)
-    if len(positions) < MINIMUM_STARS:
+    if len(positions) < minimum_stars:
         return None
     red, green, blue = (_star_fluxes(flat[index], positions) for index in range(3))
     usable = (red > 0) & (green > 0) & (blue > 0)
     total = red + green + blue
-    low, high = np.percentile(total[usable], BRIGHTNESS_PERCENTILE_RANGE) if usable.any() else (0.0, 0.0)
+    low, high = (
+        np.percentile(total[usable], resolve(BRIGHTNESS_PERCENTILE_RANGE).value)
+        if usable.any()
+        else (0.0, 0.0)
+    )
     chosen = usable & (total >= low) & (total <= high)
-    if chosen.sum() < MINIMUM_STARS:
+    if chosen.sum() < minimum_stars:
         return None
     log_red = np.log(red[chosen] / green[chosen])
     log_blue = np.log(blue[chosen] / green[chosen])

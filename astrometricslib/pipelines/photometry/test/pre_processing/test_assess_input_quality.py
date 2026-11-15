@@ -43,13 +43,13 @@ def test_assess_input_quality_stores_drift_without_a_flag() -> None:
         frames_measured=10,
         frames_available=10,
         saturated_fraction=0.0,
-        max_registration_drift_px=UNSTABLE_TRACKING_DRIFT_PX + 1.0,
+        max_registration_drift_px=UNSTABLE_TRACKING_DRIFT_PX.default + 1.0,
     )
     small = assess_input_quality(
         frames_measured=10,
         frames_available=10,
         saturated_fraction=0.0,
-        max_registration_drift_px=UNSTABLE_TRACKING_DRIFT_PX - 1.0,
+        max_registration_drift_px=UNSTABLE_TRACKING_DRIFT_PX.default - 1.0,
     )
     unmeasured = assess_input_quality(
         frames_measured=10,
@@ -58,8 +58,8 @@ def test_assess_input_quality_stores_drift_without_a_flag() -> None:
         max_registration_drift_px=None,
     )
 
-    assert large.max_registration_drift_px == pytest.approx(UNSTABLE_TRACKING_DRIFT_PX + 1.0)
-    assert small.max_registration_drift_px == pytest.approx(UNSTABLE_TRACKING_DRIFT_PX - 1.0)
+    assert large.max_registration_drift_px == pytest.approx(UNSTABLE_TRACKING_DRIFT_PX.default + 1.0)
+    assert small.max_registration_drift_px == pytest.approx(UNSTABLE_TRACKING_DRIFT_PX.default - 1.0)
     assert unmeasured.max_registration_drift_px is None
     assert "is_low_coverage" not in InputQualityAssessment.model_fields
     assert "is_tracking_unstable" not in InputQualityAssessment.model_fields

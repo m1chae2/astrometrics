@@ -26,6 +26,13 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
 from astrometricslib.drivers import VersionedCache
+from astrometricslib.parameters import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.analytics.night_index import TargetFrameMemo
 from wayfindinglib.data_access.delegation_policy_reader import get_delegation_policy
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
@@ -65,7 +72,17 @@ __all__ = ["ControlChild", "ControlContext", "require_text"]
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_LATITUDE_DEG = 45.0
+DEFAULT_LATITUDE_DEG = TunedParameter(
+    name="wayfinding.default_latitude_deg",
+    default=45.0,
+    unit="degrees",
+    description="Latitude the pointing fits use when no observer location is known.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D131",
+    pending_conversion=True,
+)
 """Latitude used by the pointing fits when no observer location is known."""
 
 
@@ -862,7 +879,7 @@ class ControlContext:
             Latitude in degrees.
         """
         location = self.observer_location()
-        return location["latitude"] if location else DEFAULT_LATITUDE_DEG
+        return location["latitude"] if location else resolve_parameter(DEFAULT_LATITUDE_DEG).value
 
     def ekos_log_directory(self) -> str:
         """Return the local folder that holds downloaded Ekos logs.

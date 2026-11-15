@@ -84,7 +84,7 @@ def test_the_targets_own_star_comes_first_then_the_brightest() -> None:
 
 def test_only_stars_with_enough_measurements_are_chosen() -> None:
     """Verify a star with too few points is never chosen."""
-    too_few = MINIMUM_POINTS_FOR_PERIOD_SEARCH - 1
+    too_few = MINIMUM_POINTS_FOR_PERIOD_SEARCH.default - 1
     stars = [
         _star("HD 1", mean_flux=100.0, points=too_few, arcseconds_from_center=1.0),
         _star("HD 2", mean_flux=10.0),
@@ -115,7 +115,7 @@ def test_without_target_coordinates_only_the_brightest_are_chosen() -> None:
 
     chosen = select_period_search_stars(stars, None, None)
 
-    assert len(chosen) == MAXIMUM_BRIGHTEST_STARS_FOR_PERIOD_SEARCH
+    assert len(chosen) == MAXIMUM_BRIGHTEST_STARS_FOR_PERIOD_SEARCH.default
     assert [star.id for star in chosen[:2]] == ["HD 15", "HD 14"]
 
 

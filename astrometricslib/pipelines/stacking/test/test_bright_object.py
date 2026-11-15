@@ -72,7 +72,7 @@ def test_a_bright_disc_gets_its_own_stretch() -> None:
     """A large bright disc is recognised and the stretch fits the disc."""
     stretch = choose_bright_object_stretch(bright_disc())
     assert stretch is not None
-    assert stretch.white_fraction >= bright_object.SATURATED_FRACTION_LIMIT
+    assert stretch.white_fraction >= bright_object.SATURATED_FRACTION_LIMIT.default
     assert stretch.black_point == pytest.approx(0.0002, abs=0.0002)
     assert 0.3 < stretch.white_point <= 1.0
     assert 0.0 < stretch.midtones < 1.0
@@ -88,7 +88,7 @@ def test_the_typical_disc_pixel_lands_at_the_chosen_brightness() -> None:
     x = np.clip((np.median(disc) - stretch.black_point) / (stretch.white_point - stretch.black_point), 0, 1)
     m = stretch.midtones
     brightness = (m - 1.0) * x / ((2.0 * m - 1.0) * x - m)
-    assert brightness == pytest.approx(bright_object.BRIGHT_OBJECT_BRIGHTNESS, abs=0.1)
+    assert brightness == pytest.approx(bright_object.BRIGHT_OBJECT_BRIGHTNESS.default, abs=0.1)
 
 
 def test_a_stack_with_values_above_one_is_scaled_down() -> None:

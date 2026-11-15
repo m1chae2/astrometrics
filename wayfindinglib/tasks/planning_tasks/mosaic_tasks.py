@@ -27,6 +27,13 @@ from astropy.coordinates import SkyCoord
 
 from astrometricslib import Target
 from astrometricslib.exceptions import InvalidArgumentError
+from astrometricslib.parameters import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration
 from wayfindinglib.models.planning.framing import SkyCorner
 from wayfindinglib.models.planning.mosaic import MosaicPanel, MosaicPlan
@@ -36,13 +43,43 @@ from wayfindinglib.models.planning.observation_package import (
     ObservationPackage,
 )
 
-DEFAULT_SENSOR_WIDTH_MM = 23.5
+DEFAULT_SENSOR_WIDTH_MM = TunedParameter(
+    name="wayfinding.default_sensor_width_mm",
+    default=23.5,
+    unit="mm",
+    description="Sensor width used when the configuration gives none.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D131",
+    pending_conversion=True,
+)
 """Sensor width used when the configuration gives none."""
 
-DEFAULT_SENSOR_HEIGHT_MM = 15.6
+DEFAULT_SENSOR_HEIGHT_MM = TunedParameter(
+    name="wayfinding.default_sensor_height_mm",
+    default=15.6,
+    unit="mm",
+    description="Sensor height used when the configuration gives none.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D131",
+    pending_conversion=True,
+)
 """Sensor height used when the configuration gives none."""
 
-DEFAULT_FOCAL_LENGTH_MM = 400.0
+DEFAULT_FOCAL_LENGTH_MM = TunedParameter(
+    name="wayfinding.default_focal_length_mm",
+    default=400.0,
+    unit="mm",
+    description="Focal length used when the configuration gives none.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D131",
+    pending_conversion=True,
+)
 """Focal length used when the configuration gives none."""
 
 
@@ -80,9 +117,15 @@ def _configured_field_of_view(config: Any) -> tuple[float, float]:
         value = float(config.get_value(section, key) or 0.0)
         return value if value > 0 else default
 
-    width_mm = positive_value("Observatory.Camera", "sensor_width_mm", DEFAULT_SENSOR_WIDTH_MM)
-    height_mm = positive_value("Observatory.Camera", "sensor_height_mm", DEFAULT_SENSOR_HEIGHT_MM)
-    focal_length_mm = positive_value("Observatory.Telescope", "focal_length_mm", DEFAULT_FOCAL_LENGTH_MM)
+    width_mm = positive_value(
+        "Observatory.Camera", "sensor_width_mm", resolve_parameter(DEFAULT_SENSOR_WIDTH_MM).value
+    )
+    height_mm = positive_value(
+        "Observatory.Camera", "sensor_height_mm", resolve_parameter(DEFAULT_SENSOR_HEIGHT_MM).value
+    )
+    focal_length_mm = positive_value(
+        "Observatory.Telescope", "focal_length_mm", resolve_parameter(DEFAULT_FOCAL_LENGTH_MM).value
+    )
     return (
         2 * math.degrees(math.atan((width_mm / 2) / focal_length_mm)),
         2 * math.degrees(math.atan((height_mm / 2) / focal_length_mm)),

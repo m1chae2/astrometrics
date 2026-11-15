@@ -37,6 +37,7 @@ from astrometricslib._internal.drivers.camera_profile_store import (
     save_sensor_setting_noise,
 )
 from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.camera_profile import (
     ProvenancedValue,
     ProvenanceKind,
@@ -119,16 +120,18 @@ def _keep_near(
         and within `EXPOSURE_RELATIVE_TOLERANCE` of the exposure. A test left
         as `None` keeps every frame.
     """
+    maximum_temperature_spread_c = resolve(MAXIMUM_TEMPERATURE_SPREAD_C).value
+    exposure_relative_tolerance = resolve(EXPOSURE_RELATIVE_TOLERANCE).value
     kept = []
     for frame in frames:
         if temperature_c is not None and (
             frame.temperature_c is None
-            or abs(frame.temperature_c - temperature_c) > MAXIMUM_TEMPERATURE_SPREAD_C
+            or abs(frame.temperature_c - temperature_c) > maximum_temperature_spread_c
         ):
             continue
         if exposure_seconds is not None and (
             frame.exposure_seconds is None
-            or not math.isclose(frame.exposure_seconds, exposure_seconds, rel_tol=EXPOSURE_RELATIVE_TOLERANCE)
+            or not math.isclose(frame.exposure_seconds, exposure_seconds, rel_tol=exposure_relative_tolerance)
         ):
             continue
         kept.append(frame)
@@ -263,7 +266,7 @@ def measure_sensor_noise_from_library(
     if flat_pairing.unpaired_count:
         notes.append(
             f"{flat_pairing.unpaired_count} flat frame(s) had no partner within "
-            f"{MAXIMUM_PAIR_GAP_SECONDS:g} s and were not used"
+            f"{resolve(MAXIMUM_PAIR_GAP_SECONDS).value:g} s and were not used"
         )
     # The profile's linearity limit is the pixel value above which the sensor
     # no longer responds in proportion to the light (see `CameraProfile`).

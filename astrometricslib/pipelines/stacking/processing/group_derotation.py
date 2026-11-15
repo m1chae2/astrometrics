@@ -31,6 +31,13 @@ from scipy.ndimage import shift as shift_image
 
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.stacking.processing.group_alignment import find_zero_order_position
 
 logger = logging.getLogger(__name__)
@@ -42,12 +49,30 @@ logger = logging.getLogger(__name__)
 # noise. A clearly visible streak scores in the hundreds to thousands;
 # Vega's weakest group (2026-09-22, a short, faint exposure) still scored
 # about 55, so the bar is set well below that and has not been tested lower.
-MINIMUM_TRAIL_CONTRAST_SIGMA = 10.0
+MINIMUM_TRAIL_CONTRAST_SIGMA = TunedParameter(
+    name="stacking.minimum_trail_contrast_sigma",
+    default=10.0,
+    unit="sigmas",
+    description="Lowest contrast of a measured trail angle at which it is trusted as a rotation.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D68",
+)
 
 # A rotation smaller than this, in degrees, is not applied: the group is
 # already close enough to the reference tilt that resampling it would only
 # add the interpolation's own blur for no visible straightening.
-NEGLIGIBLE_ROTATION_DEGREES = 0.05
+NEGLIGIBLE_ROTATION_DEGREES = TunedParameter(
+    name="stacking.negligible_rotation_degrees",
+    default=0.05,
+    unit="degrees",
+    description="Rotation below which a group is not rotated onto the reference tilt.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D68",
+)
 
 
 def rotate_about_point(
@@ -82,7 +107,7 @@ def rotate_about_point(
         The rotated image, as `float32`, the same shape as `image`. Pixels
         the turn brings in from outside the original frame are zero.
     """
-    if abs(angle_degrees) < NEGLIGIBLE_ROTATION_DEGREES:
+    if abs(angle_degrees) < resolve(NEGLIGIBLE_ROTATION_DEGREES).value:
         return np.asarray(image, dtype=np.float32).copy()
     array = np.asarray(image, dtype=np.float64)
     height, width = array.shape
@@ -155,7 +180,7 @@ def derotate_groups_to_common_tilt(
     images: list[np.ndarray],
     image_paths: list[str],
     camera_name: str,
-    minimum_contrast_sigma: float = MINIMUM_TRAIL_CONTRAST_SIGMA,
+    minimum_contrast_sigma: float | None = None,
     drivers: Drivers | None = None,
 ) -> tuple[list[np.ndarray], list[float | None]]:
     """Rotate every spectral exposure-group stack onto one common trail tilt.
@@ -200,6 +225,8 @@ def derotate_groups_to_common_tilt(
     InvalidArgumentError
         If `images` and `image_paths` are not the same length.
     """
+    if minimum_contrast_sigma is None:
+        minimum_contrast_sigma = resolve(MINIMUM_TRAIL_CONTRAST_SIGMA).value
     if len(images) != len(image_paths):
         raise InvalidArgumentError("Each image needs one path to re-measure its trail tilt from.")
 

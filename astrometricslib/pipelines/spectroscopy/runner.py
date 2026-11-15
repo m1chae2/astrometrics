@@ -12,12 +12,19 @@ from typing import Any
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.quality_summary import (
     SPECTROSCOPY_PIPELINE_VERSION,
     SpectroscopyPipelineQualityMetrics,
     SpectroscopyQualitySummary,
 )
 from astrometricslib.models.target import Target
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
     PipelineRequest,
@@ -56,7 +63,20 @@ from astrometricslib.pipelines.spectroscopy.record_and_flag_spectroscopy_stars i
 # no stars of its own was registered against every named star in the catalog,
 # and on 2026-09-24 25 of 69 stored spectra (Albireo, Alnath and M 57 fields)
 # carried the name of a star 6 to 145 degrees away.
-REGISTRATION_REFERENCE_FIELD_RADIUS_DEG = 1.5
+REGISTRATION_REFERENCE_FIELD_RADIUS_DEG = TunedParameter(
+    name="spectroscopy.registration_reference_field_radius_deg",
+    default=1.5,
+    unit="degrees",
+    description=(
+        "How far from the frame centre a reference star may "
+        "be and still be used to name spectral-frame stars."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D53",
+    pending_conversion=True,
+)
 
 # How many stars are read from the database at once when every
 # catalog-identified star must be examined. Small enough that the stars that
@@ -211,7 +231,7 @@ def _within_field(stellar_object: Any, field_center: tuple[float, float] | None)
         dec_center
     ) * np.cos(ra_star - ra_center)
     separation_deg = float(np.degrees(np.arccos(np.clip(cosine_separation, -1.0, 1.0))))
-    return separation_deg <= REGISTRATION_REFERENCE_FIELD_RADIUS_DEG
+    return separation_deg <= resolve(REGISTRATION_REFERENCE_FIELD_RADIUS_DEG).value
 
 
 # Ids that mark a detection nobody has named: the blind detector's
@@ -299,6 +319,7 @@ def _registration_reference_candidates(
         with no normal-image pixel position is skipped later by the
         registration itself.
     """
+    registration_reference_field_radius_deg = resolve(REGISTRATION_REFERENCE_FIELD_RADIUS_DEG).value
     if field_center is not None:
         # Read only the stars in this field, straight from the database's
         # sky-position index. This used to read every star in the catalog
@@ -307,7 +328,7 @@ def _registration_reference_candidates(
         field_star_ids = [
             summary.id
             for summary in catalog_access.list_stars_in_region(
-                field_center[0], field_center[1], REGISTRATION_REFERENCE_FIELD_RADIUS_DEG
+                field_center[0], field_center[1], registration_reference_field_radius_deg
             )
         ]
         catalog_identified = [

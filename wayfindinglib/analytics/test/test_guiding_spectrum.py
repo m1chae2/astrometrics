@@ -161,7 +161,7 @@ def test_no_stretch_long_enough_says_so() -> None:
 
 def test_the_break_between_stretches_is_a_minute() -> None:
     """Verify the pause length that splits stretches."""
-    assert SEGMENT_BREAK_SECONDS == pytest.approx(60.0)
+    assert SEGMENT_BREAK_SECONDS.default == pytest.approx(60.0)
 
 
 def test_a_slow_drift_is_listed_but_is_never_the_dominant_period() -> None:

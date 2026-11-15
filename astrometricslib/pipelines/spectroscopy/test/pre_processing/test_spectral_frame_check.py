@@ -55,7 +55,7 @@ def make_frame(
         -((columns - STAR_COLUMN) ** 2) / (2 * width_sigma**2)
     )
     if clip_at is not None:
-        frame[clip_at : clip_at + 3, STAR_COLUMN - 1 : STAR_COLUMN + 2] = SATURATION_ADU + 100
+        frame[clip_at : clip_at + 3, STAR_COLUMN - 1 : STAR_COLUMN + 2] = SATURATION_ADU.default + 100
     return frame
 
 
@@ -233,7 +233,7 @@ def test_a_clipped_14_bit_zero_order_is_detected_with_the_camera_level() -> None
     assert with_profile["saturation_threshold_source"] == source
     assert with_default["zero_order_saturated"] is False
     assert with_default["saturated_pixels"] == 0
-    assert with_default["saturation_threshold_adu"] == SATURATION_ADU
+    assert with_default["saturation_threshold_adu"] == SATURATION_ADU.default
 
 
 def test_a_clipped_14_bit_spectrum_is_counted_as_lost_data() -> None:

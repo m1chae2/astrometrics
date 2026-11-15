@@ -44,6 +44,7 @@ from typing import Any
 import numpy as np
 
 from astrometricslib import Astrometrics
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.stellar_source import AMBIGUOUS_RMS_GAP, ladder_position
 from astrometricslib.pipelines.spectroscopy.processing.class_gap_calibration import (
     CAMERA_NAME,
@@ -153,8 +154,8 @@ def table_record(
         "created": datetime.date.today().isoformat(),
         "camera": arguments.camera,
         "definition_version": CLASS_GAP_DEFINITION_VERSION,
-        "ambiguous_rms_gap": AMBIGUOUS_RMS_GAP,
-        "reached_share": REACHED_SHARE,
+        "ambiguous_rms_gap": resolve(AMBIGUOUS_RMS_GAP).value,
+        "reached_share": resolve(REACHED_SHARE).value,
         "minimum_native_snr": MINIMUM_NATIVE_SNR,
         "snr_estimator": CLASS_GAP_SNR_ESTIMATOR,
         "interval_percentiles": [16, 84],
@@ -273,7 +274,11 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--seed", type=int, default=20261024, help="Random seed. Default 20261024.")
     parser.add_argument(
-        "--grid", type=float, nargs="+", default=list(DEFAULT_SNR_GRID), help="Signal-to-noise values."
+        "--grid",
+        type=float,
+        nargs="+",
+        default=list(resolve(DEFAULT_SNR_GRID).value),
+        help="Signal-to-noise values.",
     )
     parser.add_argument(
         "--camera", default=CAMERA_NAME, help="The camera the spectra were taken with. Names the file."

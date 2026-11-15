@@ -19,9 +19,27 @@ from dataclasses import dataclass
 import numpy as np
 
 from astrometricslib.foundation.errors import AstrometricsError
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.camera_profile import CameraProfile, ProvenanceKind
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 
-SATURATION_ADU = 65000
+SATURATION_ADU = TunedParameter(
+    name="shared.saturation_adu",
+    default=65000,
+    unit="ADU",
+    description="Count at which a pixel counts as saturated when no camera profile is available.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-D41",
+    pending_conversion=True,
+)
 """Pixels at or above this value count as saturated when no camera profile
 gives a level (16-bit frames). See `resolve_saturation_threshold`."""
 
@@ -47,10 +65,50 @@ gives a level (16-bit frames). See `resolve_saturation_threshold`."""
 # SATURATION_MASK_FRACTION_OF_CEILING times the ceiling are masked, because the
 # plateau is ragged (0.79-0.85 in the 3 s group) and the last few percent
 # below it are already clipped by some frames in the average.
-SATURATION_CEILING_SAMPLE_PIXELS = 25
-SATURATION_PLATEAU_MINIMUM_PIXELS = 50
-SATURATION_PLATEAU_TOLERANCE = 0.03
-SATURATION_MASK_FRACTION_OF_CEILING = 0.9
+SATURATION_CEILING_SAMPLE_PIXELS = TunedParameter(
+    name="shared.saturation_ceiling_sample_pixels",
+    default=25,
+    unit="pixels",
+    description="Number of brightest pixels used to find the ceiling of a frame.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-D42",
+    pending_conversion=True,
+)
+SATURATION_PLATEAU_MINIMUM_PIXELS = TunedParameter(
+    name="shared.saturation_plateau_minimum_pixels",
+    default=50,
+    unit="pixels",
+    description="Fewest pixels sharing the ceiling value for it to count as a saturation plateau.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-D42",
+    pending_conversion=True,
+)
+SATURATION_PLATEAU_TOLERANCE = TunedParameter(
+    name="shared.saturation_plateau_tolerance",
+    default=0.03,
+    unit="fraction",
+    description="Relative distance below the ceiling within which a pixel is on the plateau.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-D42",
+    pending_conversion=True,
+)
+SATURATION_MASK_FRACTION_OF_CEILING = TunedParameter(
+    name="shared.saturation_mask_fraction_of_ceiling",
+    default=0.9,
+    unit="fraction",
+    description="Fraction of the ceiling above which a pixel is masked as saturated.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-D42",
+    pending_conversion=True,
+)
 
 # The pile-up test alone is fooled by a stack with no bright star: the
 # brightest pixels of plain sky noise also bunch together (the top 25 of a
@@ -60,7 +118,17 @@ SATURATION_MASK_FRACTION_OF_CEILING = 0.9
 # 0.004-0.005 (a ratio near 200) and the Vega group ceilings of 0.8 lie far
 # above their sky. The 10 was chosen well below those and well above noise
 # (a ratio near 1.5); it has not been tested on other stars.
-SATURATION_CEILING_MINIMUM_OVER_MEDIAN = 10.0
+SATURATION_CEILING_MINIMUM_OVER_MEDIAN = TunedParameter(
+    name="shared.saturation_ceiling_minimum_over_median",
+    default=10.0,
+    unit="× median",
+    description="Multiple of the frame median the ceiling must exceed to be real.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-D42",
+    pending_conversion=True,
+)
 
 
 def compute_saturated_pixel_fraction(data: np.ndarray, saturation_threshold: float) -> float:
@@ -86,12 +154,19 @@ def compute_saturated_pixel_fraction(data: np.ndarray, saturation_threshold: flo
 
 # The share of saturated pixels (0.1%) above which a frame or stack is flagged.
 # A guess so far: it has not been checked against real stacks.
-DEFAULT_SATURATION_FLAG_THRESHOLD = 0.001
+DEFAULT_SATURATION_FLAG_THRESHOLD = TunedParameter(
+    name="shared.default_saturation_flag_threshold",
+    default=0.001,
+    unit="fraction",
+    description="Share of saturated pixels above which a frame is flagged.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D04",
+)
 
 
-def is_saturation_significant(
-    saturated_fraction: float, flag_threshold: float = DEFAULT_SATURATION_FLAG_THRESHOLD
-) -> bool:
+def is_saturation_significant(saturated_fraction: float, flag_threshold: float | None = None) -> bool:
     """Decide if there are enough overexposed pixels to warn the user about it.
 
     Parameters
@@ -99,7 +174,8 @@ def is_saturation_significant(
     saturated_fraction : `float`
         The percentage of maxed-out pixels found.
     flag_threshold : `float`, optional
-        How much overexposure is 'too much'. Default is 0.1%. (Note: this
+        How much overexposure is 'too much'. Defaults to
+        `DEFAULT_SATURATION_FLAG_THRESHOLD` (0.1%). (Note: this
         is just a guess right now and might need to be adjusted later).
 
     Returns
@@ -107,6 +183,8 @@ def is_saturation_significant(
     is_significant : `bool`
         True if the image is too bright, False if it's fine.
     """
+    if flag_threshold is None:
+        flag_threshold = resolve(DEFAULT_SATURATION_FLAG_THRESHOLD).value
     return saturated_fraction >= flag_threshold
 
 
@@ -152,14 +230,19 @@ def find_saturation_plateau_ceiling(image: np.ndarray) -> float | None:
     """
     flat = np.asarray(image, dtype=np.float64).ravel()
     flat = flat[np.isfinite(flat)]
-    if flat.size < SATURATION_PLATEAU_MINIMUM_PIXELS:
+    if flat.size < resolve(SATURATION_PLATEAU_MINIMUM_PIXELS).value:
         return None
-    brightest = np.partition(flat, -SATURATION_CEILING_SAMPLE_PIXELS)[-SATURATION_CEILING_SAMPLE_PIXELS:]
+    sample_pixels = resolve(SATURATION_CEILING_SAMPLE_PIXELS).value
+    brightest = np.partition(flat, -sample_pixels)[-sample_pixels:]
     ceiling = float(np.median(brightest))
-    if ceiling <= 0 or ceiling < SATURATION_CEILING_MINIMUM_OVER_MEDIAN * float(np.median(flat)):
+    if ceiling <= 0 or ceiling < resolve(SATURATION_CEILING_MINIMUM_OVER_MEDIAN).value * float(
+        np.median(flat)
+    ):
         return None
-    pixels_near_ceiling = int(np.count_nonzero(flat >= ceiling * (1.0 - SATURATION_PLATEAU_TOLERANCE)))
-    if pixels_near_ceiling < SATURATION_PLATEAU_MINIMUM_PIXELS:
+    pixels_near_ceiling = int(
+        np.count_nonzero(flat >= ceiling * (1.0 - resolve(SATURATION_PLATEAU_TOLERANCE).value))
+    )
+    if pixels_near_ceiling < resolve(SATURATION_PLATEAU_MINIMUM_PIXELS).value:
         return None
     return ceiling
 
@@ -189,7 +272,7 @@ def compute_stack_saturated_pixel_fraction(data: np.ndarray, region: np.ndarray 
         return 0.0
     counted = data if region is None else region
     return compute_saturated_pixel_fraction(
-        np.asarray(counted, dtype=float), ceiling * SATURATION_MASK_FRACTION_OF_CEILING
+        np.asarray(counted, dtype=float), ceiling * resolve(SATURATION_MASK_FRACTION_OF_CEILING).value
     )
 
 
@@ -221,8 +304,8 @@ def resolve_saturation_threshold(camera_name: str | None) -> tuple[float, str]:
         profile = resolve_camera_profile(camera_name)
     except AstrometricsError as error:
         return float(
-            SATURATION_ADU
-        ), f"default {SATURATION_ADU:g} ADU (no camera profile could be read: {error})"
+            resolve(SATURATION_ADU).value
+        ), f"default {resolve(SATURATION_ADU).value:g} ADU (no camera profile could be read: {error})"
     threshold = float(profile.pixel_saturation_level_adu.value)
     if profile.is_generic_fallback:
         return (
@@ -240,7 +323,17 @@ def resolve_saturation_threshold(camera_name: str | None) -> tuple[float, str]:
 # A pixel is at the clip ceiling when it is within this fraction of it. Frames
 # that saturate pile up at exactly one value, so a small tolerance only allows
 # for the last count or two.
-CLIP_CEILING_TOLERANCE_FRACTION = 0.02
+CLIP_CEILING_TOLERANCE_FRACTION = TunedParameter(
+    name="shared.clip_ceiling_tolerance_fraction",
+    default=0.02,
+    unit="fraction",
+    description="Relative distance below the ceiling at which a pixel counts as clipped.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-D42",
+    pending_conversion=True,
+)
 
 # A star counts as saturated when at least this many connected pixels sit at
 # the frame's ceiling. Single pixels at the ceiling are common and are not
@@ -248,12 +341,32 @@ CLIP_CEILING_TOLERANCE_FRACTION = 0.02
 # saturated stars in the same frames had cores of 9 to over 1700 pixels
 # (ASI533 frames of Vega, NGC 2403 and Arcturus; D5300 frames of NGC 2244 and
 # M 42). Four pixels (2 x 2) is the smallest blob that is not one hot pixel.
-SATURATED_BLOB_MINIMUM_PIXELS = 4
+SATURATED_BLOB_MINIMUM_PIXELS = TunedParameter(
+    name="shared.saturated_blob_minimum_pixels",
+    default=4,
+    unit="pixels",
+    description="Fewest connected pixels that make a saturated blob.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D48",
+    pending_conversion=True,
+)
 
 # A frame is described as saturated when a star clips in at least this share of
 # the frames sampled from an exposure group. One clipped frame in three can be
 # a cosmic ray or a satellite trail; it is not a property of the exposure.
-SATURATED_FRAME_FRACTION = 0.5
+SATURATED_FRAME_FRACTION = TunedParameter(
+    name="shared.saturated_frame_fraction",
+    default=0.5,
+    unit="fraction",
+    description="Share of saturated stars above which the whole frame is called saturated.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D48",
+    pending_conversion=True,
+)
 
 
 @dataclass(frozen=True)
@@ -316,7 +429,7 @@ def clip_and_linearity_levels(profile: CameraProfile) -> ClipAndLinearityLevels:
                 f"the camera profile's linearity limit is {limit.provenance.kind.value}, not measured"
             )
     return ClipAndLinearityLevels(
-        clip_level_adu=float(ceiling.value) * (1.0 - CLIP_CEILING_TOLERANCE_FRACTION),
+        clip_level_adu=float(ceiling.value) * (1.0 - resolve(CLIP_CEILING_TOLERANCE_FRACTION).value),
         linearity_level_adu=linearity_level,
         notes=tuple(notes),
     )

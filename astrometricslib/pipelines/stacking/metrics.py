@@ -18,6 +18,7 @@ frames as well as for the frames it moves aside.
 
 import datetime
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.measurement import SubjectLevel
 from astrometricslib.models.quality.metric_spec import (
     Checkpoint,
@@ -1931,7 +1932,8 @@ _SCIENCE_METRICS: tuple[MetricSpec, ...] = (
                 for size in CHECKED_ESTIMATE_RANGE_ROOM_MULTIPLES_BY_CAMERA.values()
             )
             + "; no other camera has a checked range), where the estimated peak grew within "
-            f"{CHECKED_ESTIMATE_ERROR_FRACTION:.0%} of the exposure ratio in at least 90% of the cases; "
+            f"{resolve(CHECKED_ESTIMATE_ERROR_FRACTION).value:.0%} "
+            "of the exposure ratio in at least 90% of the cases; "
             "beyond it the row is not measured, with the size of the estimate. The group's "
             "value is the median of the frames' fractions; the range test uses the largest estimate. For "
             "an unclipped frame the ceiling is the camera profile's clip ceiling."

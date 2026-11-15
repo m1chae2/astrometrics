@@ -155,10 +155,13 @@ def test_a_night_needs_enough_samples(make_samples: Any, make_run: Any, make_env
     envelope = make_envelope()
 
     assert (
-        _assess(make_samples(MINIMUM_SAMPLES_PER_SESSION), [make_run()], envelope).has_enough_samples is True
+        _assess(make_samples(MINIMUM_SAMPLES_PER_SESSION.default), [make_run()], envelope).has_enough_samples
+        is True
     )
     assert (
-        _assess(make_samples(MINIMUM_SAMPLES_PER_SESSION - 1), [make_run()], envelope).has_enough_samples
+        _assess(
+            make_samples(MINIMUM_SAMPLES_PER_SESSION.default - 1), [make_run()], envelope
+        ).has_enough_samples
         is False
     )
 

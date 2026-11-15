@@ -91,6 +91,7 @@ from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, coll
 from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.foundation.jobs.runner import JobHandle, get_current_job
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.camera_profile import UNMIGRATED_NOISE_REASON, CameraProfile
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.frame_measurement_summary import FrameMeasurementSummary
@@ -635,7 +636,7 @@ def run_measurement_task(task: FrameMeasurementTask) -> list[QualityMeasurement]
         bias_level_adu=task.bias_level_adu,
         bias_level_reason=task.bias_level_reason,
         measure_gaussian_width=measure_fwhm_from_data,
-        clipped_zero_fraction_limit=CLIPPED_FRAME_ZERO_FRACTION,
+        clipped_zero_fraction_limit=resolve(CLIPPED_FRAME_ZERO_FRACTION).value,
     )
 
 

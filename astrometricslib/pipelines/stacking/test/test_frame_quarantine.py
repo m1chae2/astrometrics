@@ -92,7 +92,7 @@ def test_split_into_batches_separates_setups_and_sessions() -> None:
         make_frame("b1", 0.0, exposure="30.0"),
         make_frame("c1", 0.0, filter_name="Red"),
         make_frame("d1", 0.0, camera="Camera B"),
-        make_frame("a3", 120.0 + frame_quarantine.SESSION_GAP_SECONDS + 1),
+        make_frame("a3", 120.0 + frame_quarantine.SESSION_GAP_SECONDS.default + 1),
     ]
     batches = split_into_batches(frames)
     assert sorted(len(batch) for batch in batches) == [1, 1, 1, 1, 2]

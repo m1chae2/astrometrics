@@ -1,410 +1,598 @@
-register,id,setting,role,status
-asteroid_detection,MOV-01,detection_fwhm_px,automatic (shapes results),Partly measured
-asteroid_detection,MOV-01,detection_threshold_sigma,automatic (shapes results),Partly measured
-asteroid_detection,MOV-01,min_frames_for_persistence,automatic (sets data aside),Partly measured
-asteroid_detection,MOV-01,rate_min_arcsec_per_hour,automatic (gives a verdict),Partly measured
-asteroid_detection,MOV-02,"  - The stationary test itself (internal function, not part of the public API; may change). Relation: sanity check only. Role: automatic (gives a verdict). Source: fixed in code. Equipment: none. <!-- impl: astrometricslib.pipelines.asteroid_detection.detection.MovingObjectDetector._evaluate_reference_frame_test -->",automatic (gives a verdict),Partly measured
-asteroid_detection,MOV-02,pixel_match_tolerance_px,automatic (gives a verdict),Partly measured
-asteroid_detection,MOV-02,sky_match_tolerance_arcsec,automatic (gives a verdict),Partly measured
-asteroid_detection,MOV-03,"  - The direction check, which has no setting of its own (internal function, not part of the public API; may change). Relation: derived from this entry. Role: automatic (gives a verdict). Source: fixed in code. Equipment: none. <!-- impl: astrometricslib.pipelines.asteroid_detection.detection._reverses_direction -->",automatic (gives a verdict),Partly measured
-asteroid_detection,MOV-03,min_displacement_error_multiple,automatic (gives a verdict),Partly measured
-asteroid_detection,MOV-03,residual_rms_max_multiple,automatic (gives a verdict),Partly measured
-asteroid_detection,MOV-04,min_frames_for_persistence,automatic (gives a verdict),Partly measured
-asteroid_detection,MOV-05,_POINTING_CORRECTION_SEARCH_RADIUS_ARCSEC,automatic (shapes results),Partly measured
-asteroid_detection,MOV-05,_POINTING_CORRECTION_VOTE_BIN_ARCSEC,automatic (shapes results),Partly measured
-asteroid_detection,MOV-06,astrometric_error_default_arcsec,automatic (shapes results),Partly measured
-asteroid_detection,MOV-06,ephemeris_cross_match_radius_arcsec,automatic (gives a verdict),Partly measured
-asteroid_detection,MOV-08,"  - Night split: the detector groups detections by observing night, local noon to local noon (internal function, not part of the public API; may change). Relation: derived from this entry. Role: automatic (shapes results). Source: fixed in code. Equipment: none. <!-- impl: astrometricslib.utilities.observing_night.observing_night_id -->",automatic (shapes results),Partly measured
-asteroid_detection,MOV-08,chain_match_radius_max_arcsec,automatic (shapes results),Partly measured
-asteroid_detection,MOV-D01,Fewest frames in a track = 3 (config key `[Processing.MovingObject] min_frames_for_persistence`),automatic (sets data aside),Design estimate
-asteroid_detection,MOV-D02,"Stationary tolerances = 1.5 px; 3 arcsec (config keys `pixel_match_tolerance_px`, `sky_match_tolerance_arcsec`)",automatic (gives a verdict),Design estimate
-asteroid_detection,MOV-D03,"Allowed rate range = 1 to 300 arcsec/h (config keys `rate_min_arcsec_per_hour`, `rate_max_arcsec_per_hour`)",automatic (gives a verdict),Design estimate
-asteroid_detection,MOV-D04,Chaining radius cap = 300 arcsec (config key `chain_match_radius_max_arcsec`),automatic (shapes results),Design estimate
-asteroid_detection,MOV-D05,Assumed position error = 10 arcsec (config key `astrometric_error_default_arcsec`),automatic (shapes results),Design estimate
-asteroid_detection,MOV-D06,Centroid error = 0.5 px (config key `centroid_error_px`),automatic (shapes results),Design estimate
-asteroid_detection,MOV-D07,Known-body match radius = 10 arcsec (config key `ephemeris_cross_match_radius_arcsec`),automatic (gives a verdict),Design estimate
-asteroid_detection,MOV-D08,Fewest votes for the pointing shift = 5 (code constant `_POINTING_CORRECTION_MIN_VOTES` in `pipeline.py`),automatic (shapes results),Design estimate
-asteroid_detection,MOV-D09,Match radius for the position-error estimate = 15 arcsec (three vote bins) (code constant `_POSITION_ERROR_MATCH_RADIUS_ARCSEC` in `pipeline.py`),automatic (shapes results),Design estimate
-asteroid_detection,MOV-D10,Source shape limits = roundness -0.6 to 0.6; sharpness 0.2 to 1.0 (`SourceDetector` in `astrometricslib/pipelines/astrometry/pre_processing/source_detection.py`),automatic (sets data aside),Design estimate
-asteroid_detection,MOV-D11,"Most SkyBoT questions per run = 200 questions (100 movers at two each) (code constant `_DEFAULT_MAX_QUERIES_PER_RUN` in `astrometricslib/pipelines/asteroid_detection/ephemeris.py`, the `max_queries` argument of `EphemerisCrossMatcher`)",automatic (shapes results),Design estimate
-astrometry,AST-01,"  - The Gaia refit itself (see [AST-02](#ast-02)). Relation: derived from this entry. Role: automatic (shapes results). Source: fixed in code. Equipment: telescope, camera.",automatic (shapes results),Partly measured
-astrometry,AST-01,astrometric_residual,automatic (gives a verdict),Partly measured
-astrometry,AST-02,INITIAL_MATCH_RADIUS_PIXELS,automatic (sets data aside),Partly measured
-astrometry,AST-02,MAXIMUM_SHIFT_ARCSEC,automatic (gives a verdict),Partly measured
-astrometry,AST-02,REFINED_MATCH_RADIUS_PIXELS,automatic (sets data aside),Partly measured
-astrometry,AST-02,SIP_DEGREE,automatic (shapes results),Partly measured
-astrometry,AST-03,"  - The same code constants as [AST-02](#ast-02). Relation: confirmed by this entry. Role: automatic (sets data aside). Source: fixed in code. Equipment: telescope, camera.",automatic (sets data aside),Partly measured
-astrometry,AST-03,MINIMUM_MATCHED_STARS,automatic (gives a verdict),Partly measured
-astrometry,AST-04,MAXIMUM_RESIDUAL_FRACTION_OF_FWHM,automatic (gives a verdict),Partly measured
-astrometry,AST-05,MINIMUM_MATCHED_STARS,automatic (gives a verdict),Partly measured
-astrometry,AST-06,BLOB_WIDTH_BOX_RADIUS_PX,automatic (shapes results),Partly measured
-astrometry,AST-06,measure_blob_width_from_data,automatic (shapes results),Partly measured
-astrometry,AST-07,FWHM_EXCLUDED_CORE_RADIUS_PX,automatic (sets data aside),Partly measured
-astrometry,AST-07,FWHM_FIT_BOX_RADIUS_PX,automatic (sets data aside),Partly measured
-astrometry,AST-07,FWHM_SATURATION_FRACTION,automatic (sets data aside),Partly measured
-astrometry,AST-08,GAIA_VIZIER_TIMEOUT_SECONDS,automatic (shapes results),Partly measured
-astrometry,AST-09,CENTRE_STAR_MINIMUM_PEAK_FRACTION,automatic (sets data aside),Partly measured
-astrometry,AST-09,CENTRE_STAR_SEARCH_RADIUS_FRACTION,automatic (shapes results),Partly measured
-astrometry,AST-09,POINTING_ERROR_SEARCH_RADIUS_ARCSEC,automatic (shapes results),Partly measured
-astrometry,AST-10,UNRESOLVED_COMPANION_RADIUS_ARCSEC,automatic (shapes results),Partly measured
-astrometry,AST-12,MATCH_RADIUS_ARCSEC,automatic (sets data aside),Partly measured
-astrometry,AST-13,MINIMUM_SOURCES_FOR_LOCAL_SOLVE,automatic (shapes results),Partly measured
-astrometry,AST-16,STAR_FINDER_BOX_FRACTION,automatic (shapes results),Partly measured
-astrometry,AST-16,_BACKGROUND_2D_BOX_FRACTION,automatic (shapes results),Partly measured
-astrometry,AST-16,_BACKGROUND_2D_BOX_MIN_PX,automatic (shapes results),Partly measured
-astrometry,AST-16,_BACKGROUND_STATS_SAMPLE_FRACTION,automatic (shapes results),Partly measured
-astrometry,AST-17,FRAME_MEASUREMENT_TIME_BUDGET_SECONDS,automatic (sets data aside),Design estimate
-astrometry,AST-17,MOFFAT_BETA_MINIMUM,automatic (shapes results),Design estimate
-astrometry,AST-17,MOFFAT_FIT_BOX_HALF_WIDTH_PX,automatic (shapes results),Design estimate
-astrometry,AST-17,MOFFAT_GRID_CELL_COUNT,automatic (sets data aside),Design estimate
-astrometry,AST-17,MOFFAT_ISOLATION_RADIUS_PX,automatic (sets data aside),Design estimate
-astrometry,AST-17,MOMENT_APERTURE_FWHM_MULTIPLE,automatic (shapes results),Design estimate
-astrometry,AST-18,FIELD_GRID_CELLS_PER_SIDE,automatic (shapes results),Design estimate
-astrometry,AST-18,PIXEL_BLUR_FWHM_SQUARED_FACTOR,automatic (shapes results),Design estimate
-astrometry,AST-19,MAXIMUM_FRAMES_READ,automatic (sets data aside),Partly measured
-astrometry,AST-19,MINIMUM_PEAK_SIGMA,automatic (gives a verdict),Partly measured
-astrometry,AST-19,TARGET_REGION_RADIUS_ARCSEC,automatic (shapes results),Partly measured
-astrometry,AST-20,EXTENT_TOLERANCE_FACTOR,automatic (gives a verdict),Partly measured
-astrometry,AST-20,POSITION_TOLERANCE_FLOOR_ARCMIN,automatic (gives a verdict),Partly measured
-astrometry,AST-D01,"Detection threshold; sharpness range; roundness range; expected star width of the frame measurement's finder = 5σ; 0.2 to 1.0; −0.6 to 0.6; 4 px (`SourceDetector` defaults and `DAOStarFinder` arguments, and `SOURCE_DETECTOR_ROUNDNESS_RANGE`, in `pipelines/astrometry/pre_processing/source_detection.py`; `STAR_SHARPNESS_RANGE` in `pipelines/shared/star_finding.py`; `STAR_FINDER_EXPECTED_FWHM_PX` and `STAR_FINDER_THRESHOLD_SIGMA` in `pipelines/shared/quality/star_profile_fitting.py` <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector.detect --> <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SOURCE_DETECTOR_ROUNDNESS_RANGE --> <!-- impl: astrometricslib.pipelines.shared.star_finding.STAR_SHARPNESS_RANGE --> <!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.STAR_FINDER_EXPECTED_FWHM_PX --> <!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.STAR_FINDER_THRESHOLD_SIGMA -->)",automatic (sets data aside),Design estimate
-astrometry,AST-D02,Merge distance for duplicate detections = 15 px (`SourceDetector.deduplicate` default <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector.deduplicate -->),automatic (sets data aside),Design estimate
-astrometry,AST-D03,Color-frame block averaging before detection = 2 by 2 (`_COLOR_DETECTION_BIN_FACTOR` in `pipelines/astrometry/processing/star_identifier.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier._COLOR_DETECTION_BIN_FACTOR -->),automatic (shapes results),Design estimate
-astrometry,AST-D04,Fewest detections to try a solve = 4 (inline in `StarIdentifier.process_image` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier.process_image -->),automatic (sets data aside),Design estimate
-astrometry,AST-D05,Brightest stars sent to the online solver = 100 (`MAXIMUM_PLATE_SOLVE_SOURCES` in `pipelines/astrometry/processing/star_identifier.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.MAXIMUM_PLATE_SOLVE_SOURCES -->),automatic (shapes results),Design estimate
-astrometry,AST-D06,Pixel-scale window; driver widening; blind-retry cut-off = ±5%; 0.8 and 1.2; 90% of the time limit (`StarIdentifier._calculate_scale_hints`; `AstrometryNetPlateSolveDriver` and `HINTED_SOLVE_NEAR_TIMEOUT_FRACTION` in `drivers/astrometry_net_driver.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._calculate_scale_hints --> <!-- impl: astrometricslib._internal.drivers.astrometry_net_driver.HINTED_SOLVE_NEAR_TIMEOUT_FRACTION -->),automatic (shapes results),Design estimate
-astrometry,AST-D07,Catalog match radius = 10 arcsec (`CATALOG_MATCH_RADIUS_ARCSEC` in `pipelines/shared/catalog_star_identity.py` <!-- impl: astrometricslib.pipelines.shared.catalog_star_identity.CATALOG_MATCH_RADIUS_ARCSEC -->),automatic (sets data aside),Design estimate
-astrometry,AST-D08,Most stars identified per image = 500 (config key `[Processing.Astrometry] maximum_identified_stars` (default 500; 0 means no limit) <!-- impl: astrometricslib.AppConfiguration.get_maximum_identified_stars -->),automatic (sets data aside),Design estimate
-astrometry,AST-D09,Failed catalog lookups allowed = under 50% (`MAXIMUM_FAILED_LOOKUP_FRACTION` in `pipelines/astrometry/post_processing/record_quality.py` <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.MAXIMUM_FAILED_LOOKUP_FRACTION -->),automatic (gives a verdict),Design estimate
-astrometry,AST-D10,Consecutive Gaia failures before the circuit breaker trips = 3 (`GAIA_CONSECUTIVE_FAILURE_LIMIT` in `pipelines/astrometry/processing/star_identifier.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_CONSECUTIVE_FAILURE_LIMIT -->),automatic (shapes results),Design estimate
-astrometry,AST-D11,"Gaia search depth: margin; clamps; default; fewest stars for the estimate = 1.0 mag; G 14 to 20; G 18; 5 (`GAIA_MAGNITUDE_LIMIT_MARGIN`, `GAIA_MINIMUM_MAGNITUDE_LIMIT`, `GAIA_MAXIMUM_MAGNITUDE_LIMIT`, `GAIA_DEFAULT_MAGNITUDE_LIMIT`, `MINIMUM_STARS_FOR_DEPTH_ESTIMATE` in `pipelines/astrometry/processing/star_identifier.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_MAGNITUDE_LIMIT_MARGIN --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_MINIMUM_MAGNITUDE_LIMIT --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_MAXIMUM_MAGNITUDE_LIMIT --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_DEFAULT_MAGNITUDE_LIMIT --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.MINIMUM_STARS_FOR_DEPTH_ESTIMATE -->)",automatic (shapes results),Design estimate
-astrometry,AST-D12,"Gaia rows per cone search = 50,000 (`GAIA_ROW_LIMIT` in `pipelines/astrometry/processing/star_identifier.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_ROW_LIMIT -->)",automatic (sets data aside),Design estimate
-astrometry,AST-D13,Gaia refit: fewest matched stars = 40 (`MINIMUM_MATCHED_STARS` in `pipelines/astrometry/processing/wcs_refinement.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.MINIMUM_MATCHED_STARS -->),automatic (gives a verdict),Design estimate
-astrometry,AST-D15,Margin around the solved frame for a catalog position = 15 arcmin (`FOOTPRINT_MARGIN_ARCMIN` in `pipelines/shared/target_position.py` <!-- impl: astrometricslib.pipelines.shared.target_position.FOOTPRINT_MARGIN_ARCMIN -->),automatic (gives a verdict),Design estimate
-astrometry,AST-D16,"Target clipping check: disc inside the image, sky ring around the disc, fewest ring pixels = At least 0.5 of the disc inside the image; ring from 1.5 to 2.5 disc radii; at least 100 ring pixels (`MINIMUM_DISC_SHARE_INSIDE`, `SKY_RING_INNER_FACTOR`, `SKY_RING_OUTER_FACTOR` and `SKY_RING_MINIMUM_PIXELS` in `pipelines/astrometry/post_processing/target_clipping.py` <!-- impl: astrometricslib.pipelines.astrometry.post_processing.target_clipping.MINIMUM_DISC_SHARE_INSIDE --> <!-- impl: astrometricslib.pipelines.astrometry.post_processing.target_clipping.SKY_RING_INNER_FACTOR --> <!-- impl: astrometricslib.pipelines.astrometry.post_processing.target_clipping.SKY_RING_OUTER_FACTOR --> <!-- impl: astrometricslib.pipelines.astrometry.post_processing.target_clipping.SKY_RING_MINIMUM_PIXELS -->)",automatic (sets data aside),Design estimate
-astrometry,AST-D17,"Star-width estimator: candidates, fit refinements and what is skipped = 400 candidates; a fit that moves the center over 2.5 px is dropped; stars over 1.5 times as long as wide are dropped; candidates under 5% of the brightest flux are skipped; a refit in a 15 px box when the fitted sigma is over 3 px; 3 or more pixels at the top value mark saturation (`FWHM_MEASUREMENT_CANDIDATE_COUNT`, `FWHM_MAXIMUM_CENTRE_SHIFT_PX`, `FWHM_MEASUREMENT_MAX_ELONGATION`, `FWHM_MEASUREMENT_MIN_RELATIVE_FLUX`, `FWHM_REFIT_SIGMA_PX`, `FWHM_REFIT_BOX_RADIUS_PX` and `FWHM_SATURATED_PLATEAU_PX` in `pipelines/astrometry/pre_processing/fwhm.py` <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.fwhm.FWHM_MEASUREMENT_CANDIDATE_COUNT --> <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.fwhm.FWHM_MAXIMUM_CENTRE_SHIFT_PX --> <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.fwhm.FWHM_MEASUREMENT_MAX_ELONGATION --> <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.fwhm.FWHM_MEASUREMENT_MIN_RELATIVE_FLUX --> <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.fwhm.FWHM_REFIT_SIGMA_PX --> <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.fwhm.FWHM_REFIT_BOX_RADIUS_PX --> <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.fwhm.FWHM_SATURATED_PLATEAU_PX -->)",automatic (sets data aside),Design estimate
-astrometry,AST-D19,"Check of a reused plate solution: share of stars that must match the catalog, fewest stars to judge = At least 10% of the identified stars match a catalog; at least 20 identified stars (`MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS` and `MIN_STARS_TO_VERIFY_REUSED_WCS` in `pipelines/shared/session_identification.py` <!-- impl: astrometricslib.pipelines.shared.session_identification.MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS --> <!-- impl: astrometricslib.pipelines.shared.session_identification.MIN_STARS_TO_VERIFY_REUSED_WCS -->)",automatic (gives a verdict),Design estimate
-astrometry,AST-D20,Catalog seeding: field radius and Gaia depth = 0.8 degree radius per field; Gaia G 18 (`DEFAULT_FIELD_RADIUS_DEGREES` and `DEFAULT_MAGNITUDE_LIMIT` in `pipelines/astrometry/utilities/catalog_seeding.py` (the same G 18 as `GAIA_DEFAULT_MAGNITUDE_LIMIT` of AST-D11) <!-- impl: astrometricslib.pipelines.astrometry.utilities.catalog_seeding.DEFAULT_FIELD_RADIUS_DEGREES --> <!-- impl: astrometricslib.pipelines.astrometry.utilities.catalog_seeding.DEFAULT_MAGNITUDE_LIMIT -->),automatic (shapes results),Design estimate
-photometry,PHO-01,BRIGHTEST_SKIPPED_FRACTION,automatic (sets data aside),Partly measured
-photometry,PHO-01,ensemble_airmass_correction=False,automatic (shapes results),Partly measured
-photometry,PHO-02,MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED,automatic (gives a verdict),Partly measured
-photometry,PHO-03,sensor_noise,automatic (shapes results),Partly measured
-photometry,PHO-04,  - The gate's choice to judge the corner displacement and not the per-star offset. Relation: derived from this entry. Role: automatic (gives a verdict). Source: fixed in code. Equipment: none.,automatic (gives a verdict),Partly measured
-photometry,PHO-04,ALIGNMENT_ANCHOR_REACH_PX,automatic (shapes results),Partly measured
-photometry,PHO-04,MAXIMUM_CORNER_DISPLACEMENT_PX,automatic (gives a verdict),Partly measured
-photometry,PHO-05,ALIGNMENT_ANCHOR_MINIMUM_PEAK_SNR,automatic (sets data aside),Partly measured
-photometry,PHO-06,  - The form of the score itself. Relation: derived from this entry. Role: automatic (gives a verdict). Source: fixed in code. Equipment: none. <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.variability_score -->,automatic (gives a verdict),Partly measured
-photometry,PHO-06,EXCESS_SCATTER_THRESHOLD,automatic (gives a verdict),Partly measured
-photometry,PHO-07,  - The functions behind it. Relation: confirmed by this entry. Role: automatic (gives a verdict). Source: fixed in code. Equipment: none. <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.false_alarm_probability --> <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.benjamini_hochberg --> <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.field_error_scale -->,automatic (gives a verdict),Partly measured
-photometry,PHO-07,FALSE_DISCOVERY_LEVEL,automatic (gives a verdict),Partly measured
-photometry,PHO-08,FALSE_DISCOVERY_LEVEL,automatic (gives a verdict),Partly measured
-photometry,PHO-08,MINIMUM_DISCRIMINATION_AUC,automatic (gives a verdict),Partly measured
-photometry,PHO-09,FALSE_DISCOVERY_LEVEL,automatic (gives a verdict),Partly measured
-photometry,PHO-11,_BLOCK_LENGTH_IN_CORRELATION_LENGTHS,automatic (gives a verdict),Partly measured
-photometry,PHO-11,_CORRELATION_GONE_BELOW,automatic (gives a verdict),Partly measured
-photometry,PHO-12,_CYCLES_FOR_DETECTION,automatic (gives a verdict),Partly measured
-photometry,PHO-12,_FALSE_ALARM_FOR_DETECTION,automatic (gives a verdict),Partly measured
-photometry,PHO-12,_FALSE_ALARM_FOR_POSSIBLE,automatic (gives a verdict),Partly measured
-photometry,PHO-12,_SHUFFLE_COUNT,automatic (shapes results),Partly measured
-photometry,PHO-14,tolerance_arcsec,automatic (shapes results),Partly measured
-photometry,PHO-15,"  - the camera profile's photometric linearity limit (60,000 ADU for the ASI 533MM Pro) as the cut on a star's peak pixel, not the 65,000 ADU saturation threshold. Relation: sanity check only. Role: automatic (sets data aside). Source: from equipment settings. Equipment: camera. With no limit in the profile nothing is measured.",automatic (sets data aside),Partly measured
-photometry,PHO-15,"  - the choice not to apply a color term to the stored value. Relation: derived from this entry (the first version of it measured the SIMBAD V stars of the same night): a color slope of -0.18 mag per mag of B-V did not shrink the star-to-star scatter (0.189 mag before, 0.191 after) and did not steady the frames. The slope is stored only for SIMBAD V sessions. The Gaia G session of this entry stores none, because Gaia G stars carry no B-V color in this library. Role: automatic (shapes results). Source: fixed in code. Equipment: none.",automatic (shapes results),Partly measured
-photometry,PHO-15,CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION,automatic (sets data aside),Partly measured
-photometry,PHO-15,MINIMUM_SIGNAL_TO_NOISE,automatic (sets data aside),Partly measured
-photometry,PHO-15,MINIMUM_STARS_FOR_ZERO_POINT,automatic (sets data aside),Partly measured
-photometry,PHO-15,SESSION_STAR_FRAME_SHARE,automatic (sets data aside),Partly measured
-photometry,PHO-D01,"Aperture radius; sky ring radii = 4 px; 7 to 12 px (`APERTURE_RADIUS_PX` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.APERTURE_RADIUS_PX -->, `SKY_ANNULUS_INNER_RADIUS_PX` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.SKY_ANNULUS_INNER_RADIUS_PX -->, `SKY_ANNULUS_OUTER_RADIUS_PX` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.SKY_ANNULUS_OUTER_RADIUS_PX --> in `pre_processing/frame_photometry.py`, the defaults of the arguments of `measure_aperture_photometry`)",automatic (shapes results),Design estimate
-photometry,PHO-D02,"Re-centering box; passes; largest move; sky cutout = 11 px; 3; 1.5 px; cutout half-width 15 px (`CENTROID_BOX_HALF_WIDTH_PX` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.CENTROID_BOX_HALF_WIDTH_PX -->, `CENTROID_REFINEMENT_PASSES` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.CENTROID_REFINEMENT_PASSES -->, `MAX_CENTROID_SHIFT_PX` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.MAX_CENTROID_SHIFT_PX -->, `CENTROID_SKY_CUTOUT_HALF_WIDTH_PX` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.CENTROID_SKY_CUTOUT_HALF_WIDTH_PX --> in `pre_processing/frame_photometry.py`)",automatic (shapes results),Design estimate
-photometry,PHO-D03,"Anchor limits = 20 times the sky noise; skip brightest 5%; 50 anchors; at least 10; saturation box half-width 3 px; fallback band of detections ranked 50 to 100 (`ALIGNMENT_ANCHOR_MINIMUM_PEAK_SNR` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.ALIGNMENT_ANCHOR_MINIMUM_PEAK_SNR -->, `ALIGNMENT_ANCHOR_SKIPPED_BRIGHTEST_FRACTION` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.ALIGNMENT_ANCHOR_SKIPPED_BRIGHTEST_FRACTION -->, `ALIGNMENT_ANCHOR_COUNT` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.ALIGNMENT_ANCHOR_COUNT -->, `ALIGNMENT_ANCHOR_MINIMUM_QUALIFYING` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.ALIGNMENT_ANCHOR_MINIMUM_QUALIFYING -->, `ALIGNMENT_ANCHOR_SATURATION_BOX_HALF_WIDTH_PX` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.ALIGNMENT_ANCHOR_SATURATION_BOX_HALF_WIDTH_PX -->, `ALIGNMENT_ANCHOR_FALLBACK_BAND` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.ALIGNMENT_ANCHOR_FALLBACK_BAND --> in `pre_processing/frame_photometry.py`)",automatic (sets data aside),Design estimate
-photometry,PHO-D04,"Anchor spread for a rotation fit; fewest anchors for a shift and for a rotation fit; clipping of the fit = 7% of the corner distance; 5; 10; 3 scaled MADs, 3 passes (`MINIMUM_ANCHOR_SPREAD_FRACTION` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.MINIMUM_ANCHOR_SPREAD_FRACTION -->, `MINIMUM_ANCHORS_FOR_SHIFT` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.MINIMUM_ANCHORS_FOR_SHIFT -->, `MINIMUM_ANCHORS_FOR_SIMILARITY` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.MINIMUM_ANCHORS_FOR_SIMILARITY -->, `ALIGNMENT_CLIP_SIGMAS` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.ALIGNMENT_CLIP_SIGMAS -->, `ALIGNMENT_CLIP_PASSES` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.ALIGNMENT_CLIP_PASSES --> in `pre_processing/frame_photometry.py`)",automatic (shapes results),Design estimate
-photometry,PHO-D05,"Comparison band; vetted candidates = brightest 2% skipped, band to 30%, widened to at least 10 candidates; at most 100 (`BRIGHTEST_SKIPPED_FRACTION` <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.BRIGHTEST_SKIPPED_FRACTION -->, `FAINTEST_BAND_FRACTION` <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.FAINTEST_BAND_FRACTION -->, `MINIMUM_VETTING_CANDIDATES` <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.MINIMUM_VETTING_CANDIDATES -->, `MAXIMUM_VETTING_CANDIDATES` <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.MAXIMUM_VETTING_CANDIDATES --> in `processing/comparison_ensemble.py`)",automatic (sets data aside),Design estimate
-photometry,PHO-D06,"Minimum and cap of comparison stars = 5 and 20 (`MINIMUM_COMPARISON_STARS`, `DEFAULT_MAXIMUM_COMPARISON_STARS` in `comparison_ensemble.py`)",automatic (sets data aside),Design estimate
-photometry,PHO-D07,"Vetting consistency limit; usable-frame share; fewest frames to vet = 3σ; one half; 4 frames (`EXCESS_SCATTER_SIGMA` <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.EXCESS_SCATTER_SIGMA -->, `MINIMUM_USABLE_FRAME_FRACTION` <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.MINIMUM_USABLE_FRAME_FRACTION -->, `_MINIMUM_FRAMES_FOR_VETTING` <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble._MINIMUM_FRAMES_FOR_VETTING --> in `processing/comparison_ensemble.py`)",automatic (sets data aside),Design estimate
-photometry,PHO-D08,"Frame outlier clip; per-star outlier clip = 3σ (at least 5 frames); 5σ; a run of 2 points is kept as real (`VariabilityAnalyzer._reject_outlier_frames`, `_reject_outlier_measurements_for_star`; `MINIMUM_FRAMES_FOR_OUTLIER_REJECTION` <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.MINIMUM_FRAMES_FOR_OUTLIER_REJECTION -->, `MINIMUM_RUN_LENGTH_KEPT_AS_REAL_CHANGE` <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.MINIMUM_RUN_LENGTH_KEPT_AS_REAL_CHANGE --> in `processing/variability_analyzer.py`)",automatic (sets data aside),Design estimate
-photometry,PHO-D09,"Share of frames rejected before the run is flagged = 25% (and at least 5 frames) (`MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG`, `MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG` in `record_quality.py`)",automatic (gives a verdict),Design estimate
-photometry,PHO-D10,"Noise model sizes; fewest points per star = 20 stars; 10 per bin; 10 bins; 5 points (`MINIMUM_STARS_FOR_NOISE_MODEL` <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.MINIMUM_STARS_FOR_NOISE_MODEL -->, `MINIMUM_STARS_PER_NOISE_BIN` <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.MINIMUM_STARS_PER_NOISE_BIN -->, `MAXIMUM_NOISE_BINS` <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.MAXIMUM_NOISE_BINS -->, `MINIMUM_POINTS_FOR_INDICES` <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.MINIMUM_POINTS_FOR_INDICES --> in `processing/variability_indices.py`)",automatic (sets data aside),Design estimate
-photometry,PHO-D11,"Thresholds = excess scatter 1.5; chi-square and J at median + 2.326 robust sigma (`EXCESS_SCATTER_THRESHOLD`, `CALIBRATION_SIGMAS` in `variability_indices.py`)",automatic (gives a verdict),Design estimate
-photometry,PHO-D12,False discovery level = 0.01 (`FALSE_DISCOVERY_LEVEL` in `variability_indices.py`),automatic (gives a verdict),Design estimate
-photometry,PHO-D13,Fewest usable stars for a scatter population = 10 (`MINIMUM_STARS_FOR_SCATTER_POPULATION` in `record_quality.py`),automatic (gives a verdict),Design estimate
-photometry,PHO-D14,"Discrimination AUC floor; fewest stars for the test; chance level = 0.7; 10 cataloged variables and 30 unlisted stars; 1.645 standard errors above 0.5 (`MINIMUM_DISCRIMINATION_AUC` <!-- impl: astrometricslib.pipelines.photometry.post_processing.variability_skill.MINIMUM_DISCRIMINATION_AUC -->, `MINIMUM_KNOWN_VARIABLES` <!-- impl: astrometricslib.pipelines.photometry.post_processing.variability_skill.MINIMUM_KNOWN_VARIABLES -->, `MINIMUM_UNLISTED_STARS` <!-- impl: astrometricslib.pipelines.photometry.post_processing.variability_skill.MINIMUM_UNLISTED_STARS -->, `_ONE_SIDED_FIVE_PERCENT_Z` <!-- impl: astrometricslib.pipelines.photometry.post_processing.variability_skill._ONE_SIDED_FIVE_PERCENT_Z --> in `post_processing/variability_skill.py`)",automatic (gives a verdict),Design estimate
-photometry,PHO-D15,Largest acceptable detectable amplitude = 0.3 mag peak to peak (`MAXIMUM_DETECTABLE_AMPLITUDE_MAG` in `record_quality.py`),automatic (gives a verdict),Design estimate
-photometry,PHO-D16,"Corner displacement; centroid fallback share; tracking drift = 1 px; 20%; 20 px (`MAXIMUM_CORNER_DISPLACEMENT_PX`, `MAXIMUM_CENTROID_FALLBACK_FRACTION` in `record_quality.py`; `UNSTABLE_TRACKING_DRIFT_PX` in `pre_processing/assess_input_quality.py`)",automatic (gives a verdict),Design estimate
-photometry,PHO-D18,"Between-session flag = significance above 3; amplitude at least 0.02 mag; at least 2 sessions of 3 points each (`DEFAULT_LONG_TERM_SIGNIFICANCE_THRESHOLD` <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.DEFAULT_LONG_TERM_SIGNIFICANCE_THRESHOLD -->, `MINIMUM_LONG_TERM_AMPLITUDE_MAG` <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.MINIMUM_LONG_TERM_AMPLITUDE_MAG -->, `MINIMUM_SESSIONS_FOR_LONG_TERM_SEARCH` <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.MINIMUM_SESSIONS_FOR_LONG_TERM_SEARCH -->, `MINIMUM_POINTS_PER_SESSION_FOR_LONG_TERM_SEARCH` <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.MINIMUM_POINTS_PER_SESSION_FOR_LONG_TERM_SEARCH --> in `processing/variability_analyzer.py`)",automatic (sets data aside),Design estimate
-photometry,PHO-D19,"Period checks: alias rival share; agreeing nights; window peaks = 90% of the best peak; more than half; a window peak at least half the strongest, 3 schedule peaks tried (`_RIVAL_ALIAS_POWER_SHARE` <!-- impl: astrometricslib.pipelines.photometry.processing.period_checks._RIVAL_ALIAS_POWER_SHARE -->, `_AGREEING_SHARE` <!-- impl: astrometricslib.pipelines.photometry.processing.period_checks._AGREEING_SHARE -->, `_SIGNIFICANT_WINDOW_PEAK_SHARE` <!-- impl: astrometricslib.pipelines.photometry.processing.period_checks._SIGNIFICANT_WINDOW_PEAK_SHARE -->, `_WINDOW_PEAKS_TRIED` <!-- impl: astrometricslib.pipelines.photometry.processing.period_checks._WINDOW_PEAKS_TRIED --> in `processing/period_checks.py`)",automatic (gives a verdict),Design estimate
-photometry,PHO-D20,Stars searched for a period = target plus 10 brightest (`MAXIMUM_BRIGHTEST_STARS_FOR_PERIOD_SEARCH` in `batch.py`),automatic (sets data aside),Design estimate
-photometry,PHO-D21,"Shuffles when a search is slow; cap on repeats = 150 above 400,000 point-periods; repeats capped at 5000 (`_REDUCED_SHUFFLE_COUNT` <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search._REDUCED_SHUFFLE_COUNT -->, `_SLOW_SEARCH_WORK_LIMIT` <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search._SLOW_SEARCH_WORK_LIMIT --> in `processing/periodicity_search.py`; `MAXIMUM_REPEAT_SHUFFLES` <!-- impl: astrometricslib.pipelines.photometry.processing.family_wise_correction.MAXIMUM_REPEAT_SHUFFLES --> in `processing/family_wise_correction.py`)",automatic (shapes results),Design estimate
-photometry,PHO-D22,"Frequency grid cap; refined peaks; grid step = 20,000 points; 20 peaks, 3 coarse steps; 10 samples per peak (`_MAXIMUM_SEARCH_GRID_POINTS` <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search._MAXIMUM_SEARCH_GRID_POINTS -->, `_CANDIDATE_PEAK_COUNT` <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search._CANDIDATE_PEAK_COUNT -->, `_REFINE_HALF_WIDTH_COARSE_STEPS` <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search._REFINE_HALF_WIDTH_COARSE_STEPS -->, `_SAMPLES_PER_PEAK` <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search._SAMPLES_PER_PEAK --> in `processing/periodicity_search.py`)",automatic (shapes results),Design estimate
-photometry,PHO-D23,"Hold-out period search: window, step and size cap = 25% of the frequency either side; step 1/(5 T) for training span T; at most 20,000 frequencies (`_FREQUENCY_WINDOW` <!-- impl: astrometricslib.pipelines.photometry.processing.period_checks._FREQUENCY_WINDOW -->, `_SAMPLES_PER_PEAK` <!-- impl: astrometricslib.pipelines.photometry.processing.period_checks._SAMPLES_PER_PEAK -->, `_MAXIMUM_WINDOW_POINTS` <!-- impl: astrometricslib.pipelines.photometry.processing.period_checks._MAXIMUM_WINDOW_POINTS --> in `processing/period_checks.py`)",automatic (shapes results),Design estimate
-photometry,PHO-D24,"Catalog zero point: central region; stars needed (also the band rule); signal-to-noise cut; share of frames for the fixed star set = 0.5 of the half-diagonal; 10 stars; 20; 80 percent (`CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION`, `MINIMUM_STARS_FOR_ZERO_POINT`, `MINIMUM_SIGNAL_TO_NOISE`, `SESSION_STAR_FRAME_SHARE` in `processing/catalog_zero_point.py`)",automatic (sets data aside),Design estimate
-photometry,PHO-D30,"Fewest points for a period or dip search = 5 points for the smooth-cycle search; 8 for the dip search (`MINIMUM_POINTS_FOR_PERIOD_SEARCH` <!-- impl: astrometricslib.models.stellar_source.MINIMUM_POINTS_FOR_PERIOD_SEARCH -->, `MINIMUM_POINTS_FOR_TRANSIT_SEARCH` <!-- impl: astrometricslib.models.stellar_source.MINIMUM_POINTS_FOR_TRANSIT_SEARCH --> in `models/stellar_source.py`)",automatic (sets data aside),Design estimate
-photometry,PHO-D31,"Periods a search covers = Shortest period 3 measurement gaps; at least 2 cycles in the time span; longest to shortest period at most 2000 (`_MINIMUM_PERIOD_CADENCES` <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search._MINIMUM_PERIOD_CADENCES -->, `_MINIMUM_CYCLES_IN_SPAN` <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search._MINIMUM_CYCLES_IN_SPAN -->, `_MAXIMUM_PERIOD_RATIO` <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search._MAXIMUM_PERIOD_RATIO --> in `processing/periodicity_search.py`)",automatic (sets data aside),Design estimate
-photometry,PHO-D32,"Dip search: box widths = 5 widths, from 2 measurement gaps up to 12 gaps (`_DURATION_COUNT` <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search._DURATION_COUNT -->, `_LONGEST_DIP_CADENCES` <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search._LONGEST_DIP_CADENCES --> in `processing/periodicity_search.py`)",automatic (shapes results),Design estimate
-photometry,PHO-D33,"Dip counts for a verdict = Possible: at least 2 dips and 3 points inside them; detected: at least 3 dips and 6 points (`_EVENTS_FOR_POSSIBLE` <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search._EVENTS_FOR_POSSIBLE -->, `_EVENTS_FOR_DETECTION` <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search._EVENTS_FOR_DETECTION -->, `_POINTS_IN_DIP_FOR_POSSIBLE` <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search._POINTS_IN_DIP_FOR_POSSIBLE --> in `processing/periodicity_search.py`)",automatic (gives a verdict),Design estimate
-photometry,PHO-D34,"Period hold-out check: nights, sizes and tests = A gap over 0.25 day splits nights; at least 3 nights; 8 points in a night left out and 15 in the rest; 199 random phases at the 5% level; a dip seen at 2 standard errors with 3 points inside (`NIGHT_GAP_DAYS` <!-- impl: astrometricslib.pipelines.photometry.processing.period_checks.NIGHT_GAP_DAYS -->, `MINIMUM_NIGHTS` <!-- impl: astrometricslib.pipelines.photometry.processing.period_checks.MINIMUM_NIGHTS -->, `MINIMUM_HELD_OUT_POINTS` <!-- impl: astrometricslib.pipelines.photometry.processing.period_checks.MINIMUM_HELD_OUT_POINTS -->, `MINIMUM_TRAINING_POINTS` <!-- impl: astrometricslib.pipelines.photometry.processing.period_checks.MINIMUM_TRAINING_POINTS -->, `_PERMUTATION_COUNT` <!-- impl: astrometricslib.pipelines.photometry.processing.period_checks._PERMUTATION_COUNT -->, `_AGREEMENT_P_VALUE` <!-- impl: astrometricslib.pipelines.photometry.processing.period_checks._AGREEMENT_P_VALUE -->, `_DIP_Z_SCORE` <!-- impl: astrometricslib.pipelines.photometry.processing.period_checks._DIP_Z_SCORE -->, `_MINIMUM_POINTS_IN_DIP` <!-- impl: astrometricslib.pipelines.photometry.processing.period_checks._MINIMUM_POINTS_IN_DIP --> in `processing/period_checks.py`)",automatic (gives a verdict),Design estimate
-spectroscopy,SPE-01,SKY_BAND_GAP_PX,automatic (shapes results),Partly measured
-spectroscopy,SPE-01,SKY_BAND_WIDTH_PX,automatic (shapes results),Partly measured
-spectroscopy,SPE-02,subtract_sky_background,automatic (shapes results),Partly measured
-spectroscopy,SPE-03,SKY_CONTAMINATION_SIGMA,automatic (shapes results),Partly measured
-spectroscopy,SPE-03,SKY_POOLED_NOISE_FLOOR,automatic (shapes results),Partly measured
-spectroscopy,SPE-04,APERTURE_SIGMA_MULTIPLIER,automatic (shapes results),Partly measured
-spectroscopy,SPE-04,APERTURE_SIGMA_SMOOTHING_STEPS,automatic (shapes results),Partly measured
-spectroscopy,SPE-05,FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,automatic (shapes results),Partly measured
-spectroscopy,SPE-05,MINIMUM_FITTED_TRAIL_WIDTH_FRACTION,automatic (sets data aside),Partly measured
-spectroscopy,SPE-06,load_line_spread_profile,automatic (shapes results),Partly measured
-spectroscopy,SPE-07,MEDIAN_VARIANCE_EVEN_OFFSET,automatic (shapes results),Partly measured
-spectroscopy,SPE-07,PixelNoiseModel,automatic (shapes results),Partly measured
-spectroscopy,SPE-10,MINIMUM_SPECTRUM_SIGNAL_TO_NOISE,automatic (gives a verdict),Partly measured
-spectroscopy,SPE-11,MINIMUM_LINE_SIGNIFICANCE,automatic (sets data aside),Partly measured
-spectroscopy,SPE-12,SpectroscopyCalibrationTuner._fit_grating_distance,automatic (gives a verdict),Partly measured
-spectroscopy,SPE-12,_MAX_DIP_CANDIDATES,automatic (shapes results),Partly measured
-spectroscopy,SPE-12,grating_distance_mm,automatic (shapes results),Partly measured
-spectroscopy,SPE-13,DEFAULT_RESPONSE_WAVELENGTH_RANGE_ANGSTROM,automatic (sets data aside),Partly measured
-spectroscopy,SPE-13,load_instrument_response,automatic (shapes results),Partly measured
-spectroscopy,SPE-14,DEFAULT_RESPONSE_WAVELENGTH_RANGE_ANGSTROM,automatic (sets data aside),Partly measured
-spectroscopy,SPE-15,ATMOSPHERIC_BANDS_ANGSTROM,automatic (sets data aside),Partly measured
-spectroscopy,SPE-16,NO_GOOD_MATCH_RMS,automatic (gives a verdict),Partly measured
-spectroscopy,SPE-17,UNRELIABLE_MATCH_RMS,automatic (gives a verdict),Partly measured
-spectroscopy,SPE-19,DIFFERS_FROM_CATALOG_SUBTYPES,automatic (gives a verdict),Partly measured
-spectroscopy,SPE-20,GIANT_REFERENCE_SPECTRAL_TYPES,automatic (shapes results),Partly measured
-spectroscopy,SPE-21,deredden_spectrum,automatic (shapes results),Partly measured
-spectroscopy,SPE-22,DIFFERS_FROM_CATALOG_SUBTYPES,automatic (gives a verdict),Partly measured
-spectroscopy,SPE-22,LINE_INDICES,automatic (gives a verdict),Partly measured
-spectroscopy,SPE-23,EQUIVALENT_WIDTH_WINDOW_LINE_SPREADS,automatic (shapes results),Partly measured
-spectroscopy,SPE-24,DETECTED_P_VALUE,automatic (gives a verdict),Partly measured
-spectroscopy,SPE-24,MINIMUM_CONTROL_POSITIONS,automatic (gives a verdict),Partly measured
-spectroscopy,SPE-25,DETECTED_SIGNIFICANCE,automatic (gives a verdict),Partly measured
-spectroscopy,SPE-26,SECOND_ORDER_MAXIMUM_PLAUSIBLE_FRACTION,automatic (gives a verdict),Partly measured
-spectroscopy,SPE-27,COLOUR_DISAGREEMENT_MAGNITUDES,automatic (gives a verdict),Partly measured
-spectroscopy,SPE-28,MINIMUM_SHIFT_CORRELATION,automatic (sets data aside),Partly measured
-spectroscopy,SPE-28,XP_RESOLUTION_FWHM_NODES_ANGSTROM,automatic (shapes results),Partly measured
-spectroscopy,SPE-29,MIN_MATCHED_STAR_PAIRS,automatic (gives a verdict),Partly measured
-spectroscopy,SPE-31,MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE,automatic (gives a verdict),Partly measured
-spectroscopy,SPE-31,MINIMUM_SPECTRUM_SIGNAL_TO_NOISE,automatic (gives a verdict),Partly measured
-spectroscopy,SPE-32,MINIMUM_SPECTRUM_SIGNAL_TO_NOISE,automatic (gives a verdict),Partly measured
-spectroscopy,SPE-33,_SKY_MAP_CLIP_FLOOR_PX,automatic (shapes results),Partly measured
-spectroscopy,SPE-33,_SKY_MAP_MATCH_RADIUS_PX,automatic (shapes results),Partly measured
-spectroscopy,SPE-33,_SKY_MAP_MAXIMUM_MEDIAN_ERROR_PX,automatic (sets data aside),Partly measured
-spectroscopy,SPE-33,_SKY_MAP_MINIMUM_STARS,automatic (sets data aside),Partly measured
-spectroscopy,SPE-34,MAXIMUM_TRUSTED_RELATIVE_RESIDUAL,automatic (gives a verdict),Partly measured
-spectroscopy,SPE-34,NEIGHBOR_WING_CORRECTION_IS_ON,automatic (shapes results),Partly measured
-spectroscopy,SPE-D01,Extraction box half-width = 2.5 × trail sigma (holds about 99% of a Gaussian's light) (`APERTURE_SIGMA_MULTIPLIER` in `pre_processing/spectrum_extractor.py`),automatic (shapes results),Design estimate
-spectroscopy,SPE-D02,Width smoothing window = 61 steps (`APERTURE_SIGMA_SMOOTHING_STEPS` in `pre_processing/spectrum_extractor.py`),automatic (shapes results),Design estimate
-spectroscopy,SPE-D03,"Sky clipping = 3σ, at most 5 passes (`SKY_CLIP_SIGMA`, `SKY_CLIP_MAX_PASSES` in `pre_processing/spectrum_extractor.py`)",automatic (shapes results),Design estimate
-spectroscopy,SPE-D04,Fewest pixels in a sky strip = 4 (`SKY_BAND_MINIMUM_SAMPLE_COUNT` in `pre_processing/spectrum_extractor.py`),automatic (shapes results),Design estimate
-spectroscopy,SPE-D05,Refraction limit = 20 Å along the trail (half the trail-width resolution element at 5000 Å) (`DAR_ALONG_DISPERSION_LIMIT_ANGSTROM` in `pre_processing/assess_raw_frame_quality.py`),automatic (gives a verdict),Design estimate
-spectroscopy,SPE-D06,Lowest altitude for the refraction model = 20° (`MINIMUM_ALTITUDE_DEGREES` in `pre_processing/atmospheric_refraction.py`),automatic (shapes results),Design estimate
-spectroscopy,SPE-D07,Wavelength zero-point limit = 20 Å (`ZERO_POINT_OFFSET_LIMIT_ANGSTROM` in `pre_processing/wavelength_zero_point.py`),automatic (gives a verdict),Design estimate
-spectroscopy,SPE-D08,"Lines needed, agreement p-value = 2 lines; p ≥ 0.01 (`MINIMUM_LINES_TO_APPLY`, `AGREEMENT_MINIMUM_P_VALUE` in `pre_processing/wavelength_zero_point.py`)",automatic (shapes results),Design estimate
-spectroscopy,SPE-D09,"Chromatic defocus limit and the two windows compared = red/blue width ratio 1.3 (seeing alone, roughly wavelength to the power -0.2, gives about 0.92 from 4600 to 6600 Å); blue window 4200 to 5000 Å and red window 6200 to 7000 Å, each needing 20 width fits (`CHROMATIC_DEFOCUS_RATIO_LIMIT`, `BLUE_WINDOW_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.measured_line_spread.BLUE_WINDOW_ANGSTROM -->, `RED_WINDOW_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.measured_line_spread.RED_WINDOW_ANGSTROM -->, `MINIMUM_SAMPLES_PER_WINDOW` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.measured_line_spread.MINIMUM_SAMPLES_PER_WINDOW --> in `pre_processing/measured_line_spread.py`)",automatic (sets data aside),Design estimate
-spectroscopy,SPE-D10,Blur with the measured line spread = off (`use_measured_line_spread` argument of `SpectroscopyPipeline`),automatic (shapes results),Design estimate
-spectroscopy,SPE-D11,Zero-order saturation limit = 0.1% of pixels (`DEFAULT_SATURATION_FLAG_THRESHOLD` in `pipelines/shared/quality/saturation.py`),automatic (gives a verdict),Design estimate
-spectroscopy,SPE-D12,"Wavelength-scale gate = 11 Å RMS (one pixel of dispersion); judged only when at least 3 spectra have a measured offset (`WAVELENGTH_SCALE_LIMIT_ANGSTROM`, `MINIMUM_SPECTRA_FOR_WAVELENGTH_SCALE` <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale.MINIMUM_SPECTRA_FOR_WAVELENGTH_SCALE --> in `post_processing/wavelength_scale.py`)",automatic (gives a verdict),Design estimate
-spectroscopy,SPE-D13,Processing-quality gate = 50% of classified spectra (`PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION` in `post_processing/record_quality.py`),automatic (gives a verdict),Design estimate
-spectroscopy,SPE-D14,Gaia XP residual limit = 0.05 RMS (above XP's own 1 to 2% calibration error) (`GAIA_XP_RESIDUAL_RMS_LIMIT` in `post_processing/compare_to_gaia_xp.py`),automatic (gives a verdict),Design estimate
-spectroscopy,SPE-D15,Gaia XP tilt limit = 3% per 1000 Å (11% across the range; about the extinction error at 0.3 airmass) (`GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM` in `post_processing/compare_to_gaia_xp.py`),automatic (gives a verdict),Design estimate
-spectroscopy,SPE-D16,Gaia XP shift limit = 11 Å (one pixel) (`GAIA_XP_WAVELENGTH_SHIFT_LIMIT_ANGSTROM` in `post_processing/compare_to_gaia_xp.py`),automatic (gives a verdict),Design estimate
-spectroscopy,SPE-D17,"Gaia XP gate, fewest stars = 3 (`MINIMUM_STARS_FOR_GATE` in `post_processing/compare_to_gaia_xp.py`)",automatic (gives a verdict),Design estimate
-spectroscopy,SPE-D18,Second-order risk share = 10% of the brightness (`SECOND_ORDER_RISKY_SHARE_OF_BRIGHTNESS` in `processing/second_order_risk.py`),automatic (gives a verdict),Design estimate
-spectroscopy,SPE-D19,"Reddest catalog color compared = B-V 1.7 (the references stop at M4V, B-V 1.64) (`MAXIMUM_CALIBRATED_B_MINUS_V` in `post_processing/compare_to_catalog.py`)",automatic (sets data aside),Design estimate
-spectroscopy,SPE-D21,Calibration fit rejection = 10 nm RMS (literal in `SpectroscopyCalibrationTuner._fit_grating_distance`),automatic (gives a verdict),Design estimate
-spectroscopy,SPE-D22,"Calibration dip search = 12 candidates; depth 1% (down to 0.1%); 5 × local noise; 101-sample continuum; dips within 5 samples of either end ignored (`_MAX_DIP_CANDIDATES`, `_FIRST_FRACTIONAL_PROMINENCE`, `_LAST_FRACTIONAL_PROMINENCE`, `_NOISE_PROMINENCE_MULTIPLE`, `_CONTINUUM_WINDOW_SAMPLES`, `_DIP_EDGE_MARGIN_SAMPLES` <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner._DIP_EDGE_MARGIN_SAMPLES --> in `utilities/calibration_tuner.py`)",automatic (sets data aside),Design estimate
-spectroscopy,SPE-D23,"Registration checks = 10 matched pairs; 3σ position jump; 2.5σ amplitude. 2026-10-23: the 2.5σ background-level (""RMSE"") criterion was removed (user decision). It was a sky background check mislabeled as a registration error, so its limit no longer applies. (`MIN_MATCHED_STAR_PAIRS`, `ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA`, `ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA` in `utilities/registration_quality.py`)",automatic (gives a verdict),Design estimate
-spectroscopy,SPE-D24,Extinction curve = Kitt Peak mean curve (`data/atmospheric_extinction_kpno.txt`),automatic (shapes results),Design estimate
-spectroscopy,SPE-D27,"Neighbors fitted individually in the wing fit (the correction is turned off, so this applies only if it is switched back on; see [SPE-34](#spe-34)) = 8 brightest by median box flux; the wings of all neighbors are still subtracted (`MAXIMUM_FITTED_NEIGHBORS` in `pipelines/spectroscopy/pre_processing/neighbor_wing_correction.py` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_wing_correction.MAXIMUM_FITTED_NEIGHBORS -->)",automatic (shapes results),Design estimate
-spectroscopy,SPE-D28,Most stars followed in each raw frame (separate from the cap that [SPE-D26](#design-estimates) retired) = 10 stars; a caller can pass another limit (`MAXIMUM_TRACKED_STARS_PER_FRAME` <!-- impl: astrometricslib.pipelines.spectroscopy.batch.MAXIMUM_TRACKED_STARS_PER_FRAME --> in `pipelines/spectroscopy/batch.py`),automatic (sets data aside),Design estimate
-spectroscopy,SPE-D29,"Gaia XP comparison: fewest samples, normalization window and ratio error floor, and the fewest samples in a downloaded XP spectrum = At least 30 samples to compare and 3 in a band; both spectra scaled over 5400 to 5600 Å; 1% error floor on the ratio; at least 10 samples in a downloaded spectrum (a full one has 343) (`MINIMUM_COMPARED_SAMPLES` <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.MINIMUM_COMPARED_SAMPLES -->, `MINIMUM_BAND_SAMPLES` <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.MINIMUM_BAND_SAMPLES -->, `NORMALIZATION_WINDOW_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.NORMALIZATION_WINDOW_ANGSTROM -->, `RATIO_ERROR_FLOOR_FRACTION` <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.RATIO_ERROR_FLOOR_FRACTION --> in `post_processing/compare_to_gaia_xp.py`; `MINIMUM_SAMPLE_COUNT` <!-- impl: astrometricslib._internal.drivers.gaia_xp_driver.MINIMUM_SAMPLE_COUNT --> in `astrometricslib/_internal/drivers/gaia_xp_driver.py`)",automatic (sets data aside),Design estimate
-spectroscopy,SPE-D30,"Gaia XP wavelength shift search = Searched within 60 Å either way (five pixels of dispersion); high-pass sigma 400 Å; smoothing sigma 25 Å before the log derivative (`MAXIMUM_SEARCH_SHIFT_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.MAXIMUM_SEARCH_SHIFT_ANGSTROM -->, `SHIFT_HIGH_PASS_SIGMA_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.SHIFT_HIGH_PASS_SIGMA_ANGSTROM -->, `SHIFT_SMOOTHING_SIGMA_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.SHIFT_SMOOTHING_SIGMA_ANGSTROM --> in `post_processing/compare_to_gaia_xp.py`)",automatic (gives a verdict),Design estimate
-spectroscopy,SPE-D31,"The 4200 to 8000 Å window that the comparisons and the reports each hold a copy of (the response range itself is the setting of SPE-14) = 4200 to 8000 Å in every copy; the Gaia XP residual bands 4200 to 5000, 5000 to 6000, 6000 to 7000 and 7000 to 8000 Å; the emission-line fit stops at 8000 Å (`COMPARISON_RANGE_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.COMPARISON_RANGE_ANGSTROM -->, `COMPARISON_BANDS_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.COMPARISON_BANDS_ANGSTROM --> in `post_processing/compare_to_gaia_xp.py`; `GAIA_XP_BAND_EDGES_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.metrics.GAIA_XP_BAND_EDGES_ANGSTROM --> in `metrics.py`; `BLUE_REPORT_WAVELENGTH_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.differential_refraction.BLUE_REPORT_WAVELENGTH_ANGSTROM -->, `RED_REPORT_WAVELENGTH_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.differential_refraction.RED_REPORT_WAVELENGTH_ANGSTROM --> in `pre_processing/differential_refraction.py`; `SIGNAL_TO_NOISE_MINIMUM_WAVELENGTH_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.intensity_variance.SIGNAL_TO_NOISE_MINIMUM_WAVELENGTH_ANGSTROM -->, `SIGNAL_TO_NOISE_MAXIMUM_WAVELENGTH_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.intensity_variance.SIGNAL_TO_NOISE_MAXIMUM_WAVELENGTH_ANGSTROM --> in `pre_processing/intensity_variance.py`; `PROFILE_START_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.measured_line_spread.PROFILE_START_ANGSTROM -->, `PROFILE_END_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.measured_line_spread.PROFILE_END_ANGSTROM --> in `pre_processing/measured_line_spread.py`; `MAXIMUM_FITTED_WAVELENGTH_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.emission_line_detector.MAXIMUM_FITTED_WAVELENGTH_ANGSTROM --> in `processing/emission_line_detector.py`)",automatic (sets data aside),Design estimate
-spectroscopy,SPE-D32,"Zero-point dip fit: side bands, fewest samples and noise limits = Side bands start 1.5 line widths beyond the search range and are 1.5 widths wide (at least 10 noise samples a side); at least 6 samples in each side band and 6 in the line; side-band samples beyond 4 scatters dropped once; noise enlarged at most threefold (lag-1 correlation 0.8); samples no more than 1.5σ apart (`SIDE_BAND_GAP_WIDTHS` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.wavelength_zero_point.SIDE_BAND_GAP_WIDTHS -->, `SIDE_BAND_WIDTH_WIDTHS` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.wavelength_zero_point.SIDE_BAND_WIDTH_WIDTHS -->, `MINIMUM_NOISE_SAMPLES_PER_SIDE` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.wavelength_zero_point.MINIMUM_NOISE_SAMPLES_PER_SIDE -->, `MINIMUM_SIDE_BAND_SAMPLES` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.wavelength_zero_point.MINIMUM_SIDE_BAND_SAMPLES -->, `MINIMUM_CORE_SAMPLES` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.wavelength_zero_point.MINIMUM_CORE_SAMPLES -->, `SIDE_BAND_CLIP_SIGMAS` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.wavelength_zero_point.SIDE_BAND_CLIP_SIGMAS -->, `MAXIMUM_NOISE_CORRELATION` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.wavelength_zero_point.MAXIMUM_NOISE_CORRELATION -->, `MAXIMUM_SAMPLE_SPACING_SIGMAS` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.wavelength_zero_point.MAXIMUM_SAMPLE_SPACING_SIGMAS --> in `pre_processing/wavelength_zero_point.py`)",automatic (sets data aside),Design estimate
-spectroscopy,SPE-D33,"Dispersion angle fit: strip, bands, tilt limit and trail checks = Strip 20 px either side of the star (at least 3 px); bands 40 px long, at least 4 bands, each peak 3 noise sigmas; 41 seed tilts up to 10 degrees; trail contrast at least 5σ; a detection with sharpness above 0.5 is a star, not trail (`DISPERSION_ANGLE_ROI_HALF_WIDTH_PX` <!-- impl: astrometricslib.pipelines.spectroscopy.pipeline.DISPERSION_ANGLE_ROI_HALF_WIDTH_PX -->, `DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX` <!-- impl: astrometricslib.pipelines.spectroscopy.pipeline.DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX -->, `DISPERSION_ANGLE_BAND_LENGTH_PX` <!-- impl: astrometricslib.pipelines.spectroscopy.pipeline.DISPERSION_ANGLE_BAND_LENGTH_PX -->, `DISPERSION_ANGLE_MINIMUM_BAND_COUNT` <!-- impl: astrometricslib.pipelines.spectroscopy.pipeline.DISPERSION_ANGLE_MINIMUM_BAND_COUNT -->, `DISPERSION_ANGLE_MINIMUM_BAND_SIGMA` <!-- impl: astrometricslib.pipelines.spectroscopy.pipeline.DISPERSION_ANGLE_MINIMUM_BAND_SIGMA -->, `DISPERSION_ANGLE_SEED_SLOPE_COUNT` <!-- impl: astrometricslib.pipelines.spectroscopy.pipeline.DISPERSION_ANGLE_SEED_SLOPE_COUNT -->, `DISPERSION_ANGLE_MAXIMUM_TILT_DEGREES` <!-- impl: astrometricslib.pipelines.spectroscopy.pipeline.DISPERSION_ANGLE_MAXIMUM_TILT_DEGREES -->, `DISPERSION_ANGLE_MINIMUM_TRAIL_CONTRAST_SIGMA` <!-- impl: astrometricslib.pipelines.spectroscopy.pipeline.DISPERSION_ANGLE_MINIMUM_TRAIL_CONTRAST_SIGMA -->, `TRAIL_CONTAMINATION_MAXIMUM_SHARPNESS` <!-- impl: astrometricslib.pipelines.spectroscopy.pipeline.TRAIL_CONTAMINATION_MAXIMUM_SHARPNESS --> in `pipeline.py`)",automatic (sets data aside),Design estimate
-spectroscopy,SPE-D34,"Spike replacement in the extraction box = Baseline median 31 px wide; a pixel more than 4 noise widths above it is a spike; 2 px either side replaced too (`CONTAMINANT_BASELINE_WIDTH_PX` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.CONTAMINANT_BASELINE_WIDTH_PX -->, `CONTAMINANT_THRESHOLD_SIGMA` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.CONTAMINANT_THRESHOLD_SIGMA -->, `CONTAMINANT_DILATION_PX` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.CONTAMINANT_DILATION_PX --> in `pre_processing/spectrum_extractor.py`)",automatic (shapes results),Design estimate
-spectroscopy,SPE-D35,"Smallest extraction box, fewest cross-section pixels and narrowest accepted line width = Radius at least 3 px when a neighbor is near; box half-width at least 1 px; center found from at least 5 pixels; line width at least 0.5 px (`EXTRACTION_RADIUS_MINIMUM_PX` <!-- impl: astrometricslib.pipelines.spectroscopy.pipeline.EXTRACTION_RADIUS_MINIMUM_PX --> in `pipeline.py`; `_MINIMUM_APERTURE_HALF_WIDTH_PX` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor._MINIMUM_APERTURE_HALF_WIDTH_PX -->, `_MINIMUM_CROSS_SECTION_SAMPLES` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor._MINIMUM_CROSS_SECTION_SAMPLES -->, `_MINIMUM_FIT_SIGMA_PX` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor._MINIMUM_FIT_SIGMA_PX --> in `pre_processing/spectrum_extractor.py`)",automatic (sets data aside),Design estimate
-spectroscopy,SPE-D37,"Line-spread profile: band widths and fewest width fits per band = Resolution profile in 700 Å bands needing 20 fits each, and at least 50 trail-width fits before their median is used; measured line-spread profile in 400 Å bands needing 10 fits (`RESOLUTION_PROFILE_BAND_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution.RESOLUTION_PROFILE_BAND_ANGSTROM -->, `MINIMUM_FITTED_SAMPLES_PER_BAND` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution.MINIMUM_FITTED_SAMPLES_PER_BAND -->, `MINIMUM_FITTED_TRAIL_WIDTH_SAMPLES` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution.MINIMUM_FITTED_TRAIL_WIDTH_SAMPLES --> in `pre_processing/spectral_resolution.py`; `PROFILE_BAND_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.measured_line_spread.PROFILE_BAND_ANGSTROM -->, `MINIMUM_SAMPLES_PER_BAND` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.measured_line_spread.MINIMUM_SAMPLES_PER_BAND --> in `pre_processing/measured_line_spread.py`)",automatic (sets data aside),Design estimate
-spectroscopy,SPE-D38,"Signal-to-noise estimate: fewest elements, valid share of a window and the low-sample limit = At least 8 resolution elements in both estimators; a window is used if 80% of its samples are valid; a sample under signal-to-noise 5 counts as low (`_MINIMUM_ELEMENTS` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.intensity_variance._MINIMUM_ELEMENTS -->, `_MINIMUM_WINDOW_VALID_FRACTION` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.intensity_variance._MINIMUM_WINDOW_VALID_FRACTION -->, `LOW_SAMPLE_SIGNAL_TO_NOISE` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.intensity_variance.LOW_SAMPLE_SIGNAL_TO_NOISE --> in `pre_processing/intensity_variance.py`; `_MINIMUM_ELEMENTS` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectrum_signal._MINIMUM_ELEMENTS --> in `processing/spectrum_signal.py`)",automatic (sets data aside),Design estimate
-spectroscopy,SPE-D39,"Equivalent width: fewest points, window coverage and excess-scatter test = At least 8 points in the continuum bands and 3 in the window; window covered to 90% of its width; the continuum error grows when the reduced chi-square is more than 3σ above 1 (`_MINIMUM_BAND_POINTS` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.equivalent_width._MINIMUM_BAND_POINTS -->, `_MINIMUM_WINDOW_POINTS` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.equivalent_width._MINIMUM_WINDOW_POINTS -->, `_MINIMUM_WINDOW_COVERAGE` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.equivalent_width._MINIMUM_WINDOW_COVERAGE -->, `_EXCESS_SCATTER_SIGMA` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.equivalent_width._EXCESS_SCATTER_SIGMA --> in `processing/equivalent_width.py`)",automatic (sets data aside),Design estimate
-spectroscopy,SPE-D40,"Emission-line detector: blend limit, covered share, line count and spectrum limits = Lines whose boxes correlate at 0.6 or more are one blend; a line is covered if half its box was fitted; two lines make an emission source; continuum of degree 2; at least 30 points; noise enlarged at most to a quarter of the sample count (`BLEND_CORRELATION_THRESHOLD` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.emission_line_detector.BLEND_CORRELATION_THRESHOLD -->, `MINIMUM_COVERED_FRACTION` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.emission_line_detector.MINIMUM_COVERED_FRACTION -->, `MINIMUM_DETECTED_FOR_EMISSION_SOURCE` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.emission_line_detector.MINIMUM_DETECTED_FOR_EMISSION_SOURCE -->, `CONTINUUM_POLYNOMIAL_DEGREE` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.emission_line_detector.CONTINUUM_POLYNOMIAL_DEGREE -->, `_MINIMUM_SPECTRUM_POINTS` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.emission_line_detector._MINIMUM_SPECTRUM_POINTS -->, `_MAXIMUM_INFLATION_FRACTION` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.emission_line_detector._MAXIMUM_INFLATION_FRACTION --> in `processing/emission_line_detector.py`)",automatic (gives a verdict),Design estimate
-spectroscopy,SPE-D41,"Absorption-feature detector: continuum bands and fewest points = Continuum a degree-2 curve fitted to bands starting 1.5 resolution elements out and 3 half-windows wide; at least 8 points in the bands, 2 in the core and 30 in the spectrum (`CONTINUUM_POLYNOMIAL_DEGREE` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector.CONTINUUM_POLYNOMIAL_DEGREE -->, `SHOULDER_INNER_RESOLUTION_ELEMENTS` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector.SHOULDER_INNER_RESOLUTION_ELEMENTS -->, `SHOULDER_BAND_HALF_WINDOWS` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector.SHOULDER_BAND_HALF_WINDOWS -->, `_MINIMUM_SHOULDER_POINTS` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector._MINIMUM_SHOULDER_POINTS -->, `_MINIMUM_CORE_POINTS` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector._MINIMUM_CORE_POINTS -->, `_MINIMUM_SPECTRUM_POINTS` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector._MINIMUM_SPECTRUM_POINTS --> in `processing/spectral_feature_detector.py`)",automatic (sets data aside),Design estimate
-spectroscopy,SPE-D42,"Absorption-feature detector: search window and control positions for the noise test = A dip may sit within 30 Å of its rest wavelength; control positions every half of that tolerance; the fitted noise width is at least a quarter of one significance unit (`CENTER_SEARCH_TOLERANCE_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector.CENTER_SEARCH_TOLERANCE_ANGSTROM -->, `_CONTROL_SPACING_TOLERANCES` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector._CONTROL_SPACING_TOLERANCES -->, `_GUMBEL_WIDTH_FLOOR_FRACTION` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector._GUMBEL_WIDTH_FLOOR_FRACTION --> in `processing/spectral_feature_detector.py`)",automatic (gives a verdict),Design estimate
-spectroscopy,SPE-D43,"Absorption-feature detector: what limits a verdict = No verdict above a depth uncertainty of 0.11; no dip under 1% depth is reported; the expected depth is uncertain by 50%; the prior that a line is present is 0.5 when the type expects it and 0.1 when not (`MAXIMUM_UNCERTAINTY_FOR_A_VERDICT` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector.MAXIMUM_UNCERTAINTY_FOR_A_VERDICT -->, `MINIMUM_REPORTED_DEPTH` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector.MINIMUM_REPORTED_DEPTH -->, `_EXPECTED_DEPTH_FRACTIONAL_UNCERTAINTY` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector._EXPECTED_DEPTH_FRACTIONAL_UNCERTAINTY -->, `_PRIOR_PRESENT_WHEN_EXPECTED` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector._PRIOR_PRESENT_WHEN_EXPECTED -->, `_PRIOR_PRESENT_WHEN_NOT_EXPECTED` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector._PRIOR_PRESENT_WHEN_NOT_EXPECTED --> in `processing/spectral_feature_detector.py`)",automatic (gives a verdict),Design estimate
-spectroscopy,SPE-D44,"Line indices: fewest indices and the stretch used for local noise = At least 3 indices to name a type; the noise of a line is read within 6 resolution elements either side (`MINIMUM_INDEX_COUNT` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_line_indices.MINIMUM_INDEX_COUNT -->, `LOCAL_HALF_WIDTH_ELEMENTS` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_line_indices.LOCAL_HALF_WIDTH_ELEMENTS --> in `processing/spectral_line_indices.py`)",automatic (gives a verdict),Design estimate
-spectroscopy,SPE-D45,"Parts of a spectrum left out of the comparison with references = Two resolution elements either side of an emission line; a neighbor with under 5% of the target's flux is not counted as contamination (`EMISSION_EXCLUSION_HALF_WIDTH_RESOLUTION_ELEMENTS` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectrum_analysis.EMISSION_EXCLUSION_HALF_WIDTH_RESOLUTION_ELEMENTS -->, `NEIGHBOR_CONTAMINATION_MINIMUM_FLUX_RATIO` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectrum_analysis.NEIGHBOR_CONTAMINATION_MINIMUM_FLUX_RATIO --> in `processing/spectrum_analysis.py`)",automatic (sets data aside),Design estimate
-spectroscopy,SPE-D46,"Synthetic B and V color windows and their fewest samples = B window 4350 to 4800 Å and V window 5250 to 5800 Å; at least 10 samples in each (`B_WINDOW_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.synthetic_colour.B_WINDOW_ANGSTROM -->, `V_WINDOW_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.synthetic_colour.V_WINDOW_ANGSTROM -->, `MINIMUM_SAMPLES_PER_WINDOW` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.synthetic_colour.MINIMUM_SAMPLES_PER_WINDOW --> in `processing/synthetic_colour.py`)",automatic (gives a verdict),Design estimate
-spectroscopy,SPE-D47,"Classifier: widest range, least coverage and fewest overlapping points = Reference range 3000 to 10000 Å; at least 2500 Å of the spectrum must be covered; at least 20 overlapping points per reference (`CLASSIFICATION_WAVELENGTH_RANGE_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_classifier.CLASSIFICATION_WAVELENGTH_RANGE_ANGSTROM -->, `MINIMUM_CLASSIFICATION_COVERAGE_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_classifier.MINIMUM_CLASSIFICATION_COVERAGE_ANGSTROM -->, `_MINIMUM_OVERLAP_POINTS` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_classifier._MINIMUM_OVERLAP_POINTS --> in `processing/spectral_classifier.py`)",automatic (sets data aside),Design estimate
-spectroscopy,SPE-D48,"Wing fit: which neighbors count (the correction is turned off; see [SPE-34](#spe-34)) = A neighbor within 60 px across the streak is fitted, and one under 3 px away is the same star; its streak must run along half the star's samples; sky scatter read within 100 px along and 75 px across (`MAXIMUM_NEIGHBOR_DISTANCE_PX` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_wing_correction.MAXIMUM_NEIGHBOR_DISTANCE_PX -->, `MINIMUM_NEIGHBOR_DISTANCE_PX` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_wing_correction.MINIMUM_NEIGHBOR_DISTANCE_PX -->, `MINIMUM_OVERLAP_FRACTION` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_wing_correction.MINIMUM_OVERLAP_FRACTION -->, `_SKY_SCATTER_HALF_LENGTH_PX` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_wing_correction._SKY_SCATTER_HALF_LENGTH_PX -->, `_SKY_SCATTER_HALF_WIDTH_PX` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_wing_correction._SKY_SCATTER_HALF_WIDTH_PX --> in `pre_processing/neighbor_wing_correction.py`)",automatic (shapes results),Design estimate
-spectroscopy,SPE-D49,"Neighbor trail fit: window, sky samples, stretch limits and center shift (the correction is turned off; see [SPE-34](#spe-34)) = Window 75 px either side; sky from the outer 8 samples; blur stretch between 0.6 and 2.0; center found in a 4 px half-window and moved at most 2 px (`DEFAULT_HALF_WIDTH_PX` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_trail_deblending.DEFAULT_HALF_WIDTH_PX -->, `SKY_EDGE_SAMPLES` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_trail_deblending.SKY_EDGE_SAMPLES -->, `MINIMUM_DILATION` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_trail_deblending.MINIMUM_DILATION -->, `MAXIMUM_DILATION` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_trail_deblending.MAXIMUM_DILATION -->, `_CENTROID_HALF_WIDTH_PX` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_trail_deblending._CENTROID_HALF_WIDTH_PX -->, `_MAXIMUM_CENTRE_SHIFT_PX` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_trail_deblending._MAXIMUM_CENTRE_SHIFT_PX --> in `pre_processing/neighbor_trail_deblending.py`)",automatic (gives a verdict),Design estimate
-spectroscopy,SPE-D50,"Star registration: offset search, match distance and fewest pairs = At least 4 control points and 4 star pairs; match within 15 px; offset searched within 300 px (1000 px against a plate solution) in 6 px bins (`_MIN_CONTROL_POINTS` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration._MIN_CONTROL_POINTS -->, `_DEFAULT_MAX_MATCH_DISTANCE_PX` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration._DEFAULT_MAX_MATCH_DISTANCE_PX -->, `_DEFAULT_MAX_TRANSLATION_OFFSET_PX` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration._DEFAULT_MAX_TRANSLATION_OFFSET_PX -->, `_SOLUTION_MAX_TRANSLATION_OFFSET_PX` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration._SOLUTION_MAX_TRANSLATION_OFFSET_PX -->, `_TRANSLATION_BIN_PX` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration._TRANSLATION_BIN_PX -->, `_MINIMUM_OFFSET_PAIR_COUNT` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration._MINIMUM_OFFSET_PAIR_COUNT --> in `pre_processing/spectral_star_registration.py`)",automatic (sets data aside),Design estimate
-spectroscopy,SPE-D51,"Star registration: when a catalog pair is split into two stars = Two stars at least 8 px apart are resolved; a companion within 25 px and at most 4 magnitudes fainter is split from the blob (`_RESOLVED_PAIR_MINIMUM_SEPARATION_PX` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration._RESOLVED_PAIR_MINIMUM_SEPARATION_PX -->, `_BLENDED_PAIR_SEARCH_RADIUS_PX` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration._BLENDED_PAIR_SEARCH_RADIUS_PX -->, `_BLENDED_PAIR_MAXIMUM_MAGNITUDE_DIFFERENCE` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration._BLENDED_PAIR_MAXIMUM_MAGNITUDE_DIFFERENCE --> in `pre_processing/spectral_star_registration.py`)",automatic (shapes results),Design estimate
-spectroscopy,SPE-D52,Standard star: how far from the frame center it may sit = 25 px (`MAXIMUM_STAR_OFFSET_FROM_CENTER_PX` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.standard_star_selection.MAXIMUM_STAR_OFFSET_FROM_CENTER_PX --> in `pre_processing/standard_star_selection.py`),automatic (sets data aside),Design estimate
-spectroscopy,SPE-D53,Radius of the reference field used to name registered stars = 1.5 degrees from the field center (`REGISTRATION_REFERENCE_FIELD_RADIUS_DEG` <!-- impl: astrometricslib.pipelines.spectroscopy.runner.REGISTRATION_REFERENCE_FIELD_RADIUS_DEG --> in `runner.py`),automatic (sets data aside),Design estimate
-spectroscopy,SPE-D54,Calibration tuner: when a star's flare is judged to bleed into the spectrum = More than 10% of the pixels at the expected spectrum start still saturated (`_FLARE_CONTAMINATION_FRACTION_THRESHOLD` <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner._FLARE_CONTAMINATION_FRACTION_THRESHOLD --> in `utilities/calibration_tuner.py`),automatic (shapes results),Design estimate
-spectroscopy,SPE-D55,"Instrument response fit: polynomial degree and the band skipped around each line = Degree 4 polynomial in the logarithm of observed over reference; each line skipped 1.5 line spreads either side, and at least 60 Å (`_RESPONSE_POLYNOMIAL_DEGREE` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response._RESPONSE_POLYNOMIAL_DEGREE -->, `_LINE_SKIP_HALF_WIDTH_PER_FWHM` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response._LINE_SKIP_HALF_WIDTH_PER_FWHM -->, `_MINIMUM_LINE_SKIP_HALF_WIDTH_ANGSTROM` <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response._MINIMUM_LINE_SKIP_HALF_WIDTH_ANGSTROM --> in `pre_processing/instrument_response.py`)",automatic (shapes results),Design estimate
-spectroscopy,SPE-D56,"Stand-in camera and grating values used when the configuration lacks them, and the default start of the extracted spectrum = Pixel size 3.76 µm; sensor 3000 by 2000 px; sensor range 350 to 900 nm; 100 grating lines per mm; grating distance 0 (reported as missing); extraction starts at 380 nm (`FALLBACK_PIXEL_SIZE_UM` <!-- impl: astrometricslib.utilities.spectroscopy_models.FALLBACK_PIXEL_SIZE_UM -->, `FALLBACK_SENSOR_WIDTH_PX` <!-- impl: astrometricslib.utilities.spectroscopy_models.FALLBACK_SENSOR_WIDTH_PX -->, `FALLBACK_SENSOR_HEIGHT_PX` <!-- impl: astrometricslib.utilities.spectroscopy_models.FALLBACK_SENSOR_HEIGHT_PX -->, `FALLBACK_SENSOR_MIN_WAVELENGTH_NM` <!-- impl: astrometricslib.utilities.spectroscopy_models.FALLBACK_SENSOR_MIN_WAVELENGTH_NM -->, `FALLBACK_SENSOR_MAX_WAVELENGTH_NM` <!-- impl: astrometricslib.utilities.spectroscopy_models.FALLBACK_SENSOR_MAX_WAVELENGTH_NM -->, `FALLBACK_GRATING_LINES_PER_MM` <!-- impl: astrometricslib.utilities.spectroscopy_models.FALLBACK_GRATING_LINES_PER_MM -->, `FALLBACK_GRATING_DISTANCE_MM` <!-- impl: astrometricslib.utilities.spectroscopy_models.FALLBACK_GRATING_DISTANCE_MM -->, `DEFAULT_EXTRACTION_START_WAVELENGTH_NM` <!-- impl: astrometricslib.utilities.spectroscopy_models.DEFAULT_EXTRACTION_START_WAVELENGTH_NM --> in `astrometricslib/utilities/spectroscopy_models.py`)",automatic (shapes results),Design estimate
-stacking,STK-01,CLOUD_STAR_FRACTION,automatic (sets data aside),Partly measured
-stacking,STK-01,MINIMUM_FRAMES_TO_JUDGE,automatic (sets data aside),Partly measured
-stacking,STK-01,ROUNDNESS_DROP_BELOW_MEDIAN,automatic (sets data aside),Partly measured
-stacking,STK-01,TRAILED_ROUNDNESS_LIMIT,automatic (sets data aside),Partly measured
-stacking,STK-01,quarantine_bad_frames_enabled,automatic (sets data aside),Partly measured
-stacking,STK-03,MAXIMUM_QUARANTINED_FRACTION,automatic (sets data aside),Partly measured
-stacking,STK-04,DEFAULT_GAP_RATIO_THRESHOLD,automatic (sets data aside),Partly measured
-stacking,STK-04,background_homogeneity_check_enabled,automatic (sets data aside),Partly measured
-stacking,STK-05,MAXIMUM_FLAT_NOISE_FRACTION,automatic (gives a verdict),Partly measured
-stacking,STK-06,DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,automatic (sets data aside),Partly measured
-stacking,STK-07,MINIMUM_PENALTY_TO_WEIGHT,automatic (shapes results),Partly measured
-stacking,STK-07,stack_weight,automatic (shapes results),Partly measured
-stacking,STK-08,rejection_bounds,automatic (shapes results),Partly measured
-stacking,STK-08,rejection_sigma_mode,automatic (shapes results),Partly measured
-stacking,STK-08,stack_rejection_low_extra_sigma,automatic (shapes results),Partly measured
-stacking,STK-08,stack_rejection_sigma_floor,automatic (shapes results),Partly measured
-stacking,STK-09,rejection_sigma_low,automatic (shapes results),Partly measured
-stacking,STK-09,rejection_sigma_mode,automatic (shapes results),Partly measured
-stacking,STK-10,DEFAULT_MINIMUM_SURVIVING_FRAMES,automatic (sets data aside),Partly measured
-stacking,STK-10,FILTER_WFWHM_LOOSENING_LADDER,automatic (sets data aside),Partly measured
-stacking,STK-10,filter_wfwhm_percentile,automatic (sets data aside),Partly measured
-stacking,STK-12,MINIMUM_REGISTERED_FRACTION,automatic (gives a verdict),Partly measured
-stacking,STK-12,SPECTRAL_STAR_DETECTION_ORDER,automatic (shapes results),Partly measured
-stacking,STK-12,align_calibrated_frames,automatic (shapes results),Partly measured
-stacking,STK-14,REFINEMENT_MAX_RESIDUAL_PIXELS,automatic (gives a verdict),Partly measured
-stacking,STK-14,REFINEMENT_MAX_ROTATION_DEGREES,automatic (gives a verdict),Partly measured
-stacking,STK-14,REFINEMENT_MAX_SCALE_DEVIATION,automatic (gives a verdict),Partly measured
-stacking,STK-14,REFINEMENT_MINIMUM_PAIRS,automatic (gives a verdict),Partly measured
-stacking,STK-14,REFINEMENT_STAR_COUNT,automatic (shapes results),Partly measured
-stacking,STK-15,PATTERN_MAX_RESIDUAL_PIXELS,automatic (gives a verdict),Partly measured
-stacking,STK-15,REFINEMENT_MINIMUM_PAIRS,automatic (gives a verdict),Partly measured
-stacking,STK-17,ZERO_ORDER_MAX_RIVAL_FRACTION,automatic (gives a verdict),Partly measured
-stacking,STK-17,ZERO_ORDER_RIVAL_SEPARATION_PIXELS,automatic (gives a verdict),Partly measured
-stacking,STK-17,ZERO_ORDER_SEARCH_HALF_WIDTH_PIXELS,automatic (shapes results),Partly measured
-stacking,STK-18,EXTENDED_TARGET_MAX_RIVAL_FRACTION,automatic (gives a verdict),Partly measured
-stacking,STK-18,EXTENDED_TARGET_RIVAL_HALF_WIDTH_PIXELS,automatic (gives a verdict),Partly measured
-stacking,STK-18,EXTENDED_TARGET_SMOOTHING_SIGMA_PIXELS,automatic (shapes results),Partly measured
-stacking,STK-20,exposure_group_gain_tolerance,automatic (gives a verdict),Partly measured
-stacking,STK-21,PLAUSIBLE_GAIN_RANGE,automatic (gives a verdict),Partly measured
-stacking,STK-21,SKY_RATIO_LIMIT,automatic (gives a verdict),Partly measured
-stacking,STK-22,CLIPPED_FRAME_ZERO_FRACTION,automatic (sets data aside),Partly measured
-stacking,STK-23,MAXIMUM_EDGE_NOISE_RATIO,automatic (shapes results),Partly measured
-stacking,STK-23,MAXIMUM_TRIM_FRACTION,automatic (shapes results),Partly measured
-stacking,STK-23,STRIP_PIXELS,automatic (shapes results),Partly measured
-stacking,STK-23,trim_noisy_stack_edges_enabled,automatic (shapes results),Partly measured
-stacking,STK-24,"  - the same constant, detection side: whether the limit catches a session with a genuinely high rejected share (none was available). Relation: sanity check only. Role: automatic (gives a verdict). Source: fixed in code. Equipment: none.",automatic (gives a verdict),Partly measured
-stacking,STK-24,DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD,automatic (gives a verdict),Partly measured
-stacking,STK-25,"  - the same constant, detection side: whether the limit catches a real failed alignment (the library holds no such session). Relation: sanity check only. Role: automatic (gives a verdict). Source: fixed in code. Equipment: none.",automatic (gives a verdict),Partly measured
-stacking,STK-25,DEFAULT_FWHM_DEGRADATION_RATIO,automatic (gives a verdict),Partly measured
-stacking,STK-25,expected_stack_fwhm,automatic (gives a verdict),Partly measured
-stacking,STK-27,BRIGHTNESS_PERCENTILE_RANGE,automatic (shapes results),Partly measured
-stacking,STK-27,MINIMUM_STARS,automatic (shapes results),Partly measured
-stacking,STK-27,preview_colour_calibration_method,automatic (shapes results),Partly measured
-stacking,STK-28,preview_remove_green_noise_enabled,automatic (shapes results),Partly measured
-stacking,STK-29,DARKEST_SKY_LEVEL,automatic (shapes results),Partly measured
-stacking,STK-29,EXTENDED_LIGHT_BRIGHTNESS,automatic (shapes results),Partly measured
-stacking,STK-29,FALLBACK_SKY_LEVEL,automatic (shapes results),Partly measured
-stacking,STK-29,LIGHTEST_SKY_LEVEL,automatic (shapes results),Partly measured
-stacking,STK-30,denoise_strength,automatic (shapes results),Partly measured
-stacking,STK-30,write_stack_preview,automatic (shapes results),Partly measured
-stacking,STK-31,DEFAULT_STAR_STRENGTH,automatic (shapes results),Partly measured
-stacking,STK-31,DEFAULT_STAR_STRETCH,automatic (shapes results),Partly measured
-stacking,STK-31,star_stretch,automatic (shapes results),Partly measured
-stacking,STK-32,HIGHLIGHT_KNEE,automatic (shapes results),Partly measured
-stacking,STK-32,NOISE_WIDTHS_ABOVE_THE_BACKGROUND,automatic (shapes results),Partly measured
-stacking,STK-32,STAR_DIMMING_FULL_AT,automatic (shapes results),Partly measured
-stacking,STK-32,STAR_DIMMING_POWER,automatic (shapes results),Partly measured
-stacking,STK-32,STAR_DIMMING_STARTS_AT,automatic (shapes results),Partly measured
-stacking,STK-32,preview_star_tone_enabled,automatic (shapes results),Partly measured
-stacking,STK-33,BRIGHT_OBJECT_BRIGHTNESS,automatic (shapes results),Partly measured
-stacking,STK-33,SATURATED_FRACTION_LIMIT,automatic (gives a verdict),Partly measured
-stacking,STK-34,LOW_STAR_FRACTION,automatic (sets data aside),Partly measured
-stacking,STK-35,CENTRAL_REGION_SHAPE_PIXELS,automatic (shapes results),Partly measured
-stacking,STK-35,MAXIMUM_TEMPERATURE_SPREAD_C,automatic (sets data aside),Partly measured
-stacking,STK-35,MINIMUM_FLAT_PAIRS,automatic (gives a verdict),Partly measured
-stacking,STK-36,FAINT_SOURCE_THRESHOLD_SIGMAS,automatic (shapes results),Partly measured
-stacking,STK-36,NOISE_APERTURE_COUNT,automatic (shapes results),Partly measured
-stacking,STK-36,REFERENCE_APERTURE_FWHM_MULTIPLE,automatic (shapes results),Partly measured
-stacking,STK-36,REFERENCE_STAR_COUNT,automatic (shapes results),Partly measured
-stacking,STK-36,REPLACEMENT_DEPTH_FACTOR,automatic (shapes results),Partly measured
-stacking,STK-36,SEED_SEARCH_RADIUS_PX,automatic (shapes results),Partly measured
-stacking,STK-36,_saturation_check,automatic (gives a verdict),Partly measured
-stacking,STK-37,DEFAULT_GROWTH_STEPS,automatic (shapes results),Design estimate
-stacking,STK-37,MINIMUM_SUBSET_FRAMES,automatic (gives a verdict),Design estimate
-stacking,STK-38,STACK_UNITS_PER_ADU,automatic (shapes results),Partly measured
-stacking,STK-38,effective_aperture_area_px,automatic (shapes results),Partly measured
-stacking,STK-40,MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO,automatic (gives a verdict),Partly measured
-stacking,STK-41,MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO,automatic (gives a verdict),Partly measured
-stacking,STK-48,VALUE_STEP_ALLOWANCE,automatic (gives a verdict),Partly measured
-stacking,STK-48,bias_levels,automatic (gives a verdict),Partly measured
-stacking,STK-49,NOISE_RATIO_HIGH,automatic (gives a verdict),Partly measured
-stacking,STK-49,NOISE_RATIO_LOW,automatic (gives a verdict),Partly measured
-stacking,STK-50,VALUE_STEP_ALLOWANCE,automatic (gives a verdict),Partly measured
-stacking,STK-51,VALUE_STEP_ALLOWANCE,automatic (gives a verdict),Partly measured
-stacking,STK-52,CEILING_SHARE_LIMIT,automatic (gives a verdict),Partly measured
-stacking,STK-54,DARK_CURRENT_ALLOWANCE_ADU_PER_SECOND,automatic (gives a verdict),Partly measured
-stacking,STK-55,DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,automatic (gives a verdict),Design estimate
-stacking,STK-D01,Fewest frames per master calibration frame = 3 (config key `[Processing.Siril] minimum_calibration_frames`),automatic (gives a verdict),Design estimate
-stacking,STK-D02,Rejection limits for bias and dark masters = `rej 3 3` (Siril script in `drivers/siril_interface/script_builders.py`),automatic (shapes results),Design estimate
-stacking,STK-D03,Fewest frames in an exposure group = 5 (code constant `MINIMUM_FRAMES_PER_EXPOSURE_GROUP` in `pipelines/stacking/processing/exposure_groups.py`),automatic (sets data aside),Design estimate
-stacking,STK-D04,Saturated pixel share that flags a stack = 0.1% (code constant `DEFAULT_SATURATION_FLAG_THRESHOLD` in `pipelines/shared/quality/saturation.py`),automatic (gives a verdict),Design estimate
-stacking,STK-D05,"Flat level limits = 10% and 90% of full scale (code constants `MINIMUM_FLAT_LEVEL_FRACTION`, `MAXIMUM_FLAT_LEVEL_FRACTION` in `pipelines/stacking/pre_processing/flat_calibration.py`)",automatic (gives a verdict),Design estimate
-stacking,STK-D06,"Flat blur width limits = 1 to 8 pixels (code constants `MINIMUM_SMOOTHING_SIGMA_PIXELS`, `MAXIMUM_SMOOTHING_SIGMA_PIXELS` in the same file)",automatic (shapes results),Design estimate
-stacking,STK-D07,Dark exposure match; also match of a stored calibration set to a stack = within 0.1 s; within 0.05 s for a stored set (`CalibrationLibrary.select_dark_frames` in `drivers/calibration_library.py`; also `DARK_EXPOSURE_MATCH_SECONDS` <!-- impl: astrometricslib.pipelines.stacking.pre_processing.stack_calibration_health.DARK_EXPOSURE_MATCH_SECONDS --> in `pipelines/stacking/pre_processing/stack_calibration_health.py`; `_EXPOSURE_MATCH_TOLERANCE_SECONDS` <!-- impl: astrometricslib.api.processing._EXPOSURE_MATCH_TOLERANCE_SECONDS --> in `api/processing.py`),automatic (sets data aside),Design estimate
-stacking,STK-D08,Noise penalty that switches on weighting = 1.05 (code constant `MINIMUM_PENALTY_TO_WEIGHT` (STK-07)),automatic (shapes results),Design estimate
-stacking,STK-D09,Spectral registration share before a retry = 0.9 (code constant `MINIMUM_REGISTERED_FRACTION` (STK-12)),automatic (gives a verdict),Design estimate
-stacking,STK-D10,"Brightness-scale pixel method; also fewest pixels; source level; sky clip = 20th to 80th percentile; brightest 1%; at least 200 pixels; sources at 10σ; sky clipped at 3σ in up to 5 passes (code constants `GAIN_MID_RANGE_PERCENTILES`, `GAIN_BRIGHTEST_FRACTION` in `pipelines/stacking/processing/group_gains.py`; also `GAIN_MINIMUM_PIXELS` <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.GAIN_MINIMUM_PIXELS -->, `GAIN_SOURCE_SIGMAS` <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.GAIN_SOURCE_SIGMAS -->, `SKY_CLIP_PASSES` <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.SKY_CLIP_PASSES -->, `SKY_CLIP_SIGMAS` <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.SKY_CLIP_SIGMAS --> in `pipelines/stacking/processing/group_gains.py`)",automatic (shapes results),Design estimate
-stacking,STK-D11,Saturation level of a group stack = 0.95 of full scale (code constant `SATURATION_FRACTION_OF_FULL_SCALE` in the same file),automatic (sets data aside),Design estimate
-stacking,STK-D12,Clipping floor for clipped groups = 2 frame-noise widths (code constant `CLIPPING_FLOOR_SIGMAS` in the same file),automatic (shapes results),Design estimate
-stacking,STK-D13,Session gap for the quarantine = 4 hours (code constant `SESSION_GAP_SECONDS` in `pipelines/stacking/pre_processing/frame_quarantine.py`),automatic (sets data aside),Design estimate
-stacking,STK-D14,"Star-pattern matching constants; also shortest longest side; largest scale change; refit passes = 150 stars, 8 neighbors, 1% shape tolerance; at least 20 px; 10%; 3 passes (code constants `PATTERN_STAR_COUNT` <!-- impl: astrometricslib.pipelines.stacking.processing.star_pattern_candidates.PATTERN_STAR_COUNT -->, `PATTERN_NEIGHBOUR_COUNT` <!-- impl: astrometricslib.pipelines.stacking.processing.star_pattern_candidates.PATTERN_NEIGHBOUR_COUNT -->, `PATTERN_RATIO_TOLERANCE` <!-- impl: astrometricslib.pipelines.stacking.processing.star_pattern_candidates.PATTERN_RATIO_TOLERANCE -->, `PATTERN_MINIMUM_LONGEST_SIDE_PIXELS` <!-- impl: astrometricslib.pipelines.stacking.processing.star_pattern_candidates.PATTERN_MINIMUM_LONGEST_SIDE_PIXELS -->, `PATTERN_MAXIMUM_SCALE_DEVIATION` <!-- impl: astrometricslib.pipelines.stacking.processing.star_pattern_candidates.PATTERN_MAXIMUM_SCALE_DEVIATION --> in `pipelines/stacking/processing/star_pattern_candidates.py`; `PATTERN_REFIT_PASSES` <!-- impl: astrometricslib.pipelines.stacking.processing.group_alignment.PATTERN_REFIT_PASSES --> in `pipelines/stacking/processing/group_alignment.py`)",automatic (shapes results),Design estimate
-stacking,STK-D15,Pre-fetch readers = 4 (config key `[Processing] prefetch_workers`),automatic (shapes results),Design estimate
-stacking,STK-D16,Siril runs at once = 2 (config key `[Processing.Parallelism] max_concurrent_jobs`),automatic (shapes results),Design estimate
-stacking,STK-D17,"Color calibration star finder; also star finder width = 8σ; 3.5 px circle; 7 to 11 px ring; 3 px (code constants `DETECTION_SIGMA`, `APERTURE_RADIUS_PIXELS`, `ANNULUS_INNER_RADIUS_PIXELS`, `ANNULUS_OUTER_RADIUS_PIXELS` in `pipelines/stacking/post_processing/colour_calibration.py`; also `FINDER_FWHM_PIXELS` <!-- impl: astrometricslib.pipelines.stacking.post_processing.colour_calibration.FINDER_FWHM_PIXELS --> in `pipelines/stacking/post_processing/colour_calibration.py`)",automatic (shapes results),Design estimate
-stacking,STK-D18,Flat saturation level = 98% of full scale (code constant `_SATURATED_FRACTION_OF_FULL_SCALE` in `pipelines/stacking/pre_processing/flat_calibration.py`),automatic (gives a verdict),Design estimate
-stacking,STK-D22,"Frame measurement job: frames measured at once (worker processes); bias frames read per setting; frames measured in one stack = 4; 5; 40 (code constants `MEASUREMENT_WORKER_COUNT`, `BIAS_FRAMES_FOR_LEVEL`, `STACKING_STAGE_MEASUREMENT_LIMIT` in `pipelines/stacking/frame_measurement_run.py` <!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.MEASUREMENT_WORKER_COUNT --> <!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.BIAS_FRAMES_FOR_LEVEL --> <!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.STACKING_STAGE_MEASUREMENT_LIMIT -->)",automatic (shapes results),Design estimate
-stacking,STK-D23,"Stack noise measurement: apertures; aperture radius; reference stars; sky ring; clearance from stars; shift search radius; faint-source threshold; smoothing widths; background subtraction width; clearance from faint sources; depth factor for replacing a set; also stars detected; smallest reference aperture; ring fill = 100; 4 px; 10; 7 to 12 px; 24 px; 500 px; 3.5σ; 1.5, 3 and 6 px; 12 px; 13 px; 2; 400 stars; 8 px; 0.9 (code constants `NOISE_APERTURE_COUNT`, `APERTURE_RADIUS_PX`, `REFERENCE_STAR_COUNT`, `RING_INNER_PX`, `RING_OUTER_PX`, `STAR_CLEARANCE_PX`, `SEED_SEARCH_RADIUS_PX`, `FAINT_SOURCE_THRESHOLD_SIGMAS`, `FAINT_SOURCE_SMOOTHING_SIGMAS_PX`, `FAINT_SOURCE_HIGH_PASS_SIGMA_PX`, `FAINT_SOURCE_CLEARANCE_PX`, `REPLACEMENT_DEPTH_FACTOR` in `pipelines/stacking/post_processing/aperture_placement.py` (`REPLACEMENT_DEPTH_FACTOR` is in `empty_apertures.py`; `APERTURE_RADIUS_PX`, `RING_INNER_PX` and `RING_OUTER_PX` are in `stack_image.py` and `SEED_SEARCH_RADIUS_PX` is in `stack_noise.py`, same folder) (STK-36) <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.STAR_CLEARANCE_PX --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.FAINT_SOURCE_HIGH_PASS_SIGMA_PX --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.REPLACEMENT_DEPTH_FACTOR -->; also `DETECTED_STAR_COUNT` <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.DETECTED_STAR_COUNT -->, `REFERENCE_APERTURE_MINIMUM_RADIUS_PX` <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.REFERENCE_APERTURE_MINIMUM_RADIUS_PX --> in `pipelines/stacking/post_processing/aperture_placement.py`; `MINIMUM_RING_FILL` <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_image.MINIMUM_RING_FILL --> in `pipelines/stacking/post_processing/stack_image.py`)",automatic (shapes results),Design estimate
-stacking,STK-D24,"Subset stacks: fewest frames in a subset; growth steps = 4; 4 (code constants `MINIMUM_SUBSET_FRAMES`, `DEFAULT_GROWTH_STEPS` (STK-37))",automatic (shapes results),Design estimate
-stacking,STK-D25,"Odd–even difference noise: fewest frames in each half, counting the shared reference frame = 8 (code constant `ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF` in `pipelines/stacking/odd_even_difference_run.py` (STK-42) <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF -->)",automatic (gives a verdict),Design estimate
-stacking,STK-D26,Group frame noise `s_g`: clip limit around the median of neighbor differences; also raw frames read per group = 4 rough (median absolute deviation) scales; 3 frames (code constant `NOISE_CLIP_SIGMAS` in `pipelines/stacking/processing/group_gains.py` <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.NOISE_CLIP_SIGMAS -->; also `FRAMES_SAMPLED_PER_GROUP` <!-- impl: astrometricslib.pipelines.stacking.processing.group_combination.FRAMES_SAMPLED_PER_GROUP --> in `pipelines/stacking/processing/group_combination.py`),automatic (shapes results),Design estimate
-stacking,STK-D27,"Gain and read noise at another offset: which frames may use the entry of the same gain and binning at the nearest other offset = frames with under 20% exact zeros (`CLIPPED_FRAME_ZERO_FRACTION`, [STK-22](#stk-22)) (method `CameraProfile.sensor_noise_for` in `models/camera_profile.py` <!-- impl: astrometricslib.models.camera_profile.CameraProfile.sensor_noise_for -->)",automatic (gives a verdict),Design estimate
-stacking,STK-D28,"Stack noise plate solution: member frames of the reference group tried when no reference frame is named; then a plate solve of the stack itself (source `PLATE_SOLVE_WCS_SOURCE`, also tried when a frame's solution fails the reference-star check) = 5; one solve (code constant `MEMBER_FRAME_ATTEMPTS` in `pipelines/stacking/post_processing/stack_noise.py` <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.MEMBER_FRAME_ATTEMPTS -->)",automatic (shapes results),Design estimate
-stacking,STK-D29,Capture setting: significant figures kept of the pixel scale (the merge of stored settings follows from it) = 4 (code constant `PIXEL_SCALE_SIGNIFICANT_FIGURES` in `models/quality/capture_setting.py` <!-- impl: astrometricslib.models.quality.capture_setting.PIXEL_SCALE_SIGNIFICANT_FIGURES -->),automatic (shapes results),Design estimate
-stacking,STK-D30,"Reference-star match: largest rotation searched; trial step at the farthest corner; shift and rotation applied as none below; rms above which the fit is poor = 0.5°; 1 px; 0.05 px and 0.001°; 0.5 px (code constants `MAXIMUM_ROTATION_DEG`, `ROTATION_STEP_PX`, `NEGLIGIBLE_SHIFT_PX`, `NEGLIGIBLE_ROTATION_DEG`, `POOR_ALIGNMENT_RMS_PX` in `pipelines/stacking/post_processing/stack_noise.py` (STK-36); the shift is the median over the matched stars; 0.5 px is 1/8 of the 4 px aperture radius, and when a plate-solved aperture set fits worse than that the stack is plate-solved and moved again, and a second fit that also stays above the limit is used anyway with a note saying so and giving its rms, not refused (plate-solved placements fit to 0.00 px; frame-solution fits on real stacks measured 0.18 px on NGC 2244, kept, and 1.42 to 2.11 px on M 27, M 57 and M 81, retried; Design estimate) <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.MAXIMUM_ROTATION_DEG --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.ROTATION_STEP_PX --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.NEGLIGIBLE_SHIFT_PX --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.NEGLIGIBLE_ROTATION_DEG --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.POOR_ALIGNMENT_RMS_PX -->)",automatic (gives a verdict),Design estimate
-stacking,STK-D31,"Odd–even difference: bias divisor; also bootstrap draws for the paired noise error = 1.0 (no correction); 1,000 draws (code constant `ODD_EVEN_DIFFERENCE_NOISE_BIAS` in `pipelines/stacking/post_processing/difference_noise.py` (STK-42) <!-- impl: astrometricslib.pipelines.stacking.post_processing.difference_noise.ODD_EVEN_DIFFERENCE_NOISE_BIAS -->; also `PAIRED_BOOTSTRAP_COUNT` <!-- impl: astrometricslib.pipelines.stacking.post_processing.difference_noise.PAIRED_BOOTSTRAP_COUNT --> in `pipelines/stacking/post_processing/difference_noise.py`)",automatic (shapes results),Design estimate
-stacking,STK-D32,"Empty-aperture noise at several sizes: aperture radii as multiples of the noise aperture's radius; clearance from faint sources at the largest radius; also bootstrap draws for the slope error = 0.5, 1, 1.5 and 2; 17 px; 1,000 draws (code constant `SIZE_RADIUS_MULTIPLES` in `pipelines/stacking/post_processing/aperture_size_noise.py` (the clearance is the largest ring's outer radius plus 1 px; the fewest apertures is `MINIMUM_USABLE_APERTURES`, STK-D23) <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_size_noise.SIZE_RADIUS_MULTIPLES -->; also `_BOOTSTRAP_COUNT` <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_size_noise._BOOTSTRAP_COUNT --> in `pipelines/stacking/post_processing/aperture_size_noise.py`)",automatic (shapes results),Design estimate
-stacking,STK-D34,"Depth limits: Gaia match radius for a reference star; companion magnitude margin; fewest stars for the zero point; detection thresholds; surface-brightness box; also misfit radius factor for the position check = 3 arcsec; 3 mag; 3; 5σ and 3σ; 10 arcsec; 3 match radii (code constants `STAR_MATCH_RADIUS_ARCSEC`, `CONTAMINATION_MAGNITUDE_MARGIN`, `MINIMUM_ZERO_POINT_STARS`, `POINT_SOURCE_SIGMA`, `SURFACE_BRIGHTNESS_SIGMA`, `SURFACE_BRIGHTNESS_BOX_ARCSEC` in `pipelines/stacking/post_processing/depth_limits.py` (the thresholds and the box follow mission practice, Beckwith et al. 2006 and the Euclid preparation XVI paper) <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.STAR_MATCH_RADIUS_ARCSEC --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.CONTAMINATION_MAGNITUDE_MARGIN --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.MINIMUM_ZERO_POINT_STARS --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.POINT_SOURCE_SIGMA --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.SURFACE_BRIGHTNESS_SIGMA -->; also `POSITION_MISFIT_RADIUS_FACTOR` <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.POSITION_MISFIT_RADIUS_FACTOR --> in `pipelines/stacking/post_processing/depth_limits.py`)",automatic (gives a verdict),Design estimate
-stacking,STK-D36,Fewest different frames in a dark or bias master before it counts as thin = 10 (code constant `THIN_SET_FRAME_COUNT` in `pipelines/stacking/pre_processing/calibration_assessment.py` (STK-53) <!-- impl: astrometricslib.pipelines.stacking.pre_processing.calibration_assessment.THIN_SET_FRAME_COUNT -->),automatic (gives a verdict),Design estimate
-stacking,STK-D38,"Raw-frame check: how stars are found and measured in each frame (detection level, background block, star box, most stars measured) = 40σ; 32 px blocks; 7 px half box; 150 stars (`DETECTION_SIGMA` <!-- impl: astrometricslib.pipelines.shared.quality.raw_frame_check.DETECTION_SIGMA -->, `BACKGROUND_BLOCK_PIXELS` <!-- impl: astrometricslib.pipelines.shared.quality.raw_frame_check.BACKGROUND_BLOCK_PIXELS -->, `CENTROID_HALF_BOX_PIXELS` <!-- impl: astrometricslib.pipelines.shared.quality.raw_frame_check.CENTROID_HALF_BOX_PIXELS -->, `MAXIMUM_STARS_MEASURED` <!-- impl: astrometricslib.pipelines.shared.quality.raw_frame_check.MAXIMUM_STARS_MEASURED --> in `pipelines/shared/quality/raw_frame_check.py`)",automatic (sets data aside),Design estimate
-stacking,STK-D41,"Saturation level of a raw frame when the camera profile cannot be read = 65,000 ADU (`SATURATION_ADU` <!-- impl: astrometricslib.pipelines.shared.quality.saturation.SATURATION_ADU --> in `pipelines/shared/quality/saturation.py`)",automatic (sets data aside),Design estimate
-stacking,STK-D42,"Saturation ceiling of a stack, found from its own pixels = Ceiling at least 10 times the median; 25 pile-up pixels sampled; a plateau of at least 50 pixels within 3%; mask above 0.9 of the ceiling; 2% below the clip ceiling counts as clipped (`SATURATION_CEILING_MINIMUM_OVER_MEDIAN` <!-- impl: astrometricslib.pipelines.shared.quality.saturation.SATURATION_CEILING_MINIMUM_OVER_MEDIAN -->, `SATURATION_CEILING_SAMPLE_PIXELS` <!-- impl: astrometricslib.pipelines.shared.quality.saturation.SATURATION_CEILING_SAMPLE_PIXELS -->, `SATURATION_PLATEAU_MINIMUM_PIXELS` <!-- impl: astrometricslib.pipelines.shared.quality.saturation.SATURATION_PLATEAU_MINIMUM_PIXELS -->, `SATURATION_PLATEAU_TOLERANCE` <!-- impl: astrometricslib.pipelines.shared.quality.saturation.SATURATION_PLATEAU_TOLERANCE -->, `SATURATION_MASK_FRACTION_OF_CEILING` <!-- impl: astrometricslib.pipelines.shared.quality.saturation.SATURATION_MASK_FRACTION_OF_CEILING -->, `CLIP_CEILING_TOLERANCE_FRACTION` <!-- impl: astrometricslib.pipelines.shared.quality.saturation.CLIP_CEILING_TOLERANCE_FRACTION --> in `pipelines/shared/quality/saturation.py`)",automatic (sets data aside),Design estimate
-stacking,STK-D43,Clip level of the sky and bias estimate of a frame = 3σ (`SKY_CLIP_SIGMA` <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.SKY_CLIP_SIGMA --> in `pipelines/shared/quality/frame_measurement.py`),automatic (shapes results),Design estimate
-stacking,STK-D44,"Calibration frame measurement: grid for the block range; part of the frame used for the value step = Every 3rd pixel in a 12 by 12 cell grid; a 300 px block in a 1,000 px central region (`BLOCK_RANGE_PIXEL_STEP` <!-- impl: astrometricslib.pipelines.shared.quality.calibration_frame_measurement.BLOCK_RANGE_PIXEL_STEP -->, `BLOCK_RANGE_GRID_CELLS` <!-- impl: astrometricslib.pipelines.shared.quality.calibration_frame_measurement.BLOCK_RANGE_GRID_CELLS -->, `VALUE_STEP_CENTRAL_REGION_PX` <!-- impl: astrometricslib.pipelines.shared.quality.calibration_frame_measurement.VALUE_STEP_CENTRAL_REGION_PX -->, `VALUE_STEP_BLOCK_PX` <!-- impl: astrometricslib.pipelines.shared.quality.calibration_frame_measurement.VALUE_STEP_BLOCK_PX --> in `pipelines/shared/quality/calibration_frame_measurement.py`)",automatic (shapes results),Design estimate
-stacking,STK-D52,"Stored aperture sets: when a frame's plate solution is trusted for placing apertures = Pixel scale change under 10%; the 10 brightest stars checked; at least 5 matched; within 3 px (`MAXIMUM_PIXEL_SCALE_CHANGE` <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.MAXIMUM_PIXEL_SCALE_CHANGE -->, `WCS_CHECK_STAR_COUNT` <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.WCS_CHECK_STAR_COUNT -->, `WCS_CHECK_MINIMUM_MATCHES` <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.WCS_CHECK_MINIMUM_MATCHES -->, `WCS_CHECK_TOLERANCE_PX` <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.WCS_CHECK_TOLERANCE_PX --> in `pipelines/stacking/post_processing/stack_noise.py`)",automatic (gives a verdict),Design estimate
-stacking,STK-D54,"Sky level of the preview: block map and bright-light rule = 8 px blocks; a 3 block median filter; the 99th percentile of extended light (`_BLOCK_PIXELS` <!-- impl: astrometricslib.pipelines.stacking.post_processing.sky_level._BLOCK_PIXELS -->, `_BLOCK_FILTER_SIZE` <!-- impl: astrometricslib.pipelines.stacking.post_processing.sky_level._BLOCK_FILTER_SIZE -->, `_EXTENDED_LIGHT_PERCENTILE` <!-- impl: astrometricslib.pipelines.stacking.post_processing.sky_level._EXTENDED_LIGHT_PERCENTILE --> in `pipelines/stacking/post_processing/sky_level.py`)",automatic (shapes results),Design estimate
-stacking,STK-D55,"Star toning: background box, smoothing and noise blur = 15 px box; 2 px smoothing; 3 px blur (`_BACKGROUND_BOX_PIXELS` <!-- impl: astrometricslib.pipelines.stacking.post_processing.star_tone._BACKGROUND_BOX_PIXELS -->, `_BACKGROUND_SMOOTHING_PIXELS` <!-- impl: astrometricslib.pipelines.stacking.post_processing.star_tone._BACKGROUND_SMOOTHING_PIXELS -->, `_NOISE_BLUR_PIXELS` <!-- impl: astrometricslib.pipelines.stacking.post_processing.star_tone._NOISE_BLUR_PIXELS --> in `pipelines/stacking/post_processing/star_tone.py`)",automatic (shapes results),Design estimate
-stacking,STK-D56,Preview star scale and cleanup: star brightness percentile; finite share accepted = 99.99th percentile; at least 0.9 finite (`_STAR_SCALE_PERCENTILE` <!-- impl: astrometricslib.pipelines.stacking.post_processing.starnet_stretch._STAR_SCALE_PERCENTILE --> in `pipelines/stacking/post_processing/starnet_stretch.py`; `_MINIMUM_FINITE_FRACTION` <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_preview._MINIMUM_FINITE_FRACTION --> in `pipelines/stacking/post_processing/stack_preview.py`),automatic (shapes results),Design estimate
-stacking,STK-D58,"Stack edge trim: middle band of the edge profile, smallest trim and star mask = Middle band 0.2 to 0.8 of the edge; trims under 3 px not made; 3σ star mask (`_CROSS_AXIS_START` <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_crop._CROSS_AXIS_START -->, `_CROSS_AXIS_END` <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_crop._CROSS_AXIS_END -->, `_MINIMUM_WORTH_TRIMMING_PX` <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_crop._MINIMUM_WORTH_TRIMMING_PX -->, `_STAR_SIGMA` <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_crop._STAR_SIGMA --> in `pipelines/stacking/post_processing/stack_crop.py`)",automatic (shapes results),Design estimate
-stacking,STK-D59,"Bright object recognition: pixels counted as bright; white level of a stretched picture = Bright above 0.25 of the peak; at least 100 pixels; white at 0.98 of full brightness (`BRIGHT_PIXEL_FRACTION_OF_PEAK` <!-- impl: astrometricslib.pipelines.stacking.post_processing.bright_object.BRIGHT_PIXEL_FRACTION_OF_PEAK -->, `_MINIMUM_BRIGHT_PIXELS` <!-- impl: astrometricslib.pipelines.stacking.post_processing.bright_object._MINIMUM_BRIGHT_PIXELS --> in `pipelines/stacking/post_processing/bright_object.py`; `_WHITE_FRACTION_OF_FULL_BRIGHTNESS` <!-- impl: astrometricslib.pipelines.shared.image_scaling._WHITE_FRACTION_OF_FULL_BRIGHTNESS --> in `pipelines/shared/image_scaling.py`)",automatic (gives a verdict),Design estimate
-stacking,STK-D60,"Peak estimate of a clipped star: neighbor share, core ring, profile shape and window = Neighbors at 0.2 of the star; ring 1 px out and 1 px wide; Moffat β of 3; peak window of 3 px (`STAR_NEIGHBOUR_FRACTION` <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.STAR_NEIGHBOUR_FRACTION -->, `CORE_RING_OFFSET_PIXELS` <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.CORE_RING_OFFSET_PIXELS -->, `CORE_RING_WIDTH_PIXELS` <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.CORE_RING_WIDTH_PIXELS -->, `MOFFAT_BETA` <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.MOFFAT_BETA --> in `pipelines/stacking/post_processing/exposure_saturation.py`; `SATURATION_PEAK_HALF_WINDOW_PX` <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_image.SATURATION_PEAK_HALF_WINDOW_PX --> in `pipelines/stacking/post_processing/stack_image.py`)",automatic (shapes results),Design estimate
-stacking,STK-D61,Star width used for a clipped star when the frame has none = 3 px (`DEFAULT_STAR_FWHM_PIXELS` <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.DEFAULT_STAR_FWHM_PIXELS --> in `pipelines/stacking/post_processing/exposure_saturation.py`),automatic (shapes results),Design estimate
-stacking,STK-D62,Background split: fewest measured frames to judge = 3 (`MINIMUM_MEASURED_FRAMES_TO_JUDGE` <!-- impl: astrometricslib.pipelines.stacking.pre_processing.background_homogeneity.MINIMUM_MEASURED_FRAMES_TO_JUDGE --> in `pipelines/stacking/pre_processing/background_homogeneity.py`),automatic (sets data aside),Design estimate
-stacking,STK-D63,Flat noise check: most frames counted = 32 (`MAXIMUM_FRAMES_AVERAGED` <!-- impl: astrometricslib.pipelines.stacking.pre_processing.flat_calibration.MAXIMUM_FRAMES_AVERAGED --> in `pipelines/stacking/pre_processing/flat_calibration.py`),automatic (gives a verdict),Design estimate
-stacking,STK-D64,"Exposure group alignment: offset measurement = High pass of 8 px; clip of saturated stars at 10σ; offsets to 1/20 px; shifts under 0.05 px not applied (`ALIGNMENT_HIGH_PASS_SIGMA_PIXELS` <!-- impl: astrometricslib.pipelines.stacking.processing.group_alignment.ALIGNMENT_HIGH_PASS_SIGMA_PIXELS -->, `ALIGNMENT_CLIP_SIGMAS` <!-- impl: astrometricslib.pipelines.stacking.processing.group_alignment.ALIGNMENT_CLIP_SIGMAS -->, `ALIGNMENT_UPSAMPLE_FACTOR` <!-- impl: astrometricslib.pipelines.stacking.processing.group_alignment.ALIGNMENT_UPSAMPLE_FACTOR -->, `NEGLIGIBLE_SHIFT_PIXELS` <!-- impl: astrometricslib.pipelines.stacking.processing.group_alignment.NEGLIGIBLE_SHIFT_PIXELS --> in `pipelines/stacking/processing/group_alignment.py`)",automatic (shapes results),Design estimate
-stacking,STK-D65,"Exposure group alignment: star refinement (detection, edge margin, centroid, match radius, clipping) = 12σ detection; 60 px edge margin; skip stars above 0.9 of the ceiling; centroid in a 4 px half window with a floor of 0.2; match within 3 px; 3σ clip in 3 passes (`REFINEMENT_DETECTION_SIGMAS` <!-- impl: astrometricslib.pipelines.stacking.processing.group_alignment.REFINEMENT_DETECTION_SIGMAS -->, `REFINEMENT_EDGE_MARGIN_PIXELS` <!-- impl: astrometricslib.pipelines.stacking.processing.group_alignment.REFINEMENT_EDGE_MARGIN_PIXELS -->, `REFINEMENT_SATURATION_FRACTION` <!-- impl: astrometricslib.pipelines.stacking.processing.group_alignment.REFINEMENT_SATURATION_FRACTION -->, `REFINEMENT_CENTROID_HALF_WINDOW_PIXELS` <!-- impl: astrometricslib.pipelines.stacking.processing.group_alignment.REFINEMENT_CENTROID_HALF_WINDOW_PIXELS -->, `REFINEMENT_CENTROID_FLOOR_FRACTION` <!-- impl: astrometricslib.pipelines.stacking.processing.group_alignment.REFINEMENT_CENTROID_FLOOR_FRACTION -->, `REFINEMENT_MATCH_RADIUS_PIXELS` <!-- impl: astrometricslib.pipelines.stacking.processing.group_alignment.REFINEMENT_MATCH_RADIUS_PIXELS -->, `REFINEMENT_CLIP_SIGMAS` <!-- impl: astrometricslib.pipelines.stacking.processing.group_alignment.REFINEMENT_CLIP_SIGMAS -->, `REFINEMENT_CLIP_PASSES` <!-- impl: astrometricslib.pipelines.stacking.processing.group_alignment.REFINEMENT_CLIP_PASSES --> in `pipelines/stacking/processing/group_alignment.py`)",automatic (shapes results),Design estimate
-stacking,STK-D66,"Exposure group alignment: extended target (search block, independent peak, centroid level) = 4 px blocks; a rival peak 2σ away counts as independent; centroid at 0.5 of the peak (`EXTENDED_TARGET_BLOCK_PIXELS` <!-- impl: astrometricslib.pipelines.stacking.processing.group_alignment.EXTENDED_TARGET_BLOCK_PIXELS -->, `EXTENDED_TARGET_INDEPENDENT_PEAK_SIGMAS` <!-- impl: astrometricslib.pipelines.stacking.processing.group_alignment.EXTENDED_TARGET_INDEPENDENT_PEAK_SIGMAS -->, `EXTENDED_TARGET_CENTROID_FRACTION_OF_PEAK` <!-- impl: astrometricslib.pipelines.stacking.processing.group_alignment.EXTENDED_TARGET_CENTROID_FRACTION_OF_PEAK --> in `pipelines/stacking/processing/group_alignment.py`)",automatic (shapes results),Design estimate
-stacking,STK-D67,"Spectral group alignment on the zero-order star: smoothing, centroid window and central crop = 2 px smoothing; 25 px half window; centroid at 0.5 of the peak; 0.5 of the frame as central crop (`ZERO_ORDER_SMOOTHING_SIGMA_PIXELS` <!-- impl: astrometricslib.pipelines.stacking.processing.group_alignment.ZERO_ORDER_SMOOTHING_SIGMA_PIXELS -->, `ZERO_ORDER_CENTROID_HALF_WINDOW_PIXELS` <!-- impl: astrometricslib.pipelines.stacking.processing.group_alignment.ZERO_ORDER_CENTROID_HALF_WINDOW_PIXELS -->, `ZERO_ORDER_CENTROID_FRACTION_OF_PEAK` <!-- impl: astrometricslib.pipelines.stacking.processing.group_alignment.ZERO_ORDER_CENTROID_FRACTION_OF_PEAK -->, `SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION` <!-- impl: astrometricslib.pipelines.stacking.processing.group_alignment.SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION --> in `pipelines/stacking/processing/group_alignment.py`)",automatic (shapes results),Design estimate
-stacking,STK-D68,"Spectral group derotation: trail contrast needed to trust a tilt; rotation too small to apply = 10σ; 0.05° (`MINIMUM_TRAIL_CONTRAST_SIGMA` <!-- impl: astrometricslib.pipelines.stacking.processing.group_derotation.MINIMUM_TRAIL_CONTRAST_SIGMA -->, `NEGLIGIBLE_ROTATION_DEGREES` <!-- impl: astrometricslib.pipelines.stacking.processing.group_derotation.NEGLIGIBLE_ROTATION_DEGREES --> in `pipelines/stacking/processing/group_derotation.py`)",automatic (gives a verdict),Design estimate
-stacking,STK-D69,Blank stack: data share below which a stack counts as blank = 0.0001 (`MINIMUM_STACK_DATA_FRACTION` <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.MINIMUM_STACK_DATA_FRACTION --> in `pipelines/stacking/processing/group_gains.py`),automatic (sets data aside),Design estimate
-stacking,STK-D70,"Star-based group brightness scale: stars searched, noise probes and sky ring = 3,000 stars searched; 200 empty apertures; 50 noise probe stars; at least 4 stars per brightness quartile; sky ring 19 to 25 px (`STAR_GAIN_DETECTION_COUNT` <!-- impl: astrometricslib.pipelines.stacking.processing.group_star_gains.STAR_GAIN_DETECTION_COUNT -->, `STAR_GAIN_EMPTY_APERTURES` <!-- impl: astrometricslib.pipelines.stacking.processing.group_star_gains.STAR_GAIN_EMPTY_APERTURES -->, `STAR_GAIN_NOISE_PROBE_STARS` <!-- impl: astrometricslib.pipelines.stacking.processing.group_star_gains.STAR_GAIN_NOISE_PROBE_STARS -->, `STAR_GAIN_MINIMUM_STARS_PER_QUARTILE` <!-- impl: astrometricslib.pipelines.stacking.processing.group_star_gains.STAR_GAIN_MINIMUM_STARS_PER_QUARTILE -->, `STAR_GAIN_SKY_INNER_PIXELS` <!-- impl: astrometricslib.pipelines.stacking.processing.group_star_gains.STAR_GAIN_SKY_INNER_PIXELS -->, `STAR_GAIN_SKY_OUTER_PIXELS` <!-- impl: astrometricslib.pipelines.stacking.processing.group_star_gains.STAR_GAIN_SKY_OUTER_PIXELS --> in `pipelines/stacking/processing/group_star_gains.py`)",automatic (gives a verdict),Design estimate
-stacking,STK-D71,Matching a frame to a known optic: focal length tolerance = 2% (`FOCAL_LENGTH_TOLERANCE_FRACTION` <!-- impl: astrometricslib.pipelines.shared.frame_optics.FOCAL_LENGTH_TOLERANCE_FRACTION --> in `pipelines/shared/frame_optics.py`),automatic (shapes results),Design estimate
-wayfinding,WAY-73,NO_GOOD_MATCH_RMS,automatic (gives a verdict),Design estimate
-wayfinding,WAY-D100,Seconds of camera Idle after the last frame before the final guide log download = 600 seconds (10 minutes) (`IDLE_FINAL_LOG_SYNC_SECONDS` <!-- impl: backend.services.observatory.auto_download_service.IDLE_FINAL_LOG_SYNC_SECONDS -->),automatic (shapes results),Design estimate
-wayfinding,WAY-D122,"The centering exposure: which exposures are tried, how many stars it aims for, the detection threshold, how much history the zero point and star width use, and the fixed fallback = Exposures 1, 2, 3, 5, 8, 12, 20 and 30 s; 15 detectable Gaia stars (the local solver needs 10); a 5σ detection (the default of the library's star detector); the median of the newest 300 frames of the last 180 days, at least 5; the star's noise area is that of a Gaussian matched filter, 4 pi sigma squared; stars are counted inside the largest circle in the field; the fallback is 5 s (`EXPOSURE_LADDER_SECONDS`, `TARGET_STAR_COUNT`, `DETECTION_SIGNAL_TO_NOISE`, `ZERO_POINT_LOOKBACK_DAYS`, `MAXIMUM_FRAMES_USED`, `MINIMUM_FRAMES_USED` <!-- impl: wayfindinglib.tasks.control_tasks.centering_exposure.TARGET_STAR_COUNT -->, `alignment_exposure_seconds` <!-- impl: wayfindinglib.models.session.correction_config.CorrectionConfig -->)",automatic (shapes results),Design estimate
-wayfinding,WAY-D124,"Pointing error below which a sync is a tracking echo, not a plate solve = 0.5 arcseconds (`SPURIOUS_ALIGNMENT_ERROR_ARCSEC` <!-- impl: wayfindinglib.drivers.control_record_store.SPURIOUS_ALIGNMENT_ERROR_ARCSEC --> in `control_record_store.py`)",automatic (sets data aside),Design estimate
-wayfinding,WAY-D128,"Guide rate and pulse merging used to turn guide pulses into arcseconds, and the dither pulse length = 7.52 arcseconds per second (half the sidereal rate); pulses less than 0.8 s apart are one correction (`GUIDE_RATE_ARCSEC_PER_S` <!-- impl: wayfindinglib.analytics.guide_pulses.GUIDE_RATE_ARCSEC_PER_S -->, `PULSE_MERGE_WINDOW_SECONDS` <!-- impl: wayfindinglib.analytics.guide_pulses.PULSE_MERGE_WINDOW_SECONDS --> in `guide_pulses.py`)",automatic (shapes results),Design estimate
-wayfinding,WAY-D131,"Stand-in values used when the site or the equipment is not configured = A latitude of 45 degrees for the pointing fits; a site at Denver (39.7392, -104.9903, 1,600 m); a meridian flip delay of 5 minutes; a sensor of 23.5 by 15.6 mm and a focal length of 400 mm for mosaic plans (`DEFAULT_LATITUDE_DEG` <!-- impl: wayfindinglib.api.control.context.DEFAULT_LATITUDE_DEG -->, `FALLBACK_SITE` <!-- impl: wayfindinglib.data_access.site_profile_reader.FALLBACK_SITE -->, `DEFAULT_MERIDIAN_FLIP_DELAY_MIN` <!-- impl: wayfindinglib.data_access.equipment_catalog_reader.DEFAULT_MERIDIAN_FLIP_DELAY_MIN -->, `DEFAULT_SENSOR_WIDTH_MM` <!-- impl: wayfindinglib.tasks.planning_tasks.mosaic_tasks.DEFAULT_SENSOR_WIDTH_MM -->, `DEFAULT_SENSOR_HEIGHT_MM` <!-- impl: wayfindinglib.tasks.planning_tasks.mosaic_tasks.DEFAULT_SENSOR_HEIGHT_MM -->, `DEFAULT_FOCAL_LENGTH_MM` <!-- impl: wayfindinglib.tasks.planning_tasks.mosaic_tasks.DEFAULT_FOCAL_LENGTH_MM --> in `context.py`, `site_profile_reader.py`, `equipment_catalog_reader.py` and `mosaic_tasks.py`)",automatic (shapes results),Design estimate
-wayfinding,WAY-D132,Faintest Gaia star stored in the deep star catalog = Gaia G = 16 (`DEFAULT_MAGNITUDE_LIMIT` <!-- impl: wayfindinglib.drivers.catalog.deep_star_catalog_builder.DEFAULT_MAGNITUDE_LIMIT --> in `deep_star_catalog_builder.py`),automatic (sets data aside),Design estimate
-wayfinding,WAY-D134,"When the INDI server counts as lost, and how far the exposure countdown may fall before it is reset = 3 failed handshakes in a row; a camera countdown that falls more than 3 s below the clock (`MAX_CONSECUTIVE_PROBE_FAILURES` <!-- impl: wayfindinglib.drivers.indi.connection_manager.MAX_CONSECUTIVE_PROBE_FAILURES -->, `_EXPOSURE_CLOCK_TOLERANCE_SECONDS` <!-- impl: wayfindinglib.drivers.indi_interface._EXPOSURE_CLOCK_TOLERANCE_SECONDS --> in `connection_manager.py` and `indi_interface.py`)",automatic (gives a verdict),Design estimate
-wayfinding,WAY-D139,"How long a frame wait lasts before the control tasks give up or move on = 10 s past a guide exposure; 15 s past a centering exposure and its readout; 1.5 s settle after a slew; 0.5 s readout after each exposure (`FRAME_WAIT_MARGIN_SECONDS` <!-- impl: wayfindinglib.tasks.control_tasks.guide_exposure_ladder_tasks.FRAME_WAIT_MARGIN_SECONDS -->, `IMAGE_WAIT_SECONDS` <!-- impl: wayfindinglib.tasks.control_tasks.centering.IMAGE_WAIT_SECONDS -->, `SETTLE_SECONDS` <!-- impl: wayfindinglib.tasks.control_tasks.centering.SETTLE_SECONDS -->, `READOUT_SECONDS` <!-- impl: wayfindinglib.tasks.control_tasks.imaging_capture.READOUT_SECONDS --> in `guide_exposure_ladder_tasks.py`, `centering.py` and `imaging_capture.py`)",automatic (limits hardware),Design estimate
-wayfinding,WAY-D140,"The live guide loop: when another guider is active and when the loop stops = A sample under 5 s old means another guider is active; 5 tracking checks, 0.5 s apart, before the loop starts; the loop stops after 3 cycles in a row without tracking (`ACTIVE_WINDOW_SECONDS` <!-- impl: wayfindinglib.tasks.control_tasks.live_guiding.ACTIVE_WINDOW_SECONDS -->, `TRACKING_CHECKS` <!-- impl: wayfindinglib.tasks.control_tasks.live_guiding.TRACKING_CHECKS -->, `TRACKING_RETRY_SECONDS` <!-- impl: wayfindinglib.tasks.control_tasks.live_guiding.TRACKING_RETRY_SECONDS -->, `LOST_TRACKING_LIMIT` <!-- impl: wayfindinglib.tasks.control_tasks.live_guiding.LOST_TRACKING_LIMIT --> in `live_guiding.py`)",automatic (limits hardware),Design estimate
-wayfinding,WAY-D141,"How Ekos logs are matched to a session and to the guide equipment = A log or frame counts if it is within 30 minutes of the session's span; two guide plate scales agree within 2% (`SESSION_TIME_MARGIN_SECONDS` <!-- impl: wayfindinglib.tasks.control_tasks.ekos_log_ingestion.SESSION_TIME_MARGIN_SECONDS -->, `GUIDE_SCALE_AGREEMENT_FRACTION` <!-- impl: wayfindinglib.tasks.control_tasks.ekos_log_ingestion.GUIDE_SCALE_AGREEMENT_FRACTION --> in `ekos_log_ingestion.py`)",automatic (sets data aside),Design estimate
-wayfinding,WAY-D144,"Lowest and highest altitude a mount slew may reach when the active telescope sets no limits of its own = Lowest 0 degrees, highest 90 degrees (`[Observatory.Constraints] min_altitude` and `[Observatory.Constraints] max_altitude` in `astrometricslib/foundation/config.py`)",automatic (limits hardware),Design estimate
-wayfinding,WAY-D31,"Weighting-mode rules = Penalty 1.05 (`MINIMUM_PENALTY_TO_WEIGHT`, which `ProcessingPipelines.predict_stack_weights` applies); weight match within 5 percent (`MINIMUM_PENALTY_TO_WEIGHT` <!-- impl: astrometricslib._internal.stacking.MINIMUM_PENALTY_TO_WEIGHT -->, `WEIGHT_MATCH_TOLERANCE` <!-- impl: wayfindinglib.analytics.result_quality.noise_growth.WEIGHT_MATCH_TOLERANCE -->)",automatic (shapes results),Design estimate
-wayfinding,WAY-D47,"Match window between an Ekos exposure and a frame, and the dark-frame temperature tolerance = 30 s, 3 degC (`MATCH_WINDOW_SECONDS` <!-- impl: wayfindinglib.session_analysis.capture.pre_processing.assess_capture_input_quality.MATCH_WINDOW_SECONDS -->, `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C` <!-- impl: astrometricslib._internal.stacking.DEFAULT_DARK_TEMPERATURE_TOLERANCE_C -->)",automatic (shapes results),Design estimate
-wayfinding,WAY-D48,"Saturated pixels that make a star count as clipped, and the share of frames that makes a length clip = 4 px, half (`SATURATED_BLOB_MINIMUM_PIXELS` <!-- impl: astrometricslib._internal.stacking.SATURATED_BLOB_MINIMUM_PIXELS -->, `SATURATED_FRAME_FRACTION` <!-- impl: astrometricslib._internal.stacking.SATURATED_FRAME_FRACTION -->)",automatic (gives a verdict),Design estimate
-wayfinding,WAY-D96,Wait after a camera frame ends before the automatic download starts = 5 seconds (`FILE_WRITE_DELAY_SECONDS` <!-- impl: backend.services.observatory.auto_download_service.FILE_WRITE_DELAY_SECONDS -->),automatic (shapes results),Design estimate
-wayfinding,WAY-D97,Fewest seconds between two automatic download starts for one target = 30 seconds (`MINIMUM_INTERVAL_SECONDS` <!-- impl: backend.services.observatory.auto_download_service.MINIMUM_INTERVAL_SECONDS -->),automatic (shapes results),Design estimate
-wayfinding,WAY-D98,"Rise in the exposure countdown, between two status polls, that means a new frame has started = More than 3 seconds above the last reading (`COUNTDOWN_JUMP_SECONDS` <!-- impl: wayfindinglib.tasks.control_tasks.frame_end_detection.COUNTDOWN_JUMP_SECONDS -->)",automatic (shapes results),Design estimate
-wayfinding,WAY-D99,Fewest seconds between two automatic guide log downloads = 300 seconds (5 minutes) (`GUIDE_LOG_MINIMUM_INTERVAL_SECONDS` <!-- impl: backend.services.observatory.auto_download_service.GUIDE_LOG_MINIMUM_INTERVAL_SECONDS -->),automatic (shapes results),Design estimate
+parameter,register_entry,role,status
+api.exposure_match_tolerance_seconds,STK-D07,exclusion criteria,Design estimate
+asteroid_detection.pointing_correction_min_votes,MOV-D08,measurement,Design estimate
+asteroid_detection.pointing_correction_search_radius_arcsec,MOV-05,measurement,Partly measured
+asteroid_detection.pointing_correction_vote_bin_arcsec,MOV-05,measurement,Partly measured
+astrometry.background_2d_box_fraction,AST-16,measurement,Partly measured
+astrometry.background_2d_box_max_px,AST-16,measurement,Partly measured
+astrometry.background_2d_box_min_px,AST-16,measurement,Partly measured
+astrometry.background_2d_min_boxes_per_axis,AST-16,measurement,Partly measured
+astrometry.background_stats_sample_fraction,AST-16,measurement,Partly measured
+astrometry.blob_width_box_radius_px,AST-06,measurement,Partly measured
+astrometry.centre_star_minimum_peak_fraction,AST-09,exclusion criteria,Partly measured
+astrometry.centre_star_search_radius_fraction,AST-09,measurement,Partly measured
+astrometry.clip_sigmas,AST-02,exclusion criteria,Partly measured
+astrometry.color_detection_bin_factor,AST-D03,measurement,Design estimate
+astrometry.default_field_radius_degrees,AST-D20,measurement,Design estimate
+astrometry.default_magnitude_limit,AST-D20,measurement,Design estimate
+astrometry.fwhm_excluded_core_radius_px,AST-07,exclusion criteria,Partly measured
+astrometry.fwhm_fit_box_radius_px,AST-07,exclusion criteria,Partly measured
+astrometry.fwhm_maximum_centre_shift_px,AST-D17,exclusion criteria,Design estimate
+astrometry.fwhm_measurement_candidate_count,AST-D17,exclusion criteria,Design estimate
+astrometry.fwhm_measurement_max_elongation,AST-D17,exclusion criteria,Design estimate
+astrometry.fwhm_measurement_min_relative_flux,AST-D17,exclusion criteria,Design estimate
+astrometry.fwhm_measurement_star_count,AST-06,measurement,Partly measured
+astrometry.fwhm_minimum_fit_r_squared,AST-07,exclusion criteria,Partly measured
+astrometry.fwhm_refit_box_radius_px,AST-D17,exclusion criteria,Design estimate
+astrometry.fwhm_refit_sigma_px,AST-D17,exclusion criteria,Design estimate
+astrometry.fwhm_saturated_plateau_px,AST-D17,exclusion criteria,Design estimate
+astrometry.fwhm_saturation_fraction,AST-07,exclusion criteria,Partly measured
+astrometry.gaia_default_magnitude_limit,AST-D11,measurement,Design estimate
+astrometry.gaia_depth_step_magnitudes,AST-08,measurement,Partly measured
+astrometry.gaia_depth_steps_down,AST-08,measurement,Partly measured
+astrometry.gaia_magnitude_limit_margin,AST-D11,measurement,Design estimate
+astrometry.gaia_maximum_magnitude_limit,AST-D11,measurement,Design estimate
+astrometry.gaia_minimum_magnitude_limit,AST-D11,measurement,Design estimate
+astrometry.initial_match_radius_pixels,AST-02,exclusion criteria,Partly measured
+astrometry.maximum_failed_lookup_fraction,AST-D09,judgment,Design estimate
+astrometry.maximum_identified_stars,AST-D08,measurement,Design estimate
+astrometry.maximum_passes,AST-02,exclusion criteria,Partly measured
+astrometry.maximum_residual_fraction_of_fwhm,AST-04,judgment,Partly measured
+astrometry.maximum_shift_arcsec,AST-02,judgment,Partly measured
+astrometry.minimum_disc_share_inside,AST-D16,exclusion criteria,Design estimate
+astrometry.minimum_matched_stars,AST-05,judgment,Partly measured
+astrometry.minimum_peak_sigma,AST-19,judgment,Partly measured
+astrometry.minimum_stars_for_depth_estimate,AST-D11,measurement,Design estimate
+astrometry.pointing_error_search_radius_arcsec,AST-09,measurement,Partly measured
+astrometry.refined_match_radius_pixels,AST-02,exclusion criteria,Partly measured
+astrometry.sip_degree,AST-02,measurement,Partly measured
+astrometry.sky_ring_inner_factor,AST-D16,exclusion criteria,Design estimate
+astrometry.sky_ring_minimum_pixels,AST-D16,exclusion criteria,Design estimate
+astrometry.sky_ring_outer_factor,AST-D16,exclusion criteria,Design estimate
+astrometry.source_detector_roundness_range,AST-D01,exclusion criteria,Design estimate
+astrometry.unresolved_companion_radius_arcsec,AST-10,measurement,Partly measured
+astrometry.wcs_refinement.minimum_matched_stars,AST-03,judgment,Partly measured
+foundation.full_scale_counts,STK-38,measurement,Partly measured
+internal.default_dark_temperature_tolerance_c,STK-06,exclusion criteria,Partly measured
+internal.hinted_solve_near_timeout_fraction,AST-D06,measurement,Design estimate
+internal.minimum_sample_count,SPE-D29,exclusion criteria,Design estimate
+internal.minimum_sources_for_local_solve,AST-13,measurement,Partly measured
+models.differs_from_catalog_subtypes,SPE-19,judgment,Partly measured
+models.minimum_points_for_period_search,PHO-D30,exclusion criteria,Design estimate
+models.minimum_points_for_transit_search,PHO-D30,exclusion criteria,Design estimate
+models.no_good_match_rms,SPE-16,judgment,Partly measured
+models.pixel_scale_significant_figures,STK-D29,measurement,Design estimate
+models.unreliable_match_rms,SPE-17,judgment,Partly measured
+photometry.agreeing_share,PHO-D19,judgment,Design estimate
+photometry.agreement_p_value,PHO-D34,judgment,Design estimate
+photometry.alignment_anchor_count,PHO-05,exclusion criteria,Partly measured
+photometry.alignment_anchor_fallback_band,PHO-D03,exclusion criteria,Design estimate
+photometry.alignment_anchor_minimum_peak_snr,PHO-05,exclusion criteria,Partly measured
+photometry.alignment_anchor_minimum_qualifying,PHO-05,exclusion criteria,Partly measured
+photometry.alignment_anchor_reach_px,PHO-04,measurement,Partly measured
+photometry.alignment_anchor_saturation_box_half_width_px,PHO-D03,exclusion criteria,Design estimate
+photometry.alignment_anchor_skipped_brightest_fraction,PHO-05,exclusion criteria,Partly measured
+photometry.alignment_clip_passes,PHO-D04,measurement,Design estimate
+photometry.alignment_clip_sigmas,PHO-D04,measurement,Design estimate
+photometry.alignment_refinement_passes,PHO-04,measurement,Partly measured
+photometry.aperture_radius_px,PHO-D01,measurement,Design estimate
+photometry.block_length_in_correlation_lengths,PHO-11,judgment,Partly measured
+photometry.brightest_skipped_fraction,PHO-01,exclusion criteria,Partly measured
+photometry.calibration_sigmas,PHO-06,judgment,Partly measured
+photometry.central_radius_half_diagonal_fraction,PHO-15,exclusion criteria,Partly measured
+photometry.centroid_box_half_width_px,PHO-D02,measurement,Design estimate
+photometry.centroid_refinement_passes,PHO-D02,measurement,Design estimate
+photometry.centroid_sky_cutout_half_width_px,PHO-D02,measurement,Design estimate
+photometry.correlation_gone_below,PHO-11,judgment,Partly measured
+photometry.cycles_for_detection,PHO-12,judgment,Partly measured
+photometry.default_long_term_significance_threshold,PHO-D18,exclusion criteria,Design estimate
+photometry.default_maximum_comparison_stars,PHO-01,exclusion criteria,Partly measured
+photometry.dip_z_score,PHO-D34,judgment,Design estimate
+photometry.duration_count,PHO-D32,measurement,Design estimate
+photometry.events_for_detection,PHO-D33,judgment,Design estimate
+photometry.events_for_possible,PHO-D33,judgment,Design estimate
+photometry.excess_scatter_sigma,PHO-01,exclusion criteria,Partly measured
+photometry.excess_scatter_threshold,PHO-06,judgment,Partly measured
+photometry.faintest_band_fraction,PHO-01,exclusion criteria,Partly measured
+photometry.false_alarm_for_detection,PHO-12,judgment,Partly measured
+photometry.false_alarm_for_possible,PHO-12,judgment,Partly measured
+photometry.false_discovery_level,PHO-07,judgment,Partly measured
+photometry.frequency_window,PHO-D23,measurement,Design estimate
+photometry.longest_block_fraction,PHO-11,judgment,Partly measured
+photometry.longest_dip_cadences,PHO-D32,measurement,Design estimate
+photometry.max_centroid_shift_px,PHO-04,measurement,Partly measured
+photometry.maximum_brightest_stars_for_period_search,PHO-D20,exclusion criteria,Design estimate
+photometry.maximum_centroid_fallback_fraction,PHO-04,judgment,Partly measured
+photometry.maximum_corner_displacement_px,PHO-04,judgment,Partly measured
+photometry.maximum_detectable_amplitude_mag,PHO-09,judgment,Partly measured
+photometry.maximum_ensemble_scatter_over_predicted,PHO-02,judgment,Partly measured
+photometry.maximum_noise_bins,PHO-06,judgment,Partly measured
+photometry.maximum_period_ratio,PHO-D31,exclusion criteria,Design estimate
+photometry.maximum_vetting_candidates,PHO-D05,exclusion criteria,Design estimate
+photometry.maximum_window_points,PHO-D23,measurement,Design estimate
+photometry.minimum_anchor_spread_fraction,PHO-D04,measurement,Design estimate
+photometry.minimum_anchors_for_shift,PHO-D04,measurement,Design estimate
+photometry.minimum_anchors_for_similarity,PHO-D04,measurement,Design estimate
+photometry.minimum_comparison_stars,PHO-01,exclusion criteria,Partly measured
+photometry.minimum_cycles_in_span,PHO-D31,exclusion criteria,Design estimate
+photometry.minimum_discrimination_auc,PHO-08,judgment,Partly measured
+photometry.minimum_ensemble_rejection_count_to_flag,PHO-D09,judgment,Design estimate
+photometry.minimum_ensemble_rejection_fraction_to_flag,PHO-D09,judgment,Design estimate
+photometry.minimum_frames_for_outlier_rejection,PHO-D08,exclusion criteria,Design estimate
+photometry.minimum_frames_for_vetting,PHO-D07,exclusion criteria,Design estimate
+photometry.minimum_held_out_points,PHO-D34,judgment,Design estimate
+photometry.minimum_known_variables,PHO-D14,judgment,Design estimate
+photometry.minimum_long_term_amplitude_mag,PHO-D18,exclusion criteria,Design estimate
+photometry.minimum_nights,PHO-D34,judgment,Design estimate
+photometry.minimum_period_cadences,PHO-D31,exclusion criteria,Design estimate
+photometry.minimum_points_for_indices,PHO-D10,exclusion criteria,Design estimate
+photometry.minimum_points_in_dip,PHO-D34,judgment,Design estimate
+photometry.minimum_points_per_session_for_long_term_search,PHO-D18,exclusion criteria,Design estimate
+photometry.minimum_run_length_kept_as_real_change,PHO-D08,exclusion criteria,Design estimate
+photometry.minimum_sessions_for_long_term_search,PHO-D18,exclusion criteria,Design estimate
+photometry.minimum_signal_to_noise,PHO-15,exclusion criteria,Partly measured
+photometry.minimum_stars_for_scatter_population,PHO-D13,judgment,Design estimate
+photometry.minimum_stars_for_zero_point,PHO-15,exclusion criteria,Partly measured
+photometry.minimum_stars_per_noise_bin,PHO-06,judgment,Partly measured
+photometry.minimum_training_points,PHO-D34,judgment,Design estimate
+photometry.minimum_unlisted_stars,PHO-D14,judgment,Design estimate
+photometry.minimum_usable_frame_fraction,PHO-D07,exclusion criteria,Design estimate
+photometry.minimum_vetting_candidates,PHO-D05,exclusion criteria,Design estimate
+photometry.night_gap_days,PHO-D34,judgment,Design estimate
+photometry.one_sided_five_percent_z,PHO-D14,judgment,Design estimate
+photometry.period_checks.samples_per_peak,PHO-D23,measurement,Design estimate
+photometry.permutation_count,PHO-D34,judgment,Design estimate
+photometry.points_in_dip_for_possible,PHO-D33,judgment,Design estimate
+photometry.rival_alias_power_share,PHO-D19,judgment,Design estimate
+photometry.session_star_frame_share,PHO-15,exclusion criteria,Partly measured
+photometry.shuffle_count,PHO-12,measurement,Partly measured
+photometry.significant_window_peak_share,PHO-D19,judgment,Design estimate
+photometry.sky_annulus_inner_radius_px,PHO-D01,measurement,Design estimate
+photometry.sky_annulus_outer_radius_px,PHO-D01,measurement,Design estimate
+photometry.unstable_tracking_drift_px,PHO-D16,judgment,Design estimate
+photometry.window_peaks_tried,PHO-D19,judgment,Design estimate
+shared.background_block_pixels,STK-D38,exclusion criteria,Design estimate
+shared.block_range_grid_cells,STK-D44,measurement,Design estimate
+shared.block_range_pixel_step,STK-D44,measurement,Design estimate
+shared.catalog_match_radius_arcsec,AST-D07,exclusion criteria,Design estimate
+shared.centroid_half_box_pixels,STK-D38,exclusion criteria,Design estimate
+shared.clip_ceiling_tolerance_fraction,STK-D42,exclusion criteria,Design estimate
+shared.default_saturation_flag_threshold,STK-D04,judgment,Design estimate
+shared.detection_sigma,STK-D38,exclusion criteria,Design estimate
+shared.extent_tolerance_factor,AST-20,judgment,Partly measured
+shared.field_grid_cells_per_side,AST-18,measurement,Design estimate
+shared.field_region_cells_per_side,AST-18,measurement,Design estimate
+shared.focal_length_tolerance_fraction,STK-D71,measurement,Design estimate
+shared.low_star_fraction,STK-34,exclusion criteria,Partly measured
+shared.match_radius_arcsec,AST-12,exclusion criteria,Partly measured
+shared.maximum_magnitude_difference,AST-12,exclusion criteria,Partly measured
+shared.maximum_stars_measured,STK-D38,exclusion criteria,Design estimate
+shared.min_catalog_match_fraction_for_reused_wcs,AST-D19,judgment,Design estimate
+shared.min_stars_to_verify_reused_wcs,AST-D19,judgment,Design estimate
+shared.moffat_beta_maximum,AST-17,measurement,Design estimate
+shared.moffat_beta_minimum,AST-17,measurement,Design estimate
+shared.moffat_candidates_per_cell,AST-17,exclusion criteria,Design estimate
+shared.moffat_fit_box_half_width_px,AST-17,measurement,Design estimate
+shared.moffat_grid_cell_count,AST-17,exclusion criteria,Design estimate
+shared.moffat_isolation_radius_px,AST-17,exclusion criteria,Design estimate
+shared.moffat_maximum_center_shift_px,AST-17,exclusion criteria,Design estimate
+shared.moffat_maximum_fwhm_px,AST-17,exclusion criteria,Design estimate
+shared.moffat_minimum_fwhm_px,AST-17,exclusion criteria,Design estimate
+shared.moffat_minimum_r_squared,AST-17,exclusion criteria,Design estimate
+shared.moffat_minimum_star_count,AST-17,exclusion criteria,Design estimate
+shared.moffat_saturation_margin_fraction,AST-17,exclusion criteria,Design estimate
+shared.moffat_subpixel_factor,AST-17,measurement,Design estimate
+shared.moment_aperture_fwhm_multiple,AST-17,measurement,Design estimate
+shared.moment_aperture_minimum_radius_px,AST-17,measurement,Design estimate
+shared.position_tolerance_floor_arcmin,AST-20,judgment,Partly measured
+shared.saturated_blob_minimum_pixels,WAY-D48,judgment,Design estimate
+shared.saturated_frame_fraction,WAY-D48,judgment,Design estimate
+shared.saturation_adu,STK-D41,exclusion criteria,Design estimate
+shared.saturation_ceiling_minimum_over_median,STK-D42,exclusion criteria,Design estimate
+shared.saturation_ceiling_sample_pixels,STK-D42,exclusion criteria,Design estimate
+shared.saturation_mask_fraction_of_ceiling,STK-D42,exclusion criteria,Design estimate
+shared.saturation_plateau_minimum_pixels,STK-D42,exclusion criteria,Design estimate
+shared.saturation_plateau_tolerance,STK-D42,exclusion criteria,Design estimate
+shared.sky_clip_sigma,STK-D43,measurement,Design estimate
+shared.star_finder_box_fraction,AST-16,measurement,Partly measured
+shared.star_finder_box_maximum_px,AST-16,measurement,Partly measured
+shared.star_finder_box_minimum_px,AST-16,measurement,Partly measured
+shared.star_finder_expected_fwhm_px,AST-D01,exclusion criteria,Design estimate
+shared.star_finder_minimum_boxes_per_axis,AST-16,measurement,Partly measured
+shared.star_finder_threshold_sigma,AST-D01,exclusion criteria,Design estimate
+shared.star_sharpness_range,AST-D01,exclusion criteria,Design estimate
+shared.value_step_block_px,STK-D44,measurement,Design estimate
+shared.value_step_central_region_px,STK-D44,measurement,Design estimate
+shared.white_fraction_of_full_brightness,STK-D59,judgment,Design estimate
+spectroscopy.agreement_minimum_p_value,SPE-D08,measurement,Design estimate
+spectroscopy.aperture_sigma_multiplier,SPE-04,measurement,Partly measured
+spectroscopy.aperture_sigma_smoothing_steps,SPE-04,measurement,Partly measured
+spectroscopy.b_window_angstrom,SPE-D46,judgment,Design estimate
+spectroscopy.blend_correlation_threshold,SPE-D40,judgment,Design estimate
+spectroscopy.blended_pair_maximum_magnitude_difference,SPE-D51,measurement,Design estimate
+spectroscopy.blended_pair_search_radius_px,SPE-D51,measurement,Design estimate
+spectroscopy.blue_report_wavelength_angstrom,SPE-D31,exclusion criteria,Design estimate
+spectroscopy.blue_window_angstrom,SPE-D09,exclusion criteria,Design estimate
+spectroscopy.center_search_tolerance_angstrom,SPE-D42,judgment,Design estimate
+spectroscopy.centroid_half_width_px,SPE-D49,judgment,Design estimate
+spectroscopy.chromatic_defocus_ratio_limit,SPE-D09,exclusion criteria,Design estimate
+spectroscopy.classification_wavelength_range_angstrom,SPE-D47,exclusion criteria,Design estimate
+spectroscopy.colour_disagreement_magnitudes,SPE-27,judgment,Partly measured
+spectroscopy.comparison_range_angstrom,SPE-D31,exclusion criteria,Design estimate
+spectroscopy.contaminant_baseline_width_px,SPE-D34,measurement,Design estimate
+spectroscopy.contaminant_dilation_px,SPE-D34,measurement,Design estimate
+spectroscopy.contaminant_threshold_sigma,SPE-D34,measurement,Design estimate
+spectroscopy.continuum_polynomial_degree,SPE-D40,judgment,Design estimate
+spectroscopy.continuum_window_samples,SPE-D22,exclusion criteria,Design estimate
+spectroscopy.control_spacing_tolerances,SPE-D42,judgment,Design estimate
+spectroscopy.core_resolution_fraction,SPE-22,judgment,Partly measured
+spectroscopy.dar_along_dispersion_limit_angstrom,SPE-D05,judgment,Design estimate
+spectroscopy.default_half_width_px,SPE-D49,judgment,Design estimate
+spectroscopy.default_max_match_distance_px,SPE-D50,exclusion criteria,Design estimate
+spectroscopy.default_max_translation_offset_px,SPE-D50,exclusion criteria,Design estimate
+spectroscopy.default_response_wavelength_range_angstrom,SPE-13,exclusion criteria,Partly measured
+spectroscopy.detected_p_value,SPE-24,judgment,Partly measured
+spectroscopy.detected_significance,SPE-25,judgment,Partly measured
+spectroscopy.dip_edge_margin_samples,SPE-D22,exclusion criteria,Design estimate
+spectroscopy.dispersion_angle_band_length_px,SPE-D33,exclusion criteria,Design estimate
+spectroscopy.dispersion_angle_maximum_tilt_degrees,SPE-D33,exclusion criteria,Design estimate
+spectroscopy.dispersion_angle_minimum_band_count,SPE-D33,exclusion criteria,Design estimate
+spectroscopy.dispersion_angle_minimum_band_sigma,SPE-D33,exclusion criteria,Design estimate
+spectroscopy.dispersion_angle_minimum_trail_contrast_sigma,SPE-D33,exclusion criteria,Design estimate
+spectroscopy.dispersion_angle_roi_half_width_px,SPE-D33,exclusion criteria,Design estimate
+spectroscopy.dispersion_angle_roi_minimum_half_width_px,SPE-D33,exclusion criteria,Design estimate
+spectroscopy.dispersion_angle_seed_slope_count,SPE-D33,exclusion criteria,Design estimate
+spectroscopy.emission_exclusion_half_width_resolution_elements,SPE-D45,exclusion criteria,Design estimate
+spectroscopy.equivalent_width_window_line_spreads,SPE-23,measurement,Partly measured
+spectroscopy.excess_scatter_sigma,SPE-D39,exclusion criteria,Design estimate
+spectroscopy.expected_depth_fractional_uncertainty,SPE-D43,judgment,Design estimate
+spectroscopy.extraction_radius_minimum_px,SPE-D35,exclusion criteria,Design estimate
+spectroscopy.fallback_resolution_element_angstrom,SPE-05,measurement,Partly measured
+spectroscopy.first_fractional_prominence,SPE-D22,exclusion criteria,Design estimate
+spectroscopy.flare_contamination_fraction_threshold,SPE-D54,measurement,Design estimate
+spectroscopy.gaia_xp_residual_rms_limit,SPE-D14,judgment,Design estimate
+spectroscopy.gaia_xp_slope_limit_percent_per_1000_angstrom,SPE-D15,judgment,Design estimate
+spectroscopy.gaia_xp_wavelength_shift_limit_angstrom,SPE-D16,judgment,Design estimate
+spectroscopy.gumbel_width_floor_fraction,SPE-D42,judgment,Design estimate
+spectroscopy.inconclusive_minimum_depth,SPE-24,judgment,Partly measured
+spectroscopy.inconclusive_p_value,SPE-24,judgment,Partly measured
+spectroscopy.last_fractional_prominence,SPE-D22,exclusion criteria,Design estimate
+spectroscopy.line_skip_half_width_per_fwhm,SPE-D55,measurement,Design estimate
+spectroscopy.local_half_width_elements,SPE-D44,judgment,Design estimate
+spectroscopy.low_sample_signal_to_noise,SPE-D38,exclusion criteria,Design estimate
+spectroscopy.max_dip_candidates,SPE-12,measurement,Partly measured
+spectroscopy.maximum_calibrated_b_minus_v,SPE-D19,exclusion criteria,Design estimate
+spectroscopy.maximum_centre_shift_px,SPE-D49,judgment,Design estimate
+spectroscopy.maximum_dilation,SPE-D49,judgment,Design estimate
+spectroscopy.maximum_fitted_neighbors,SPE-D27,measurement,Design estimate
+spectroscopy.maximum_fitted_wavelength_angstrom,SPE-D31,exclusion criteria,Design estimate
+spectroscopy.maximum_inflation_fraction,SPE-D40,judgment,Design estimate
+spectroscopy.maximum_neighbor_distance_px,SPE-D48,measurement,Design estimate
+spectroscopy.maximum_noise_correlation,SPE-D32,exclusion criteria,Design estimate
+spectroscopy.maximum_sample_spacing_sigmas,SPE-D32,exclusion criteria,Design estimate
+spectroscopy.maximum_search_shift_angstrom,SPE-D30,judgment,Design estimate
+spectroscopy.maximum_star_offset_from_center_px,SPE-D52,exclusion criteria,Design estimate
+spectroscopy.maximum_trusted_relative_residual,SPE-34,judgment,Partly measured
+spectroscopy.maximum_uncertainty_for_a_verdict,SPE-D43,judgment,Design estimate
+spectroscopy.median_variance_even_offset,SPE-07,measurement,Partly measured
+spectroscopy.median_variance_odd_offset,SPE-07,measurement,Partly measured
+spectroscopy.min_control_points,SPE-D50,exclusion criteria,Design estimate
+spectroscopy.min_matched_star_pairs,SPE-29,judgment,Partly measured
+spectroscopy.minimum_altitude_degrees,SPE-D06,measurement,Design estimate
+spectroscopy.minimum_aperture_half_width_px,SPE-D35,exclusion criteria,Design estimate
+spectroscopy.minimum_band_points,SPE-D39,exclusion criteria,Design estimate
+spectroscopy.minimum_band_samples,SPE-D29,exclusion criteria,Design estimate
+spectroscopy.minimum_classification_coverage_angstrom,SPE-D47,exclusion criteria,Design estimate
+spectroscopy.minimum_compared_samples,SPE-D29,exclusion criteria,Design estimate
+spectroscopy.minimum_control_positions,SPE-24,judgment,Partly measured
+spectroscopy.minimum_core_points,SPE-D41,exclusion criteria,Design estimate
+spectroscopy.minimum_core_samples,SPE-D32,exclusion criteria,Design estimate
+spectroscopy.minimum_covered_fraction,SPE-D40,judgment,Design estimate
+spectroscopy.minimum_cross_section_samples,SPE-D35,exclusion criteria,Design estimate
+spectroscopy.minimum_detected_for_emission_source,SPE-D40,judgment,Design estimate
+spectroscopy.minimum_dilation,SPE-D49,judgment,Design estimate
+spectroscopy.minimum_elements,SPE-D38,exclusion criteria,Design estimate
+spectroscopy.minimum_feature_analysis_signal_to_noise,SPE-31,judgment,Partly measured
+spectroscopy.minimum_fit_sigma_px,SPE-D35,exclusion criteria,Design estimate
+spectroscopy.minimum_fitted_samples_per_band,SPE-D37,exclusion criteria,Design estimate
+spectroscopy.minimum_fitted_trail_width_fraction,SPE-05,exclusion criteria,Partly measured
+spectroscopy.minimum_fitted_trail_width_samples,SPE-D37,exclusion criteria,Design estimate
+spectroscopy.minimum_index_count,SPE-D44,judgment,Design estimate
+spectroscopy.minimum_line_significance,SPE-11,exclusion criteria,Partly measured
+spectroscopy.minimum_line_skip_half_width_angstrom,SPE-D55,measurement,Design estimate
+spectroscopy.minimum_lines_to_apply,SPE-D08,measurement,Design estimate
+spectroscopy.minimum_neighbor_distance_px,SPE-D48,measurement,Design estimate
+spectroscopy.minimum_noise_samples_per_side,SPE-D32,exclusion criteria,Design estimate
+spectroscopy.minimum_offset_pair_count,SPE-D50,exclusion criteria,Design estimate
+spectroscopy.minimum_overlap_fraction,SPE-D48,measurement,Design estimate
+spectroscopy.minimum_overlap_points,SPE-D47,exclusion criteria,Design estimate
+spectroscopy.minimum_reported_depth,SPE-D43,judgment,Design estimate
+spectroscopy.minimum_samples_per_band,SPE-D37,exclusion criteria,Design estimate
+spectroscopy.minimum_samples_per_window,SPE-D09,exclusion criteria,Design estimate
+spectroscopy.minimum_shift_correlation,SPE-28,exclusion criteria,Partly measured
+spectroscopy.minimum_shoulder_points,SPE-D41,exclusion criteria,Design estimate
+spectroscopy.minimum_side_band_samples,SPE-D32,exclusion criteria,Design estimate
+spectroscopy.minimum_spectra_for_wavelength_scale,SPE-D12,judgment,Design estimate
+spectroscopy.minimum_spectrum_points,SPE-D40,judgment,Design estimate
+spectroscopy.minimum_spectrum_signal_to_noise,SPE-10,judgment,Partly measured
+spectroscopy.minimum_stars_for_gate,SPE-D17,judgment,Design estimate
+spectroscopy.minimum_window_coverage,SPE-D39,exclusion criteria,Design estimate
+spectroscopy.minimum_window_points,SPE-D39,exclusion criteria,Design estimate
+spectroscopy.minimum_window_valid_fraction,SPE-D38,exclusion criteria,Design estimate
+spectroscopy.neighbor_contamination_minimum_flux_ratio,SPE-D45,exclusion criteria,Design estimate
+spectroscopy.noise_prominence_multiple,SPE-D22,exclusion criteria,Design estimate
+spectroscopy.normalization_window_angstrom,SPE-D29,exclusion criteria,Design estimate
+spectroscopy.possible_p_value,SPE-24,judgment,Partly measured
+spectroscopy.prior_present_when_expected,SPE-D43,judgment,Design estimate
+spectroscopy.prior_present_when_not_expected,SPE-D43,judgment,Design estimate
+spectroscopy.processing_quality_maximum_failed_fraction,SPE-D13,judgment,Design estimate
+spectroscopy.profile_band_angstrom,SPE-D37,exclusion criteria,Design estimate
+spectroscopy.profile_end_angstrom,SPE-D31,exclusion criteria,Design estimate
+spectroscopy.profile_start_angstrom,SPE-D31,exclusion criteria,Design estimate
+spectroscopy.ratio_error_floor_fraction,SPE-D29,exclusion criteria,Design estimate
+spectroscopy.red_report_wavelength_angstrom,SPE-D31,exclusion criteria,Design estimate
+spectroscopy.red_window_angstrom,SPE-D09,exclusion criteria,Design estimate
+spectroscopy.registration_reference_field_radius_deg,SPE-D53,exclusion criteria,Design estimate
+spectroscopy.resolution_profile_band_angstrom,SPE-D37,exclusion criteria,Design estimate
+spectroscopy.resolved_pair_minimum_separation_px,SPE-D51,measurement,Design estimate
+spectroscopy.response_polynomial_degree,SPE-D55,measurement,Design estimate
+spectroscopy.second_order_maximum_plausible_fraction,SPE-26,judgment,Partly measured
+spectroscopy.second_order_risky_share_of_brightness,SPE-D18,judgment,Design estimate
+spectroscopy.shift_high_pass_sigma_angstrom,SPE-D30,judgment,Design estimate
+spectroscopy.shift_smoothing_sigma_angstrom,SPE-D30,judgment,Design estimate
+spectroscopy.shoulder_band_half_windows,SPE-D41,exclusion criteria,Design estimate
+spectroscopy.shoulder_inner_resolution_elements,SPE-D41,exclusion criteria,Design estimate
+spectroscopy.side_band_clip_sigmas,SPE-D32,exclusion criteria,Design estimate
+spectroscopy.side_band_gap_widths,SPE-D32,exclusion criteria,Design estimate
+spectroscopy.side_band_width_widths,SPE-D32,exclusion criteria,Design estimate
+spectroscopy.signal_to_noise_maximum_wavelength_angstrom,SPE-D31,exclusion criteria,Design estimate
+spectroscopy.signal_to_noise_minimum_wavelength_angstrom,SPE-D31,exclusion criteria,Design estimate
+spectroscopy.sky_band_gap_px,SPE-01,measurement,Partly measured
+spectroscopy.sky_band_minimum_sample_count,SPE-D04,measurement,Design estimate
+spectroscopy.sky_band_width_px,SPE-01,measurement,Partly measured
+spectroscopy.sky_clip_max_passes,SPE-D03,measurement,Design estimate
+spectroscopy.sky_clip_sigma,SPE-D03,measurement,Design estimate
+spectroscopy.sky_contamination_sigma,SPE-03,measurement,Partly measured
+spectroscopy.sky_edge_samples,SPE-D49,judgment,Design estimate
+spectroscopy.sky_map_clip_floor_px,SPE-33,measurement,Partly measured
+spectroscopy.sky_map_match_radius_px,SPE-33,measurement,Partly measured
+spectroscopy.sky_map_maximum_median_error_px,SPE-33,exclusion criteria,Partly measured
+spectroscopy.sky_map_minimum_kept_fraction,SPE-33,exclusion criteria,Partly measured
+spectroscopy.sky_map_minimum_span_fraction,SPE-33,exclusion criteria,Partly measured
+spectroscopy.sky_map_minimum_stars,SPE-33,exclusion criteria,Partly measured
+spectroscopy.sky_pooled_noise_floor,SPE-03,measurement,Partly measured
+spectroscopy.sky_scatter_half_length_px,SPE-D48,measurement,Design estimate
+spectroscopy.sky_scatter_half_width_px,SPE-D48,measurement,Design estimate
+spectroscopy.solution_max_translation_offset_px,SPE-D50,exclusion criteria,Design estimate
+spectroscopy.spectral_feature_detector.continuum_polynomial_degree,SPE-D41,exclusion criteria,Design estimate
+spectroscopy.spectral_feature_detector.minimum_spectrum_points,SPE-D41,exclusion criteria,Design estimate
+spectroscopy.spectrum_signal.minimum_elements,SPE-D38,exclusion criteria,Design estimate
+spectroscopy.standard_r_v,SPE-21,measurement,Partly measured
+spectroscopy.synthetic_colour.minimum_samples_per_window,SPE-D46,judgment,Design estimate
+spectroscopy.trail_contamination_maximum_sharpness,SPE-D33,exclusion criteria,Design estimate
+spectroscopy.translation_bin_px,SPE-D50,exclusion criteria,Design estimate
+spectroscopy.unclear_significance,SPE-25,judgment,Partly measured
+spectroscopy.v_window_angstrom,SPE-D46,judgment,Design estimate
+spectroscopy.wavelength_scale_limit_angstrom,SPE-D12,judgment,Design estimate
+spectroscopy.zero_order_amplitude_outlier_sigma,SPE-29,judgment,Partly measured
+spectroscopy.zero_order_position_jump_outlier_sigma,SPE-29,judgment,Partly measured
+spectroscopy.zero_point_offset_limit_angstrom,SPE-D07,judgment,Design estimate
+stacking.alignment_clip_sigmas,STK-D64,measurement,Design estimate
+stacking.alignment_high_pass_sigma_pixels,STK-D64,measurement,Design estimate
+stacking.alignment_upsample_factor,STK-D64,measurement,Design estimate
+stacking.annulus_inner_radius_pixels,STK-D17,measurement,Design estimate
+stacking.annulus_outer_radius_pixels,STK-D17,measurement,Design estimate
+stacking.aperture_radius_pixels,STK-D17,measurement,Design estimate
+stacking.aperture_radius_px,STK-36,measurement,Partly measured
+stacking.background_box_pixels,STK-D55,measurement,Design estimate
+stacking.background_smoothing_pixels,STK-D55,measurement,Design estimate
+stacking.block_filter_size,STK-D54,measurement,Design estimate
+stacking.block_pixels,STK-D54,measurement,Design estimate
+stacking.bootstrap_count,STK-D32,measurement,Design estimate
+stacking.bright_object_brightness,STK-33,measurement,Partly measured
+stacking.bright_pixel_fraction_of_peak,STK-D59,judgment,Design estimate
+stacking.brightness_percentile_range,STK-27,measurement,Partly measured
+stacking.ceiling_share_limit,STK-52,judgment,Partly measured
+stacking.central_region_shape_pixels,STK-35,measurement,Partly measured
+stacking.clipped_frame_zero_fraction,STK-22,exclusion criteria,Partly measured
+stacking.clipping_floor_sigmas,STK-D12,measurement,Design estimate
+stacking.contamination_magnitude_margin,STK-D34,judgment,Design estimate
+stacking.core_ring_offset_pixels,STK-D60,measurement,Design estimate
+stacking.core_ring_width_pixels,STK-D60,measurement,Design estimate
+stacking.cosmic_clarity_denoise_strength,STK-30,measurement,Partly measured
+stacking.cross_axis_end,STK-D58,measurement,Design estimate
+stacking.cross_axis_start,STK-D58,measurement,Design estimate
+stacking.dark_current_allowance_adu_per_second,STK-54,judgment,Partly measured
+stacking.dark_exposure_match_seconds,STK-D07,exclusion criteria,Design estimate
+stacking.darkest_sky_level,STK-29,measurement,Partly measured
+stacking.default_fwhm_degradation_ratio,STK-25,judgment,Partly measured
+stacking.default_gain_disagreement_tolerance,STK-20,judgment,Partly measured
+stacking.default_gap_ratio_threshold,STK-04,exclusion criteria,Partly measured
+stacking.default_growth_steps,STK-37,measurement,Design estimate
+stacking.default_rejected_fraction_flag_threshold,STK-24,judgment,Partly measured
+stacking.default_star_fwhm_pixels,STK-D61,measurement,Design estimate
+stacking.default_star_strength,STK-31,measurement,Partly measured
+stacking.default_star_stretch,STK-31,measurement,Partly measured
+stacking.detected_star_count,STK-D23,measurement,Design estimate
+stacking.detection_sigma,STK-D17,measurement,Design estimate
+stacking.exposure_group_gain_tolerance,STK-20,exclusion criteria,Partly measured
+stacking.exposure_relative_tolerance,STK-35,exclusion criteria,Partly measured
+stacking.extended_light_brightness,STK-29,measurement,Partly measured
+stacking.extended_light_percentile,STK-D54,measurement,Design estimate
+stacking.extended_target_block_pixels,STK-D66,measurement,Design estimate
+stacking.extended_target_centroid_fraction_of_peak,STK-D66,measurement,Design estimate
+stacking.extended_target_independent_peak_sigmas,STK-D66,measurement,Design estimate
+stacking.extended_target_max_rival_fraction,STK-18,judgment,Partly measured
+stacking.extended_target_smoothing_sigma_pixels,STK-18,measurement,Partly measured
+stacking.faint_source_high_pass_sigma_px,STK-36,measurement,Partly measured
+stacking.faint_source_smoothing_sigmas_px,STK-36,measurement,Partly measured
+stacking.faint_source_threshold_sigmas,STK-36,measurement,Partly measured
+stacking.fallback_sky_level,STK-29,measurement,Partly measured
+stacking.finder_fwhm_pixels,STK-D17,measurement,Design estimate
+stacking.frames_sampled_per_group,STK-D26,measurement,Design estimate
+stacking.gain_brightest_fraction,STK-D10,measurement,Design estimate
+stacking.gain_mid_range_percentiles,STK-D10,measurement,Design estimate
+stacking.gain_minimum_pixels,STK-D10,measurement,Design estimate
+stacking.gain_source_sigmas,STK-D10,measurement,Design estimate
+stacking.highlight_knee,STK-32,measurement,Partly measured
+stacking.lightest_sky_level,STK-29,measurement,Partly measured
+stacking.maximum_edge_noise_ratio,STK-23,measurement,Partly measured
+stacking.maximum_flat_level_fraction,STK-D05,judgment,Design estimate
+stacking.maximum_flat_noise_fraction,STK-05,judgment,Partly measured
+stacking.maximum_frames_averaged,STK-D63,judgment,Design estimate
+stacking.maximum_pair_gap_seconds,STK-35,exclusion criteria,Partly measured
+stacking.maximum_pixel_scale_change,STK-D52,judgment,Design estimate
+stacking.maximum_quarantined_fraction,STK-03,exclusion criteria,Partly measured
+stacking.maximum_reliable_peak_to_room_ratio,STK-40,judgment,Partly measured
+stacking.maximum_rotation_deg,STK-36,measurement,Partly measured
+stacking.maximum_smoothing_sigma_pixels,STK-D06,measurement,Design estimate
+stacking.maximum_temperature_spread_c,STK-35,exclusion criteria,Partly measured
+stacking.maximum_trim_fraction,STK-23,measurement,Partly measured
+stacking.member_frame_attempts,STK-D28,measurement,Design estimate
+stacking.minimum_bias_pairs,STK-35,judgment,Partly measured
+stacking.minimum_bright_pixels,STK-D59,judgment,Design estimate
+stacking.minimum_calibration_frames,STK-D01,judgment,Design estimate
+stacking.minimum_finite_fraction,STK-D56,measurement,Design estimate
+stacking.minimum_flat_level_fraction,STK-D05,judgment,Design estimate
+stacking.minimum_flat_pairs,STK-35,judgment,Partly measured
+stacking.minimum_frames_to_judge,STK-01,exclusion criteria,Partly measured
+stacking.minimum_measured_frames_to_judge,STK-D62,exclusion criteria,Design estimate
+stacking.minimum_penalty_to_weight,STK-07,measurement,Partly measured
+stacking.minimum_registered_fraction,STK-12,judgment,Partly measured
+stacking.minimum_ring_fill,STK-D23,measurement,Design estimate
+stacking.minimum_smoothing_sigma_pixels,STK-D06,measurement,Design estimate
+stacking.minimum_stack_data_fraction,STK-D69,exclusion criteria,Design estimate
+stacking.minimum_stars,STK-27,measurement,Partly measured
+stacking.minimum_subset_frames,STK-37,judgment,Design estimate
+stacking.minimum_trail_contrast_sigma,STK-D68,judgment,Design estimate
+stacking.minimum_usable_apertures,STK-D32,measurement,Design estimate
+stacking.minimum_usable_reference_stars,STK-36,measurement,Partly measured
+stacking.minimum_worth_trimming_px,STK-D58,measurement,Design estimate
+stacking.minimum_zero_point_stars,STK-D34,judgment,Design estimate
+stacking.moffat_beta,STK-D60,measurement,Design estimate
+stacking.negligible_rotation_deg,STK-D30,judgment,Design estimate
+stacking.negligible_rotation_degrees,STK-D68,judgment,Design estimate
+stacking.negligible_shift_pixels,STK-D64,measurement,Design estimate
+stacking.negligible_shift_px,STK-D30,judgment,Design estimate
+stacking.noise_aperture_count,STK-36,measurement,Partly measured
+stacking.noise_blur_pixels,STK-D55,measurement,Design estimate
+stacking.noise_clip_sigmas,STK-D26,measurement,Design estimate
+stacking.noise_ratio_high,STK-49,judgment,Partly measured
+stacking.noise_ratio_low,STK-49,judgment,Partly measured
+stacking.noise_widths_above_the_background,STK-32,measurement,Partly measured
+stacking.odd_even_difference_minimum_frames_per_half,STK-D25,judgment,Design estimate
+stacking.odd_even_difference_noise_bias,STK-D31,measurement,Design estimate
+stacking.paired_bootstrap_count,STK-D31,measurement,Design estimate
+stacking.pattern_max_residual_pixels,STK-15,judgment,Partly measured
+stacking.pattern_maximum_scale_deviation,STK-D14,measurement,Design estimate
+stacking.pattern_minimum_longest_side_pixels,STK-D14,measurement,Design estimate
+stacking.pattern_neighbour_count,STK-D14,measurement,Design estimate
+stacking.pattern_ratio_tolerance,STK-D14,measurement,Design estimate
+stacking.pattern_refit_passes,STK-D14,measurement,Design estimate
+stacking.pattern_star_count,STK-D14,measurement,Design estimate
+stacking.plausible_gain_range,STK-21,judgment,Partly measured
+stacking.point_source_sigma,STK-D34,judgment,Design estimate
+stacking.poor_alignment_rms_px,STK-D30,judgment,Design estimate
+stacking.position_misfit_radius_factor,STK-D34,judgment,Design estimate
+stacking.reference_aperture_fwhm_multiple,STK-36,measurement,Partly measured
+stacking.reference_aperture_minimum_radius_px,STK-D23,measurement,Design estimate
+stacking.reference_star_count,STK-36,measurement,Partly measured
+stacking.refinement_centroid_floor_fraction,STK-D65,measurement,Design estimate
+stacking.refinement_centroid_half_window_pixels,STK-D65,measurement,Design estimate
+stacking.refinement_clip_passes,STK-D65,measurement,Design estimate
+stacking.refinement_clip_sigmas,STK-D65,measurement,Design estimate
+stacking.refinement_detection_sigmas,STK-D65,measurement,Design estimate
+stacking.refinement_edge_margin_pixels,STK-D65,measurement,Design estimate
+stacking.refinement_match_radius_pixels,STK-D65,measurement,Design estimate
+stacking.refinement_max_residual_pixels,STK-14,judgment,Partly measured
+stacking.refinement_max_rotation_degrees,STK-14,judgment,Partly measured
+stacking.refinement_max_scale_deviation,STK-14,judgment,Partly measured
+stacking.refinement_minimum_pairs,STK-14,judgment,Partly measured
+stacking.refinement_saturation_fraction,STK-D65,measurement,Design estimate
+stacking.refinement_star_count,STK-14,measurement,Partly measured
+stacking.rejection_sigma_high,STK-09,measurement,Partly measured
+stacking.rejection_sigma_low,STK-09,measurement,Partly measured
+stacking.replacement_depth_factor,STK-36,measurement,Partly measured
+stacking.ring_inner_px,STK-D23,measurement,Design estimate
+stacking.ring_outer_px,STK-D23,measurement,Design estimate
+stacking.rotation_step_px,STK-36,measurement,Partly measured
+stacking.roundness_drop_below_median,STK-01,exclusion criteria,Partly measured
+stacking.saturated_fraction_limit,STK-33,judgment,Partly measured
+stacking.saturated_fraction_of_full_scale,STK-D18,judgment,Design estimate
+stacking.saturation_fraction_of_full_scale,STK-D11,exclusion criteria,Design estimate
+stacking.saturation_peak_half_window_px,STK-D60,measurement,Design estimate
+stacking.seed_search_radius_px,STK-36,measurement,Partly measured
+stacking.session_gap_seconds,STK-D13,exclusion criteria,Design estimate
+stacking.single_night_fractions,STK-37,measurement,Design estimate
+stacking.size_radius_multiples,STK-D32,measurement,Design estimate
+stacking.sky_clip_passes,STK-D10,measurement,Design estimate
+stacking.sky_clip_sigmas,STK-D10,measurement,Design estimate
+stacking.sky_ratio_limit,STK-21,judgment,Partly measured
+stacking.spectral_alignment_center_crop_fraction,STK-D67,measurement,Design estimate
+stacking.stack_rejection_low_extra_sigma,STK-08,measurement,Partly measured
+stacking.stack_rejection_sigma_floor,STK-08,measurement,Partly measured
+stacking.star_dimming_full_at,STK-32,measurement,Partly measured
+stacking.star_dimming_power,STK-32,measurement,Partly measured
+stacking.star_dimming_starts_at,STK-32,measurement,Partly measured
+stacking.star_gain_detection_count,STK-D70,judgment,Design estimate
+stacking.star_gain_empty_apertures,STK-D70,judgment,Design estimate
+stacking.star_gain_minimum_stars_per_quartile,STK-D70,judgment,Design estimate
+stacking.star_gain_noise_probe_stars,STK-D70,judgment,Design estimate
+stacking.star_gain_sky_inner_pixels,STK-D70,judgment,Design estimate
+stacking.star_gain_sky_outer_pixels,STK-D70,judgment,Design estimate
+stacking.star_match_radius_arcsec,STK-D34,judgment,Design estimate
+stacking.star_neighbour_fraction,STK-D60,measurement,Design estimate
+stacking.star_scale_percentile,STK-D56,measurement,Design estimate
+stacking.star_sigma,STK-D58,measurement,Design estimate
+stacking.strip_pixels,STK-23,measurement,Partly measured
+stacking.surface_brightness_box_arcsec,STK-D34,judgment,Design estimate
+stacking.surface_brightness_sigma,STK-D34,judgment,Design estimate
+stacking.thin_set_frame_count,STK-D36,judgment,Design estimate
+stacking.trailed_roundness_limit,STK-01,exclusion criteria,Partly measured
+stacking.value_step_allowance,STK-48,judgment,Partly measured
+stacking.wcs_check_minimum_matches,STK-D52,judgment,Design estimate
+stacking.wcs_check_star_count,STK-D52,judgment,Design estimate
+stacking.wcs_check_tolerance_px,STK-D52,judgment,Design estimate
+stacking.white_point_percentile,STK-33,measurement,Partly measured
+stacking.zero_order_centroid_fraction_of_peak,STK-D67,measurement,Design estimate
+stacking.zero_order_centroid_half_window_pixels,STK-D67,measurement,Design estimate
+stacking.zero_order_max_rival_fraction,STK-17,judgment,Partly measured
+stacking.zero_order_rival_separation_pixels,STK-17,judgment,Partly measured
+stacking.zero_order_search_half_width_pixels,STK-17,measurement,Partly measured
+stacking.zero_order_smoothing_sigma_pixels,STK-D67,measurement,Design estimate
+utilities.default_extraction_start_wavelength_nm,SPE-D56,measurement,Design estimate
+utilities.default_minimum_surviving_frames,STK-10,exclusion criteria,Partly measured
+utilities.fallback_grating_distance_mm,SPE-D56,measurement,Design estimate
+utilities.fallback_grating_lines_per_mm,SPE-D56,measurement,Design estimate
+utilities.fallback_pixel_size_um,SPE-D56,measurement,Design estimate
+utilities.fallback_sensor_height_px,SPE-D56,measurement,Design estimate
+utilities.fallback_sensor_max_wavelength_nm,SPE-D56,measurement,Design estimate
+utilities.fallback_sensor_min_wavelength_nm,SPE-D56,measurement,Design estimate
+utilities.fallback_sensor_width_px,SPE-D56,measurement,Design estimate
+wayfinding.active_window_seconds,WAY-D140,hardware limit,Design estimate
+wayfinding.ambiguous_rms_gap_limit,WAY-73,judgment,Design estimate
+wayfinding.centering_exposure.exposure_ladder_seconds,WAY-D122,measurement,Design estimate
+wayfinding.default_focal_length_mm,WAY-D131,measurement,Design estimate
+wayfinding.default_latitude_deg,WAY-D131,measurement,Design estimate
+wayfinding.default_magnitude_limit,WAY-D132,exclusion criteria,Design estimate
+wayfinding.default_meridian_flip_delay_min,WAY-D131,measurement,Design estimate
+wayfinding.default_sensor_height_mm,WAY-D131,measurement,Design estimate
+wayfinding.default_sensor_width_mm,WAY-D131,measurement,Design estimate
+wayfinding.detection_signal_to_noise,WAY-D122,measurement,Design estimate
+wayfinding.exposure_clock_tolerance_seconds,WAY-D134,judgment,Design estimate
+wayfinding.guide_rate_arcsec_per_s,WAY-D128,measurement,Design estimate
+wayfinding.guide_scale_agreement_fraction,WAY-D141,exclusion criteria,Design estimate
+wayfinding.lost_tracking_limit,WAY-D140,hardware limit,Design estimate
+wayfinding.match_window_seconds,WAY-D47,exclusion criteria,Design estimate
+wayfinding.max_consecutive_probe_failures,WAY-D134,judgment,Design estimate
+wayfinding.maximum_frames_used,WAY-D122,measurement,Design estimate
+wayfinding.minimum_frames_used,WAY-D122,measurement,Design estimate
+wayfinding.poor_match_rms_limit,WAY-73,judgment,Design estimate
+wayfinding.pulse_merge_window_seconds,WAY-D128,measurement,Design estimate
+wayfinding.session_time_margin_seconds,WAY-D141,exclusion criteria,Design estimate
+wayfinding.spurious_alignment_error_arcsec,WAY-D124,exclusion criteria,Design estimate
+wayfinding.target_star_count,WAY-D122,measurement,Design estimate
+wayfinding.tracking_checks,WAY-D140,hardware limit,Design estimate
+wayfinding.tracking_retry_seconds,WAY-D140,hardware limit,Design estimate
+wayfinding.weight_match_tolerance,WAY-D31,measurement,Design estimate
+wayfinding.zero_point_lookback_days,WAY-D122,measurement,Design estimate

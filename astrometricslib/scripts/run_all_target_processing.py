@@ -41,6 +41,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from astrometricslib.exceptions import FITS_READ_ERRORS, AstrometricsError
+from astrometricslib.foundation.parameters import resolve
 
 # Disable opening Siril GUI when stacking completes -- must be set
 # before astrometricslib is imported, since a batch run across every
@@ -878,7 +879,8 @@ def _odd_even_difference_label(odd_even_difference_rows: list[Any], enabled: boo
         return "failed: no result row was stored"
     reason = " ".join((odd_even_difference_rows[0].reason or "no reason was stored").split())
     if reason.startswith(ODD_EVEN_DIFFERENCE_TOO_FEW_FRAMES_TEXT):
-        return f"not run (fewer than {ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF} frames per half)"
+        minimum_frames = resolve(ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF).value
+        return f"not run (fewer than {minimum_frames} frames per half)"
     return f"failed: {reason}"
 
 
@@ -1187,7 +1189,8 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         help=(
             "With --stack-only, do not run the odd–even difference noise measurement. By default it runs "
             "for every target (the library refuses it when a half would hold fewer than "
-            f"{ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF} frames) and costs about one library stack."
+            f"{resolve(ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF).value} frames) "
+            "and costs about one library stack."
         ),
     )
     parser.add_argument(

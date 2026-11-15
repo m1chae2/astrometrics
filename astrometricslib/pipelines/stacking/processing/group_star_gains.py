@@ -18,6 +18,14 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from astrometricslib.foundation.constants import FULL_SCALE_COUNTS
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import measure_aperture_photometry
 from astrometricslib.pipelines.stacking.processing.group_alignment import detect_star_centroids
 from astrometricslib.pipelines.stacking.processing.group_gains import (
@@ -51,18 +59,57 @@ logger = logging.getLogger(__name__)
 # fraction of a star's light whether the star is a pixel wider or narrower in
 # one group, which the pixel ratio cannot (see
 # documentation/library_design/validation/stacking.md, STK-19).
-STAR_GAIN_APERTURE_RADIUS_PIXELS = 14.0
+STAR_GAIN_APERTURE_RADIUS_PIXELS = TunedParameter(
+    name="stacking.star_gain_aperture_radius_pixels",
+    default=14.0,
+    unit="px",
+    description="Radius of the circle in which a star's flux is measured for the star-flux gain.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-19",
+)
 
-STAR_GAIN_SKY_INNER_PIXELS = 19.0
+STAR_GAIN_SKY_INNER_PIXELS = TunedParameter(
+    name="stacking.star_gain_sky_inner_pixels",
+    default=19.0,
+    unit="× FWHM",
+    description="Inner radius of the sky ring around a star in the star-flux gain.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D70",
+    pending_conversion=True,
+)
 
-STAR_GAIN_SKY_OUTER_PIXELS = 25.0
+STAR_GAIN_SKY_OUTER_PIXELS = TunedParameter(
+    name="stacking.star_gain_sky_outer_pixels",
+    default=25.0,
+    unit="× FWHM",
+    description="Outer radius of the sky ring around a star in the star-flux gain.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D70",
+    pending_conversion=True,
+)
 
 # How many of the reference's brightest stars are looked for. A star is
 # isolated when no other detected star lies within the sky ring's outer
 # radius, so a neighbour's light does not leak into its sky measurement or
 # aperture. The brightest stars are the ones most likely to be clipped, so the
 # search is wide enough that plenty of unclipped ones are left.
-STAR_GAIN_DETECTION_COUNT = 3000
+STAR_GAIN_DETECTION_COUNT = TunedParameter(
+    name="stacking.star_gain_detection_count",
+    default=3000,
+    unit="stars",
+    description="Number of the reference's brightest stars looked for in the star-flux gain.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D70",
+    pending_conversion=True,
+)
 
 # A star is measured only when no pixel in its circle or sky ring, in either
 # group, reaches STAR_GAIN_CLIP_FRACTION_OF_CEILING of the camera's clip
@@ -79,7 +126,18 @@ STAR_GAIN_DETECTION_COUNT = 3000
 # (0.6) to 1.3-2.7%. Half the ceiling sits in that quiet range and still
 # leaves 1,000 or more unclipped stars on the Nikon fields tried (see the
 # tests and documentation of the validation of 2026-10-13).
-STAR_GAIN_CLIP_FRACTION_OF_CEILING = 0.5
+STAR_GAIN_CLIP_FRACTION_OF_CEILING = TunedParameter(
+    name="stacking.star_gain_clip_fraction_of_ceiling",
+    default=0.5,
+    unit="fraction of ceiling",
+    description=(
+        "Share of the camera's clip ceiling a pixel near a star must reach for the star to be skipped."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-19",
+)
 
 # A star's flux must stand STAR_GAIN_MINIMUM_SIGNAL_TO_NOISE times above the
 # noise of an empty aperture in each group (see
@@ -90,14 +148,43 @@ STAR_GAIN_CLIP_FRACTION_OF_CEILING = 0.5
 # 1.137, and in the faintest octiles half the stars' ratios spread over 0.9
 # to 2.8. Dropping stars below 10 times the noise removes that bias (see
 # documentation/library_design/validation/stacking.md, STK-19).
-STAR_GAIN_MINIMUM_SIGNAL_TO_NOISE = 10.0
+STAR_GAIN_MINIMUM_SIGNAL_TO_NOISE = TunedParameter(
+    name="stacking.star_gain_minimum_signal_to_noise",
+    default=10.0,
+    unit="ratio",
+    description="Lowest signal-to-noise ratio a star must have to be used in the star-flux gain.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-19",
+)
 
 # How many empty apertures are measured to find the noise, how far from every
 # detected star each must lie (the sky ring's outer radius twice, so no ring
 # touches a star's wings), and the seed that keeps the choice repeatable.
-STAR_GAIN_EMPTY_APERTURES = 200
+STAR_GAIN_EMPTY_APERTURES = TunedParameter(
+    name="stacking.star_gain_empty_apertures",
+    default=200,
+    unit="apertures",
+    description="Number of empty apertures measured to find the noise in the star-flux gain.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D70",
+    pending_conversion=True,
+)
 
-STAR_GAIN_NOISE_PROBE_STARS = 50
+STAR_GAIN_NOISE_PROBE_STARS = TunedParameter(
+    name="stacking.star_gain_noise_probe_stars",
+    default=50,
+    unit="stars",
+    description="Number of stars used to probe the noise in the star-flux gain.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D70",
+    pending_conversion=True,
+)
 
 STAR_GAIN_EMPTY_APERTURE_ATTEMPTS = 3000
 
@@ -109,9 +196,28 @@ STAR_GAIN_EMPTY_APERTURE_SEED = 20261013
 # in the faint quarter and the bright quarter for the linearity test. A group
 # below either count falls back to the pixel method. The counts are design
 # choices (see documentation/library_design/validation/stacking.md, STK-19).
-STAR_GAIN_MINIMUM_STARS = 16
+STAR_GAIN_MINIMUM_STARS = TunedParameter(
+    name="stacking.star_gain_minimum_stars",
+    default=16,
+    unit="stars",
+    description="Fewest stars two groups must share for the star-flux gain to be used.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-19",
+)
 
-STAR_GAIN_MINIMUM_STARS_PER_QUARTILE = 4
+STAR_GAIN_MINIMUM_STARS_PER_QUARTILE = TunedParameter(
+    name="stacking.star_gain_minimum_stars_per_quartile",
+    default=4,
+    unit="stars",
+    description="Fewest shared stars the star-flux gain needs in each brightness quartile.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D70",
+    pending_conversion=True,
+)
 
 
 @dataclass
@@ -182,7 +288,7 @@ def find_isolated_stars(stars: np.ndarray) -> np.ndarray:
     if len(stars) < 2:
         return stars
     neighbour_distance = cKDTree(stars).query(stars, k=2)[0][:, 1]
-    return stars[neighbour_distance > STAR_GAIN_SKY_OUTER_PIXELS]
+    return stars[neighbour_distance > resolve(STAR_GAIN_SKY_OUTER_PIXELS).value]
 
 
 def _measure_star_fluxes(plane: np.ndarray, usable: np.ndarray, stars: np.ndarray) -> np.ndarray:
@@ -205,9 +311,12 @@ def _measure_star_fluxes(plane: np.ndarray, usable: np.ndarray, stars: np.ndarra
         untrusted pixel inside its sky ring's outer radius, which includes the
         aperture. That is how a star with a clipped core is left out.
     """
-    reach = math.ceil(STAR_GAIN_SKY_OUTER_PIXELS)
+    star_gain_sky_outer_pixels = resolve(STAR_GAIN_SKY_OUTER_PIXELS).value
+    star_gain_aperture_radius_pixels = resolve(STAR_GAIN_APERTURE_RADIUS_PIXELS).value
+    star_gain_sky_inner_pixels = resolve(STAR_GAIN_SKY_INNER_PIXELS).value
+    reach = math.ceil(star_gain_sky_outer_pixels)
     offsets = np.arange(-reach, reach + 1)
-    inside_ring = np.hypot(*np.meshgrid(offsets, offsets)) <= STAR_GAIN_SKY_OUTER_PIXELS
+    inside_ring = np.hypot(*np.meshgrid(offsets, offsets)) <= star_gain_sky_outer_pixels
     fluxes = np.full(len(stars), np.nan)
     for index, (row, column) in enumerate(stars):
         center_row, center_column = round(row), round(column)
@@ -220,9 +329,9 @@ def _measure_star_fluxes(plane: np.ndarray, usable: np.ndarray, stars: np.ndarra
             plane,
             float(column),
             float(row),
-            radius=STAR_GAIN_APERTURE_RADIUS_PIXELS,
-            annulus_inner=STAR_GAIN_SKY_INNER_PIXELS,
-            annulus_outer=STAR_GAIN_SKY_OUTER_PIXELS,
+            radius=star_gain_aperture_radius_pixels,
+            annulus_inner=star_gain_sky_inner_pixels,
+            annulus_outer=star_gain_sky_outer_pixels,
             cutout_radius=reach + 1,
             saturation_threshold_adu=math.inf,
         )
@@ -265,21 +374,23 @@ def _measure_empty_aperture_noise(
         The noise of an aperture flux in the image's units, or NaN when fewer
         than half of `STAR_GAIN_EMPTY_APERTURES` positions could be found.
     """
-    margin = math.ceil(STAR_GAIN_SKY_OUTER_PIXELS) + 1
+    star_gain_sky_outer_pixels = resolve(STAR_GAIN_SKY_OUTER_PIXELS).value
+    star_gain_empty_apertures = resolve(STAR_GAIN_EMPTY_APERTURES).value
+    margin = math.ceil(star_gain_sky_outer_pixels) + 1
     height, width = difference_plane.shape
     tree = cKDTree(stars) if len(stars) else None
     positions = []
     for _ in range(STAR_GAIN_EMPTY_APERTURE_ATTEMPTS):
         row = random_generator.uniform(margin, height - margin)
         column = random_generator.uniform(margin, width - margin)
-        if tree is not None and tree.query([row, column])[0] <= 2.0 * STAR_GAIN_SKY_OUTER_PIXELS:
+        if tree is not None and tree.query([row, column])[0] <= 2.0 * star_gain_sky_outer_pixels:
             continue
         positions.append((row, column))
-        if len(positions) >= 4 * STAR_GAIN_EMPTY_APERTURES:
+        if len(positions) >= 4 * star_gain_empty_apertures:
             break
     fluxes = _measure_star_fluxes(difference_plane, usable, np.array(positions).reshape(-1, 2))
-    fluxes = fluxes[np.isfinite(fluxes)][:STAR_GAIN_EMPTY_APERTURES]
-    if fluxes.size < STAR_GAIN_EMPTY_APERTURES // 2:
+    fluxes = fluxes[np.isfinite(fluxes)][:star_gain_empty_apertures]
+    if fluxes.size < star_gain_empty_apertures // 2:
         return float("nan")
     return float(np.percentile(fluxes, 84.13))
 
@@ -319,11 +430,15 @@ def measure_star_flux_ratios(
         too few per quarter (`STAR_GAIN_MINIMUM_STARS_PER_QUARTILE`), so the
         caller falls back to another method.
     """
+    star_gain_minimum_stars = resolve(STAR_GAIN_MINIMUM_STARS).value
+    star_gain_minimum_stars_per_quartile = resolve(STAR_GAIN_MINIMUM_STARS_PER_QUARTILE).value
+    star_gain_noise_probe_stars = resolve(STAR_GAIN_NOISE_PROBE_STARS).value
+    star_gain_minimum_signal_to_noise = resolve(STAR_GAIN_MINIMUM_SIGNAL_TO_NOISE).value
     reference_plane = _photometry_plane(per_second_images[reference_index])
-    detected = detect_star_centroids(reference_plane, count=STAR_GAIN_DETECTION_COUNT)
+    detected = detect_star_centroids(reference_plane, count=resolve(STAR_GAIN_DETECTION_COUNT).value)
     stars = find_isolated_stars(detected)
     results: list[StarFluxRatios | None] = [None] * len(per_second_images)
-    if len(stars) < STAR_GAIN_MINIMUM_STARS:
+    if len(stars) < star_gain_minimum_stars:
         return results
     random_generator = np.random.default_rng(STAR_GAIN_EMPTY_APERTURE_SEED)
     reference_usable = _usable_plane(star_masks[reference_index])
@@ -335,25 +450,25 @@ def measure_star_flux_ratios(
         usable = _usable_plane(star_masks[index])
         fluxes = _measure_star_fluxes(plane, usable, stars)
         measured = np.isfinite(reference_fluxes) & np.isfinite(fluxes) & (reference_fluxes > 0) & (fluxes > 0)
-        if int(np.count_nonzero(measured)) < STAR_GAIN_MINIMUM_STARS:
+        if int(np.count_nonzero(measured)) < star_gain_minimum_stars:
             continue
         # A first gain from the brightest stars, whose noise hardly matters,
         # lets the difference image be formed.
         brightest = np.flatnonzero(measured)[np.argsort(reference_fluxes[measured])[::-1]]
-        brightest = brightest[:STAR_GAIN_NOISE_PROBE_STARS]
+        brightest = brightest[:star_gain_noise_probe_stars]
         first_gain = float(np.median(fluxes[brightest] / reference_fluxes[brightest]))
         noise = _measure_empty_aperture_noise(
             plane - first_gain * reference_plane, usable & reference_usable, detected, random_generator
         )
         if not np.isfinite(noise) or noise <= 0:
             continue
-        clean = measured & (reference_fluxes >= STAR_GAIN_MINIMUM_SIGNAL_TO_NOISE * noise)
-        if int(np.count_nonzero(clean)) < STAR_GAIN_MINIMUM_STARS:
+        clean = measured & (reference_fluxes >= star_gain_minimum_signal_to_noise * noise)
+        if int(np.count_nonzero(clean)) < star_gain_minimum_stars:
             continue
         order = np.argsort(reference_fluxes[clean])
         ratios = (fluxes[clean] / reference_fluxes[clean])[order]
         quarter = len(ratios) // 4
-        if quarter < STAR_GAIN_MINIMUM_STARS_PER_QUARTILE:
+        if quarter < star_gain_minimum_stars_per_quartile:
             continue
         results[index] = StarFluxRatios(
             gain=float(np.median(ratios)),
@@ -369,7 +484,7 @@ def measure_group_gains_with_stars(
     star_masks: list[np.ndarray],
     trusted_masks: list[np.ndarray],
     reference_index: int,
-    tolerance: float = DEFAULT_GAIN_DISAGREEMENT_TOLERANCE,
+    tolerance: float | None = None,
 ) -> list[GroupGainMeasurement]:
     """Measure each group's brightness scale from its stars, else its pixels.
 
@@ -406,6 +521,9 @@ def measure_group_gains_with_stars(
     measurements : `list` [`GroupGainMeasurement`]
         One entry per group.
     """
+    if tolerance is None:
+        tolerance = resolve(DEFAULT_GAIN_DISAGREEMENT_TOLERANCE).value
+    plausible_gain_range = resolve(PLAUSIBLE_GAIN_RANGE).value
     sky_levels = [
         estimate_sky_level(image, mask) for image, mask in zip(per_second_images, trusted_masks, strict=True)
     ]
@@ -440,7 +558,7 @@ def measure_group_gains_with_stars(
                 "Exposure group %d measured a star-flux gain of %.3g, outside %s; using 1 instead.",
                 index,
                 ratios.gain,
-                PLAUSIBLE_GAIN_RANGE,
+                plausible_gain_range,
             )
             measurements[index] = GroupGainMeasurement(
                 bright_end_ratio=ratios.bright_ratio,
@@ -483,5 +601,6 @@ def star_clip_level(clip_ceiling_adu: float | None = None) -> float:
         `STAR_GAIN_CLIP_FRACTION_OF_CEILING` of the ceiling, as a fraction of
         `FULL_SCALE_COUNTS` (the units of a Siril stack).
     """
-    ceiling = FULL_SCALE_COUNTS if clip_ceiling_adu is None or clip_ceiling_adu <= 0 else clip_ceiling_adu
-    return STAR_GAIN_CLIP_FRACTION_OF_CEILING * min(1.0, ceiling / FULL_SCALE_COUNTS)
+    full_scale_counts = resolve(FULL_SCALE_COUNTS).value
+    ceiling = full_scale_counts if clip_ceiling_adu is None or clip_ceiling_adu <= 0 else clip_ceiling_adu
+    return resolve(STAR_GAIN_CLIP_FRACTION_OF_CEILING).value * min(1.0, ceiling / full_scale_counts)

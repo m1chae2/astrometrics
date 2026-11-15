@@ -22,6 +22,7 @@ import numpy as np
 
 from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib._internal.drivers.fits_access import read_data
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
     DEFAULT_STAR_FWHM_PIXELS,
@@ -62,9 +63,7 @@ def _attribute(frame: Any, name: str) -> Any:
     return frame.get(name) if isinstance(frame, dict) else getattr(frame, name, None)
 
 
-def measure_group_saturation(
-    frames: list[Any], sample_count: int = FRAMES_SAMPLED_PER_GROUP
-) -> list[FrameSaturation]:
+def measure_group_saturation(frames: list[Any], sample_count: int | None = None) -> list[FrameSaturation]:
     """Measure saturation in a few raw frames spread through an exposure group.
 
     Parameters
@@ -73,6 +72,7 @@ def measure_group_saturation(
         The frame records (or dictionaries of them) of one exposure group.
     sample_count : `int`, optional
         How many frames to read, spread evenly through the group.
+        If `None`, the value of `FRAMES_SAMPLED_PER_GROUP` is used.
 
     Returns
     -------
@@ -80,6 +80,9 @@ def measure_group_saturation(
         One per frame that could be read. Frames that cannot be read are
         skipped, so this may be empty.
     """
+    if sample_count is None:
+        sample_count = resolve(FRAMES_SAMPLED_PER_GROUP).value
+    default_star_fwhm_pixels = resolve(DEFAULT_STAR_FWHM_PIXELS).value
     if not frames:
         return []
     positions = sorted({
@@ -91,7 +94,7 @@ def measure_group_saturation(
         path = _attribute(frame, "path")
         if not path:
             continue
-        fwhm = _attribute(_attribute(frame, "measurements"), "measured_fwhm_px") or DEFAULT_STAR_FWHM_PIXELS
+        fwhm = _attribute(_attribute(frame, "measurements"), "measured_fwhm_px") or default_star_fwhm_pixels
         try:
             data = np.asarray(read_data(str(path)))
         except OSError as read_error:
@@ -522,6 +525,7 @@ def raw_frame_clipping_gate(diagnostics: dict[str, Any]) -> GateResult:
         above `CLIPPED_FRAME_ZERO_FRACTION`. Failed otherwise. The measured
         value is the largest zero share of any group.
     """
+    clipped_frame_zero_fraction = resolve(CLIPPED_FRAME_ZERO_FRACTION).value
     limit_source = (
         "share of raw pixels at exactly zero; 0.2 sits between the clipped 1 s and the clean 2 s "
         "groups of the Vega session (ASI533MM Pro, offset 0)"
@@ -535,10 +539,10 @@ def raw_frame_clipping_gate(diagnostics: dict[str, Any]) -> GateResult:
         )
     largest = max(float(entry["frame_zero_fraction"]) for entry in measured)
     clipped = [
-        entry for entry in measured if float(entry["frame_zero_fraction"]) > CLIPPED_FRAME_ZERO_FRACTION
+        entry for entry in measured if float(entry["frame_zero_fraction"]) > clipped_frame_zero_fraction
     ]
     if not clipped:
-        return passed_gate(RAW_FRAME_CLIPPING_GATE_NAME, largest, CLIPPED_FRAME_ZERO_FRACTION, limit_source)
+        return passed_gate(RAW_FRAME_CLIPPING_GATE_NAME, largest, clipped_frame_zero_fraction, limit_source)
     exposures = ", ".join(f"{entry['exposure_seconds']:g} s" for entry in clipped)
     if len(clipped) == len(measured):
         detail = (
@@ -554,7 +558,7 @@ def raw_frame_clipping_gate(diagnostics: dict[str, Any]) -> GateResult:
         RAW_FRAME_CLIPPING_GATE_NAME,
         detail,
         measured_value=largest,
-        limit=CLIPPED_FRAME_ZERO_FRACTION,
+        limit=clipped_frame_zero_fraction,
         limit_source=limit_source,
     )
 

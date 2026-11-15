@@ -92,6 +92,7 @@ from scipy.interpolate import PchipInterpolator
 from scipy.ndimage import gaussian_filter1d
 
 from astrometricslib._internal.drivers.interfaces.gaia_xp_driver import GaiaXpDownloadError, GaiaXpDriver
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.gaia_xp_comparison import (
     GaiaXpBandResidual,
     GaiaXpBandSummary,
@@ -100,6 +101,13 @@ from astrometricslib.models.quality.gaia_xp_comparison import (
 )
 from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.models.quality.spectroscopy_quality import StageQualityMetric, metric
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_mask import atmospheric_band_mask
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
     FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
@@ -115,12 +123,32 @@ GAIA_XP_GATE_NAME = "gaia_xp_agreement"
 # The wavelength range compared, in Angstroms. It is the range the instrument
 # response is fitted over (`DEFAULT_RESPONSE_WAVELENGTH_RANGE_ANGSTROM`); the
 # response-corrected spectrum is NaN outside it.
-COMPARISON_RANGE_ANGSTROM = (4200.0, 8000.0)
+COMPARISON_RANGE_ANGSTROM = TunedParameter(
+    name="spectroscopy.comparison_range_angstrom",
+    default=(4200.0, 8000.0),
+    unit="Å",
+    description="The wavelength range over which spectra are compared with the Gaia XP reference.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D31",
+    pending_conversion=True,
+)
 
 # Both spectra are scaled to have the same median over this window, in
 # Angstroms. It sits near the peak of the response and holds no strong line
 # of an A, F or G star, so the median is steady.
-NORMALIZATION_WINDOW_ANGSTROM = (5400.0, 5600.0)
+NORMALIZATION_WINDOW_ANGSTROM = TunedParameter(
+    name="spectroscopy.normalization_window_angstrom",
+    default=(5400.0, 5600.0),
+    unit="Å",
+    description="The window over which both spectra are scaled to the same median.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D29",
+    pending_conversion=True,
+)
 
 # The wavelength the straight-line slope is quoted at: the middle of the
 # normalisation window. The ratio is 1 there by construction, so the slope is
@@ -160,24 +188,74 @@ GRID_PADDING_ANGSTROM = 400.0
 MINIMUM_BLUR_FWHM_ANGSTROM = 1.0
 
 # The fewest samples the comparison needs, and the fewest a band needs.
-MINIMUM_COMPARED_SAMPLES = 30
-MINIMUM_BAND_SAMPLES = 3
+MINIMUM_COMPARED_SAMPLES = TunedParameter(
+    name="spectroscopy.minimum_compared_samples",
+    default=30,
+    unit="count",
+    description="The fewest samples the Gaia XP comparison needs.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D29",
+    pending_conversion=True,
+)
+MINIMUM_BAND_SAMPLES = TunedParameter(
+    name="spectroscopy.minimum_band_samples",
+    default=3,
+    unit="count",
+    description="The fewest samples a comparison band needs.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D29",
+    pending_conversion=True,
+)
 
 # The error floor on the ratio at every sample, as a fraction. XP's absolute
 # calibration is good to about 1 to 2 percent, and a line our blur does not
 # match leaves a residual far above the formal errors. Without a floor the
 # few samples with tiny errors would decide the straight-line fit. Designed.
-RATIO_ERROR_FLOOR_FRACTION = 0.01
+RATIO_ERROR_FLOOR_FRACTION = TunedParameter(
+    name="spectroscopy.ratio_error_floor_fraction",
+    default=0.01,
+    unit="fraction",
+    description="The floor on the relative error of the spectrum ratio at every sample.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D29",
+    pending_conversion=True,
+)
 
 # The wavelength shift is searched for within this many Angstroms either
 # way. Five pixels of dispersion, far more than a bad calibration should give.
-MAXIMUM_SEARCH_SHIFT_ANGSTROM = 60.0
+MAXIMUM_SEARCH_SHIFT_ANGSTROM = TunedParameter(
+    name="spectroscopy.maximum_search_shift_angstrom",
+    default=60.0,
+    unit="× resolution",
+    description="The wavelength shift is searched for within this many Angstroms either way.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D30",
+    pending_conversion=True,
+)
 
 # The logarithmic derivatives are high-pass filtered: a Gaussian running mean
 # of this sigma, in Angstroms, is subtracted, so a smooth tilt or curvature of
 # the ratio does not drive the correlation. It is wider than the features
 # that carry the shift (about 100 Angstroms) and narrower than the continuum.
-SHIFT_HIGH_PASS_SIGMA_ANGSTROM = 400.0
+SHIFT_HIGH_PASS_SIGMA_ANGSTROM = TunedParameter(
+    name="spectroscopy.shift_high_pass_sigma_angstrom",
+    default=400.0,
+    unit="× resolution",
+    description="Sigma of the Gaussian running mean subtracted so a smooth tilt does not bias the shift.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D30",
+    pending_conversion=True,
+)
 
 # Both spectra are smoothed by a Gaussian of this sigma, in Angstroms, before
 # the logarithmic derivative is taken. Differencing amplifies noise, and a
@@ -185,13 +263,32 @@ SHIFT_HIGH_PASS_SIGMA_ANGSTROM = 400.0
 # Smoothing both the same way does not move a feature, so the shift is
 # unchanged; 25 Angstroms (a FWHM of 59) is a little more than the sample
 # spacing and well below the resolution of both spectra.
-SHIFT_SMOOTHING_SIGMA_ANGSTROM = 25.0
+SHIFT_SMOOTHING_SIGMA_ANGSTROM = TunedParameter(
+    name="spectroscopy.shift_smoothing_sigma_angstrom",
+    default=25.0,
+    unit="× resolution",
+    description="Sigma of the Gaussian that smooths both spectra before the logarithmic derivative is taken.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D30",
+    pending_conversion=True,
+)
 
 # A correlation peak below this is too weak to give a shift. Two spectra of
 # the same star correlate at 0.9 or more in the synthetic tests; the value is
 # designed, a point well above chance for about 700 independent points
 # (about 0.04), not yet checked against real spectra.
-MINIMUM_SHIFT_CORRELATION = 0.3
+MINIMUM_SHIFT_CORRELATION = TunedParameter(
+    name="spectroscopy.minimum_shift_correlation",
+    default=0.3,
+    unit="correlation",
+    description="A correlation peak below this is too weak to give a wavelength shift.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-28",
+)
 
 # The designed limits of the checkpoint metrics and of the run gate.
 #
@@ -203,12 +300,51 @@ MINIMUM_SHIFT_CORRELATION = 0.3
 #   airmass error the extinction correction makes at 0.3 airmass.
 # 11: the wavelength shift, in Angstroms. One pixel of dispersion
 #   (11.0 to 11.4 Angstroms, see `spectral_resolution`).
-GAIA_XP_RESIDUAL_RMS_LIMIT = 0.05
-GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM = 3.0
-GAIA_XP_WAVELENGTH_SHIFT_LIMIT_ANGSTROM = 11.0
+GAIA_XP_RESIDUAL_RMS_LIMIT = TunedParameter(
+    name="spectroscopy.gaia_xp_residual_rms_limit",
+    default=0.05,
+    unit="fraction",
+    description="The largest residual RMS against Gaia XP the checkpoint and run gate accept.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D14",
+    pending_conversion=True,
+)
+GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM = TunedParameter(
+    name="spectroscopy.gaia_xp_slope_limit_percent_per_1000_angstrom",
+    default=3.0,
+    unit="% per 1000 Å",
+    description="The largest spectral slope error against Gaia XP the checkpoint and run gate accept.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D15",
+    pending_conversion=True,
+)
+GAIA_XP_WAVELENGTH_SHIFT_LIMIT_ANGSTROM = TunedParameter(
+    name="spectroscopy.gaia_xp_wavelength_shift_limit_angstrom",
+    default=11.0,
+    unit="× resolution",
+    description="The largest wavelength shift against Gaia XP the checkpoint and run gate accept.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D16",
+    pending_conversion=True,
+)
 
 # The run gate needs at least this many compared stars.
-MINIMUM_STARS_FOR_GATE = 3
+MINIMUM_STARS_FOR_GATE = TunedParameter(
+    name="spectroscopy.minimum_stars_for_gate",
+    default=3,
+    unit="count",
+    description="The fewest compared stars the Gaia XP run gate needs.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D17",
+)
 
 REASON_NO_SOURCE_ID = "no Gaia DR3 source id is known for this star"
 REASON_NO_SPECTRUM = (
@@ -365,15 +501,15 @@ def _wavelength_shift(
             return np.full(spectrum.shape, np.nan)
         filled = np.interp(grid_angstrom, grid_angstrom[good], logarithm[good])
         smoothed = gaussian_filter1d(
-            filled, SHIFT_SMOOTHING_SIGMA_ANGSTROM / GRID_STEP_ANGSTROM, mode="nearest"
+            filled, resolve(SHIFT_SMOOTHING_SIGMA_ANGSTROM).value / GRID_STEP_ANGSTROM, mode="nearest"
         )
         derivative = np.gradient(smoothed, grid_angstrom)
-        sigma = SHIFT_HIGH_PASS_SIGMA_ANGSTROM / GRID_STEP_ANGSTROM
+        sigma = resolve(SHIFT_HIGH_PASS_SIGMA_ANGSTROM).value / GRID_STEP_ANGSTROM
         return derivative - gaussian_filter1d(derivative, sigma, mode="nearest")
 
     observed_derivative = high_pass_log_derivative(observed)
     xp_derivative = high_pass_log_derivative(xp)
-    maximum_lag = round(MAXIMUM_SEARCH_SHIFT_ANGSTROM / GRID_STEP_ANGSTROM)
+    maximum_lag = round(resolve(MAXIMUM_SEARCH_SHIFT_ANGSTROM).value / GRID_STEP_ANGSTROM)
     lags = np.arange(-maximum_lag, maximum_lag + 1)
     correlations = np.full(lags.shape, np.nan)
     count = usable.size
@@ -395,7 +531,7 @@ def _wavelength_shift(
         return None, None
     peak = int(np.nanargmax(correlations))
     peak_correlation = float(correlations[peak])
-    if peak_correlation < MINIMUM_SHIFT_CORRELATION or peak in (0, lags.size - 1):
+    if peak_correlation < resolve(MINIMUM_SHIFT_CORRELATION).value or peak in (0, lags.size - 1):
         return None, peak_correlation
     left, centre, right = correlations[peak - 1], correlations[peak], correlations[peak + 1]
     # The vertex of the parabola through the peak and its two neighbours.
@@ -439,7 +575,7 @@ def compare_spectrum_to_xp(
     gaia_source_id: int | None = None,
     intensity_errors: Sequence[float] | np.ndarray | None = None,
     line_spread: ResolutionProfile | None = None,
-    fallback_resolution_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    fallback_resolution_angstrom: float | None = None,
 ) -> GaiaXpComparison:
     """Compare a response-corrected spectrum with a Gaia XP spectrum.
 
@@ -471,6 +607,9 @@ def compare_spectrum_to_xp(
         than `MINIMUM_COMPARED_SAMPLES` samples can be compared or the
         normalisation window holds no usable sample.
     """
+    minimum_band_samples = resolve(MINIMUM_BAND_SAMPLES).value
+    if fallback_resolution_angstrom is None:
+        fallback_resolution_angstrom = resolve(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM).value
     wavelength = np.asarray(wavelength_angstrom, dtype=float)
     brightness = np.asarray(intensity, dtype=float)
     errors = None if intensity_errors is None else np.asarray(intensity_errors, dtype=float)
@@ -478,12 +617,12 @@ def compare_spectrum_to_xp(
         errors = None
     xp_wavelength, xp_flux, xp_flux_error = (np.asarray(array, dtype=float) for array in xp_spectrum)
 
-    low, high = COMPARISON_RANGE_ANGSTROM
+    low, high = resolve(COMPARISON_RANGE_ANGSTROM).value
     in_range = np.isfinite(wavelength) & np.isfinite(brightness) & (wavelength >= low) & (wavelength <= high)
     clear_of_air = in_range & ~atmospheric_band_mask(wavelength)
-    if int(clear_of_air.sum()) < MINIMUM_COMPARED_SAMPLES:
+    if int(clear_of_air.sum()) < resolve(MINIMUM_COMPARED_SAMPLES).value:
         return _not_checked(
-            f"fewer than {MINIMUM_COMPARED_SAMPLES} usable samples "
+            f"fewer than {resolve(MINIMUM_COMPARED_SAMPLES).value} usable samples "
             f"between {low:.0f} and {high:.0f} Angstroms",
             gaia_source_id,
         )
@@ -520,11 +659,11 @@ def compare_spectrum_to_xp(
     observed_at_samples = np.interp(sample_wavelength, grid, observed_blurred)
     xp_at_samples = np.interp(sample_wavelength, grid, xp_blurred)
     xp_error_at_samples = np.interp(sample_wavelength, xp_wavelength, xp_flux_error)
-    window_low, window_high = NORMALIZATION_WINDOW_ANGSTROM
+    window_low, window_high = resolve(NORMALIZATION_WINDOW_ANGSTROM).value
     in_window = (sample_wavelength >= window_low) & (sample_wavelength <= window_high)
-    if int(in_window.sum()) < MINIMUM_BAND_SAMPLES:
+    if int(in_window.sum()) < minimum_band_samples:
         return _not_checked(
-            f"fewer than {MINIMUM_BAND_SAMPLES} usable samples "
+            f"fewer than {minimum_band_samples} usable samples "
             f"between {window_low:.0f} and {window_high:.0f} Angstroms",
             gaia_source_id,
         )
@@ -536,9 +675,10 @@ def compare_spectrum_to_xp(
     usable = (xp_at_samples > 0) & (observed_at_samples > 0)
     sample_wavelength = sample_wavelength[usable]
     ratio = (observed_at_samples[usable] / observed_level) / (xp_at_samples[usable] / xp_level)
-    if sample_wavelength.size < MINIMUM_COMPARED_SAMPLES:
+    if sample_wavelength.size < resolve(MINIMUM_COMPARED_SAMPLES).value:
         return _not_checked(
-            f"fewer than {MINIMUM_COMPARED_SAMPLES} positive samples to compare", gaia_source_id
+            f"fewer than {resolve(MINIMUM_COMPARED_SAMPLES).value} positive samples to compare",
+            gaia_source_id,
         )
 
     # The ratio's one-sigma error: the errors of the two spectra added in
@@ -549,7 +689,9 @@ def compare_spectrum_to_xp(
     if errors is not None:
         relative_observed_error = np.abs(errors[clear_of_air][usable] / observed_at_samples[usable])
         relative_observed_error = np.where(np.isfinite(relative_observed_error), relative_observed_error, 0.0)
-    sigma = ratio * np.sqrt(relative_xp_error**2 + relative_observed_error**2 + RATIO_ERROR_FLOOR_FRACTION**2)
+    sigma = ratio * np.sqrt(
+        relative_xp_error**2 + relative_observed_error**2 + resolve(RATIO_ERROR_FLOOR_FRACTION).value ** 2
+    )
 
     scaled_wavelength = (sample_wavelength - SLOPE_REFERENCE_ANGSTROM) / 1000.0
     _intercept, slope, slope_error = _straight_line_fit(scaled_wavelength, ratio, sigma)
@@ -561,7 +703,7 @@ def compare_spectrum_to_xp(
             (sample_wavelength <= band_end) if last_band else (sample_wavelength < band_end)
         )
         band_ratio = ratio[in_band]
-        enough = band_ratio.size >= MINIMUM_BAND_SAMPLES
+        enough = band_ratio.size >= minimum_band_samples
         bands.append(
             GaiaXpBandResidual(
                 start_angstrom=band_start,
@@ -633,7 +775,7 @@ def compare_to_gaia_xp(
     *,
     intensity_errors: Sequence[float] | np.ndarray | None = None,
     line_spread: ResolutionProfile | None = None,
-    fallback_resolution_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    fallback_resolution_angstrom: float | None = None,
 ) -> GaiaXpComparison:
     """Check one star's response-corrected spectrum against Gaia XP.
 
@@ -668,6 +810,8 @@ def compare_to_gaia_xp(
     comparison : `GaiaXpComparison`
         The comparison, or a ``not_checked`` record that says why not.
     """
+    if fallback_resolution_angstrom is None:
+        fallback_resolution_angstrom = resolve(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM).value
     not_checked = gaia_xp_precheck(gaia_source_id, response_corrected_intensity)
     if not_checked is not None:
         return not_checked
@@ -726,7 +870,7 @@ def gaia_xp_metrics(comparison: GaiaXpComparison | None) -> list[StageQualityMet
             "gaia_xp_residual_rms_fraction",
             rms,
             "fraction",
-            limit=GAIA_XP_RESIDUAL_RMS_LIMIT,
+            limit=resolve(GAIA_XP_RESIDUAL_RMS_LIMIT).value,
             higher_is_better=False,
             note="RMS of observed / Gaia XP - 1 over 4200-8000 A; the limit is a designed value",
         ),
@@ -734,7 +878,7 @@ def gaia_xp_metrics(comparison: GaiaXpComparison | None) -> list[StageQualityMet
             "gaia_xp_slope_percent_per_1000_angstrom",
             abs(slope) if slope is not None else None,
             "percent per 1000 A",
-            limit=GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM,
+            limit=resolve(GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM).value,
             higher_is_better=False,
             note="absolute tilt of observed / Gaia XP; the limit is a designed value",
         ),
@@ -742,7 +886,7 @@ def gaia_xp_metrics(comparison: GaiaXpComparison | None) -> list[StageQualityMet
             "gaia_xp_wavelength_shift_angstrom",
             abs(shift) if shift is not None else None,
             "angstrom",
-            limit=GAIA_XP_WAVELENGTH_SHIFT_LIMIT_ANGSTROM,
+            limit=resolve(GAIA_XP_WAVELENGTH_SHIFT_LIMIT_ANGSTROM).value,
             higher_is_better=False,
             note="absolute feature shift against Gaia XP; the limit, one pixel of dispersion, is designed",
         ),
@@ -893,16 +1037,17 @@ def gaia_xp_gate(rows: Iterable[Mapping[str, Any]]) -> GateResult:
     """
     source = (
         f"median absolute tilt of observed / Gaia XP across compared stars within "
-        f"{GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM:.0f} percent per 1000 A (designed, not yet "
-        f"checked against real spectra); needs at least {MINIMUM_STARS_FOR_GATE} stars"
+        f"{resolve(GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM).value:.0f} "
+        f"percent per 1000 A (designed, not yet "
+        f"checked against real spectra); needs at least {resolve(MINIMUM_STARS_FOR_GATE).value} stars"
     )
     summary = summarize_gaia_xp(rows)
     compared = summary.compared_star_count if summary is not None else 0
-    if summary is None or compared < MINIMUM_STARS_FOR_GATE:
+    if summary is None or compared < resolve(MINIMUM_STARS_FOR_GATE).value:
         return unchecked_gate(
             GAIA_XP_GATE_NAME,
             f"only {compared} star(s) were compared with Gaia XP; "
-            f"at least {MINIMUM_STARS_FOR_GATE} are needed",
+            f"at least {resolve(MINIMUM_STARS_FOR_GATE).value} are needed",
             source,
         )
     median_absolute_slope = summary.median_absolute_slope_percent_per_1000_angstrom
@@ -910,18 +1055,18 @@ def gaia_xp_gate(rows: Iterable[Mapping[str, Any]]) -> GateResult:
         return unchecked_gate(GAIA_XP_GATE_NAME, "no compared star had a measurable tilt", source)
     median_slope = summary.median_slope_percent_per_1000_angstrom
     detail = f"median tilt {median_slope:+.2f} percent per 1000 A over {compared} stars"
-    if median_absolute_slope > GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM:
+    if median_absolute_slope > resolve(GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM).value:
         return failed_gate(
             GAIA_XP_GATE_NAME,
             f"the spectra disagree with Gaia XP: {detail}",
             median_absolute_slope,
-            GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM,
+            resolve(GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM).value,
             source,
         )
     return passed_gate(
         GAIA_XP_GATE_NAME,
         median_absolute_slope,
-        GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM,
+        resolve(GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM).value,
         source,
         detail,
     )

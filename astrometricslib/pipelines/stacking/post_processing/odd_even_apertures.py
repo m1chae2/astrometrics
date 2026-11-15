@@ -47,6 +47,13 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.stacking.post_processing.aperture_placement import (
     FAINT_SOURCE_CLEARANCE_PX,
     faint_source_distance,
@@ -82,7 +89,16 @@ APERTURE_RECORD_VERSION = 1
 # sigma / sqrt(n): 10% of the pixel noise for 100. Rows crossing a bright
 # nebula or stars are mostly masked and are dropped. Design estimate; no data
 # set chose it.
-MINIMUM_PIXELS_PER_LINE = 100
+MINIMUM_PIXELS_PER_LINE = TunedParameter(
+    name="stacking.minimum_pixels_per_line",
+    default=100,
+    unit="pixels",
+    description="Fewest usable empty-sky pixels a row or column needs to give a mean.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D33",
+)
 
 # The running mean that is taken off the line means before their scatter is
 # measured spans this many lines. A gradient or a vignetting trend changes
@@ -92,12 +108,30 @@ MINIMUM_PIXELS_PER_LINE = 100
 # ramp it returns the line's own value and removes the line noise too.) The
 # lines nearer than half a window to the image edge are not used, because their
 # window is not centered. Design estimate; no data set chose it.
-RUNNING_MEAN_LINES = 31
+RUNNING_MEAN_LINES = TunedParameter(
+    name="stacking.running_mean_lines",
+    default=31,
+    unit="lines",
+    description="Number of lines in the running mean taken off the line means.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D33",
+)
 
 # At least this many lines must give a mean for a scatter to be reported:
 # 20 lines give a 26% error on the spread (1.1664 / sqrt(20)), as the
 # empty-aperture noise accepts at its minimum.
-MINIMUM_LINES = 20
+MINIMUM_LINES = TunedParameter(
+    name="stacking.minimum_lines",
+    default=20,
+    unit="lines",
+    description="Fewest lines that must give a mean for a scatter to be reported.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D33",
+)
 
 
 @dataclass(frozen=True)
@@ -358,23 +392,25 @@ def _line_scatter(image: np.ndarray, usable: np.ndarray, axis: int) -> tuple[flo
         `RUNNING_MEAN_LINES` lines is taken off, and the number of lines
         that gave a mean; `None` when fewer than `MINIMUM_LINES` did.
     """
+    minimum_lines = resolve(MINIMUM_LINES).value
+    running_mean_lines = resolve(RUNNING_MEAN_LINES).value
     counts = usable.sum(axis=axis)
     totals = np.where(usable, image, 0.0).sum(axis=axis, dtype=np.float64)
     means = np.full(counts.shape, np.nan)
-    enough = counts >= MINIMUM_PIXELS_PER_LINE
+    enough = counts >= resolve(MINIMUM_PIXELS_PER_LINE).value
     means[enough] = totals[enough] / counts[enough]
-    if int(np.count_nonzero(enough)) < MINIMUM_LINES:
+    if int(np.count_nonzero(enough)) < minimum_lines:
         return None
-    half = RUNNING_MEAN_LINES // 2
-    if means.size <= RUNNING_MEAN_LINES:
+    half = running_mean_lines // 2
+    if means.size <= running_mean_lines:
         return None
-    windows = sliding_window_view(means, RUNNING_MEAN_LINES)
+    windows = sliding_window_view(means, running_mean_lines)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)  # a window of masked lines has no mean
         local = np.nanmean(windows, axis=1)
     residual = means[half : means.size - half] - local
     residual = residual[np.isfinite(residual)]
-    if residual.size < MINIMUM_LINES:
+    if residual.size < minimum_lines:
         return None
     scatter = float(robust_sigma(residual))
     return scatter, int(residual.size)
@@ -399,6 +435,8 @@ def measure_line_pattern(odd_plane: np.ndarray, even_plane: np.ndarray) -> LineP
     outcome : `LinePatternOutcome`
         The four scatters, or the reason there are none.
     """
+    minimum_lines = resolve(MINIMUM_LINES).value
+    minimum_pixels_per_line = resolve(MINIMUM_PIXELS_PER_LINE).value
     if odd_plane.shape != even_plane.shape:
         return LinePatternOutcome(None, "the two half stacks are on different pixel grids")
     holds_data = np.isfinite(odd_plane) & np.isfinite(even_plane) & (odd_plane != 0) & (even_plane != 0)
@@ -418,7 +456,7 @@ def measure_line_pattern(odd_plane: np.ndarray, even_plane: np.ndarray) -> LineP
         if scatter is None:
             return LinePatternOutcome(
                 None,
-                f"fewer than {MINIMUM_LINES} image lines hold {MINIMUM_PIXELS_PER_LINE} pixels of empty sky",
+                f"fewer than {minimum_lines} image lines hold {minimum_pixels_per_line} pixels of empty sky",
             )
         found[name] = scatter
     return LinePatternOutcome(

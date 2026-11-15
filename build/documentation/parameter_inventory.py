@@ -1,13 +1,15 @@
 """Purpose: Find the numeric constants and config defaults of the libraries.
 
-Description: The validation register names each tuned value. This module
-lists the numeric constants (module-level and class-level UPPER_CASE names
-built only from number literals) and the numeric config defaults (calls such
-as ``config.get("Section", "key", fallback="3")``) in ``astrometricslib/`` and
+Description: Every tuned value is a ``TunedParameter`` declaration, which is
+not a number literal. This module lists the plain numeric constants
+(module-level and class-level UPPER_CASE names built only from number
+literals) and the numeric config defaults (calls such as
+``config.get("Section", "key", fallback="3")``) in ``astrometricslib/`` and
 ``wayfindinglib/``. ``astrometricslib/test/test_parameter_inventory.py``
-compares that list with the register and with the two lists in
-``build/documentation/parameter_inventory/``, so a new tuning value cannot be
-added without being registered or judged not tuning.
+requires each one to be on exactly one of the two lists in
+``build/documentation/parameter_inventory/``: ``not_tuning.csv`` (decided not
+tuning, with a reason) or ``tuning_not_registered.csv`` (tuning values that
+are not declared yet, such as dict or nested-tuple values).
 
 Run ``python build/documentation/parameter_inventory.py --report`` for counts.
 """
@@ -19,7 +21,6 @@ import ast
 import csv
 import re
 import sys
-from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -61,7 +62,7 @@ class ParameterCandidate:
 
     @property
     def bare_name(self) -> str:
-        """The name the register uses: the constant name or the config key.
+        """The constant name or the config key, without its class or section.
 
         Returns
         -------
@@ -72,7 +73,7 @@ class ParameterCandidate:
 
 
 def bare_name(name: str) -> str:
-    """Return the part of a qualified name that the register uses.
+    """Return the part of a qualified name after its class or section.
 
     Parameters
     ----------
@@ -320,87 +321,6 @@ def find_parameters(repo_root: Path) -> list[ParameterCandidate]:
     return sorted(found, key=lambda candidate: (candidate.file, candidate.line, candidate.name))
 
 
-def registered_names(repo_root: Path) -> Registration:
-    """Read which constants and config keys the register names.
-
-    The register writes a constant or config key in backticks, or links it
-    with a hidden ``<!-- impl: dotted.path -->`` comment. A plain word in the
-    prose, such as "port", does not register anything. A name that only one
-    constant in the code has is registered wherever it is written. A name
-    that several constants share is registered only for the file written on
-    the same line, or named by the impl link.
-
-    Parameters
-    ----------
-    repo_root : `pathlib.Path`
-        Root of the repository.
-
-    Returns
-    -------
-    registration : `Registration`
-        The names tied to a file, and the names written with no file.
-    """
-    tied: set[tuple[str, str]] = set()
-    loose: set[str] = set()
-    for path in (repo_root / "documentation" / "library_design" / "validation").glob("*.md"):
-        for line in path.read_text(encoding="utf-8").splitlines():
-            for dotted in re.findall(r"<!-- impl: ([^ ]+?) -->", line):
-                parts = dotted.split(".")
-                loose.add(parts[-1])
-                tied.update((parts[-1], part) for part in parts[:-1])
-            stems = re.findall(r"(\w+)\.py\b", re.sub(r"<!-- impl: [^ ]+? -->", "", line))
-            stems += [
-                part
-                for dotted in re.findall(r"<!-- impl: ([^ ]+?) -->", line)
-                for part in dotted.split(".")[:-1]
-            ]
-            for span in re.findall(r"`([^`\n]+)`", line):
-                for word in re.findall(r"\w+", span):
-                    loose.add(word)
-                    tied.update((word, stem) for stem in stems)
-    return Registration(tied=frozenset(tied), loose=frozenset(loose))
-
-
-@dataclass(frozen=True)
-class Registration:
-    """The names the validation register gives, read by `registered_names`.
-
-    Attributes
-    ----------
-    tied : `frozenset` [`tuple` [`str`, `str`]]
-        Pairs of a bare name and the file stem (``group_gains``) it is
-        written with.
-    loose : `frozenset` [`str`]
-        Every bare name written in backticks or in an impl link.
-    """
-
-    tied: frozenset[tuple[str, str]]
-    loose: frozenset[str]
-
-    def covers(self, file: str, name: str, name_counts: Counter[str]) -> bool:
-        """Say whether the register names one parameter.
-
-        Parameters
-        ----------
-        file : `str`
-            The parameter's repository-relative file.
-        name : `str`
-            Its qualified name, such as ``Gate.LIMIT`` or ``[Section] key``.
-        name_counts : `collections.Counter` [`str`]
-            How many found parameters share each bare name. A shared name
-            counts only when it is written with this parameter's file.
-
-        Returns
-        -------
-        covered : `bool`
-            True when the register names this parameter.
-        """
-        bare = bare_name(name)
-        if (bare, Path(file).stem) in self.tied:
-            return True
-        return bare in self.loose and name_counts[bare] == 1
-
-
 def read_list(path: Path) -> list[dict[str, str]]:
     """Read one of the two inventory CSV files.
 
@@ -421,7 +341,7 @@ def read_list(path: Path) -> list[dict[str, str]]:
 
 
 def classify(repo_root: Path) -> dict[str, list]:
-    """Sort each found parameter by where it is accounted for.
+    """Sort each found parameter by the list that accounts for it.
 
     Parameters
     ----------
@@ -431,15 +351,12 @@ def classify(repo_root: Path) -> dict[str, list]:
     Returns
     -------
     groups : `dict` [`str`, `list`]
-        Keys ``found``, ``registered``, ``not_tuning``, ``backlog``,
-        ``unlisted``.
+        Keys ``found``, ``not_tuning``, ``backlog``, ``unlisted``.
     """
-    registration = registered_names(repo_root)
     candidates = find_parameters(repo_root)
-    name_counts = Counter(candidate.bare_name for candidate in candidates)
     not_tuning = {(row["file"], row["name"]) for row in read_list(NOT_TUNING_FILE)}
     backlog = {(row["file"], row["name"]) for row in read_list(BACKLOG_FILE)}
-    groups: dict[str, list] = {"found": [], "registered": [], "not_tuning": [], "backlog": [], "unlisted": []}
+    groups: dict[str, list] = {"found": [], "not_tuning": [], "backlog": [], "unlisted": []}
     seen: set[tuple[str, str]] = set()
     for candidate in candidates:
         key = (candidate.file, candidate.name)
@@ -447,9 +364,7 @@ def classify(repo_root: Path) -> dict[str, list]:
             continue
         seen.add(key)
         groups["found"].append(candidate)
-        if registration.covers(candidate.file, candidate.name, name_counts):
-            groups["registered"].append(candidate)
-        elif key in not_tuning:
+        if key in not_tuning:
             groups["not_tuning"].append(candidate)
         elif key in backlog:
             groups["backlog"].append(candidate)
@@ -469,7 +384,7 @@ def main(argv: list[str] | None = None) -> int:
     Returns
     -------
     exit_code : `int`
-        1 when any parameter is neither registered nor listed, otherwise 0.
+        1 when any parameter is not listed, otherwise 0.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[2])
@@ -479,7 +394,6 @@ def main(argv: list[str] | None = None) -> int:
     unlisted = groups["unlisted"]
     if args.report:
         print(f"found: {len(groups['found'])}")
-        print(f"registered: {len(groups['registered'])}")
         print(f"listed not tuning: {len(groups['not_tuning'])}")
         print(f"listed tuning, not registered: {len(groups['backlog'])}")
         print(f"unlisted: {len(unlisted)}")

@@ -22,6 +22,7 @@ design estimate: the data is observational, not a designed test, and altitude
 is linked to time of night, so a poor region can be a poor hour.
 """
 
+from astrometricslib.parameters import resolve_parameter
 from astrometricslib.reports import QualityLimit
 from wayfindinglib.analytics.performance_envelope import BASELINE_SPREAD_MULTIPLIER, MINIMUM_BASELINE_SESSIONS
 from wayfindinglib.models.quality.statements import TargetStatement
@@ -92,17 +93,17 @@ def _insufficient_data(input_quality: SkyInputQuality) -> TargetStatement:
         "sky_insufficient_data",
         message=(
             f"Only {input_quality.nights} nights have measurements with a known pointing; at least "
-            f"{MINIMUM_BASELINE_SESSIONS} are needed to compare parts of the sky."
+            f"{resolve_parameter(MINIMUM_BASELINE_SESSIONS).value} are needed to compare parts of the sky."
         ),
         reason=(
             "Too few nights with a known pointing. Image on more nights and sync, then the parts "
             "of the sky can be compared."
         ),
         values={"nights": float(input_quality.nights)},
-        plain_values={"minimum": MINIMUM_BASELINE_SESSIONS},
+        plain_values={"minimum": resolve_parameter(MINIMUM_BASELINE_SESSIONS).value},
         limits=[
             design_limit(
-                float(MINIMUM_BASELINE_SESSIONS),
+                float(resolve_parameter(MINIMUM_BASELINE_SESSIONS).value),
                 "nights",
                 "Fewest nights with a known pointing that a comparison of parts of the sky needs.",
                 "WAY-D42",
@@ -149,7 +150,7 @@ def _poor_region(metric: str, bin_: SkyBinResult, tolerance: float) -> TargetSta
         limits=[
             _tolerance_limit(tolerance),
             design_limit(
-                BASELINE_SPREAD_MULTIPLIER,
+                resolve_parameter(BASELINE_SPREAD_MULTIPLIER).value,
                 "sigma",
                 "How many robust standard deviations of the nights' own values a part must be worse by.",
                 "WAY-D42",

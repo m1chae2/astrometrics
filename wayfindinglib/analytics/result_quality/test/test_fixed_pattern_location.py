@@ -146,7 +146,7 @@ def test_an_excess_that_grows_with_the_distance_from_the_center_is_a_radial_tren
     radial = location.test_for(FixedPatternShape.RADIAL_TREND)
     assert radial is not None
     assert radial.sigmas is not None
-    assert radial.sigmas >= SHAPE_SIGMAS
+    assert radial.sigmas >= SHAPE_SIGMAS.default
     assert "grows" in radial.reason
 
 
@@ -158,7 +158,7 @@ def test_a_plane_in_the_sums_only_is_a_gradient() -> None:
     gradient = location.test_for(FixedPatternShape.GRADIENT)
     assert gradient is not None
     assert gradient.sigmas is not None
-    assert gradient.sigmas >= SHAPE_SIGMAS
+    assert gradient.sigmas >= SHAPE_SIGMAS.default
 
 
 def test_an_excess_near_the_target_is_named_and_not_a_radial_trend() -> None:
@@ -290,7 +290,7 @@ def test_without_line_pattern_rows_banding_is_not_tested() -> None:
 
 def test_too_few_apertures_leave_the_aperture_tests_out() -> None:
     """Fewer than the minimum apertures make no aperture test."""
-    location = locate_fixed_pattern(_apertures(23, count=MINIMUM_SHAPE_APERTURES - 1))
+    location = locate_fixed_pattern(_apertures(23, count=MINIMUM_SHAPE_APERTURES.default - 1))
     assert not any(test.tested for test in location.tests if test.shape != FixedPatternShape.BANDING)
     assert location.significant_shapes == []
 

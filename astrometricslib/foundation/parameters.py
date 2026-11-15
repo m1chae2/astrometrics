@@ -374,6 +374,10 @@ def resolve(
     """
     if parameter.source in (ParameterSource.HARDCODED, ParameterSource.DETERMINED_EACH_RUN):
         return ResolvedValue(name=parameter.name, value=parameter.default, origin=parameter.source)
+    if parameter.pending_conversion:
+        # The code still uses the default; the parameter table and a test
+        # list the values that are pending, so no notice is needed here.
+        return ResolvedValue(name=parameter.name, value=parameter.default, origin="default")
 
     value, reason = _lookup(parameter, configuration, equipment, tuned)
     if value is not None:

@@ -8,6 +8,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
+
 logger = logging.getLogger(__name__)
 
 # --- Placeholder values for a camera that is missing from the config --------
@@ -19,13 +27,83 @@ logger = logging.getLogger(__name__)
 # made-up camera. `FALLBACK_PIXEL_SIZE_UM` is the ZWO ASI533MM Pro's pixel
 # size, kept from before the warning existed so that nothing changed. The
 # others are generic guesses that were never checked against any camera.
-FALLBACK_PIXEL_SIZE_UM = 3.76
-FALLBACK_SENSOR_WIDTH_PX = 3000
-FALLBACK_SENSOR_HEIGHT_PX = 2000
-FALLBACK_SENSOR_MIN_WAVELENGTH_NM = 350.0
-FALLBACK_SENSOR_MAX_WAVELENGTH_NM = 900.0
-FALLBACK_GRATING_LINES_PER_MM = 100.0
-FALLBACK_GRATING_DISTANCE_MM = 0.0
+FALLBACK_PIXEL_SIZE_UM = TunedParameter(
+    name="utilities.fallback_pixel_size_um",
+    default=3.76,
+    unit="µm",
+    description="Pixel size used when the instrument file has none.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D56",
+    pending_conversion=True,
+)
+FALLBACK_SENSOR_WIDTH_PX = TunedParameter(
+    name="utilities.fallback_sensor_width_px",
+    default=3000,
+    unit="pixels",
+    description="Sensor width used when the instrument file has none.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D56",
+    pending_conversion=True,
+)
+FALLBACK_SENSOR_HEIGHT_PX = TunedParameter(
+    name="utilities.fallback_sensor_height_px",
+    default=2000,
+    unit="pixels",
+    description="Sensor height used when the instrument file has none.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D56",
+    pending_conversion=True,
+)
+FALLBACK_SENSOR_MIN_WAVELENGTH_NM = TunedParameter(
+    name="utilities.fallback_sensor_min_wavelength_nm",
+    default=350.0,
+    unit="nm",
+    description="Shortest sensor wavelength used when the instrument file has none.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D56",
+    pending_conversion=True,
+)
+FALLBACK_SENSOR_MAX_WAVELENGTH_NM = TunedParameter(
+    name="utilities.fallback_sensor_max_wavelength_nm",
+    default=900.0,
+    unit="nm",
+    description="Longest sensor wavelength used when the instrument file has none.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D56",
+    pending_conversion=True,
+)
+FALLBACK_GRATING_LINES_PER_MM = TunedParameter(
+    name="utilities.fallback_grating_lines_per_mm",
+    default=100.0,
+    unit="lines/mm",
+    description="Grating line density used when the instrument file has none.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D56",
+    pending_conversion=True,
+)
+FALLBACK_GRATING_DISTANCE_MM = TunedParameter(
+    name="utilities.fallback_grating_distance_mm",
+    default=0.0,
+    unit="mm",
+    description="Grating-to-sensor distance used when the instrument file has none.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D56",
+    pending_conversion=True,
+)
 FALLBACK_DISPERSION_ORIENTATION = "horizontal"
 FALLBACK_DISPERSION_DIRECTION = "negative"
 
@@ -33,7 +111,17 @@ FALLBACK_DISPERSION_DIRECTION = "negative"
 # spectrum at (see `SpectroscopyConfig.extraction_start_wavelength_nm`). It is
 # the start of the visible spectrum. It was chosen, not measured. The
 # instrument response and the classifier only use light redder than 420 nm.
-DEFAULT_EXTRACTION_START_WAVELENGTH_NM = 380.0
+DEFAULT_EXTRACTION_START_WAVELENGTH_NM = TunedParameter(
+    name="utilities.default_extraction_start_wavelength_nm",
+    default=380.0,
+    unit="nm",
+    description="Wavelength at which spectrum extraction starts when the settings give none.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D56",
+    pending_conversion=True,
+)
 
 
 class CameraConfig(BaseModel):
@@ -200,7 +288,7 @@ class SpectroscopyConfig(BaseModel):
     )
 
     extraction_start_wavelength_nm: float = Field(
-        DEFAULT_EXTRACTION_START_WAVELENGTH_NM,
+        resolve(DEFAULT_EXTRACTION_START_WAVELENGTH_NM).value,
         gt=0.0,
         description="Wavelength the calibration tuner treats as the start of the spectrum (nm)",
     )
@@ -393,28 +481,36 @@ class ConfigLoader:
             return str(value).strip().lower() in ("1", "true", "yes", "on")
 
         grating_distance_mm = get_f(
-            "grating_distance_mm", FALLBACK_GRATING_DISTANCE_MM, is_hardware_setting=True
+            "grating_distance_mm", resolve(FALLBACK_GRATING_DISTANCE_MM).value, is_hardware_setting=True
         )
         camera = CameraConfig(
             name=resolved_camera_name,
-            pixel_size_um=get_f("pixel_size_μm", FALLBACK_PIXEL_SIZE_UM, is_hardware_setting=True),
-            sensor_width_px=int(get_f("sensor_width_px", FALLBACK_SENSOR_WIDTH_PX, is_hardware_setting=True)),
+            pixel_size_um=get_f(
+                "pixel_size_μm", resolve(FALLBACK_PIXEL_SIZE_UM).value, is_hardware_setting=True
+            ),
+            sensor_width_px=int(
+                get_f("sensor_width_px", resolve(FALLBACK_SENSOR_WIDTH_PX).value, is_hardware_setting=True)
+            ),
             sensor_height_px=int(
-                get_f("sensor_height_px", FALLBACK_SENSOR_HEIGHT_PX, is_hardware_setting=True)
+                get_f("sensor_height_px", resolve(FALLBACK_SENSOR_HEIGHT_PX).value, is_hardware_setting=True)
             ),
             grating_distance_mm=grating_distance_mm,
             sensor_min_wavelength=get_f(
-                "sensor_min_wavelength", FALLBACK_SENSOR_MIN_WAVELENGTH_NM, is_hardware_setting=True
+                "sensor_min_wavelength",
+                resolve(FALLBACK_SENSOR_MIN_WAVELENGTH_NM).value,
+                is_hardware_setting=True,
             ),
             sensor_max_wavelength=get_f(
-                "sensor_max_wavelength", FALLBACK_SENSOR_MAX_WAVELENGTH_NM, is_hardware_setting=True
+                "sensor_max_wavelength",
+                resolve(FALLBACK_SENSOR_MAX_WAVELENGTH_NM).value,
+                is_hardware_setting=True,
             ),
         )
 
         spectroscopy_config = SpectroscopyConfig(
             camera=camera,
             grating_lines_per_mm=get_f(
-                "grating_lines_per_mm", FALLBACK_GRATING_LINES_PER_MM, is_hardware_setting=True
+                "grating_lines_per_mm", resolve(FALLBACK_GRATING_LINES_PER_MM).value, is_hardware_setting=True
             ),
             grating_distance_mm=grating_distance_mm,
             dispersion_orientation=get_s(
@@ -430,7 +526,7 @@ class ConfigLoader:
             dispersion_offset_y=get_f("dispersion_offset_y", 0.0),
             dispersion_angle_degrees=get_f("dispersion_angle_degrees", 0.0),
             extraction_start_wavelength_nm=get_f(
-                "extraction_start_wavelength_nm", DEFAULT_EXTRACTION_START_WAVELENGTH_NM
+                "extraction_start_wavelength_nm", resolve(DEFAULT_EXTRACTION_START_WAVELENGTH_NM).value
             ),
             expected_fwhm=get_f("expected_fwhm", 8.0),
             extraction_radius=int(get_f("extraction_radius", 10)),

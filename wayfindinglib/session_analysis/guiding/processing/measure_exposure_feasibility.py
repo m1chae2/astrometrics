@@ -37,31 +37,87 @@ from typing import Any
 
 import numpy as np
 
+from astrometricslib.parameters import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
 from wayfindinglib.models.session.guiding_run import GuidingRunSummary
 from wayfindinglib.models.session.session_quality import ExposureFeasibility
 
-LOST_STAR_CYCLES = 4
+LOST_STAR_CYCLES = TunedParameter(
+    name="wayfinding.lost_star_cycles",
+    default=4,
+    unit="× guide cycle",
+    description="A gap longer than this many guide cycles means the star was lost.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D135",
+    pending_conversion=True,
+)
 """A gap longer than this many guide cycles means the star was lost.
 
 Design estimate. One missed frame (two cycles between samples) happens in
 normal guiding; three in a row is a recovery. Four leaves room for one more.
 """
 
-RELIABLE_CLEAN_FRACTION = 0.5
+RELIABLE_CLEAN_FRACTION = TunedParameter(
+    name="wayfinding.reliable_clean_fraction",
+    default=0.5,
+    unit="fraction",
+    description="The clean share at which a length counts as reliable: most exposures work.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D46",
+)
 """The clean share at which a length counts as reliable: most exposures work.
 
 Design estimate. Below it, more exposures of that length are ruined than kept.
 """
 
-_STRIDE_FRACTION = 0.25
+_STRIDE_FRACTION = TunedParameter(
+    name="wayfinding.stride_fraction",
+    default=0.25,
+    unit="× exposure length",
+    description="Start times are tried every this fraction of the exposure length.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D135",
+    pending_conversion=True,
+)
 """Start times are tried every this fraction of the exposure length."""
 
-_MINIMUM_WINDOWS = 10
+_MINIMUM_WINDOWS = TunedParameter(
+    name="wayfinding.minimum_windows",
+    default=10,
+    unit="windows per exposure length",
+    description="Fewest windows for a length to be reported.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D135",
+    pending_conversion=True,
+)
 """Fewest windows for a length to be reported. Fewer would be a few exposures'
 worth of night."""
 
-_MAXIMUM_CADENCE_GAP_SECONDS = 60.0
+_MAXIMUM_CADENCE_GAP_SECONDS = TunedParameter(
+    name="wayfinding.measure_exposure_feasibility.maximum_cadence_gap_seconds",
+    default=60.0,
+    unit="s (scales with the guide cycle)",
+    description="A gap longer than this between samples is a stop in guiding.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    register_entry="WAY-D126",
+    pending_conversion=True,
+)
 """A gap longer than this between samples is a stop in guiding.
 
 It is excluded when working out the guide cycle, and it splits the samples into
@@ -97,7 +153,7 @@ def _run_spans(times: np.ndarray, runs: Sequence[GuidingRunSummary]) -> list[tup
         spans.append((run.started_at, end))
     if spans:
         return spans
-    breaks = np.flatnonzero(np.diff(times) >= _MAXIMUM_CADENCE_GAP_SECONDS)
+    breaks = np.flatnonzero(np.diff(times) >= resolve_parameter(_MAXIMUM_CADENCE_GAP_SECONDS).value)
     starts = np.concatenate([[0], breaks + 1])
     ends = np.concatenate([breaks, [times.size - 1]])
     return [(float(times[first]), float(times[last])) for first, last in zip(starts, ends, strict=True)]
@@ -147,7 +203,7 @@ def measure_exposure_feasibility(
     dra = np.array([sample["dra"] for sample in ordered])
     ddec = np.array([sample["ddec"] for sample in ordered])
     gaps = np.diff(times)
-    short_gaps = gaps[gaps < _MAXIMUM_CADENCE_GAP_SECONDS]
+    short_gaps = gaps[gaps < resolve_parameter(_MAXIMUM_CADENCE_GAP_SECONDS).value]
     if short_gaps.size == 0:
         return [], None
     cadence = float(np.median(short_gaps))
@@ -158,10 +214,12 @@ def measure_exposure_feasibility(
     for length in sorted({float(value) for value in exposure_lengths_seconds if value > 0}):
         counts = {"windows": 0, "clean": 0, "lost": 0, "jump": 0, "wobble": 0}
         for span_start, span_end in spans:
-            for start in np.arange(span_start, span_end - length + 1e-6, length * _STRIDE_FRACTION):
+            for start in np.arange(
+                span_start, span_end - length + 1e-6, length * resolve_parameter(_STRIDE_FRACTION).value
+            ):
                 first, last = np.searchsorted(times, [start, start + length])
                 window_times = np.concatenate([[start], times[first:last], [start + length]])
-                lost = bool(np.diff(window_times).max() > LOST_STAR_CYCLES * cadence)
+                lost = bool(np.diff(window_times).max() > resolve_parameter(LOST_STAR_CYCLES).value * cadence)
                 jumped = bool(jump[first:last].any())
                 wobble = (
                     last - first >= 2
@@ -173,7 +231,7 @@ def measure_exposure_feasibility(
                 counts["jump"] += jumped
                 counts["wobble"] += wobble
                 counts["clean"] += not (lost or jumped or wobble)
-        if counts["windows"] < _MINIMUM_WINDOWS:
+        if counts["windows"] < resolve_parameter(_MINIMUM_WINDOWS).value:
             continue
         total = counts["windows"]
         results.append(
@@ -189,6 +247,7 @@ def measure_exposure_feasibility(
     reliable = [
         result.exposure_seconds
         for result in results
-        if result.clean_fraction is not None and result.clean_fraction >= RELIABLE_CLEAN_FRACTION
+        if result.clean_fraction is not None
+        and result.clean_fraction >= resolve_parameter(RELIABLE_CLEAN_FRACTION).value
     ]
     return results, max(reliable) if reliable else None

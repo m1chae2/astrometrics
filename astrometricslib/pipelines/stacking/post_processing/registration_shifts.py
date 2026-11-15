@@ -60,7 +60,15 @@ from typing import Any
 import numpy as np
 
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.measurement import QualityMeasurement
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     PipelineRunContext,
     build_measurement,
@@ -120,7 +128,17 @@ _SPEC_BY_NAME = {spec.name: spec for spec in STACKING_METRICS}
 # 7,400 px "shifts" that come from the debayered, differently sized frames and
 # not from pointing. 50 px sits between the two with a wide margin on both
 # sides. Pairs above it are counted, not used. Register entry STK-44.
-MAXIMUM_PLAUSIBLE_STEP_PX = 50.0
+MAXIMUM_PLAUSIBLE_STEP_PX = TunedParameter(
+    name="stacking.maximum_plausible_step_px",
+    default=50.0,
+    unit="pixels",
+    description="Longest step between neighboring exposures that can still be a pointing change.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-44",
+    pending_conversion=True,
+)
 
 # The step rows are not measured when more than this share of the pairs of one
 # night is degenerate. The survey (register entry STK-44) found 0 to 2 of 120
@@ -129,14 +147,32 @@ MAXIMUM_PLAUSIBLE_STEP_PX = 50.0
 # whose medians were not pointings (NGC 1499 9 of 80, IC 1805 14 of 80, M 31
 # 113 of 464); a 10% limit splits the two sets, and a lone bad pair in a long
 # run (2% in NGC 7331) stays below it and is only counted.
-MAXIMUM_DEGENERATE_SHARE = 0.10
+MAXIMUM_DEGENERATE_SHARE = TunedParameter(
+    name="stacking.maximum_degenerate_share",
+    default=0.10,
+    unit="fraction of pairs",
+    description="Largest share of a night's pairs that may be degenerate before the step rows are refused.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-44",
+)
 
 # The step rows are not measured when more than this share of the frames has
 # exactly the identity transform. Siril leaves the identity on a frame it did
 # not register and on the reference frame; a run in which most frames have it
 # was mostly not registered (a median step of 0.0 px in NGC 1499). Half is the
 # majority; the reference frame alone is one frame.
-MAXIMUM_IDENTITY_SHARE = 0.5
+MAXIMUM_IDENTITY_SHARE = TunedParameter(
+    name="stacking.maximum_identity_share",
+    default=0.5,
+    unit="fraction of frames",
+    description="Largest share of frames with the identity transform before the step rows are refused.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-44",
+)
 
 # A pointing of exactly zero is an identity transform. Siril writes the
 # identity as exact zeros, and a fitted transform is never closer to it than
@@ -156,14 +192,33 @@ IDENTITY_TOLERANCE_PX = 1e-9
 # estimated from the steps of one run, and a simulation of 200 runs of 60
 # frames of jitter alone (register entry STK-44) gave 2 false jumps in 11,800
 # steps, about one run in a hundred.
-STEP_JUMP_SIGMAS = 5.0
+STEP_JUMP_SIGMAS = TunedParameter(
+    name="stacking.step_jump_sigmas",
+    default=5.0,
+    unit="× robust standard deviation",
+    description="How far above the median step a step must be to count as a jump.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-44",
+)
 
 # The floor of the robust deviation, in pixels. A pure drift has a median
 # absolute deviation of zero, and then every step above the median would
 # count. The smallest median absolute deviation of the steps of a real run is
 # 0.05 px (M 81 on 2026-01-14, 1.4826 x 0.05 = 0.07 px); 0.1 px is above it
 # and below the 0.2 px of the usual run.
-MINIMUM_STEP_SCALE_PX = 0.1
+MINIMUM_STEP_SCALE_PX = TunedParameter(
+    name="stacking.minimum_step_scale_px",
+    default=0.1,
+    unit="pixels",
+    description="Floor of the robust deviation of the pointing steps.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D51",
+    pending_conversion=True,
+)
 
 # The robust drift line takes the median slope over all pairs of frames of a
 # night. A night of n frames has n (n - 1) / 2 pairs; above this many pairs
@@ -176,23 +231,63 @@ SLOPE_SAMPLE_SEED = 20261024
 # Fewest steps for which a median step is reported. With fewer, one odd pair
 # decides the median. 5 is the smallest odd count for which the median of the
 # steps is still set by a majority of three.
-MINIMUM_STEPS = 5
+MINIMUM_STEPS = TunedParameter(
+    name="stacking.minimum_steps",
+    default=5,
+    unit="steps",
+    description="Fewest steps for which a median step is reported.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D51",
+    pending_conversion=True,
+)
 
 # Fewest frames of one night for a straight-line fit of its pointings. A line
 # has two parameters for each of the two coordinates, so 5 frames leave 3
 # degrees of freedom for the scatter used in the significance test.
-MINIMUM_FRAMES_FOR_DRIFT_FIT = 5
+MINIMUM_FRAMES_FOR_DRIFT_FIT = TunedParameter(
+    name="stacking.minimum_frames_for_drift_fit",
+    default=5,
+    unit="frames",
+    description="Fewest frames of one night for a straight-line fit of its pointings.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D51",
+    pending_conversion=True,
+)
 
 # A night's drift counts only when its length (slope) is at least this many
 # times the standard error of the slope. The same 3 sigma that
 # `stack_noise.ROTATION_SIGNIFICANCE` uses.
-DRIFT_SIGNIFICANCE = 3.0
+DRIFT_SIGNIFICANCE = TunedParameter(
+    name="stacking.drift_significance",
+    default=3.0,
+    unit="× standard error",
+    description="How many standard errors of the slope a night's drift must exceed to count.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D51",
+    pending_conversion=True,
+)
 
 # The axes of the nights must agree at least this well for one axis to be
 # named. The agreement is the length of the mean of the unit vectors at twice
 # each axis angle: 1 when all axes are the same, 0 when they point every way.
 # 0.5 is where the axes are spread over about +-30 degrees.
-MINIMUM_AXIS_AGREEMENT = 0.5
+MINIMUM_AXIS_AGREEMENT = TunedParameter(
+    name="stacking.minimum_axis_agreement",
+    default=0.5,
+    unit="fraction",
+    description="Least agreement between the nights' drift axes for one axis to be named.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D51",
+    pending_conversion=True,
+)
 
 SECONDS_PER_HOUR = 3600.0
 
@@ -573,15 +668,17 @@ def _fit_night(
         `MINIMUM_FRAMES_FOR_DRIFT_FIT` frames remain or the exposures all
         start at one moment.
     """
+    minimum_frames_for_drift_fit = resolve(MINIMUM_FRAMES_FOR_DRIFT_FIT).value
+    maximum_plausible_step_px = resolve(MAXIMUM_PLAUSIBLE_STEP_PX).value
     kept = list(frames)
-    if len(kept) < MINIMUM_FRAMES_FOR_DRIFT_FIT:
+    if len(kept) < minimum_frames_for_drift_fit:
         return None
     times, columns, rows = _night_arrays(kept)
     if np.ptp(times) <= 0.0:
         return None
     distance = np.hypot(_robust_residuals(times, columns), _robust_residuals(times, rows))
-    kept = [frame for frame, near in zip(kept, distance <= MAXIMUM_PLAUSIBLE_STEP_PX, strict=True) if near]
-    if len(kept) < MINIMUM_FRAMES_FOR_DRIFT_FIT:
+    kept = [frame for frame, near in zip(kept, distance <= maximum_plausible_step_px, strict=True) if near]
+    if len(kept) < minimum_frames_for_drift_fit:
         return None
     times, columns, rows = _night_arrays(kept)
     if np.ptp(times) <= 0.0:
@@ -607,7 +704,7 @@ def _fit_night(
         row_rate_px_per_hour=row_slope,
         rate_px_per_hour=rate,
         rate_error_px_per_hour=error,
-        significant=rate > 0.0 and rate >= DRIFT_SIGNIFICANCE * error,
+        significant=rate > 0.0 and rate >= resolve(DRIFT_SIGNIFICANCE).value * error,
     )
     return drift, column_residuals, row_residuals, kept
 
@@ -658,6 +755,11 @@ def step_summary(series: ShiftSeries, fits: Sequence[_NightFit] | None = None) -
         one night are degenerate, or when fewer than `MINIMUM_STEPS` pairs
         remain.
     """
+    minimum_steps = resolve(MINIMUM_STEPS).value
+    maximum_plausible_step_px = resolve(MAXIMUM_PLAUSIBLE_STEP_PX).value
+    maximum_identity_share = resolve(MAXIMUM_IDENTITY_SHARE).value
+    maximum_degenerate_share = resolve(MAXIMUM_DEGENERATE_SHARE).value
+    step_jump_sigmas = resolve(STEP_JUMP_SIGMAS).value
     ordered = sorted(series.shifts, key=lambda shift: (shift.timestamp, shift.path))
     steps: list[float] = []
     degenerate = 0
@@ -667,7 +769,7 @@ def step_summary(series: ShiftSeries, fits: Sequence[_NightFit] | None = None) -
             other_night += 1
             continue
         step = math.hypot(second.column_px - first.column_px, second.row_px - first.row_px)
-        if step > MAXIMUM_PLAUSIBLE_STEP_PX:
+        if step > maximum_plausible_step_px:
             degenerate += 1
             continue
         steps.append(step)
@@ -677,35 +779,35 @@ def step_summary(series: ShiftSeries, fits: Sequence[_NightFit] | None = None) -
         1 for shift in ordered if math.hypot(shift.column_px, shift.row_px) < IDENTITY_TOLERANCE_PX
     )
     pairs_in_nights = len(steps) + degenerate
-    if ordered and identity_count / len(ordered) > MAXIMUM_IDENTITY_SHARE:
+    if ordered and identity_count / len(ordered) > maximum_identity_share:
         reason = (
             f"{identity_count} of {len(ordered)} frames have exactly the identity transform (more than "
-            f"{MAXIMUM_IDENTITY_SHARE:.0%}), so most of the run was not registered and the steps are not "
+            f"{maximum_identity_share:.0%}), so most of the run was not registered and the steps are not "
             "pointings"
         )
         return StepSummary(None, None, None, None, **counts, unusable_reason=reason, is_suspect=True)
-    if pairs_in_nights and degenerate / pairs_in_nights > MAXIMUM_DEGENERATE_SHARE:
+    if pairs_in_nights and degenerate / pairs_in_nights > maximum_degenerate_share:
         reason = (
             f"{degenerate} of {pairs_in_nights} pairs of one night have a step longer than "
-            f"{MAXIMUM_PLAUSIBLE_STEP_PX:.0f} px (more than {MAXIMUM_DEGENERATE_SHARE:.0%}), so the "
+            f"{maximum_plausible_step_px:.0f} px (more than {maximum_degenerate_share:.0%}), so the "
             "transforms are not pointings"
         )
         return StepSummary(None, None, None, None, **counts, unusable_reason=reason, is_suspect=True)
-    if len(steps) < MINIMUM_STEPS:
+    if len(steps) < minimum_steps:
         reason = (
-            f"fewer than {MINIMUM_STEPS} usable pairs of neighboring exposures of one night among "
+            f"fewer than {minimum_steps} usable pairs of neighboring exposures of one night among "
             f"{len(series.shifts)} registered frames with a capture time"
         )
         return StepSummary(None, None, None, None, **counts, unusable_reason=reason)
     values = np.array(steps)
     median = float(np.median(values))
     mad = float(np.median(np.abs(values - median)))
-    threshold = median + STEP_JUMP_SIGMAS * max(MAD_TO_SIGMA * mad, MINIMUM_STEP_SCALE_PX)
+    threshold = median + step_jump_sigmas * max(MAD_TO_SIGMA * mad, resolve(MINIMUM_STEP_SCALE_PX).value)
     residual_steps: list[float] = []
     night_fits = fit_nights(series) if fits is None else fits
     for _, column_residuals, row_residuals, _ in night_fits:
         residual_steps.extend(np.hypot(np.diff(column_residuals), np.diff(row_residuals)).tolist())
-    after_median = float(np.median(residual_steps)) if len(residual_steps) >= MINIMUM_STEPS else None
+    after_median = float(np.median(residual_steps)) if len(residual_steps) >= minimum_steps else None
     return StepSummary(
         median_px=median,
         mad_px=mad,
@@ -743,9 +845,14 @@ def drift_summary(series: ShiftSeries, fits: Sequence[_NightFit] | None = None) 
         when it cannot be named. A rate below `DRIFT_SIGNIFICANCE` times its
         error carries the warning that the noise has made it too large.
     """
+    minimum_axis_agreement = resolve(MINIMUM_AXIS_AGREEMENT).value
+    drift_significance = resolve(DRIFT_SIGNIFICANCE).value
     fits = fit_nights(series) if fits is None else list(fits)
     if not fits:
-        reason = f"no night has {MINIMUM_FRAMES_FOR_DRIFT_FIT} registered frames that a straight line fits"
+        reason = (
+            f"no night has {resolve(MINIMUM_FRAMES_FOR_DRIFT_FIT).value} registered frames "
+            "that a straight line fits"
+        )
         return DriftSummary(None, None, None, reason, None, rate_reason=reason)
     nights = tuple(fit[0] for fit in fits)
     weights = np.array([night.frame_count for night in nights], dtype=float)
@@ -754,10 +861,10 @@ def drift_summary(series: ShiftSeries, fits: Sequence[_NightFit] | None = None) 
     rate = float(np.sum(weights * rates) / weights.sum())
     rate_error = float(math.sqrt(np.sum((weights * errors) ** 2)) / weights.sum())
     rate_reason = ""
-    if rate < DRIFT_SIGNIFICANCE * rate_error:
+    if rate < drift_significance * rate_error:
         rate_reason = (
             f"the rate is {rate / rate_error if rate_error > 0 else 0.0:.1f} times its error, below "
-            f"{DRIFT_SIGNIFICANCE:.0f}: the length of a slope is never below zero, so the noise makes it "
+            f"{drift_significance:.0f}: the length of a slope is never below zero, so the noise makes it "
             "too large (about 1.25 errors when there is no drift)"
         )
     significant = [fit for fit in fits if fit[0].significant]
@@ -766,7 +873,7 @@ def drift_summary(series: ShiftSeries, fits: Sequence[_NightFit] | None = None) 
             rate,
             rate_error,
             None,
-            f"no night drifts by {DRIFT_SIGNIFICANCE:.0f} times the scatter of its own straight-line fit, "
+            f"no night drifts by {drift_significance:.0f} times the scatter of its own straight-line fit, "
             "so the axis would be set by noise",
             None,
             nights,
@@ -778,13 +885,13 @@ def drift_summary(series: ShiftSeries, fits: Sequence[_NightFit] | None = None) 
     significant_weights = np.array([fit[0].frame_count for fit in significant], dtype=float)
     mean_vector = np.sum(significant_weights * np.exp(2j * angles)) / significant_weights.sum()
     agreement = float(abs(mean_vector))
-    if agreement < MINIMUM_AXIS_AGREEMENT:
+    if agreement < minimum_axis_agreement:
         return DriftSummary(
             rate,
             rate_error,
             None,
             f"the drift axes of the nights disagree (agreement {agreement:.2f}, below "
-            f"{MINIMUM_AXIS_AGREEMENT:.1f}), so no one axis names the smear",
+            f"{minimum_axis_agreement:.1f}), so no one axis names the smear",
             None,
             nights,
             rate_reason,
@@ -901,12 +1008,13 @@ def _step_rows(
         return rows
     detail = (
         f"{note}; {steps.used_count} pairs used, {steps.degenerate_count} longer than "
-        f"{MAXIMUM_PLAUSIBLE_STEP_PX:.0f} px, {steps.other_night_count} across two nights; a jump is a step "
+        f"{resolve(MAXIMUM_PLAUSIBLE_STEP_PX).value:.0f} px, {steps.other_night_count} across two nights; "
+        "a jump is a step "
         f"above {steps.jump_threshold_px:.2f} px"
     )
     after_reason = (
-        f"fewer than {MINIMUM_STEPS} pairs of neighboring exposures remain in nights that have "
-        f"{MINIMUM_FRAMES_FOR_DRIFT_FIT} or more registered frames"
+        f"fewer than {resolve(MINIMUM_STEPS).value} pairs of neighboring exposures remain in nights "
+        f"that have {resolve(MINIMUM_FRAMES_FOR_DRIFT_FIT).value} or more registered frames"
     )
     values = (
         (steps.median_px, steps.used_count, ""),

@@ -1,6 +1,6 @@
 # Documentation conventions
 
-*Version 1.4 · 2026-11-15 · Status: current*
+*Version 1.5 · 2026-11-15 · Status: current*
 
 ## Abstract
 
@@ -49,7 +49,7 @@ Every tuned value of the Astrometrics library carries exactly one of three label
 
 The Wayfinding library's values use the same labels, in their own register file (`library_design/validation/wayfinding.md`).
 
-Each tuned setting also has a role: automatic, when the software acts on it with no person checking (it sets data aside, gives a verdict, limits hardware or shapes results), or advisory, when it only changes advice a person reads before acting. The words for role, source and equipment are defined in `library_design/validation/index.md`, Section 2.2. The rule:
+Each tuned setting also has a role: automatic, when the software acts on it with no person checking (it sets data aside, gives a verdict, limits hardware or shapes results), or advisory, when it only changes advice a person reads before acting. Each setting's role, source and equipment are recorded on its declaration in the code (`astrometricslib.parameters`). The rule:
 
 - An automatic value needs a Measured entry.
 - An advisory value may stay Partly measured or Design estimate.

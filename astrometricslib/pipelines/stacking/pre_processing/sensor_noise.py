@@ -63,8 +63,16 @@ import numpy as np
 from astrometricslib._internal.drivers.calibration_library import header_binning, header_temperature_c
 from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import NotFoundError, StorageError
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.measurement import MeasurementStatus
 from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasurement
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.utilities.camera_setting_text import (
     canonical_binning_setting,
     canonical_gain_setting,
@@ -79,7 +87,17 @@ logger = logging.getLogger(__name__)
 # 0.1% (the relative error of a variance from N samples is sqrt(2 / N)), so
 # the pair-to-pair spread is set by the lamp, not the sample size. The
 # region is clipped to the sensor for a smaller frame.
-CENTRAL_REGION_SHAPE_PIXELS = (1000, 1000)
+CENTRAL_REGION_SHAPE_PIXELS = TunedParameter(
+    name="stacking.central_region_shape_pixels",
+    default=(1000, 1000),
+    unit="px",
+    description="Height and width of the central region measured for sensor noise.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-35",
+    pending_conversion=True,
+)
 
 # The fewest flat pairs a measurement may use. The result is the median of the
 # pairs' gains, and the median of five survives two bad pairs (it is the third
@@ -91,25 +109,63 @@ CENTRAL_REGION_SHAPE_PIXELS = (1000, 1000)
 # its own pairs. For scale, the hand measurement behind the ASI 533MM Pro
 # profile (STK-35) found a spread of 0.05% over 15 pairs. A design estimate,
 # checked only against that one data set.
-MINIMUM_FLAT_PAIRS = 5
+MINIMUM_FLAT_PAIRS = TunedParameter(
+    name="stacking.minimum_flat_pairs",
+    default=5,
+    unit="pairs",
+    description="Fewest flat pairs a sensor-noise measurement may use.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-35",
+)
 
 # The fewest bias pairs a measurement may use. Each pair already holds a
 # million pixels, so the read noise of one pair is good to about 0.1%.
 # Three pairs let the median survive one bad pair, such as one with a
 # cosmic-ray hit. The hand measurement used 5. A design estimate.
-MINIMUM_BIAS_PAIRS = 3
+MINIMUM_BIAS_PAIRS = TunedParameter(
+    name="stacking.minimum_bias_pairs",
+    default=3,
+    unit="pairs",
+    description="Fewest bias pairs a sensor-noise measurement may use.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-35",
+)
 
 # The most the sensor temperature may vary across the frames, in degrees C.
 # Read noise and gain change slowly with temperature, but a cooled camera's
 # set point jitters by a few tenths of a degree. 1.0 C is tighter than the
 # 3 C that groups dark frames (DEFAULT_DARK_TEMPERATURE_TOLERANCE_C), since
 # this is a precision measurement. A design estimate.
-MAXIMUM_TEMPERATURE_SPREAD_C = 1.0
+MAXIMUM_TEMPERATURE_SPREAD_C = TunedParameter(
+    name="stacking.maximum_temperature_spread_c",
+    default=1.0,
+    unit="°C",
+    description="Largest spread in sensor temperature allowed across the frames of a measurement.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-35",
+    pending_conversion=True,
+)
 
 # Two exposures count as the same when they differ by less than this
 # fraction. Header exposure times are written to a few digits, so exact
 # equality would reject frames of one exposure.
-EXPOSURE_RELATIVE_TOLERANCE = 1.0e-3
+EXPOSURE_RELATIVE_TOLERANCE = TunedParameter(
+    name="stacking.exposure_relative_tolerance",
+    default=1.0e-3,
+    unit="fraction",
+    description="Relative difference below which two exposure times count as the same.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-35",
+    pending_conversion=True,
+)
 
 # The longest time between the two frames of a flat pair, in seconds. Flat
 # frames of one session are taken back to back (an Ekos or NINA flat sequence
@@ -119,7 +175,16 @@ EXPOSURE_RELATIVE_TOLERANCE = 1.0e-3
 # lamp inside it is removed by scaling the second frame to the first's level.
 # A design estimate: it separates sessions by orders of magnitude, so its exact
 # value does not matter, and it has not been tuned on this library's flats.
-MAXIMUM_PAIR_GAP_SECONDS = 300.0
+MAXIMUM_PAIR_GAP_SECONDS = TunedParameter(
+    name="stacking.maximum_pair_gap_seconds",
+    default=300.0,
+    unit="seconds",
+    description="Longest time between the two flat frames of a pair.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-35",
+)
 
 # Turns a median absolute deviation into a standard deviation for Gaussian
 # noise (the same constant `flat_calibration.py` uses).
@@ -291,7 +356,7 @@ class FramePairing:
 
 
 def pair_by_observation_time(
-    frames: list[CalibrationFrame], maximum_gap_seconds: float = MAXIMUM_PAIR_GAP_SECONDS
+    frames: list[CalibrationFrame], maximum_gap_seconds: float | None = None
 ) -> FramePairing:
     """Pair frames that were taken one after the other, by their time.
 
@@ -315,6 +380,8 @@ def pair_by_observation_time(
     pairing : `FramePairing`
         The pairs and the counts of frames that could not be paired.
     """
+    if maximum_gap_seconds is None:
+        maximum_gap_seconds = resolve(MAXIMUM_PAIR_GAP_SECONDS).value
     dated = sorted((frame for frame in frames if frame.observed_at is not None), key=lambda f: f.observed_at)
     pairs = []
     index = 0
@@ -378,6 +445,8 @@ def _find_condition_problem(
     problem : `str` or `None`
         One sentence saying what differs, or `None` when the frames agree.
     """
+    maximum_temperature_spread_c = resolve(MAXIMUM_TEMPERATURE_SPREAD_C).value
+    exposure_relative_tolerance = resolve(EXPOSURE_RELATIVE_TOLERANCE).value
     every_frame = [*flat_frames, *bias_frames]
     settings = {frame.setting for frame in every_frame}
     if len(settings) > 1:
@@ -387,15 +456,15 @@ def _find_condition_problem(
         return "the frames do not all have the same size"
     exposures = [frame.exposure_seconds for frame in flat_frames if frame.exposure_seconds is not None]
     if exposures and any(
-        not math.isclose(value, exposures[0], rel_tol=EXPOSURE_RELATIVE_TOLERANCE) for value in exposures
+        not math.isclose(value, exposures[0], rel_tol=exposure_relative_tolerance) for value in exposures
     ):
         listed = ", ".join(f"{value:g} s" for value in sorted(set(exposures)))
         return f"the flat frames were not all taken with one exposure ({listed})"
     temperatures = [frame.temperature_c for frame in every_frame if frame.temperature_c is not None]
-    if temperatures and max(temperatures) - min(temperatures) > MAXIMUM_TEMPERATURE_SPREAD_C:
+    if temperatures and max(temperatures) - min(temperatures) > maximum_temperature_spread_c:
         return (
             f"the frame temperatures span {min(temperatures):.1f} to {max(temperatures):.1f} C, "
-            f"more than {MAXIMUM_TEMPERATURE_SPREAD_C:g} C"
+            f"more than {maximum_temperature_spread_c:g} C"
         )
     return None
 
@@ -403,7 +472,7 @@ def _find_condition_problem(
 def measure_sensor_noise(
     flat_pairs: list[tuple[CalibrationFrame, CalibrationFrame]],
     bias_pairs: list[tuple[CalibrationFrame, CalibrationFrame]],
-    region_shape: tuple[int, int] = CENTRAL_REGION_SHAPE_PIXELS,
+    region_shape: tuple[int, int] | None = None,
     *,
     camera_id: str = "",
     measured_on: date,
@@ -457,21 +526,25 @@ def measure_sensor_noise(
         The gain, read noise, spreads and counts, or a ``not_measured``
         result with a reason.
     """
+    if region_shape is None:
+        region_shape = resolve(CENTRAL_REGION_SHAPE_PIXELS).value
+    minimum_flat_pairs = resolve(MINIMUM_FLAT_PAIRS).value
+    minimum_bias_pairs = resolve(MINIMUM_BIAS_PAIRS).value
     flat_frames = [frame for pair in flat_pairs for frame in pair]
     bias_frames = [frame for pair in bias_pairs for frame in pair]
     first_frame = (flat_frames or bias_frames or [None])[0]
     setting = first_frame.setting if first_frame is not None else ("", "", "")
     counts = (len(flat_frames), len(bias_frames))
-    if len(flat_pairs) < MINIMUM_FLAT_PAIRS:
+    if len(flat_pairs) < minimum_flat_pairs:
         reason = (
-            f"{len(flat_pairs)} flat pair(s) found; at least {MINIMUM_FLAT_PAIRS} are needed "
-            f"({2 * MINIMUM_FLAT_PAIRS} flat frames)"
+            f"{len(flat_pairs)} flat pair(s) found; at least {minimum_flat_pairs} are needed "
+            f"({2 * minimum_flat_pairs} flat frames)"
         )
         return make_unmeasured_result(camera_id, setting, reason, *counts)
-    if len(bias_pairs) < MINIMUM_BIAS_PAIRS:
+    if len(bias_pairs) < minimum_bias_pairs:
         reason = (
-            f"{len(bias_pairs)} bias pair(s) found; at least {MINIMUM_BIAS_PAIRS} are needed "
-            f"({2 * MINIMUM_BIAS_PAIRS} bias frames)"
+            f"{len(bias_pairs)} bias pair(s) found; at least {minimum_bias_pairs} are needed "
+            f"({2 * minimum_bias_pairs} bias frames)"
         )
         return make_unmeasured_result(camera_id, setting, reason, *counts)
     slices = _central_slices(first_frame.pixels.shape, region_shape)
@@ -492,10 +565,10 @@ def measure_sensor_noise(
             )
         flat_pairs = linear_pairs
         flat_frames = [frame for pair in flat_pairs for frame in pair]
-        if len(flat_pairs) < MINIMUM_FLAT_PAIRS:
+        if len(flat_pairs) < minimum_flat_pairs:
             reason = (
                 f"{len(flat_pairs)} flat pair(s) are below the camera profile's photometric linearity "
-                f"limit of {linearity_limit_adu:.0f} ADU; at least {MINIMUM_FLAT_PAIRS} are needed. "
+                f"limit of {linearity_limit_adu:.0f} ADU; at least {minimum_flat_pairs} are needed. "
                 f"{linearity_notes[0] if linearity_notes else ''}".strip()
             )
             return make_unmeasured_result(camera_id, setting, reason, *counts)
@@ -532,10 +605,10 @@ def measure_sensor_noise(
             continue
         pair_gains.append(first_signal / shot_variance)
         pair_signals.append(first_signal)
-    if len(pair_gains) < MINIMUM_FLAT_PAIRS:
+    if len(pair_gains) < minimum_flat_pairs:
         reason = (
             f"only {len(pair_gains)} of {len(flat_pairs)} flat pairs gave a gain (the others were dark or "
-            f"no noisier than the read noise); at least {MINIMUM_FLAT_PAIRS} are needed"
+            f"no noisier than the read noise); at least {minimum_flat_pairs} are needed"
         )
         return make_unmeasured_result(camera_id, setting, reason, *counts)
 

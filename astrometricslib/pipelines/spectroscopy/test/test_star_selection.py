@@ -343,7 +343,7 @@ def test_a_strong_unidentified_star_is_kept_under_a_position_id(monkeypatch: pyt
     neighbor = _star("Star_1", 105, 100)
     neighbor.right_ascension, neighbor.declination = 299.7668, 22.6288
 
-    results = _run_with_neighbor(monkeypatch, neighbor, MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE)
+    results = _run_with_neighbor(monkeypatch, neighbor, MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE.default)
 
     assert [result["star_source"].id for result in results] == ["GAIA_A", "FIELD_J299.7668+22.6288"]
     assert neighbor.name == neighbor.id
@@ -353,7 +353,7 @@ def test_a_strong_unidentified_star_is_kept_under_a_position_id(monkeypatch: pyt
     assert not is_unresolved_star(neighbor)
 
 
-@pytest.mark.parametrize("signal_to_noise", [MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE - 0.01, None])
+@pytest.mark.parametrize("signal_to_noise", [MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE.default - 0.01, None])
 def test_a_weak_unidentified_star_is_left_as_it_was(
     monkeypatch: pytest.MonkeyPatch, signal_to_noise: float | None
 ) -> None:

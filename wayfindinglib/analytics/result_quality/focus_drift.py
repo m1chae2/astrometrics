@@ -57,6 +57,14 @@ from enum import StrEnum
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
+from astrometricslib.parameters import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from astrometricslib.reports import CaptureSetting, MeasurementReference
 from wayfindinglib.analytics.result_quality.plain_text import format_plain, plain_missing_data
 from wayfindinglib.analytics.result_quality.rules import rule_by_name
@@ -70,40 +78,103 @@ from wayfindinglib.models.quality.statements import (
 # The fewest frames a segment (the frames after one autofocus run) needs to
 # join the fit. With fewer, the best width and the slope cannot be told
 # apart from noise. Design estimate, register entry WAY-D09.
-MINIMUM_FRAMES_PER_SEGMENT = 5
+MINIMUM_FRAMES_PER_SEGMENT = TunedParameter(
+    name="wayfinding.minimum_frames_per_segment",
+    default=5,
+    unit="frames",
+    description="The fewest frames a segment (the frames after one autofocus run) needs to join the fit.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D09",
+)
 
 # The fewest frames, all segments together, the fit needs. A fit with one
 # shared slope, one best width per segment and an airmass term has as many as
 # a dozen unknowns, so 20 frames leave a margin. Design estimate, register
 # entry WAY-D09.
-MINIMUM_FRAMES_TOTAL = 20
+MINIMUM_FRAMES_TOTAL = TunedParameter(
+    name="wayfinding.minimum_frames_total",
+    default=20,
+    unit="frames",
+    description="The fewest frames, all segments together, the fit needs.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D09",
+)
 
 # The least change of focuser temperature, in degrees Celsius, that some
 # frame must show from the start of its segment. A change smaller than this is
 # lost in the width noise. It is about 5 times the 0.2 degree Celsius step of
 # a typical focuser temperature probe. Design estimate, register entry WAY-D09.
-MINIMUM_TEMPERATURE_CHANGE_DEGC = 1.0
+MINIMUM_TEMPERATURE_CHANGE_DEGC = TunedParameter(
+    name="wayfinding.minimum_temperature_change_degc",
+    default=1.0,
+    unit="deg C",
+    description=(
+        "The least change of focuser temperature, in degrees Celsius, that some frame must show from the"
+        " start of its segment."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE}),
+    register_entry="WAY-D09",
+    pending_conversion=True,
+)
 
 # The lowest efficiency the seeing factor may fall to before a refocus. Batch 2
 # (efficiency) names 0.9 as the level at which a factor costs under 10% of the
 # time. Design estimate, register entry WAY-D10.
-MINIMUM_SEEING_EFFICIENCY = 0.9
+MINIMUM_SEEING_EFFICIENCY = TunedParameter(
+    name="wayfinding.minimum_seeing_efficiency",
+    default=0.9,
+    unit="fraction",
+    description="The lowest efficiency the seeing factor may fall to before a refocus.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D10",
+)
 
 # For a faint star in a sky-limited frame, the time to reach a depth grows as
 # the square of the star width, so efficiency is (best width / width) squared.
 # The width may then grow by this factor before the efficiency falls to
 # `MINIMUM_SEEING_EFFICIENCY`: 0.9 to the power -0.5, about 1.054.
-ALLOWED_WIDTH_RATIO = MINIMUM_SEEING_EFFICIENCY**-0.5
+ALLOWED_WIDTH_RATIO = resolve_parameter(MINIMUM_SEEING_EFFICIENCY).value ** -0.5
 
 # Seeing width grows about as airmass to the power 0.6 (the Kolmogorov
 # expectation for a thin atmosphere), so the square of the width grows as
 # airmass to the power 1.2. Design estimate, register entry WAY-D11.
-SEEING_SQUARED_AIRMASS_EXPONENT = 1.2
+SEEING_SQUARED_AIRMASS_EXPONENT = TunedParameter(
+    name="wayfinding.seeing_squared_airmass_exponent",
+    default=1.2,
+    unit="exponent",
+    description=(
+        "Seeing width grows about as airmass to the power 0.6 (the Kolmogorov expectation for a thin "
+        "atmosphere), so the square of the width grows as airmass to the power 1.2."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.PUBLISHED_CONSTANT,
+    register_entry="WAY-D11",
+)
 
 # The number of resamples used for the error of the slope, and the seed that
 # makes the error repeat. 200 resamples give the error to about 5% of itself.
 # Design estimate, register entry WAY-D10.
-BOOTSTRAP_RESAMPLES = 200
+BOOTSTRAP_RESAMPLES = TunedParameter(
+    name="wayfinding.bootstrap_resamples",
+    default=200,
+    unit="resamples",
+    description=(
+        "The number of resamples used for the error of the slope, and the seed that makes the error repeat."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D10",
+)
 BOOTSTRAP_SEED = 20261024
 
 # Frames of one segment are not independent: the temperature, the seeing and
@@ -113,20 +184,62 @@ BOOTSTRAP_SEED = 20261024
 # segments are the blocks. With fewer, there are too few segments to draw
 # from, so blocks of `BOOTSTRAP_BLOCK_LENGTH` consecutive frames inside each
 # segment are drawn. Design estimate, register entry WAY-D10.
-MINIMUM_SEGMENTS_FOR_SEGMENT_BOOTSTRAP = 3
-BOOTSTRAP_BLOCK_LENGTH = 5
+MINIMUM_SEGMENTS_FOR_SEGMENT_BOOTSTRAP = TunedParameter(
+    name="wayfinding.minimum_segments_for_segment_bootstrap",
+    default=3,
+    unit="segments",
+    description=(
+        "With at least this many segments, the bootstrap resamples whole segments; with fewer it "
+        "resamples blocks of frames."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D10",
+)
+BOOTSTRAP_BLOCK_LENGTH = TunedParameter(
+    name="wayfinding.bootstrap_block_length",
+    default=5,
+    unit="frames",
+    description=(
+        "The number of consecutive frames in one resampled block when there are too few segments to "
+        "resample whole segments."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D10",
+)
 
 # The squared slope counts as found only when it is this many times its error.
 # The fit is linear in the squared slope, so its error is well behaved near
 # zero; the slope itself is a square root and is not. The test is one-sided
 # (the squared slope cannot be negative), so two standard errors is a false
 # alarm of about 2.3%. Design estimate, register entry WAY-D10.
-SIGNIFICANCE_SIGMAS = 2.0
+SIGNIFICANCE_SIGMAS = TunedParameter(
+    name="wayfinding.significance_sigmas",
+    default=2.0,
+    unit="sigma",
+    description="The squared slope counts as found only when it is this many times its error.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D10",
+)
 
 # The share of bootstrap resamples that must give a usable fit. With
 # fewer, the error of the slope cannot be trusted. Design estimate,
 # register entry WAY-D10.
-MINIMUM_VALID_BOOTSTRAP_SHARE = 0.8
+MINIMUM_VALID_BOOTSTRAP_SHARE = TunedParameter(
+    name="wayfinding.minimum_valid_bootstrap_share",
+    default=0.8,
+    unit="fraction",
+    description="The share of bootstrap resamples that must give a usable fit.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D10",
+)
 
 FOCUS_DRIFT_RULE_NAME = "focus_drift"
 
@@ -331,7 +444,7 @@ def _resample_blocks(
         inside each segment, which keeps their segment number.
     """
     members = [np.flatnonzero(segment_index == number) for number in range(segment_count)]
-    if segment_count >= MINIMUM_SEGMENTS_FOR_SEGMENT_BOOTSTRAP:
+    if segment_count >= resolve_parameter(MINIMUM_SEGMENTS_FOR_SEGMENT_BOOTSTRAP).value:
         drawn = generator.integers(0, segment_count, size=segment_count)
         pick = np.concatenate([members[number] for number in drawn])
         segments = np.concatenate([
@@ -341,7 +454,7 @@ def _resample_blocks(
     picks = []
     segments_list = []
     for number, frames in enumerate(members):
-        length = min(BOOTSTRAP_BLOCK_LENGTH, len(frames))
+        length = min(resolve_parameter(BOOTSTRAP_BLOCK_LENGTH).value, len(frames))
         block_count = math.ceil(len(frames) / length)
         starts = generator.integers(0, len(frames) - length + 1, size=block_count)
         chosen = np.concatenate([frames[start : start + length] for start in starts])
@@ -384,14 +497,17 @@ def fit_focus_drift(
             continue
         segments.setdefault(run_number, []).append(sample)
     kept = {
-        number: frames for number, frames in segments.items() if len(frames) >= MINIMUM_FRAMES_PER_SEGMENT
+        number: frames
+        for number, frames in segments.items()
+        if len(frames) >= resolve_parameter(MINIMUM_FRAMES_PER_SEGMENT).value
     }
     dropped += sum(len(frames) for number, frames in segments.items() if number not in kept)
     frame_total = sum(len(frames) for frames in kept.values())
-    if frame_total < MINIMUM_FRAMES_TOTAL:
+    if frame_total < resolve_parameter(MINIMUM_FRAMES_TOTAL).value:
         return _insufficient(
             f"Only {frame_total} frames follow an autofocus run in segments of at least "
-            f"{MINIMUM_FRAMES_PER_SEGMENT} frames; the fit needs {MINIMUM_FRAMES_TOTAL}. "
+            f"{resolve_parameter(MINIMUM_FRAMES_PER_SEGMENT).value} frames; the fit needs "
+            f"{resolve_parameter(MINIMUM_FRAMES_TOTAL).value}. "
             "Measure the star width of more frames and record the autofocus runs.",
             dropped,
         )
@@ -412,15 +528,17 @@ def fit_focus_drift(
             temperature_term.append(change**2)
             if frame.airmass is not None and start.airmass is not None:
                 airmass_term.append(
-                    frame.airmass**SEEING_SQUARED_AIRMASS_EXPONENT
-                    - start.airmass**SEEING_SQUARED_AIRMASS_EXPONENT
+                    frame.airmass ** resolve_parameter(SEEING_SQUARED_AIRMASS_EXPONENT).value
+                    - start.airmass ** resolve_parameter(SEEING_SQUARED_AIRMASS_EXPONENT).value
                 )
             squared_width.append(frame.star_width_px**2)
             used_samples.append(frame)
-    if largest_change < MINIMUM_TEMPERATURE_CHANGE_DEGC:
+    if largest_change < resolve_parameter(MINIMUM_TEMPERATURE_CHANGE_DEGC).value:
         return _insufficient(
             f"The focuser temperature changed by at most {largest_change:.2f} degrees C after an autofocus "
-            f"run; the fit needs {MINIMUM_TEMPERATURE_CHANGE_DEGC:g}. A longer stretch of frames after a "
+            f"run; the fit needs "
+            f"{resolve_parameter(MINIMUM_TEMPERATURE_CHANGE_DEGC).value:g}. A longer stretch of frames "
+            f"after a "
             "temperature change is needed.",
             dropped,
         )
@@ -445,7 +563,7 @@ def fit_focus_drift(
     generator = np.random.default_rng(BOOTSTRAP_SEED)
     boot_slopes: list[float] = []
     boot_squared_slopes: list[float] = []
-    for _ in range(BOOTSTRAP_RESAMPLES):
+    for _ in range(resolve_parameter(BOOTSTRAP_RESAMPLES).value):
         pick, boot_segments = _resample_blocks(indices, segment_count, generator)
         boot = _fit_squared_width(
             boot_segments,
@@ -459,9 +577,14 @@ def fit_focus_drift(
         boot_squared = float(boot[0][int(boot_segments.max()) + 1])
         boot_squared_slopes.append(boot_squared)
         boot_slopes.append(math.sqrt(max(boot_squared, 0.0)))
-    if len(boot_slopes) < MINIMUM_VALID_BOOTSTRAP_SHARE * BOOTSTRAP_RESAMPLES:
+    if (
+        len(boot_slopes)
+        < resolve_parameter(MINIMUM_VALID_BOOTSTRAP_SHARE).value
+        * resolve_parameter(BOOTSTRAP_RESAMPLES).value
+    ):
         return _insufficient(
-            f"Only {len(boot_slopes)} of {BOOTSTRAP_RESAMPLES} resamples of the frames gave a usable fit, "
+            f"Only {len(boot_slopes)} of "
+            f"{resolve_parameter(BOOTSTRAP_RESAMPLES).value} resamples of the frames gave a usable fit, "
             "so the error of the slope cannot be trusted. More frames are needed.",
             dropped,
         )
@@ -495,12 +618,16 @@ def fit_focus_drift(
         "airmass_used": airmass_used,
         "evidence": evidence,
     }
-    if squared_slope < SIGNIFICANCE_SIGMAS * squared_slope_error or best_width is None:
+    if (
+        squared_slope < resolve_parameter(SIGNIFICANCE_SIGMAS).value * squared_slope_error
+        or best_width is None
+    ):
         return FocusDriftResult(
             status=FocusDriftStatus.NO_DRIFT_DETECTED,
             reason=(
                 f"The squared slope is {squared_slope:.3f} px^2 per degree C squared, which is less than "
-                f"{SIGNIFICANCE_SIGMAS:g} times its error of {squared_slope_error:.3f}: no drift beyond "
+                f"{resolve_parameter(SIGNIFICANCE_SIGMAS).value:g} times its error of "
+                f"{squared_slope_error:.3f}: no drift beyond "
                 f"the noise (the slope would be {slope:.2f} px per degree C)."
             ),
             **common,
@@ -597,7 +724,8 @@ def focus_drift_statement(
         message=message,
         plain_message=format_plain(rule, fields),
         reason=(
-            f"{result.reason} The limit is an efficiency of {MINIMUM_SEEING_EFFICIENCY:g} for a faint point "
+            f"{result.reason} The limit is an efficiency of "
+            f"{resolve_parameter(MINIMUM_SEEING_EFFICIENCY).value:g} for a faint point "
             "source. The interval is the allowed width increase divided by the measured slope, and its "
             "tolerance comes from the error of the slope."
         ),

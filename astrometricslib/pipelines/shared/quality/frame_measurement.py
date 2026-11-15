@@ -66,6 +66,7 @@ from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, open_primary_hdu
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.camera_profile import CameraProfile, ProvenancedValue, ProvenanceKind
 from astrometricslib.models.quality.measurement import (
     MeasurementOrigin,
@@ -76,6 +77,12 @@ from astrometricslib.models.quality.measurement import (
 )
 from astrometricslib.models.quality.metric_spec import Checkpoint
 from astrometricslib.models.target import FrameRecord
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_seconds
 from astrometricslib.pipelines.shared.quality.frame_notices import FRAME_NOTICE_METRICS
 from astrometricslib.pipelines.shared.quality.metrics import (
@@ -522,6 +529,9 @@ def _emit_field_region_measurements(
     mosaic_note : `str`
         Text added to the reasons for a raw mosaic, else empty.
     """
+    minimum_star_count = resolve(MOFFAT_MINIMUM_STAR_COUNT).value
+    region_cells = resolve(FIELD_REGION_CELLS_PER_SIDE).value
+    grid_cells = resolve(FIELD_GRID_CELLS_PER_SIDE).value
     for region in measure_field_region_widths(result):
         metric = FRAME_STAR_WIDTH_REGION_PX[region.region]
         if region.width_px is None:
@@ -529,7 +539,7 @@ def _emit_field_region_measurements(
                 metric,
                 reason=(
                     f"only {region.star_count} fitted stars lie in this region of the field; "
-                    f"at least {MOFFAT_MINIMUM_STAR_COUNT} are needed"
+                    f"at least {minimum_star_count} are needed"
                 ),
                 channel=channel,
             )
@@ -541,8 +551,8 @@ def _emit_field_region_measurements(
             sample_count=region.star_count,
             reason=(
                 f"{region.star_count} of the frame's {result.star_count} fitted stars lie in this region "
-                f"(a block of {FIELD_REGION_CELLS_PER_SIDE} x {FIELD_REGION_CELLS_PER_SIDE} of the "
-                f"{FIELD_GRID_CELLS_PER_SIDE} x {FIELD_GRID_CELLS_PER_SIDE} grid cells){mosaic_note}"
+                f"(a block of {region_cells} x {region_cells} of the "
+                f"{grid_cells} x {grid_cells} grid cells){mosaic_note}"
             ),
             channel=channel,
         )
@@ -900,7 +910,16 @@ def _clipped_median(plane: np.ndarray) -> float:
 # of up to 5 passes are the same as the background metric's, so the two
 # estimators differ only in the statistic taken from the clipped pixels (mean,
 # not median).
-SKY_CLIP_SIGMA = 3.0
+SKY_CLIP_SIGMA = TunedParameter(
+    name="shared.sky_clip_sigma",
+    default=3.0,
+    unit="sigma",
+    description="Clipping level used when measuring the sky background of a frame.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D43",
+)
 
 
 def measure_clipped_mean_adu(plane: np.ndarray) -> float:
@@ -926,7 +945,7 @@ def measure_clipped_mean_adu(plane: np.ndarray) -> float:
     mean_adu : `float`
         The mean of the pixels left after sigma clipping.
     """
-    mean, _, _ = sigma_clipped_stats(plane, sigma=SKY_CLIP_SIGMA)
+    mean, _, _ = sigma_clipped_stats(plane, sigma=resolve(SKY_CLIP_SIGMA).value)
     return float(mean)
 
 

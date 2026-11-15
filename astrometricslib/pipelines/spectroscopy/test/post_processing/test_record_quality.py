@@ -130,7 +130,7 @@ def test_zero_order_gate_goes_red_when_the_zero_order_is_saturated() -> None:
     """One percent saturated fails; none passes; unmeasured is not checked."""
     failed = run_gates([make_star()], zero_order=[0.01])[rg.ZERO_ORDER_GATE_NAME]
     assert failed.status is GateStatus.FAILED
-    assert failed.limit == pytest.approx(DEFAULT_SATURATION_FLAG_THRESHOLD)
+    assert failed.limit == pytest.approx(DEFAULT_SATURATION_FLAG_THRESHOLD.default)
 
     assert run_gates([make_star()], zero_order=[0.0])[rg.ZERO_ORDER_GATE_NAME].status is GateStatus.PASSED
     assert run_gates([make_star()], zero_order=[])[rg.ZERO_ORDER_GATE_NAME].status is GateStatus.NOT_CHECKED
@@ -185,10 +185,10 @@ def test_classification_gate_fails_for_each_reason_the_limits_define() -> None:
             ),
         )
 
-    poor_star = star(NO_GOOD_MATCH_RMS + 0.05, 0.5)
-    class_tie = star(0.05, 0.05 + AMBIGUOUS_RMS_GAP / 2)
-    subtype_tie = star(0.05, 0.05 + AMBIGUOUS_RMS_GAP / 2, second_type="K7V")
-    clear = star(0.05, 0.05 + 2 * AMBIGUOUS_RMS_GAP)
+    poor_star = star(NO_GOOD_MATCH_RMS.default + 0.05, 0.5)
+    class_tie = star(0.05, 0.05 + AMBIGUOUS_RMS_GAP.default / 2)
+    subtype_tie = star(0.05, 0.05 + AMBIGUOUS_RMS_GAP.default / 2, second_type="K7V")
+    clear = star(0.05, 0.05 + 2 * AMBIGUOUS_RMS_GAP.default)
 
     for failing in (poor_star, class_tie):
         concerns = build_spectral_classification_concerns([failing])
@@ -317,7 +317,7 @@ def test_processing_quality_gate_goes_red_when_most_classified_spectra_fail_a_me
 
     assert failed.status is GateStatus.FAILED
     assert failed.measured_value == pytest.approx(2 / 3)
-    assert failed.limit == rg.PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION
+    assert failed.limit == rg.PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION.default
     assert "2 of 3 classified spectra" in failed.detail
 
 
@@ -347,7 +347,7 @@ def test_processing_quality_gate_is_not_checked_without_a_classified_spectrum() 
 
 def test_the_designed_share_is_half() -> None:
     """The processing-quality limit is the documented 50 percent."""
-    assert rg.PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION == pytest.approx(0.5)
+    assert rg.PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION.default == pytest.approx(0.5)
 
 
 def test_the_real_validate_output_records_the_stage_quality_summary() -> None:

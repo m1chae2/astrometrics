@@ -265,7 +265,7 @@ def test_roi_half_width_is_unchanged_with_no_close_neighbour() -> None:
         (100.0, 100.0), [(500.0, 100.0)], "vertical", trail_length_px=600.0
     )
 
-    assert half_width == DISPERSION_ANGLE_ROI_HALF_WIDTH_PX
+    assert half_width == DISPERSION_ANGLE_ROI_HALF_WIDTH_PX.default
 
 
 def test_roi_half_width_shrinks_to_the_midpoint_of_a_close_neighbour() -> None:
@@ -287,7 +287,7 @@ def test_roi_half_width_never_shrinks_below_the_floor() -> None:
         (100.0, 100.0), [(102.0, 100.0)], "vertical", trail_length_px=600.0
     )
 
-    assert half_width == DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX
+    assert half_width == DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX.default
 
 
 def test_roi_half_width_reads_the_axis_matching_orientation() -> None:
@@ -306,7 +306,7 @@ def test_roi_half_width_reads_the_axis_matching_orientation() -> None:
         (100.0, 100.0), neighbor, "horizontal", trail_length_px=600.0
     )
 
-    assert vertical_half_width == DISPERSION_ANGLE_ROI_HALF_WIDTH_PX
+    assert vertical_half_width == DISPERSION_ANGLE_ROI_HALF_WIDTH_PX.default
     assert horizontal_half_width == pytest.approx(4.0)
 
 
@@ -331,7 +331,7 @@ def test_roi_half_width_ignores_a_neighbour_whose_trail_cannot_reach_here() -> N
         (100.0, 100.0), close_in_x_far_in_y, "vertical", trail_length_px=600.0
     )
 
-    assert half_width == DISPERSION_ANGLE_ROI_HALF_WIDTH_PX
+    assert half_width == DISPERSION_ANGLE_ROI_HALF_WIDTH_PX.default
 
 
 def _add_tilted_trace(
@@ -508,7 +508,7 @@ def test_the_extended_target_never_re_detects_the_tilt_on_the_nebula(monkeypatch
         self: SpectroscopyPipeline,
         image: AstrometricsImage,
         star_pos: tuple[float, float],
-        roi_half_width_px: float = DISPERSION_ANGLE_ROI_HALF_WIDTH_PX,
+        roi_half_width_px: float = DISPERSION_ANGLE_ROI_HALF_WIDTH_PX.default,
     ) -> tuple[float, float]:
         """Record which position was offered for a tilt fit, without fitting.
 

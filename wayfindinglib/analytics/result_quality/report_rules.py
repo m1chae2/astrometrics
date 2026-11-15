@@ -40,6 +40,13 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
+from astrometricslib.parameters import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from astrometricslib.reports import CaptureSetting, LimitTier, MeasurementReference, QualityLimit
 from wayfindinglib.analytics.capture_history import normalize_name
 from wayfindinglib.analytics.result_quality.capture_overheads import (
@@ -92,19 +99,49 @@ from wayfindinglib.models.quality.statements import (
     TargetStatement,
 )
 
-FRAME_LOSS_WARNING_FRACTION = 0.05
+FRAME_LOSS_WARNING_FRACTION = TunedParameter(
+    name="wayfinding.frame_loss_warning_fraction",
+    default=0.05,
+    unit="fraction",
+    description="``frames_lost`` fires when at least this share of a setting's frames was set aside.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D60",
+)
 """``frames_lost`` fires when at least this share of a setting's frames was set
 aside. One frame in twenty is the point where the loss shows in the stack's
 total time; a single trailed frame in a long run is not worth a warning. Design
 estimate, register row WAY-D60."""
 
-SKY_COST_MINIMUM_SHARE = 0.10
+SKY_COST_MINIMUM_SHARE = TunedParameter(
+    name="wayfinding.sky_cost_minimum_share",
+    default=0.1,
+    unit="fraction",
+    description=(
+        "``sky_cost`` fires when the Moon (or, without a sky model, a bright sky) cost at least this "
+        "share of the captured time."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D64",
+)
 """``sky_cost`` fires when the Moon (or, without a sky model, a bright sky)
 cost at least this share of the captured time. Ten percent is the same size the
 stop signal treats as too small to act on (`MINIMUM_GAIN_FRACTION` in
 ``noise_growth.py``). Design estimate, register row WAY-D64."""
 
-SKY_COST_MINIMUM_CAPTURED_SECONDS = 300.0
+SKY_COST_MINIMUM_CAPTURED_SECONDS = TunedParameter(
+    name="wayfinding.sky_cost_minimum_captured_seconds",
+    default=300.0,
+    unit="s",
+    description="``sky_cost`` stays quiet for a setting with less captured time than this, in seconds.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D64",
+)
 """``sky_cost`` stays quiet for a setting with less captured time than this, in
 seconds. A share of a few frames is not a share of the sky: Polaris was told
 it "lost about 100%" from one 32-microsecond frame, and Arcturus rested on one
@@ -112,39 +149,111 @@ it "lost about 100%" from one 32-microsecond frame, and Arcturus rested on one
 share to describe the nights and not one frame. Design estimate, register row
 WAY-D64; not yet tested against nights of known sky loss."""
 
-ALTITUDE_CUTS_DEG = (30.0, 40.0, 50.0)
+ALTITUDE_CUTS_DEG = TunedParameter(
+    name="wayfinding.altitude_cuts_deg",
+    default=(30.0, 40.0, 50.0),
+    unit="deg",
+    description="Altitudes, in degrees, at which the frames are split into low and high.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D65",
+)
 """Altitudes, in degrees, at which the frames are split into low and high. 30
 degrees is about an airmass of 2, where the atmosphere starts to cost visibly;
 the others test whether the loss reaches higher. Design estimate, register row
 WAY-D65."""
 
-ALTITUDE_MINIMUM_FRAMES_PER_SIDE = 5
+ALTITUDE_MINIMUM_FRAMES_PER_SIDE = TunedParameter(
+    name="wayfinding.altitude_minimum_frames_per_side",
+    default=5,
+    unit="frames",
+    description="Fewest frames on each side of a cut for the cut to be judged.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D65",
+)
 """Fewest frames on each side of a cut for the cut to be judged. With
 fewer, one bad frame sets the average. Design estimate, register row
 WAY-D65."""
 
-ALTITUDE_MINIMUM_RELATIVE_LOSS = 0.15
+ALTITUDE_MINIMUM_RELATIVE_LOSS = TunedParameter(
+    name="wayfinding.altitude_minimum_relative_loss",
+    default=0.15,
+    unit="fraction",
+    description=(
+        "``altitude_cost`` fires when the low frames were at least this much less efficient than the "
+        "high ones."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D65",
+)
 """``altitude_cost`` fires when the low frames were at least this much less
 efficient than the high ones. The efficiency of a single frame is known to
 within about 5 percent (the seeing width bias of AST-18), so 15 percent is
 three times that. Design estimate, register row WAY-D65."""
 
-SHARPNESS_KEEP_FRACTION = 0.7
+SHARPNESS_KEEP_FRACTION = TunedParameter(
+    name="wayfinding.sharpness_keep_fraction",
+    default=0.7,
+    unit="fraction",
+    description="The share of frames kept when the sharpness trade-off is worked out.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D66",
+)
 """The share of frames kept when the sharpness trade-off is worked out. The
 example in the design keeps the sharpest 70 percent. Design estimate,
 register row WAY-D66."""
 
-SHARPNESS_MINIMUM_GAIN = 0.05
+SHARPNESS_MINIMUM_GAIN = TunedParameter(
+    name="wayfinding.sharpness_minimum_gain",
+    default=0.05,
+    unit="fraction",
+    description=(
+        "``sharpness_tradeoff`` fires when keeping the sharpest frames narrows the median star by at "
+        "least this fraction."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D66",
+)
 """``sharpness_tradeoff`` fires when keeping the sharpest frames narrows the
 median star by at least this fraction. Below 5 percent the stars look the same
 to the eye. Design estimate, register row WAY-D66."""
 
-SHARPNESS_MINIMUM_FRAMES = 20
+SHARPNESS_MINIMUM_FRAMES = TunedParameter(
+    name="wayfinding.sharpness_minimum_frames",
+    default=20,
+    unit="frames",
+    description="Fewest frames of one setting for the trade-off.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D66",
+)
 """Fewest frames of one setting for the trade-off. A subset of 70 percent then
 still holds 14 frames, enough for a median. Design estimate, register row
 WAY-D66."""
 
-SEEING_AT_REFERENCE_TOLERANCE = 0.10
+SEEING_AT_REFERENCE_TOLERANCE = TunedParameter(
+    name="wayfinding.seeing_at_reference_tolerance",
+    default=0.1,
+    unit="fraction",
+    description=(
+        "For a point-source goal, ``seeing_limits_resolution`` fires when the median star width is "
+        "within this fraction above the physical reference width (or below it)."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D68",
+)
 """For a point-source goal, ``seeing_limits_resolution`` fires when the median
 star width is within this fraction above the physical reference width (or
 below it). The efficiency of a single frame is known to within about 5 percent
@@ -351,7 +460,7 @@ def frames_lost_statements(
         if summary.frames_taken == 0:
             continue
         share = summary.frames_set_aside / summary.frames_taken
-        if share < FRAME_LOSS_WARNING_FRACTION:
+        if share < resolve_parameter(FRAME_LOSS_WARNING_FRACTION).value:
             continue
         reasons = reasons_by_setting.get(summary.capture_setting, Counter())
         reason_text = _reason_text(reasons)
@@ -367,7 +476,9 @@ def frames_lost_statements(
                 message,
                 (
                     f"{share * 100:.0f}% of this setting's frames were moved out of the stack, at or above "
-                    f"the {FRAME_LOSS_WARNING_FRACTION * 100:.0f}% that the rule treats as a loss."
+                    f"the "
+                    f"{resolve_parameter(FRAME_LOSS_WARNING_FRACTION).value * 100:.0f}% that the rule "
+                    f"treats as a loss."
                 ),
                 capture_setting=summary.capture_setting,
                 plain_message=format_plain(rule, fields),
@@ -458,14 +569,17 @@ def sky_cost_statements(summaries: Sequence[CaptureSettingSummary]) -> list[Targ
     statements: list[TargetStatement] = []
     for summary in summaries:
         account = summary.loss_account
-        if account is None or summary.captured_seconds < SKY_COST_MINIMUM_CAPTURED_SECONDS:
+        if (
+            account is None
+            or summary.captured_seconds < resolve_parameter(SKY_COST_MINIMUM_CAPTURED_SECONDS).value
+        ):
             continue
         moon_seconds = sum(s.seconds for s in account.kept_frame_deficit if s.cause == CAUSE_SKY_MOON)
         sky_seconds = sum(s.seconds for s in account.kept_frame_deficit if s.cause == CAUSE_SKY)
         has_split = any(s.cause == CAUSE_SKY_MOON for s in account.kept_frame_deficit)
         lost_seconds = moon_seconds if has_split else sky_seconds
         share = lost_seconds / summary.captured_seconds
-        if share < SKY_COST_MINIMUM_SHARE:
+        if share < resolve_parameter(SKY_COST_MINIMUM_SHARE).value:
             continue
         condition = "Moon" if has_split else "Moon, twilight or light pollution"
         advice = "Schedule moonless nights." if has_split else "Schedule darker nights, away from the Moon."
@@ -574,11 +688,15 @@ def seeing_limit_statements(
         median_width = statistics.median(width for _frame_id, width in widths)
         if setting_goal in detail_goals:
             spread = reference.factors.get(STAR_WIDTH_NIGHTLY_SPREAD_KEY)
-            margin = spread if spread is not None else reference_width * SEEING_AT_REFERENCE_TOLERANCE
+            margin = (
+                spread
+                if spread is not None
+                else reference_width * resolve_parameter(SEEING_AT_REFERENCE_TOLERANCE).value
+            )
             fires = median_width > reference_width + margin
         else:
             fires = reference.kind == EfficiencyReferenceKind.PHYSICAL and median_width <= reference_width * (
-                1.0 + SEEING_AT_REFERENCE_TOLERANCE
+                1.0 + resolve_parameter(SEEING_AT_REFERENCE_TOLERANCE).value
             )
         if not fires:
             continue
@@ -654,7 +772,7 @@ def guiding_limits_statements(
     if result is None:
         return [insufficient("guiding_limits_exposure", outcome.reason, setting)]
     used = result.used
-    if used.sharp_fraction is None or used.sharp_fraction >= TARGET_SHARP_FRACTION:
+    if used.sharp_fraction is None or used.sharp_fraction >= resolve_parameter(TARGET_SHARP_FRACTION).value:
         return []
     rule = rule_by_name("guiding_limits_exposure")
     supported = result.supported_exposure_seconds
@@ -669,7 +787,7 @@ def guiding_limits_statements(
     values: dict[str, float | str | None] = {
         "allowed_guide_rms_arcsec": round(result.allowed_guide_rms_arcsec, 3),
         "star_width_arcsec": round(result.star_width_arcsec, 3),
-        "target_sharp_fraction": TARGET_SHARP_FRACTION,
+        "target_sharp_fraction": resolve_parameter(TARGET_SHARP_FRACTION).value,
         "frames_sharp_fraction": result.frames_sharp_fraction,
         "nights": ", ".join(result.nights),
     }
@@ -679,13 +797,16 @@ def guiding_limits_statements(
     if supported is not None:
         action = ProposedAction(exposure_seconds=supported)
         reason_tail = (
-            f" The longest exposure that reaches {TARGET_SHARP_FRACTION * 100:.0f}% is {supported:g} s."
+            f" The longest exposure that reaches {resolve_parameter(TARGET_SHARP_FRACTION).value * 100:.0f}% "
+            f"is {supported:g} s."
         )
     else:
         action = ProposedAction(
             note="No tested exposure reaches the target share. Check the guiding record first."
         )
-        reason_tail = f" No tested exposure reaches {TARGET_SHARP_FRACTION * 100:.0f}%."
+        reason_tail = (
+            f" No tested exposure reaches {resolve_parameter(TARGET_SHARP_FRACTION).value * 100:.0f}%."
+        )
     if supported is not None and supported_fraction is not None:
         supported_sentence = (
             f" Try {supported:g} s frames: we expect about {supported_fraction * 100:.0f}% to stay sharp."
@@ -704,7 +825,8 @@ def guiding_limits_statements(
         (
             f"A window of {result.used_exposure_seconds:g} s is sharp when its guide error on the worse "
             f"axis is at most {result.allowed_guide_rms_arcsec:.2f} arcsec, which widens a "
-            f"{result.star_width_arcsec:.2f} arcsec star by at most {STAR_WIDTH_BUDGET_FRACTION * 100:.0f}%. "
+            f"{result.star_width_arcsec:.2f} arcsec star by at most "
+            f"{resolve_parameter(STAR_WIDTH_BUDGET_FRACTION).value * 100:.0f}%. "
             f"{used.windows_sharp} of {used.windows_judged} windows on {len(result.nights)} night(s) were."
             + reason_tail
         ),
@@ -780,10 +902,13 @@ def find_altitude_cost(samples: Sequence[AltitudeSample]) -> AltitudeCost | None
         `ALTITUDE_MINIMUM_RELATIVE_LOSS`; else ``None``.
     """
     best: AltitudeCost | None = None
-    for cut in ALTITUDE_CUTS_DEG:
+    for cut in resolve_parameter(ALTITUDE_CUTS_DEG).value:
         low = [s for s in samples if s.altitude_deg < cut]
         high = [s for s in samples if s.altitude_deg >= cut]
-        if len(low) < ALTITUDE_MINIMUM_FRAMES_PER_SIDE or len(high) < ALTITUDE_MINIMUM_FRAMES_PER_SIDE:
+        if (
+            len(low) < resolve_parameter(ALTITUDE_MINIMUM_FRAMES_PER_SIDE).value
+            or len(high) < resolve_parameter(ALTITUDE_MINIMUM_FRAMES_PER_SIDE).value
+        ):
             continue
         low_eta = sum(s.eta * s.exposure_seconds for s in low) / sum(s.exposure_seconds for s in low)
         high_eta = sum(s.eta * s.exposure_seconds for s in high) / sum(s.exposure_seconds for s in high)
@@ -792,7 +917,7 @@ def find_altitude_cost(samples: Sequence[AltitudeSample]) -> AltitudeCost | None
         loss = 1.0 - low_eta / high_eta
         if best is None or loss > best.relative_loss:
             best = AltitudeCost(cut, loss, len(low), len(high))
-    if best is None or best.relative_loss < ALTITUDE_MINIMUM_RELATIVE_LOSS:
+    if best is None or best.relative_loss < resolve_parameter(ALTITUDE_MINIMUM_RELATIVE_LOSS).value:
         return None
     return best
 
@@ -897,10 +1022,10 @@ def find_sharpness_tradeoff(
     """
     if mode == WeightingMode.GROUP:
         return None
-    if len(frames) != len(widths_arcsec) or len(frames) < SHARPNESS_MINIMUM_FRAMES:
+    if len(frames) != len(widths_arcsec) or len(frames) < resolve_parameter(SHARPNESS_MINIMUM_FRAMES).value:
         return None
     order = sorted(range(len(frames)), key=lambda index: widths_arcsec[index])
-    kept_count = math.ceil(SHARPNESS_KEEP_FRACTION * len(frames))
+    kept_count = math.ceil(resolve_parameter(SHARPNESS_KEEP_FRACTION).value * len(frames))
     kept_indices = order[:kept_count]
     all_noise = forecast_stack_noise(frames, mode).noise
     kept_noise = forecast_stack_noise([frames[index] for index in kept_indices], mode).noise
@@ -910,10 +1035,10 @@ def find_sharpness_tradeoff(
         statistics.median(widths_arcsec[index] for index in kept_indices) / statistics.median(widths_arcsec)
         - 1.0
     )
-    if -width_change < SHARPNESS_MINIMUM_GAIN:
+    if -width_change < resolve_parameter(SHARPNESS_MINIMUM_GAIN).value:
         return None
     return SharpnessTradeoff(
-        keep_fraction=SHARPNESS_KEEP_FRACTION,
+        keep_fraction=resolve_parameter(SHARPNESS_KEEP_FRACTION).value,
         kept_count=kept_count,
         total_count=len(frames),
         star_width_change=width_change,
@@ -951,10 +1076,13 @@ def find_sharpness_tradeoff_in_groups(
         ``None`` when the stack cannot be forecast.
     """
     group = groups[group_position]
-    if len(group.frames) != len(widths_arcsec) or len(group.frames) < SHARPNESS_MINIMUM_FRAMES:
+    if (
+        len(group.frames) != len(widths_arcsec)
+        or len(group.frames) < resolve_parameter(SHARPNESS_MINIMUM_FRAMES).value
+    ):
         return None
     order = sorted(range(len(group.frames)), key=lambda index: widths_arcsec[index])
-    kept_count = math.ceil(SHARPNESS_KEEP_FRACTION * len(group.frames))
+    kept_count = math.ceil(resolve_parameter(SHARPNESS_KEEP_FRACTION).value * len(group.frames))
     kept_indices = sorted(order[:kept_count])
     kept_group = group.model_copy(
         update={"frames": tuple(group.frames[index] for index in kept_indices), "in_group_weights": None}
@@ -971,10 +1099,10 @@ def find_sharpness_tradeoff_in_groups(
         statistics.median(widths_arcsec[index] for index in kept_indices) / statistics.median(widths_arcsec)
         - 1.0
     )
-    if -width_change < SHARPNESS_MINIMUM_GAIN:
+    if -width_change < resolve_parameter(SHARPNESS_MINIMUM_GAIN).value:
         return None
     return SharpnessTradeoff(
-        keep_fraction=SHARPNESS_KEEP_FRACTION,
+        keep_fraction=resolve_parameter(SHARPNESS_KEEP_FRACTION).value,
         kept_count=kept_count,
         total_count=len(group.frames),
         star_width_change=width_change,
@@ -1283,7 +1411,8 @@ def find_calibration_gaps(
                 continue
             exposure = _as_float(row.get("exposure"))
             if setting.exposure_seconds is not None and (
-                exposure is None or abs(exposure - setting.exposure_seconds) > EXPOSURE_MATCH_SECONDS
+                exposure is None
+                or abs(exposure - setting.exposure_seconds) > resolve_parameter(EXPOSURE_MATCH_SECONDS).value
             ):
                 continue
             temperature = _as_float(row.get("temperature_c"))
@@ -1381,7 +1510,8 @@ def _nearest_text(
         if kind == "dark":
             exposure = _as_float(row.get("exposure"))
             if setting.exposure_seconds is not None and (
-                exposure is None or abs(exposure - setting.exposure_seconds) > EXPOSURE_MATCH_SECONDS
+                exposure is None
+                or abs(exposure - setting.exposure_seconds) > resolve_parameter(EXPOSURE_MATCH_SECONDS).value
             ):
                 found.append("exposure")
             temperature = _as_float(row.get("temperature_c"))
@@ -1613,7 +1743,8 @@ def _diminishing_returns_statement(
         (
             "Doubling the effective time is the step, because it is about the smallest change the eye "
             "sees. The count asked for is the practical one: the target's own count is beyond "
-            f"{PRACTICAL_TIME_FACTOR:g} times the stack's time, so one doubling is given instead. "
+            f"{resolve_parameter(PRACTICAL_TIME_FACTOR).value:g} times the stack's time, so one doubling is "
+            f"given instead. "
             f"{result.reason or ''} {exposure_note}"
         ).strip(),
         capture_setting=capture_setting,

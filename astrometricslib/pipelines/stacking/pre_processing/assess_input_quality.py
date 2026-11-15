@@ -10,6 +10,7 @@ metrics.
 from typing import Any
 
 from astrometricslib._internal.drivers.calibration_library import CALIBRATION_MATCH_BLOCKING_FLAGS_KEY
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.models.quality.quality_summary import StackingPipelineQualityMetrics
 from astrometricslib.pipelines.stacking.pre_processing.calibration_assessment import THIN_SET_FRAME_COUNT
@@ -130,14 +131,16 @@ def calibration_gates(diagnostics: dict[str, Any]) -> list[GateResult]:
         ``calibration_frame_count`` gates, then the gates above when the run
         judged them.
     """
+    maximum_flat_noise_fraction = resolve(MAXIMUM_FLAT_NOISE_FRACTION).value
     gates: list[GateResult] = []
     flat = diagnostics.get("flat_calibration") or {}
     issues = list(flat.get("issues", []))
     level_source = (
-        f"{MINIMUM_FLAT_LEVEL_FRACTION:.0%} to {MAXIMUM_FLAT_LEVEL_FRACTION:.0%} "
+        f"{resolve(MINIMUM_FLAT_LEVEL_FRACTION).value:.0%} "
+        f"to {resolve(MAXIMUM_FLAT_LEVEL_FRACTION).value:.0%} "
         "of full scale (design estimate)"
     )
-    noise_source = f"master flat noise at most {MAXIMUM_FLAT_NOISE_FRACTION:.1%} (derived from stack noise)"
+    noise_source = f"master flat noise at most {maximum_flat_noise_fraction:.1%} (derived from stack noise)"
     if not flat:
         no_flats = "the stack used no flat frames"
         gates.append(unchecked_gate(FLAT_LEVEL_GATE_NAME, no_flats, level_source))
@@ -177,7 +180,7 @@ def calibration_gates(diagnostics: dict[str, Any]) -> list[GateResult]:
                         FLAT_NOISE_GATE_NAME,
                         f"flat calibration: {noise_issues[0]}",
                         measured_value=measured_noise,
-                        limit=MAXIMUM_FLAT_NOISE_FRACTION,
+                        limit=maximum_flat_noise_fraction,
                         limit_source=noise_source,
                     )
                 )
@@ -190,7 +193,10 @@ def calibration_gates(diagnostics: dict[str, Any]) -> list[GateResult]:
             else:
                 gates.append(
                     passed_gate(
-                        FLAT_NOISE_GATE_NAME, measured_noise, MAXIMUM_FLAT_NOISE_FRACTION, noise_source
+                        FLAT_NOISE_GATE_NAME,
+                        measured_noise,
+                        maximum_flat_noise_fraction,
+                        noise_source,
                     )
                 )
 
@@ -232,8 +238,8 @@ def calibration_gates(diagnostics: dict[str, Any]) -> list[GateResult]:
                 limit=0.0,
                 limit_source=(
                     "minimum_calibration_frames setting (default 3); a dark or bias master of fewer than "
-                    f"{THIN_SET_FRAME_COUNT} different frames is thin (validation register STK-53, "
-                    "design estimate)"
+                    f"{resolve(THIN_SET_FRAME_COUNT).value} different frames is thin "
+                    "(validation register STK-53, design estimate)"
                 ),
             )
         )

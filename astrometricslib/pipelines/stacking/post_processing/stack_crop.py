@@ -34,6 +34,14 @@ import numpy as np
 from scipy.ndimage import median_filter
 
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data, read_header, write_image
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.stacking.post_processing.stack_image import MAD_TO_SIGMA
 
 logger = logging.getLogger(__name__)
@@ -46,7 +54,17 @@ _REJECTION_MAP_SUFFIX = "_RejMap.fits"
 # The edge profile is measured in strips of this many pixels. A strip is wide
 # enough to hold thousands of sky pixels for a stable noise estimate, and
 # narrow enough to place the edge within a few dozen pixels.
-STRIP_PIXELS = 25
+STRIP_PIXELS = TunedParameter(
+    name="stacking.strip_pixels",
+    default=25,
+    unit="pixels",
+    description="Width of the strips in which the edge profile is measured.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-23",
+    pending_conversion=True,
+)
 
 # Strips whose noise exceeds the interior's by more than this factor are
 # trimmed. M 27's edges measured 1.18 to 1.33; the edges of the Bubble Nebula,
@@ -54,25 +72,80 @@ STRIP_PIXELS = 25
 # frames of equal weight it corresponds to an edge covered by about three
 # quarters of the frames (noise goes as one over the square root of the
 # coverage).
-MAXIMUM_EDGE_NOISE_RATIO = 1.15
+MAXIMUM_EDGE_NOISE_RATIO = TunedParameter(
+    name="stacking.maximum_edge_noise_ratio",
+    default=1.15,
+    unit="ratio",
+    description="Ratio of strip noise to interior noise above which a strip is trimmed.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    register_entry="STK-23",
+    pending_conversion=True,
+)
 
 # The profile along one axis is measured on the middle of the other axis, so a
 # corner that is noisy in both directions does not count twice.
-_CROSS_AXIS_START = 0.2
-_CROSS_AXIS_END = 0.8
+_CROSS_AXIS_START = TunedParameter(
+    name="stacking.cross_axis_start",
+    default=0.2,
+    unit="fraction",
+    description="Start of the middle part of the cross axis on which an edge profile is measured.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D58",
+)
+_CROSS_AXIS_END = TunedParameter(
+    name="stacking.cross_axis_end",
+    default=0.8,
+    unit="fraction",
+    description="End of the middle part of the cross axis on which an edge profile is measured.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D58",
+)
 
 # No side is trimmed by more than this share of its length. A bigger crop
 # means something other than edge coverage is wrong with the stack, and the
 # stack is left whole for a person to look at.
-MAXIMUM_TRIM_FRACTION = 0.25
+MAXIMUM_TRIM_FRACTION = TunedParameter(
+    name="stacking.maximum_trim_fraction",
+    default=0.25,
+    unit="fraction",
+    description="Largest share of its length by which a side may be trimmed.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    register_entry="STK-23",
+    pending_conversion=True,
+)
 
 # A trim this small is not worth making. Dithering of a few pixels leaves
 # margins like this, and cutting them would only change the file size.
-_MINIMUM_WORTH_TRIMMING_PX = 3
+_MINIMUM_WORTH_TRIMMING_PX = TunedParameter(
+    name="stacking.minimum_worth_trimming_px",
+    default=3,
+    unit="pixels",
+    description="Smallest trim worth making.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D58",
+    pending_conversion=True,
+)
 
 # Pixels brighter than the sky by more than this many robust standard
 # deviations are treated as stars and left out of the noise estimate.
-_STAR_SIGMA = 3.0
+_STAR_SIGMA = TunedParameter(
+    name="stacking.star_sigma",
+    default=3.0,
+    unit="sigma",
+    description="Robust sigmas above the sky at which pixels count as stars in the edge noise estimate.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D58",
+)
 
 
 @dataclass(frozen=True)
@@ -127,7 +200,7 @@ def _strip_noise(strip: np.ndarray, axis: int) -> float:
     sigma = MAD_TO_SIGMA * float(np.median(np.abs(strip - median)))
     if median <= 0 or sigma <= 0:
         return float("nan")
-    sky = strip < median + _STAR_SIGMA * sigma
+    sky = strip < median + resolve(_STAR_SIGMA).value * sigma
     if axis == 1:
         differences = (strip[:, 1:] - strip[:, :-1])[sky[:, 1:] & sky[:, :-1]]
     else:
@@ -157,7 +230,7 @@ def _trim_from_ends(ratios: np.ndarray) -> tuple[int, int]:
         ratios[0] if np.isfinite(ratios[0]) else 1.0,
         ratios[-1] if np.isfinite(ratios[-1]) else 1.0,
     )
-    noisy = smoothed > MAXIMUM_EDGE_NOISE_RATIO
+    noisy = smoothed > resolve(MAXIMUM_EDGE_NOISE_RATIO).value
     start = 0
     while start < len(noisy) and noisy[start]:
         start += 1
@@ -182,32 +255,36 @@ def find_edge_crop_box(image: np.ndarray) -> CropBox:
         stack has no measurable sky, or if a side would lose more than
         `MAXIMUM_TRIM_FRACTION` of its length.
     """
+    strip_pixels = resolve(STRIP_PIXELS).value
+    cross_axis_start = resolve(_CROSS_AXIS_START).value
+    cross_axis_end = resolve(_CROSS_AXIS_END).value
+    maximum_trim_fraction = resolve(MAXIMUM_TRIM_FRACTION).value
     plane = np.asarray(collapse_to_2d(np.asarray(image, dtype=np.float64)))
     height, width = plane.shape
     whole = CropBox(0, width, 0, height)
-    rows_a, rows_b = int(_CROSS_AXIS_START * height), int(_CROSS_AXIS_END * height)
-    cols_a, cols_b = int(_CROSS_AXIS_START * width), int(_CROSS_AXIS_END * width)
-    strips_x, strips_y = width // STRIP_PIXELS, height // STRIP_PIXELS
+    rows_a, rows_b = int(cross_axis_start * height), int(cross_axis_end * height)
+    cols_a, cols_b = int(cross_axis_start * width), int(cross_axis_end * width)
+    strips_x, strips_y = width // strip_pixels, height // strip_pixels
     if strips_x < 8 or strips_y < 8:
         return whole
     columns = np.array([
-        _strip_noise(plane[rows_a:rows_b, i * STRIP_PIXELS : (i + 1) * STRIP_PIXELS], axis=1)
+        _strip_noise(plane[rows_a:rows_b, i * strip_pixels : (i + 1) * strip_pixels], axis=1)
         for i in range(strips_x)
     ])
     rows = np.array([
-        _strip_noise(plane[i * STRIP_PIXELS : (i + 1) * STRIP_PIXELS, cols_a:cols_b], axis=0)
+        _strip_noise(plane[i * strip_pixels : (i + 1) * strip_pixels, cols_a:cols_b], axis=0)
         for i in range(strips_y)
     ])
     if not np.isfinite(columns).any() or not np.isfinite(rows).any():
         return whole
     column_ratios = columns / np.nanmedian(columns[strips_x // 4 : 3 * strips_x // 4])
     row_ratios = rows / np.nanmedian(rows[strips_y // 4 : 3 * strips_y // 4])
-    left, right = (n * STRIP_PIXELS for n in _trim_from_ends(column_ratios))
-    start, end = (n * STRIP_PIXELS for n in _trim_from_ends(row_ratios))
-    if max(left, right) > MAXIMUM_TRIM_FRACTION * width or max(start, end) > MAXIMUM_TRIM_FRACTION * height:
+    left, right = (n * strip_pixels for n in _trim_from_ends(column_ratios))
+    start, end = (n * strip_pixels for n in _trim_from_ends(row_ratios))
+    if max(left, right) > maximum_trim_fraction * width or max(start, end) > maximum_trim_fraction * height:
         logger.warning(
             "The stack's edges are noisy over more than %.0f%% of a side; leaving it whole.",
-            100 * MAXIMUM_TRIM_FRACTION,
+            100 * maximum_trim_fraction,
         )
         return whole
     return _same_shape_box(CropBox(left, width - right, start, height - end), width, height)
@@ -287,7 +364,7 @@ def crop_stack_edges(stack_path: str) -> CropBox | None:
         height, width = data.shape[-2:]
         box = find_edge_crop_box(data)
         trimmed = (box.x0, width - box.x1, box.y0, height - box.y1)
-        if max(trimmed) < _MINIMUM_WORTH_TRIMMING_PX:
+        if max(trimmed) < resolve(_MINIMUM_WORTH_TRIMMING_PX).value:
             return None
         _crop_file(stack_path, box)
         stem, _ = os.path.splitext(stack_path)

@@ -43,9 +43,27 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.ndimage import uniform_filter
 
+from astrometricslib.parameters import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.models.session.guide_exposure_ladder import GuideExposureLadder, GuideExposureResult
 
-APERTURE_RADIUS_PIXELS = 6
+APERTURE_RADIUS_PIXELS = TunedParameter(
+    name="wayfinding.aperture_radius_pixels",
+    default=6,
+    unit="pixels",
+    description="Radius, in pixels, of the circle used for a star's light and centre.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="WAY-D129",
+    pending_conversion=True,
+)
 """Radius, in pixels, of the circle used for a star's light and centre.
 
 The guide scope's star is about one pixel wide (a 5.6 arcsec star on a 6.4
@@ -53,23 +71,59 @@ arcsec pixel), so this is wide enough to hold the whole star and its wings
 without taking in neighbours.
 """
 
-MINIMUM_FRAMES = 5
+MINIMUM_FRAMES = TunedParameter(
+    name="wayfinding.minimum_frames",
+    default=5,
+    unit="frames",
+    description="Fewest frames with the star found for a position noise to be worked out.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D129",
+)
 """Fewest frames with the star found for a position noise to be worked out.
 
 The second difference needs three positions, and five give three of them.
 """
 
-SATURATION_FRACTION = 0.8
+SATURATION_FRACTION = TunedParameter(
+    name="wayfinding.saturation_fraction",
+    default=0.8,
+    unit="fraction",
+    description="Share of the camera's ceiling at which the star counts as saturated.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D129",
+)
 """Share of the camera's ceiling at which the star counts as saturated.
 
 The same 80 percent the science side uses when it plans exposures: far enough
 below the ceiling that a change of seeing does not clip the star.
 """
 
-DETECTION_SIGMA = 5.0
+DETECTION_SIGMA = TunedParameter(
+    name="wayfinding.detection_sigma",
+    default=5.0,
+    unit="sigma",
+    description="How many background scatters above the background a star's peak must be.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D129",
+)
 """How many background scatters above the background a star's peak must be."""
 
-_SMOOTHING_PIXELS = 3
+_SMOOTHING_PIXELS = TunedParameter(
+    name="wayfinding.smoothing_pixels",
+    default=3,
+    unit="pixels",
+    description="Width of the box used to find the brightest star without a hot pixel.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D129",
+)
 """Width of the box used to find the brightest star without a hot pixel."""
 
 
@@ -121,14 +175,14 @@ def measure_star(frame: np.ndarray, expected_xy: tuple[float, float] | None = No
     background = float(np.median(data))
     noise = float(1.4826 * np.median(np.abs(data - background)))
     if expected_xy is None:
-        smoothed = uniform_filter(data, size=_SMOOTHING_PIXELS)
+        smoothed = uniform_filter(data, size=resolve_parameter(_SMOOTHING_PIXELS).value)
         y0, x0 = np.unravel_index(int(np.argmax(smoothed)), smoothed.shape)
     else:
         x0, y0 = round(expected_xy[0]), round(expected_xy[1])
     rows, columns = np.ogrid[: data.shape[0], : data.shape[1]]
-    inside = (rows - y0) ** 2 + (columns - x0) ** 2 <= APERTURE_RADIUS_PIXELS**2
+    inside = (rows - y0) ** 2 + (columns - x0) ** 2 <= resolve_parameter(APERTURE_RADIUS_PIXELS).value ** 2
     peak = float(data[inside].max())
-    if noise <= 0 or peak < background + DETECTION_SIGMA * noise:
+    if noise <= 0 or peak < background + resolve_parameter(DETECTION_SIGMA).value * noise:
         return None
     weights = np.where(inside, np.clip(data - background, 0.0, None), 0.0)
     flux = float(weights.sum())
@@ -153,7 +207,7 @@ def position_noise_pixels(positions: Sequence[tuple[float, float]]) -> float | N
         Noise per axis, in pixels, from the second differences of each axis.
         `None` if there are fewer than `MINIMUM_FRAMES` positions.
     """
-    if len(positions) < MINIMUM_FRAMES:
+    if len(positions) < resolve_parameter(MINIMUM_FRAMES).value:
         return None
     points = np.asarray(positions, dtype=float)
     variances = []
@@ -194,7 +248,7 @@ def _measure_series(
     result.flux_per_second = result.flux_adu / exposure_seconds
     result.background_adu = float(np.median([m.background for m in measurements]))
     result.noise_adu = float(np.median([m.noise for m in measurements]))
-    result.saturated = result.peak_adu >= SATURATION_FRACTION * ceiling_adu
+    result.saturated = result.peak_adu >= resolve_parameter(SATURATION_FRACTION).value * ceiling_adu
     noise_pixels = position_noise_pixels([(m.x, m.y) for m in measurements])
     if noise_pixels is not None:
         result.jitter_arcsec = noise_pixels * plate_scale_arcsec_per_px

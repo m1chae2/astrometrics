@@ -35,6 +35,13 @@ import shutil
 import numpy as np
 
 from astrometricslib._internal.drivers.fits_access import read_data, read_header, write_image
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,19 +49,46 @@ logger = logging.getLogger(__name__)
 # stars) to 1 (as stretched). Chosen by eye on M 81, M 51 and NGC 6992
 # stacks, where 0.6 left the stars looking dim and 1.0 crowded the nebula.
 # Not validated beyond those three.
-DEFAULT_STAR_STRENGTH = 0.8
+DEFAULT_STAR_STRENGTH = TunedParameter(
+    name="stacking.default_star_strength",
+    default=0.8,
+    unit="fraction",
+    description="How strongly the stars layer is scaled before it is blended.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-31",
+)
 
 # The arcsinh strength of the stars' own stretch. Larger values lift fainter
 # stars: on M 51, 300 showed the bright stars and few others, 3000 showed
 # every star but made them soft, and 1000 sat between. Chosen by eye on the
 # same three stacks.
-DEFAULT_STAR_STRETCH = 1000.0
+DEFAULT_STAR_STRETCH = TunedParameter(
+    name="stacking.default_star_stretch",
+    default=1000.0,
+    unit="none",
+    description="Arcsinh strength of the stars' own stretch.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-31",
+)
 
 # The stars' brightness is divided by this percentile of the brightest value
 # at each pixel before the curve, so a few saturated cores set the scale and
 # not the single brightest pixel. The 99.99th percentile follows the cores of
 # the brightest stars on every stack tried.
-_STAR_SCALE_PERCENTILE = 99.99
+_STAR_SCALE_PERCENTILE = TunedParameter(
+    name="stacking.star_scale_percentile",
+    default=99.99,
+    unit="percentile",
+    description="Percentile of the brightest value at each pixel by which star brightness is divided.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D56",
+)
 
 # The names the StarNet step and the blend give the files in the scratch
 # folder. Siril names its two outputs after the file it loaded.
@@ -127,7 +161,7 @@ def stretch_stars(stars: np.ndarray, stretch: float) -> np.ndarray:
     """
     clipped = np.clip(np.asarray(stars, dtype=np.float64), 0.0, None)
     brightest = clipped.max(axis=0) if clipped.ndim == 3 else clipped
-    scale = float(np.percentile(brightest, _STAR_SCALE_PERCENTILE))
+    scale = float(np.percentile(brightest, resolve(_STAR_SCALE_PERCENTILE).value))
     if scale <= 0.0:
         return np.zeros_like(clipped)
     return np.arcsinh(stretch * np.clip(clipped / scale, 0.0, 1.0)) / np.arcsinh(stretch)

@@ -1,16 +1,18 @@
 """Purpose: Write a review table of every tuned parameter.
 
-Description: The validation register
-(``documentation/library_design/validation/``) lists tuned values in three
-places: the setting bullets of each entry, the
-design-estimate table at the end of each file, and a backlog of tuned values
-that no entry covers yet (``parameter_inventory/tuning_not_registered.csv``).
-This script reads all three and writes one CSV with a single row schema, one
-Markdown page per register file, and a page that groups the automatic,
-fixed-source settings by the equipment they depend on. For each row that has an
-``<!-- impl: ... -->`` link it also finds the line of the constant in the code
-and its live value. The output is for review and is not part of the published
-documentation.
+Description: Every tuned value in ``astrometricslib/`` and ``wayfindinglib/``
+is a ``TunedParameter`` declaration, which holds its role, source, equipment,
+kind, pending status and the ID of the validation register entry that holds
+its evidence. This script reads both parameter registries
+(``astrometricslib.parameters.collect_parameters``), finds each declaration
+in the code with ``ast``, reads the status and title of its register entry
+from ``documentation/library_design/validation/``, and adds the backlog of
+tuning values that are not declared yet
+(``parameter_inventory/tuning_not_registered.csv``). It writes one CSV with a
+single row schema, one Markdown page per register file, and a page that lists
+the automatic parameters that are hardcoded or pending conversion, grouped by
+the equipment (or the site) they depend on. The output is for review and is
+not part of the published documentation.
 
 Usage::
 
@@ -23,12 +25,14 @@ from __future__ import annotations
 import argparse
 import ast
 import csv
-import importlib
 import re
 from collections import Counter
 from pathlib import Path
 
+from astrometricslib.parameters import EquipmentKind, ParameterRegistry, collect_parameters
+
 DEFAULT_REPO = Path(__file__).resolve().parents[2]
+LIBRARIES = ("astrometricslib", "wayfindinglib")
 REGISTER_FILES = {
     "stacking": "stacking.md",
     "astrometry": "astrometry.md",
@@ -37,49 +41,43 @@ REGISTER_FILES = {
     "asteroid_detection": "asteroid_detection.md",
     "wayfinding": "wayfinding.md",
 }
+REGISTER_PREFIXES = {
+    "STK": "stacking",
+    "AST": "astrometry",
+    "PHO": "photometry",
+    "SPE": "spectroscopy",
+    "MOV": "asteroid_detection",
+    "WAY": "wayfinding",
+}
 BACKLOG_RELATIVE_PATH = Path("build/documentation/parameter_inventory/tuning_not_registered.csv")
 COLUMNS = (
-    "source",
-    "register",
-    "entry_id",
-    "entry_title",
-    "status",
-    "setting",
-    "relation",
+    "row_type",
+    "parameter",
+    "module",
+    "constant",
+    "location",
+    "default",
+    "unit",
     "role",
-    "source_of_value",
+    "source",
+    "pending_conversion",
     "equipment",
-    "marks_are_draft",
-    "code_location",
-    "live_value",
-    "impl_link",
-    "impl_resolved",
-    "target_source",
-    "derive_from",
-    "check_kind",
+    "kind",
+    "register",
+    "register_entry",
+    "status",
+    "entry_title",
+    "description",
 )
-CONVERSION_COLUMNS = ("target_source", "derive_from", "check_kind")
-EQUIPMENT_KINDS = ("mount", "telescope", "camera", "filter or grating")
+EQUIPMENT_KINDS = tuple(kind.value for kind in EquipmentKind)
 CELL_LIMIT = 80
 
 ENTRY_HEADING = re.compile(r"^### ([A-Z]{3}-\d{2,3})\s*$", re.MULTILINE)
+DESIGN_ROW_ID = re.compile(r"^\| ([A-Z]{3}-D\d{2,3}) \|", re.MULTILINE)
 FIELD_LINE = re.compile(r"^- \*\*([^*:]+):\*\*", re.MULTILINE)
-RELATION_FORM = re.compile(r"Relation: (derived from|confirmed by|sanity check only|challenged by)\b")
-NO_SETTING = re.compile(r"^(None|No tuned value)\b")
-IMPL_COMMENT = re.compile(r"<!-- impl: ([^ ]+?) -->")
 STATUS_LABEL = re.compile(r"^(Measured|Partly measured|Design estimate|Retired)\b")
-ROLE_WORDS = r"(?:automatic \((?:sets data aside|gives a verdict|limits hardware|shapes results)\)|advisory)"
-SOURCE_WORDS = (
-    r"(?:computed each run|from configuration|from equipment settings|from tuning results|fixed in code)"
-    r"(?: with a fallback in code)?"
-)
-EQUIPMENT_ITEM = r"(?:mount|telescope|camera|filter or grating)"
-EQUIPMENT_WORDS = rf"(?:none|{EQUIPMENT_ITEM}(?:, {EQUIPMENT_ITEM})*)"
-MARK_PATTERNS = {
-    "role": re.compile(rf"\bRole: ({ROLE_WORDS})\."),
-    "source_of_value": re.compile(rf"\bSource: ({SOURCE_WORDS})\."),
-    "equipment": re.compile(rf"\bEquipment: ({EQUIPMENT_WORDS})\."),
-}
+MEASURED = "Measured"
+DESIGN_ESTIMATE = "Design estimate"
 
 
 def _entries(text: str) -> dict[str, str]:
@@ -107,26 +105,24 @@ def _entries(text: str) -> dict[str, str]:
     return entries
 
 
-def _fields(body: str) -> dict[str, str]:
-    """Split one entry into its fields.
+def _status_of(body: str) -> str:
+    """Read the status label of one entry.
 
     Parameters
     ----------
     body : `str`
-        The text of one entry.
+        The text of one entry, after its heading.
 
     Returns
     -------
-    fields : `dict` [`str`, `str`]
-        The text of each field keyed by its label, in file order.
+    status : `str`
+        The label on the ``**Status:**`` line, or an empty string.
     """
-    matches = list(FIELD_LINE.finditer(body))
-    fields = {}
-    for index, match in enumerate(matches):
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
-        text = body[match.end() : end].strip("\n")
-        fields[match.group(1)] = text if text.startswith("  ") else text.strip()
-    return fields
+    for match in FIELD_LINE.finditer(body):
+        if match.group(1) == "Status":
+            label = STATUS_LABEL.match(body[match.end() :].strip())
+            return label.group(1) if label else ""
+    return ""
 
 
 def _entry_title(body: str) -> str:
@@ -146,166 +142,100 @@ def _entry_title(body: str) -> str:
     return match.group(1) if match else ""
 
 
-def _setting_name(text: str) -> str:
-    """Pick the constant or config key a bullet or table cell names.
+def _design_rows(text: str) -> dict[str, str]:
+    """Read the design-estimate table of one register file.
 
     Parameters
     ----------
     text : `str`
-        A setting bullet or the setting cell of a design-estimate row.
+        The text of one register file.
 
     Returns
     -------
-    name : `str`
-        The first backtick span that looks like a constant or key (its last
-        word), else the first span, else the text itself.
+    titles : `dict` [`str`, `str`]
+        The setting text of each design-estimate row, keyed by row ID.
     """
-    spans = re.findall(r"`([^`\n]+)`", text)
-    for span in spans:
-        word = span.split()[-1].rstrip(",.;:")
-        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", word) and ("_" in word or word.isupper()):
-            return word
-    return spans[0] if spans else text
+    if "## Design estimates" not in text:
+        return {}
+    section = text[text.index("## Design estimates") :]
+    table = [line for line in section.splitlines() if line.startswith("|")]
+    if len(table) < 3:
+        return {}
+    columns = [cell.strip() for cell in table[0].strip("|").split("|")]
+    titles = {}
+    for line in table[2:]:
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        named = dict(zip(columns, cells, strict=False))
+        if DESIGN_ROW_ID.match(line):
+            titles[named["ID"]] = named.get("Setting", "")
+    return titles
 
 
-def parse_setting_bullet(line: str) -> dict[str, str]:
-    """Read one setting bullet of an entry.
+def read_register_index(repo: Path) -> dict[str, dict[str, str]]:
+    """Read every entry and design-estimate row of the validation register.
 
     Parameters
     ----------
-    line : `str`
-        A line of the "Settings it supports" field that starts with ``  - ``.
-
-    Returns
-    -------
-    parsed : `dict` [`str`, `str`]
-        Keys ``setting``, ``relation``, ``role``, ``source_of_value``,
-        ``equipment`` and ``impl_link``. A mark that is absent is an empty
-        string.
-    """
-    relation = RELATION_FORM.search(line)
-    impl = IMPL_COMMENT.search(line)
-    parsed = {
-        "setting": _setting_name(line),
-        "relation": relation.group(1) if relation else "",
-        "impl_link": impl.group(1) if impl else "",
-    }
-    for key, pattern in MARK_PATTERNS.items():
-        found = pattern.search(line)
-        parsed[key] = found.group(1) if found else ""
-    return parsed
-
-
-def resolve_dotted(dotted: str) -> tuple[object | None, str]:
-    """Import the longest module prefix of a dotted path, then walk attributes.
-
-    Parameters
-    ----------
-    dotted : `str`
-        A path such as ``astrometricslib.pipelines.shared.angles.name``.
-
-    Returns
-    -------
-    target : `object` or `None`
-        The named object, or `None` when it does not resolve.
-    module_name : `str`
-        The name of the module that was imported, empty when none was.
-    """
-    parts = dotted.split(".")
-    for split in range(len(parts), 0, -1):
-        module_name = ".".join(parts[:split])
-        try:
-            target: object = importlib.import_module(module_name)
-        except ImportError:
-            continue
-        for attribute in parts[split:]:
-            target = getattr(target, attribute, None)
-            if target is None:
-                return None, module_name
-        return target, module_name
-    return None, ""
-
-
-def _find_line(tree: ast.AST, names: list[str]) -> int | None:
-    """Find the line where a module-level or class-level name is defined.
-
-    Parameters
-    ----------
-    tree : `ast.AST`
-        The parsed module.
-    names : `list` [`str`]
-        The path below the module: a name, or a class name then a name.
-
-    Returns
-    -------
-    line : `int` or `None`
-        The 1-based line of the assignment, function or class, or `None`.
-    """
-    body = getattr(tree, "body", [])
-    for position, name in enumerate(names):
-        found = None
-        for node in body:
-            if isinstance(node, ast.Assign):
-                if any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
-                    found = node
-            elif isinstance(node, ast.AnnAssign):
-                if isinstance(node.target, ast.Name) and node.target.id == name:
-                    found = node
-            elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-                if node.name == name:
-                    found = node
-            if found is not None:
-                break
-        if found is None:
-            return None
-        if position == len(names) - 1:
-            return found.lineno
-        body = getattr(found, "body", [])
-    return None
-
-
-def locate_impl(dotted: str, repo: Path) -> tuple[bool, str, str]:
-    """Resolve an impl link to a code location and a live value.
-
-    Parameters
-    ----------
-    dotted : `str`
-        The dotted path of an ``<!-- impl: -->`` link.
     repo : `pathlib.Path`
-        The repository root, used to shorten file paths.
+        The repository root.
 
     Returns
     -------
-    resolved : `bool`
-        Whether the path names an existing object.
-    location : `str`
-        ``path:line`` of the definition, empty when it cannot be found.
-    value : `str`
-        The live value as text when it is an int, float, tuple or string.
+    index : `dict` [`str`, `dict` [`str`, `str`]]
+        Keyed by entry ID (``STK-05``) or design-estimate row ID
+        (``STK-D07``). Each value has ``register``, ``status`` and ``title``.
+        A design-estimate row has the status ``Design estimate``, because it
+        is never measured.
     """
-    target, module_name = resolve_dotted(dotted)
-    if target is None:
-        return False, "", ""
-    value = ""
-    if isinstance(target, int | float | tuple | str):
-        value = repr(target)
-    location = ""
-    module = importlib.import_module(module_name)
-    source_file = getattr(module, "__file__", None)
-    if source_file:
-        path = Path(source_file)
-        names = dotted[len(module_name) :].strip(".").split(".")
-        names = [name for name in names if name]
-        try:
-            line = _find_line(ast.parse(path.read_text(encoding="utf-8")), names) if names else 1
-        except OSError, SyntaxError:
-            line = None
-        try:
-            shown = path.resolve().relative_to(repo.resolve())
-        except ValueError:
-            shown = path
-        location = f"{shown}:{line}" if line else f"{shown}"
-    return True, location, value
+    index: dict[str, dict[str, str]] = {}
+    folder = repo / "documentation" / "library_design" / "validation"
+    for register, file_name in REGISTER_FILES.items():
+        text = (folder / file_name).read_text(encoding="utf-8")
+        for entry_id, body in _entries(text).items():
+            index[entry_id] = {"register": register, "status": _status_of(body), "title": _entry_title(body)}
+        for row_id, title in _design_rows(text).items():
+            index[row_id] = {"register": register, "status": DESIGN_ESTIMATE, "title": title}
+    return index
+
+
+def find_declarations(repo: Path) -> dict[str, tuple[str, int, str]]:
+    """Find where each ``TunedParameter`` is declared in the code.
+
+    Parameters
+    ----------
+    repo : `pathlib.Path`
+        The repository root.
+
+    Returns
+    -------
+    found : `dict` [`str`, `tuple` [`str`, `int`, `str`]]
+        For each parameter name: the repository-relative file, the line of
+        the assignment and the constant name it is assigned to. Test, script
+        and cache folders are skipped.
+    """
+    found: dict[str, tuple[str, int, str]] = {}
+    for library in LIBRARIES:
+        for path in sorted((repo / library).rglob("*.py")):
+            relative = path.relative_to(repo).as_posix()
+            if "/test" in relative or "/scripts/" in relative or "__pycache__" in relative:
+                continue
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+            except SyntaxError:
+                continue
+            for node in tree.body:
+                if not (isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)):
+                    continue
+                call = node.value
+                if not (isinstance(call.func, ast.Name) and call.func.id == "TunedParameter"):
+                    continue
+                target = node.targets[0]
+                for keyword in call.keywords:
+                    if keyword.arg == "name" and isinstance(keyword.value, ast.Constant):
+                        name = str(keyword.value.value)
+                        if isinstance(target, ast.Name):
+                            found.setdefault(name, (relative, node.lineno, target.id))
+    return found
 
 
 def _row(**fields: str) -> dict[str, str]:
@@ -326,148 +256,70 @@ def _row(**fields: str) -> dict[str, str]:
     return row
 
 
-def _with_location(row: dict[str, str], impl_link: str, repo: Path) -> None:
-    """Fill the code location and live value of a row from its impl link.
+def _register_of(entry_id: str) -> str:
+    """Name the register file an entry ID belongs to.
 
     Parameters
     ----------
-    row : `dict` [`str`, `str`]
-        The row to update in place.
-    impl_link : `str`
-        The dotted path, or an empty string.
-    repo : `pathlib.Path`
-        The repository root.
-    """
-    row["impl_link"] = impl_link
-    if not impl_link:
-        return
-    resolved, location, value = locate_impl(impl_link, repo)
-    row["impl_resolved"] = "yes" if resolved else "no"
-    row["code_location"] = location
-    row["live_value"] = value
+    entry_id : `str`
+        An entry or design-estimate ID such as ``STK-05``.
 
-
-def entry_rows(register: str, text: str, repo: Path) -> list[dict[str, str]]:
-    """List the setting rows of the entries of one register file.
-
-    Parameters
-    ----------
+    Returns
+    -------
     register : `str`
-        The register name, such as ``stacking``.
-    text : `str`
-        The text of the register file.
+        The register name, or ``unassigned`` for an empty or unknown ID.
+    """
+    return REGISTER_PREFIXES.get(entry_id[:3], "unassigned")
+
+
+def declared_rows(repo: Path, registries: list[ParameterRegistry]) -> list[dict[str, str]]:
+    """List one row for each declared parameter.
+
+    Parameters
+    ----------
     repo : `pathlib.Path`
         The repository root.
+    registries : `list` [`ParameterRegistry`]
+        The registries of the two libraries.
 
     Returns
     -------
     rows : `list` [`dict` [`str`, `str`]]
-        One row per setting bullet of every entry that is not retired.
+        One row per parameter, in registry order.
     """
+    index = read_register_index(repo)
+    declarations = find_declarations(repo)
     rows = []
-    for entry_id, body in _entries(text).items():
-        fields = _fields(body)
-        status_match = STATUS_LABEL.match(fields.get("Status", ""))
-        status = status_match.group(1) if status_match else ""
-        settings = fields.get("Settings it supports", "")
-        if status == "Retired" or NO_SETTING.match(settings):
-            continue
-        for line in settings.splitlines():
-            if not line.startswith("  - "):
-                continue
-            parsed = parse_setting_bullet(line)
-            row = _row(
-                source="register entry",
-                register=register,
-                entry_id=entry_id,
-                entry_title=_entry_title(body),
-                status=status,
-                setting=parsed["setting"],
-                relation=parsed["relation"],
-                role=parsed["role"],
-                source_of_value=parsed["source_of_value"],
-                equipment=parsed["equipment"],
+    for registry in registries:
+        for parameter in registry.all():
+            file, line, constant = declarations.get(parameter.name, ("", 0, ""))
+            entry = index.get(parameter.register_entry or "", {})
+            rows.append(
+                _row(
+                    row_type="declared",
+                    parameter=parameter.name,
+                    module=file.removesuffix(".py").replace("/", "."),
+                    constant=constant,
+                    location=f"{file}:{line}" if file else "",
+                    default=repr(parameter.default),
+                    unit=parameter.unit,
+                    role=parameter.role.value,
+                    source=parameter.source.value,
+                    pending_conversion="yes" if parameter.pending_conversion else "",
+                    equipment=", ".join(sorted(kind.value for kind in parameter.equipment)),
+                    kind=parameter.kind.value if parameter.kind else "",
+                    register=entry.get("register", _register_of(parameter.register_entry or "")),
+                    register_entry=parameter.register_entry or "",
+                    status=entry.get("status", ""),
+                    entry_title=entry.get("title", ""),
+                    description=parameter.description,
+                )
             )
-            _with_location(row, parsed["impl_link"], repo)
-            rows.append(row)
     return rows
 
 
-def design_rows(register: str, text: str, repo: Path) -> list[dict[str, str]]:
-    """List the rows of the design-estimate table of one register file.
-
-    Parameters
-    ----------
-    register : `str`
-        The register name.
-    text : `str`
-        The text of the register file.
-    repo : `pathlib.Path`
-        The repository root.
-
-    Returns
-    -------
-    rows : `list` [`dict` [`str`, `str`]]
-        One row per table row. The value as stated and where it lives go in
-        the live-value column prefix and the setting text.
-    """
-    if "## Design estimates" not in text:
-        return []
-    section = text[text.index("## Design estimates") :]
-    table = [line for line in section.splitlines() if line.startswith("|")]
-    if len(table) < 3:
-        return []
-    columns = [cell.strip() for cell in table[0].strip("|").split("|")]
-    rows = []
-    for line in table[2:]:
-        cells = [cell.strip() for cell in line.strip("|").split("|")]
-        cells += [""] * (len(columns) - len(cells))
-        named = dict(zip(columns, cells, strict=False))
-        impl = IMPL_COMMENT.search(line)
-        row = _row(
-            source="design estimate",
-            register=register,
-            entry_id=named.get("ID", ""),
-            entry_title=named.get("Setting", ""),
-            status="Design estimate",
-            setting=f"{named.get('Setting', '')} = {named.get('Value', '')} ({named.get('Where', '')})",
-            role=named.get("Role", ""),
-            source_of_value=named.get("Source", ""),
-            equipment=named.get("Equipment", ""),
-        )
-        _with_location(row, impl.group(1) if impl else "", repo)
-        rows.append(row)
-    return rows
-
-
-def _backlog_register(record: dict[str, str]) -> str:
-    """Pick the register file a backlog line belongs with.
-
-    Parameters
-    ----------
-    record : `dict` [`str`, `str`]
-        One line of the backlog CSV.
-
-    Returns
-    -------
-    register : `str`
-        The register named by the related entry's prefix, else a guess from the
-        file path, else ``unassigned``.
-    """
-    prefixes = {"STK": "stacking", "AST": "astrometry", "PHO": "photometry", "SPE": "spectroscopy"}
-    prefixes.update({"MOV": "asteroid_detection", "WAY": "wayfinding"})
-    related = record.get("related_entry", "")
-    if related[:3] in prefixes:
-        return prefixes[related[:3]]
-    path = record.get("file", "")
-    for register in ("stacking", "astrometry", "photometry", "spectroscopy", "asteroid_detection"):
-        if f"pipelines/{register}/" in path:
-            return register
-    return "wayfinding" if path.startswith("wayfindinglib/") else "unassigned"
-
-
-def backlog_rows(repo: Path) -> list[dict[str, str]] | None:
-    """Read the backlog of tuned values that no entry covers yet.
+def backlog_rows(repo: Path) -> list[dict[str, str]]:
+    """Read the backlog of tuning values that are not declared yet.
 
     Parameters
     ----------
@@ -476,31 +328,100 @@ def backlog_rows(repo: Path) -> list[dict[str, str]] | None:
 
     Returns
     -------
-    rows : `list` [`dict` [`str`, `str`]] or `None`
-        One row per backlog line, or `None` when the file does not exist.
+    rows : `list` [`dict` [`str`, `str`]]
+        One row per backlog line; empty when the file does not exist. Its
+        role, source and equipment are the draft marks of the backlog.
     """
     path = repo / BACKLOG_RELATIVE_PATH
     if not path.is_file():
-        return None
+        return []
     rows = []
     with path.open(encoding="utf-8", newline="") as handle:
         for record in csv.DictReader(handle):
             file_name = record.get("file", "")
-            row = _row(
-                source="backlog",
-                register=_backlog_register(record),
-                entry_id=record.get("related_entry", ""),
-                entry_title=record.get("note", ""),
-                status="Not registered",
-                setting=record.get("name", ""),
-                role=re.sub(r"^automatic: (.*)$", r"automatic (\1)", record.get("draft_role", "")),
-                source_of_value=record.get("draft_source", ""),
-                equipment=record.get("draft_equipment", "").replace(";", ",").replace(",  ", ", "),
-                marks_are_draft="yes",
-                code_location=file_name,
+            related = record.get("related_entry", "")
+            register = _register_of(related)
+            if register == "unassigned":
+                for name in REGISTER_FILES:
+                    if f"pipelines/{name}/" in file_name:
+                        register = name
+                if file_name.startswith("wayfindinglib/"):
+                    register = "wayfinding"
+            rows.append(
+                _row(
+                    row_type="backlog",
+                    parameter=record.get("name", ""),
+                    module=file_name.removesuffix(".py").replace("/", "."),
+                    constant=record.get("name", ""),
+                    location=file_name,
+                    role=re.sub(r"^automatic: (.*)$", r"automatic (\1)", record.get("draft_role", "")),
+                    source=record.get("draft_source", ""),
+                    equipment=", ".join(
+                        part.strip() for part in record.get("draft_equipment", "").split(";") if part.strip()
+                    ),
+                    register=register,
+                    register_entry=related,
+                    description=record.get("note", ""),
+                )
             )
-            rows.append(row)
     return rows
+
+
+def build_rows(repo: Path) -> list[dict[str, str]]:
+    """Collect the rows of both registries and the backlog.
+
+    Parameters
+    ----------
+    repo : `pathlib.Path`
+        The repository root.
+
+    Returns
+    -------
+    rows : `list` [`dict` [`str`, `str`]]
+        Declared rows, then backlog rows.
+    """
+    registries = [collect_parameters(library) for library in LIBRARIES]
+    return declared_rows(repo, registries) + backlog_rows(repo)
+
+
+def is_automatic(row: dict[str, str]) -> bool:
+    """Say whether the software acts on a row's value without asking.
+
+    Parameters
+    ----------
+    row : `dict` [`str`, `str`]
+        A table row.
+
+    Returns
+    -------
+    automatic : `bool`
+        True for every role except ``recommendation``; an empty role is not
+        automatic.
+    """
+    return bool(row["role"]) and not row["role"].startswith("recommendation")
+
+
+def automatic_not_measured(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    """List the declared automatic parameters whose entry is not Measured.
+
+    Parameters
+    ----------
+    rows : `list` [`dict` [`str`, `str`]]
+        All table rows.
+
+    Returns
+    -------
+    unmeasured : `list` [`dict` [`str`, `str`]]
+        One row per parameter name with ``parameter``, ``register_entry``,
+        ``role`` and ``status``, sorted by name. A parameter with no entry has
+        an empty entry and status.
+    """
+    unmeasured = {
+        row["parameter"]: {key: row[key] for key in ("parameter", "register_entry", "role", "status")}
+        for row in rows
+        if row["row_type"] == "declared" and is_automatic(row) and row["status"] != MEASURED
+    }
+    return [unmeasured[name] for name in sorted(unmeasured)]
 
 
 def _cell(value: str) -> str:
@@ -584,35 +505,46 @@ def write_outputs(rows: list[dict[str, str]], out: Path) -> None:
         writer.writeheader()
         writer.writerows(rows)
     page_columns = (
-        "entry_id",
-        "setting",
-        "status",
-        "relation",
+        "parameter",
+        "row_type",
+        "default",
+        "unit",
         "role",
-        "source_of_value",
+        "source",
+        "pending_conversion",
         "equipment",
-        "code_location",
-        "live_value",
-        *(column for column in CONVERSION_COLUMNS if any(row[column] for row in rows)),
+        "kind",
+        "register_entry",
+        "status",
+        "location",
     )
     for register in (*REGISTER_FILES, "unassigned"):
         subset = [row for row in rows if row["register"] == register]
         text = _page(
             f"Parameter table: {register}",
-            "Rows come from the entry settings and the design-estimate table. An empty role, "
-            "source or equipment means the setting is not marked yet.",
+            "Rows are the declared parameters whose register entry is in this file, then the "
+            "backlog rows (`backlog`), whose role, source and equipment are drafts.",
             subset,
             page_columns,
         )
         (out / f"parameter_table_{register}.md").write_text(text, encoding="utf-8")
     sections = []
-    equipment_columns = ("register", "entry_id", "setting", "status", "role", "equipment", "marks_are_draft")
+    equipment_columns = (
+        "parameter",
+        "row_type",
+        "register_entry",
+        "status",
+        "role",
+        "source",
+        "kind",
+        "pending_conversion",
+    )
     for kind in EQUIPMENT_KINDS:
         subset = [
             row
             for row in rows
-            if row["role"].startswith("automatic")
-            and row["source_of_value"].startswith(("fixed in code", "fixed", "fallback"))
+            if is_automatic(row)
+            and (row["source"] in {"hardcoded", "fixed"} or row["pending_conversion"])
             and kind in [item.strip() for item in row["equipment"].split(",")]
         ]
         sections.append(
@@ -621,40 +553,13 @@ def write_outputs(rows: list[dict[str, str]], out: Path) -> None:
     header = (
         "# Parameter table by equipment\n\n"
         "This page is generated by `build/documentation/generate_parameter_table.py`. "
-        "Do not edit it by hand. It lists automatic settings with a fixed source, grouped by the "
-        "equipment whose change would call for a new value. A row with `marks_are_draft` set to "
-        "`yes` has marks that are drafts.\n\n"
+        "Do not edit it by hand. It lists the automatic parameters that are hardcoded, fixed in "
+        "code (backlog) or pending conversion, grouped by the equipment, or the observing site, "
+        "whose change would call for a new value.\n\n"
     )
     (out / "parameter_table_by_equipment.md").write_text(
         header + "\n\n".join(sections) + "\n", encoding="utf-8"
     )
-
-
-def build_rows(repo: Path) -> tuple[list[dict[str, str]], bool]:
-    """Collect the rows from the register and the backlog.
-
-    Parameters
-    ----------
-    repo : `pathlib.Path`
-        The repository root.
-
-    Returns
-    -------
-    rows : `list` [`dict` [`str`, `str`]]
-        All rows.
-    backlog_found : `bool`
-        Whether the backlog file existed.
-    """
-    rows = []
-    register_dir = repo / "documentation" / "library_design" / "validation"
-    for register, file_name in REGISTER_FILES.items():
-        text = (register_dir / file_name).read_text(encoding="utf-8")
-        rows.extend(entry_rows(register, text, repo))
-        rows.extend(design_rows(register, text, repo))
-    backlog = backlog_rows(repo)
-    if backlog is not None:
-        rows.extend(backlog)
-    return rows, backlog is not None
 
 
 def summarize(rows: list[dict[str, str]]) -> list[str]:
@@ -668,62 +573,14 @@ def summarize(rows: list[dict[str, str]]) -> list[str]:
     Returns
     -------
     lines : `list` [`str`]
-        Rows per source, marked and unmarked counts, and unresolved links.
+        Rows per type, and declared rows with no register entry found.
     """
-    per_source = Counter(row["source"] for row in rows)
-    marked = sum(1 for row in rows if row["role"] and row["source_of_value"] and row["equipment"])
-    unresolved = [row["impl_link"] for row in rows if row["impl_resolved"] == "no"]
+    per_type = Counter(row["row_type"] for row in rows)
+    no_entry = sum(1 for row in rows if row["row_type"] == "declared" and not row["status"])
     lines = [f"rows: {len(rows)}"]
-    lines += [f"  {name}: {count}" for name, count in per_source.items()]
-    lines.append(f"marked: {marked}, unmarked: {len(rows) - marked}")
-    lines.append(f"impl links that did not resolve: {len(unresolved)}")
-    lines += [f"  {link}" for link in unresolved[:10]]
+    lines += [f"  {name}: {count}" for name, count in per_type.items()]
+    lines.append(f"declared rows with no register entry found: {no_entry}")
     return lines
-
-
-def add_conversion_targets(rows: list[dict[str, str]], folder: Path) -> int:
-    """Fill the conversion columns from draft conversion lists.
-
-    A conversion list is a planning aid, not part of the register: one
-    ``conversion_<register>.csv`` per register file, with columns ``id``,
-    ``settings`` (names separated by ``; ``), ``target_source``,
-    ``derive_from`` and ``check_kind``. A row matches a table row with the
-    same register and ID whose setting is one of the listed names.
-
-    Parameters
-    ----------
-    rows : `list` [`dict` [`str`, `str`]]
-        All table rows; matched rows are filled in place.
-    folder : `pathlib.Path`
-        The folder that holds the conversion lists.
-
-    Returns
-    -------
-    filled : `int`
-        How many table rows got conversion columns.
-    """
-    targets: dict[tuple[str, str, str], dict[str, str]] = {}
-    for register in REGISTER_FILES:
-        path = folder / f"conversion_{register}.csv"
-        if not path.is_file():
-            continue
-        with path.open(encoding="utf-8", newline="") as handle:
-            for record in csv.DictReader(handle):
-                for setting in record.get("settings", "").split(";"):
-                    targets[register, record.get("id", "").strip(), setting.strip()] = record
-    filled = 0
-    for row in rows:
-        record = targets.get((row["register"], row["entry_id"], row["setting"]))
-        if record is None and row["source"] == "design estimate":
-            record = next(
-                (value for key, value in targets.items() if key[:2] == (row["register"], row["entry_id"])),
-                None,
-            )
-        if record is not None:
-            for column in CONVERSION_COLUMNS:
-                row[column] = record.get(column, "")
-            filled += 1
-    return filled
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -742,17 +599,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", required=True, type=Path, help="Folder for the generated files.")
     parser.add_argument("--repo", type=Path, default=DEFAULT_REPO, help="Repository root.")
-    parser.add_argument(
-        "--conversion-dir",
-        type=Path,
-        help="Folder of draft conversion_<register>.csv lists to add as columns.",
-    )
     args = parser.parse_args(argv)
-    rows, backlog_found = build_rows(args.repo)
-    if args.conversion_dir is not None:
-        print(f"conversion targets added to {add_conversion_targets(rows, args.conversion_dir)} rows")
-    if not backlog_found:
-        print(f"note: {BACKLOG_RELATIVE_PATH} does not exist yet; the backlog source was skipped.")
+    rows = build_rows(args.repo)
     write_outputs(rows, args.out)
     print("\n".join(summarize(rows)))
     return 0

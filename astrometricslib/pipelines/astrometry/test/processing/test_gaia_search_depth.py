@@ -284,10 +284,12 @@ def test_the_limit_is_the_faintest_detection_plus_one_magnitude_within_clamps(
 
 def test_too_few_matched_stars_gives_no_estimate() -> None:
     """With fewer than five identified stars, the caller uses the default."""
-    stars = stars_with_depth(16.0, matched_count=star_identifier_module.MINIMUM_STARS_FOR_DEPTH_ESTIMATE - 1)
+    stars = stars_with_depth(
+        16.0, matched_count=star_identifier_module.MINIMUM_STARS_FOR_DEPTH_ESTIMATE.default - 1
+    )
 
     assert star_identifier_module.estimate_gaia_magnitude_limit(stars) is None
-    assert star_identifier_module.GAIA_DEFAULT_MAGNITUDE_LIMIT == pytest.approx(18.0)
+    assert star_identifier_module.GAIA_DEFAULT_MAGNITUDE_LIMIT.default == pytest.approx(18.0)
 
 
 def test_a_star_without_a_flux_is_ignored_by_the_estimate() -> None:

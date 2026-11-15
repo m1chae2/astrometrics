@@ -451,8 +451,8 @@ def test_a_lone_star_gets_no_record_even_with_the_switch_on(monkeypatch: pytest.
 
 def test_up_to_the_cap_every_neighbor_is_fitted() -> None:
     """With few neighbors, all of them keep their own shift."""
-    fluxes = [np.full(5, float(level)) for level in range(MAXIMUM_FITTED_NEIGHBORS)]
-    assert brightest_neighbor_indices(fluxes) == list(range(MAXIMUM_FITTED_NEIGHBORS))
+    fluxes = [np.full(5, float(level)) for level in range(MAXIMUM_FITTED_NEIGHBORS.default)]
+    assert brightest_neighbor_indices(fluxes) == list(range(MAXIMUM_FITTED_NEIGHBORS.default))
 
 
 def test_beyond_the_cap_the_brightest_neighbors_are_kept_in_order() -> None:
@@ -504,5 +504,5 @@ def test_the_fit_sees_eight_neighbors_but_every_wing_is_subtracted(
     monkeypatch.setattr(wing_module, "neighbor_wing_flux", counting_wing_flux)
     outcomes = correct_neighbor_wings(image, traces, stored, VERTICAL, [False] + [True] * 11)
     assert outcomes[0].status == STATUS_APPLIED
-    assert seen["fitted_positions"] == 1 + MAXIMUM_FITTED_NEIGHBORS
+    assert seen["fitted_positions"] == 1 + MAXIMUM_FITTED_NEIGHBORS.default
     assert seen["wing_calls"] == 11

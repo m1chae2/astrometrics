@@ -45,6 +45,7 @@ import numpy as np
 from astrometricslib import Target
 from astrometricslib.drivers import VersionedCache, get_stack_quality_data_version
 from astrometricslib.exceptions import AstrometricsError
+from astrometricslib.parameters import resolve_parameter
 from astrometricslib.reports import EARLIER_NIGHTS_VARIANT, CaptureSetting, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.result_quality.capture_overheads import EXPOSURE_MATCH_SECONDS
 from wayfindinglib.analytics.result_quality.forecast import (
@@ -472,7 +473,8 @@ def assign_stacks_to_settings(
                 for setting_id, setting in settings.items()
                 if exposure is not None
                 and setting.exposure_seconds is not None
-                and abs(setting.exposure_seconds - exposure) <= EXPOSURE_MATCH_SECONDS
+                and abs(setting.exposure_seconds - exposure)
+                <= resolve_parameter(EXPOSURE_MATCH_SECONDS).value
             )
             if len(matches) == 1:
                 assignment[stack_id] = matches[0]

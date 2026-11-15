@@ -19,6 +19,7 @@ from astropy.coordinates import EarthLocation
 from astropy.time import Time
 
 from astrometricslib import StellarObject, Target
+from astrometricslib.parameters import resolve_parameter
 from wayfindinglib.data_access.equipment_catalog_reader import (
     DEFAULT_MERIDIAN_FLIP_DELAY_MIN,
     get_meridian_flip_delay_min,
@@ -64,7 +65,9 @@ class SkyEngine:
         self.longitude = longitude or site["longitude"]
         self.elevation = elevation or site["elevation"]
         self.meridian_flip_delay_min = (
-            get_meridian_flip_delay_min(config) if has_config else DEFAULT_MERIDIAN_FLIP_DELAY_MIN
+            get_meridian_flip_delay_min(config)
+            if has_config
+            else resolve_parameter(DEFAULT_MERIDIAN_FLIP_DELAY_MIN).value
         )
 
         self.location = EarthLocation(

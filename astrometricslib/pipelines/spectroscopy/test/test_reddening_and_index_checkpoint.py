@@ -316,7 +316,7 @@ def test_the_pipeline_dereddens_a_gaia_star_and_checkpoint_2_reports_it() -> Non
     index_metric = metrics["index_vs_template_type_steps"]
     assert result.line_index_classification is not None
     assert index_metric.value == pytest.approx(result.line_index_classification.steps_from_template_fit)
-    assert index_metric.limit == DIFFERS_FROM_CATALOG_SUBTYPES
+    assert index_metric.limit == DIFFERS_FROM_CATALOG_SUBTYPES.default
     assert index_metric.passed is True
     assert "slope_and_lines_disagree" not in checkpoint.flags
 
@@ -398,16 +398,16 @@ def checkpoint_with_index_distance(steps: float) -> StageQualityCheckpoint:
 
 def test_a_line_index_type_far_from_the_template_fit_raises_the_flag() -> None:
     """Verify more than 20 steps fails the metric and sets the flag."""
-    checkpoint = checkpoint_with_index_distance(DIFFERS_FROM_CATALOG_SUBTYPES + 1.0)
+    checkpoint = checkpoint_with_index_distance(DIFFERS_FROM_CATALOG_SUBTYPES.default + 1.0)
 
     metric = metrics_of(checkpoint)["index_vs_template_type_steps"]
     assert metric.passed is False
-    assert metric.limit == DIFFERS_FROM_CATALOG_SUBTYPES
+    assert metric.limit == DIFFERS_FROM_CATALOG_SUBTYPES.default
     assert "slope_and_lines_disagree" in checkpoint.flags
     assert checkpoint.has_failed_metric
 
 
-@pytest.mark.parametrize("steps", [0.0, 7.0, DIFFERS_FROM_CATALOG_SUBTYPES])
+@pytest.mark.parametrize("steps", [0.0, 7.0, DIFFERS_FROM_CATALOG_SUBTYPES.default])
 def test_a_line_index_type_within_the_limit_does_not_raise_the_flag(steps: float) -> None:
     """Verify a distance at or under the limit passes and sets no flag."""
     checkpoint = checkpoint_with_index_distance(steps)

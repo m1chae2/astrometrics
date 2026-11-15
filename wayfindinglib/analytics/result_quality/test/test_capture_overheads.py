@@ -75,9 +75,9 @@ def test_overheads_are_recovered_from_the_records() -> None:
 def test_too_few_records_use_named_defaults() -> None:
     """With no matching captures every part is a default and says so."""
     result = co.estimate_capture_overheads([_context()], exposure_seconds=300.0)
-    assert result.download_seconds == co.DEFAULT_DOWNLOAD_SECONDS
-    assert result.dither_settle_seconds == co.DEFAULT_DITHER_SETTLE_SECONDS
-    assert result.autofocus_seconds == co.DEFAULT_AUTOFOCUS_SECONDS
+    assert result.download_seconds == co.DEFAULT_DOWNLOAD_SECONDS.default
+    assert result.dither_settle_seconds == co.DEFAULT_DITHER_SETTLE_SECONDS.default
+    assert result.autofocus_seconds == co.DEFAULT_AUTOFOCUS_SECONDS.default
     assert not result.download_from_records
     assert result.register_entry == co.CAPTURE_OVERHEADS_ENTRY
 

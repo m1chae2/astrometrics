@@ -107,7 +107,7 @@ def with_session(inputs: NoiseBudgetInputs, **changes: object) -> NoiseBudgetInp
 def test_a_full_set_of_inputs_gives_every_noise_row_measured() -> None:
     """With every input known, no noise row is assumed."""
     rows = noise_budget_measurements(photometry_fixture_noise_inputs(), CONTEXT)
-    assert len(rows) == len(NOISE_MODEL_MAGNITUDES) * len(NOISE_MODEL_PARTS) + 1
+    assert len(rows) == len(NOISE_MODEL_MAGNITUDES.default) * len(NOISE_MODEL_PARTS) + 1
     assert all(row.status is MeasurementStatus.MEASURED for row in rows)
     assert all(row.value is not None and row.value > 0 for row in rows)
 
@@ -116,13 +116,17 @@ def test_photon_noise_falls_and_sky_noise_rises_toward_faint_stars() -> None:
     """Photon noise in magnitudes rises toward faint stars; sky noise too."""
     rows = noise_budget_measurements(photometry_fixture_noise_inputs(), CONTEXT)
     photon = [
-        one(rows, model_noise_metric_name("photon", magnitude)).value for magnitude in NOISE_MODEL_MAGNITUDES
+        one(rows, model_noise_metric_name("photon", magnitude)).value
+        for magnitude in NOISE_MODEL_MAGNITUDES.default
     ]
-    sky = [one(rows, model_noise_metric_name("sky", magnitude)).value for magnitude in NOISE_MODEL_MAGNITUDES]
+    sky = [
+        one(rows, model_noise_metric_name("sky", magnitude)).value
+        for magnitude in NOISE_MODEL_MAGNITUDES.default
+    ]
     assert photon == sorted(photon)
     assert sky == sorted(sky)
     assert sky[-1] / sky[0] == pytest.approx(
-        10.0 ** (0.4 * (NOISE_MODEL_MAGNITUDES[-1] - NOISE_MODEL_MAGNITUDES[0]))
+        10.0 ** (0.4 * (NOISE_MODEL_MAGNITUDES.default[-1] - NOISE_MODEL_MAGNITUDES.default[0]))
     )
 
 
@@ -207,7 +211,7 @@ def test_no_zero_point_leaves_the_electron_terms_out_but_not_scintillation() -> 
 def test_a_run_with_no_session_stores_every_row_as_not_measured() -> None:
     """With nothing gathered, all rows are present and none has a value."""
     rows = noise_budget_measurements(None, CONTEXT)
-    assert len(rows) == len(NOISE_MODEL_MAGNITUDES) * len(NOISE_MODEL_PARTS) + 1
+    assert len(rows) == len(NOISE_MODEL_MAGNITUDES.default) * len(NOISE_MODEL_PARTS) + 1
     assert all(row.value is None and row.reason for row in rows)
 
 
@@ -318,11 +322,11 @@ def test_the_inputs_of_a_run_are_gathered_from_sessions_frames_and_configuration
 def test_the_alias_rows_hold_a_frequency_and_a_power_for_each_rank() -> None:
     """Three nights give six rows, the strongest peak first."""
     rows = window_alias_measurements(photometry_fixture_frame_times_days(), CONTEXT)
-    assert len(rows) == 2 * len(WINDOW_ALIAS_RANKS)
+    assert len(rows) == 2 * len(WINDOW_ALIAS_RANKS.default)
     first_power = one(rows, window_alias_power_metric_name(1)).value
     assert 0.0 < first_power <= 1.0
     assert one(rows, window_alias_frequency_metric_name(1)).value > 0
-    powers = [one(rows, window_alias_power_metric_name(rank)).value for rank in WINDOW_ALIAS_RANKS]
+    powers = [one(rows, window_alias_power_metric_name(rank)).value for rank in WINDOW_ALIAS_RANKS.default]
     assert powers == sorted(powers, reverse=True)
     for row in rows:
         check_measurement_against_registry(row)

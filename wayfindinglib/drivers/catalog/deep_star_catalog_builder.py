@@ -35,6 +35,13 @@ import numpy as np
 
 from astrometricslib.drivers import require_online
 from astrometricslib.exceptions import AstrometricsError, ExternalServiceError, InvalidArgumentError
+from astrometricslib.parameters import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib._internal.errors import ONLINE_QUERY_ERRORS
 from wayfindinglib.drivers.catalog import deep_star_store
 
@@ -68,7 +75,17 @@ __all__ = [
 # depth back from the catalog itself; DEEP_STAR_MAX_MAGNITUDE in the UI's
 # StarOverlay.ts only mirrors this default for the moments before it has
 # done so.
-DEFAULT_MAGNITUDE_LIMIT = 16.0
+DEFAULT_MAGNITUDE_LIMIT = TunedParameter(
+    name="wayfinding.default_magnitude_limit",
+    default=16.0,
+    unit="Gaia G magnitude",
+    description="The faintest Gaia G magnitude that is downloaded for the deep star catalog.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D132",
+    pending_conversion=True,
+)
 
 # How finely the Gaia archive's own sky map is cut for the download. Level L
 # has 12 * 4**L pixels, so level 4 is 3072 pixels of about 13 square degrees.
@@ -559,7 +576,7 @@ def _download_pixel(
 def build_deep_star_catalog(
     config: Any,
     healpix_level: int = DEFAULT_HEALPIX_LEVEL,
-    magnitude_limit: float = DEFAULT_MAGNITUDE_LIMIT,
+    magnitude_limit: float | None = None,
     request_delay_seconds: float = DEFAULT_REQUEST_DELAY_SECONDS,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     query_timeout_seconds: float = DEFAULT_QUERY_TIMEOUT_SECONDS,
@@ -582,7 +599,8 @@ def build_deep_star_catalog(
     healpix_level : `int`, optional
         How finely the sky is cut into chunks.
     magnitude_limit : `float`, optional
-        Only stars brighter than this Gaia G magnitude are downloaded.
+        Only stars brighter than this Gaia G magnitude are downloaded. The
+        default is `DEFAULT_MAGNITUDE_LIMIT`.
     request_delay_seconds : `float`, optional
         Seconds to pause between requests.
     max_attempts : `int`, optional
@@ -620,6 +638,9 @@ def build_deep_star_catalog(
         If an earlier catalog was made with other settings, or `pixels`
         names a chunk outside the sky.
     """
+    if magnitude_limit is None:
+        magnitude_limit = resolve_parameter(DEFAULT_MAGNITUDE_LIMIT).value
+
     if gaia is None:
         from astroquery.gaia import Gaia
 
@@ -701,7 +722,7 @@ def build_deep_star_catalog(
 
 def estimate_catalog_size(
     healpix_level: int = DEFAULT_HEALPIX_LEVEL,
-    magnitude_limit: float = DEFAULT_MAGNITUDE_LIMIT,
+    magnitude_limit: float | None = None,
     sample_count: int = 24,
     query_timeout_seconds: float = DEFAULT_QUERY_TIMEOUT_SECONDS,
     request_delay_seconds: float = DEFAULT_REQUEST_DELAY_SECONDS,
@@ -720,7 +741,8 @@ def estimate_catalog_size(
     healpix_level : `int`, optional
         How finely the sky is cut into chunks.
     magnitude_limit : `float`, optional
-        Only stars brighter than this Gaia G magnitude are counted.
+        Only stars brighter than this Gaia G magnitude are counted. The
+        default is `DEFAULT_MAGNITUDE_LIMIT`.
     sample_count : `int`, optional
         How many chunks to count.
     query_timeout_seconds : `float`, optional
@@ -744,6 +766,9 @@ def estimate_catalog_size(
     ExternalServiceError
         If no chunk could be counted.
     """
+    if magnitude_limit is None:
+        magnitude_limit = resolve_parameter(DEFAULT_MAGNITUDE_LIMIT).value
+
     if gaia is None:
         from astroquery.gaia import Gaia
 

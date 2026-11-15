@@ -25,7 +25,9 @@ from astropy.coordinates import SkyCoord
 
 from astrometricslib._internal.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib.foundation.errors import ExternalServiceError, InvalidArgumentError
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.target import TargetObjectType
+from astrometricslib.models.tuned_parameter import ParameterRole, ParameterSource, TunedParameter
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS
 from astrometricslib.utilities.target_classification import classify_target_name
@@ -52,20 +54,38 @@ NO_FIXED_POSITION_TYPES = (
 # of that: the object is still well inside the frame, yet the framing is
 # visibly off. It is also well under the 38 arcminute error that led to this
 # check. Evidence: validation register entry AST-20.
-POSITION_TOLERANCE_FLOOR_ARCMIN = 15.0
+POSITION_TOLERANCE_FLOOR_ARCMIN = TunedParameter(
+    name="shared.position_tolerance_floor_arcmin",
+    default=15.0,
+    unit="arcmin",
+    description="Smallest distance from the catalog position at which a target still counts as found.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    register_entry="AST-20",
+    pending_conversion=True,
+)
 
 # An extended object may be framed anywhere over its body, so the tolerance
 # grows with its size: tolerance = max(floor, K x half the major axis) with
 # K = 1, that is, the object's own radius. The catalog's major axis is used
 # when SIMBAD gives one.
-EXTENT_TOLERANCE_FACTOR = 1.0
+EXTENT_TOLERANCE_FACTOR = TunedParameter(
+    name="shared.extent_tolerance_factor",
+    default=1.0,
+    unit="× half axis",
+    description="Share of an object's half axis added to the position tolerance.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    register_entry="AST-20",
+    pending_conversion=True,
+)
 
 # How far outside the solved frame, in arcminutes, a catalog position may lie
 # before it is distrusted (the name probably resolved to a different object).
 # It equals the tolerance floor: a mosaic panel or an offset spectral frame
 # can miss the object's center, but not by more than the framing error that
 # the audit already tolerates.
-FOOTPRINT_MARGIN_ARCMIN = POSITION_TOLERANCE_FLOOR_ARCMIN
+FOOTPRINT_MARGIN_ARCMIN = resolve(POSITION_TOLERANCE_FLOOR_ARCMIN).value
 
 _EMPTY_RA_TEXTS = ("", "0", "0.0", "0h 0m 0s")
 _EMPTY_DEC_TEXTS = ("", "0", "0.0", "0° 0′ 0′′")
@@ -137,7 +157,8 @@ def parse_position_text(ra: Any, dec: Any) -> SkyCoord | None:
 
 
 def position_tolerance_arcmin(
-    major_axis_arcmin: float | None = None, floor_arcmin: float = POSITION_TOLERANCE_FLOOR_ARCMIN
+    major_axis_arcmin: float | None = None,
+    floor_arcmin: float | None = None,
 ) -> float:
     """Return how far a stored position may be from the catalog's.
 
@@ -147,7 +168,7 @@ def position_tolerance_arcmin(
         The object's apparent major axis in arcminutes, when SIMBAD gives
         one.
     floor_arcmin : `float`, optional
-        The smallest tolerance.
+        The smallest tolerance. Defaults to `POSITION_TOLERANCE_FLOOR_ARCMIN`.
 
     Returns
     -------
@@ -155,8 +176,10 @@ def position_tolerance_arcmin(
         ``max(floor_arcmin, EXTENT_TOLERANCE_FACTOR x
         half the major axis)``.
     """
+    if floor_arcmin is None:
+        floor_arcmin = resolve(POSITION_TOLERANCE_FLOOR_ARCMIN).value
     half_axis = 0.0 if major_axis_arcmin is None else 0.5 * float(major_axis_arcmin)
-    return max(floor_arcmin, EXTENT_TOLERANCE_FACTOR * half_axis)
+    return max(floor_arcmin, resolve(EXTENT_TOLERANCE_FACTOR).value * half_axis)
 
 
 @dataclass(frozen=True)

@@ -48,7 +48,7 @@ def test_each_search_needs_its_minimum_number_of_points(points: int, period: boo
 
 def test_the_minimums_are_five_and_eight_and_reach_the_app() -> None:
     """The limits match the searches, and the flags are in the star's JSON."""
-    assert (MINIMUM_POINTS_FOR_PERIOD_SEARCH, MINIMUM_POINTS_FOR_TRANSIT_SEARCH) == (5, 8)
+    assert (MINIMUM_POINTS_FOR_PERIOD_SEARCH.default, MINIMUM_POINTS_FOR_TRANSIT_SEARCH.default) == (5, 8)
     data = _star(6).model_dump(by_alias=True)
     assert data["canRunPeriodSearch"] is True
     assert data["canRunTransitSearch"] is False

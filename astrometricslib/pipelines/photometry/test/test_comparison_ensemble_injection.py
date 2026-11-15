@@ -463,7 +463,7 @@ def test_the_dip_is_recovered_from_pixel_frames_with_a_monotonic_airmass_run(
     target = min(analyzer.stellar_objects, key=distance)
     assert distance(target) < 2.0
     assert analyzer.comparison_set is not None
-    assert len(analyzer.comparison_set.star_ids) >= MINIMUM_COMPARISON_STARS
+    assert len(analyzer.comparison_set.star_ids) >= MINIMUM_COMPARISON_STARS.default
     assert recovered_dip_depth(target) == pytest.approx(DIP_DEPTH, rel=RELATIVE_DEPTH_TOLERANCE)
 
 
@@ -493,7 +493,11 @@ def test_a_comparison_candidate_with_a_five_percent_sinusoid_is_rejected(with_er
     assert star_id not in comparison_set.star_ids
     assert star_id in comparison_set.rejected_ids
     assert comparison_set.rejected_count >= 1
-    assert MINIMUM_COMPARISON_STARS <= len(comparison_set.star_ids) <= DEFAULT_MAXIMUM_COMPARISON_STARS
+    assert (
+        MINIMUM_COMPARISON_STARS.default
+        <= len(comparison_set.star_ids)
+        <= DEFAULT_MAXIMUM_COMPARISON_STARS.default
+    )
     summary = _summarize_session_for_star("night_a", analyzer, session.stars[0].photometry)
     assert star_id not in summary.comparison_star_ids
     assert summary.comparison_rejected_count == comparison_set.rejected_count
@@ -687,7 +691,7 @@ def test_a_session_with_one_candidate_is_left_unnormalized_and_says_so() -> None
     star = session.stars[0]
     assert star.photometry.fluxes_normalized == star.photometry.fluxes
     assert analyzer.comparison_set is not None
-    assert len(analyzer.comparison_set.star_ids) < MINIMUM_COMPARISON_STARS
+    assert len(analyzer.comparison_set.star_ids) < MINIMUM_COMPARISON_STARS.default
 
 
 # ---------------------------------------------------------------------------

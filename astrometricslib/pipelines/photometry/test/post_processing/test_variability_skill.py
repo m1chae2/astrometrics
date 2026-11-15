@@ -50,10 +50,10 @@ def test_the_design_floor_binds_for_every_allowed_group_size() -> None:
     smallest = skill.discrimination([0.9] * 10, [0.1] * 30)
     large = skill.discrimination(list(np.linspace(0.0, 1.0, 400)), list(np.linspace(0.0, 1.0, 1200)))
 
-    assert smallest.required_auc < skill.MINIMUM_DISCRIMINATION_AUC
-    assert large.required_auc < skill.MINIMUM_DISCRIMINATION_AUC
-    assert smallest.needed_auc == skill.MINIMUM_DISCRIMINATION_AUC
-    assert large.needed_auc == skill.MINIMUM_DISCRIMINATION_AUC
+    assert smallest.required_auc < skill.MINIMUM_DISCRIMINATION_AUC.default
+    assert large.required_auc < skill.MINIMUM_DISCRIMINATION_AUC.default
+    assert smallest.needed_auc == skill.MINIMUM_DISCRIMINATION_AUC.default
+    assert large.needed_auc == skill.MINIMUM_DISCRIMINATION_AUC.default
     assert smallest.sees_known_variables
     assert not large.sees_known_variables  # AUC 0.5: no skill
 

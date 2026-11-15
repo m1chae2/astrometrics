@@ -17,6 +17,7 @@ from collections.abc import Sequence
 from itertools import pairwise
 from typing import Any
 
+from astrometricslib.parameters import ParameterRole, ParameterSource, TunedParameter, resolve_parameter
 from wayfindinglib.analytics.performance_envelope import (
     MINIMUM_SAMPLES_PER_SESSION,
     SIDEREAL_RATE_ARCSEC_PER_SECOND,
@@ -25,7 +26,16 @@ from wayfindinglib.models.equipment_and_site.performance_envelope import Perform
 from wayfindinglib.models.session.guiding_run import GuidingRunSummary
 from wayfindinglib.models.session.session_quality import GuidingInputQuality
 
-_MAXIMUM_CADENCE_GAP_SECONDS = 60.0
+_MAXIMUM_CADENCE_GAP_SECONDS = TunedParameter(
+    name="wayfinding.assess_guiding_input_quality.maximum_cadence_gap_seconds",
+    default=60.0,
+    unit="s (scales with the guide cycle)",
+    description="A gap between samples longer than this is a pause, not the guide cadence.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    register_entry="WAY-D126",
+    pending_conversion=True,
+)
 """A gap between samples longer than this is a pause, not the guide cadence."""
 
 
@@ -140,7 +150,7 @@ def assess_guiding_input_quality(
 
     times = sorted(sample["timestamp"] for sample in samples)
     gaps = [later - earlier for earlier, later in pairwise(times)]
-    cadence_gaps = [gap for gap in gaps if gap < _MAXIMUM_CADENCE_GAP_SECONDS]
+    cadence_gaps = [gap for gap in gaps if gap < resolve_parameter(_MAXIMUM_CADENCE_GAP_SECONDS).value]
 
     speed_limit = _limit(envelope, "max_credible_guide_speed", limits_equipment_match)
     if speed_limit is None:
@@ -178,6 +188,6 @@ def assess_guiding_input_quality(
         typical_cadence_seconds=typical_cadence,
         calibration_problems=_calibration_problems(runs, speed_limit),
         guide_scale_matches_configuration=guide_scale_matches_configuration,
-        has_enough_samples=len(samples) >= MINIMUM_SAMPLES_PER_SESSION,
+        has_enough_samples=len(samples) >= resolve_parameter(MINIMUM_SAMPLES_PER_SESSION).value,
         limits_equipment_match=limits_equipment_match,
     )

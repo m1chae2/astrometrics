@@ -23,6 +23,14 @@ from collections.abc import Sequence
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["NOISE_WEIGHT_MODE", "choose_stack_weight", "equal_weight_noise_penalty"]
@@ -35,7 +43,16 @@ NOISE_WEIGHT_MODE = "noise"
 # Exposures that differ by a few percent give a factor within 1.005 of 1, so
 # they are left alone. M 27 gives 1.17 and measured 13% less noise with the
 # weighting.
-MINIMUM_PENALTY_TO_WEIGHT = 1.05
+MINIMUM_PENALTY_TO_WEIGHT = TunedParameter(
+    name="stacking.minimum_penalty_to_weight",
+    default=1.05,
+    unit="ratio",
+    description="Noise penalty of equal weights above which noise weighting is switched on.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-07",
+)
 
 
 def equal_weight_noise_penalty(exposures: Sequence[float]) -> float:
@@ -83,7 +100,7 @@ def choose_stack_weight(
     if configured_weight or is_spectral:
         return configured_weight
     penalty = equal_weight_noise_penalty(frame_exposures)
-    if penalty < MINIMUM_PENALTY_TO_WEIGHT:
+    if penalty < resolve(MINIMUM_PENALTY_TO_WEIGHT).value:
         return None
     logger.info(
         "Frames of different exposure lengths: equal weights would add %.0f%% noise, "

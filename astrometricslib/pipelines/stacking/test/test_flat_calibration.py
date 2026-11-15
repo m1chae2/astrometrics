@@ -77,7 +77,7 @@ def test_a_frame_with_no_positive_median_has_no_noise_estimate() -> None:
 
 def test_smoothing_width_is_none_when_noise_is_within_the_limit() -> None:
     """A quiet master flat is not smoothed."""
-    assert fc.smoothing_sigma_for_noise(fc.MAXIMUM_FLAT_NOISE_FRACTION) is None
+    assert fc.smoothing_sigma_for_noise(fc.MAXIMUM_FLAT_NOISE_FRACTION.default) is None
     assert fc.smoothing_sigma_for_noise(0.001) is None
 
 
@@ -85,9 +85,9 @@ def test_smoothing_width_follows_the_noise_and_is_clipped() -> None:
     """The width grows with the noise, between the two limits."""
     moderate = fc.smoothing_sigma_for_noise(0.02)
     assert moderate is not None
-    assert fc.MINIMUM_SMOOTHING_SIGMA_PIXELS < moderate < fc.MAXIMUM_SMOOTHING_SIGMA_PIXELS
-    assert fc.smoothing_sigma_for_noise(0.0051) == fc.MINIMUM_SMOOTHING_SIGMA_PIXELS
-    assert fc.smoothing_sigma_for_noise(0.9) == fc.MAXIMUM_SMOOTHING_SIGMA_PIXELS
+    assert fc.MINIMUM_SMOOTHING_SIGMA_PIXELS.default < moderate < fc.MAXIMUM_SMOOTHING_SIGMA_PIXELS.default
+    assert fc.smoothing_sigma_for_noise(0.0051) == fc.MINIMUM_SMOOTHING_SIGMA_PIXELS.default
+    assert fc.smoothing_sigma_for_noise(0.9) == fc.MAXIMUM_SMOOTHING_SIGMA_PIXELS.default
 
 
 def test_the_chosen_width_brings_white_noise_down_to_the_limit(tmp_path: Path) -> None:
@@ -101,7 +101,7 @@ def test_the_chosen_width_brings_white_noise_down_to_the_limit(tmp_path: Path) -
     )
     shape = vignette()
     leftover = (blurred / blurred.mean()) / (shape / shape.mean()) - 1.0
-    assert float(np.std(leftover[20:-20, 20:-20])) < 1.6 * fc.MAXIMUM_FLAT_NOISE_FRACTION
+    assert float(np.std(leftover[20:-20, 20:-20])) < 1.6 * fc.MAXIMUM_FLAT_NOISE_FRACTION.default
 
 
 def test_a_single_faint_noisy_flat_is_reported_and_smoothed(tmp_path: Path) -> None:
@@ -123,7 +123,9 @@ def test_a_good_set_of_flats_has_no_issues(tmp_path: Path) -> None:
     assessment = fc.assess_flats(paths)
     assert assessment.issues == []
     assert not assessment.needs_smoothing
-    assert assessment.noise_fraction == pytest.approx(0.01 / np.sqrt(fc.MAXIMUM_FRAMES_AVERAGED), rel=0.2)
+    assert assessment.noise_fraction == pytest.approx(
+        0.01 / np.sqrt(fc.MAXIMUM_FRAMES_AVERAGED.default), rel=0.2
+    )
 
 
 def test_noise_from_two_frames_ignores_a_shared_pixel_pattern(tmp_path: Path) -> None:
@@ -221,7 +223,11 @@ def test_a_14_bit_flat_at_8000_counts_passes_the_level_check(tmp_path: Path) -> 
     path = write_counts_flat(tmp_path / "flat.fits", 8000.0, seed=41)
     assessment = fc.assess_flats([path], camera="Nikon D5300")
     assert assessment.level_fraction == pytest.approx(8000.0 / 16383.0, rel=0.01)
-    assert fc.MINIMUM_FLAT_LEVEL_FRACTION < assessment.level_fraction < fc.MAXIMUM_FLAT_LEVEL_FRACTION
+    assert (
+        fc.MINIMUM_FLAT_LEVEL_FRACTION.default
+        < assessment.level_fraction
+        < fc.MAXIMUM_FLAT_LEVEL_FRACTION.default
+    )
     assert assessment.full_scale == pytest.approx(16383.0)
     assert not any(issue.startswith(fc.FAINT_FLAT_ISSUE_PREFIX) for issue in assessment.issues)
     assert not any(issue.startswith(fc.BRIGHT_FLAT_ISSUE_PREFIX) for issue in assessment.issues)

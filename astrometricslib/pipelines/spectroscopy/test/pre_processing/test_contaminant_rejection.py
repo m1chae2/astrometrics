@@ -74,7 +74,7 @@ def test_a_dark_dip_is_left_alone() -> None:
 
 def test_a_line_shorter_than_the_window_comes_back_unchanged() -> None:
     """There is no smooth level to compare against on a tiny line."""
-    line = np.full(CONTAMINANT_BASELINE_WIDTH_PX - 1, NEBULA_LEVEL)
+    line = np.full(CONTAMINANT_BASELINE_WIDTH_PX.default - 1, NEBULA_LEVEL)
     line[5] += SPIKE_HEIGHT
 
     assert np.array_equal(replace_narrow_spikes(line), line)

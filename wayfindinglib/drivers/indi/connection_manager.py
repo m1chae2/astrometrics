@@ -6,11 +6,28 @@ import time
 
 from astrometricslib.drivers import require_local_host
 from astrometricslib.exceptions import OfflineModeError
+from astrometricslib.parameters import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.drivers.host_resolver import KnownHostAddress
 
 logger = logging.getLogger(__name__)
 
-MAX_CONSECUTIVE_PROBE_FAILURES = 3
+MAX_CONSECUTIVE_PROBE_FAILURES = TunedParameter(
+    name="wayfinding.max_consecutive_probe_failures",
+    default=3,
+    unit="handshakes",
+    description="Failed handshakes in a row before a connected INDI server counts as lost.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="WAY-D134",
+    pending_conversion=True,
+)
 """Failed handshakes in a row before a connected server counts as lost.
 
 Design estimate. Handshakes run at least 5 s apart, so 3 in a row means the
@@ -73,7 +90,7 @@ class ConnectionManager:
             `True` after `MAX_CONSECUTIVE_PROBE_FAILURES` failed handshakes in
             a row. A failed name lookup is not counted.
         """
-        return self.consecutive_probe_failures >= MAX_CONSECUTIVE_PROBE_FAILURES
+        return self.consecutive_probe_failures >= resolve_parameter(MAX_CONSECUTIVE_PROBE_FAILURES).value
 
     def reset_probe_failures(self) -> None:
         """Forget earlier failed handshakes (after a reconnect)."""

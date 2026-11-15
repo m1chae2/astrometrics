@@ -24,6 +24,13 @@ from collections.abc import Iterable
 from typing import Any
 
 from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 
 # Two catalog rows closer than this on the sky are the same star. On the
 # real catalog, pairs of non-position-only rows within 1 arcsecond number
@@ -31,13 +38,32 @@ from astrometricslib.models.stellar_source import StellarObject
 # nearly stops growing after 2 arcseconds, so pairs inside it are one star
 # under two names, and the few beyond are ordinary neighbors. 2 arcseconds
 # is also well below the separation of real neighbors in these fields.
-SAME_STAR_POSITION_TOLERANCE_ARCSEC = 2.0
+SAME_STAR_POSITION_TOLERANCE_ARCSEC = TunedParameter(
+    name="shared.same_star_position_tolerance_arcsec",
+    default=2.0,
+    unit="arcsec",
+    description="Largest position difference at which two records are the same star.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.PUBLISHED_CONSTANT,
+    register_entry="AST-11",
+)
 
 # The maximum allowed distance between a detected star and a catalog entry
 # for the two to count as the same physical star. This 10-arcsecond limit is
 # used when matching detected stars to the SIMBAD and Gaia catalogs, and when
 # reusing an existing position-only star's id (see `star_recording`).
-CATALOG_MATCH_RADIUS_ARCSEC = 10.0
+CATALOG_MATCH_RADIUS_ARCSEC = TunedParameter(
+    name="shared.catalog_match_radius_arcsec",
+    default=10.0,
+    unit="arcsec",
+    description="Radius within which a detected star is matched to a catalog star.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-D07",
+    pending_conversion=True,
+)
 
 # Names that beat every other catalog, best first. A name matching the
 # first pattern is preferred to one matching the second, and both to any

@@ -23,6 +23,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.quality_reports import InputQualityReport, RawFrameCheckReport
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
@@ -262,7 +263,9 @@ def input_quality_report(
             if values
             else {"frames": 0}
         )
-    trend_metrics, trend_notes = _background_trend_metrics(rows[-max(trend_frames, MINIMUM_FRAMES) :])
+    trend_metrics, trend_notes = _background_trend_metrics(
+        rows[-max(trend_frames, resolve(MINIMUM_FRAMES).value) :]
+    )
     trend_metrics["measured_fwhm_px"] = "rising"
     trends = find_trends(rows, trend_metrics, trend_frames, trend_threshold_percent)
     if trend_notes:

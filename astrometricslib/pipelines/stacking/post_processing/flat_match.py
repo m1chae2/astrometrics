@@ -140,7 +140,15 @@ from scipy import ndimage
 
 from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, open_primary_hdu
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.measurement import QualityMeasurement, QualitySubject
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.quality.frame_measurement import measure_clipped_mean_adu
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     PipelineRunContext,
@@ -191,7 +199,17 @@ _SPEC_BY_NAME = {spec.name: spec for spec in STACKING_METRICS}
 # averaging 64 pixels lowers the pixel noise 8 times. Dust nearer the sensor
 # casts smaller shadows, which an 8-pixel cell still resolves down to about
 # 50 pixels.
-MAP_CELL_PX = 8
+MAP_CELL_PX = TunedParameter(
+    name="stacking.map_cell_px",
+    default=8,
+    unit="pixels",
+    description="Sensor pixels along one side of a flat-match map cell.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D47",
+    pending_conversion=True,
+)
 
 # Gaussian widths of the band pass, in cells. The low width (2 cells, 16
 # pixels) removes the noise and the sensor's fixed pattern, which repeats from
@@ -202,8 +220,28 @@ MAP_CELL_PX = 8
 # shadow's edge region and far narrower than the vignetting, which spans the
 # sensor. Both were chosen on the M 57 night, the flat of the same afternoon
 # (register entry STK-46).
-LOW_PASS_SIGMA_CELLS = 2.0
-HIGH_PASS_SIGMA_CELLS = 30.0
+LOW_PASS_SIGMA_CELLS = TunedParameter(
+    name="stacking.low_pass_sigma_cells",
+    default=2.0,
+    unit="cells",
+    description="Width of the smaller Gaussian of the flat-match band pass.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D47",
+    pending_conversion=True,
+)
+HIGH_PASS_SIGMA_CELLS = TunedParameter(
+    name="stacking.high_pass_sigma_cells",
+    default=30.0,
+    unit="cells",
+    description="Width of the larger Gaussian of the flat-match band pass.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D47",
+    pending_conversion=True,
+)
 
 # Frames read at most. The flats are bright (about 28,000 ADU) and the dust
 # shows as a fraction of a percent to a few percent, so 16 flats put the map's
@@ -211,11 +249,38 @@ HIGH_PASS_SIGMA_CELLS = 30.0
 # 400 to 800 ADU), so 24 are read: the median of N frames has about 1.25 /
 # sqrt(N) of one frame's noise. The cap keeps the arrays at 24 x 750 x 500
 # floats (36 MB) for the largest camera.
-MAXIMUM_FLAT_FRAMES = 16
-MAXIMUM_LIGHT_FRAMES = 24
+MAXIMUM_FLAT_FRAMES = TunedParameter(
+    name="stacking.maximum_flat_frames",
+    default=16,
+    unit="frames",
+    description="Most flat frames read.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D46",
+)
+MAXIMUM_LIGHT_FRAMES = TunedParameter(
+    name="stacking.maximum_light_frames",
+    default=24,
+    unit="frames",
+    description="Most light frames read.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D46",
+)
 # The odd and even halves need at least 4 frames each to have a median that
 # means anything.
-MINIMUM_LIGHT_FRAMES = 8
+MINIMUM_LIGHT_FRAMES = TunedParameter(
+    name="stacking.minimum_light_frames",
+    default=8,
+    unit="frames",
+    description="Fewest light frames for the odd and even halves to have a median.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D46",
+)
 
 # A light frame is used only when its sky, above the bias level, is at least
 # this many times the camera's read noise (in electrons). Below that the
@@ -223,29 +288,117 @@ MINIMUM_LIGHT_FRAMES = 8
 # variation that carries the dust. The factor 10 is a round number chosen
 # for the brief, not tuned; at the ASI 533MM's 3.8 e- it asks for 38 e- of sky,
 # 49 ADU, and the real lights have 400 to 800 ADU.
-SKY_READ_NOISE_FACTOR = 10.0
+SKY_READ_NOISE_FACTOR = TunedParameter(
+    name="stacking.sky_read_noise_factor",
+    default=10.0,
+    unit="× read noise",
+    description="How many times the read noise a light frame's sky must be above the bias level.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D46",
+)
 
 # Bias frames read to find the bias level: the median of the clipped means of
 # up to this many frames (the same estimator and count as the frame
 # measurement's bias finder, `BIAS_FRAMES_FOR_LEVEL`).
-BIAS_FRAMES_FOR_LEVEL = 5
+BIAS_FRAMES_FOR_LEVEL = TunedParameter(
+    name="stacking.flat_match.bias_frames_for_level",
+    default=5,
+    unit="frames",
+    description="Most bias frames read to find the bias level.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D46",
+)
 
 # The target is at the frame centre (the mount is pointed at it), so a disc
 # of this radius around the centre is set aside in every frame. 25 cells is
 # 200 pixels: 6.4 arcminutes on the ASI 533MM at 1.9 arcsec/px. A target that
 # is larger, or framed off the centre, is not covered.
-TARGET_MASK_RADIUS_CELLS = 25.0
+TARGET_MASK_RADIUS_CELLS = TunedParameter(
+    name="stacking.target_mask_radius_cells",
+    default=25.0,
+    unit="cells",
+    description="Radius of the disc around the frame center set aside for the target.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D47",
+    pending_conversion=True,
+)
 
 # A cell this many robust standard deviations above the local sky is a star or
 # a hot pixel; the connected cells above the lower limit around it are its
 # wings; all are set aside together with the cells within 2 cells of them.
-STAR_MASK_SIGMAS = 4.0
-STAR_WING_SIGMAS = 2.0
-STAR_MASK_GROW_CELLS = 2
+STAR_MASK_SIGMAS = TunedParameter(
+    name="stacking.star_mask_sigmas",
+    default=4.0,
+    unit="sigma",
+    description="Robust sigmas above the local sky at which a cell counts as a star or hot pixel.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D47",
+    pending_conversion=True,
+)
+STAR_WING_SIGMAS = TunedParameter(
+    name="stacking.star_wing_sigmas",
+    default=2.0,
+    unit="sigma",
+    description="Lower limit in sigmas used to grow a star mask over its wings.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D47",
+    pending_conversion=True,
+)
+STAR_MASK_GROW_CELLS = TunedParameter(
+    name="stacking.star_mask_grow_cells",
+    default=2,
+    unit="cells",
+    description="Cells by which star masks are enlarged.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D47",
+    pending_conversion=True,
+)
 # The second pass on the median map (see `_build_light_maps`).
-MAP_STAR_LOCAL_SIGMA_CELLS = 3.0
-MAP_STAR_CORE_SIGMAS = 3.0
-MAP_STAR_WING_SIGMAS = 1.5
+MAP_STAR_LOCAL_SIGMA_CELLS = TunedParameter(
+    name="stacking.map_star_local_sigma_cells",
+    default=3.0,
+    unit="cells",
+    description="Width of the local sky estimate in the second star pass on the median map.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D47",
+    pending_conversion=True,
+)
+MAP_STAR_CORE_SIGMAS = TunedParameter(
+    name="stacking.map_star_core_sigmas",
+    default=3.0,
+    unit="sigma",
+    description="Sigmas above the local sky at which a map cell is a star core.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D47",
+    pending_conversion=True,
+)
+MAP_STAR_WING_SIGMAS = TunedParameter(
+    name="stacking.map_star_wing_sigmas",
+    default=1.5,
+    unit="sigma",
+    description="Sigmas above the local sky down to which star wings are masked on the map.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D47",
+    pending_conversion=True,
+)
 
 # A dust shadow in the flat map: at least this deep (standard deviations of the
 # flat map's noise) and at least this deep as a fraction of the level, and at
@@ -255,30 +408,140 @@ MAP_STAR_WING_SIGMAS = 1.5
 # can show in the lights. The count depends on these limits (register entry
 # STK-46 lists it for others), so it is a count of shadows above them, not of
 # all the dust. It is a diagnostic: no other row waits on it.
-SHADOW_MINIMUM_SIGMAS = 5.0
-SHADOW_MINIMUM_DEPTH_FRACTION = 0.0015
-SHADOW_MINIMUM_AREA_CELLS = 25
+SHADOW_MINIMUM_SIGMAS = TunedParameter(
+    name="stacking.shadow_minimum_sigmas",
+    default=5.0,
+    unit="sigma",
+    description="Least depth of a dust shadow, in standard deviations of the flat map's noise.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D48",
+    pending_conversion=True,
+)
+SHADOW_MINIMUM_DEPTH_FRACTION = TunedParameter(
+    name="stacking.shadow_minimum_depth_fraction",
+    default=0.0015,
+    unit="fraction",
+    description="Least depth of a dust shadow, as a fraction of the flat map's level.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D48",
+    pending_conversion=True,
+)
+SHADOW_MINIMUM_AREA_CELLS = TunedParameter(
+    name="stacking.shadow_minimum_area_cells",
+    default=25,
+    unit="cells",
+    description="Least area of a dust shadow.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D48",
+    pending_conversion=True,
+)
 # The shadows are enlarged by this many cells before the control correlation
 # leaves them out, so their soft edges are out too (a shadow's edge is about
 # 10 pixels wide, a cell is 8, and the band pass spreads it by 2 cells).
-SHADOW_MASK_GROW_CELLS = 4
+SHADOW_MASK_GROW_CELLS = TunedParameter(
+    name="stacking.shadow_mask_grow_cells",
+    default=4,
+    unit="cells",
+    description="Cells by which dust shadows are enlarged before the control correlation.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D48",
+    pending_conversion=True,
+)
 
 # The degree of the polynomial that removes the vignetting before the band pass
 # (see `_smooth_trend`).
-TREND_DEGREE = 4
+TREND_DEGREE = TunedParameter(
+    name="stacking.trend_degree",
+    default=4,
+    unit="degree",
+    description="Degree of the polynomial that removes vignetting before the band pass.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D47",
+    pending_conversion=True,
+)
 
 # Cells this close to the edge are not compared: near the edge the smoothing
 # leans on cells on one side only. Two low-pass widths (32 pixels) is far
 # enough in that the flattened maps have no gradient left to bias it.
-EDGE_MARGIN_CELLS = 16
+EDGE_MARGIN_CELLS = TunedParameter(
+    name="stacking.edge_margin_cells",
+    default=16,
+    unit="cells",
+    description="Distance from the edge within which cells are not compared.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D48",
+    pending_conversion=True,
+)
 
 # Search range, in cells. Dust that moved more than 160 pixels is not the same
 # dust.
-MAXIMUM_SHIFT_CELLS = 20
-COARSE_ANGLE_RANGE_DEG = 3.0
-COARSE_ANGLE_STEP_DEG = 0.25
-FINE_ANGLE_STEP_DEG = 0.05
-FINE_ANGLE_COUNT = 3
+MAXIMUM_SHIFT_CELLS = TunedParameter(
+    name="stacking.maximum_shift_cells",
+    default=20,
+    unit="cells",
+    description="Search range of the shift between the flat map and the light map.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D49",
+    pending_conversion=True,
+)
+COARSE_ANGLE_RANGE_DEG = TunedParameter(
+    name="stacking.coarse_angle_range_deg",
+    default=3.0,
+    unit="degrees",
+    description="Range of the coarse rotation search.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D49",
+    pending_conversion=True,
+)
+COARSE_ANGLE_STEP_DEG = TunedParameter(
+    name="stacking.coarse_angle_step_deg",
+    default=0.25,
+    unit="degrees",
+    description="Step of the coarse rotation search.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D49",
+    pending_conversion=True,
+)
+FINE_ANGLE_STEP_DEG = TunedParameter(
+    name="stacking.fine_angle_step_deg",
+    default=0.05,
+    unit="degrees",
+    description="Step of the fine rotation search.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D49",
+    pending_conversion=True,
+)
+FINE_ANGLE_COUNT = TunedParameter(
+    name="stacking.fine_angle_count",
+    default=3,
+    unit="steps",
+    description="Number of fine rotation steps on each side of the coarse best.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D49",
+    pending_conversion=True,
+)
 
 # The chance level of the correlation. Two maps of a few broad shadows
 # correlate by chance with a spread of 0.1 to 0.3, so the size of a
@@ -286,8 +549,28 @@ FINE_ANGLE_COUNT = 3
 # maps: the correlation at displacements of 40 to 100 cells (320 to 800
 # pixels) is that of patterns that cannot be the same dust (the shadows are
 # about 40 cells across, so beyond 40 cells their own overlap is gone).
-DISPLACED_MINIMUM_SHIFT_CELLS = 40
-DISPLACED_MAXIMUM_SHIFT_CELLS = 100
+DISPLACED_MINIMUM_SHIFT_CELLS = TunedParameter(
+    name="stacking.displaced_minimum_shift_cells",
+    default=40,
+    unit="cells",
+    description="Smallest shift at which the correlation is at chance level.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D49",
+    pending_conversion=True,
+)
+DISPLACED_MAXIMUM_SHIFT_CELLS = TunedParameter(
+    name="stacking.displaced_maximum_shift_cells",
+    default=100,
+    unit="cells",
+    description="Largest shift at which the correlation is at chance level.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D49",
+    pending_conversion=True,
+)
 
 # The null of the search. The search takes the best of 25 angles and 41 x 41
 # shifts, so a high score happens by chance. The same search is repeated with
@@ -312,15 +595,45 @@ NULL_OFFSETS_CELLS: tuple[tuple[int, int], ...] = (
 # of the real flat map; the largest value was 3.29). Measured false-alarm
 # rate at this limit: 1 pair of 101 (register entry STK-46). The 5 spreads
 # this replaces had no measurement behind it.
-PLACEMENT_LIMIT_SIGMAS = 3.1
+PLACEMENT_LIMIT_SIGMAS = TunedParameter(
+    name="stacking.placement_limit_sigmas",
+    default=3.1,
+    unit="sigma",
+    description="Null spreads above the mean null score at which a placement is described.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D49",
+    pending_conversion=True,
+)
 
 # The error of the method itself, from injecting 8 known displacements into 8
 # random dust sets at real shadow depths (0.15 to 0.4%) and real noise: the
 # root-mean-square error was 1.06 pixel along x, 0.98 along y and 0.19 degree
 # in rotation (register entry STK-46). It is added in quadrature to the
 # odd/even odd–even difference, which sees noise only.
-METHOD_SHIFT_ERROR_PX = 1.1
-METHOD_ROTATION_ERROR_DEG = 0.2
+METHOD_SHIFT_ERROR_PX = TunedParameter(
+    name="stacking.method_shift_error_px",
+    default=1.1,
+    unit="pixels",
+    description="Error of the shift method itself, from injected known displacements.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D49",
+    pending_conversion=True,
+)
+METHOD_ROTATION_ERROR_DEG = TunedParameter(
+    name="stacking.method_rotation_error_deg",
+    default=0.2,
+    unit="degrees",
+    description="Error of the rotation method itself, from injected known displacements.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D49",
+    pending_conversion=True,
+)
 
 # A sensor of fewer cells than this cannot hold the band pass.
 MINIMUM_MAP_CELLS = 64
@@ -682,6 +995,7 @@ def _read_cells(path: str, bias_level_adu: float = 0.0) -> _FrameCells | None:
         frame (the cells are `None` when that median is not positive). `None`
         when the file cannot be read, is not a single plane, or is too small.
     """
+    map_cell_px = resolve(MAP_CELL_PX).value
     try:
         with open_primary_hdu(path) as hdu:
             data = hdu.data
@@ -695,13 +1009,13 @@ def _read_cells(path: str, bias_level_adu: float = 0.0) -> _FrameCells | None:
         return None
     if plane.ndim != 2:
         return None
-    block = MAP_CELL_PX
+    block = map_cell_px
     if uses_color_filter_array:
         # Merge each 2 x 2 group of the mosaic first, so the cell does not
         # depend on which color a pixel is.
         rows, columns = (size - size % 2 for size in plane.shape)
         plane = plane[:rows, :columns].reshape(rows // 2, 2, columns // 2, 2).mean(axis=(1, 3))
-        block = MAP_CELL_PX // 2
+        block = map_cell_px // 2
     rows, columns = (size - size % block for size in plane.shape)
     if rows < MINIMUM_MAP_CELLS * block or columns < MINIMUM_MAP_CELLS * block:
         return None
@@ -785,6 +1099,7 @@ def _smooth_trend(cells: np.ndarray, usable: np.ndarray) -> np.ndarray:
     trend : `numpy.ndarray`
         The fitted level in every cell, never less than a thousandth.
     """
+    trend_degree = resolve(TREND_DEGREE).value
     rows, columns = cells.shape
     row_axis = np.linspace(-1.0, 1.0, rows)
     column_axis = np.linspace(-1.0, 1.0, columns)
@@ -793,7 +1108,7 @@ def _smooth_trend(cells: np.ndarray, usable: np.ndarray) -> np.ndarray:
     sample_columns = column_axis[::stride]
     design = np.polynomial.legendre.legvander2d(
         *(axis.ravel() for axis in np.meshgrid(sample_rows, sample_columns, indexing="ij")),
-        [TREND_DEGREE, TREND_DEGREE],
+        [trend_degree, trend_degree],
     )
     values = cells[::stride, ::stride].astype(np.float64).ravel()
     keep = usable[::stride, ::stride].ravel().copy()
@@ -807,7 +1122,7 @@ def _smooth_trend(cells: np.ndarray, usable: np.ndarray) -> np.ndarray:
         keep = usable[::stride, ::stride].ravel() & (np.abs(residual) < 3.0 * max(spread, 1e-6))
     full = np.polynomial.legendre.legvander2d(
         *(axis.ravel() for axis in np.meshgrid(row_axis, column_axis, indexing="ij")),
-        [TREND_DEGREE, TREND_DEGREE],
+        [trend_degree, trend_degree],
     )
     trend = (full @ coefficients).reshape(rows, columns)
     return np.clip(trend, 1e-3, None).astype(np.float32)
@@ -844,12 +1159,12 @@ def band_pass_dust_map(
         usable &= has_value
     flattened = np.where(usable, cells, np.nan) / _smooth_trend(np.where(usable, cells, 0.0), usable)
     weights = usable.astype(np.float32)
-    low = _smooth_without_gaps(flattened, weights, LOW_PASS_SIGMA_CELLS)
-    high = _smooth_without_gaps(flattened, weights, HIGH_PASS_SIGMA_CELLS)
+    low = _smooth_without_gaps(flattened, weights, resolve(LOW_PASS_SIGMA_CELLS).value)
+    high = _smooth_without_gaps(flattened, weights, resolve(HIGH_PASS_SIGMA_CELLS).value)
     with np.errstate(divide="ignore", invalid="ignore"):
         band = low / high - 1.0
     valid = usable & np.isfinite(band) & (high > 0)
-    margin = EDGE_MARGIN_CELLS
+    margin = resolve(EDGE_MARGIN_CELLS).value
     valid[:margin, :] = False
     valid[-margin:, :] = False
     valid[:, :margin] = False
@@ -879,18 +1194,19 @@ def find_dust_shadows(band: np.ndarray, valid: np.ndarray, noise_sigma: float | 
         the threshold (the larger of ``SHADOW_MINIMUM_SIGMAS`` times the noise
         and ``SHADOW_MINIMUM_DEPTH_FRACTION``) and the cells of those groups.
     """
+    shadow_minimum_depth_fraction = resolve(SHADOW_MINIMUM_DEPTH_FRACTION).value
     values = band[valid]
     empty = np.zeros(band.shape, dtype=bool)
     if values.size == 0:
-        return DustShadows(0, SHADOW_MINIMUM_DEPTH_FRACTION, empty)
+        return DustShadows(0, shadow_minimum_depth_fraction, empty)
     if noise_sigma is None:
         noise_sigma = float(robust_sigma(values))
-    threshold = max(SHADOW_MINIMUM_SIGMAS * noise_sigma, SHADOW_MINIMUM_DEPTH_FRACTION)
+    threshold = max(resolve(SHADOW_MINIMUM_SIGMAS).value * noise_sigma, shadow_minimum_depth_fraction)
     labels, group_count = ndimage.label((band < -threshold) & valid, structure=np.ones((3, 3), dtype=int))
     if group_count == 0:
         return DustShadows(0, threshold, empty)
     areas = np.bincount(labels.ravel())[1:]
-    large = np.concatenate([[False], areas >= SHADOW_MINIMUM_AREA_CELLS])
+    large = np.concatenate([[False], areas >= resolve(SHADOW_MINIMUM_AREA_CELLS).value])
     return DustShadows(int(np.count_nonzero(large)), threshold, large[labels])
 
 
@@ -927,7 +1243,7 @@ def correlation_outside_shadows(
         The Pearson coefficient at zero shift and rotation over the cells
         that remain; `None` when fewer than 100 remain or a map has no spread.
     """
-    outside = ~ndimage.binary_dilation(shadow_mask, iterations=SHADOW_MASK_GROW_CELLS)
+    outside = ~ndimage.binary_dilation(shadow_mask, iterations=resolve(SHADOW_MASK_GROW_CELLS).value)
     return _pearson(flat_band, light_band, flat_valid & light_valid & outside)
 
 
@@ -998,7 +1314,7 @@ def _star_mask(cells: np.ndarray, local_sigma: float, core_sigmas: float, wing_s
     hit = np.zeros(group_count + 1, dtype=bool)
     hit[np.unique(labels[cores])] = True
     hit[0] = False
-    return ndimage.binary_dilation(hit[labels], iterations=STAR_MASK_GROW_CELLS)
+    return ndimage.binary_dilation(hit[labels], iterations=resolve(STAR_MASK_GROW_CELLS).value)
 
 
 def _median_without_warnings(stack: np.ndarray) -> np.ndarray:
@@ -1042,8 +1358,9 @@ def _read_flat_cells(
         Raises `_TimeLimitReachedError` if the time limit passes before a
         frame is read.
     """
+    maximum_flat_frames = resolve(MAXIMUM_FLAT_FRAMES).value
     frames: list[np.ndarray] = []
-    for path in _evenly_spaced(sorted(flat_paths), MAXIMUM_FLAT_FRAMES):
+    for path in _evenly_spaced(sorted(flat_paths), maximum_flat_frames):
         frame = reader.read_cells(path)
         if frame is None or frame.cells is None or (frames and frame.cells.shape != frames[0].shape):
             continue
@@ -1071,9 +1388,10 @@ def _bias_level(bias_paths: Sequence[str], reader: _FrameReader) -> float | None
         Raises `_TimeLimitReachedError` if the time limit passes before a
         frame is read.
     """
+    bias_frames_for_level = resolve(BIAS_FRAMES_FOR_LEVEL).value
     levels = [
         level
-        for path in sorted(bias_paths)[:BIAS_FRAMES_FOR_LEVEL]
+        for path in sorted(bias_paths)[:bias_frames_for_level]
         if (level := reader.read_level(path)) is not None
     ]
     return float(np.median(levels)) if levels else None
@@ -1111,8 +1429,11 @@ def _build_light_maps(
         Raises `_TimeLimitReachedError` if the time limit passes before a
         frame is read.
     """
+    high_pass_sigma_cells = resolve(HIGH_PASS_SIGMA_CELLS).value
+    star_mask_sigmas = resolve(STAR_MASK_SIGMAS).value
+    star_wing_sigmas = resolve(STAR_WING_SIGMAS).value
     frames: list[np.ndarray] = []
-    sampled = _evenly_spaced(list(light_paths), MAXIMUM_LIGHT_FRAMES)
+    sampled = _evenly_spaced(list(light_paths), resolve(MAXIMUM_LIGHT_FRAMES).value)
     too_faint = 0
     for path in sampled:
         frame = reader.read_cells(path, bias_level_adu)
@@ -1125,7 +1446,7 @@ def _build_light_maps(
             continue
         cells = frame.cells.copy()
         cells[_target_disc(cells.shape, target_radius_cells)] = np.nan
-        cells[_star_mask(cells, HIGH_PASS_SIGMA_CELLS, STAR_MASK_SIGMAS, STAR_WING_SIGMAS)] = np.nan
+        cells[_star_mask(cells, high_pass_sigma_cells, star_mask_sigmas, star_wing_sigmas)] = np.nan
         frames.append(cells)
     counts = {
         "used": len(frames),
@@ -1133,7 +1454,7 @@ def _build_light_maps(
         "too_faint": too_faint,
         "unusable": len(sampled) - len(frames) - too_faint,
     }
-    if len(frames) < MINIMUM_LIGHT_FRAMES:
+    if len(frames) < resolve(MINIMUM_LIGHT_FRAMES).value:
         return _LightMaps(None, None, None, **counts)
     stack = np.stack(frames)
     full_map = _median_without_warnings(stack)
@@ -1142,7 +1463,12 @@ def _build_light_maps(
     # frames is far quieter than one frame, so a second, lower limit on the
     # median finds them. It looks at the scale of a star (3 cells), so the
     # broad donuts do not trigger it.
-    faint_stars = _star_mask(full_map, MAP_STAR_LOCAL_SIGMA_CELLS, MAP_STAR_CORE_SIGMAS, MAP_STAR_WING_SIGMAS)
+    faint_stars = _star_mask(
+        full_map,
+        resolve(MAP_STAR_LOCAL_SIGMA_CELLS).value,
+        resolve(MAP_STAR_CORE_SIGMAS).value,
+        resolve(MAP_STAR_WING_SIGMAS).value,
+    )
     stack[:, faint_stars] = np.nan
     return _LightMaps(
         _median_without_warnings(stack),
@@ -1401,14 +1727,15 @@ def _displaced_scores(
         rotation. `None` when the maps are too small for a ring of shifts that
         far out.
     """
-    reach = int(min(DISPLACED_MAXIMUM_SHIFT_CELLS, min(flat_band.shape) // 3))
-    if reach <= DISPLACED_MINIMUM_SHIFT_CELLS + 4:
+    displaced_minimum_shift_cells = resolve(DISPLACED_MINIMUM_SHIFT_CELLS).value
+    reach = int(min(resolve(DISPLACED_MAXIMUM_SHIFT_CELLS).value, min(flat_band.shape) // 3))
+    if reach <= displaced_minimum_shift_cells + 4:
         return None, None
     scores = _LagSearch(flat_band, flat_valid, reach).score(
         np.where(light_valid, light_band, 0.0), light_valid
     )
     offsets = np.abs(np.arange(-reach, reach + 1))
-    far = np.maximum(offsets[:, None], offsets[None, :]) >= DISPLACED_MINIMUM_SHIFT_CELLS
+    far = np.maximum(offsets[:, None], offsets[None, :]) >= displaced_minimum_shift_cells
     return float(scores[far].mean()), float(scores[far].std())
 
 
@@ -1418,7 +1745,7 @@ def match_dust_maps(
     light_band: np.ndarray,
     light_valid: np.ndarray,
     *,
-    max_shift_cells: int = MAXIMUM_SHIFT_CELLS,
+    max_shift_cells: int | None = None,
     with_null: bool = True,
 ) -> DustMatch | None:
     """Find the shift and rotation that line the dust up.
@@ -1431,6 +1758,7 @@ def match_dust_maps(
         Where each map can be used.
     max_shift_cells : `int`, optional
         The window of shifts, in cells.
+        If `None`, the value of `MAXIMUM_SHIFT_CELLS` is used.
     with_null : `bool`, optional
         Whether to run the same search at the displaced placements
         (``NULL_OFFSETS_CELLS``) and the displaced spread. The odd/even
@@ -1442,6 +1770,12 @@ def match_dust_maps(
         The correlations and the best placement; `None` when the maps share
         fewer than 100 valid cells.
     """
+    if max_shift_cells is None:
+        max_shift_cells = resolve(MAXIMUM_SHIFT_CELLS).value
+    coarse_angle_range_deg = resolve(COARSE_ANGLE_RANGE_DEG).value
+    fine_angle_step_deg = resolve(FINE_ANGLE_STEP_DEG).value
+    map_cell_px = resolve(MAP_CELL_PX).value
+    fine_angle_count = resolve(FINE_ANGLE_COUNT).value
     both_valid = flat_valid & light_valid
     correlation_at_zero = _pearson(flat_band, light_band, both_valid)
     if correlation_at_zero is None:
@@ -1493,7 +1827,9 @@ def match_dust_maps(
         )
 
     null_offsets = NULL_OFFSETS_CELLS if with_null else ()
-    coarse_angles = np.arange(-COARSE_ANGLE_RANGE_DEG, COARSE_ANGLE_RANGE_DEG + 1e-9, COARSE_ANGLE_STEP_DEG)
+    coarse_angles = np.arange(
+        -coarse_angle_range_deg, coarse_angle_range_deg + 1e-9, resolve(COARSE_ANGLE_STEP_DEG).value
+    )
     coarse: dict[float, tuple[float, float, float, bool]] = {}
     null_best = [-math.inf] * len(null_offsets)
     for angle in coarse_angles:
@@ -1502,17 +1838,17 @@ def match_dust_maps(
         for index, offset in enumerate(null_offsets):
             null_best[index] = max(null_best[index], peak_of_turned(turned, turned_valid, offset)[0])
     best_angle = max(coarse, key=lambda angle: coarse[angle][0])
-    at_angle_edge = abs(best_angle) >= COARSE_ANGLE_RANGE_DEG - 1e-9
+    at_angle_edge = abs(best_angle) >= coarse_angle_range_deg - 1e-9
 
     fine_angles = [
-        best_angle + step * FINE_ANGLE_STEP_DEG for step in range(-FINE_ANGLE_COUNT, FINE_ANGLE_COUNT + 1)
+        best_angle + step * fine_angle_step_deg for step in range(-fine_angle_count, fine_angle_count + 1)
     ]
     fine = {angle: peak_of_turned(*turned_at(angle)) for angle in fine_angles}
     top = max(fine_angles, key=lambda angle: fine[angle][0])
     index = fine_angles.index(top)
     angle_offset = 0.0
     if 0 < index < len(fine_angles) - 1:
-        angle_offset = FINE_ANGLE_STEP_DEG * _parabola_offset(
+        angle_offset = fine_angle_step_deg * _parabola_offset(
             fine[fine_angles[index - 1]][0], fine[top][0], fine[fine_angles[index + 1]][0]
         )
     best_rotation = top + angle_offset
@@ -1533,8 +1869,8 @@ def match_dust_maps(
     return DustMatch(
         correlation_at_zero=correlation_at_zero,
         best_correlation=best_correlation,
-        shift_x_px=shift_x_cells * MAP_CELL_PX,
-        shift_y_px=shift_y_cells * MAP_CELL_PX,
+        shift_x_px=shift_x_cells * map_cell_px,
+        shift_y_px=shift_y_cells * map_cell_px,
         rotation_deg=_wrap_angle(best_rotation),
         at_edge=bool(at_shift_edge or at_angle_edge),
         displaced_std=displaced_std,
@@ -1607,12 +1943,16 @@ def _placement_uncertainty(
         The combined value for each; `None` when either half found no usable
         match, or its peak was at the edge of the search.
     """
+    method_shift_error_px = resolve(METHOD_SHIFT_ERROR_PX).value
     if odd is None or even is None or odd.at_edge or even.at_edge:
         return None, None, None
     return (
-        math.hypot(abs(odd.shift_x_px - even.shift_x_px) / 2.0, METHOD_SHIFT_ERROR_PX),
-        math.hypot(abs(odd.shift_y_px - even.shift_y_px) / 2.0, METHOD_SHIFT_ERROR_PX),
-        math.hypot(abs(_wrap_angle(odd.rotation_deg - even.rotation_deg)) / 2.0, METHOD_ROTATION_ERROR_DEG),
+        math.hypot(abs(odd.shift_x_px - even.shift_x_px) / 2.0, method_shift_error_px),
+        math.hypot(abs(odd.shift_y_px - even.shift_y_px) / 2.0, method_shift_error_px),
+        math.hypot(
+            abs(_wrap_angle(odd.rotation_deg - even.rotation_deg)) / 2.0,
+            resolve(METHOD_ROTATION_ERROR_DEG).value,
+        ),
     )
 
 
@@ -1657,9 +1997,9 @@ def _light_shortfall_reason(maps: _LightMaps, minimum_sky_adu: float) -> str:
     return (
         f"only {maps.used} of {maps.sampled} sampled light frame(s) could be used ("
         f"{maps.too_faint} had a sky under {minimum_sky_adu:.0f} ADU above the bias, "
-        f"{SKY_READ_NOISE_FACTOR:g} times the read noise; {maps.unusable} could not be read or differ "
-        f"from the flat's size); {MINIMUM_LIGHT_FRAMES} are needed for a map that the star mask and "
-        "the median can clean"
+        f"{resolve(SKY_READ_NOISE_FACTOR).value:g} times the read noise; {maps.unusable} could not be "
+        f"read or differ from the flat's size); {resolve(MINIMUM_LIGHT_FRAMES).value} are needed for a map "
+        "that the star mask and the median can clean"
     )
 
 
@@ -1714,7 +2054,7 @@ def measure_flat_match(
             bias_paths,
             sky_requirement.minimum_adu,
             reader,
-            TARGET_MASK_RADIUS_CELLS if target_radius_cells is None else target_radius_cells,
+            resolve(TARGET_MASK_RADIUS_CELLS).value if target_radius_cells is None else target_radius_cells,
         )
     except _TimeLimitReachedError as stop:
         return _all_metrics_missing(str(stop))
@@ -1750,6 +2090,7 @@ def _measure(
         `_TimeLimitReachedError` if the time limit passes before a frame is
         read.
     """
+    placement_limit_sigmas = resolve(PLACEMENT_LIMIT_SIGMAS).value
     flat_frames = _read_flat_cells(flat_paths, reader, target_radius_cells)
     if not flat_frames:
         return _all_metrics_missing("none of the flat frames could be read as a single-plane image")
@@ -1809,17 +2150,17 @@ def _measure(
     why_no_placement = ""
     if match.excess_sigmas is None:
         why_no_placement = "the maps are too small or too flat to measure the chance level of the search"
-    elif match.excess_sigmas < PLACEMENT_LIMIT_SIGMAS:
+    elif match.excess_sigmas < placement_limit_sigmas:
         why_no_placement = (
             f"the best correlation, {match.best_correlation:.3f}, stands only {match.excess_sigmas:.1f} "
             "null spreads above the best correlation of the same search at displaced placements "
-            f"(needs {PLACEMENT_LIMIT_SIGMAS:g})"
+            f"(needs {placement_limit_sigmas:g})"
         )
     elif match.at_edge:
         why_no_placement = (
             "the best placement is at the edge of the search (plus or minus "
-            f"{MAXIMUM_SHIFT_CELLS * MAP_CELL_PX} pixels, plus or minus {COARSE_ANGLE_RANGE_DEG:g} "
-            "degrees), so the true displacement may be larger"
+            f"{resolve(MAXIMUM_SHIFT_CELLS).value * resolve(MAP_CELL_PX).value} pixels, plus or minus "
+            f"{resolve(COARSE_ANGLE_RANGE_DEG).value:g} degrees), so the true displacement may be larger"
         )
     if why_no_placement:
         for name in (
@@ -1929,7 +2270,9 @@ def sky_requirement_for_frame(frame: Any) -> SkyRequirement:
             f"the camera profile of {camera or 'the camera'} holds no gain and read noise for this "
             "gain, offset and binning, so the sky requirement of the light frames cannot be set",
         )
-    return SkyRequirement(SKY_READ_NOISE_FACTOR * entry.read_noise_e.value / entry.gain_e_per_adu.value)
+    return SkyRequirement(
+        resolve(SKY_READ_NOISE_FACTOR).value * entry.read_noise_e.value / entry.gain_e_per_adu.value
+    )
 
 
 def _time_limit_from(configuration: Any) -> float:
@@ -2026,10 +2369,10 @@ def flat_match_rows(
                 "Flat-to-light match of %s: reading up to %d flat and %d light frame(s) of %d, "
                 "and up to %d bias frame(s).",
                 os.path.basename(stack_file_name),
-                min(len(flat_paths or ()), MAXIMUM_FLAT_FRAMES),
-                min(len(light_paths), MAXIMUM_LIGHT_FRAMES),
+                min(len(flat_paths or ()), resolve(MAXIMUM_FLAT_FRAMES).value),
+                min(len(light_paths), resolve(MAXIMUM_LIGHT_FRAMES).value),
                 len(light_paths),
-                min(len(bias_paths or ()), BIAS_FRAMES_FOR_LEVEL),
+                min(len(bias_paths or ()), resolve(BIAS_FRAMES_FOR_LEVEL).value),
             )
             outcome = measure_flat_match(
                 list(flat_paths or ()),

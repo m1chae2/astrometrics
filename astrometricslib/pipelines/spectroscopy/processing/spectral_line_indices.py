@@ -52,8 +52,16 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.spectral_cross_checks import LineIndexClassification
 from astrometricslib.models.stellar_source import ladder_steps_between
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_mask import (
     ATMOSPHERIC_BANDS_ANGSTROM,
 )
@@ -125,19 +133,51 @@ LINE_INDICES: tuple[LineIndex, ...] = (
 # bundled references blurred to the stored line-spread profile, it raised the
 # leave-one-out share within two subtypes from 41% (listed half-widths only)
 # to 59%. It was compared with 0, 0.25, 0.75 and 1.0 on that one measure.
-CORE_RESOLUTION_FRACTION = 0.5
+CORE_RESOLUTION_FRACTION = TunedParameter(
+    name="spectroscopy.core_resolution_fraction",
+    default=0.5,
+    unit="× resolution",
+    description=(
+        "The core of a line index is at least this fraction of the resolution element wide on each side."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-22",
+    pending_conversion=True,
+)
 
 # The fewest indices that must be measurable for a type to be named. Chosen
 # by judgement: with two, a Balmer pair alone cannot tell the hot side of A
 # from the cool side.
-MINIMUM_INDEX_COUNT = 3
+MINIMUM_INDEX_COUNT = TunedParameter(
+    name="spectroscopy.minimum_index_count",
+    default=3,
+    unit="count",
+    description="The fewest indices that must be measurable for a type to be named.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D44",
+)
 
 # The stretch around a line whose scatter gives its signal-to-noise reaches
 # this many resolution elements to each side. The scatter estimate needs at
 # least 8 elements (`spectrum_signal`); 6 on each side gives about 12 after
 # the atmospheric bands are left out, close to that minimum so the stretch
 # stays local to the line. Chosen by judgement; not tuned.
-LOCAL_HALF_WIDTH_ELEMENTS = 6.0
+LOCAL_HALF_WIDTH_ELEMENTS = TunedParameter(
+    name="spectroscopy.local_half_width_elements",
+    default=6.0,
+    unit="× resolution",
+    description=(
+        "How far, in resolution elements, the stretch whose scatter gives a line's signal-to-noise reaches."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D44",
+)
 
 # The reference tables already built, by blur. The key is the resolution
 # element rounded to a whole Angstrom, or the profile's wavelengths and
@@ -193,7 +233,7 @@ def _core_half_width(
     resolution = _resolution_at(line.center_angstrom, resolution_element_angstrom, resolution_profile)
     half_width = line.half_width_angstrom
     if line.widens_with_resolution:
-        half_width = max(half_width, CORE_RESOLUTION_FRACTION * resolution)
+        half_width = max(half_width, resolve(CORE_RESOLUTION_FRACTION).value * resolution)
     return half_width
 
 
@@ -227,7 +267,7 @@ def line_window_signal_to_noise(
     wavelength_angstrom: np.ndarray,
     intensity: np.ndarray,
     errors: np.ndarray,
-    resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    resolution_element_angstrom: float | None = None,
     resolution_profile: ResolutionProfile | None = None,
 ) -> float | None:
     """Find the signal-to-noise per resolution element at the lines.
@@ -272,6 +312,9 @@ def line_window_signal_to_noise(
         signal-to-noise of the stretch around the line. `None` when no line
         has a stretch long enough to measure.
     """
+    local_half_width_elements = resolve(LOCAL_HALF_WIDTH_ELEMENTS).value
+    if resolution_element_angstrom is None:
+        resolution_element_angstrom = resolve(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM).value
     wavelength = np.asarray(wavelength_angstrom, dtype=float)
     values = np.asarray(intensity, dtype=float)
     sigma = np.asarray(errors, dtype=float)
@@ -284,7 +327,7 @@ def line_window_signal_to_noise(
         if any(start <= high and end >= low for _name, start, end in ATMOSPHERIC_BANDS_ANGSTROM):
             continue
         resolution = _resolution_at(line.center_angstrom, resolution_element_angstrom, resolution_profile)
-        reach = LOCAL_HALF_WIDTH_ELEMENTS * resolution
+        reach = local_half_width_elements * resolution
         nearby = usable & (np.abs(wavelength - line.center_angstrom) <= reach)
         reading = estimate_spectrum_signal_to_noise(wavelength[nearby], values[nearby], resolution)
         if reading is not None and np.isfinite(reading):
@@ -295,7 +338,7 @@ def line_window_signal_to_noise(
 def measure_line_indices(
     wavelength_angstrom: np.ndarray,
     flux: np.ndarray,
-    resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    resolution_element_angstrom: float | None = None,
     resolution_profile: ResolutionProfile | None = None,
     excluded_windows_angstrom: Sequence[tuple[float, float]] = (),
     exclude_atmospheric_bands: bool = True,
@@ -328,6 +371,8 @@ def measure_line_indices(
         continuum (0.1 means 10% dimmer; negative means a bump). `None` for an
         index that could not be measured.
     """
+    if resolution_element_angstrom is None:
+        resolution_element_angstrom = resolve(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM).value
     wavelengths = np.asarray(wavelength_angstrom, dtype=float)
     fluxes = np.asarray(flux, dtype=float)
     usable = np.isfinite(wavelengths) & np.isfinite(fluxes) & (fluxes > 0)
@@ -358,7 +403,7 @@ def measure_line_indices(
 
 
 def reference_index_table(
-    resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    resolution_element_angstrom: float | None = None,
     resolution_profile: ResolutionProfile | None = None,
 ) -> tuple[tuple[str, ...], np.ndarray]:
     """Measure the line indices of every main-sequence reference spectrum.
@@ -381,6 +426,8 @@ def reference_index_table(
         an array with one row per reference and one column per index in
         `LINE_INDICES`. An index that could not be measured is NaN.
     """
+    if resolution_element_angstrom is None:
+        resolution_element_angstrom = resolve(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM).value
     if resolution_profile is not None:
         key: tuple = (
             "profile",
@@ -404,7 +451,7 @@ def reference_index_table(
 def classify_by_line_indices(
     wavelength_angstrom: np.ndarray,
     flux: np.ndarray,
-    resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    resolution_element_angstrom: float | None = None,
     resolution_profile: ResolutionProfile | None = None,
     excluded_windows_angstrom: Sequence[tuple[float, float]] = (),
     template_fit_type: str | None = None,
@@ -439,6 +486,8 @@ def classify_by_line_indices(
         `MINIMUM_INDEX_COUNT` indices could be measured, or no reference
         had enough of them.
     """
+    if resolution_element_angstrom is None:
+        resolution_element_angstrom = resolve(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM).value
     types, table = reference_index_table(resolution_element_angstrom, resolution_profile)
     if reference_types is not None:
         wanted = set(reference_types)
@@ -458,7 +507,7 @@ def classify_by_line_indices(
         excluded_windows_angstrom,
     )
     observed = np.array([np.nan if value is None else value for value in measured.values()], dtype=float)
-    if int(np.isfinite(observed).sum()) < MINIMUM_INDEX_COUNT:
+    if int(np.isfinite(observed).sum()) < resolve(MINIMUM_INDEX_COUNT).value:
         return None
 
     # Each index is divided by how much it varies across the references, so
@@ -472,7 +521,9 @@ def classify_by_line_indices(
     counts = usable.sum(axis=1)
     squared = np.where(usable, differences, 0.0) ** 2
     with np.errstate(all="ignore"):
-        distances = np.where(counts >= MINIMUM_INDEX_COUNT, np.sqrt(squared.sum(axis=1) / counts), np.inf)
+        distances = np.where(
+            counts >= resolve(MINIMUM_INDEX_COUNT).value, np.sqrt(squared.sum(axis=1) / counts), np.inf
+        )
     if not np.isfinite(distances).any():
         return None
     best = int(np.argmin(distances))

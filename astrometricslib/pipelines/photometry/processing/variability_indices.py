@@ -48,7 +48,14 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.stats import chi2, median_abs_deviation
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 
 # Converts a fractional flux change to magnitudes: 2.5 / ln(10) = 1.0857.
 MAGNITUDES_PER_FRACTION = 2.5 / math.log(10.0)
@@ -56,26 +63,73 @@ MAGNITUDES_PER_FRACTION = 2.5 / math.log(10.0)
 # The fewest usable points a light curve needs for the indices. Stetson J
 # multiplies neighbouring points and the chi-square has n - 1 degrees of
 # freedom, so a handful of points say little.
-MINIMUM_POINTS_FOR_INDICES = 5
+MINIMUM_POINTS_FOR_INDICES = TunedParameter(
+    name="photometry.minimum_points_for_indices",
+    default=5,
+    unit="points",
+    description="Fewest usable points a light curve needs for the variability indices.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-D10",
+)
 
 # The fewest stars the noise model needs. Each bin of the model holds at
 # least `MINIMUM_STARS_PER_NOISE_BIN` stars, and the model has at least two
 # bins so that it can follow a trend with brightness.
-MINIMUM_STARS_PER_NOISE_BIN = 10
-MINIMUM_STARS_FOR_NOISE_MODEL = 2 * MINIMUM_STARS_PER_NOISE_BIN
-MAXIMUM_NOISE_BINS = 10
+MINIMUM_STARS_PER_NOISE_BIN = TunedParameter(
+    name="photometry.minimum_stars_per_noise_bin",
+    default=10,
+    unit="stars",
+    description="Fewest stars in each brightness bin of the noise model.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-06",
+)
+MINIMUM_STARS_FOR_NOISE_MODEL = 2 * resolve(MINIMUM_STARS_PER_NOISE_BIN).value
+MAXIMUM_NOISE_BINS = TunedParameter(
+    name="photometry.maximum_noise_bins",
+    default=10,
+    unit="bins",
+    description="Most brightness bins in the noise model.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-06",
+)
 
 # A star is a candidate only when it scatters at least this many times the
 # scatter expected at its brightness. A design value: 1.5 is a 50 percent
 # excess, large enough that the ordinary spread of the measured scatter of a
 # constant star (about 1 / sqrt(2 (n - 1)), 10 to 20 percent for 25 to 50
 # points) rarely reaches it.
-EXCESS_SCATTER_THRESHOLD = 1.5
+EXCESS_SCATTER_THRESHOLD = TunedParameter(
+    name="photometry.excess_scatter_threshold",
+    default=1.5,
+    unit="ratio",
+    description=("How many times the scatter expected at its brightness a star must show to be a candidate."),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-06",
+)
 
 # The number of robust standard deviations above the field's median at
 # which the chi-square and J thresholds sit. 2.326 is the one-sided 99th
 # percentile of a normal distribution.
-CALIBRATION_SIGMAS = 2.326
+CALIBRATION_SIGMAS = TunedParameter(
+    name="photometry.calibration_sigmas",
+    default=2.326,
+    unit="sigma",
+    description=(
+        "Robust standard deviations above the field's median at which the chi-square and J thresholds sit."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-06",
+)
 
 # Converts a median absolute deviation to a standard deviation for a
 # normal distribution.
@@ -86,7 +140,16 @@ _MAD_TO_SIGMA = 1.4826
 # rule accepts may be false when the errors are right and the noise is
 # independent. A design value; it is the level journals usually ask for and
 # has been measured only on the synthetic fields (see the README).
-FALSE_DISCOVERY_LEVEL = 0.01
+FALSE_DISCOVERY_LEVEL = TunedParameter(
+    name="photometry.false_discovery_level",
+    default=0.01,
+    unit="probability",
+    description="Largest false discovery q-value a candidate may have.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-07",
+)
 
 
 @dataclass(frozen=True)
@@ -159,6 +222,8 @@ def fit_noise_model(instrumental_magnitudes: Sequence[float], rms_mag: Sequence[
         The fitted curve, or `None` when fewer than
         `MINIMUM_STARS_FOR_NOISE_MODEL` stars have a finite positive scatter.
     """
+    maximum_noise_bins = resolve(MAXIMUM_NOISE_BINS).value
+    minimum_stars_per_noise_bin = resolve(MINIMUM_STARS_PER_NOISE_BIN).value
     mags = np.asarray(instrumental_magnitudes, dtype=float)
     rms = np.asarray(rms_mag, dtype=float)
     keep = np.isfinite(mags) & np.isfinite(rms) & (rms > 0.0)
@@ -167,7 +232,7 @@ def fit_noise_model(instrumental_magnitudes: Sequence[float], rms_mag: Sequence[
         return None
     order = np.argsort(mags)
     mags, rms = mags[order], rms[order]
-    bin_count = min(MAXIMUM_NOISE_BINS, mags.size // MINIMUM_STARS_PER_NOISE_BIN)
+    bin_count = min(maximum_noise_bins, mags.size // minimum_stars_per_noise_bin)
     groups = np.array_split(np.arange(mags.size), bin_count)
     centres = tuple(float(np.median(mags[group])) for group in groups)
     medians = np.maximum.accumulate([float(np.median(rms[group])) for group in groups])
@@ -266,7 +331,7 @@ class VariabilityThresholds:
 def calibrate_thresholds(
     chi_squares: Sequence[float],
     stetson_js: Sequence[float],
-    sigmas: float = CALIBRATION_SIGMAS,
+    sigmas: float | None = None,
 ) -> VariabilityThresholds:
     """Set the chi-square and J thresholds from the field's own stars.
 
@@ -293,6 +358,9 @@ def calibrate_thresholds(
     thresholds : `VariabilityThresholds`
         The thresholds.
     """
+    excess_scatter_threshold = resolve(EXCESS_SCATTER_THRESHOLD).value
+    if sigmas is None:
+        sigmas = resolve(CALIBRATION_SIGMAS).value
     log_chi = np.log10(np.maximum(np.asarray(chi_squares, dtype=float), 1e-6))
     j_values = np.asarray(stetson_js, dtype=float)
     chi_threshold = 10.0 ** (
@@ -301,7 +369,7 @@ def calibrate_thresholds(
     j_threshold = float(np.median(j_values)) + sigmas * _MAD_TO_SIGMA * float(
         median_abs_deviation(j_values, scale=1.0)
     )
-    return VariabilityThresholds(chi_threshold, j_threshold, EXCESS_SCATTER_THRESHOLD)
+    return VariabilityThresholds(chi_threshold, j_threshold, excess_scatter_threshold)
 
 
 def variability_score(
@@ -480,6 +548,7 @@ def extract_series(star: StellarObject) -> LightCurveSeries | None:
         The series, or `None` when fewer than `MINIMUM_POINTS_FOR_INDICES`
         usable points remain.
     """
+    minimum_points_for_indices = resolve(MINIMUM_POINTS_FOR_INDICES).value
     photometry = star.photometry
     if photometry is None:
         return None
@@ -489,7 +558,7 @@ def extract_series(star: StellarObject) -> LightCurveSeries | None:
         raw_values, raw_errors = photometry.fluxes_normalized, photometry.fluxes_normalized_errors
     values = np.asarray(raw_values, dtype=float)
     keep = np.isfinite(values) & (values > 0.0)
-    if int(keep.sum()) < MINIMUM_POINTS_FOR_INDICES:
+    if int(keep.sum()) < minimum_points_for_indices:
         return None
     errors: np.ndarray | None = None
     if len(raw_errors) == values.size:
@@ -632,6 +701,7 @@ def assess_variability(stars: Sequence[StellarObject]) -> FieldAssessment:
     assessment : `FieldAssessment`
         The model, the thresholds and the candidate stars.
     """
+    false_discovery_level = resolve(FALSE_DISCOVERY_LEVEL).value
     series_by_index: dict[int, LightCurveSeries] = {}
     for index, star in enumerate(stars):
         series = extract_series(star)
@@ -673,6 +743,6 @@ def assess_variability(stars: Sequence[StellarObject]) -> FieldAssessment:
         photometry.reduced_chi_square = chi_square
         photometry.stetson_j = j_index
         photometry.variability_score = score
-        if score > 1.0 and q_values[index] < FALSE_DISCOVERY_LEVEL:
+        if score > 1.0 and q_values[index] < false_discovery_level:
             candidates.append(stars[index])
     return FieldAssessment(model, thresholds, candidates)

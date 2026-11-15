@@ -146,10 +146,10 @@ def test_the_star_gain_recovers_a_known_gain() -> None:
     measurement = measure(make_image(gain=TRUE_GAIN, seed=5))
     assert measurement.method == "stars"
     assert measurement.gain == pytest.approx(TRUE_GAIN, rel=0.01)
-    assert measurement.stars_used >= STAR_GAIN_MINIMUM_STARS
+    assert measurement.stars_used >= STAR_GAIN_MINIMUM_STARS.default
     assert not measurement.nonlinear
     assert measurement.disagreement is not None
-    assert measurement.disagreement < DEFAULT_GAIN_DISAGREEMENT_TOLERANCE
+    assert measurement.disagreement < DEFAULT_GAIN_DISAGREEMENT_TOLERANCE.default
 
 
 def test_a_sky_gradient_that_differs_between_groups_does_not_move_the_gain() -> None:
@@ -193,7 +193,7 @@ def test_clipped_bright_stars_are_left_out_of_the_gain() -> None:
 
 def test_a_group_with_too_few_stars_falls_back_to_the_pixel_ratios() -> None:
     """With too few clean stars, the pixel method is used."""
-    few = STAR_GAIN_MINIMUM_STARS // 2
+    few = STAR_GAIN_MINIMUM_STARS.default // 2
     group_a = make_image(seed=2, star_count=few)
     measurement = measure(make_image(gain=TRUE_GAIN, seed=9, star_count=few), group_a)
     assert measurement.method == "pixels"
@@ -218,7 +218,7 @@ def test_a_compressed_bright_end_marks_the_group_nonlinear() -> None:
     assert measurement.method == "stars"
     assert measurement.nonlinear
     assert measurement.disagreement is not None
-    assert measurement.disagreement > DEFAULT_GAIN_DISAGREEMENT_TOLERANCE
+    assert measurement.disagreement > DEFAULT_GAIN_DISAGREEMENT_TOLERANCE.default
     assert measurement.bright_end_ratio is not None
     assert measurement.faint_ratio is not None
     assert measurement.bright_end_ratio < measurement.faint_ratio
@@ -248,16 +248,16 @@ def test_the_camera_clip_ceiling_sets_the_level_of_a_stack_with_no_plateau() -> 
     """A 14-bit stack with no plateau is judged against 16383."""
     smooth = np.random.default_rng(12).normal(0.01, 1e-4, (200, 200))
     nikon_level = estimate_saturation_mask_level(smooth, clip_ceiling_adu=16383.0)
-    assert nikon_level == pytest.approx(SATURATION_FRACTION_OF_FULL_SCALE * 16383.0 / 65535.0)
+    assert nikon_level == pytest.approx(SATURATION_FRACTION_OF_FULL_SCALE.default * 16383.0 / 65535.0)
     assert nikon_level < 0.25
-    assert estimate_saturation_mask_level(smooth) == SATURATION_FRACTION_OF_FULL_SCALE
+    assert estimate_saturation_mask_level(smooth) == SATURATION_FRACTION_OF_FULL_SCALE.default
 
 
 def test_a_sixteen_bit_camera_keeps_the_old_fallback_level() -> None:
     """A 16-bit ceiling leaves the fallback level as it was."""
     smooth = np.random.default_rng(13).normal(0.01, 1e-4, (200, 200))
     asi_level = estimate_saturation_mask_level(smooth, clip_ceiling_adu=65532.0)
-    assert asi_level == pytest.approx(SATURATION_FRACTION_OF_FULL_SCALE, rel=1e-4)
+    assert asi_level == pytest.approx(SATURATION_FRACTION_OF_FULL_SCALE.default, rel=1e-4)
 
 
 def test_a_found_plateau_ignores_the_camera_ceiling() -> None:
@@ -271,9 +271,11 @@ def test_a_found_plateau_ignores_the_camera_ceiling() -> None:
 
 def test_the_star_clip_level_is_a_fraction_of_the_camera_ceiling() -> None:
     """The star level is a set fraction of the ceiling in stack units."""
-    assert star_clip_level(16383.0) == pytest.approx(STAR_GAIN_CLIP_FRACTION_OF_CEILING * 16383.0 / 65535.0)
-    assert star_clip_level(None) == pytest.approx(STAR_GAIN_CLIP_FRACTION_OF_CEILING)
-    assert SKY_RATIO_LIMIT > 1.0
+    assert star_clip_level(16383.0) == pytest.approx(
+        STAR_GAIN_CLIP_FRACTION_OF_CEILING.default * 16383.0 / 65535.0
+    )
+    assert star_clip_level(None) == pytest.approx(STAR_GAIN_CLIP_FRACTION_OF_CEILING.default)
+    assert SKY_RATIO_LIMIT.default > 1.0
 
 
 def test_a_much_brighter_sky_marks_the_group_too_bright() -> None:

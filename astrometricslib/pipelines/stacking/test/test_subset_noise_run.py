@@ -699,7 +699,7 @@ def test_stack_chosen_subset_writes_beside_the_library_stack_or_to_the_folder_as
 def test_a_subset_needs_enough_frames_and_a_safe_label(tmp_path: Path) -> None:
     """Too few frames or an unsafe label are refused before any stacking."""
     library = _Library(tmp_path, nights=1)
-    few = library.target.frames[: MINIMUM_SUBSET_FRAMES - 1]
+    few = library.target.frames[: MINIMUM_SUBSET_FRAMES.default - 1]
     with pytest.raises(InvalidArgumentError, match="at least"):
         stack_frame_subset(
             "M 99",

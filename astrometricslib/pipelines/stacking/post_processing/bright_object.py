@@ -29,6 +29,14 @@ import numpy as np
 
 from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import NotFoundError, StorageError
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.image_scaling import (
     measure_sky,
     midtones_balance_for,
@@ -45,28 +53,75 @@ logger = logging.getLogger(__name__)
 # below the Moon. Validated on the Moon only. A planet is too small to reach
 # it (a disc a few dozen pixels wide covers well under 0.01% of the frame),
 # so planet stacks are not caught by this rule.
-SATURATED_FRACTION_LIMIT = 0.01
+SATURATED_FRACTION_LIMIT = TunedParameter(
+    name="stacking.saturated_fraction_limit",
+    default=0.01,
+    unit="fraction",
+    description="Share of pixels the normal stretch may whiten before a stack counts as a bright object.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-33",
+)
 
 # Pixels brighter than this fraction of the way from the sky to the peak count
 # as the bright object when the white point is chosen. A quarter keeps the
 # lunar disc, with its dark maria, and leaves out the glow around it.
-BRIGHT_PIXEL_FRACTION_OF_PEAK = 0.25
+BRIGHT_PIXEL_FRACTION_OF_PEAK = TunedParameter(
+    name="stacking.bright_pixel_fraction_of_peak",
+    default=0.25,
+    unit="fraction",
+    description="Fraction of the way from sky to peak above which pixels count as the bright object.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D59",
+    pending_conversion=True,
+)
 
 # The white point is this percentile of the bright object's pixels. A
 # percentile near the top ignores a few extreme pixels (a bright limb, a
 # hot pixel) and still reaches the brightest real surface. Chosen by eye on
 # the Moon stack.
-WHITE_POINT_PERCENTILE = 99.8
+WHITE_POINT_PERCENTILE = TunedParameter(
+    name="stacking.white_point_percentile",
+    default=99.8,
+    unit="percentile",
+    description="Percentile of the bright object's pixels that sets the white point.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-33",
+)
 
 # The display brightness the bright object's median is placed at, as a
 # fraction of full brightness. Chosen by eye on the Moon stack, where it
 # kept both the dark maria and the bright rays visible. The only tuned
 # number besides the white-point percentile.
-BRIGHT_OBJECT_BRIGHTNESS = 0.55
+BRIGHT_OBJECT_BRIGHTNESS = TunedParameter(
+    name="stacking.bright_object_brightness",
+    default=0.55,
+    unit="fraction",
+    description="Display brightness at which the bright object's median is placed.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-33",
+)
 
 # The smallest number of bright pixels needed to measure the object. Fewer
 # than this are a few stars, not an extended object.
-_MINIMUM_BRIGHT_PIXELS = 100
+_MINIMUM_BRIGHT_PIXELS = TunedParameter(
+    name="stacking.minimum_bright_pixels",
+    default=100,
+    unit="pixels",
+    description="Fewest bright pixels needed to treat them as an extended object.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D59",
+    pending_conversion=True,
+)
 
 # Every n-th pixel in each direction is used to measure the object's
 # brightness, as the measurement of a whole disc does not need every pixel.
@@ -130,17 +185,20 @@ def choose_bright_object_stretch(data: np.ndarray) -> BrightObjectStretch | None
         return None
     median, _, peak = sky
     white_fraction = white_fraction_after_autostretch(arr, choose_sky_level(arr).sky_level)
-    if white_fraction is None or white_fraction < SATURATED_FRACTION_LIMIT:
+    if white_fraction is None or white_fraction < resolve(SATURATED_FRACTION_LIMIT).value:
         return None
     sample = arr[::_SAMPLE_STRIDE, ::_SAMPLE_STRIDE]
-    bright = sample[np.isfinite(sample) & (sample > median + BRIGHT_PIXEL_FRACTION_OF_PEAK * (peak - median))]
-    if bright.size < _MINIMUM_BRIGHT_PIXELS:
+    bright = sample[
+        np.isfinite(sample)
+        & (sample > median + resolve(BRIGHT_PIXEL_FRACTION_OF_PEAK).value * (peak - median))
+    ]
+    if bright.size < resolve(_MINIMUM_BRIGHT_PIXELS).value:
         return None
-    white_point = float(np.percentile(bright, WHITE_POINT_PERCENTILE))
+    white_point = float(np.percentile(bright, resolve(WHITE_POINT_PERCENTILE).value))
     if not white_point > median:
         return None
     typical = (float(np.median(bright)) - median) / (white_point - median)
-    midtones = midtones_balance_for(min(0.99, max(0.01, typical)), BRIGHT_OBJECT_BRIGHTNESS)
+    midtones = midtones_balance_for(min(0.99, max(0.01, typical)), resolve(BRIGHT_OBJECT_BRIGHTNESS).value)
     scale = 1.0 / white_point if white_point > 1.0 else 1.0
     return BrightObjectStretch(
         scale=scale,

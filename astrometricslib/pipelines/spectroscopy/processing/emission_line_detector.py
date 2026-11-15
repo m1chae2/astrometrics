@@ -46,6 +46,14 @@ import numpy as np
 from scipy.optimize import lsq_linear
 from scipy.special import erf
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
     FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
 )
@@ -77,15 +85,45 @@ NEBULA_LINE_GROUPS: tuple[tuple[str, tuple[tuple[float, float], ...]], ...] = (
 # Light above this wavelength is never used: the instrument response is
 # only valid up to 8000 A, and second-order light (blue light showing up at
 # twice its wavelength) starts to matter from about 7600 A.
-MAXIMUM_FITTED_WAVELENGTH_ANGSTROM = 8000.0
+MAXIMUM_FITTED_WAVELENGTH_ANGSTROM = TunedParameter(
+    name="spectroscopy.maximum_fitted_wavelength_angstrom",
+    default=8000.0,
+    unit="Å",
+    description="Light above this wavelength is never used in the emission-line fit.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D31",
+    pending_conversion=True,
+)
 
 # The continuum is a polynomial of this degree. 2 is a gentle curve: a
 # higher degree could bend into a hump 600 A wide and hide it. Chosen for
 # M 57 only.
-CONTINUUM_POLYNOMIAL_DEGREE = 2
+CONTINUUM_POLYNOMIAL_DEGREE = TunedParameter(
+    name="spectroscopy.continuum_polynomial_degree",
+    default=2,
+    unit="degree",
+    description="The continuum under an emission line is a polynomial of this degree.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D40",
+    pending_conversion=True,
+)
 
 # The fewest samples a spectrum needs before a fit is attempted.
-_MINIMUM_SPECTRUM_POINTS = 30
+_MINIMUM_SPECTRUM_POINTS = TunedParameter(
+    name="spectroscopy.minimum_spectrum_points",
+    default=30,
+    unit="count",
+    description="The fewest samples a spectrum needs before an emission-line fit is attempted.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D40",
+    pending_conversion=True,
+)
 
 # The caller should pass the box half-width as (extraction box width in
 # pixels / 2) x (Angstroms per pixel). For M 57 that is 37 / 2 x 11.04 =
@@ -100,27 +138,85 @@ _MINIMUM_SPECTRUM_POINTS = 30
 # H-beta vs [O III] 0.69, H-alpha vs [S II] 0.66, He II vs H-beta 0.52, and
 # every other pair below 0.45. 0.6 is a judgement call that merges the
 # first two pairs and no others. Validated on M 57 only.
-BLEND_CORRELATION_THRESHOLD = 0.6
+BLEND_CORRELATION_THRESHOLD = TunedParameter(
+    name="spectroscopy.blend_correlation_threshold",
+    default=0.6,
+    unit="correlation",
+    description="Two lines whose fitted amplitudes correlate above this are reported as a blend.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D40",
+    pending_conversion=True,
+)
 
 # How many error bars above zero a line must be. 5 means "very unlikely to
 # be noise"; between 3 and 5 is called unclear. Judgement calls, checked
 # against noise-only spectra in the tests and against M 57 only.
-DETECTED_SIGNIFICANCE = 5.0
-UNCLEAR_SIGNIFICANCE = 3.0
+DETECTED_SIGNIFICANCE = TunedParameter(
+    name="spectroscopy.detected_significance",
+    default=5.0,
+    unit="sigma",
+    description="How many error bars above zero an emission line must be to count as detected.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-25",
+)
+UNCLEAR_SIGNIFICANCE = TunedParameter(
+    name="spectroscopy.unclear_significance",
+    default=3.0,
+    unit="sigma",
+    description="How many error bars above zero an emission line must be to count as unclear.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-25",
+)
 
 # A line is "covered" only when at least this much of its box lies inside
 # the wavelength range that was actually fitted. Half is a judgement call.
-MINIMUM_COVERED_FRACTION = 0.5
+MINIMUM_COVERED_FRACTION = TunedParameter(
+    name="spectroscopy.minimum_covered_fraction",
+    default=0.5,
+    unit="fraction",
+    description="A line is covered only when at least this much of its box lies inside the fitted range.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D40",
+    pending_conversion=True,
+)
 
 # A spectrum is called an emission-line source when at least this many
 # separate lines or blends are detected. Two is the least that tells a
 # nebula from one noisy bump. Validated on M 57 only.
-MINIMUM_DETECTED_FOR_EMISSION_SOURCE = 2
+MINIMUM_DETECTED_FOR_EMISSION_SOURCE = TunedParameter(
+    name="spectroscopy.minimum_detected_for_emission_source",
+    default=2,
+    unit="count",
+    description="The fewest detected lines or blends for a spectrum to be called an emission-line source.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D40",
+    pending_conversion=True,
+)
 
 # The noise inflation for correlated samples is never allowed to be larger
 # than this fraction of the sample count, so a nearly perfect residual
 # autocorrelation cannot make the error bars infinite.
-_MAXIMUM_INFLATION_FRACTION = 0.25
+_MAXIMUM_INFLATION_FRACTION = TunedParameter(
+    name="spectroscopy.maximum_inflation_fraction",
+    default=0.25,
+    unit="fraction",
+    description="The largest noise inflation for correlated samples, as a fraction of the sample count.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D40",
+    pending_conversion=True,
+)
 
 
 @dataclass(frozen=True)
@@ -241,6 +337,7 @@ def _group_into_blends(columns: list[_LineColumn], continuum_design: np.ndarray)
         Indices into `columns`, one list per blend. A line with no look-alike
         is a blend of one.
     """
+    blend_correlation_threshold = resolve(BLEND_CORRELATION_THRESHOLD).value
     projection = continuum_design @ np.linalg.pinv(continuum_design)
     residual_profiles = [column.profile - projection @ column.profile for column in columns]
 
@@ -272,7 +369,7 @@ def _group_into_blends(columns: list[_LineColumn], continuum_design: np.ndarray)
             if norm_product <= 0.0:
                 continue
             correlation = float(residual_profiles[first] @ residual_profiles[second] / norm_product)
-            if correlation >= BLEND_CORRELATION_THRESHOLD:
+            if correlation >= blend_correlation_threshold:
                 parent[find(second)] = find(first)
 
     grouped: dict[int, list[int]] = {}
@@ -304,14 +401,14 @@ def _correlated_noise_inflation(residual: np.ndarray) -> float:
     lag_one = float(centered[:-1] @ centered[1:]) / denominator
     lag_one = min(max(lag_one, 0.0), 0.999)
     inflation = (1.0 + lag_one) / (1.0 - lag_one)
-    return float(min(inflation, max(1.0, _MAXIMUM_INFLATION_FRACTION * residual.size)))
+    return float(min(inflation, max(1.0, resolve(_MAXIMUM_INFLATION_FRACTION).value * residual.size)))
 
 
 def detect_emission_lines(
     wavelength_angstrom: np.ndarray,
     intensity: np.ndarray,
     line_half_width_angstrom: float,
-    resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    resolution_element_angstrom: float | None = None,
 ) -> list[dict[str, object]]:
     """Test a spectrum for each named nebula emission line.
 
@@ -347,16 +444,19 @@ def detect_emission_lines(
         (amplitude divided by its uncertainty). Empty when the spectrum is
         too short to fit.
     """
+    minimum_covered_fraction = resolve(MINIMUM_COVERED_FRACTION).value
+    if resolution_element_angstrom is None:
+        resolution_element_angstrom = resolve(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM).value
     wavelengths = np.asarray(wavelength_angstrom, dtype=float)
     brightness = np.asarray(intensity, dtype=float)
     valid = (
         np.isfinite(wavelengths)
         & np.isfinite(brightness)
-        & (wavelengths <= MAXIMUM_FITTED_WAVELENGTH_ANGSTROM)
+        & (wavelengths <= resolve(MAXIMUM_FITTED_WAVELENGTH_ANGSTROM).value)
     )
     wavelengths = wavelengths[valid]
     brightness = brightness[valid]
-    if wavelengths.size < _MINIMUM_SPECTRUM_POINTS:
+    if wavelengths.size < resolve(_MINIMUM_SPECTRUM_POINTS).value:
         return []
     order = np.argsort(wavelengths)
     wavelengths = wavelengths[order]
@@ -365,7 +465,7 @@ def detect_emission_lines(
     # Blur (Gaussian sigma) from the resolution element, taken as FWHM.
     blur_sigma = resolution_element_angstrom / 2.355
     all_columns = _build_columns(wavelengths, line_half_width_angstrom, blur_sigma)
-    covered = [column for column in all_columns if column.covered_fraction >= MINIMUM_COVERED_FRACTION]
+    covered = [column for column in all_columns if column.covered_fraction >= minimum_covered_fraction]
 
     entries: list[dict[str, object]] = []
     covered_names = {column.name for column in covered}
@@ -405,8 +505,10 @@ def _fit_covered(
     entries : `list` [`dict`]
         One entry per blend of covered lines.
     """
+    detected_significance = resolve(DETECTED_SIGNIFICANCE).value
+    unclear_significance = resolve(UNCLEAR_SIGNIFICANCE).value
     normalized = 2.0 * (wavelengths - wavelengths[0]) / (wavelengths[-1] - wavelengths[0]) - 1.0
-    continuum_design = np.vander(normalized, CONTINUUM_POLYNOMIAL_DEGREE + 1, increasing=True)
+    continuum_design = np.vander(normalized, resolve(CONTINUUM_POLYNOMIAL_DEGREE).value + 1, increasing=True)
     continuum_term_count = continuum_design.shape[1]
     line_design = np.column_stack([column.profile for column in covered])
     design = np.hstack([continuum_design, line_design])
@@ -428,9 +530,9 @@ def _fit_covered(
         variance = float(covariance[np.ix_(indices, indices)].sum())
         uncertainty = math.sqrt(max(variance, 0.0))
         significance = amplitude / uncertainty if uncertainty > 0.0 else 0.0
-        if significance >= DETECTED_SIGNIFICANCE:
+        if significance >= detected_significance:
             verdict = VERDICT_DETECTED
-        elif significance >= UNCLEAR_SIGNIFICANCE:
+        elif significance >= unclear_significance:
             verdict = VERDICT_UNCLEAR
         else:
             verdict = VERDICT_NOT_SEEN
@@ -508,4 +610,4 @@ def is_emission_line_source(lines: list[dict[str, object]]) -> bool:
         blends were detected.
     """
     detected_count = sum(1 for entry in lines if entry["verdict"] == VERDICT_DETECTED)
-    return detected_count >= MINIMUM_DETECTED_FOR_EMISSION_SOURCE
+    return detected_count >= resolve(MINIMUM_DETECTED_FOR_EMISSION_SOURCE).value

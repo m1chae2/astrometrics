@@ -17,6 +17,14 @@ from photutils.background import Background2D, MedianBackground
 from scipy.ndimage import zoom
 
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.star_finding import find_sources_above_background
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
@@ -26,7 +34,16 @@ logger = logging.getLogger(__name__)
 # filaments are not, so a source outside (-0.6, 0.6) is dropped. Tightened from
 # DAOStarFinder's (-1, 1) default on the Veil Nebula frame (AST-16). The frame
 # measurement passes no window, because it must keep trailed stars.
-SOURCE_DETECTOR_ROUNDNESS_RANGE = (-0.6, 0.6)
+SOURCE_DETECTOR_ROUNDNESS_RANGE = TunedParameter(
+    name="astrometry.source_detector_roundness_range",
+    default=(-0.6, 0.6),
+    unit="roundness",
+    description="The roundness window a detected source must lie inside to count as a star.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="AST-D01",
+)
 
 # Below this pixel count, background stats are computed on the full
 # array -- subsampling only pays off once the full-array cost is
@@ -38,7 +55,16 @@ _BACKGROUND_STATS_SUBSAMPLE_MIN_PIXELS = 512 * 512
 # within 0.05%, at ~20x lower cost. A *strided* subsample (data[::4,
 # ::4]) was tried first and rejected -- it aliased with real spatial
 # structure in the frame and came out 77% off on std.
-_BACKGROUND_STATS_SAMPLE_FRACTION = 1.0 / 16.0
+_BACKGROUND_STATS_SAMPLE_FRACTION = TunedParameter(
+    name="astrometry.background_stats_sample_fraction",
+    default=1.0 / 16.0,
+    unit="fraction of pixels",
+    description="The share of pixels sampled to estimate the global background of a large image.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    register_entry="AST-16",
+    pending_conversion=True,
+)
 # Seed for the random subsample above. The sample feeds the detection
 # threshold, so an unseeded sample would nudge the threshold a little on
 # every run, and a faint star near the cutoff could appear in one run and
@@ -56,13 +82,53 @@ BACKGROUND_SAMPLE_SEED = 20261010
 # into "background" instead of candidate source flux. 1/20 keeps the
 # box comfortably larger than a stellar FWHM while still tracking
 # nebula-scale gradients.
-_BACKGROUND_2D_BOX_FRACTION = 1.0 / 20.0
-_BACKGROUND_2D_BOX_MIN_PX = 20
-_BACKGROUND_2D_BOX_MAX_PX = 200
+_BACKGROUND_2D_BOX_FRACTION = TunedParameter(
+    name="astrometry.background_2d_box_fraction",
+    default=1.0 / 20.0,
+    unit="× shorter image axis",
+    description="Side of a background box, as a fraction of the image's shorter axis.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-16",
+    pending_conversion=True,
+)
+_BACKGROUND_2D_BOX_MIN_PX = TunedParameter(
+    name="astrometry.background_2d_box_min_px",
+    default=20,
+    unit="px",
+    description="Smallest side of a background box.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-16",
+    pending_conversion=True,
+)
+_BACKGROUND_2D_BOX_MAX_PX = TunedParameter(
+    name="astrometry.background_2d_box_max_px",
+    default=200,
+    unit="px",
+    description="Largest side of a background box.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-16",
+    pending_conversion=True,
+)
 # Background2D needs several boxes per axis to interpolate a map at
 # all; below this, per-box statistics are too noisy to be meaningful
 # and we fall back to a single global background estimate.
-_BACKGROUND_2D_MIN_BOXES_PER_AXIS = 3
+_BACKGROUND_2D_MIN_BOXES_PER_AXIS = TunedParameter(
+    name="astrometry.background_2d_min_boxes_per_axis",
+    default=3,
+    unit="boxes",
+    description="Fewest background boxes along each axis for the 2D background map to be used.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-16",
+    pending_conversion=True,
+)
 
 # A star's radius is the distance from its centre at which it falls to this
 # fraction of its peak brightness above the background. 10% captures the
@@ -96,7 +162,7 @@ def background_sample_indices(pixel_count: int, seed: int = BACKGROUND_SAMPLE_SE
         Distinct positions in the flattened image, one per sampled pixel.
         The sample holds `_BACKGROUND_STATS_SAMPLE_FRACTION` of the pixels.
     """
-    sample_size = int(pixel_count * _BACKGROUND_STATS_SAMPLE_FRACTION)
+    sample_size = int(pixel_count * resolve(_BACKGROUND_STATS_SAMPLE_FRACTION).value)
     return np.random.default_rng(seed).choice(pixel_count, size=sample_size, replace=False)
 
 
@@ -270,13 +336,13 @@ class SourceDetector:
         # meaningful box grid (see _BACKGROUND_2D_MIN_BOXES_PER_AXIS).
         box_size = int(
             np.clip(
-                min(data.shape) * _BACKGROUND_2D_BOX_FRACTION,
-                _BACKGROUND_2D_BOX_MIN_PX,
-                _BACKGROUND_2D_BOX_MAX_PX,
+                min(data.shape) * resolve(_BACKGROUND_2D_BOX_FRACTION).value,
+                resolve(_BACKGROUND_2D_BOX_MIN_PX).value,
+                resolve(_BACKGROUND_2D_BOX_MAX_PX).value,
             )
         )
         background_map: np.ndarray | float
-        if min(data.shape) >= box_size * _BACKGROUND_2D_MIN_BOXES_PER_AXIS:
+        if min(data.shape) >= box_size * resolve(_BACKGROUND_2D_MIN_BOXES_PER_AXIS).value:
             try:
                 bkg = Background2D(
                     data,
@@ -324,7 +390,7 @@ class SourceDetector:
             noise=std,
             expected_fwhm_px=self.fwhm,
             threshold_sigma=self.threshold_sigma,
-            roundness_range=SOURCE_DETECTOR_ROUNDNESS_RANGE,
+            roundness_range=resolve(SOURCE_DETECTOR_ROUNDNESS_RANGE).value,
             mask=mask,
         )
         if not with_radius:

@@ -37,6 +37,7 @@ import statistics
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.models.quality.limit import LimitTier
 from astrometricslib.models.quality.measurement import QualityMeasurement, QualitySubject
@@ -53,6 +54,12 @@ from astrometricslib.models.stellar_source import (
     NO_GOOD_MATCH_RMS,
     is_rms_gap_ambiguous,
     types_differ_on_ladder,
+)
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
 )
 from astrometricslib.models.wavelength_scale import WavelengthScaleSummary
 from astrometricslib.pipelines.shared.quality.notices import notice_measurement
@@ -129,7 +136,19 @@ PROCESSING_QUALITY_GATE_NAME = "processing_quality"
 # value, not a measured one: half the classified spectra failing means the
 # processing stage is not working for most of the run. It has not been checked
 # against real runs.
-PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION = 0.5
+PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION = TunedParameter(
+    name="spectroscopy.processing_quality_maximum_failed_fraction",
+    default=0.5,
+    unit="fraction",
+    description=(
+        "The largest share of classified spectra allowed to "
+        "fail a processing checkpoint before the gate fails."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-D13",
+)
 
 # The counts `spectrum_facts` returns, so a caller can start from all zeros.
 FACT_NAMES = (
@@ -364,18 +383,24 @@ def spectroscopy_run_gates(
                     ZERO_ORDER_GATE_NAME,
                     "zero-order saturated in at least one processed star",
                     worst,
-                    DEFAULT_SATURATION_FLAG_THRESHOLD,
+                    resolve(DEFAULT_SATURATION_FLAG_THRESHOLD).value,
                     saturation_source,
                 )
             )
         else:
             gates.append(
-                passed_gate(ZERO_ORDER_GATE_NAME, worst, DEFAULT_SATURATION_FLAG_THRESHOLD, saturation_source)
+                passed_gate(
+                    ZERO_ORDER_GATE_NAME,
+                    worst,
+                    resolve(DEFAULT_SATURATION_FLAG_THRESHOLD).value,
+                    saturation_source,
+                )
             )
 
     classification_source = (
-        f"best reference within {NO_GOOD_MATCH_RMS} relative RMS of the spectrum, and the best "
-        f"reference of another spectral class at least {AMBIGUOUS_RMS_GAP} RMS further away "
+        f"best reference within {resolve(NO_GOOD_MATCH_RMS).value} "
+        f"relative RMS of the spectrum, and the best "
+        f"reference of another spectral class at least {resolve(AMBIGUOUS_RMS_GAP).value} RMS further away "
         "(not a probability); neighbouring subtypes closer than that are reported, not failed"
     )
     classified = facts.get("classified", 0)
@@ -414,7 +439,8 @@ def spectroscopy_run_gates(
         )
 
     catalog_source = (
-        f"measured type within {DIFFERS_FROM_CATALOG_SUBTYPES:.0f} subtype steps of the catalog type "
+        f"measured type within {resolve(DIFFERS_FROM_CATALOG_SUBTYPES).value:.0f} "
+        f"subtype steps of the catalog type "
         "(set on 29 stars)"
     )
     if facts.get("catalog_compared", 0) == 0:
@@ -478,7 +504,8 @@ def spectroscopy_run_gates(
         )
 
     processing_source = (
-        f"at most {PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION:.0%} of classified spectra fail a "
+        f"at most {resolve(PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION).value:.0%} "
+        f"of classified spectra fail a "
         "processing-checkpoint metric (designed share, not validated)"
     )
     processing_checked = facts.get("processing_checked", 0)
@@ -494,13 +521,13 @@ def spectroscopy_run_gates(
     else:
         failed_fraction = processing_failed / processing_checked
         detail = f"{processing_failed} of {processing_checked} classified spectra failed a processing metric"
-        if failed_fraction > PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION:
+        if failed_fraction > resolve(PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION).value:
             gates.append(
                 failed_gate(
                     PROCESSING_QUALITY_GATE_NAME,
                     detail,
                     failed_fraction,
-                    PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION,
+                    resolve(PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION).value,
                     processing_source,
                 )
             )
@@ -509,7 +536,7 @@ def spectroscopy_run_gates(
                 passed_gate(
                     PROCESSING_QUALITY_GATE_NAME,
                     failed_fraction,
-                    PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION,
+                    resolve(PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION).value,
                     processing_source,
                     detail,
                 )
@@ -806,7 +833,8 @@ def below_feature_limit_notice_measurement(
         float(star_count),
         context,
         subject,
-        f"{star_count} spectrum(s) have a signal-to-noise below {MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE:g} "
+        f"{star_count} spectrum(s) have a signal-to-noise below "
+        f"{resolve(MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE).value:g} "
         "per resolution element, too low to find an absorption line; each keeps its spectrum and its "
         "emission-line test and has no absorption-feature detection or classification",
         action_taken="kept the spectra and skipped the absorption-feature detection and classification",

@@ -167,7 +167,9 @@ def test_solve_skips_the_local_solver_when_too_few_sources_are_detected(
     header["CRVAL1"] = 250.4  # a non-empty header is truthy; an empty one is not
     monkeypatch.setattr(solver, "_solve_online_sources", lambda *a, **k: header)
 
-    too_few_sources = [{"x_centroid": i, "y_centroid": i} for i in range(MINIMUM_SOURCES_FOR_LOCAL_SOLVE - 1)]
+    too_few_sources = [
+        {"x_centroid": i, "y_centroid": i} for i in range(MINIMUM_SOURCES_FOR_LOCAL_SOLVE.default - 1)
+    ]
     result = solver.solve(
         image_path="/fake/image.fits", sources=too_few_sources, image_width=100, image_height=100
     )
@@ -184,7 +186,9 @@ def test_solve_still_tries_the_local_solver_with_enough_sources(monkeypatch: pyt
     local_solve_calls = []
     monkeypatch.setattr(solver, "_solve_locally", lambda *a, **k: local_solve_calls.append(1) or header)
 
-    enough_sources = [{"x_centroid": i, "y_centroid": i} for i in range(MINIMUM_SOURCES_FOR_LOCAL_SOLVE)]
+    enough_sources = [
+        {"x_centroid": i, "y_centroid": i} for i in range(MINIMUM_SOURCES_FOR_LOCAL_SOLVE.default)
+    ]
     result = solver.solve(
         image_path="/fake/image.fits", sources=enough_sources, image_width=100, image_height=100
     )

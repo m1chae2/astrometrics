@@ -93,7 +93,7 @@ def test_the_colours_of_the_problem_spectra_are_flagged(catalog: float, syntheti
 
 @pytest.mark.parametrize(
     ("catalog", "synthetic"),
-    [(0.76, 1.06), (0.87, 0.99), (0.0, -0.08), (1.5, 1.5 + COLOUR_DISAGREEMENT_MAGNITUDES)],
+    [(0.76, 1.06), (0.87, 0.99), (0.0, -0.08), (1.5, 1.5 + COLOUR_DISAGREEMENT_MAGNITUDES.default)],
 )
 def test_ordinary_scatter_is_not_flagged(catalog: float, synthetic: float) -> None:
     """The worst ordinary case (0.30 mag) and the threshold stay quiet."""
@@ -107,7 +107,7 @@ def test_ordinary_scatter_is_not_flagged(catalog: float, synthetic: float) -> No
         (0.5, None),
         (float("nan"), 0.5),
         (0.5, float("nan")),
-        (MAXIMUM_CALIBRATED_B_MINUS_V + 0.1, 0.0),
+        (MAXIMUM_CALIBRATED_B_MINUS_V.default + 0.1, 0.0),
     ],
 )
 def test_missing_or_uncalibratable_colours_are_not_flagged(
@@ -142,7 +142,7 @@ def test_the_colour_difference_and_the_colour_note_come_from_the_same_numbers() 
         (0.5, None),
         (float("nan"), 0.5),
         (0.5, float("nan")),
-        (MAXIMUM_CALIBRATED_B_MINUS_V + 0.1, 0.0),
+        (MAXIMUM_CALIBRATED_B_MINUS_V.default + 0.1, 0.0),
     ],
 )
 def test_the_colour_difference_is_empty_when_the_colour_is_not_compared(

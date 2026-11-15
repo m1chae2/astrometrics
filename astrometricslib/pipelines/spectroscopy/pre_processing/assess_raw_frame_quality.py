@@ -24,10 +24,17 @@ from collections.abc import Mapping, Sequence
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.spectroscopy_quality import (
     StageQualityCheckpoint,
     StageQualityMetric,
     metric,
+)
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
 )
 from astrometricslib.pipelines.shared.quality.saturation import DEFAULT_SATURATION_FLAG_THRESHOLD
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_refraction import (
@@ -47,7 +54,19 @@ STAGE = "raw_frame"
 # resolution element of this setup at 5000 A, which is about 40 A (35 to
 # 48 A measured on Vega; see `spectral_resolution`). A spread of 20 A moves
 # a line by half of what the instrument can tell apart.
-DAR_ALONG_DISPERSION_LIMIT_ANGSTROM = 20.0
+DAR_ALONG_DISPERSION_LIMIT_ANGSTROM = TunedParameter(
+    name="spectroscopy.dar_along_dispersion_limit_angstrom",
+    default=20.0,
+    unit="× resolution",
+    description=(
+        "The largest refraction wavelength error between the blue and red ends accepted without a flag."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D05",
+    pending_conversion=True,
+)
 
 
 def _optional_float(value: object) -> float | None:
@@ -106,8 +125,8 @@ def _refraction_metrics(refraction: DifferentialRefraction) -> tuple[list[StageQ
         the plane-parallel model.
     """
     span_note = (
-        f"span of the wavelength error between {BLUE_REPORT_WAVELENGTH_ANGSTROM:.0f} and "
-        f"{RED_REPORT_WAVELENGTH_ANGSTROM:.0f} A before the correction; the limit is a design "
+        f"span of the wavelength error between {resolve(BLUE_REPORT_WAVELENGTH_ANGSTROM).value:.0f} and "
+        f"{resolve(RED_REPORT_WAVELENGTH_ANGSTROM).value:.0f} A before the correction; the limit is a design "
         "choice (half the resolution element at 5000 A), not a measurement"
         f"; correction applied: {'yes' if refraction.is_applied else 'no'}"
     )
@@ -115,7 +134,7 @@ def _refraction_metrics(refraction: DifferentialRefraction) -> tuple[list[StageQ
         "dar_along_dispersion_angstrom",
         refraction.along_dispersion_span_angstrom,
         "angstrom",
-        limit=DAR_ALONG_DISPERSION_LIMIT_ANGSTROM,
+        limit=resolve(DAR_ALONG_DISPERSION_LIMIT_ANGSTROM).value,
         higher_is_better=False,
         note=span_note,
     )
@@ -123,9 +142,10 @@ def _refraction_metrics(refraction: DifferentialRefraction) -> tuple[list[StageQ
         "target_altitude_degrees",
         refraction.altitude_degrees,
         "degree",
-        limit=MINIMUM_ALTITUDE_DEGREES,
+        limit=resolve(MINIMUM_ALTITUDE_DEGREES).value,
         note=(
-            f"below {MINIMUM_ALTITUDE_DEGREES:.0f} degrees the plane-parallel refraction model is "
+            f"below {resolve(MINIMUM_ALTITUDE_DEGREES).value:.0f} "
+            f"degrees the plane-parallel refraction model is "
             "refused; the limit is a design choice, not a measurement"
         ),
     )
@@ -206,7 +226,7 @@ def assess_raw_frame_quality(
         "zero_order_saturated_fraction",
         zero_order_saturated_pixel_fraction,
         "fraction",
-        limit=DEFAULT_SATURATION_FLAG_THRESHOLD,
+        limit=resolve(DEFAULT_SATURATION_FLAG_THRESHOLD).value,
         higher_is_better=False,
         note=saturation_note,
         limit_is_a_pass=False,

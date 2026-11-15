@@ -39,6 +39,7 @@ import numpy as np
 from astrometricslib import Astrometrics, configure_logging
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.gaia_xp_comparison import GaiaXpComparison
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.shared.catalog_star_identity import gaia_dr3_source_id_of
@@ -96,7 +97,7 @@ def compare_star(
         intensity_errors=np.asarray(errors, dtype=float) if errors else None,
         line_spread=line_spread,
         fallback_resolution_angstrom=spectroscopy.resolution_element_angstrom
-        or FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+        or resolve(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM).value,
     )
 
 
@@ -179,7 +180,7 @@ def format_report(results: Sequence[tuple[str, GaiaXpComparison]]) -> str:
             f"Median tilt {_number(summary.median_slope_percent_per_1000_angstrom, 0, 2, signed=True)} "
             f"percent per 1000 A; median absolute tilt "
             f"{_number(summary.median_absolute_slope_percent_per_1000_angstrom, 0, 2)} "
-            f"(designed limit {GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM:g})."
+            f"(designed limit {resolve(GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM).value:g})."
         )
     gate = gaia_xp_gate(rows)
     lines.append(f"Gate {gate.name}: {gate.status.value}. {gate.detail}".rstrip())

@@ -207,7 +207,7 @@ def test_one_or_two_failed_probes_do_not_reconnect() -> None:
     """A connected client survives fewer than the limit of failed probes."""
     client = _connected_client()
     client.supports_rebuild = True
-    for attempt in range(MAX_CONSECUTIVE_PROBE_FAILURES - 1):
+    for attempt in range(MAX_CONSECUTIVE_PROBE_FAILURES.default - 1):
         _ensure_after_probe(client, probe_ok=False, now=1000.0 + attempt)
     assert not client.stale_client
     assert client.calls == []
@@ -217,7 +217,7 @@ def test_consecutive_failed_probes_reconnect() -> None:
     """The limit of failed probes in a row triggers the reconnect."""
     client = _connected_client()
     client.supports_rebuild = True
-    for attempt in range(MAX_CONSECUTIVE_PROBE_FAILURES):
+    for attempt in range(MAX_CONSECUTIVE_PROBE_FAILURES.default):
         _ensure_after_probe(client, probe_ok=False, now=1000.0 + attempt)
     assert client.stale_client
 
@@ -226,7 +226,7 @@ def test_a_good_probe_resets_the_failure_run() -> None:
     """Failures that are not in a row never add up to a reconnect."""
     client = _connected_client()
     client.supports_rebuild = True
-    for attempt in range(MAX_CONSECUTIVE_PROBE_FAILURES * 2):
+    for attempt in range(MAX_CONSECUTIVE_PROBE_FAILURES.default * 2):
         _ensure_after_probe(client, probe_ok=attempt % 2 == 0, now=1000.0 + attempt)
     assert not client.stale_client
 

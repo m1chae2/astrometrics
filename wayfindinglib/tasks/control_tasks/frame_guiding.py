@@ -20,6 +20,13 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib.exceptions import NotFoundError
+from astrometricslib.parameters import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.analytics.result_quality.guiding_join import (
     FrameWindow,
     guiding_read_range,
@@ -68,7 +75,17 @@ class FrameRange:
 GUIDE_LOG_SOURCE = "ekos_guide_log"
 """The guiding samples that are real star measurements."""
 
-SLOW_FRAME_RATIO = 2.0
+SLOW_FRAME_RATIO = TunedParameter(
+    name="wayfinding.slow_frame_ratio",
+    default=2.0,
+    unit="× group median",
+    description="A frame whose guide error exceeds this multiple of the group median is listed as worse.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D142",
+    pending_conversion=True,
+)
 """A frame whose guide error is above this multiple of the group's median
 is listed as worse than its neighbours. The ratio is relative, so it adapts
 to the equipment: it is a flag for a person to look at, not a pass mark.
@@ -258,9 +275,10 @@ def link_frames_to_guiding(
     median_error = statistics.median(measured) if measured else None
     worse = []
     if median_error:
+        slow_frame_ratio = resolve_parameter(SLOW_FRAME_RATIO).value
         for row in frames:
             value = row.get("rms_total_arcsec")
-            if value is not None and value > SLOW_FRAME_RATIO * median_error:
+            if value is not None and value > slow_frame_ratio * median_error:
                 row["rms_vs_group_median"] = round(value / median_error, 1)
                 worse.append(row["file"])
     return {

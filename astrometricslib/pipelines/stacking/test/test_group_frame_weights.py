@@ -559,7 +559,7 @@ def test_the_fold_rule_matches_how_frames_are_split(exposures: list[float]) -> N
 
 def test_the_fold_rule_folds_a_short_list_into_the_nearest_length_by_ratio() -> None:
     """Frames of 2 s join the 1 s group, not the 5 s group."""
-    exposures = [1.0] * 10 + [5.0] * 10 + [2.0] * (MINIMUM_FRAMES_PER_EXPOSURE_GROUP - 1)
+    exposures = [1.0] * 10 + [5.0] * 10 + [2.0] * (MINIMUM_FRAMES_PER_EXPOSURE_GROUP.default - 1)
 
     group_lengths = fold_exposure_lengths(exposures)
 

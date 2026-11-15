@@ -19,6 +19,13 @@ from collections.abc import Sequence
 
 import numpy as np
 
+from astrometricslib.parameters import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.models.session.ekos_session import EkosCapture, EkosGuideStat, EkosSessionContext
 from wayfindinglib.models.session.live_session_status import (
     DitherEvent,
@@ -29,7 +36,17 @@ from wayfindinglib.models.session.live_session_status import (
     LiveSessionStatus,
 )
 
-EARLY_EXPOSURE_SECONDS = 30.0
+EARLY_EXPOSURE_SECONDS = TunedParameter(
+    name="wayfinding.early_exposure_seconds",
+    default=30.0,
+    unit="s",
+    description="Length of the opening stretch of an exposure compared with the rest.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D136",
+    pending_conversion=True,
+)
 """Length of the opening stretch of an exposure compared with the rest.
 
 A dither's after-effects show in the first moments of the next exposure.
@@ -37,7 +54,17 @@ Checked on the 2026-10-02 M 27 session: the 30 s after a dither averaged
 2.3 to 6.0 arcsec of guide error, against 1.3 to 1.7 arcsec for the rest.
 """
 
-DITHER_FOLLOW_SECONDS = 130.0
+DITHER_FOLLOW_SECONDS = TunedParameter(
+    name="wayfinding.dither_follow_seconds",
+    default=130.0,
+    unit="s",
+    description='How long before an exposure a dither counts as "just before" it.',
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D136",
+    pending_conversion=True,
+)
 """How long before an exposure a dither counts as "just before" it.
 
 One exposure plus its settle time on that session: 120 s exposure plus a
@@ -46,7 +73,17 @@ settle begins, and the exposure starts at the end of the settle, so a
 dither that began within this time of the exposure's start led into it.
 """
 
-EXCURSION_MEDIAN_MULTIPLE = 8.0
+EXCURSION_MEDIAN_MULTIPLE = TunedParameter(
+    name="wayfinding.excursion_median_multiple",
+    default=8.0,
+    unit="multiple",
+    description="An excursion is a guide error above this multiple of the session median.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D136",
+    pending_conversion=True,
+)
 """An excursion is a guide error above this multiple of the session median.
 
 Using the session's own median keeps the limit tied to the equipment's
@@ -57,14 +94,34 @@ dither, and two minutes of RA drift reaching 300 arcsec) all exceeded it by
 a wide margin.
 """
 
-EXCURSION_FLOOR_ARCSEC = 5.0
+EXCURSION_FLOOR_ARCSEC = TunedParameter(
+    name="wayfinding.excursion_floor_arcsec",
+    default=5.0,
+    unit="arcsec",
+    description="The smallest excursion limit, whatever the median is.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D136",
+    pending_conversion=True,
+)
 """The smallest excursion limit, whatever the median is.
 
 A session with unusually tight guiding would otherwise flag ordinary
 fluctuations of a couple of arcseconds.
 """
 
-EXCURSION_JOIN_SECONDS = 20.0
+EXCURSION_JOIN_SECONDS = TunedParameter(
+    name="wayfinding.excursion_join_seconds",
+    default=20.0,
+    unit="s",
+    description="Two over-limit runs closer together than this are one excursion.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D136",
+    pending_conversion=True,
+)
 """Two over-limit runs closer together than this are one excursion.
 
 The guider re-locks on its star after a large error, which briefly resets
@@ -73,7 +130,17 @@ between three runs of one drift, so a join time of 20 s merges them while
 keeping the 21:15 and 22:17 events apart.
 """
 
-STOPPED_AXIS_TOLERANCE = 0.25
+STOPPED_AXIS_TOLERANCE = TunedParameter(
+    name="wayfinding.stopped_axis_tolerance",
+    default=0.25,
+    unit="fraction",
+    description="Fraction a drift rate may differ from a stopped mount's and still match.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D136",
+    pending_conversion=True,
+)
 """Fraction a drift rate may differ from a stopped mount's and still match.
 
 The drift measured on 2026-10-02 was 7 arcsec per second against a
@@ -84,7 +151,17 @@ for the fit's error without matching ordinary tracking errors.
 SIDEREAL_RATE_ARCSEC_PER_SECOND = 15.0411
 """How fast the sky turns: arcseconds of right ascension per second."""
 
-LOW_STAR_FRACTION = 0.5
+LOW_STAR_FRACTION = TunedParameter(
+    name="wayfinding.low_star_fraction",
+    default=0.5,
+    unit="fraction",
+    description="A frame with fewer stars than this fraction of the usual one is flagged.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D136",
+    pending_conversion=True,
+)
 """A frame with fewer stars than this fraction of the usual one is flagged.
 
 The usual count is the median of the frames before it. Trailed or clouded
@@ -93,17 +170,47 @@ frames lose their stars quickly. On 2026-10-02 a normal frame held about
 fraction of that.
 """
 
-MINIMUM_FRAMES_FOR_STAR_BASELINE = 5
+MINIMUM_FRAMES_FOR_STAR_BASELINE = TunedParameter(
+    name="wayfinding.minimum_frames_for_star_baseline",
+    default=5,
+    unit="frames",
+    description="Frames needed before a star-count baseline means anything.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D136",
+    pending_conversion=True,
+)
 """Frames needed before a star-count baseline means anything."""
 
-MAXIMUM_FRAMES_IN_STAR_BASELINE = 20
+MAXIMUM_FRAMES_IN_STAR_BASELINE = TunedParameter(
+    name="wayfinding.maximum_frames_in_star_baseline",
+    default=20,
+    unit="frames",
+    description="The most earlier frames the star-count baseline looks back over.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D136",
+    pending_conversion=True,
+)
 """The most earlier frames the star-count baseline looks back over.
 
 Twenty frames is about 40 minutes of 120 s exposures on the 2026-10-02 session,
 enough to ride out a passing cloud without following a slow change of sky.
 """
 
-JUMP_FIRST_SAMPLE_FRACTION = 0.5
+JUMP_FIRST_SAMPLE_FRACTION = TunedParameter(
+    name="wayfinding.jump_first_sample_fraction",
+    default=0.5,
+    unit="fraction",
+    description="An excursion is a jump if its first sample is already this much of its peak.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D136",
+    pending_conversion=True,
+)
 """An excursion is a jump if its first sample is already this much of its peak.
 
 A drift builds up over many samples, so its first over-limit sample is a
@@ -112,13 +219,33 @@ small share of the peak (33 of 307 arcsec for the 21:53 drift on
 was at its 739 arcsec peak from its first sample).
 """
 
-MINIMUM_SAMPLES_FOR_DRIFT_FIT = 3
+MINIMUM_SAMPLES_FOR_DRIFT_FIT = TunedParameter(
+    name="wayfinding.minimum_samples_for_drift_fit",
+    default=3,
+    unit="samples",
+    description="Measurements needed to fit a straight line to part of an excursion.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D136",
+    pending_conversion=True,
+)
 """Measurements needed to fit a straight line to part of an excursion."""
 
 RECENT_EXPOSURE_COUNT = 10
 """How many of the latest exposures the status lists."""
 
-STALE_RECORD_SECONDS = 300.0
+STALE_RECORD_SECONDS = TunedParameter(
+    name="wayfinding.stale_record_seconds",
+    default=300.0,
+    unit="s",
+    description="A file with no new record for this long is reported as stale.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D136",
+    pending_conversion=True,
+)
 """A file with no new record for this long is reported as stale.
 
 Ekos writes a guide measurement every few seconds while guiding, so five
@@ -242,7 +369,7 @@ def _median_drift_rate(
         pieces[-1].append(sample)
     slopes = []
     for piece in pieces:
-        if len(piece) < MINIMUM_SAMPLES_FOR_DRIFT_FIT:
+        if len(piece) < resolve_parameter(MINIMUM_SAMPLES_FOR_DRIFT_FIT).value:
             continue
         times = np.array([sample.timestamp for sample in piece])
         errors = np.array([
@@ -277,13 +404,19 @@ def find_guiding_excursions(
     if not guide_stats:
         return []
     median_error = statistics.median(_total_error(s) for s in guide_stats)
-    limit = max(EXCURSION_MEDIAN_MULTIPLE * median_error, EXCURSION_FLOOR_ARCSEC)
+    limit = max(
+        resolve_parameter(EXCURSION_MEDIAN_MULTIPLE).value * median_error,
+        resolve_parameter(EXCURSION_FLOOR_ARCSEC).value,
+    )
 
     runs: list[list[EkosGuideStat]] = []
     for sample in guide_stats:
         if _total_error(sample) <= limit:
             continue
-        if runs and sample.timestamp - runs[-1][-1].timestamp <= EXCURSION_JOIN_SECONDS:
+        if (
+            runs
+            and sample.timestamp - runs[-1][-1].timestamp <= resolve_parameter(EXCURSION_JOIN_SECONDS).value
+        ):
             runs[-1].append(sample)
         else:
             runs.append([sample])
@@ -297,10 +430,16 @@ def find_guiding_excursions(
         matches_stopped = None
         if axis == "RA" and rate is not None and declination_degrees is not None:
             stopped_rate = SIDEREAL_RATE_ARCSEC_PER_SECOND * math.cos(math.radians(declination_degrees))
-            matches_stopped = abs(rate - stopped_rate) <= STOPPED_AXIS_TOLERANCE * stopped_rate
+            matches_stopped = (
+                abs(rate - stopped_rate) <= resolve_parameter(STOPPED_AXIS_TOLERANCE).value * stopped_rate
+            )
         started_at, ended_at = run[0].timestamp, run[-1].timestamp
         peak_error = max(_total_error(s) for s in run)
-        kind = "jump" if _total_error(run[0]) >= JUMP_FIRST_SAMPLE_FRACTION * peak_error else "drift"
+        kind = (
+            "jump"
+            if _total_error(run[0]) >= resolve_parameter(JUMP_FIRST_SAMPLE_FRACTION).value * peak_error
+            else "drift"
+        )
         excursions.append(
             GuidingExcursion(
                 started_at=started_at,
@@ -389,7 +528,7 @@ def star_count_baseline(captures: Sequence[EkosCapture], index: int) -> list[int
     start = index
     while (
         start > 0
-        and index - start < MAXIMUM_FRAMES_IN_STAR_BASELINE
+        and index - start < resolve_parameter(MAXIMUM_FRAMES_IN_STAR_BASELINE).value
         and _baseline_key(captures[start - 1]) == key
     ):
         start -= 1
@@ -428,15 +567,23 @@ def summarize_exposures(
         capture = captures[index]
         started_at = capture.completed_at - capture.exposure_seconds
         inside = [s for s in guide_stats if started_at <= s.timestamp <= capture.completed_at]
-        early = [_total_error(s) for s in inside if s.timestamp < started_at + EARLY_EXPOSURE_SECONDS]
-        rest = [_total_error(s) for s in inside if s.timestamp >= started_at + EARLY_EXPOSURE_SECONDS]
+        early = [
+            _total_error(s)
+            for s in inside
+            if s.timestamp < started_at + resolve_parameter(EARLY_EXPOSURE_SECONDS).value
+        ]
+        rest = [
+            _total_error(s)
+            for s in inside
+            if s.timestamp >= started_at + resolve_parameter(EARLY_EXPOSURE_SECONDS).value
+        ]
 
         flags: list[str] = []
         plain_flags: list[str] = []
         earlier_star_counts = star_count_baseline(captures, index)
-        if len(earlier_star_counts) >= MINIMUM_FRAMES_FOR_STAR_BASELINE:
+        if len(earlier_star_counts) >= resolve_parameter(MINIMUM_FRAMES_FOR_STAR_BASELINE).value:
             usual = statistics.median(earlier_star_counts)
-            if usual > 0 and capture.star_count < LOW_STAR_FRACTION * usual:
+            if usual > 0 and capture.star_count < resolve_parameter(LOW_STAR_FRACTION).value * usual:
                 flags.append(
                     f"Only {capture.star_count} stars against a usual {usual:.0f}: likely trailed or clouded."
                 )
@@ -464,7 +611,10 @@ def summarize_exposures(
                 eccentricity=capture.eccentricity,
                 guide_rms_first_seconds_arcsec=_rms(early),
                 guide_rms_rest_arcsec=_rms(rest),
-                follows_dither=any(0.0 <= started_at - d.timestamp <= DITHER_FOLLOW_SECONDS for d in dithers),
+                follows_dither=any(
+                    0.0 <= started_at - d.timestamp <= resolve_parameter(DITHER_FOLLOW_SECONDS).value
+                    for d in dithers
+                ),
                 flags=flags,
                 plain_flags=plain_flags,
             )
@@ -619,7 +769,7 @@ def summarize_live_session(
         flags.append(f"The guider is in state {last_guide_state.state!r}, not Guiding.")
         plain_flags.append(f"The guider is not guiding right now (it is {last_guide_state.state.lower()}).")
     silence = now - as_of
-    if silence > STALE_RECORD_SECONDS:
+    if silence > resolve_parameter(STALE_RECORD_SECONDS).value:
         flags.append(
             f"No new record for {silence / 60:.0f} minutes: Ekos may have stopped, or the file is stale."
         )

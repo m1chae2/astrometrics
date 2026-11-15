@@ -20,6 +20,7 @@ import sys
 
 from astrometricslib import Astrometrics, configure_logging
 from astrometricslib._internal.drivers.catalog_store import summarize_catalog_coverage
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.pipelines.astrometry.utilities.catalog_seeding import (
     DEFAULT_FIELD_RADIUS_DEGREES,
     DEFAULT_MAGNITUDE_LIMIT,
@@ -49,14 +50,14 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--radius-degrees",
         type=float,
-        default=DEFAULT_FIELD_RADIUS_DEGREES,
-        help=f"Cone-search radius per field (default {DEFAULT_FIELD_RADIUS_DEGREES}).",
+        default=resolve(DEFAULT_FIELD_RADIUS_DEGREES).value,
+        help=f"Cone-search radius per field (default {resolve(DEFAULT_FIELD_RADIUS_DEGREES).value}).",
     )
     parser.add_argument(
         "--magnitude-limit",
         type=float,
-        default=DEFAULT_MAGNITUDE_LIMIT,
-        help=f"Faintest Gaia G magnitude to store (default {DEFAULT_MAGNITUDE_LIMIT}).",
+        default=resolve(DEFAULT_MAGNITUDE_LIMIT).value,
+        help=f"Faintest Gaia G magnitude to store (default {resolve(DEFAULT_MAGNITUDE_LIMIT).value}).",
     )
     parser.add_argument(
         "--request-delay-seconds",

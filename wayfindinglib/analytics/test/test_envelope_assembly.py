@@ -345,7 +345,7 @@ def test_a_night_with_too_few_samples_is_skipped(records: ControlRecordStore) ->
             "snr": 300.0,
             "source": "ekos_guide_log",
         }
-        for index in range(MINIMUM_SAMPLES_PER_SESSION - 1)
+        for index in range(MINIMUM_SAMPLES_PER_SESSION.default - 1)
     ])
 
     baseline = collect_baseline_values(

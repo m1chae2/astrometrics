@@ -33,6 +33,7 @@ import numpy as np
 from scipy.special import erf
 
 from astrometricslib import Astrometrics
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
     FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
 )
@@ -125,7 +126,9 @@ def load_spectra(connection: sqlite3.Connection) -> list[StoredSpectrum]:
         )
         if intensity_values.size != wavelength_values.size:
             continue
-        resolution_element = float(resolution) if resolution else FALLBACK_RESOLUTION_ELEMENT_ANGSTROM
+        resolution_element = (
+            float(resolution) if resolution else resolve(FALLBACK_RESOLUTION_ELEMENT_ANGSTROM).value
+        )
         box_width = float(json.loads(rectangle)[3]) if rectangle else None
         half_width = (
             line_half_width_angstrom(wavelength_values, box_width)
@@ -293,7 +296,8 @@ def format_report(summary: dict[str, float], table: dict[tuple[str, float], tupl
         f"({summary['called_emission_source'] / max(count, 1):.1%})",
         f"  detected lines in all:                            {int(summary['detected_lines'])}",
         "",
-        f"Share of injected lines reported 'detected' (limit: {DETECTED_SIGNIFICANCE:g} error bars):",
+        "Share of injected lines reported 'detected' "
+        f"(limit: {resolve(DETECTED_SIGNIFICANCE).value:g} error bars):",
         "  height / median brightness   " + "".join(f"{strength:>8.2f}" for strength in STRENGTHS),
     ]
     for group in INJECTED_LINES:

@@ -348,3 +348,21 @@ def test_resolve_refuses_when_missing() -> None:
     with pytest.raises(ParameterUnavailableError, match=expected):
         resolve(parameter)
     assert issubclass(ParameterUnavailableError, ConfigurationError)
+
+
+def test_a_pending_parameter_resolves_to_its_default_without_a_notice() -> None:
+    """A pending value keeps its default and records no notice."""
+    parameter = TunedParameter(
+        name="stacking.example_pending_profile",
+        default=3.0,
+        unit="px",
+        description="An example.",
+        role=ParameterRole.MEASUREMENT,
+        source=ParameterSource.EQUIPMENT_PROFILE,
+        equipment=frozenset({EquipmentKind.CAMERA}),
+        pending_conversion=True,
+    )
+    resolved = resolve(parameter)
+    assert resolved.value is parameter.default
+    assert resolved.origin == "default"
+    assert resolved.notice is None

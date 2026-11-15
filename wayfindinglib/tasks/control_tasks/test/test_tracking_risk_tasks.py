@@ -89,7 +89,7 @@ def test_a_measured_target_lands_at_its_hour_angle() -> None:
     assert risk_map.solve_count == 30
     assert risk_map.plate_scale_arcsec_per_px is None
     score = risk_map.scores[risk_map.dec_deg.index(40.0)][risk_map.ha_deg.index(30.0)]
-    assert score >= HIGH_SCORE
+    assert score >= HIGH_SCORE.default
 
 
 def test_without_a_location_only_the_prior_is_used() -> None:

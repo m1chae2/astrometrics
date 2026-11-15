@@ -60,6 +60,13 @@ from typing import Any
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_seconds
 from astrometricslib.pipelines.shared.target_sessions import compute_session_night
 
@@ -71,7 +78,16 @@ from astrometricslib.pipelines.shared.target_sessions import compute_session_nig
 # on the Vega session every group has at least 20 frames, and the smallest
 # groups in the library (1-2 frames each, from short calibration sets) only
 # need to be small enough to be folded away. It has not been tested at 5.
-MINIMUM_FRAMES_PER_EXPOSURE_GROUP = 5
+MINIMUM_FRAMES_PER_EXPOSURE_GROUP = TunedParameter(
+    name="stacking.minimum_frames_per_exposure_group",
+    default=5,
+    unit="frames",
+    description="Fewest frames a group of one exposure length may have and still be stacked on its own.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-11",
+)
 
 
 @dataclass
@@ -117,7 +133,7 @@ def exposure_group_key(exposure_seconds: float) -> float:
 
 def fold_exposure_lengths(
     exposures_seconds: Sequence[float | None],
-    minimum_frames_per_group: int = MINIMUM_FRAMES_PER_EXPOSURE_GROUP,
+    minimum_frames_per_group: int | None = None,
 ) -> list[float | None]:
     """Say which exposure group each frame lands in.
 
@@ -145,6 +161,8 @@ def fold_exposure_lengths(
         readable length, or when no length has enough frames. All the frames
         then stay in one group, which is the same as stacking them together.
     """
+    if minimum_frames_per_group is None:
+        minimum_frames_per_group = resolve(MINIMUM_FRAMES_PER_EXPOSURE_GROUP).value
     count = len(exposures_seconds)
     if not count or any(exposure is None for exposure in exposures_seconds):
         return [None] * count
@@ -198,7 +216,7 @@ def exposure_group_holds_folded_frames(frames: list[Any]) -> bool:
 
 
 def split_frames_by_exposure(
-    frames: list[Any], minimum_frames_per_group: int = MINIMUM_FRAMES_PER_EXPOSURE_GROUP
+    frames: list[Any], minimum_frames_per_group: int | None = None
 ) -> list[ExposureGroup]:
     """Split frames into groups that share one exposure length.
 
@@ -222,6 +240,8 @@ def split_frames_by_exposure(
     groups : `list` [`ExposureGroup`]
         The groups, shortest exposure first. Always at least one.
     """
+    if minimum_frames_per_group is None:
+        minimum_frames_per_group = resolve(MINIMUM_FRAMES_PER_EXPOSURE_GROUP).value
     exposures = [frame_exposure_seconds(frame) for frame in frames]
     group_lengths = fold_exposure_lengths(exposures, minimum_frames_per_group)
     if not frames or group_lengths[0] is None:
@@ -258,7 +278,8 @@ def _frame_night(frame: Any) -> date | None:
 
 
 def split_groups_by_night(
-    groups: list[ExposureGroup], minimum_frames_per_group: int = MINIMUM_FRAMES_PER_EXPOSURE_GROUP
+    groups: list[ExposureGroup],
+    minimum_frames_per_group: int | None = None,
 ) -> list[ExposureGroup]:
     """Split each exposure group into one group per observing night.
 
@@ -287,6 +308,8 @@ def split_groups_by_night(
     groups : `list` [`ExposureGroup`]
         The groups, shortest exposure first and then earliest night first.
     """
+    if minimum_frames_per_group is None:
+        minimum_frames_per_group = resolve(MINIMUM_FRAMES_PER_EXPOSURE_GROUP).value
     result: list[ExposureGroup] = []
     for group in groups:
         nights = [_frame_night(frame) for frame in group.frames]

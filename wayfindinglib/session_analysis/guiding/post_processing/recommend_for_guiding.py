@@ -28,6 +28,7 @@ night's, when the guide signal was poor, or when the statement rests on a
 proxy.
 """
 
+from astrometricslib.parameters import resolve_parameter
 from astrometricslib.reports import QualityLimit
 from wayfindinglib.analytics.performance_envelope import MINIMUM_SAMPLES_PER_SESSION
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
@@ -86,17 +87,17 @@ def _insufficient_data(input_quality: GuidingInputQuality) -> TargetStatement:
         "guiding_insufficient_data",
         message=(
             f"Only {input_quality.samples_analyzed} measured guide samples exist for this night; "
-            f"at least {MINIMUM_SAMPLES_PER_SESSION} are needed to judge it."
+            f"at least {resolve_parameter(MINIMUM_SAMPLES_PER_SESSION).value} are needed to judge it."
         ),
         reason=(
             "Too few measured guide samples. Guide for at least six minutes with the guide log "
             "enabled, then sync the logs."
         ),
         values={"samples": float(input_quality.samples_analyzed)},
-        plain_values={"minimum": MINIMUM_SAMPLES_PER_SESSION},
+        plain_values={"minimum": resolve_parameter(MINIMUM_SAMPLES_PER_SESSION).value},
         limits=[
             design_limit(
-                float(MINIMUM_SAMPLES_PER_SESSION),
+                float(resolve_parameter(MINIMUM_SAMPLES_PER_SESSION).value),
                 "samples",
                 "Fewest measured guide samples a night needs: about six minutes of guiding.",
                 "WAY-D45",
@@ -320,7 +321,10 @@ def _exposure_length_limited(
     if not feasibility:
         return None
     longest = feasibility[-1]
-    if longest.clean_fraction is None or longest.clean_fraction >= RELIABLE_CLEAN_FRACTION:
+    if (
+        longest.clean_fraction is None
+        or longest.clean_fraction >= resolve_parameter(RELIABLE_CLEAN_FRACTION).value
+    ):
         return None
     causes = {
         "the guide star was lost": longest.lost_fraction or 0.0,
@@ -352,7 +356,7 @@ def _exposure_length_limited(
         plain_values={"clean_percent": longest.clean_fraction * 100.0},
         limits=[
             design_limit(
-                RELIABLE_CLEAN_FRACTION,
+                resolve_parameter(RELIABLE_CLEAN_FRACTION).value,
                 "fraction",
                 "An exposure length is reliable when at least this share of start times had clean guiding.",
                 "WAY-D46",

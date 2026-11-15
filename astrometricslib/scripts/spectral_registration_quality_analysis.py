@@ -44,6 +44,7 @@ from astrometricslib._internal.drivers.siril_output_parsing import parse_seq_fil
 from astrometricslib._internal.errors import DATA_ERRORS
 from astrometricslib._internal.processing_scripts import detect_point_sources
 from astrometricslib.exceptions import AstrometricsError
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.paths import siril_work_directory
 from astrometricslib.foundation.system import split_program_command
 from astrometricslib.pipelines.spectroscopy.utilities.registration_quality import (
@@ -387,11 +388,11 @@ def run_analysis() -> None:
         else:
             position_jumps.append(float(np.hypot(curr["x"] - prev["x"], curr["y"] - prev["y"])))
 
-    low_star_count_flags = [n < MIN_MATCHED_STAR_PAIRS for n in nb_stars]
+    low_star_count_flags = [n < resolve(MIN_MATCHED_STAR_PAIRS).value for n in nb_stars]
     dim_zero_order_flags = flag_outliers(
-        peak_to_background_ratios, ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA, low_is_bad=True
+        peak_to_background_ratios, resolve(ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA).value, low_is_bad=True
     )
-    position_jump_flags = flag_outliers(position_jumps, ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA)
+    position_jump_flags = flag_outliers(position_jumps, resolve(ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA).value)
 
     results = []
     print("\n==========================================")

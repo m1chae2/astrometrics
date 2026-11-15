@@ -73,7 +73,7 @@ def test_a_spectrum_redder_than_any_reference_reads_as_the_reddest() -> None:
     colour = synthetic_b_minus_v(*_get_reference_templates()["M6V"])
 
     assert colour is not None
-    assert 1.5 < colour <= MAXIMUM_CALIBRATED_B_MINUS_V
+    assert 1.5 < colour <= MAXIMUM_CALIBRATED_B_MINUS_V.default
     assert colour_disagreement_note(0.0, colour) != ""
 
 

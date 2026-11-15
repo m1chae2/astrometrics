@@ -13,10 +13,26 @@ It is a pure function of the recommendations passed in.
 from collections import defaultdict
 from collections.abc import Iterable
 
+from astrometricslib.parameters import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.models.quality.statements import Severity, TargetStatement
 from wayfindinglib.models.session.recurring_issue import RecurringIssue
 
-MINIMUM_NIGHTS_FOR_A_PATTERN = 2
+MINIMUM_NIGHTS_FOR_A_PATTERN = TunedParameter(
+    name="wayfinding.minimum_nights_for_a_pattern",
+    default=2,
+    unit="nights",
+    description="Fewest nights a finding must appear on to be called recurring.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D137",
+)
 """Fewest nights a finding must appear on to be called recurring."""
 
 _SEVERITY_RANK = {
@@ -54,7 +70,7 @@ def find_recurring_issues(
 
     issues = []
     for (pipeline, rule), by_night in found.items():
-        if len(by_night) < MINIMUM_NIGHTS_FOR_A_PATTERN:
+        if len(by_night) < resolve_parameter(MINIMUM_NIGHTS_FOR_A_PATTERN).value:
             continue
         ordered = sorted(by_night)
         worst = max((r.severity or Severity.INFO for r in by_night.values()), key=_SEVERITY_RANK.__getitem__)

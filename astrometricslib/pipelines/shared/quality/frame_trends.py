@@ -18,10 +18,36 @@ from collections.abc import Mapping, Sequence
 from itertools import pairwise
 from typing import Any
 
-MINIMUM_FRAMES = 4
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
+
+MINIMUM_FRAMES = TunedParameter(
+    name="shared.minimum_frames",
+    default=4,
+    unit="frames",
+    description="Fewest frames needed to judge a trend across a run.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D21",
+)
 """Fewest frames a trend can be judged from. Fewer say nothing."""
 
-STEADY_STEP_FRACTION = 0.7
+STEADY_STEP_FRACTION = TunedParameter(
+    name="shared.steady_step_fraction",
+    default=0.7,
+    unit="fraction",
+    description="Fraction of steps that must go the same way for a trend to count as steady.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D21",
+)
 """The share of neighbouring-frame steps that must go the same way as the
 fitted change. Random scatter goes up and down about equally, so about half
 the steps agree; a steady drift has most steps agreeing. Chosen so a clean
@@ -71,7 +97,7 @@ def describe_trend(values: Sequence[float], threshold_percent: float) -> dict[st
         too few frames only ``frames`` and ``flagged: False`` come back.
     """
     count = len(values)
-    if count < MINIMUM_FRAMES:
+    if count < resolve(MINIMUM_FRAMES).value:
         return {"frames": count, "flagged": False}
     slope = _theil_sen_slope(values)
     middle = statistics.median(values)
@@ -81,7 +107,9 @@ def describe_trend(values: Sequence[float], threshold_percent: float) -> dict[st
     steps = [later - earlier for earlier, later in pairwise(values)]
     agreeing = sum(1 for step in steps if step * slope > 0)
     steady_fraction = agreeing / len(steps)
-    flagged = abs(change_percent) >= threshold_percent and steady_fraction >= STEADY_STEP_FRACTION
+    flagged = (
+        abs(change_percent) >= threshold_percent and steady_fraction >= resolve(STEADY_STEP_FRACTION).value
+    )
     return {
         "frames": count,
         "first_level": round(first_level, 4),
@@ -120,7 +148,7 @@ def find_trends(
         `describe_trend`, plus ``direction`` and ``worrying``), and
         ``alerts``: one plain sentence for each worrying trend.
     """
-    recent = list(rows)[-max(window, MINIMUM_FRAMES) :]
+    recent = list(rows)[-max(window, resolve(MINIMUM_FRAMES).value) :]
     results: dict[str, Any] = {}
     alerts = []
     for name, worrying_direction in metrics.items():

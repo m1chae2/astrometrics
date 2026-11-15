@@ -52,7 +52,14 @@ from pathlib import Path
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.stellar_source import AMBIGUOUS_RMS_GAP, ladder_steps_between
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier import classify_spectral_type
 from astrometricslib.pipelines.spectroscopy.processing.spectrum_signal import (
     estimate_spectrum_signal_to_noise,
@@ -118,19 +125,48 @@ def class_gap_table_path(camera_name: str = CAMERA_NAME) -> Path:
 # signal-to-noise of the spectra used (30), so every spectrum can be degraded
 # to every grid value. A spectrum cannot be improved, so none is used above its
 # own value.
-DEFAULT_SNR_GRID: tuple[float, ...] = (3.0, 5.0, 8.0, 12.0, 20.0, 30.0)
+DEFAULT_SNR_GRID: TunedParameter = TunedParameter(
+    name="spectroscopy.default_snr_grid",
+    default=(3.0, 5.0, 8.0, 12.0, 20.0, 30.0),
+    unit="signal-to-noise",
+    description="The signal-to-noise values the class-gap table is made at.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="SPE-30",
+)
 
 # A level (class or subtype) counts as reached at a signal-to-noise when at
 # least this share of the spectra reach a gap of `AMBIGUOUS_RMS_GAP` or more.
 # One half means the typical spectrum separates; chosen by judgment, not tuned
 # (SPE-D25 in the validation register).
-REACHED_SHARE = 0.5
+REACHED_SHARE = TunedParameter(
+    name="spectroscopy.reached_share",
+    default=0.5,
+    unit="fraction",
+    description="A level counts as reached when at least this share of spectra reach the gap.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="SPE-30",
+)
 
 CONFIDENCE_LIMITED = "confidence-limited at this resolution"
 
 # How close the injected noise must put the estimate to the target, as a
 # fraction of the target, before a degraded copy is accepted.
-_SNR_TOLERANCE = 0.03
+_SNR_TOLERANCE = TunedParameter(
+    name="spectroscopy.snr_tolerance",
+    default=0.03,
+    unit="fraction",
+    description=(
+        "How close the injected noise must put the estimate to the target before a degraded copy is accepted."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="SPE-D25",
+)
 _MAXIMUM_BISECTION_STEPS = 40
 
 
@@ -283,6 +319,7 @@ def degrade_to_snr(
         The noisy brightness and the signal-to-noise it reads. `None` when
         the target is not below the sample's own, or no noise level reaches it.
     """
+    snr_tolerance = resolve(_SNR_TOLERANCE).value
     if not target_snr < sample.native_snr:
         return None
     # A stored spectrum can hold NaN where the response correction had no
@@ -303,7 +340,7 @@ def degrade_to_snr(
     for _ in range(_MAXIMUM_BISECTION_STEPS):
         middle = 0.5 * (low + high)
         reading = _read(sample, middle * unit_noise)
-        if abs(reading - target_snr) <= _SNR_TOLERANCE * target_snr:
+        if abs(reading - target_snr) <= snr_tolerance * target_snr:
             return sample.intensity + middle * unit_noise, reading
         if reading > target_snr:
             low = middle
@@ -442,10 +479,11 @@ def reachable_snr(
         a share of at least `REACHED_SHARE`; `CONFIDENCE_LIMITED` when not even
         the highest row does.
     """
+    reached_share = resolve(REACHED_SHARE).value
     best: float | str = CONFIDENCE_LIMITED
     for row in sorted(rows, key=lambda item: -(item.snr or 0.0)):
         share = share_of(row)
-        if share is None or share < REACHED_SHARE:
+        if share is None or share < reached_share:
             break
         best = float(row.snr) if row.snr is not None else best
     return best
@@ -455,10 +493,12 @@ def reachable_snr(
 # one outcome and gives True, False, or None where the outcome has no answer.
 _SHARE_RULES: dict[str, Callable[[SampleOutcome], bool | None]] = {
     "class_separated_share": lambda item: (
-        None if item.gap_to_next_class is None else item.gap_to_next_class >= AMBIGUOUS_RMS_GAP
+        None if item.gap_to_next_class is None else item.gap_to_next_class >= resolve(AMBIGUOUS_RMS_GAP).value
     ),
     "subtype_separated_share": lambda item: (
-        None if item.gap_to_second_best is None else item.gap_to_second_best >= AMBIGUOUS_RMS_GAP
+        None
+        if item.gap_to_second_best is None
+        else item.gap_to_second_best >= resolve(AMBIGUOUS_RMS_GAP).value
     ),
     "class_agreement_share": lambda item: item.class_matches_catalog,
     "undegraded_class_agreement_share": lambda item: item.class_matches_undegraded,
@@ -570,7 +610,7 @@ def _row(
 
 def class_gap_table(
     samples: Sequence[SpectrumSample],
-    snr_grid: Sequence[float] = DEFAULT_SNR_GRID,
+    snr_grid: Sequence[float] | None = None,
     draws_per_spectrum: int = 5,
     bootstrap_count: int = 400,
     seed: int = 20261024,
@@ -599,6 +639,8 @@ def class_gap_table(
         The undegraded row, one row for each grid value, and the lowest
         signal-to-noise at which the class and the subtype stay separated.
     """
+    if snr_grid is None:
+        snr_grid = resolve(DEFAULT_SNR_GRID).value
     rng = np.random.default_rng(seed)
     native: dict[str, list[SampleOutcome]] = {}
     undegraded_class: dict[int, str | None] = {}
@@ -692,11 +734,11 @@ def class_gap_for_snr(
             f"the stored table has definition version {version}, "
             f"the code is at {CLASS_GAP_DEFINITION_VERSION}",
         )
-    if threshold != AMBIGUOUS_RMS_GAP:
+    if threshold != resolve(AMBIGUOUS_RMS_GAP).value:
         return (
             None,
             f"the stored table used an ambiguity threshold of {threshold}, "
-            f"the classifier uses {AMBIGUOUS_RMS_GAP}",
+            f"the classifier uses {resolve(AMBIGUOUS_RMS_GAP).value}",
         )
     if estimator != CLASS_GAP_SNR_ESTIMATOR:
         return (

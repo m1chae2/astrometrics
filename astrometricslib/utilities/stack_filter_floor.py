@@ -7,6 +7,14 @@ frames to make a good stack. This file loosens the requested
 percentage, step by step, until enough frames would survive.
 """
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
+
 # "80%" then "90%" then unfiltered: the two percentiles
 # rejection_threshold_analysis.py swept, in order from tightest to loosest.
 FILTER_WFWHM_LOOSENING_LADDER: list[str | None] = ["80%", "90%", None]
@@ -20,13 +28,22 @@ FILTER_WFWHM_LOOSENING_LADDER: list[str | None] = ["80%", "90%", None]
 # at 5 to calibrate against, since quality degrades continuously rather than
 # breaking at some threshold), but it does confirm 5 isn't producing garbage --
 # the raw per-N sweep this was checked against was not kept.
-DEFAULT_MINIMUM_SURVIVING_FRAMES = 5
+DEFAULT_MINIMUM_SURVIVING_FRAMES = TunedParameter(
+    name="utilities.default_minimum_surviving_frames",
+    default=5,
+    unit="frames",
+    description="Fewest frames that must survive a filter for it to be applied.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-10",
+)
 
 
 def resolve_filter_wfwhm_with_floor(
     num_lights: int,
     requested_filter_wfwhm: str | None,
-    minimum_surviving_frames: int = DEFAULT_MINIMUM_SURVIVING_FRAMES,
+    minimum_surviving_frames: int | None = None,
 ) -> tuple[str | None, bool]:
     """Make sure too many images aren't thrown away when filtering.
 
@@ -44,7 +61,8 @@ def resolve_filter_wfwhm_with_floor(
     requested_filter_wfwhm : `str` or `None`
         The rule to use (like "80%").
     minimum_surviving_frames : `int`, optional
-        The absolute minimum number of images needed to keep.
+        The absolute minimum number of images needed to keep. Defaults to
+        `DEFAULT_MINIMUM_SURVIVING_FRAMES`.
 
     Returns
     -------
@@ -52,6 +70,8 @@ def resolve_filter_wfwhm_with_floor(
         A pair containing the rule that should actually be used, and a
         True/False flag saying whether the original rule was loosened.
     """
+    if minimum_surviving_frames is None:
+        minimum_surviving_frames = resolve(DEFAULT_MINIMUM_SURVIVING_FRAMES).value
     if requested_filter_wfwhm is None:
         return None, False
 

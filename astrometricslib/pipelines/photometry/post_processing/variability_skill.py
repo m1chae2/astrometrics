@@ -35,13 +35,40 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.stats import rankdata
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.photometry.processing.variability_indices import EXCESS_SCATTER_THRESHOLD
 
 # The fewest known variables and unlisted stars a field needs for an AUC to
 # mean anything. With 10 and 30 the standard error of an AUC at chance is
 # about 0.10, so the test below is not overstrict on a small field.
-MINIMUM_KNOWN_VARIABLES = 10
-MINIMUM_UNLISTED_STARS = 30
+MINIMUM_KNOWN_VARIABLES = TunedParameter(
+    name="photometry.minimum_known_variables",
+    default=10,
+    unit="stars",
+    description=(
+        "Fewest catalogued variable stars a field needs for the discrimination test (AUC) to mean anything."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-D14",
+)
+MINIMUM_UNLISTED_STARS = TunedParameter(
+    name="photometry.minimum_unlisted_stars",
+    default=30,
+    unit="stars",
+    description="Fewest unlisted stars a field needs for the discrimination test (AUC) to mean anything.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-D14",
+)
 
 # The AUC the variability score must reach on the catalogued variables of a
 # field, whatever the group sizes. A design choice, not a measurement: it is
@@ -49,11 +76,33 @@ MINIMUM_UNLISTED_STARS = 30
 # score, and sits well above the 0.46 to 0.49 the CV gave on the library. A
 # field that falls below it has a score that cannot be trusted to rank
 # variables.
-MINIMUM_DISCRIMINATION_AUC = 0.7
+MINIMUM_DISCRIMINATION_AUC = TunedParameter(
+    name="photometry.minimum_discrimination_auc",
+    default=0.7,
+    unit="AUC",
+    description=(
+        "Area under the ROC curve (AUC) the variability score must reach on a field's catalogued variables."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-08",
+)
 
 # The one-sided 5% point of the standard normal distribution. The AUC must
 # exceed 0.5 by this many standard errors.
-_ONE_SIDED_FIVE_PERCENT_Z = 1.645
+_ONE_SIDED_FIVE_PERCENT_Z = TunedParameter(
+    name="photometry.one_sided_five_percent_z",
+    default=1.645,
+    unit="sigma",
+    description=(
+        "One-sided 5% point of the standard normal distribution, used to test that the AUC beats chance."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-D14",
+)
 
 # For a sinusoid of semi-amplitude A the scatter (standard deviation) is
 # A / sqrt(2), so the peak-to-peak amplitude is 2 sqrt(2) times the scatter.
@@ -95,7 +144,8 @@ class DiscriminationResult:
         needed : `float`
             The larger of `required_auc` and `MINIMUM_DISCRIMINATION_AUC`.
         """
-        return max(self.required_auc, MINIMUM_DISCRIMINATION_AUC)
+        minimum_discrimination_auc = resolve(MINIMUM_DISCRIMINATION_AUC).value
+        return max(self.required_auc, minimum_discrimination_auc)
 
     @property
     def sees_known_variables(self) -> bool:
@@ -147,10 +197,11 @@ def required_auc(known_variables: int, unlisted_stars: int) -> float:
     auc : `float`
         0.5 plus 1.645 standard errors of an AUC at chance.
     """
+    one_sided_five_percent_z = resolve(_ONE_SIDED_FIVE_PERCENT_Z).value
     standard_error = math.sqrt(
         (known_variables + unlisted_stars + 1) / (12.0 * known_variables * unlisted_stars)
     )
-    return 0.5 + _ONE_SIDED_FIVE_PERCENT_Z * standard_error
+    return 0.5 + one_sided_five_percent_z * standard_error
 
 
 def discrimination(
@@ -170,7 +221,9 @@ def discrimination(
     result : `DiscriminationResult` or `None`
         `None` when either group is too small to say anything.
     """
-    if len(known_scores) < MINIMUM_KNOWN_VARIABLES or len(unlisted_scores) < MINIMUM_UNLISTED_STARS:
+    minimum_known_variables = resolve(MINIMUM_KNOWN_VARIABLES).value
+    minimum_unlisted_stars = resolve(MINIMUM_UNLISTED_STARS).value
+    if len(known_scores) < minimum_known_variables or len(unlisted_scores) < minimum_unlisted_stars:
         return None
     auc = area_under_curve(known_scores, unlisted_scores)
     if auc is None:
@@ -202,7 +255,7 @@ def minimum_detectable_amplitude_mag(cutoff_cv: float) -> float:
 
 
 def minimum_detectable_amplitude_from_noise_mag(
-    expected_rms_mag: float, excess_threshold: float = EXCESS_SCATTER_THRESHOLD
+    expected_rms_mag: float, excess_threshold: float | None = None
 ) -> float:
     """Give the smallest sinusoidal variable the candidate rule can flag.
 
@@ -228,4 +281,6 @@ def minimum_detectable_amplitude_from_noise_mag(
     amplitude_mag : `float`
         The peak-to-peak amplitude, in magnitudes.
     """
+    if excess_threshold is None:
+        excess_threshold = resolve(EXCESS_SCATTER_THRESHOLD).value
     return _PEAK_TO_PEAK_PER_SCATTER * float(expected_rms_mag) * math.sqrt(excess_threshold**2 - 1.0)

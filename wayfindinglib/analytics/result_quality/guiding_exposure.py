@@ -41,6 +41,14 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from astrometricslib.parameters import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.analytics.result_quality.guiding_join import (
     FrameWindow,
     join_frames_to_guiding,
@@ -53,57 +61,122 @@ GAUSSIAN_FWHM_PER_SIGMA = 2.0 * math.sqrt(2.0 * math.log(2.0))
 """The full width at half maximum of a Gaussian, in standard deviations
 (about 2.3548). A mathematical fact, not a tuned value."""
 
-STAR_WIDTH_BUDGET_FRACTION = 0.10
+STAR_WIDTH_BUDGET_FRACTION = TunedParameter(
+    name="wayfinding.star_width_budget_fraction",
+    default=0.1,
+    unit="fraction of the star width",
+    description="The most guiding may widen a star: 10%.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D78",
+)
 """The most guiding may widen a star: 10%. Squared widths add, so 10% of width
 takes a guide blur of 0.46 of the star width. Design estimate, register row
 WAY-D78. A star that is 10% wider is about 1 dB less peak signal."""
 
-STAR_WIDTH_QUANTILE = 0.25
+STAR_WIDTH_QUANTILE = TunedParameter(
+    name="wayfinding.star_width_quantile",
+    default=0.25,
+    unit="quantile of the setting star widths",
+    description=(
+        'The star width used as "what the stars look like when guiding is not the limit": the lower '
+        "quartile of the setting's frame widths."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D78",
+)
 """The star width used as "what the stars look like when guiding is not the
 limit": the lower quartile of the setting's frame widths. The median already
 includes the guiding blur and would allow too much. Design estimate, register
 row WAY-D78."""
 
-TARGET_SHARP_FRACTION = 0.80
+TARGET_SHARP_FRACTION = TunedParameter(
+    name="wayfinding.target_sharp_fraction",
+    default=0.8,
+    unit="fraction",
+    description=(
+        "The share of windows that must stay sharp for an exposure to be called supported by the "
+        "guiding: 80%."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D79",
+)
 """The share of windows that must stay sharp for an exposure to be called
 supported by the guiding: 80%. The rule fires when the exposure the setting
 used falls below it. Design estimate, register row WAY-D79."""
 
-MINIMUM_WINDOW_SAMPLES = 3
+MINIMUM_WINDOW_SAMPLES = TunedParameter(
+    name="wayfinding.minimum_window_samples",
+    default=3,
+    unit="samples",
+    description="Fewest guide samples a window must hold to be judged.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D80",
+)
 """Fewest guide samples a window must hold to be judged. Guide samples come
 every 1 to 5 seconds, so three samples is the least that gives an error
 spread. Design estimate, register row WAY-D80."""
 
-MINIMUM_WINDOW_COVERAGE = 0.5
+MINIMUM_WINDOW_COVERAGE = TunedParameter(
+    name="wayfinding.minimum_window_coverage",
+    default=0.5,
+    unit="fraction",
+    description="Least share of a window the samples must cover (`window_statistics` ``coverage_fraction``).",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D80",
+)
 """Least share of a window the samples must cover (`window_statistics`
 ``coverage_fraction``). A window with a big gap in the log is not judged.
 Design estimate, register row WAY-D80."""
 
-MINIMUM_WINDOWS_PER_EXPOSURE = 10
+MINIMUM_WINDOWS_PER_EXPOSURE = TunedParameter(
+    name="wayfinding.minimum_windows_per_exposure",
+    default=10,
+    unit="windows",
+    description="Fewest judged windows for an exposure to be given a share.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D80",
+)
 """Fewest judged windows for an exposure to be given a share. Ten windows
 gives a share to about 15 percentage points (binomial, 1 / sqrt(10) at its
 widest is 16%). Design estimate, register row WAY-D80."""
 
-EXPOSURE_LADDER_SECONDS: tuple[float, ...] = (
-    10.0,
-    15.0,
-    20.0,
-    30.0,
-    45.0,
-    60.0,
-    90.0,
-    120.0,
-    180.0,
-    240.0,
-    300.0,
-    600.0,
+EXPOSURE_LADDER_SECONDS = TunedParameter(
+    name="wayfinding.exposure_ladder_seconds",
+    default=(10.0, 15.0, 20.0, 30.0, 45.0, 60.0, 90.0, 120.0, 180.0, 240.0, 300.0, 600.0),
+    unit="s",
+    description="The exposures tried besides the one the setting used.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D80",
 )
 """The exposures tried besides the one the setting used. A familiar ladder of
 imaging exposures (steps of about 1.4 to 1.5). Design estimate, register row
 WAY-D80."""
 
 
-MAXIMUM_GAP_WITHIN_IMAGING_SECONDS = 600.0
+MAXIMUM_GAP_WITHIN_IMAGING_SECONDS = TunedParameter(
+    name="wayfinding.maximum_gap_within_imaging_seconds",
+    default=600.0,
+    unit="s",
+    description="Two frames of one setting closer than this (end to start) are one stretch of imaging.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D80",
+)
 """Two frames of one setting closer than this (end to start) are one stretch of
 imaging; a longer gap (another target, a meridian flip, a stop) ends the
 stretch, so windows are not cut across time that was not imaging with this
@@ -114,7 +187,7 @@ WAY-D80."""
 
 def imaging_spans(
     frame_windows: Sequence[tuple[float, float]],
-    maximum_gap_seconds: float = MAXIMUM_GAP_WITHIN_IMAGING_SECONDS,
+    maximum_gap_seconds: float | None = None,
 ) -> list[tuple[float, float]]:
     """Join the frames of one night into stretches of imaging.
 
@@ -126,12 +199,15 @@ def imaging_spans(
     maximum_gap_seconds : `float`, optional
         The largest gap between one frame's end and the next frame's start
         that still counts as the same stretch.
+        When omitted, `MAXIMUM_GAP_WITHIN_IMAGING_SECONDS` is used.
 
     Returns
     -------
     spans : `list` [`tuple` [`float`, `float`]]
         The stretches, earliest first.
     """
+    if maximum_gap_seconds is None:
+        maximum_gap_seconds = resolve_parameter(MAXIMUM_GAP_WITHIN_IMAGING_SECONDS).value
     spans: list[tuple[float, float]] = []
     for start, end in sorted(frame_windows):
         if spans and start - spans[-1][1] <= maximum_gap_seconds:
@@ -220,9 +296,7 @@ class GuidingExposureOutcome(BaseModel):
     reason: str = ""
 
 
-def allowed_guide_rms_arcsec(
-    star_width_arcsec: float, budget_fraction: float = STAR_WIDTH_BUDGET_FRACTION
-) -> float:
+def allowed_guide_rms_arcsec(star_width_arcsec: float, budget_fraction: float | None = None) -> float:
     """Find the largest guide error that keeps a star within its width budget.
 
     Parameters
@@ -231,6 +305,7 @@ def allowed_guide_rms_arcsec(
         The star width without a guiding limit, in arcseconds.
     budget_fraction : `float`, optional
         The most the star may widen, as a fraction of its width.
+        When omitted, `STAR_WIDTH_BUDGET_FRACTION` is used.
 
     Returns
     -------
@@ -238,6 +313,8 @@ def allowed_guide_rms_arcsec(
         The largest standard deviation of the guide error on one axis, in
         arcseconds.
     """
+    if budget_fraction is None:
+        budget_fraction = resolve_parameter(STAR_WIDTH_BUDGET_FRACTION).value
     blur_fwhm = star_width_arcsec * math.sqrt((1.0 + budget_fraction) ** 2 - 1.0)
     return blur_fwhm / GAUSSIAN_FWHM_PER_SIGMA
 
@@ -258,10 +335,10 @@ def _is_sharp(statistics_of_window: Mapping[str, Any], allowed_rms_arcsec: float
         ``None`` when the window has too few samples or too little coverage
         to judge.
     """
-    if statistics_of_window.get("guide_samples", 0) < MINIMUM_WINDOW_SAMPLES:
+    if statistics_of_window.get("guide_samples", 0) < resolve_parameter(MINIMUM_WINDOW_SAMPLES).value:
         return None
     coverage = statistics_of_window.get("coverage_fraction")
-    if coverage is None or coverage < MINIMUM_WINDOW_COVERAGE:
+    if coverage is None or coverage < resolve_parameter(MINIMUM_WINDOW_COVERAGE).value:
         return None
     worst_axis = max(statistics_of_window["rms_ra_arcsec"], statistics_of_window["rms_dec_arcsec"])
     return worst_axis <= allowed_rms_arcsec
@@ -311,7 +388,11 @@ def sharpness_at_exposure(
         if verdict is not None:
             judgments.append(verdict)
     sharp = sum(judgments)
-    fraction = sharp / len(judgments) if len(judgments) >= MINIMUM_WINDOWS_PER_EXPOSURE else None
+    fraction = (
+        sharp / len(judgments)
+        if len(judgments) >= resolve_parameter(MINIMUM_WINDOWS_PER_EXPOSURE).value
+        else None
+    )
     return ExposureSharpness(
         exposureSeconds=exposure_seconds,
         windowsJudged=len(judgments),
@@ -327,7 +408,7 @@ def assess_guiding_exposure(
     samples_by_night: Mapping[str, Sequence[Mapping[str, Any]]],
     frame_windows: Sequence[FrameWindow] = (),
     *,
-    budget_fraction: float = STAR_WIDTH_BUDGET_FRACTION,
+    budget_fraction: float | None = None,
 ) -> GuidingExposureOutcome:
     """Find the share of sharp windows at each exposure for one setting.
 
@@ -346,24 +427,27 @@ def assess_guiding_exposure(
         The setting's own frames, to find the share of them that was sharp.
     budget_fraction : `float`, optional
         The most guiding may widen a star.
+        When omitted, `STAR_WIDTH_BUDGET_FRACTION` is used.
 
     Returns
     -------
     outcome : `GuidingExposureOutcome`
         The result, or the reason it cannot be made.
     """
+    if budget_fraction is None:
+        budget_fraction = resolve_parameter(STAR_WIDTH_BUDGET_FRACTION).value
     if used_exposure_seconds <= 0.0:
         return GuidingExposureOutcome(reason="The setting has no exposure time.")
-    if len(star_widths_arcsec) < MINIMUM_WINDOWS_PER_EXPOSURE:
+    if len(star_widths_arcsec) < resolve_parameter(MINIMUM_WINDOWS_PER_EXPOSURE).value:
         return GuidingExposureOutcome(
             reason=(
                 f"Only {len(star_widths_arcsec)} frames have a star width; the rule needs "
-                f"{MINIMUM_WINDOWS_PER_EXPOSURE} to set the allowed guide error. "
+                f"{resolve_parameter(MINIMUM_WINDOWS_PER_EXPOSURE).value} to set the allowed guide error. "
                 "Measure the target's frames (QualityRecords.measure_frames)."
             )
         )
     ranked_widths = sorted(star_widths_arcsec)
-    width = float(ranked_widths[int(STAR_WIDTH_QUANTILE * (len(ranked_widths) - 1))])
+    width = float(ranked_widths[int(resolve_parameter(STAR_WIDTH_QUANTILE).value * (len(ranked_widths) - 1))])
     if width <= 0.0:
         return GuidingExposureOutcome(reason="The star widths are not positive, so no allowed error exists.")
     nights = [night for night, samples in samples_by_night.items() if samples and spans_by_night.get(night)]
@@ -377,21 +461,24 @@ def assess_guiding_exposure(
     allowed = allowed_guide_rms_arcsec(width, budget_fraction)
     spans = [span for night in nights for span in spans_by_night[night]]
     samples = [sample for night in nights for sample in samples_by_night[night]]
-    exposures = sorted({*EXPOSURE_LADDER_SECONDS, used_exposure_seconds})
+    exposures = sorted({*resolve_parameter(EXPOSURE_LADDER_SECONDS).value, used_exposure_seconds})
     ladder = [sharpness_at_exposure(spans, samples, exposure, allowed) for exposure in exposures]
     used = next(item for item in ladder if item.exposure_seconds == used_exposure_seconds)
     if used.sharp_fraction is None:
         return GuidingExposureOutcome(
             reason=(
                 f"Only {used.windows_judged} windows of {used_exposure_seconds:g} s had enough guide samples "
-                f"(at least {MINIMUM_WINDOWS_PER_EXPOSURE} are needed). The guide log may not cover the "
+                f"(at least "
+                f"{resolve_parameter(MINIMUM_WINDOWS_PER_EXPOSURE).value} are needed). The guide log may "
+                f"not cover the "
                 "imaging time; sync the logs."
             )
         )
     supported = [
         item.exposure_seconds
         for item in ladder
-        if item.sharp_fraction is not None and item.sharp_fraction >= TARGET_SHARP_FRACTION
+        if item.sharp_fraction is not None
+        and item.sharp_fraction >= resolve_parameter(TARGET_SHARP_FRACTION).value
     ]
     frames_fraction = None
     if frame_windows:
@@ -402,7 +489,7 @@ def assess_guiding_exposure(
             )
         ]
         judged = [verdict for verdict in verdicts if verdict is not None]
-        if len(judged) >= MINIMUM_WINDOWS_PER_EXPOSURE:
+        if len(judged) >= resolve_parameter(MINIMUM_WINDOWS_PER_EXPOSURE).value:
             frames_fraction = sum(judged) / len(judged)
     return GuidingExposureOutcome(
         result=GuidingExposureResult(

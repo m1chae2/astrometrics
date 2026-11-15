@@ -33,6 +33,13 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from astrometricslib.parameters import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.models.equipment_and_site.performance_envelope import TrackingRiskMap
 
 __all__ = [
@@ -44,10 +51,30 @@ __all__ = [
     "rms_risk_score",
 ]
 
-CAUTION_SCORE = 0.28
+CAUTION_SCORE = TunedParameter(
+    name="wayfinding.caution_score",
+    default=0.28,
+    unit="fraction",
+    description="Scores from here up are a caution (amber).",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D130",
+    pending_conversion=True,
+)
 """Scores from here up are a caution (amber)."""
 
-HIGH_SCORE = 0.58
+HIGH_SCORE = TunedParameter(
+    name="wayfinding.high_score",
+    default=0.58,
+    unit="fraction",
+    description="Scores from here up are a high risk (red).",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D130",
+    pending_conversion=True,
+)
 """Scores from here up are a high risk (red)."""
 
 HA_STEP_DEG = 10.0
@@ -56,19 +83,69 @@ HA_STEP_DEG = 10.0
 DEC_STEP_DEG = 5.0
 """Spacing of the grid in declination."""
 
-INFLUENCE_RADIUS_DEG = 25.0
+INFLUENCE_RADIUS_DEG = TunedParameter(
+    name="wayfinding.influence_radius_deg",
+    default=25.0,
+    unit="deg",
+    description="Width of the Gaussian pull of a measured target.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D130",
+    pending_conversion=True,
+)
 """Width of the Gaussian pull of a measured target."""
 
-FULL_CONFIDENCE_SOLVES = 30
+FULL_CONFIDENCE_SOLVES = TunedParameter(
+    name="wayfinding.full_confidence_solves",
+    default=30,
+    unit="solves",
+    description="A measured target with this many solves has its full weight.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D130",
+    pending_conversion=True,
+)
 """A measured target with this many solves has its full weight."""
 
-MAX_MEASURED_SHARE = 0.85
+MAX_MEASURED_SHARE = TunedParameter(
+    name="wayfinding.max_measured_share",
+    default=0.85,
+    unit="fraction",
+    description="The largest share of a score that measured targets can decide.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D130",
+    pending_conversion=True,
+)
 """The largest share of a score that measured targets can decide."""
 
-FALLBACK_IDEAL_RMS_ARCSEC = 1.2
+FALLBACK_IDEAL_RMS_ARCSEC = TunedParameter(
+    name="wayfinding.fallback_ideal_rms_arcsec",
+    default=1.2,
+    unit="arcsec",
+    description="Safe jitter when the plate scale is unknown.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D130",
+    pending_conversion=True,
+)
 """Safe jitter when the plate scale is unknown."""
 
-FALLBACK_TRAILING_RMS_ARCSEC = 2.0
+FALLBACK_TRAILING_RMS_ARCSEC = TunedParameter(
+    name="wayfinding.fallback_trailing_rms_arcsec",
+    default=2.0,
+    unit="arcsec",
+    description="Trailing jitter when the plate scale is unknown.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D130",
+    pending_conversion=True,
+)
 """Trailing jitter when the plate scale is unknown."""
 
 
@@ -110,7 +187,9 @@ def _rms_limits(plate_scale_arcsec_per_px: float | None) -> tuple[float, float]:
     """
     if plate_scale_arcsec_per_px and plate_scale_arcsec_per_px > 0:
         return 0.75 * plate_scale_arcsec_per_px, 1.25 * plate_scale_arcsec_per_px
-    return FALLBACK_IDEAL_RMS_ARCSEC, FALLBACK_TRAILING_RMS_ARCSEC
+    return resolve_parameter(FALLBACK_IDEAL_RMS_ARCSEC).value, resolve_parameter(
+        FALLBACK_TRAILING_RMS_ARCSEC
+    ).value
 
 
 def prior_risk(ha_deg: float, dec_deg: float, alt_deg: float) -> float:
@@ -240,15 +319,15 @@ def _score(
     total_weight = weighted_sum = 0.0
     for target in targets:
         distance = _separation_deg(ha_deg, dec_deg, target.ha_deg, target.dec_deg)
-        if distance >= INFLUENCE_RADIUS_DEG * 1.8:
+        if distance >= resolve_parameter(INFLUENCE_RADIUS_DEG).value * 1.8:
             continue
-        confidence = min(1.0, target.solve_count / FULL_CONFIDENCE_SOLVES)
-        weight = math.exp(-0.5 * (distance / INFLUENCE_RADIUS_DEG) ** 2) * confidence
+        confidence = min(1.0, target.solve_count / resolve_parameter(FULL_CONFIDENCE_SOLVES).value)
+        weight = math.exp(-0.5 * (distance / resolve_parameter(INFLUENCE_RADIUS_DEG).value) ** 2) * confidence
         weighted_sum += rms_risk_score(target.rms_arcsec, plate_scale_arcsec_per_px) * weight
         total_weight += weight
     if total_weight <= 0.001:
         return prior
-    share = min(MAX_MEASURED_SHARE, total_weight)
+    share = min(resolve_parameter(MAX_MEASURED_SHARE).value, total_weight)
     return prior * (1.0 - share) + (weighted_sum / total_weight) * share
 
 
@@ -290,8 +369,8 @@ def build_tracking_risk_map(
         ha_deg=ha_values,
         dec_deg=dec_values,
         scores=scores,
-        caution_score=CAUTION_SCORE,
-        high_score=HIGH_SCORE,
+        caution_score=resolve_parameter(CAUTION_SCORE).value,
+        high_score=resolve_parameter(HIGH_SCORE).value,
         ideal_rms_arcsec=ideal,
         trailing_rms_arcsec=trailing,
         plate_scale_arcsec_per_px=plate_scale_arcsec_per_px,

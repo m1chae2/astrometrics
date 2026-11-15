@@ -32,7 +32,7 @@ def gaussian_star(centre_y: int, centre_x: int, peak: float, width: float = 1.6)
 
 def test_soft_highlights_leave_values_below_the_knee_alone() -> None:
     """Shadows and midtones pass through unchanged."""
-    values = np.linspace(0.0, star_tone.HIGHLIGHT_KNEE, 20)
+    values = np.linspace(0.0, star_tone.HIGHLIGHT_KNEE.default, 20)
 
     assert star_tone.soft_highlights(values) == pytest.approx(values)
 
@@ -45,7 +45,7 @@ def test_soft_highlights_never_reach_white_and_keep_the_order() -> None:
 
     assert np.all(np.diff(toned) > 0)
     assert toned[-1] < 1.0
-    knee = star_tone.HIGHLIGHT_KNEE
+    knee = star_tone.HIGHLIGHT_KNEE.default
     assert toned[-1] == pytest.approx(knee + (1 - knee) * np.tanh(1.0))
 
 
@@ -90,7 +90,7 @@ def test_a_clear_star_is_dimmed_in_full() -> None:
 
     room = 1.0 - BACKGROUND
     assert toned[100, 100] == pytest.approx(
-        BACKGROUND + room * (0.5 / room) ** star_tone.STAR_DIMMING_POWER, abs=0.01
+        BACKGROUND + room * (0.5 / room) ** star_tone.STAR_DIMMING_POWER.default, abs=0.01
     )
 
 
@@ -150,8 +150,8 @@ def test_the_limit_stays_at_its_set_value_when_the_noise_is_small() -> None:
     )
 
     assert (
-        star_tone.NOISE_WIDTHS_ABOVE_THE_BACKGROUND * star_tone.estimate_noise(image)
-        < star_tone.STAR_DIMMING_STARTS_AT
+        star_tone.NOISE_WIDTHS_ABOVE_THE_BACKGROUND.default * star_tone.estimate_noise(image)
+        < star_tone.STAR_DIMMING_STARTS_AT.default
     )
 
 

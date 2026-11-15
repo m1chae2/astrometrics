@@ -32,6 +32,7 @@ from typing import Any
 import numpy as np
 
 from astrometricslib.foundation.errors import AstrometricsError
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.measurement import QualityMeasurement
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import TargetObjectType
@@ -154,6 +155,7 @@ def target_amplitude_inputs(
     inputs : `TargetAmplitudeInputs`
         Both amplitudes, or the reason for each gap.
     """
+    maximum_target_distance_arcsec = resolve(MAXIMUM_TARGET_DISTANCE_ARCSEC).value
     if target.object_type is not TargetObjectType.STAR:
         reason = (
             f"the target {target.id!r} is not a single star (read from its name as a "
@@ -167,10 +169,10 @@ def target_amplitude_inputs(
     distance: float | None = None
     if center_ra is not None and center_dec is not None:
         distance = separation_arcsec(star, center_ra, center_dec)
-        if distance > MAXIMUM_TARGET_DISTANCE_ARCSEC:
+        if distance > maximum_target_distance_arcsec:
             reason = (
                 f"the star named {star.id!r} lies {distance:.0f} arcsec from the target's position, "
-                f"farther than {MAXIMUM_TARGET_DISTANCE_ARCSEC:.0f}, so the match is not trusted"
+                f"farther than {maximum_target_distance_arcsec:.0f}, so the match is not trusted"
             )
             return TargetAmplitudeInputs(light_curve_reason=reason, catalog_reason=reason)
 

@@ -109,7 +109,7 @@ def test_noise_alone_is_not_called_a_periodic_error() -> None:
     result = measure_run(synthetic_run(amplitude=0.0, noise=0.6, walk=0.0))
     assert not result.significant_periodic_error
     if result.periodic_error is not None:
-        assert result.periodic_error.significance < MINIMUM_AMPLITUDE_SIGNIFICANCE
+        assert result.periodic_error.significance < MINIMUM_AMPLITUDE_SIGNIFICANCE.default
 
 
 def test_a_run_without_a_guide_rate_says_so() -> None:

@@ -22,6 +22,7 @@ of the post-hoc estimate was set on that estimator's own scale, so it does
 not carry over.
 """
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.spectroscopy_quality import (
     InputQualityAssessment,
     StageQualityCheckpoint,
@@ -102,8 +103,8 @@ def noise_metrics(
     if noise_model is not None and noise_model.frames_are_assumed:
         assumed.append("one frame assumed in the stack")
     assumption_note = f" Assumptions: {'; '.join(assumed)}." if assumed else ""
-    low_edge = SIGNAL_TO_NOISE_MINIMUM_WAVELENGTH_ANGSTROM
-    high_edge = SIGNAL_TO_NOISE_MAXIMUM_WAVELENGTH_ANGSTROM
+    low_edge = resolve(SIGNAL_TO_NOISE_MINIMUM_WAVELENGTH_ANGSTROM).value
+    high_edge = resolve(SIGNAL_TO_NOISE_MAXIMUM_WAVELENGTH_ANGSTROM).value
     span = f"{low_edge:.0f}-{high_edge:.0f} A"
     return [
         metric(
@@ -133,7 +134,8 @@ def noise_metrics(
             summary.fraction_samples_snr_below_5,
             "fraction",
             note=(
-                f"share of samples in {span} whose brightness is below {LOW_SAMPLE_SIGNAL_TO_NOISE:g} times "
+                f"share of samples in {span} whose brightness is below "
+                f"{resolve(LOW_SAMPLE_SIGNAL_TO_NOISE).value:g} times "
                 "their own error; 5 is a convention, not a measured limit."
             ),
         ),
@@ -186,7 +188,7 @@ def input_quality_checkpoint(
         "zero_order_saturated_fraction",
         assessment.zero_order_saturated_pixel_fraction,
         "fraction",
-        limit=DEFAULT_SATURATION_FLAG_THRESHOLD,
+        limit=resolve(DEFAULT_SATURATION_FLAG_THRESHOLD).value,
         higher_is_better=False,
         note="limit is the run's zero-order saturation flag level; a guess, not validated",
         limit_is_a_pass=False,
@@ -195,7 +197,7 @@ def input_quality_checkpoint(
         "signal_to_noise",
         assessment.signal_to_noise,
         "per resolution element",
-        limit=MINIMUM_SPECTRUM_SIGNAL_TO_NOISE,
+        limit=resolve(MINIMUM_SPECTRUM_SIGNAL_TO_NOISE).value,
         note="below the limit the spectrum is not classified",
     )
     metrics = [

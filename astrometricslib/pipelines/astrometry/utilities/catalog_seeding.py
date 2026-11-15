@@ -18,6 +18,13 @@ from astropy.coordinates import SkyCoord
 
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
 from astrometricslib.foundation.errors import AstrometricsError
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -36,14 +43,34 @@ __all__ = [
 # the radius already present in every `cached_regions` row written by
 # `astrometry_pipeline`, so seeded regions share the existing key format
 # rather than creating a second, near-duplicate set.
-DEFAULT_FIELD_RADIUS_DEGREES = 0.8
+DEFAULT_FIELD_RADIUS_DEGREES = TunedParameter(
+    name="astrometry.default_field_radius_degrees",
+    default=0.8,
+    unit="degrees",
+    description="Radius of the sky area downloaded around each field center.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-D20",
+    pending_conversion=True,
+)
 
 # Gaia DR3 is essentially complete to G=20, but sources fainter than the
 # stacks' own detection limit only inflate the cache. G=18 is the
 # threshold `star_identifier._seed_gaia_cache_for_field` has always
 # used; keeping it identical means a seeded region and an
 # opportunistically cached one hold the same population.
-DEFAULT_MAGNITUDE_LIMIT = 18.0
+DEFAULT_MAGNITUDE_LIMIT = TunedParameter(
+    name="astrometry.default_magnitude_limit",
+    default=18.0,
+    unit="magnitude",
+    description="Faintest Gaia G magnitude stored for a seeded field.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-D20",
+    pending_conversion=True,
+)
 
 # Two image centers that are very close to each other will look at mostly
 # the same stars. If they are closer than half the field radius, we treat
@@ -51,7 +78,7 @@ DEFAULT_MAGNITUDE_LIMIT = 18.0
 # This successfully combines separate sessions of the same target (where
 # the telescope pointing drifts slightly) without accidentally merging
 # two different targets.
-DEFAULT_DEDUPLICATION_SEPARATION_DEGREES = DEFAULT_FIELD_RADIUS_DEGREES / 2
+DEFAULT_DEDUPLICATION_SEPARATION_DEGREES = resolve(DEFAULT_FIELD_RADIUS_DEGREES).value / 2
 
 # Serial pacing is the whole point of this module -- see the module
 # docstring. Two seconds between requests keeps a full catalog sweep to
@@ -224,8 +251,8 @@ def derive_field_centers(
 
 def seed_local_gaia_catalog(
     targets: list[Any],
-    radius_degrees: float = DEFAULT_FIELD_RADIUS_DEGREES,
-    magnitude_limit: float = DEFAULT_MAGNITUDE_LIMIT,
+    radius_degrees: float | None = None,
+    magnitude_limit: float | None = None,
     request_delay_seconds: float = DEFAULT_REQUEST_DELAY_SECONDS,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
@@ -241,9 +268,11 @@ def seed_local_gaia_catalog(
     targets : `list`
         The list of targets (folders of photos) to process.
     radius_degrees : `float`, optional
-        How wide of an area to download around each spot.
+        How wide of an area to download around each spot. Defaults to
+        `DEFAULT_FIELD_RADIUS_DEGREES`.
     magnitude_limit : `float`, optional
         How dim of a star we care about (ignore the super faint ones).
+        Defaults to `DEFAULT_MAGNITUDE_LIMIT`.
     request_delay_seconds : `float`, optional
         How long to wait between downloads so we don't overwhelm the server.
     max_attempts : `int`, optional
@@ -258,6 +287,11 @@ def seed_local_gaia_catalog(
         failed, and how many new stars were added to the database.
     """
     from astrometricslib._internal.drivers.catalog_store import summarize_catalog_coverage
+
+    if radius_degrees is None:
+        radius_degrees = resolve(DEFAULT_FIELD_RADIUS_DEGREES).value
+    if magnitude_limit is None:
+        magnitude_limit = resolve(DEFAULT_MAGNITUDE_LIMIT).value
 
     field_centers = derive_field_centers(targets)
     report: dict[str, Any] = {

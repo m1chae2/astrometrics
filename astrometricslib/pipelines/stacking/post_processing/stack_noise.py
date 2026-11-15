@@ -130,7 +130,15 @@ from scipy.spatial import cKDTree
 from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data, read_header
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.camera_profile import ProvenanceKind
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.applied_camera_profile import camera_name_from_header
 from astrometricslib.pipelines.stacking.post_processing.aperture_placement import (
     DETECTED_STAR_COUNT,
@@ -187,15 +195,55 @@ __all__ = [
 
 # The pixel scale of a later stack may differ from the first by this fraction
 # before the stored apertures are refused (a different binning or optic).
-MAXIMUM_PIXEL_SCALE_CHANGE = 0.10
+MAXIMUM_PIXEL_SCALE_CHANGE = TunedParameter(
+    name="stacking.maximum_pixel_scale_change",
+    default=0.10,
+    unit="fraction",
+    description="Largest change of pixel scale before the stored apertures are refused.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D52",
+    pending_conversion=True,
+)
 
 # The check that a reference frame's solution fits the stack: this many of the
 # stack's brightest stars must have a star in the reference frame within this
 # many pixels. The registration puts the reference star at the same pixel, so
 # a match closer than 3 px is far tighter than chance at these star densities.
-WCS_CHECK_STAR_COUNT = 10
-WCS_CHECK_MINIMUM_MATCHES = 5
-WCS_CHECK_TOLERANCE_PX = 3.0
+WCS_CHECK_STAR_COUNT = TunedParameter(
+    name="stacking.wcs_check_star_count",
+    default=10,
+    unit="stars",
+    description="Number of the stack's brightest stars that must have a match in the reference frame.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D52",
+    pending_conversion=True,
+)
+WCS_CHECK_MINIMUM_MATCHES = TunedParameter(
+    name="stacking.wcs_check_minimum_matches",
+    default=5,
+    unit="stars",
+    description="Fewest matches for a reference frame's solution to fit the stack.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D52",
+    pending_conversion=True,
+)
+WCS_CHECK_TOLERANCE_PX = TunedParameter(
+    name="stacking.wcs_check_tolerance_px",
+    default=3.0,
+    unit="pixels",
+    description="Distance within which a star counts as matched in the solution check.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D52",
+    pending_conversion=True,
+)
 
 # Moving a solution onto the stored apertures. The stored reference stars are
 # searched for within this many pixels of where the solution predicts them. On
@@ -204,11 +252,21 @@ WCS_CHECK_TOLERANCE_PX = 3.0
 # for a night-to-night pointing error, and is still small enough that the
 # stars of a field do not line up by chance (4000 star pairs in a window of
 # 1,000,000 square pixels, against a 3 px agreement).
-SEED_SEARCH_RADIUS_PX = 500.0
+SEED_SEARCH_RADIUS_PX = TunedParameter(
+    name="stacking.seed_search_radius_px",
+    default=500.0,
+    unit="pixels",
+    description="Search radius for moving a solution onto the stored apertures.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-36",
+    pending_conversion=True,
+)
 
 # Reference stars agree on a shift when their shifts differ by less than this.
 # It is the tolerance of the other star checks in this module.
-SEED_AGREEMENT_PX = WCS_CHECK_TOLERANCE_PX
+SEED_AGREEMENT_PX = resolve(WCS_CHECK_TOLERANCE_PX).value
 
 # The largest rotation, in degrees, between a stack's solution and the stored
 # stars that is searched for and accepted. The apertures are placed by a shift
@@ -225,17 +283,46 @@ SEED_AGREEMENT_PX = WCS_CHECK_TOLERANCE_PX
 # design estimate. The M 81 case (3 of 10 stars agree by shift only, 9 of 10
 # with a rotation of 0.16 to 0.24 deg) is the motivating observation, not a
 # validation.
-MAXIMUM_ROTATION_DEG = 0.5
+MAXIMUM_ROTATION_DEG = TunedParameter(
+    name="stacking.maximum_rotation_deg",
+    default=0.5,
+    unit="degrees",
+    description="Largest rotation between a stack's solution and the stored stars that is searched for.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-36",
+    pending_conversion=True,
+)
 
 # Trial rotations are this many pixels apart at the farthest corner of the
 # image (the step is this distance divided by the corner's distance from the
 # center). The nearest trial is then at most half of it off anywhere in the
 # image, well inside SEED_AGREEMENT_PX, so a star at the right rotation always
 # votes with the others.
-ROTATION_STEP_PX = 1.0
+ROTATION_STEP_PX = TunedParameter(
+    name="stacking.rotation_step_px",
+    default=1.0,
+    unit="pixels",
+    description="Distance at the farthest corner between trial rotations.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-36",
+    pending_conversion=True,
+)
 
 # The rotation must also exceed this many times its own error to count.
-ROTATION_SIGNIFICANCE = 3.0
+ROTATION_SIGNIFICANCE = TunedParameter(
+    name="stacking.rotation_significance",
+    default=3.0,
+    unit="× error",
+    description="How many times its own error a rotation must exceed to count.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D53",
+)
 
 # A fitted move smaller than both of these leaves the solution as it is, so a
 # rerun on the same stack puts the apertures on the same pixels. Shift: a
@@ -246,8 +333,28 @@ ROTATION_SIGNIFICANCE = 3.0
 # MAD of the 99 apertures by 1.5 to 1.9% rms, and one rerun changed the
 # odd-even difference noise by 5% (sampling scatter). Design estimates;
 # validated only by that M 13 check.
-NEGLIGIBLE_SHIFT_PX = 0.05
-NEGLIGIBLE_ROTATION_DEG = 0.001
+NEGLIGIBLE_SHIFT_PX = TunedParameter(
+    name="stacking.negligible_shift_px",
+    default=0.05,
+    unit="pixels",
+    description="Shift below which the solution is left as it is.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D30",
+    pending_conversion=True,
+)
+NEGLIGIBLE_ROTATION_DEG = TunedParameter(
+    name="stacking.negligible_rotation_deg",
+    default=0.001,
+    unit="degrees",
+    description="Rotation below which the solution is left as it is.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D30",
+    pending_conversion=True,
+)
 
 # A move onto the stored stars that leaves more than this rms is a poor fit.
 # Stored apertures from a plate solve hold true sky positions, so a poor fit
@@ -256,7 +363,17 @@ NEGLIGIBLE_ROTATION_DEG = 0.001
 # Plate-solved placements fit to 0.00 px; frame-solution fits on real stacks
 # measured 0.18 px (NGC 2244, kept) and 1.42 to 2.11 px (M 27, M 57, M 81,
 # retried with the plate solve). A design estimate.
-POOR_ALIGNMENT_RMS_PX = 0.5
+POOR_ALIGNMENT_RMS_PX = TunedParameter(
+    name="stacking.poor_alignment_rms_px",
+    default=0.5,
+    unit="pixels",
+    description="Rms above which a move onto the stored stars is a poor fit.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D30",
+    pending_conversion=True,
+)
 
 NO_WCS_REASON = "no WCS for this stack"
 
@@ -268,7 +385,16 @@ MEMBER_FRAME_WCS_SOURCE = "member frame of the reference exposure group"
 # try reads one frame and runs the star check, so a few are enough: a frame
 # that fails the check is a poor frame (clouds, trails), and the next is
 # unlikely to be as bad. A design estimate.
-MEMBER_FRAME_ATTEMPTS = 5
+MEMBER_FRAME_ATTEMPTS = TunedParameter(
+    name="stacking.member_frame_attempts",
+    default=5,
+    unit="frames",
+    description="How many member frames are tried before giving up.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D28",
+)
 
 # Given when apertures must be chosen on a group stack but the area every
 # exposure group covers cannot be laid under the trimmed stack.
@@ -520,7 +646,8 @@ class _Alignment:
                 f"The stack's sky positions were left as they were: the fitted move "
                 f"({self.shift_row:+.2f} rows, {self.shift_column:+.2f} columns, "
                 f"{self.rotation_deg:+.4f} deg) "
-                f"is below {NEGLIGIBLE_SHIFT_PX} px and {NEGLIGIBLE_ROTATION_DEG} deg, so reruns place the "
+                f"is below {resolve(NEGLIGIBLE_SHIFT_PX).value} px and "
+                f"{resolve(NEGLIGIBLE_ROTATION_DEG).value} deg, so reruns place the "
                 f"apertures on the same pixels; {self.matched_stars} stored reference stars agree to "
                 f"{self.rms_px:.2f} px rms."
             )
@@ -602,18 +729,24 @@ def _bright_star_matches(
     frame_star_count : `int`
         How many stars were found in the frame. When it is 0, `matches` is 0.
     """
-    stack_stars = detect_star_centroids(stack_plane, count=WCS_CHECK_STAR_COUNT)
+    stack_stars = detect_star_centroids(stack_plane, count=resolve(WCS_CHECK_STAR_COUNT).value)
     # Saturated stars stay in: the stack's brightest stars are bright in
     # the single frame too, and the frame's own 99.99th percentile would cut
     # them.
-    frame_stars = detect_star_centroids(frame_plane, count=DETECTED_STAR_COUNT, skip_saturated=False)
+    frame_stars = detect_star_centroids(
+        frame_plane, count=resolve(DETECTED_STAR_COUNT).value, skip_saturated=False
+    )
     if len(stack_stars) == 0 or len(frame_stars) == 0:
         return 0, len(stack_stars), len(frame_stars)
     # Stack pixel (row, column) is frame pixel (row + rows cut,
     # column + columns cut).
     expected = stack_stars + np.array([crop_offset[1], crop_offset[0]], dtype=float)
     distance = cKDTree(frame_stars).query(expected)[0]
-    return int(np.count_nonzero(distance <= WCS_CHECK_TOLERANCE_PX)), len(stack_stars), len(frame_stars)
+    return (
+        int(np.count_nonzero(distance <= resolve(WCS_CHECK_TOLERANCE_PX).value)),
+        len(stack_stars),
+        len(frame_stars),
+    )
 
 
 def _frame_lines_up(frame_path: str, stack_plane: np.ndarray, crop_offset: tuple[int, int]) -> bool:
@@ -635,6 +768,7 @@ def _frame_lines_up(frame_path: str, stack_plane: np.ndarray, crop_offset: tuple
         brightest stars have a star in the frame (the check
         `_reference_frame_wcs` makes). False when the frame cannot be read.
     """
+    wcs_check_minimum_matches = resolve(WCS_CHECK_MINIMUM_MATCHES).value
     try:
         frame_data = read_data(frame_path)
     except OSError, ValueError:
@@ -643,8 +777,8 @@ def _frame_lines_up(frame_path: str, stack_plane: np.ndarray, crop_offset: tuple
         return False
     frame_plane = collapse_to_2d(np.asarray(frame_data, dtype=np.float64))
     matches, stack_star_count, frame_star_count = _bright_star_matches(stack_plane, frame_plane, crop_offset)
-    enough_stars = stack_star_count >= WCS_CHECK_MINIMUM_MATCHES and frame_star_count > 0
-    return enough_stars and matches >= WCS_CHECK_MINIMUM_MATCHES
+    enough_stars = stack_star_count >= wcs_check_minimum_matches and frame_star_count > 0
+    return enough_stars and matches >= wcs_check_minimum_matches
 
 
 def _plate_solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> tuple[WCS | None, str, str]:
@@ -767,6 +901,7 @@ def _reference_frame_wcs(
     reason : `str`
         Why there is none. Empty when there is one.
     """
+    wcs_check_minimum_matches = resolve(WCS_CHECK_MINIMUM_MATCHES).value
     header = read_header(reference_frame_path)
     frame_wcs = celestial_wcs(header)
     if frame_wcs is None:
@@ -778,9 +913,9 @@ def _reference_frame_wcs(
         return None, NO_WCS_REASON
     frame_plane = collapse_to_2d(np.asarray(frame_data, dtype=np.float64))
     matches, stack_star_count, frame_star_count = _bright_star_matches(stack_plane, frame_plane, crop_offset)
-    if stack_star_count < WCS_CHECK_MINIMUM_MATCHES or frame_star_count == 0:
+    if stack_star_count < wcs_check_minimum_matches or frame_star_count == 0:
         return None, "the reference frame's solution could not be checked: too few stars were found"
-    if matches < WCS_CHECK_MINIMUM_MATCHES:
+    if matches < wcs_check_minimum_matches:
         return None, (
             f"the reference frame does not line up with the stack ({matches} of {stack_star_count} "
             "bright stars match), so its coordinate solution does not apply to the stack"
@@ -828,8 +963,10 @@ def _member_frame_wcs(
         place in that frame (rounded to whole pixels). Equal to ``crop_offset``
         when there is no solution.
     """
-    stack_stars = detect_star_centroids(stack_plane, count=WCS_CHECK_STAR_COUNT)
-    if len(stack_stars) < WCS_CHECK_MINIMUM_MATCHES:
+    member_frame_attempts = resolve(MEMBER_FRAME_ATTEMPTS).value
+    detected_star_count = resolve(DETECTED_STAR_COUNT).value
+    stack_stars = detect_star_centroids(stack_plane, count=resolve(WCS_CHECK_STAR_COUNT).value)
+    if len(stack_stars) < resolve(WCS_CHECK_MINIMUM_MATCHES).value:
         return (
             None,
             "the member frames' solutions could not be checked: too few stars were found",
@@ -839,7 +976,7 @@ def _member_frame_wcs(
         )
     expected = stack_stars + np.array([crop_offset[1], crop_offset[0]], dtype=float)
     reasons = []
-    for frame_path in list(member_frame_paths)[:MEMBER_FRAME_ATTEMPTS]:
+    for frame_path in list(member_frame_paths)[:member_frame_attempts]:
         try:
             frame_wcs = celestial_wcs(read_header(frame_path))
             frame_data = read_data(frame_path)
@@ -849,7 +986,7 @@ def _member_frame_wcs(
             continue
         frame_stars = detect_star_centroids(
             collapse_to_2d(np.asarray(frame_data, dtype=np.float64)),
-            count=DETECTED_STAR_COUNT,
+            count=detected_star_count,
             skip_saturated=False,
         )
         if len(frame_stars) == 0:
@@ -904,18 +1041,18 @@ def _agreed_shift(expected: np.ndarray, frame_stars: np.ndarray) -> tuple[float,
     )
     shifts = expected[star_index.ravel()] - frame_stars[frame_index.ravel()]
     owner = star_index.ravel()
-    near = np.hypot(shifts[:, 0], shifts[:, 1]) <= SEED_SEARCH_RADIUS_PX
+    near = np.hypot(shifts[:, 0], shifts[:, 1]) <= resolve(SEED_SEARCH_RADIUS_PX).value
     shifts, owner = shifts[near], owner[near]
     if len(shifts) == 0:
         return None
-    neighbors = cKDTree(shifts).query_ball_point(shifts, r=WCS_CHECK_TOLERANCE_PX)
+    neighbors = cKDTree(shifts).query_ball_point(shifts, r=resolve(WCS_CHECK_TOLERANCE_PX).value)
     best = None
     for index, members in enumerate(neighbors):
         agreeing_stars = len(set(owner[members].tolist()))
         size = float(np.hypot(*shifts[index]))
         if best is None or (agreeing_stars, -size) > (best[0], -best[1]):
             best = (agreeing_stars, size, members)
-    if best is None or best[0] < WCS_CHECK_MINIMUM_MATCHES:
+    if best is None or best[0] < resolve(WCS_CHECK_MINIMUM_MATCHES).value:
         return None
     median_shift = shifts[best[2]].mean(axis=0)
     return float(median_shift[0]), float(median_shift[1])
@@ -954,7 +1091,7 @@ def _vote_for_shift(
     shifts = detected[detected_index.ravel()] - predicted[star_index.ravel()]
     owner = star_index.ravel()
     pair_detected = detected_index.ravel()
-    near = np.hypot(shifts[:, 0], shifts[:, 1]) <= SEED_SEARCH_RADIUS_PX
+    near = np.hypot(shifts[:, 0], shifts[:, 1]) <= resolve(SEED_SEARCH_RADIUS_PX).value
     shifts, owner, pair_detected = shifts[near], owner[near], pair_detected[near]
     if len(shifts) == 0:
         return None
@@ -1086,16 +1223,18 @@ def _move_guess_onto_reference_stars(
     alignment : `_Alignment` or `None`
         What was found (also given when the rotation was refused).
     """
+    maximum_rotation_deg = resolve(MAXIMUM_ROTATION_DEG).value
+    rotation_significance = resolve(ROTATION_SIGNIFICANCE).value
     predicted = sky_to_pixels(wcs, reference_sky)[:, ::-1]
-    detected = detect_star_centroids(plane, count=DETECTED_STAR_COUNT, skip_saturated=False)
+    detected = detect_star_centroids(plane, count=resolve(DETECTED_STAR_COUNT).value, skip_saturated=False)
     if len(predicted) == 0 or len(detected) == 0:
         return None, "the stored reference stars could not be found: no stars were detected", None
     center = np.array([(plane.shape[0] - 1) / 2.0, (plane.shape[1] - 1) / 2.0])
     farthest_corner = float(np.hypot(*center))
-    maximum_rad = math.radians(MAXIMUM_ROTATION_DEG)
+    maximum_rad = math.radians(maximum_rotation_deg)
     # The step times the farthest distance is ROTATION_STEP_PX, so the nearest
     # trial leaves at most half of that misplaced anywhere in the image.
-    step_rad = ROTATION_STEP_PX / max(farthest_corner, 1.0)
+    step_rad = resolve(ROTATION_STEP_PX).value / max(farthest_corner, 1.0)
     half_steps = max(math.ceil(maximum_rad / step_rad), 1)
     trial_angles = np.linspace(-maximum_rad, maximum_rad, 2 * half_steps + 1)
 
@@ -1117,12 +1256,12 @@ def _move_guess_onto_reference_stars(
             None,
         )
     trial_rad, (shifts, owner, pair_detected, members, count) = best
-    if count < MINIMUM_USABLE_REFERENCE_STARS:
+    if count < resolve(MINIMUM_USABLE_REFERENCE_STARS).value:
         return (
             None,
             (
                 f"only {count} of {len(predicted)} stored reference stars agree on a shift and a rotation "
-                f"(up to {MAXIMUM_ROTATION_DEG} deg) from the stack's solution, so the stack's sky "
+                f"(up to {maximum_rotation_deg} deg) from the stack's solution, so the stack's sky "
                 "positions cannot be trusted"
             ),
             None,
@@ -1144,7 +1283,7 @@ def _move_guess_onto_reference_stars(
     trial_shifted = trial_points + np.array([shift_row, shift_column])
     trial_rms = float(np.sqrt(np.mean(np.sum((to_points - trial_shifted) ** 2, axis=1))))
     extra_deg, rotation_error_deg = _rotation_between(trial_shifted, to_points, trial_rms)
-    if abs(extra_deg) <= ROTATION_SIGNIFICANCE * rotation_error_deg:
+    if abs(extra_deg) <= rotation_significance * rotation_error_deg:
         extra_deg = 0.0
     rotation_rad = trial_rad + math.radians(extra_deg)
     rotation_deg = math.degrees(rotation_rad)
@@ -1162,18 +1301,21 @@ def _move_guess_onto_reference_stars(
         rotation_error_deg=rotation_error_deg,
     )
     if (
-        abs(rotation_deg) > MAXIMUM_ROTATION_DEG
-        and abs(rotation_deg) > ROTATION_SIGNIFICANCE * rotation_error_deg
+        abs(rotation_deg) > maximum_rotation_deg
+        and abs(rotation_deg) > rotation_significance * rotation_error_deg
     ):
         return (
             None,
             (
                 f"the stack's solution is rotated by {rotation_deg:+.3f} deg against the stored reference "
-                f"stars, more than the {MAXIMUM_ROTATION_DEG} deg the apertures can follow"
+                f"stars, more than the {maximum_rotation_deg} deg the apertures can follow"
             ),
             alignment,
         )
-    if float(np.hypot(*median_shift)) < NEGLIGIBLE_SHIFT_PX and abs(rotation_deg) < NEGLIGIBLE_ROTATION_DEG:
+    if (
+        float(np.hypot(*median_shift)) < resolve(NEGLIGIBLE_SHIFT_PX).value
+        and abs(rotation_deg) < resolve(NEGLIGIBLE_ROTATION_DEG).value
+    ):
         return wcs.deepcopy(), "", replace(alignment, left_unchanged=True)
     moved = _turn_and_shift_wcs(
         wcs,
@@ -1346,8 +1488,9 @@ def _reference_exposure_seconds(
         The ``EXPTIME`` (or ``EXPOSURE``) of the reference frame, or of the
         first readable member frame, or `None` when none is known.
     """
+    member_frame_attempts = resolve(MEMBER_FRAME_ATTEMPTS).value
     headers = [reference_header]
-    for frame_path in list(member_frame_paths)[:MEMBER_FRAME_ATTEMPTS]:
+    for frame_path in list(member_frame_paths)[:member_frame_attempts]:
         try:
             headers.append(read_header(frame_path))
         except OSError, ValueError:
@@ -1699,7 +1842,9 @@ def _resolve_apertures(
                     chosen.identity,
                     "the old sky positions were not from a plate solve"
                     if replaced_for_trust
-                    else f"this stack is at least {REPLACEMENT_DEPTH_FACTOR:.0f} times as deep",
+                    else (
+                        f"this stack is at least {resolve(REPLACEMENT_DEPTH_FACTOR).value:.0f} times as deep"
+                    ),
                 )
     if may_choose_apertures:
         # Tell the stacks that may not choose which set is the library
@@ -1775,7 +1920,7 @@ def _align_to_stored_apertures(
         aperture_set.sky_positions_from_plate_solve
         and not is_plate_solve_wcs_source(wcs_source)
         and alignment is not None
-        and alignment.rms_px > POOR_ALIGNMENT_RMS_PX
+        and alignment.rms_px > resolve(POOR_ALIGNMENT_RMS_PX).value
     ):
         wcs, wcs_source, position_note = _retry_poor_fit_with_plate_solve(
             plane, wcs, wcs_source, position_note, alignment.rms_px, aperture_set, plate_solve
@@ -1836,7 +1981,7 @@ def _retry_poor_fit_with_plate_solve(
         )
         if wcs is not None:
             second_note = alignment.describe() if alignment is not None else ""
-            if alignment is not None and alignment.rms_px > POOR_ALIGNMENT_RMS_PX:
+            if alignment is not None and alignment.rms_px > resolve(POOR_ALIGNMENT_RMS_PX).value:
                 # The plate solve is still the better-founded solution, so it
                 # is used; the note records that the fit stayed poor.
                 second_note = (
@@ -2118,7 +2263,7 @@ def measure_noise_in_plane(
     scale = pixel_scale_arcsec(wcs)
     if (
         abs(scale - aperture_set.pixel_scale_arcsec)
-        > MAXIMUM_PIXEL_SCALE_CHANGE * aperture_set.pixel_scale_arcsec
+        > resolve(MAXIMUM_PIXEL_SCALE_CHANGE).value * aperture_set.pixel_scale_arcsec
     ):
         return StackNoiseOutcome(
             None,
@@ -2138,7 +2283,7 @@ def measure_noise_in_plane(
         plane, wcs, aperture_set, subtracted_plane, may_choose_apertures, target_sky_deg, stack_path
     )
     sums = aperture_sums.all_sums[np.isfinite(aperture_sums.all_sums)]
-    if sums.size < MINIMUM_USABLE_APERTURES:
+    if sums.size < resolve(MINIMUM_USABLE_APERTURES).value:
         return StackNoiseOutcome(None, f"only {sums.size} of the stored apertures fall on this stack")
     ratios, saturated_count, star_fluxes = _reference_ratios(plane, wcs, aperture_set, saturation)
     flux_ratio = (
@@ -2148,7 +2293,7 @@ def measure_noise_in_plane(
             plane, wcs, aperture_set, saturation, reference_frame_path, crop_offset, reference_header
         )
     )
-    if ratios.size < MINIMUM_USABLE_REFERENCE_STARS:
+    if ratios.size < resolve(MINIMUM_USABLE_REFERENCE_STARS).value:
         return StackNoiseOutcome(
             None,
             f"only {ratios.size} of the reference stars can be used on this stack "
@@ -2234,7 +2379,7 @@ def _flux_ratio_to_reference_frame(
     matches, stack_star_count, _ = _bright_star_matches(
         plane, np.asarray(frame_plane, dtype=np.float64), crop_offset
     )
-    if matches < WCS_CHECK_MINIMUM_MATCHES:
+    if matches < resolve(WCS_CHECK_MINIMUM_MATCHES).value:
         return ReferenceFrameFluxRatio(
             None,
             reference_exposure_seconds=exposure,
@@ -2264,7 +2409,7 @@ def _flux_ratio_to_reference_frame(
         )
         if stack_flux is not None and frame_flux is not None and stack_flux > 0 and frame_flux > 0:
             ratios.append(stack_flux / frame_flux)
-    if len(ratios) < MINIMUM_USABLE_REFERENCE_STARS:
+    if len(ratios) < resolve(MINIMUM_USABLE_REFERENCE_STARS).value:
         return ReferenceFrameFluxRatio(
             None,
             star_count=len(ratios),

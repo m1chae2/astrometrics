@@ -36,6 +36,7 @@ prefix ``gate_`` (for example ``photometry.gate_registration_drift``).
 
 import datetime
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.measurement import SubjectLevel
 from astrometricslib.models.quality.metric_spec import (
     Checkpoint,
@@ -43,6 +44,12 @@ from astrometricslib.models.quality.metric_spec import (
     MetricPurpose,
     MetricSpec,
     UncertaintyKind,
+)
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
 )
 from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_spec
 
@@ -87,7 +94,16 @@ PHOTOMETRY_ZERO_POINT_METRIC_NAMES: frozenset[str] = frozenset({
 # star of each stated catalog magnitude. The scintillation of a star does not
 # depend on its magnitude, so it has one value. The magnitudes are in the band
 # of the session's zero point.
-NOISE_MODEL_MAGNITUDES: tuple[int, ...] = (10, 12, 14)
+NOISE_MODEL_MAGNITUDES = TunedParameter(
+    name="photometry.noise_model_magnitudes",
+    default=(10, 12, 14),
+    unit="mag",
+    description="The catalog magnitudes at which the noise model is stored for a run.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-17",
+)
 NOISE_MODEL_PARTS: tuple[str, ...] = ("photon", "sky", "read")
 
 
@@ -113,7 +129,16 @@ PHOTOMETRY_MODEL_NOISE_SCINTILLATION_MAG = "photometry.model_noise_scintillation
 
 # The strongest peaks of the window function of the run's frame times (the
 # alias peaks), by rank. Each has a frequency and a power.
-WINDOW_ALIAS_RANKS: tuple[int, ...] = (1, 2, 3)
+WINDOW_ALIAS_RANKS = TunedParameter(
+    name="photometry.window_alias_ranks",
+    default=(1, 2, 3),
+    unit="rank",
+    description="The ranks of the window-function peaks (the alias peaks) that a run stores.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-D29",
+)
 
 
 def window_alias_frequency_metric_name(rank: int) -> str:
@@ -577,7 +602,7 @@ _SCINTILLATION_ESTIMATOR = (
 _NOISE_MODEL_METRICS: tuple[MetricSpec, ...] = (
     *(
         _noise_model_metric(part, magnitude)
-        for magnitude in NOISE_MODEL_MAGNITUDES
+        for magnitude in resolve(NOISE_MODEL_MAGNITUDES).value
         for part in NOISE_MODEL_PARTS
     ),
     MetricSpec(
@@ -679,7 +704,7 @@ def _window_metrics(rank: int) -> tuple[MetricSpec, MetricSpec]:
 
 
 _WINDOW_METRICS: tuple[MetricSpec, ...] = tuple(
-    spec for rank in WINDOW_ALIAS_RANKS for spec in _window_metrics(rank)
+    spec for rank in resolve(WINDOW_ALIAS_RANKS).value for spec in _window_metrics(rank)
 )
 
 _AMPLITUDE_REVIEW_DATE = datetime.date(2027, 4, 30)

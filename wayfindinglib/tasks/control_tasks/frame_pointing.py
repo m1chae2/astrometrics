@@ -26,6 +26,13 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib.exceptions import FITS_READ_ERRORS, InvalidArgumentError
+from astrometricslib.parameters import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib._internal.coordinates import parse_coordinate_string
 from wayfindinglib.astronomy.coordinate_transforms import signed_offset_components_arcsec
 
@@ -36,7 +43,17 @@ __all__ = ["ALIGNED_LIMIT_ARCSEC", "pointing_error_from_header", "record_frame_p
 
 logger = logging.getLogger(__name__)
 
-ALIGNED_LIMIT_ARCSEC = 120.0
+ALIGNED_LIMIT_ARCSEC = TunedParameter(
+    name="wayfinding.aligned_limit_arcsec",
+    default=120.0,
+    unit="arcseconds",
+    description="A frame whose pointing error is at most this counts as aligned.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D142",
+    pending_conversion=True,
+)
 """A frame whose pointing error is at most this counts as aligned."""
 
 
@@ -127,7 +144,7 @@ def pointing_error_from_header(header: Any, file_path: str) -> dict[str, Any] | 
     delta_ra, delta_dec = signed_offset_components_arcsec(commanded_ra, commanded_dec, solved_ra, solved_dec)
     error = math.hypot(delta_ra, delta_dec)
     return {
-        "status": "aligned" if error <= ALIGNED_LIMIT_ARCSEC else "warning",
+        "status": "aligned" if error <= resolve_parameter(ALIGNED_LIMIT_ARCSEC).value else "warning",
         "delta_ra_arcsec": round(delta_ra, 2),
         "delta_dec_arcsec": round(delta_dec, 2),
         "pointing_error_arcsec": round(error, 2),

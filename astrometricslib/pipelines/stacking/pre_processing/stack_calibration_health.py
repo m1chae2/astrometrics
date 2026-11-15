@@ -43,6 +43,7 @@ from astrometricslib._internal.drivers.calibration_library import (
 )
 from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib._internal.drivers.quality_store import QualityStore
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.gate_result import (
     GateResult,
     GateStatus,
@@ -51,6 +52,12 @@ from astrometricslib.models.quality.gate_result import (
     unchecked_gate,
 )
 from astrometricslib.models.quality.measurement import SubjectLevel
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_seconds
 from astrometricslib.pipelines.shared.quality.calibration_frame_measurement import calibration_subject_id
 from astrometricslib.pipelines.shared.quality.metrics import CALIBRATION_FRAME_METRICS, FRAME_METRICS
@@ -97,7 +104,17 @@ TEMPERATURE_SPREAD_GATE_NAME = "light_temperature_spread"
 # A dark fits a light when their exposures differ by less than this many
 # seconds. It is the jitter `select_dark_frames` allows (see
 # `_dark_paths_at_exposure` in `drivers/calibration_library.py`).
-DARK_EXPOSURE_MATCH_SECONDS = 0.1
+DARK_EXPOSURE_MATCH_SECONDS = TunedParameter(
+    name="stacking.dark_exposure_match_seconds",
+    default=0.1,
+    unit="s",
+    description="Largest exposure difference at which a dark still fits a light.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-D07",
+    pending_conversion=True,
+)
 
 # Lights whose exposures round to the same 0.1 s are one batch, the batch the
 # darks are chosen for.
@@ -207,6 +224,7 @@ def _dark_missing_gate(
         Failed when a batch has no dark within `DARK_EXPOSURE_MATCH_SECONDS`.
         The value is the number of lights in those batches; the limit is 0.
     """
+    dark_exposure_match_seconds = resolve(DARK_EXPOSURE_MATCH_SECONDS).value
     if not batches:
         return unchecked_gate(DARK_MISSING_GATE_NAME, "the lights record no exposure", _MISSING_SOURCE)
     if applied_dark is None and not dark_exposures:
@@ -224,7 +242,7 @@ def _dark_missing_gate(
     without = {
         exposure: frames
         for exposure, frames in batches.items()
-        if not any(abs(exposure - dark) < DARK_EXPOSURE_MATCH_SECONDS for dark in dark_exposures)
+        if not any(abs(exposure - dark) < dark_exposure_match_seconds for dark in dark_exposures)
     }
     total = sum(len(frames) for frames in batches.values())
     missing = sum(len(frames) for frames in without.values())
@@ -261,6 +279,7 @@ def _temperature_spread_gate(batches: Mapping[float, list[Any]], used_dark: bool
         spans more than `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C`. The value is
         the widest span in degrees C.
     """
+    default_dark_temperature_tolerance_c = resolve(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value
     if not used_dark:
         return unchecked_gate(TEMPERATURE_SPREAD_GATE_NAME, "the stack used no dark", _SPREAD_SOURCE)
     spans: dict[float, float] = {}
@@ -278,18 +297,21 @@ def _temperature_spread_gate(batches: Mapping[float, list[Any]], used_dark: bool
             TEMPERATURE_SPREAD_GATE_NAME, "the lights record no sensor temperature to compare", _SPREAD_SOURCE
         )
     worst_exposure, worst = max(spans.items(), key=lambda item: item[1])
-    if worst > DEFAULT_DARK_TEMPERATURE_TOLERANCE_C:
+    if worst > default_dark_temperature_tolerance_c:
         return failed_gate(
             TEMPERATURE_SPREAD_GATE_NAME,
             f"the sensor temperature of the {worst_exposure:g} s lights spans {worst:.1f} C, more than the "
-            f"{DEFAULT_DARK_TEMPERATURE_TOLERANCE_C:g} C a dark can match; the mean temperature "
+            f"{default_dark_temperature_tolerance_c:g} C a dark can match; the mean temperature "
             "hides the drift",
             worst,
-            DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+            default_dark_temperature_tolerance_c,
             _SPREAD_SOURCE,
         )
     return passed_gate(
-        TEMPERATURE_SPREAD_GATE_NAME, worst, DEFAULT_DARK_TEMPERATURE_TOLERANCE_C, _SPREAD_SOURCE
+        TEMPERATURE_SPREAD_GATE_NAME,
+        worst,
+        default_dark_temperature_tolerance_c,
+        _SPREAD_SOURCE,
     )
 
 

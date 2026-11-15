@@ -61,7 +61,7 @@ def test_the_gains_undo_the_channel_sensitivities() -> None:
     expected_blue = 1.0 / (SENSITIVITY[2] / SENSITIVITY[1] * np.median(colours[:, 1]))
     assert calibration.red_gain == pytest.approx(expected_red, rel=0.05)
     assert calibration.blue_gain == pytest.approx(expected_blue, rel=0.05)
-    assert calibration.star_count >= colour_calibration.MINIMUM_STARS
+    assert calibration.star_count >= colour_calibration.MINIMUM_STARS.default
 
 
 def test_the_sky_is_measured_per_channel() -> None:

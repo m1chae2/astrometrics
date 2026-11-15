@@ -13,6 +13,7 @@ from typing import Any
 
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import AstrometricsError
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -148,12 +149,14 @@ def measure_fwhm_degradation(
         expected_stack_fwhm,
     )
 
+    fwhm_measurement_star_count = resolve(FWHM_MEASUREMENT_STAR_COUNT).value
+
     # A sample of at most 15 frames (matching FWHM_MEASUREMENT_STAR_COUNT),
     # spaced evenly over the whole set. A median or an RMS only needs a
     # representative sample, unlike the background-split check, which needs
     # every frame to avoid missing a split.
-    step = max(1, len(target_frames) // FWHM_MEASUREMENT_STAR_COUNT)
-    sample_paths = [frame.path for frame in target_frames[::step][:FWHM_MEASUREMENT_STAR_COUNT]]
+    step = max(1, len(target_frames) // fwhm_measurement_star_count)
+    sample_paths = [frame.path for frame in target_frames[::step][:fwhm_measurement_star_count]]
     input_fwhms = [
         fwhm
         for fwhm in _measure_sample_fwhms(sample_paths, _fwhm_worker_count(len(sample_paths)))

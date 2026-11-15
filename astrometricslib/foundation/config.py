@@ -30,8 +30,101 @@ from astrometricslib.foundation.paths import (
     resolve_mounted_path,
     state_directory,
 )
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 
 _instance = None
+
+# Defaults of the processing settings below. Each is a `TunedParameter`
+# whose value comes from the config file; the default is used when the
+# file has none. The getters of `AppConfiguration` read them.
+
+REJECTION_SIGMA_LOW = TunedParameter(
+    name="stacking.rejection_sigma_low",
+    default=3.0,
+    unit="× standard deviation",
+    description="Low pixel rejection limit of a stack in fixed mode.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    register_entry="STK-09",
+    config_key=("Processing.Siril", "rejection_sigma_low"),
+)
+REJECTION_SIGMA_HIGH = TunedParameter(
+    name="stacking.rejection_sigma_high",
+    default=3.0,
+    unit="× standard deviation",
+    description="High pixel rejection limit of a stack in fixed mode.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    register_entry="STK-09",
+    config_key=("Processing.Siril", "rejection_sigma_high"),
+)
+STACK_REJECTION_SIGMA_FLOOR = TunedParameter(
+    name="stacking.stack_rejection_sigma_floor",
+    default=2.5,
+    unit="× standard deviation",
+    description="Smallest high rejection limit adaptive mode may use.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    register_entry="STK-08",
+    config_key=("Processing.Siril", "stack_rejection_sigma_floor"),
+)
+STACK_REJECTION_LOW_EXTRA_SIGMA = TunedParameter(
+    name="stacking.stack_rejection_low_extra_sigma",
+    default=0.5,
+    unit="× standard deviation",
+    description="How much looser the low rejection limit is than the high one in adaptive mode.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    register_entry="STK-08",
+    config_key=("Processing.Siril", "stack_rejection_low_extra_sigma"),
+)
+EXPOSURE_GROUP_GAIN_TOLERANCE = TunedParameter(
+    name="stacking.exposure_group_gain_tolerance",
+    default=0.05,
+    unit="fraction of the scale",
+    description="How far the faint and bright star ratios of a group may differ from its brightness scale.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-20",
+    config_key=("Processing.Siril", "exposure_group_gain_tolerance"),
+)
+MINIMUM_CALIBRATION_FRAMES = TunedParameter(
+    name="stacking.minimum_calibration_frames",
+    default=3,
+    unit="frames",
+    description="Fewest frames in a master calibration frame before the stack is flagged.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-D01",
+    config_key=("Processing.Siril", "minimum_calibration_frames"),
+)
+COSMIC_CLARITY_DENOISE_STRENGTH = TunedParameter(
+    name="stacking.cosmic_clarity_denoise_strength",
+    default=0.9,
+    unit="fraction (0 to 1)",
+    description="How strongly Cosmic Clarity removes noise from the stack preview.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    register_entry="STK-30",
+    config_key=("Processing.CosmicClarity", "denoise_strength"),
+)
+MAXIMUM_IDENTIFIED_STARS = TunedParameter(
+    name="astrometry.maximum_identified_stars",
+    default=500,
+    unit="stars",
+    description="Most detected stars matched against the catalog in one image; 0 means no limit.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    register_entry="AST-D08",
+    config_key=("Processing.Astrometry", "maximum_identified_stars"),
+)
 
 _UNSET = object()
 
@@ -499,10 +592,10 @@ class AppConfiguration:
                 # it has to be the working value, not the historical one.
                 "siril_executable": "siril-cli",
                 "rejection_sigma_mode": "adaptive",
-                "rejection_sigma_low": "3.0",
-                "rejection_sigma_high": "3.0",
-                "stack_rejection_sigma_floor": "2.5",
-                "stack_rejection_low_extra_sigma": "0.5",
+                "rejection_sigma_low": str(REJECTION_SIGMA_LOW.default),
+                "rejection_sigma_high": str(REJECTION_SIGMA_HIGH.default),
+                "stack_rejection_sigma_floor": str(STACK_REJECTION_SIGMA_FLOOR.default),
+                "stack_rejection_low_extra_sigma": str(STACK_REJECTION_LOW_EXTRA_SIGMA.default),
                 "filter_wfwhm_percentile": "",
                 "filter_round_percentile": "",
                 # Blank, matching the config template: -weight= needs
@@ -510,8 +603,8 @@ class AppConfiguration:
                 # default that breaks the default install is not a default.
                 "stack_weight": "",
                 "generate_rejmap": "true",
-                "exposure_group_gain_tolerance": "0.05",
-                "minimum_calibration_frames": "3",
+                "exposure_group_gain_tolerance": str(EXPOSURE_GROUP_GAIN_TOLERANCE.default),
+                "minimum_calibration_frames": str(MINIMUM_CALIBRATION_FRAMES.default),
                 "background_homogeneity_check_enabled": "true",
                 "quarantine_bad_frames_enabled": "true",
                 "preview_star_tone_enabled": "true",
@@ -540,12 +633,12 @@ class AppConfiguration:
             "Processing.CosmicClarity": {
                 "denoise_executable": "",
                 "denoise_enabled": "true",
-                "denoise_strength": "0.9",
+                "denoise_strength": str(COSMIC_CLARITY_DENOISE_STRENGTH.default),
             },
             # 500; see get_maximum_identified_stars for why this isn't 0
             # (unlimited) despite that having been this setting's first
             # default.
-            "Processing.Astrometry": {"maximum_identified_stars": "500"},
+            "Processing.Astrometry": {"maximum_identified_stars": str(MAXIMUM_IDENTIFIED_STARS.default)},
         }
         for section, values in defaults.items():
             if section not in self.app_config:
@@ -668,11 +761,15 @@ class AppConfiguration:
             and left star peaks unchanged. On the M 13 stack, 0.5 left
             visible grain. The denoise runs after the stretch.
         """
-        raw = self.get_value("Processing.CosmicClarity", "denoise_strength", fallback="0.9")
+        raw = self.get_value(
+            "Processing.CosmicClarity",
+            "denoise_strength",
+            fallback=str(COSMIC_CLARITY_DENOISE_STRENGTH.default),
+        )
         try:
             return min(1.0, max(0.0, float(raw)))
         except TypeError, ValueError:
-            return 0.9
+            return float(COSMIC_CLARITY_DENOISE_STRENGTH.default)
 
     def get_stack_rejection_sigma_mode(self) -> str:
         """Return the configured stack-time pixel rejection sigma mode.
@@ -712,8 +809,12 @@ class AppConfiguration:
         sigma_pair : `tuple` [`float`, `float`]
             The configured ``(sigma_low, sigma_high)`` pair.
         """
-        low = self.get_value("Processing.Siril", "rejection_sigma_low", fallback="3.0")
-        high = self.get_value("Processing.Siril", "rejection_sigma_high", fallback="3.0")
+        low = self.get_value(
+            "Processing.Siril", "rejection_sigma_low", fallback=str(REJECTION_SIGMA_LOW.default)
+        )
+        high = self.get_value(
+            "Processing.Siril", "rejection_sigma_high", fallback=str(REJECTION_SIGMA_HIGH.default)
+        )
         return (float(low), float(high))
 
     def get_stack_rejection_sigma_floor(self) -> float:
@@ -734,12 +835,16 @@ class AppConfiguration:
             The configured floor, in standard deviations. An entry that is not
             a number above zero gives the default, 2.5.
         """
-        raw = self.get_value("Processing.Siril", "stack_rejection_sigma_floor", fallback="2.5")
+        raw = self.get_value(
+            "Processing.Siril",
+            "stack_rejection_sigma_floor",
+            fallback=str(STACK_REJECTION_SIGMA_FLOOR.default),
+        )
         try:
             floor = float(str(raw).strip())
         except TypeError, ValueError:
-            return 2.5
-        return floor if math.isfinite(floor) and floor > 0 else 2.5
+            return float(STACK_REJECTION_SIGMA_FLOOR.default)
+        return floor if math.isfinite(floor) and floor > 0 else float(STACK_REJECTION_SIGMA_FLOOR.default)
 
     def get_stack_rejection_low_extra_sigma(self) -> float:
         """Return how much looser the low rejection limit is than the high one.
@@ -757,12 +862,16 @@ class AppConfiguration:
             The configured amount, in standard deviations, at least 0. An
             entry that is not a number gives the default, 0.5.
         """
-        raw = self.get_value("Processing.Siril", "stack_rejection_low_extra_sigma", fallback="0.5")
+        raw = self.get_value(
+            "Processing.Siril",
+            "stack_rejection_low_extra_sigma",
+            fallback=str(STACK_REJECTION_LOW_EXTRA_SIGMA.default),
+        )
         try:
             extra = float(str(raw).strip())
         except TypeError, ValueError:
-            return 0.5
-        return max(0.0, extra) if math.isfinite(extra) else 0.5
+            return float(STACK_REJECTION_LOW_EXTRA_SIGMA.default)
+        return max(0.0, extra) if math.isfinite(extra) else float(STACK_REJECTION_LOW_EXTRA_SIGMA.default)
 
     def get_stack_filter_wfwhm_percentile(self) -> str | None:
         """Return the configured -filter-wfwhm value, or None if disabled.
@@ -815,11 +924,13 @@ class AppConfiguration:
             The configured count, at least 1. An entry that is not a whole
             number gives the default, 3.
         """
-        raw = self.get_value("Processing.Siril", "minimum_calibration_frames", fallback="3")
+        raw = self.get_value(
+            "Processing.Siril", "minimum_calibration_frames", fallback=str(MINIMUM_CALIBRATION_FRAMES.default)
+        )
         try:
             return max(1, int(str(raw).strip()))
         except TypeError, ValueError:
-            return 3
+            return int(MINIMUM_CALIBRATION_FRAMES.default)
 
     def get_exposure_group_gain_tolerance(self) -> float:
         """Return how far two brightness ratios may differ.
@@ -845,12 +956,20 @@ class AppConfiguration:
             entry that is not a number, or is not above zero, gives the
             default, 0.05.
         """
-        raw = self.get_value("Processing.Siril", "exposure_group_gain_tolerance", fallback="0.05")
+        raw = self.get_value(
+            "Processing.Siril",
+            "exposure_group_gain_tolerance",
+            fallback=str(EXPOSURE_GROUP_GAIN_TOLERANCE.default),
+        )
         try:
             tolerance = float(raw)
         except TypeError, ValueError:
-            return 0.05
-        return tolerance if math.isfinite(tolerance) and tolerance > 0 else 0.05
+            return float(EXPOSURE_GROUP_GAIN_TOLERANCE.default)
+        return (
+            tolerance
+            if math.isfinite(tolerance) and tolerance > 0
+            else float(EXPOSURE_GROUP_GAIN_TOLERANCE.default)
+        )
 
     def get_stack_generate_rejmap(self) -> bool:
         """Return whether Siril should generate a rejection map (-rejmap).
@@ -1091,7 +1210,11 @@ class AppConfiguration:
         limit : int or None
             The maximum number of stars to identify. 0 means unlimited.
         """
-        val = self.get_value("Processing.Astrometry", "maximum_identified_stars", fallback="500")
+        val = self.get_value(
+            "Processing.Astrometry",
+            "maximum_identified_stars",
+            fallback=str(MAXIMUM_IDENTIFIED_STARS.default),
+        )
         try:
             maximum = int(str(val).strip())
         except TypeError, ValueError:

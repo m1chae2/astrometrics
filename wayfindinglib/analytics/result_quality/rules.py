@@ -34,6 +34,13 @@ measure them on your own data.
 
 from pydantic import BaseModel, ConfigDict
 
+from astrometricslib.parameters import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from astrometricslib.reports import LimitTier, QualityLimit
 from wayfindinglib.models.quality.rule import MetricRequirement, QualityRule
 from wayfindinglib.models.quality.statements import ActionClass, Confidence, Severity, StatementKind
@@ -82,7 +89,19 @@ CALIBRATION_FRAME_COUNT_GATE_METRIC = "stacking.gate_calibration_frame_count"
 # The brightest star's peak, as a fraction of the room between the sky and the
 # ceiling, at which the star clips. 1.0 is the ceiling by definition, so the
 # value needs no measurement (tier: geometry).
-CLIPPING_PEAK_FRACTION = 1.0
+CLIPPING_PEAK_FRACTION = TunedParameter(
+    name="wayfinding.clipping_peak_fraction",
+    default=1.0,
+    unit="fraction",
+    description=(
+        "The brightest star's peak, as a fraction of the room between the sky and the ceiling, at which "
+        "the star clips."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D05",
+)
 
 # The fraction of the room that a clipped exposure is scaled back to. It is
 # the value `TARGET_PEAK_FRACTION` that astrometricslib used for its old
@@ -90,7 +109,16 @@ CLIPPING_PEAK_FRACTION = 1.0
 # of 20% for a change in seeing or sky). It is a design estimate, register
 # entry WAY-D05. Measure it by taking one star at several exposures and
 # finding the one where the peak sits at 0.8 of the room.
-TARGET_PEAK_FRACTION = 0.8
+TARGET_PEAK_FRACTION = TunedParameter(
+    name="wayfinding.target_peak_fraction",
+    default=0.8,
+    unit="fraction",
+    description="The fraction of the room that a clipped exposure is scaled back to.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D05",
+)
 
 # The least ratio of the sky's photon noise to the camera's read noise in one
 # pixel. At 3 the read noise adds 1/9 to the variance, so the total noise is
@@ -98,43 +126,115 @@ TARGET_PEAK_FRACTION = 0.8
 # same derivation as the efficiency batch: eta of the read-noise factor at
 # least 0.9 means sky variance at least 9 times the read-noise variance).
 # Design estimate, register entry WAY-D06.
-MINIMUM_SKY_TO_READ_NOISE_RATIO = 3.0
+MINIMUM_SKY_TO_READ_NOISE_RATIO = TunedParameter(
+    name="wayfinding.minimum_sky_to_read_noise_ratio",
+    default=3.0,
+    unit="ratio",
+    description="The least ratio of the sky's photon noise to the camera's read noise in one pixel.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D06",
+)
 
 # The most stretched the stars may be (long axis divided by short axis; 1 is
 # round) before the rule warns. Noise alone pushes the value of a round star
 # a little above 1, most for faint stars. 1.2 is the point where a star is
 # plainly oval to the eye. Design estimate, register entry WAY-D07.
-TRAILED_STAR_ELONGATION_LIMIT = 1.2
+TRAILED_STAR_ELONGATION_LIMIT = TunedParameter(
+    name="wayfinding.trailed_star_elongation_limit",
+    default=1.2,
+    unit="ratio",
+    description=(
+        "The most stretched the stars may be (long axis divided by short axis; 1 is round) before the "
+        "rule warns."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D07",
+)
 
 # The share of the stack's noise variance that the master flat may add before
 # the rule warns. 0.03 is the figure of STK-05: a flat that adds under 3% to
 # the variance leaves a fixed pattern too small to see. Design estimate (the
 # stack-level reading is new), register entry WAY-D08.
-FLAT_VARIANCE_SHARE_LIMIT = 0.03
+FLAT_VARIANCE_SHARE_LIMIT = TunedParameter(
+    name="wayfinding.flat_variance_share_limit",
+    default=0.03,
+    unit="fraction",
+    description="The share of the stack's noise variance that the master flat may add before the rule warns.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D08",
+)
 
 # The share of variance the master flat should add after the extra flats are
 # taken: one third of the limit, so the fix leaves a clear margin. Design
 # estimate, register entry WAY-D08.
-FLAT_VARIANCE_SHARE_TARGET = 0.01
+FLAT_VARIANCE_SHARE_TARGET = TunedParameter(
+    name="wayfinding.flat_variance_share_target",
+    default=0.01,
+    unit="fraction",
+    description=(
+        "The share of variance the master flat should add after the extra flats are taken: one third of "
+        "the limit, so the fix leaves a clear margin."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D08",
+)
 
 # The relative noise of a master flat above which the stacker blurs the flat.
 # It equals astrometricslib's `MAXIMUM_FLAT_NOISE_FRACTION` (0.5%), derived
 # in STK-05: a flat at 0.5% adds under 3% to the variance of a typical stack.
-MASTER_FLAT_NOISE_FRACTION_LIMIT = 0.005
+MASTER_FLAT_NOISE_FRACTION_LIMIT = TunedParameter(
+    name="wayfinding.master_flat_noise_fraction_limit",
+    default=0.005,
+    unit="fraction",
+    description="The relative noise of a master flat above which the stacker blurs the flat.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D08",
+)
 
 # The share of pixel values the stacker may throw out before the rule warns.
 # It equals astrometricslib's `DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD`
 # (15%), set in STK-24: three real sessions never passed about 10%, so 15% has
 # headroom. Partly measured: no session with a truly high share was available.
 # A test compares this copy with the library's value.
-REJECTED_PIXEL_FRACTION_LIMIT = 0.15
+REJECTED_PIXEL_FRACTION_LIMIT = TunedParameter(
+    name="wayfinding.rejected_pixel_fraction_limit",
+    default=0.15,
+    unit="fraction",
+    description="The share of pixel values the stacker may throw out before the rule warns.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-24",
+)
 
 # The most a stack's star width may exceed the width its input frames predict
 # (stack width divided by predicted width) before the rule warns. It equals
 # astrometricslib's `DEFAULT_FWHM_DEGRADATION_RATIO` (1.2), set in STK-25:
 # six normal stacks measured 0.77 to 1.16. Partly measured: no real failed
 # alignment was available. A test compares this copy with the library's value.
-STACK_SHARPNESS_RATIO_LIMIT = 1.2
+STACK_SHARPNESS_RATIO_LIMIT = TunedParameter(
+    name="wayfinding.stack_sharpness_ratio_limit",
+    default=1.2,
+    unit="ratio",
+    description=(
+        "The most a stack's star width may exceed the width its input frames predict (stack width "
+        "divided by predicted width) before the rule warns."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-25",
+)
 
 
 def build_limit(
@@ -239,7 +339,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         requires=[MetricRequirement(name=PEAK_FRACTION_METRIC, definition_version=1)],
         limits=[
             QualityLimit(
-                value=CLIPPING_PEAK_FRACTION,
+                value=resolve_parameter(CLIPPING_PEAK_FRACTION).value,
                 unit="fraction",
                 tier=LimitTier.GEOMETRY,
                 derivation=(
@@ -248,7 +348,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
                 ),
             ),
             _design_limit(
-                TARGET_PEAK_FRACTION,
+                resolve_parameter(TARGET_PEAK_FRACTION).value,
                 "fraction",
                 (
                     "The value astrometricslib used for its recommended exposure before issue 94: "
@@ -279,7 +379,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         ],
         limits=[
             _design_limit(
-                MINIMUM_SKY_TO_READ_NOISE_RATIO,
+                resolve_parameter(MINIMUM_SKY_TO_READ_NOISE_RATIO).value,
                 "",
                 (
                     "At a sky noise of 3 times the read noise, the read noise adds 1/9 to the "
@@ -332,7 +432,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         requires=[MetricRequirement(name=ELONGATION_METRIC, definition_version=1)],
         limits=[
             _design_limit(
-                TRAILED_STAR_ELONGATION_LIMIT,
+                resolve_parameter(TRAILED_STAR_ELONGATION_LIMIT).value,
                 "",
                 "A star whose long axis is 20% longer than its short axis is plainly oval to the eye.",
                 "WAY-D07",
@@ -362,13 +462,13 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         ],
         limits=[
             _design_limit(
-                FLAT_VARIANCE_SHARE_LIMIT,
+                resolve_parameter(FLAT_VARIANCE_SHARE_LIMIT).value,
                 "fraction",
                 "STK-05: a flat that adds under 3% to the stack's noise variance leaves no visible pattern.",
                 "WAY-D08",
             ),
             _design_limit(
-                FLAT_VARIANCE_SHARE_TARGET,
+                resolve_parameter(FLAT_VARIANCE_SHARE_TARGET).value,
                 "fraction",
                 "One third of the limit, so the fix leaves a clear margin.",
                 "WAY-D08",
@@ -402,7 +502,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         ],
         limits=[
             QualityLimit(
-                value=MASTER_FLAT_NOISE_FRACTION_LIMIT,
+                value=resolve_parameter(MASTER_FLAT_NOISE_FRACTION_LIMIT).value,
                 unit="fraction",
                 tier=LimitTier.VALIDATED_DATASET,
                 derivation=(
@@ -436,7 +536,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         requires=[MetricRequirement(name=REJECTED_PIXEL_FRACTION_METRIC, definition_version=1)],
         limits=[
             QualityLimit(
-                value=REJECTED_PIXEL_FRACTION_LIMIT,
+                value=resolve_parameter(REJECTED_PIXEL_FRACTION_LIMIT).value,
                 unit="fraction",
                 tier=LimitTier.VALIDATED_DATASET,
                 derivation=(
@@ -474,7 +574,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         ],
         limits=[
             QualityLimit(
-                value=STACK_SHARPNESS_RATIO_LIMIT,
+                value=resolve_parameter(STACK_SHARPNESS_RATIO_LIMIT).value,
                 unit="ratio",
                 tier=LimitTier.VALIDATED_DATASET,
                 derivation=(

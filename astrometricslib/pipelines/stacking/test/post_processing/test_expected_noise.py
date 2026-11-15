@@ -155,7 +155,7 @@ def test_no_frames_and_bad_weights_give_a_reason() -> None:
 
 def test_the_unit_scale_is_the_one_shared_full_scale_count() -> None:
     """The expected noise and the exposure-group combine use one constant."""
-    assert pytest.approx(1.0 / FULL_SCALE_COUNTS) == STACK_UNITS_PER_ADU
+    assert pytest.approx(1.0 / FULL_SCALE_COUNTS.default) == STACK_UNITS_PER_ADU
     result = expected_stack_noise([FrameNoiseInput(1.0, 100.0, 3.0, 1.0)]).result
     assert result is not None
     assert result.stack_units_per_adu == STACK_UNITS_PER_ADU

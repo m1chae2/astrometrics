@@ -23,6 +23,14 @@ from typing import TYPE_CHECKING, NamedTuple
 import numpy as np
 
 from astrometricslib.exceptions import InvalidArgumentError
+from astrometricslib.parameters import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from astrometricslib.reports import observing_night_id
 from wayfindinglib.analytics.capture_history import equipment_light_frames, normalize_name
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
@@ -33,18 +41,46 @@ if TYPE_CHECKING:
     from wayfindinglib.api.control.context import ControlContext
     from wayfindinglib.models.session.ekos_session import EkosSessionContext
 
-MINIMUM_FOCUS_PAIRS = 6
+MINIMUM_FOCUS_PAIRS = TunedParameter(
+    name="wayfinding.minimum_focus_pairs",
+    default=6,
+    unit="pairs",
+    description="Fewest (temperature, best-focus position) pairs for a focus fit.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D121",
+)
 """Fewest (temperature, best-focus position) pairs for a fit. The fit has one
 slope and one offset per filter, and the uncertainty needs at least three
 degrees of freedom. Design estimate, register row WAY-D121."""
 
-MINIMUM_TEMPERATURE_SPAN_C = 3.0
+MINIMUM_TEMPERATURE_SPAN_C = TunedParameter(
+    name="wayfinding.minimum_temperature_span_c",
+    default=3.0,
+    unit="degrees Celsius",
+    description="Narrowest temperature range a focus fit may rest on.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE}),
+    register_entry="WAY-D121",
+    pending_conversion=True,
+)
 """Narrowest temperature range a fit may rest on, in degrees Celsius. A
 focuser step is a fraction of a micrometer, and a slope measured over less
 than this is mostly the scatter of the focus runs. Design estimate, register
 row WAY-D121."""
 
-MINIMUM_FILTER_SHARE_PAIRS = 2
+MINIMUM_FILTER_SHARE_PAIRS = TunedParameter(
+    name="wayfinding.minimum_filter_share_pairs",
+    default=2,
+    unit="pairs",
+    description="Fewest pairs a filter needs before it gets its own focus offset.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D121",
+)
 """A filter with fewer pairs than this adds an offset the data cannot place,
 so its pairs are dropped. Design estimate, register row WAY-D121."""
 
@@ -180,21 +216,24 @@ def fit_thermal_coefficient_with_uncertainty(
     counts: dict[str, int] = defaultdict(int)
     for pair in pairs:
         counts[pair.filter_name] += 1
-    kept = [pair for pair in pairs if counts[pair.filter_name] >= MINIMUM_FILTER_SHARE_PAIRS]
-    if len(kept) < MINIMUM_FOCUS_PAIRS:
+    minimum_filter_share_pairs = resolve_parameter(MINIMUM_FILTER_SHARE_PAIRS).value
+    minimum_focus_pairs = resolve_parameter(MINIMUM_FOCUS_PAIRS).value
+    minimum_temperature_span_c = resolve_parameter(MINIMUM_TEMPERATURE_SPAN_C).value
+    kept = [pair for pair in pairs if counts[pair.filter_name] >= minimum_filter_share_pairs]
+    if len(kept) < minimum_focus_pairs:
         return FocusTemperatureFit(
             pairs_used=len(kept),
             nights_excluded=excluded,
-            message=f"The focus history has {len(kept)} usable pairs; a fit needs {MINIMUM_FOCUS_PAIRS}.",
+            message=f"The focus history has {len(kept)} usable pairs; a fit needs {minimum_focus_pairs}.",
         )
     temperatures = np.array([pair.temperature_c for pair in kept], dtype=float)
     positions = np.array([pair.position for pair in kept], dtype=float)
     span = float(temperatures.max() - temperatures.min())
-    if span < MINIMUM_TEMPERATURE_SPAN_C:
+    if span < minimum_temperature_span_c:
         return FocusTemperatureFit(
             pairs_used=len(kept),
             nights_excluded=excluded,
-            message=(f"The pairs span {span:.1f} C; a fit needs at least {MINIMUM_TEMPERATURE_SPAN_C:g} C."),
+            message=(f"The pairs span {span:.1f} C; a fit needs at least {minimum_temperature_span_c:g} C."),
         )
     filters = sorted({pair.filter_name for pair in kept})
     columns = [np.array([pair.filter_name == name for pair in kept], dtype=float) for name in filters]

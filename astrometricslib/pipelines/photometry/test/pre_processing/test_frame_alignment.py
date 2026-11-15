@@ -157,7 +157,7 @@ def test_anchors_bunched_in_a_cluster_core_give_a_shift_alone() -> None:
 
 def test_too_few_anchors_give_a_shift_alone() -> None:
     """Below `MINIMUM_ANCHORS_FOR_SIMILARITY` anchors, only a shift is fit."""
-    anchors = make_anchors(count=MINIMUM_ANCHORS_FOR_SIMILARITY - 1)
+    anchors = make_anchors(count=MINIMUM_ANCHORS_FOR_SIMILARITY.default - 1)
 
     alignment = fit_frame_alignment(anchors, move_anchors(anchors), FIELD_SHAPE)
 
@@ -343,5 +343,5 @@ def test_the_session_summary_reports_the_corner_displacement_and_the_gate_judges
     expected_worst = math.radians(0.7) * math.hypot(*SEQUENCE_CENTRE)
     assert summary.worst_corner_displacement_px == pytest.approx(expected_worst, abs=0.1)
     assert gate.status is GateStatus.FAILED
-    assert gate.limit == pytest.approx(rg.MAXIMUM_CORNER_DISPLACEMENT_PX)
+    assert gate.limit == pytest.approx(rg.MAXIMUM_CORNER_DISPLACEMENT_PX.default)
     assert "a corner moves" in gate.detail

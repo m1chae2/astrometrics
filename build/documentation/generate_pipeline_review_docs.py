@@ -32,6 +32,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from astrometricslib.parameters import TunedParameter
+
 # The date and version written under each guide's title.
 DOC_VERSION = "1.2"
 DOC_DATE = "2026-10-15"
@@ -776,9 +778,11 @@ def get_symbol(module_path: str, symbol_name: str) -> Any:
     """
     try:
         mod = importlib.import_module(module_path)
-        return getattr(mod, symbol_name)
+        symbol = getattr(mod, symbol_name)
     except ImportError, AttributeError:
         return None
+    # A tuned value is declared as a parameter; the guide quotes its default.
+    return symbol.default if isinstance(symbol, TunedParameter) else symbol
 
 
 def require_symbol(module_path: str, symbol_name: str) -> Any:
@@ -805,7 +809,11 @@ def require_symbol(module_path: str, symbol_name: str) -> Any:
     module = importlib.import_module(module_path)
     if not hasattr(module, symbol_name):
         raise LookupError(f"{module_path}.{symbol_name} no longer exists; update the review guide generator")
-    return getattr(module, symbol_name)
+    symbol = getattr(module, symbol_name)
+    # A tuned value is declared as a parameter; the guide quotes its default.
+    if isinstance(symbol, TunedParameter):
+        return symbol.default
+    return symbol
 
 
 def default_of(function: Any, parameter: str) -> Any:
@@ -1740,9 +1748,7 @@ def build_photometry_doc() -> str:
     indices_module = "astrometricslib.pipelines.photometry.processing.variability_indices"
     analyzer_module = "astrometricslib.pipelines.photometry.processing.variability_analyzer"
     periodicity_module = "astrometricslib.pipelines.photometry.processing.periodicity_search"
-    aperture = require_symbol(
-        "astrometricslib.pipelines.photometry.pre_processing.frame_photometry", "measure_aperture_photometry"
-    )
+    frame_photometry_module = "astrometricslib.pipelines.photometry.pre_processing.frame_photometry"
     values = {
         "version_line": VERSION_LINE,
         "rej_frac": require_symbol(record_quality_module, "MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG"),
@@ -1769,9 +1775,9 @@ def build_photometry_doc() -> str:
             "astrometricslib.pipelines.photometry.processing.family_wise_correction",
             "MAXIMUM_REPEAT_SHUFFLES",
         ),
-        "radius": float(default_of(aperture, "radius")),
-        "r_in": float(default_of(aperture, "annulus_inner")),
-        "r_out": float(default_of(aperture, "annulus_outer")),
+        "radius": float(require_symbol(frame_photometry_module, "APERTURE_RADIUS_PX")),
+        "r_in": float(require_symbol(frame_photometry_module, "SKY_ANNULUS_INNER_RADIUS_PX")),
+        "r_out": float(require_symbol(frame_photometry_module, "SKY_ANNULUS_OUTER_RADIUS_PX")),
         "gate_count": gate_count_text(gates),
         "gate_table": gate_table(gates),
     }

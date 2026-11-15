@@ -43,6 +43,7 @@ from scipy.spatial import cKDTree
 
 from astrometricslib import Astrometrics, configure_logging
 from astrometricslib._internal.drivers.local_database import backup_catalog_database
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.pipelines.shared.catalog_star_identity import (
     SAME_STAR_POSITION_TOLERANCE_ARCSEC,
@@ -109,7 +110,7 @@ def find_duplicate_clusters(summaries: list) -> list[list[str]]:
     ])
     # The straight-line distance between two points on the unit sphere for
     # a small angle; faster than a great-circle formula for every pair.
-    chord = 2.0 * np.sin(np.radians(SAME_STAR_POSITION_TOLERANCE_ARCSEC / 3600.0) / 2.0)
+    chord = 2.0 * np.sin(np.radians(resolve(SAME_STAR_POSITION_TOLERANCE_ARCSEC).value / 3600.0) / 2.0)
     pairs = np.array(sorted(cKDTree(unit_vectors).query_pairs(chord)))
     if pairs.size == 0:
         return []

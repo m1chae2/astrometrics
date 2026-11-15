@@ -1205,10 +1205,13 @@ def test_take_more_prices_dithers_and_refocusing_like_the_ranking(
     downloads_only = wall_clock_estimate(action.frame_count, action.exposure_seconds, overheads)
     assert effect.wall_clock_seconds > downloads_only.total_seconds
     without_focus = wall_clock_estimate(
-        action.frame_count, action.exposure_seconds, overheads, dither_every_frames=DITHER_EVERY_FRAMES
+        action.frame_count,
+        action.exposure_seconds,
+        overheads,
+        dither_every_frames=DITHER_EVERY_FRAMES.default,
     )
     assert effect.wall_clock_seconds >= without_focus.total_seconds
-    assert AUTOFOCUS_RUNS_PER_HOUR >= 1
+    assert AUTOFOCUS_RUNS_PER_HOUR.default >= 1
     assert "dithers and refocusing" in more.message
 
 

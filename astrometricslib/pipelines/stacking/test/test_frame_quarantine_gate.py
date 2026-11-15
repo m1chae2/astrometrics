@@ -60,7 +60,7 @@ def test_gate_passes_when_a_session_was_judged_and_is_clean(tmp_path: Path) -> N
 
 def test_gate_is_not_checked_when_every_session_is_too_small(tmp_path: Path) -> None:
     """Too few frames to judge is "not checked", never a pass."""
-    frames = _batch(tmp_path, MINIMUM_FRAMES_TO_JUDGE - 1)
+    frames = _batch(tmp_path, MINIMUM_FRAMES_TO_JUDGE.default - 1)
 
     gate = quarantine_gate(find_frames_to_quarantine(frames, measure=lambda path: make_measurement(path)))
 
@@ -74,7 +74,7 @@ def test_gate_is_not_checked_when_unreadable_frames_leave_too_few(tmp_path: Path
     This used to look like a clean pass, because judging a short list moves
     nothing.
     """
-    frames = _batch(tmp_path, MINIMUM_FRAMES_TO_JUDGE + 1)
+    frames = _batch(tmp_path, MINIMUM_FRAMES_TO_JUDGE.default + 1)
 
     def measure(path: str) -> dict[str, Any]:
         if int(Path(path).stem.removeprefix("f")) >= 2:

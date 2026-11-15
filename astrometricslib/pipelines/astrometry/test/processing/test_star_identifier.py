@@ -312,7 +312,7 @@ def test_query_gaia_region_pins_dr3_table_name(
     assert len(captured_queries) == 1
     query = captured_queries[0]
     assert "FROM gaiadr3.gaia_source" in query
-    assert f"phot_g_mean_mag < {star_identifier_module.GAIA_DEFAULT_MAGNITUDE_LIMIT}" in query
+    assert f"phot_g_mean_mag < {star_identifier_module.GAIA_DEFAULT_MAGNITUDE_LIMIT.default}" in query
     assert f"TOP {star_identifier_module.GAIA_ROW_LIMIT}" in query
     assert "pmra" in query
     assert "pmdec" in query

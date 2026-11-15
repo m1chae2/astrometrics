@@ -74,7 +74,15 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.stats import chi2
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.spectroscopy_quality import StageQualityMetric, metric
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.models.wavelength_scale import WavelengthZeroPointLine, WavelengthZeroPointRecord
 from astrometricslib.pipelines.shared.quality.saturation import is_saturation_significant
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_mask import ATMOSPHERIC_BANDS_ANGSTROM
@@ -153,22 +161,59 @@ ZERO_POINT_LINES: tuple[ZeroPointLine, ...] = (
 #
 # 6.0 keeps a margin. Real lines in a clean spectrum reach 20 or more. Not
 # checked on real faint spectra, whose noise may be correlated.
-MINIMUM_LINE_SIGNIFICANCE = 6.0
+MINIMUM_LINE_SIGNIFICANCE = TunedParameter(
+    name="spectroscopy.minimum_line_significance",
+    default=6.0,
+    unit="noise sigma",
+    description="How deep a dip must be to count as a measured line.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-11",
+)
 
 # The fewest independent lines needed before the offset is removed. One line
 # cannot be told apart from a misidentified feature.
-MINIMUM_LINES_TO_APPLY = 2
+MINIMUM_LINES_TO_APPLY = TunedParameter(
+    name="spectroscopy.minimum_lines_to_apply",
+    default=2,
+    unit="count",
+    description="The fewest independent lines needed before the offset is removed.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D08",
+)
 
 # The least p-value of the chi-square test for the lines to count as agreeing.
 # A designed value: with it, truly agreeing lines are wrongly refused 1 time in
 # 100. Not tuned on data.
-AGREEMENT_MINIMUM_P_VALUE = 0.01
+AGREEMENT_MINIMUM_P_VALUE = TunedParameter(
+    name="spectroscopy.agreement_minimum_p_value",
+    default=0.01,
+    unit="p-value",
+    description="The least chi-square p-value for the lines to count as agreeing.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D08",
+)
 
 # The limit on the size of a spectrum's offset: half a resolution element at
 # 5000 A. Designed, not measured. The resolution element is about 40 A there
 # (Vega: 38 to 43 A, see `spectral_resolution`), so the limit is about 20 A.
 # An offset this large moves a line by half its own blur.
-ZERO_POINT_OFFSET_LIMIT_ANGSTROM = 20.0
+ZERO_POINT_OFFSET_LIMIT_ANGSTROM = TunedParameter(
+    name="spectroscopy.zero_point_offset_limit_angstrom",
+    default=20.0,
+    unit="× resolution",
+    description="The limit on the size of a spectrum's wavelength zero-point offset.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D07",
+    pending_conversion=True,
+)
 
 # Step of the search for a line's centre, in Angstroms. Far below the fit
 # errors (about 1 A or more) so that the grid does not matter.
@@ -177,7 +222,16 @@ SEARCH_STEP_ANGSTROM = 0.5
 # The nearest edge of the side bands is this many effective line widths (FWHM)
 # beyond the search range. That clears the Gaussian dip's wing (3.5 sigma is
 # 1.5 widths) when the dip sits at the end of the search range.
-SIDE_BAND_GAP_WIDTHS = 1.5
+SIDE_BAND_GAP_WIDTHS = TunedParameter(
+    name="spectroscopy.side_band_gap_widths",
+    default=1.5,
+    unit="× FWHM",
+    description="The nearest edge of the side bands, in effective line widths beyond the search range.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-D32",
+)
 
 # How wide each side band is, in effective line widths, and the fewest samples
 # it is made to hold. The noise is estimated from the side bands, so a band
@@ -186,25 +240,88 @@ SIDE_BAND_GAP_WIDTHS = 1.5
 # enough for `MINIMUM_NOISE_SAMPLES_PER_SIDE`. Where the line spread is broad
 # (the stored profile gives 100 to 150 A), 1.5 widths already hold plenty, and
 # a wider band would reach other lines.
-SIDE_BAND_WIDTH_WIDTHS = 1.5
-MINIMUM_NOISE_SAMPLES_PER_SIDE = 10
+SIDE_BAND_WIDTH_WIDTHS = TunedParameter(
+    name="spectroscopy.side_band_width_widths",
+    default=1.5,
+    unit="× FWHM",
+    description="How wide each side band is, in effective line widths.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-D32",
+)
+MINIMUM_NOISE_SAMPLES_PER_SIDE = TunedParameter(
+    name="spectroscopy.minimum_noise_samples_per_side",
+    default=10,
+    unit="count",
+    description="The fewest samples each side band is made to hold.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-D32",
+)
 
 # The fewest samples in each side band, and in the line's own range. Below
 # these the curve through the side bands or the dip itself is not constrained.
-MINIMUM_SIDE_BAND_SAMPLES = 6
-MINIMUM_CORE_SAMPLES = 6
+MINIMUM_SIDE_BAND_SAMPLES = TunedParameter(
+    name="spectroscopy.minimum_side_band_samples",
+    default=6,
+    unit="count",
+    description="The fewest samples in each side band.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-D32",
+)
+MINIMUM_CORE_SAMPLES = TunedParameter(
+    name="spectroscopy.minimum_core_samples",
+    default=6,
+    unit="count",
+    description="The fewest samples in the line's own range.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-D32",
+)
 
 # A side-band sample further than this many scatters from the fitted curve is
 # a cosmic-ray hit or a neighbouring line, and is dropped once.
-SIDE_BAND_CLIP_SIGMAS = 4.0
+SIDE_BAND_CLIP_SIGMAS = TunedParameter(
+    name="spectroscopy.side_band_clip_sigmas",
+    default=4.0,
+    unit="sigma",
+    description="A side-band sample further than this many scatters from the fitted curve is dropped once.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-D32",
+)
 
 # The most the noise is enlarged for correlated neighbouring samples. A lag-1
 # correlation of 0.8 enlarges it threefold.
-MAXIMUM_NOISE_CORRELATION = 0.8
+MAXIMUM_NOISE_CORRELATION = TunedParameter(
+    name="spectroscopy.maximum_noise_correlation",
+    default=0.8,
+    unit="ratio",
+    description="The most the noise is enlarged for correlated neighbouring samples.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-D32",
+)
 
 # Samples must be at least this close together, in units of the dip's sigma,
 # for the dip to span several samples.
-MAXIMUM_SAMPLE_SPACING_SIGMAS = 1.5
+MAXIMUM_SAMPLE_SPACING_SIGMAS = TunedParameter(
+    name="spectroscopy.maximum_sample_spacing_sigmas",
+    default=1.5,
+    unit="sigma",
+    description="Samples must be at least this close together for the dip to span several samples.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-D32",
+)
 
 
 def _line_spread_angstrom(
@@ -264,7 +381,9 @@ def _side_band_noise(side_residuals: list[np.ndarray]) -> float | None:
         if residual.size >= 2:
             products += float(np.sum(residual[:-1] * residual[1:]))
             squares += float(np.sum(residual[:-1] ** 2))
-    correlation = min(max(products / squares, 0.0), MAXIMUM_NOISE_CORRELATION) if squares > 0 else 0.0
+    correlation = (
+        min(max(products / squares, 0.0), resolve(MAXIMUM_NOISE_CORRELATION).value) if squares > 0 else 0.0
+    )
     noise = scatter * math.sqrt((1.0 + correlation) / (1.0 - correlation))
     return max(noise, 1e-9)
 
@@ -301,12 +420,13 @@ def measure_line(
     rest = line.rest_wavelength_angstrom
     effective_fwhm = math.hypot(spread_angstrom, line.intrinsic_fwhm_angstrom)
     sigma = effective_fwhm / FWHM_PER_SIGMA
-    inner = spread_angstrom + SIDE_BAND_GAP_WIDTHS * effective_fwhm
+    inner = spread_angstrom + resolve(SIDE_BAND_GAP_WIDTHS).value * effective_fwhm
     if wavelength_angstrom.size < 2:
         return None
     sample_spacing = float(np.median(np.diff(wavelength_angstrom)))
     outer = inner + max(
-        SIDE_BAND_WIDTH_WIDTHS * effective_fwhm, MINIMUM_NOISE_SAMPLES_PER_SIDE * sample_spacing
+        resolve(SIDE_BAND_WIDTH_WIDTHS).value * effective_fwhm,
+        resolve(MINIMUM_NOISE_SAMPLES_PER_SIDE).value * sample_spacing,
     )
 
     # Leave out the atmospheric bands that are not this line, so they do not
@@ -325,12 +445,15 @@ def measure_line(
     left = in_side & (offsets < 0)
     right = in_side & (offsets > 0)
     if (
-        left.sum() < MINIMUM_SIDE_BAND_SAMPLES
-        or right.sum() < MINIMUM_SIDE_BAND_SAMPLES
-        or in_core.sum() < MINIMUM_CORE_SAMPLES
+        left.sum() < resolve(MINIMUM_SIDE_BAND_SAMPLES).value
+        or right.sum() < resolve(MINIMUM_SIDE_BAND_SAMPLES).value
+        or in_core.sum() < resolve(MINIMUM_CORE_SAMPLES).value
     ):
         return None
-    if np.median(np.diff(wavelength_angstrom[in_core | in_side])) > MAXIMUM_SAMPLE_SPACING_SIGMAS * sigma:
+    if (
+        np.median(np.diff(wavelength_angstrom[in_core | in_side]))
+        > resolve(MAXIMUM_SAMPLE_SPACING_SIGMAS).value * sigma
+    ):
         return None
 
     # Work with brightness in units of the side bands' median, so the numbers
@@ -348,8 +471,8 @@ def measure_line(
     residual = scaled_brightness - np.polyval(coefficients, scaled_offsets)
     scatter = float(np.std(residual[keep]))
     if scatter > 0:
-        keep &= np.abs(residual) <= SIDE_BAND_CLIP_SIGMAS * scatter
-        if keep.sum() < 2 * MINIMUM_SIDE_BAND_SAMPLES:
+        keep &= np.abs(residual) <= resolve(SIDE_BAND_CLIP_SIGMAS).value * scatter
+        if keep.sum() < 2 * resolve(MINIMUM_SIDE_BAND_SAMPLES).value:
             return None
         coefficients = np.polyfit(scaled_offsets[keep], scaled_brightness[keep], 2)
         residual = scaled_brightness - np.polyval(coefficients, scaled_offsets)
@@ -381,7 +504,7 @@ def measure_line(
     depths = (cleaned_shapes @ region_brightness) / shape_power
     significance = depths * np.sqrt(shape_power) / noise
     best = int(np.argmax(significance))
-    if best in (0, shifts.size - 1) or significance[best] < MINIMUM_LINE_SIGNIFICANCE:
+    if best in (0, shifts.size - 1) or significance[best] < resolve(MINIMUM_LINE_SIGNIFICANCE).value:
         return None
 
     # The error of the centre, with the parabola and the depth both free: how
@@ -484,7 +607,7 @@ def measure_wavelength_zero_point(
     brightness = brightness[usable][order]
 
     lines: list[WavelengthZeroPointLine] = []
-    if wavelengths.size >= 2 * MINIMUM_SIDE_BAND_SAMPLES + MINIMUM_CORE_SAMPLES:
+    if wavelengths.size >= 2 * resolve(MINIMUM_SIDE_BAND_SAMPLES).value + resolve(MINIMUM_CORE_SAMPLES).value:
         for line in ZERO_POINT_LINES:
             spread = _line_spread_angstrom(
                 line.rest_wavelength_angstrom, line_spread_profile, resolution_element_angstrom
@@ -513,9 +636,9 @@ def measure_wavelength_zero_point(
         )
     offset, uncertainty, chi_square, p_value = combine_line_offsets(lines)
     is_applied = (
-        len(lines) >= MINIMUM_LINES_TO_APPLY
+        len(lines) >= resolve(MINIMUM_LINES_TO_APPLY).value
         and p_value is not None
-        and (p_value >= AGREEMENT_MINIMUM_P_VALUE)
+        and (p_value >= resolve(AGREEMENT_MINIMUM_P_VALUE).value)
     )
     return WavelengthZeroPointRecord(
         offset_angstrom=offset,
@@ -584,7 +707,7 @@ def zero_point_metrics(record: WavelengthZeroPointRecord) -> tuple[list[StageQua
         "wavelength_zero_point_offset_angstrom",
         None if record.offset_angstrom is None else abs(record.offset_angstrom),
         "angstrom",
-        limit=ZERO_POINT_OFFSET_LIMIT_ANGSTROM,
+        limit=resolve(ZERO_POINT_OFFSET_LIMIT_ANGSTROM).value,
         higher_is_better=False,
         note=(
             "absolute offset of the wavelength scale, measured from known lines; the limit is designed "
@@ -613,7 +736,7 @@ def zero_point_metrics(record: WavelengthZeroPointRecord) -> tuple[list[StageQua
         ),
     ]
     flags = []
-    if record.line_count < MINIMUM_LINES_TO_APPLY:
+    if record.line_count < resolve(MINIMUM_LINES_TO_APPLY).value:
         flags.append("wavelength_zero_point_unconstrained")
     elif not record.is_applied:
         flags.append("wavelength_zero_point_lines_disagree")

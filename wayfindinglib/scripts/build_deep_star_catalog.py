@@ -43,6 +43,7 @@ import time
 
 from astrometricslib import Astrometrics, configure_logging
 from astrometricslib.exceptions import ConflictError, ExternalServiceError, InvalidArgumentError
+from astrometricslib.parameters import resolve_parameter
 from wayfindinglib import Wayfinder
 from wayfindinglib.drivers.catalog import deep_star_store
 from wayfindinglib.drivers.catalog.deep_star_catalog_builder import (
@@ -76,6 +77,7 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     parser : `argparse.ArgumentParser`
         Parser covering depth, chunk size, pacing, and the trial options.
     """
+    default_magnitude_limit = resolve_parameter(DEFAULT_MAGNITUDE_LIMIT).value
     parser = argparse.ArgumentParser(
         prog="build_deep_star_catalog",
         description="Download the Gaia DR3 stars the Planetarium draws, once, to this computer.",
@@ -102,9 +104,9 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--magnitude-limit",
         type=float,
-        default=DEFAULT_MAGNITUDE_LIMIT,
+        default=default_magnitude_limit,
         help=(
-            f"Faintest Gaia G magnitude to download (default {DEFAULT_MAGNITUDE_LIMIT}). "
+            f"Faintest Gaia G magnitude to download (default {default_magnitude_limit}). "
             "Must stay the same when resuming."
         ),
     )

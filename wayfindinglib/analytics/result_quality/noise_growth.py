@@ -193,6 +193,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from astrometricslib import ProcessingPipelines
+from astrometricslib.parameters import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.models.quality.statements import Confidence
 
 _MODEL_CONFIG = ConfigDict(populate_by_name=True, alias_generator=to_camel)
@@ -202,7 +209,19 @@ NOISE_GROWTH_ENTRY = "WAY-21"
 TAKE_MORE_ENTRY = "WAY-D30"
 """Register row behind "take N more" (a design estimate, see STK-36)."""
 
-WEIGHT_MATCH_TOLERANCE = 0.05
+WEIGHT_MATCH_TOLERANCE = TunedParameter(
+    name="wayfinding.weight_match_tolerance",
+    default=0.05,
+    unit="fraction",
+    description=(
+        "A recorded weight matches a mode's predicted weight when they agree within this fraction (after"
+        " both are divided by their mean)."
+    ),
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D31",
+)
 """A recorded weight matches a mode's predicted weight when they agree within
 this
 fraction (after both are divided by their mean). The recorded weights are
@@ -216,7 +235,19 @@ is
 the effect of doubling the effective time (noise falls as the square root of
 time) and is the smallest change the eye sees."""
 
-PRACTICAL_TIME_FACTOR = 4.0
+PRACTICAL_TIME_FACTOR = TunedParameter(
+    name="wayfinding.practical_time_factor",
+    default=4.0,
+    unit="ratio",
+    description=(
+        'A "take N more" count is given only when reaching the target needs at most this many times the '
+        "stack's present exposure time (so at most 3 times as much again)."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D30",
+)
 """A "take N more" count is given only when reaching the target needs at most
 this many times the stack's present exposure time (so at most 3 times as much
 again). The time is the sum of the exposure of every frame in the stack, not
@@ -227,7 +258,19 @@ about half the noise variance, doubling the time cuts the noise by 14 percent,
 most any number of frames gives is 30 percent), so the gain flattens past
 about 4 times (M 13, 44 frames of 30 s, a copy of the library)."""
 
-MINIMUM_DOUBLING_GAIN_FRACTION = 0.05
+MINIMUM_DOUBLING_GAIN_FRACTION = TunedParameter(
+    name="wayfinding.minimum_doubling_gain_fraction",
+    default=0.05,
+    unit="fraction",
+    description=(
+        "Below this cut in the noise, doubling the stack's time is not worth asking for, and no frames "
+        "are suggested."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D30",
+)
 """Below this cut in the noise, doubling the stack's time is not worth asking
 for, and no frames are suggested. It is half of `MINIMUM_GAIN_FRACTION` (the
 cut below which a target counts as stopped, 10 percent): a doubling between the
@@ -236,25 +279,66 @@ percent (fixed-pattern noise of about 80 percent of the noise variance or more)
 is
 not. Design estimate, register row WAY-D30."""
 
-MAXIMUM_NEW_FRAMES = 5000
+MAXIMUM_NEW_FRAMES = TunedParameter(
+    name="wayfinding.maximum_new_frames",
+    default=5000,
+    unit="frames",
+    description="The search for N stops here.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D30",
+)
 """The search for N stops here. 5000 frames of 30 s is 42 hours, far more than
 one
 target needs."""
 
-APERTURE_NOISE_ERROR_FACTOR = 1.17
+APERTURE_NOISE_ERROR_FACTOR = TunedParameter(
+    name="wayfinding.aperture_noise_error_factor",
+    default=1.17,
+    unit="ratio",
+    description="The error of the empty-aperture noise is 1.17 / sqrt(n) of the noise for n apertures.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.PUBLISHED_CONSTANT,
+    register_entry="WAY-21",
+)
 """The error of the empty-aperture noise is 1.17 / sqrt(n) of the noise for n
 apertures. The noise is 1.4826 times the median absolute deviation, and the
 large-sample variance of that estimate is 1.364 sigma^2 / n, so its standard
 error is sqrt(1.364) = 1.17 sigma / sqrt(n). Derived; register entry WAY-21."""
 
-FIXED_PATTERN_SIGMAS = 2.0
+FIXED_PATTERN_SIGMAS = TunedParameter(
+    name="wayfinding.fixed_pattern_sigmas",
+    default=2.0,
+    unit="sigma",
+    description=(
+        "Fixed-pattern noise is reported only when its fitted size is above 0 by this many standard errors."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D32",
+)
 """Fixed-pattern noise is reported only when its fitted size is above 0 by this
 many standard errors. The test is one-sided (fixed-pattern noise cannot be
 negative), so two standard errors is a false alarm of about 2.3 percent, not 5.
 Design estimate,
 register row WAY-D32."""
 
-POSSIBLE_FIXED_PATTERN_SIGMAS = 1.0
+POSSIBLE_FIXED_PATTERN_SIGMAS = TunedParameter(
+    name="wayfinding.possible_fixed_pattern_sigmas",
+    default=1.0,
+    unit="sigma",
+    description=(
+        "Between this many standard errors and `FIXED_PATTERN_SIGMAS` the fixed-pattern noise is "
+        '"possible", not found.'
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D89",
+)
 """Between this many standard errors and `FIXED_PATTERN_SIGMAS` the
 fixed-pattern noise is "possible", not found. It is not proven, so it is not
 assumed; the forecast gives the gain both with it and without it, and the
@@ -266,7 +350,19 @@ evidence M 13, whose significance moved from 2.2 to 1.9 between two runs on
 the same frames and moved the advice from about 13 to about 29 percent
 (validation register entry WAY-76). Register row to be added."""
 
-MINIMUM_MODEL_ERROR_TARGETS = 5
+MINIMUM_MODEL_ERROR_TARGETS = TunedParameter(
+    name="wayfinding.minimum_model_error_targets",
+    default=5,
+    unit="targets",
+    description=(
+        "The noise model's relative error is measured from odd-even differences only when at least this "
+        "many targets of one capture setting group have one."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D90",
+)
 """The noise model's relative error is measured from odd–even differences only
 when at least this many targets of one capture setting group have one;
 otherwise the stand-in `EXPECTED_NOISE_MODEL_RELATIVE_ERROR` is used and the
@@ -276,13 +372,34 @@ not to claim more. User decision of 2026-10-26 (issue #134); design estimate,
 register row
 to be added."""
 
-MODEL_AGREEMENT_SIGMAS = 2.0
+MODEL_AGREEMENT_SIGMAS = TunedParameter(
+    name="wayfinding.model_agreement_sigmas",
+    default=2.0,
+    unit="sigma",
+    description=(
+        "The measured stack noise is said to disagree with the model only when its variance ratio "
+        "exceeds 1 by this many standard errors."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D32",
+)
 """The measured stack noise is said to disagree with the model only when its
 variance ratio exceeds 1 by this many standard errors. The test is one-sided
 (only a noisier stack counts), so two standard errors is a false alarm of
 about 2.3 percent, not 5. Design estimate, register row WAY-D34."""
 
-EXPECTED_NOISE_MODEL_RELATIVE_ERROR = 0.11
+EXPECTED_NOISE_MODEL_RELATIVE_ERROR = TunedParameter(
+    name="wayfinding.expected_noise_model_relative_error",
+    default=0.11,
+    unit="fraction",
+    description="The relative error of the expected noise itself, as noise.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D34",
+)
 """The relative error of the expected noise itself, as noise. On M 57 the real
 subsets measured 9 to 31 percent below the prediction (validation register
 entry STK-36); half of that spread, 11 percent, is taken as the model's own
@@ -301,7 +418,19 @@ first three measure the target's own stack. ``setup_history`` measures nothing
 on the target: the share is the median of other targets of the same camera,
 optic and flat set (issue #134)."""
 
-MINIMUM_HISTORY_TARGETS = 3
+MINIMUM_HISTORY_TARGETS = TunedParameter(
+    name="wayfinding.minimum_history_targets",
+    default=3,
+    unit="targets",
+    description=(
+        "A target with no fixed-pattern measurement borrows the median share of other targets of its "
+        "setup only when at least this many have one."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D93",
+)
 """A target with no fixed-pattern measurement of its own borrows the median
 fixed-pattern share of other targets of its setup (camera, optic and flat set)
 only when at least this many other targets have one. The median of 3 is the
@@ -320,14 +449,38 @@ FIXED_PATTERN_BASIS_TEXT = {
 """Words for each basis, used in the statements that name the fixed-pattern
 noise."""
 
-MINIMUM_GAIN_FRACTION = 0.10
+MINIMUM_GAIN_FRACTION = TunedParameter(
+    name="wayfinding.minimum_gain_fraction",
+    default=0.1,
+    unit="fraction",
+    description=(
+        "The stop signal is raised when doubling the data is predicted to cut the noise by less than "
+        "this fraction."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D30",
+)
 """The stop signal is raised when doubling the data is predicted to cut the
 noise
 by less than this fraction. The ideal gain from doubling is 29 percent, and 10
 percent is about a third of that. Design estimate, register row WAY-D32."""
 
 
-MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH = 5
+MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH = TunedParameter(
+    name="wayfinding.minimum_frames_new_exposure_length",
+    default=5,
+    unit="frames",
+    description=(
+        "A suggestion never asks for fewer frames than this of an exposure length the stack does not "
+        "have yet."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D30",
+)
 """A suggestion never asks for fewer frames than this of an exposure length the
 stack does not have yet. The stacker folds a length with fewer frames into the
 nearest group instead of stacking it on its own
@@ -708,7 +861,10 @@ def identify_weighting_mode(
         if predicted_array.mean() <= 0.0:
             continue
         predicted_array = predicted_array / predicted_array.mean()
-        if float(np.max(np.abs(predicted_array - observed))) <= WEIGHT_MATCH_TOLERANCE:
+        if (
+            float(np.max(np.abs(predicted_array - observed)))
+            <= resolve_parameter(WEIGHT_MATCH_TOLERANCE).value
+        ):
             matches.append(candidate)
     if not matches:
         return WeightingModeEvidence(
@@ -1034,7 +1190,7 @@ def frames_to_cut_noise(
     *,
     new_exposure_seconds: float | None = None,
     target_noise_ratio: float = TARGET_NOISE_RATIO,
-    maximum_new_frames: int = MAXIMUM_NEW_FRAMES,
+    maximum_new_frames: int | None = None,
     fixed_pattern: StackFixedPatternNoise | None = None,
 ) -> TakeMoreResult:
     """Find how many more frames cut the noise ("take N more").
@@ -1074,6 +1230,7 @@ def frames_to_cut_noise(
         The noise after over the noise now. The default is 0.707.
     maximum_new_frames : `int`, optional
         Where the search gives up.
+        When omitted, `MAXIMUM_NEW_FRAMES` is used.
     fixed_pattern : `StackFixedPatternNoise`, optional
         The stack's fixed-pattern noise, when one was found.
 
@@ -1083,6 +1240,8 @@ def frames_to_cut_noise(
         N and the predicted ratio, or ``None`` with a reason. The confidence
         is always ``design_estimate``.
     """
+    if maximum_new_frames is None:
+        maximum_new_frames = resolve_parameter(MAXIMUM_NEW_FRAMES).value
     current = forecast_stack_noise(existing, mode)
     if current.noise is None:
         return TakeMoreResult(target_noise_ratio=target_noise_ratio, reason=current.reason)
@@ -1289,7 +1448,8 @@ def _take_more_result(
     fixed_pattern_present = fixed_pattern is not None and fixed_pattern.fixed_pattern_noise_detected
     beyond_practical_limit = needed is None or (
         held_exposure_seconds is not None
-        and needed * exposure_seconds > (PRACTICAL_TIME_FACTOR - 1.0) * held_exposure_seconds
+        and needed * exposure_seconds
+        > (resolve_parameter(PRACTICAL_TIME_FACTOR).value - 1.0) * held_exposure_seconds
     )
     if fixed_pattern_present and beyond_practical_limit and held_exposure_seconds:
         doubling_frames = max(minimum_count, round(held_exposure_seconds / exposure_seconds))
@@ -1307,18 +1467,20 @@ def _take_more_result(
                 doubling_frames=doubling_frames,
                 doubling_noise_cut=doubling_cut,
                 most_reachable_cut=1.0 - most_ratio,
-                doubling_worthwhile=doubling_cut >= MINIMUM_DOUBLING_GAIN_FRACTION,
+                doubling_worthwhile=doubling_cut >= resolve_parameter(MINIMUM_DOUBLING_GAIN_FRACTION).value,
                 reason=(
                     "A design estimate: real subsets of M 57 came out 9 to 31 percent below the prediction "
                     f"(STK-36). Reaching the target of {target_noise_ratio:.2f} of today's noise "
                     + (
                         "is out of reach"
                         if needed is None
-                        else f"needs {needed} frames, more than {PRACTICAL_TIME_FACTOR - 1.0:g} times the "
+                        else f"needs {needed} frames, more than "
+                        f"{resolve_parameter(PRACTICAL_TIME_FACTOR).value - 1.0:g} times the "
                         "stack's exposure time again"
                     )
                     + f" because of the fixed-pattern noise, {fixed_pattern.basis_text} (practical limit "
-                    f"{PRACTICAL_TIME_FACTOR:g} times the stack's exposure time, WAY-D30)."
+                    f"{resolve_parameter(PRACTICAL_TIME_FACTOR).value:g} times the stack's exposure time, "
+                    f"WAY-D30)."
                 ),
                 **fixed_pattern_fields,
             )
@@ -1393,13 +1555,13 @@ def aperture_noise_relative_error(aperture_count: int) -> float:
     """
     if aperture_count < 2:
         raise ValueError("At least 2 apertures are needed to estimate a noise error.")
-    return APERTURE_NOISE_ERROR_FACTOR / math.sqrt(aperture_count)
+    return resolve_parameter(APERTURE_NOISE_ERROR_FACTOR).value / math.sqrt(aperture_count)
 
 
 def total_variance_ratio_error(
     variance_ratio: float,
     aperture_error: float,
-    model_relative_error: float = EXPECTED_NOISE_MODEL_RELATIVE_ERROR,
+    model_relative_error: float | None = None,
 ) -> float:
     """Give the error of a measured-over-predicted variance ratio.
 
@@ -1421,6 +1583,7 @@ def total_variance_ratio_error(
     model_relative_error : `float`, optional
         The expected-noise model's own relative error, as noise. Doubled for
         the variance.
+        When omitted, `EXPECTED_NOISE_MODEL_RELATIVE_ERROR` is used.
 
     Returns
     -------
@@ -1428,6 +1591,8 @@ def total_variance_ratio_error(
         The aperture error and ``2 * model_relative_error * variance_ratio``
         added in quadrature.
     """
+    if model_relative_error is None:
+        model_relative_error = resolve_parameter(EXPECTED_NOISE_MODEL_RELATIVE_ERROR).value
     return math.hypot(aperture_error, 2.0 * model_relative_error * variance_ratio)
 
 
@@ -1538,7 +1703,9 @@ class NoiseModelError(BaseModel):
 
     model_config = _MODEL_CONFIG
 
-    relative_error: float = Field(default=EXPECTED_NOISE_MODEL_RELATIVE_ERROR, ge=0.0)
+    relative_error: float = Field(
+        default=resolve_parameter(EXPECTED_NOISE_MODEL_RELATIVE_ERROR).value, ge=0.0
+    )
     target_count: int = Field(default=0, ge=0)
     measured: bool = False
     mean_log_ratio: float | None = None
@@ -1559,7 +1726,7 @@ class NoiseModelError(BaseModel):
 
 
 def measure_noise_model_error(
-    samples: Sequence[NoiseModelErrorSample], *, minimum_targets: int = MINIMUM_MODEL_ERROR_TARGETS
+    samples: Sequence[NoiseModelErrorSample], *, minimum_targets: int | None = None
 ) -> NoiseModelError:
     """Measure the noise model's relative error from odd–even differences.
 
@@ -1585,6 +1752,7 @@ def measure_noise_model_error(
     minimum_targets : `int`, optional
         The fewest samples that may replace the stand-in
         (`MINIMUM_MODEL_ERROR_TARGETS`).
+        When omitted, `MINIMUM_MODEL_ERROR_TARGETS` is used.
 
     Returns
     -------
@@ -1593,6 +1761,8 @@ def measure_noise_model_error(
         (`EXPECTED_NOISE_MODEL_RELATIVE_ERROR`) with ``measured`` false when
         there are fewer samples than the minimum.
     """
+    if minimum_targets is None:
+        minimum_targets = resolve_parameter(MINIMUM_MODEL_ERROR_TARGETS).value
     count = len(samples)
     if count < max(minimum_targets, 2):
         return NoiseModelError(target_count=count)
@@ -1812,7 +1982,7 @@ def fit_fixed_pattern_noise(
     covariance = np.linalg.inv(weighted_design.T @ weighted_design)
     fixed_pattern = float(solution[-1])
     fixed_pattern_error = float(math.sqrt(covariance[-1, -1]))
-    detected = fixed_pattern > FIXED_PATTERN_SIGMAS * fixed_pattern_error
+    detected = fixed_pattern > resolve_parameter(FIXED_PATTERN_SIGMAS).value * fixed_pattern_error
     return FixedPatternNoiseFit(
         steps_used=len(steps),
         alpha=float(solution[0]),
@@ -1896,7 +2066,7 @@ def stop_signal(fit: FixedPatternNoiseFit, current_expected_variance: float) -> 
     if now <= 0.0 or after <= 0.0:
         return StopSignal(reason="The fit predicts a non-positive variance, so it cannot be used.")
     gain = 1.0 - math.sqrt(after / now)
-    stopped = gain < MINIMUM_GAIN_FRACTION
+    stopped = gain < resolve_parameter(MINIMUM_GAIN_FRACTION).value
     return StopSignal(
         stopped=stopped,
         predicted_gain_fraction=gain,
@@ -2110,8 +2280,8 @@ def measure_stack_fixed_pattern_noise(
         "sigmas": (variance_ratio - 1.0) / ratio_error,
         "model_error_basis": model_error.basis_text,
     }
-    if variance_ratio - 1.0 <= MODEL_AGREEMENT_SIGMAS * ratio_error:
-        if variance_ratio - 1.0 >= POSSIBLE_FIXED_PATTERN_SIGMAS * ratio_error:
+    if variance_ratio - 1.0 <= resolve_parameter(MODEL_AGREEMENT_SIGMAS).value * ratio_error:
+        if variance_ratio - 1.0 >= resolve_parameter(POSSIBLE_FIXED_PATTERN_SIGMAS).value * ratio_error:
             return StackFixedPatternNoise(
                 **common,
                 possible=True,
@@ -2122,7 +2292,8 @@ def measure_stack_fixed_pattern_noise(
                 reason=(
                     f"Possible fixed-pattern noise of {math.sqrt(difference):.3g} (stack units), not proven: "
                     f"the measured noise exceeds the predicted random noise by {common['sigmas']:.1f} "
-                    f"standard errors, below the {MODEL_AGREEMENT_SIGMAS:g} needed, counting the "
+                    f"standard errors, below the "
+                    f"{resolve_parameter(MODEL_AGREEMENT_SIGMAS).value:g} needed, counting the "
                     f"prediction's own error ({model_error.relative_error:.0%}, {model_error.basis_text})."
                 ),
             )
@@ -2130,7 +2301,8 @@ def measure_stack_fixed_pattern_noise(
             **common,
             reason=(
                 "No fixed-pattern noise: the measured noise does not exceed the predicted random noise by "
-                f"{MODEL_AGREEMENT_SIGMAS:g} standard errors, counting the prediction's own error "
+                f"{resolve_parameter(MODEL_AGREEMENT_SIGMAS).value:g} standard errors, counting the "
+                f"prediction's own error "
                 f"({difference / error:.1f} found; the error is {model_error.relative_error:.0%}, "
                 f"{model_error.basis_text})."
             ),
@@ -2235,7 +2407,7 @@ def compare_stack_noise_with_odd_even_difference(
         measured_variance_error=measured_error,
         random_variance_error=random_error,
         sigmas=log_ratio / log_error,
-        significant=log_ratio > MODEL_AGREEMENT_SIGMAS * log_error,
+        significant=log_ratio > resolve_parameter(MODEL_AGREEMENT_SIGMAS).value * log_error,
     )
 
 
@@ -2303,7 +2475,7 @@ def measure_stack_fixed_pattern_noise_from_odd_even_difference(
         "basis": FIXED_PATTERN_BASIS_ODD_EVEN_DIFFERENCE,
         "sigmas": sigmas,
     }
-    if not test.significant and sigmas >= POSSIBLE_FIXED_PATTERN_SIGMAS:
+    if not test.significant and sigmas >= resolve_parameter(POSSIBLE_FIXED_PATTERN_SIGMAS).value:
         return StackFixedPatternNoise(
             **common,
             possible=True,
@@ -2314,7 +2486,8 @@ def measure_stack_fixed_pattern_noise_from_odd_even_difference(
             reason=(
                 f"Possible fixed-pattern noise of {math.sqrt(difference):.3g} (stack units), not proven: "
                 f"the full stack's noise exceeds the random noise measured from the odd and even half "
-                f"stacks by {sigmas:.1f} standard errors, below the {MODEL_AGREEMENT_SIGMAS:g} needed."
+                f"stacks by {sigmas:.1f} standard errors, below the "
+                f"{resolve_parameter(MODEL_AGREEMENT_SIGMAS).value:g} needed."
             ),
         )
     if not test.significant:
@@ -2322,7 +2495,8 @@ def measure_stack_fixed_pattern_noise_from_odd_even_difference(
             **common,
             reason=(
                 "No fixed-pattern noise: the full stack's noise does not exceed the random noise "
-                f"measured from the odd and even half stacks by {MODEL_AGREEMENT_SIGMAS:g} "
+                f"measured from the odd and even half stacks by "
+                f"{resolve_parameter(MODEL_AGREEMENT_SIGMAS).value:g} "
                 f"standard errors ({sigmas:.1f} found)."
             ),
         )
@@ -3050,7 +3224,7 @@ def _identify_group_weighting(
     if predicted.mean() <= 0.0:
         return WeightingModeEvidence(mode=WeightingMode.UNKNOWN, reason="The predicted weights are all 0.")
     predicted = predicted / predicted.mean()
-    if float(np.max(np.abs(predicted - observed))) <= WEIGHT_MATCH_TOLERANCE:
+    if float(np.max(np.abs(predicted - observed))) <= resolve_parameter(WEIGHT_MATCH_TOLERANCE).value:
         return WeightingModeEvidence(
             mode=WeightingMode.GROUP, reason="The recorded weights match the exposure-group weights."
         )
@@ -3360,7 +3534,7 @@ def frames_to_cut_noise_in_groups(
     electrons_per_adu: float | None = None,
     fixed_pattern: StackFixedPatternNoise | None = None,
     target_noise_ratio: float = TARGET_NOISE_RATIO,
-    maximum_new_frames: int = MAXIMUM_NEW_FRAMES,
+    maximum_new_frames: int | None = None,
 ) -> TakeMoreResult:
     """Find how many more frames cut the noise of a group stack.
 
@@ -3388,6 +3562,7 @@ def frames_to_cut_noise_in_groups(
         The noise after over the noise now. The default is 0.707.
     maximum_new_frames : `int`, optional
         Where the search gives up.
+        When omitted, `MAXIMUM_NEW_FRAMES` is used.
 
     Returns
     -------
@@ -3397,6 +3572,8 @@ def frames_to_cut_noise_in_groups(
         missing fact). The result also says whether the frames start a new
         group and whether the heaviest group changes.
     """
+    if maximum_new_frames is None:
+        maximum_new_frames = resolve_parameter(MAXIMUM_NEW_FRAMES).value
     current = forecast_group_noise(existing_groups)
     if current.noise is None:
         return TakeMoreResult(target_noise_ratio=target_noise_ratio, reason=current.reason)
@@ -3414,7 +3591,7 @@ def frames_to_cut_noise_in_groups(
     new_length = fold_exposure_lengths([exposure])[0]
     starts_new_group = new_length not in existing_lengths
     supply = _NewFrameSupply(template, new_exposure_seconds)
-    minimum_count = MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH if starts_new_group else 1
+    minimum_count = resolve_parameter(MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH).value if starts_new_group else 1
 
     def plan_for(count: int) -> GroupPlan:
         """Build the later stack after adding `count` frames.
@@ -3478,7 +3655,8 @@ def frames_to_cut_noise_in_groups(
     if starts_new_group:
         notes.append(
             f"The new {exposure:g} s frames make a new exposure group; at least "
-            f"{MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH} frames are asked for so the stacker keeps it."
+            f"{resolve_parameter(MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH).value} frames are asked for so the "
+            f"stacker keeps it."
         )
     if answer_plan.heaviest_group_changed:
         notes.append(

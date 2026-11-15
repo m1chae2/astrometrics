@@ -43,6 +43,7 @@ import sys
 from astrometricslib import Astrometrics, configure_logging
 from astrometricslib._internal.drivers.catalog_access import StarPosition
 from astrometricslib._internal.drivers.local_database import backup_catalog_database
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.pipelines.shared.catalog_star_identity import (
     CATALOG_MATCH_RADIUS_ARCSEC,
     merge_duplicate_into_survivor,
@@ -122,7 +123,7 @@ def cluster_position_only_stars(stars: list[StarPosition]) -> list[list[StarPosi
     # Chord length on the unit sphere corresponding to the match radius,
     # for a plain Euclidean cKDTree query -- exact for this small an
     # angle, and avoids a slower per-pair great-circle computation.
-    chord_radius = 2 * np.sin(np.radians(CATALOG_MATCH_RADIUS_ARCSEC / 3600) / 2)
+    chord_radius = 2 * np.sin(np.radians(resolve(CATALOG_MATCH_RADIUS_ARCSEC).value / 3600) / 2)
 
     tree = cKDTree(xyz)
     pairs = np.array(list(tree.query_pairs(chord_radius)))

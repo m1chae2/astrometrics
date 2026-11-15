@@ -35,6 +35,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from astrometricslib.parameters import resolve_parameter
 from wayfindinglib.analytics.performance_envelope import (
     BASELINE_SPREAD_MULTIPLIER,
     MAD_TO_SIGMA,
@@ -79,8 +80,8 @@ class MetricSpec:
 
 
 METRIC_SPECS = {
-    "star_width": MetricSpec(True, MINIMUM_FRAMES_PER_NIGHT, 5),
-    "star_roundness": MetricSpec(False, MINIMUM_FRAMES_PER_NIGHT, 5),
+    "star_width": MetricSpec(True, resolve_parameter(MINIMUM_FRAMES_PER_NIGHT).value, 5),
+    "star_roundness": MetricSpec(False, resolve_parameter(MINIMUM_FRAMES_PER_NIGHT).value, 5),
     "guiding_error": MetricSpec(True, 3, 1),
 }
 """The metrics compared. A night's frames number in the tens, so its typical
@@ -163,7 +164,7 @@ def _compare_metric(
             if d == dimension
             for value in values
         ]
-        if len(residuals) >= MINIMUM_NIGHTS_PER_BIN:
+        if len(residuals) >= resolve_parameter(MINIMUM_NIGHTS_PER_BIN).value:
             spreads[dimension] = MAD_TO_SIGMA * statistics.median(abs(value) for value in residuals)
         else:
             spreads[dimension] = None
@@ -176,7 +177,7 @@ def _compare_metric(
         result = SkyBinResult(
             dimension=dimension, label=label, samples=sample_count, nights=len(values), spread=spread
         )
-        if len(values) >= MINIMUM_NIGHTS_PER_BIN and spread is not None:
+        if len(values) >= resolve_parameter(MINIMUM_NIGHTS_PER_BIN).value and spread is not None:
             median_relative = statistics.median(values)
             worse_by = (median_relative - 1.0) if spec.higher_is_worse else (1.0 - median_relative)
             error = _MEDIAN_ERROR_FACTOR * spread / math.sqrt(len(values))
@@ -187,7 +188,7 @@ def _compare_metric(
             result.is_poor = (
                 worse_by >= blur_tolerance_fraction
                 and result.z_score is not None
-                and result.z_score >= BASELINE_SPREAD_MULTIPLIER
+                and result.z_score >= resolve_parameter(BASELINE_SPREAD_MULTIPLIER).value
             )
         results.append(result)
     return SkyMetricResult(

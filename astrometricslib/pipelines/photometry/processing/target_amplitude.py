@@ -30,6 +30,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
+
 __all__ = [
     "MAXIMUM_TARGET_DISTANCE_ARCSEC",
     "MINIMUM_FILLED_BIN_FRACTION",
@@ -44,17 +51,46 @@ __all__ = [
 # a sine and a typical eclipse shape without leaving the bins empty; a sharp
 # eclipse narrower than a tenth of the period is smoothed away, and the
 # amplitude then reads too small (PHO-19).
-PHASE_BIN_COUNT = 10
+PHASE_BIN_COUNT = TunedParameter(
+    name="photometry.phase_bin_count",
+    default=10,
+    unit="bins",
+    description="How many equal bins of phase the folded curve is cut into.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    register_entry="PHO-19",
+    pending_conversion=True,
+)
 
 # A bin needs this many points for its median to be steadier than one point.
 # With three, the median is the middle point and one outlier cannot move it.
-MINIMUM_POINTS_PER_BIN = 3
+MINIMUM_POINTS_PER_BIN = TunedParameter(
+    name="photometry.minimum_points_per_bin",
+    default=3,
+    unit="points",
+    description="Fewest points a phase bin needs for its median to count.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    register_entry="PHO-19",
+    pending_conversion=True,
+)
 
 # The share of the phase bins that must hold enough points for the amplitude
 # to count as covered. Eight of ten leaves room for at most one empty bin
 # beside the one that the minimum or maximum might be hiding in. Chosen by
 # judgment; not tuned (PHO-D28 in the validation register).
-MINIMUM_FILLED_BIN_FRACTION = 0.8
+MINIMUM_FILLED_BIN_FRACTION = TunedParameter(
+    name="photometry.minimum_filled_bin_fraction",
+    default=0.8,
+    unit="fraction",
+    description=(
+        "Share of the phase bins that must hold enough points for the amplitude to count as covered."
+    ),
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    register_entry="PHO-19",
+    pending_conversion=True,
+)
 
 # The target's own star must lie within this distance of the target's catalog
 # position, in arcseconds. A target star is centered in the frame and the
@@ -63,7 +99,16 @@ MINIMUM_FILLED_BIN_FRACTION = 0.8
 # used, not the pointing, so the allowance only covers proper motion and the
 # measured star position (about 2 pixels = 4 arcsec). 30 arcsec is generous
 # and still rejects the neighboring star of a crowded field.
-MAXIMUM_TARGET_DISTANCE_ARCSEC = 30.0
+MAXIMUM_TARGET_DISTANCE_ARCSEC = TunedParameter(
+    name="photometry.maximum_target_distance_arcsec",
+    default=30.0,
+    unit="arcsec",
+    description="Farthest the target's own star may lie from the target's catalog position.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    register_entry="PHO-19",
+    pending_conversion=True,
+)
 
 
 @dataclass(frozen=True)
@@ -137,39 +182,42 @@ def folded_amplitude(time_days: np.ndarray, flux: np.ndarray, period_days: float
         The amplitude, or the reason there is none (no period, too few
         points, or too few bins with enough points).
     """
+    minimum_points_per_bin = resolve(MINIMUM_POINTS_PER_BIN).value
+    minimum_filled_bin_fraction = resolve(MINIMUM_FILLED_BIN_FRACTION).value
+    phase_bin_count = resolve(PHASE_BIN_COUNT).value
     times = np.asarray(time_days, dtype=float)
     magnitudes = magnitudes_from_flux(np.asarray(flux, dtype=float))
     usable = np.isfinite(times) & np.isfinite(magnitudes)
     point_count = int(usable.sum())
     if not math.isfinite(period_days) or period_days <= 0:
         return FoldedAmplitude(None, None, 0.0, point_count, "there is no period to fold on")
-    needed = math.ceil(MINIMUM_FILLED_BIN_FRACTION * PHASE_BIN_COUNT) * MINIMUM_POINTS_PER_BIN
+    needed = math.ceil(minimum_filled_bin_fraction * phase_bin_count) * minimum_points_per_bin
     if point_count < needed:
         return FoldedAmplitude(
             None, None, 0.0, point_count, f"only {point_count} usable points, and {needed} are needed"
         )
     phase = np.mod(times[usable] / period_days, 1.0)
-    bin_index = np.minimum((phase * PHASE_BIN_COUNT).astype(int), PHASE_BIN_COUNT - 1)
+    bin_index = np.minimum((phase * phase_bin_count).astype(int), phase_bin_count - 1)
     medians: list[float] = []
     errors: list[float] = []
-    for index in range(PHASE_BIN_COUNT):
+    for index in range(phase_bin_count):
         values = magnitudes[usable][bin_index == index]
-        if values.size < MINIMUM_POINTS_PER_BIN:
+        if values.size < minimum_points_per_bin:
             continue
         median = float(np.median(values))
         spread = 1.4826 * float(np.median(np.abs(values - median)))
         medians.append(median)
         # The standard error of a median is 1.2533 times that of a mean.
         errors.append(1.2533 * spread / math.sqrt(values.size))
-    filled_fraction = len(medians) / PHASE_BIN_COUNT
-    if filled_fraction < MINIMUM_FILLED_BIN_FRACTION:
+    filled_fraction = len(medians) / phase_bin_count
+    if filled_fraction < minimum_filled_bin_fraction:
         return FoldedAmplitude(
             None,
             None,
             filled_fraction,
             point_count,
-            f"the light curve fills {len(medians)} of {PHASE_BIN_COUNT} phase bins and "
-            f"{math.ceil(MINIMUM_FILLED_BIN_FRACTION * PHASE_BIN_COUNT)} are needed",
+            f"the light curve fills {len(medians)} of {phase_bin_count} phase bins and "
+            f"{math.ceil(minimum_filled_bin_fraction * phase_bin_count)} are needed",
         )
     faintest, brightest = int(np.argmax(medians)), int(np.argmin(medians))
     amplitude = medians[faintest] - medians[brightest]

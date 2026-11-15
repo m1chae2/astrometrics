@@ -48,6 +48,7 @@ from typing import Any
 from astrometricslib import Astrometrics, configure_logging
 from astrometricslib._internal.drivers.local_database import backup_catalog_database
 from astrometricslib.foundation.errors import ExternalServiceError
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared.simbad_object_types import quote_adql, separation_arcsec
 from astrometricslib.pipelines.shared.target_position import (
@@ -265,7 +266,7 @@ def decide_outcome(target: Target, rows: dict[str, list[Any]]) -> tuple[Outcome,
                 return float("inf")
 
         chosen = min(candidates, key=separation)
-        if separation(chosen) > POSITION_TOLERANCE_FLOOR_ARCMIN * 60.0:
+        if separation(chosen) > resolve(POSITION_TOLERANCE_FLOOR_ARCMIN).value * 60.0:
             return Outcome.POSITION_MISMATCH, ""
     value = chosen["otype"]
     if getattr(value, "mask", False) or not str(value).strip():

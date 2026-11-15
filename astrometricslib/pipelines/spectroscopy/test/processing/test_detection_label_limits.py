@@ -22,22 +22,22 @@ def test_the_record_repeats_the_detector_constants() -> None:
     """Every stored limit equals the constant the detector uses."""
     limits = build_detection_label_limits()
     features = limits.absorption_features
-    assert features.detected_p_value == spectral_feature_detector.DETECTED_P_VALUE
-    assert features.possible_p_value == spectral_feature_detector.POSSIBLE_P_VALUE
-    assert features.inconclusive_p_value == spectral_feature_detector.INCONCLUSIVE_P_VALUE
-    assert features.inconclusive_minimum_depth == spectral_feature_detector.INCONCLUSIVE_MINIMUM_DEPTH
-    assert features.minimum_reported_depth == spectral_feature_detector.MINIMUM_REPORTED_DEPTH
+    assert features.detected_p_value == spectral_feature_detector.DETECTED_P_VALUE.default
+    assert features.possible_p_value == spectral_feature_detector.POSSIBLE_P_VALUE.default
+    assert features.inconclusive_p_value == spectral_feature_detector.INCONCLUSIVE_P_VALUE.default
+    assert features.inconclusive_minimum_depth == spectral_feature_detector.INCONCLUSIVE_MINIMUM_DEPTH.default
+    assert features.minimum_reported_depth == spectral_feature_detector.MINIMUM_REPORTED_DEPTH.default
     assert (
         features.maximum_depth_uncertainty_for_label
-        == spectral_feature_detector.MAXIMUM_UNCERTAINTY_FOR_A_VERDICT
+        == spectral_feature_detector.MAXIMUM_UNCERTAINTY_FOR_A_VERDICT.default
     )
     lines = limits.emission_lines
-    assert lines.detected_significance == emission_line_detector.DETECTED_SIGNIFICANCE
-    assert lines.unclear_significance == emission_line_detector.UNCLEAR_SIGNIFICANCE
-    assert lines.minimum_covered_fraction == emission_line_detector.MINIMUM_COVERED_FRACTION
+    assert lines.detected_significance == emission_line_detector.DETECTED_SIGNIFICANCE.default
+    assert lines.unclear_significance == emission_line_detector.UNCLEAR_SIGNIFICANCE.default
+    assert lines.minimum_covered_fraction == emission_line_detector.MINIMUM_COVERED_FRACTION.default
     assert (
         lines.minimum_detected_for_emission_source
-        == emission_line_detector.MINIMUM_DETECTED_FOR_EMISSION_SOURCE
+        == emission_line_detector.MINIMUM_DETECTED_FOR_EMISSION_SOURCE.default
     )
 
 

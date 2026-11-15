@@ -34,6 +34,7 @@ import numpy as np
 
 from astrometricslib import Astrometrics
 from astrometricslib.foundation.errors import ProcessingError
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
 from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline, _frame_airmass
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction import (
@@ -144,13 +145,13 @@ def run_derivation(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--minimum-wavelength",
         type=float,
-        default=DEFAULT_RESPONSE_WAVELENGTH_RANGE_ANGSTROM[0],
+        default=resolve(DEFAULT_RESPONSE_WAVELENGTH_RANGE_ANGSTROM).value[0],
         help="Shortest wavelength to fit, in Angstroms.",
     )
     parser.add_argument(
         "--maximum-wavelength",
         type=float,
-        default=DEFAULT_RESPONSE_WAVELENGTH_RANGE_ANGSTROM[1],
+        default=resolve(DEFAULT_RESPONSE_WAVELENGTH_RANGE_ANGSTROM).value[1],
         help=(
             "Longest wavelength to fit, in Angstroms. The default stops at 8000 A because second-order "
             "light and low sensitivity spoil the spectrum beyond it; pass the camera's limit "

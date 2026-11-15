@@ -31,11 +31,29 @@ from scipy import ndimage
 
 from astrometricslib._internal.drivers.fits_access import open_primary_hdu
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.quality.saturation import resolve_saturation_threshold
 
 logger = logging.getLogger(__name__)
 
-DETECTION_SIGMA = 40.0
+DETECTION_SIGMA = TunedParameter(
+    name="shared.detection_sigma",
+    default=40.0,
+    unit="× noise",
+    description="Threshold above the noise for a star to be detected in a raw frame check.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D38",
+    pending_conversion=True,
+)
 """A bright region must stand this many noise units above the background.
 
 The noise is the spread of the smoothed, background-subtracted frame. At
@@ -46,7 +64,17 @@ noise units) let the halos of bright stars merge into regions hundreds of
 pixels long and flagged clean frames as trailed.
 """
 
-BACKGROUND_BLOCK_PIXELS = 32
+BACKGROUND_BLOCK_PIXELS = TunedParameter(
+    name="shared.background_block_pixels",
+    default=32,
+    unit="pixels",
+    description="Side of the block used to measure the background of a raw frame.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D38",
+    pending_conversion=True,
+)
 """Side of the square blocks whose medians estimate the sky background.
 
 A block holds a thousand pixels, so a star covering a tenth of it does not
@@ -58,20 +86,58 @@ sliding median filter plus resampling, with the same flags on the
 NOISE_SAMPLE_STEP = 3
 """Every this-many pixels is used to estimate the noise, for speed."""
 
-MAXIMUM_STARS_MEASURED = 150
+MAXIMUM_STARS_MEASURED = TunedParameter(
+    name="shared.maximum_stars_measured",
+    default=150,
+    unit="stars",
+    description="Most stars measured in a raw frame, taking the brightest.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D38",
+    pending_conversion=True,
+)
 """Brightest stars used for width, roundness and frame-to-frame matching."""
 
-CENTROID_HALF_BOX_PIXELS = 7
+CENTROID_HALF_BOX_PIXELS = TunedParameter(
+    name="shared.centroid_half_box_pixels",
+    default=7,
+    unit="pixels",
+    description="Half the side of the box used to find a star centroid.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D38",
+    pending_conversion=True,
+)
 """Half-width of the box used to measure one star's centre and size."""
 
-LOW_STAR_FRACTION = 0.5
+LOW_STAR_FRACTION = TunedParameter(
+    name="shared.low_star_fraction",
+    default=0.5,
+    unit="× median",
+    description="Fraction of the median star count below which a frame has too few stars.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    register_entry="STK-34",
+    pending_conversion=True,
+)
 """A frame with fewer stars than this fraction of the batch median is flagged.
 
 On 2026-10-02 a typical frame held 3,200 to 3,550 bright regions. The frame
 exposed during a two-minute drift held 783, under a quarter of that.
 """
 
-HIGH_STAR_MULTIPLE = 1.4
+HIGH_STAR_MULTIPLE = TunedParameter(
+    name="shared.high_star_multiple",
+    default=1.4,
+    unit="× median",
+    description="Multiple of the median star count above which a frame has too many stars.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    register_entry="STK-34",
+    pending_conversion=True,
+)
 """A frame with more stars than this multiple of the batch median is flagged.
 
 This is a designed value, not one fitted to data. It mirrors the low-count
@@ -85,17 +151,46 @@ M 13 lights the one frame with a faint trail held 934 regions against a
 median of 624 (1.50 times), and no other frame came near the limit.
 """
 
-TRAIL_MULTIPLE = 6.0
+TRAIL_MULTIPLE = TunedParameter(
+    name="shared.trail_multiple",
+    default=6.0,
+    unit="× median",
+    description="Multiple of the median trail length above which a frame is trailed.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D40",
+    pending_conversion=True,
+)
 """A longest streak above this multiple of the batch median is a trail."""
 
-TRAIL_FLOOR_PIXELS = 60
+TRAIL_FLOOR_PIXELS = TunedParameter(
+    name="shared.trail_floor_pixels",
+    default=60,
+    unit="pixels",
+    description="Shortest trail length that can flag a frame as trailed.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D40",
+    pending_conversion=True,
+)
 """The shortest streak that can count as a trail, whatever the batch median.
 
 Clean frames of that session had a longest region of 29 to 44 pixels (the
 largest bright stars). The trailed frame had one of 396.
 """
 
-SOFT_FWHM_MULTIPLE = 1.25
+SOFT_FWHM_MULTIPLE = TunedParameter(
+    name="shared.soft_fwhm_multiple",
+    default=1.25,
+    unit="× median FWHM",
+    description="Multiple of the median star width above which a frame is soft.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D39",
+)
 """A frame whose star width exceeds this multiple of the median is soft.
 
 Frames with a 10% wider median star width on 2026-10-02 looked acceptable.
@@ -103,7 +198,16 @@ The clearly soft frame (frame 092, 5.4 pixels against 3.75) was 1.43 times
 the median.
 """
 
-ROUND_STAR_RATIO = 0.88
+ROUND_STAR_RATIO = TunedParameter(
+    name="shared.round_star_ratio",
+    default=0.88,
+    unit="ratio",
+    description="Star roundness below which a frame's stars count as elongated.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D39",
+)
 """A frame whose median star roundness falls below this is elongated.
 
 Roundness is the narrow width divided by the wide width, 1.0 for a circle.
@@ -111,7 +215,16 @@ Clean frames measured 0.93 to 0.99. A frame guided badly through a dither
 measured 0.86.
 """
 
-SHIFT_FRACTION_OF_WIDTH = 0.015
+SHIFT_FRACTION_OF_WIDTH = TunedParameter(
+    name="shared.shift_fraction_of_width",
+    default=0.015,
+    unit="fraction",
+    description="Frame-to-frame shift, as a fraction of the frame width, above which a frame has jumped.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D39",
+)
 """A move larger than this share of the frame width is flagged as a jump.
 
 A deliberate dither of a few guide pixels moves the field 5 to 8 pixels
@@ -119,7 +232,17 @@ A deliberate dither of a few guide pixels moves the field 5 to 8 pixels
 pixels (12%).
 """
 
-TRAIL_MIN_DIAGONAL_FRACTION = 0.25
+TRAIL_MIN_DIAGONAL_FRACTION = TunedParameter(
+    name="shared.trail_min_diagonal_fraction",
+    default=0.25,
+    unit="× diagonal",
+    description="Shortest trail, as a fraction of the frame diagonal, that is reported.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-34",
+    pending_conversion=True,
+)
 """A straight trail must be at least this fraction of the frame diagonal.
 
 Configurable per call (``trail_min_diagonal_fraction``). A quarter of the
@@ -130,7 +253,17 @@ on the spectroscopy frame, where the spectrum itself is a straight streak).
 The trailed light gave 3,220 pixels.
 """
 
-TRAIL_BLOCK_PIXELS = 4
+TRAIL_BLOCK_PIXELS = TunedParameter(
+    name="shared.trail_block_pixels",
+    default=4,
+    unit="pixels",
+    description="Side of the block used when searching a frame for star trails.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-34",
+    pending_conversion=True,
+)
 """Side of the square blocks averaged before looking for straight trails.
 
 A trail about 4 pixels wide is about one block wide after averaging, so its
@@ -138,7 +271,17 @@ signal-to-noise ratio rises by about the block side (4 times) while the frame
 shrinks 16-fold, which also makes the line search fast.
 """
 
-TRAIL_THRESHOLD_SIGMA = 3.0
+TRAIL_THRESHOLD_SIGMA = TunedParameter(
+    name="shared.trail_threshold_sigma",
+    default=3.0,
+    unit="× noise",
+    description="Block brightness above the noise that counts as part of a trail.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-34",
+    pending_conversion=True,
+)
 """A block counts as bright when it is this many block-noise units high.
 
 The block noise is the robust spread of the block averages. On the M 13
@@ -148,7 +291,17 @@ star detection, and block averaging raises its signal-to-noise further),
 while pure noise passes it in 0.13% of blocks.
 """
 
-TRAIL_STAR_SIGMA = 60.0
+TRAIL_STAR_SIGMA = TunedParameter(
+    name="shared.trail_star_sigma",
+    default=60.0,
+    unit="× noise",
+    description="Peak brightness above the noise that counts as a star and is masked from the trail search.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-34",
+    pending_conversion=True,
+)
 """Blocks near smoothed values above this many noise units are masked as stars.
 
 The cut-off is above the faint trail on purpose. On the M 13 light with the
@@ -158,23 +311,63 @@ about 95. A lower cut-off (for example the 8 noise units that first came to
 mind) masks the trail itself and hides it from the line search.
 """
 
-TRAIL_STAR_MARGIN_BLOCKS = 2
+TRAIL_STAR_MARGIN_BLOCKS = TunedParameter(
+    name="shared.trail_star_margin_blocks",
+    default=2,
+    unit="blocks",
+    description="Margin, in blocks, masked around each star in the trail search.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D40",
+    pending_conversion=True,
+)
 """Blocks added around each masked star, to cover its halo (8 pixels)."""
 
 TRAIL_ANGLE_STEP_DEGREES = 0.5
 """Spacing of the line angles tried by the line search."""
 
-TRAIL_STRIP_HALF_WIDTH_BLOCKS = 1.5
+TRAIL_STRIP_HALF_WIDTH_BLOCKS = TunedParameter(
+    name="shared.trail_strip_half_width_blocks",
+    default=1.5,
+    unit="blocks",
+    description="Half the width of the strip that must contain a trail.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D40",
+    pending_conversion=True,
+)
 """A bright block lies on a candidate line when it is this close to it."""
 
-TRAIL_MAXIMUM_GAP_BLOCKS = 4
+TRAIL_MAXIMUM_GAP_BLOCKS = TunedParameter(
+    name="shared.trail_maximum_gap_blocks",
+    default=4,
+    unit="blocks",
+    description="Largest gap along a trail that still counts as one trail.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D40",
+    pending_conversion=True,
+)
 """Longest stretch of a trail that may be missing (16 pixels).
 
 Gaps appear where the trail dips below the threshold or passes behind a
 masked star. A longer gap ends the trail.
 """
 
-TRAIL_MINIMUM_HIT_FRACTION = 0.5
+TRAIL_MINIMUM_HIT_FRACTION = TunedParameter(
+    name="shared.trail_minimum_hit_fraction",
+    default=0.5,
+    unit="fraction",
+    description="Share of the trail length that must be bright blocks.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D40",
+    pending_conversion=True,
+)
 """At least this share of the blocks along a trail must be bright.
 
 The rest may lie under masked stars. This stops a line from being claimed
@@ -184,17 +377,46 @@ through a dense star field that happens to be masked end to end.
 TRAIL_CANDIDATE_LINES = 5
 """How many of the strongest lines in the line search are checked in full."""
 
-TRAIL_MAXIMUM_BRIGHT_FRACTION = 0.2
+TRAIL_MAXIMUM_BRIGHT_FRACTION = TunedParameter(
+    name="shared.trail_maximum_bright_fraction",
+    default=0.2,
+    unit="fraction",
+    description="Largest share of bright blocks for which a trail search is still meaningful.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D40",
+    pending_conversion=True,
+)
 """If more of the blocks than this are bright, the line search is skipped.
 
 A frame that bright (a bad flat field, thick cloud or a light leak) has no
 trail to find, and its many bright blocks would only slow the search.
 """
 
-MINIMUM_MATCH_VOTES = 5
+MINIMUM_MATCH_VOTES = TunedParameter(
+    name="shared.minimum_match_votes",
+    default=5,
+    unit="stars",
+    description="Fewest matching star pairs needed to accept a frame-to-frame shift.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D39",
+)
 """Matching star pairs needed before a frame-to-frame shift is trusted."""
 
-_SHIFT_BIN_PIXELS = 4
+_SHIFT_BIN_PIXELS = TunedParameter(
+    name="shared.shift_bin_pixels",
+    default=4,
+    unit="pixels",
+    description="Bin size of the offset histogram used to match star patterns.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D39",
+    pending_conversion=True,
+)
 """Bin size of the offset histogram used to match star patterns."""
 
 
@@ -212,7 +434,7 @@ def _block_background(image: np.ndarray) -> np.ndarray:
         An array the shape of `image`, constant inside each block. Edge
         pixels beyond the last whole block take the nearest block's value.
     """
-    block = BACKGROUND_BLOCK_PIXELS
+    block = resolve(BACKGROUND_BLOCK_PIXELS).value
     rows, columns = image.shape[0] // block, image.shape[1] // block
     blocks = image[: rows * block, : columns * block].reshape(rows, block, columns, block)
     medians = np.median(blocks.swapaxes(1, 2).reshape(rows, columns, -1), axis=2)
@@ -246,7 +468,7 @@ def _bright_block_map(
     Both maps are `None` together when the frame is too empty or too bright
     for a line search to mean anything.
     """
-    block = TRAIL_BLOCK_PIXELS
+    block = resolve(TRAIL_BLOCK_PIXELS).value
     rows, columns = residual.shape[0] // block, residual.shape[1] // block
     if rows < 8 or columns < 8:
         return None
@@ -256,10 +478,12 @@ def _bright_block_map(
     block_noise = 1.4826 * np.median(np.abs(average - np.median(average)))
     if not block_noise > 0:
         return None
-    margin = 2 * TRAIL_STAR_MARGIN_BLOCKS + 1
-    star = ndimage.binary_dilation(peak > TRAIL_STAR_SIGMA * noise, structure=np.ones((margin, margin)))
-    bright = (average > TRAIL_THRESHOLD_SIGMA * block_noise) & ~star
-    if bright.mean() > TRAIL_MAXIMUM_BRIGHT_FRACTION or bright.sum() < 2:
+    margin = 2 * resolve(TRAIL_STAR_MARGIN_BLOCKS).value + 1
+    star = ndimage.binary_dilation(
+        peak > resolve(TRAIL_STAR_SIGMA).value * noise, structure=np.ones((margin, margin))
+    )
+    bright = (average > resolve(TRAIL_THRESHOLD_SIGMA).value * block_noise) & ~star
+    if bright.mean() > resolve(TRAIL_MAXIMUM_BRIGHT_FRACTION).value or bright.sum() < 2:
         return None
     return bright, star
 
@@ -333,7 +557,7 @@ def _trail_along_line(
         in [0, 180). `None` if the line is not a trail.
     """
     normal = np.array([np.cos(theta), np.sin(theta)])
-    near = bright_xy[np.abs(bright_xy @ normal - rho) <= 2 * TRAIL_STRIP_HALF_WIDTH_BLOCKS]
+    near = bright_xy[np.abs(bright_xy @ normal - rho) <= 2 * resolve(TRAIL_STRIP_HALF_WIDTH_BLOCKS).value]
     if len(near) < 10:
         return None
     centre = near.mean(axis=0)
@@ -355,7 +579,7 @@ def _trail_along_line(
             `TRAIL_STRIP_HALF_WIDTH_BLOCKS` of the line.
         """
         offsets = (points - centre) @ normal
-        inside = np.abs(offsets) <= TRAIL_STRIP_HALF_WIDTH_BLOCKS
+        inside = np.abs(offsets) <= resolve(TRAIL_STRIP_HALF_WIDTH_BLOCKS).value
         return (points[inside] - centre) @ direction
 
     bright_t, star_t = positions(bright_xy), positions(star_xy)
@@ -371,14 +595,14 @@ def _trail_along_line(
         covered[np.floor(star_t).astype(int) - start] = True
 
     steps = np.flatnonzero(covered)
-    breaks = np.flatnonzero(np.diff(steps) > TRAIL_MAXIMUM_GAP_BLOCKS + 1) + 1
+    breaks = np.flatnonzero(np.diff(steps) > resolve(TRAIL_MAXIMUM_GAP_BLOCKS).value + 1) + 1
     best_length = 0
     for chain in np.split(steps, breaks):
         hits = chain[hit[chain]]
         if len(hits) == 0:
             continue
         length = int(hits[-1] - hits[0]) + 1
-        if len(hits) >= TRAIL_MINIMUM_HIT_FRACTION * length and length > best_length:
+        if len(hits) >= resolve(TRAIL_MINIMUM_HIT_FRACTION).value * length and length > best_length:
             best_length = length
     if best_length == 0:
         return None
@@ -436,14 +660,14 @@ def _detect_straight_trail(
             best = trail
     if best is None:
         return None
-    length_px = best[0] * TRAIL_BLOCK_PIXELS
+    length_px = best[0] * resolve(TRAIL_BLOCK_PIXELS).value
     if length_px < minimum_fraction * np.hypot(*residual.shape):
         return None
     return round(length_px), best[1]
 
 
 def detect_stars(
-    image: np.ndarray, trail_min_diagonal_fraction: float = TRAIL_MIN_DIAGONAL_FRACTION
+    image: np.ndarray, trail_min_diagonal_fraction: float | None = None
 ) -> tuple[np.ndarray, int, int, tuple[int, float] | None]:
     """Find the bright stars, and any long straight trail, in one image.
 
@@ -453,7 +677,7 @@ def detect_stars(
         The 2-D pixel array.
     trail_min_diagonal_fraction : `float`, optional
         The shortest straight trail that counts, as a fraction of the frame
-        diagonal. See `TRAIL_MIN_DIAGONAL_FRACTION`.
+        diagonal. Defaults to `TRAIL_MIN_DIAGONAL_FRACTION`.
 
     Returns
     -------
@@ -469,6 +693,8 @@ def detect_stars(
         ``(length_px, angle_degrees)`` of the longest faint straight trail
         (see `_detect_straight_trail`), or `None` if there is none.
     """
+    if trail_min_diagonal_fraction is None:
+        trail_min_diagonal_fraction = resolve(TRAIL_MIN_DIAGONAL_FRACTION).value
     image = image.astype(np.float32, copy=False)
     background = _block_background(image)
     residual = image - background
@@ -476,20 +702,22 @@ def detect_stars(
     sample = smooth[::NOISE_SAMPLE_STEP, ::NOISE_SAMPLE_STEP]
     noise = 1.4826 * np.median(np.abs(sample - np.median(sample)))
 
-    labels, blob_count = ndimage.label(smooth > DETECTION_SIGMA * noise)
+    labels, blob_count = ndimage.label(smooth > resolve(DETECTION_SIGMA).value * noise)
     extents = [
         max(box[0].stop - box[0].start, box[1].stop - box[1].start) for box in ndimage.find_objects(labels)
     ]
     longest_blob = int(max(extents)) if extents else 0
 
-    is_peak = (smooth == ndimage.maximum_filter(smooth, 15)) & (smooth > DETECTION_SIGMA * noise)
+    is_peak = (smooth == ndimage.maximum_filter(smooth, 15)) & (
+        smooth > resolve(DETECTION_SIGMA).value * noise
+    )
     ys, xs = np.nonzero(is_peak)
-    margin = CENTROID_HALF_BOX_PIXELS + 1
+    margin = resolve(CENTROID_HALF_BOX_PIXELS).value + 1
     inside = (xs > margin) & (xs < image.shape[1] - margin) & (ys > margin) & (ys < image.shape[0] - margin)
     ys, xs = ys[inside], xs[inside]
-    brightest = np.argsort(smooth[ys, xs])[::-1][:MAXIMUM_STARS_MEASURED]
+    brightest = np.argsort(smooth[ys, xs])[::-1][: resolve(MAXIMUM_STARS_MEASURED).value]
 
-    half = CENTROID_HALF_BOX_PIXELS
+    half = resolve(CENTROID_HALF_BOX_PIXELS).value
     yy, xx = np.mgrid[-half : half + 1, -half : half + 1]
     rows = []
     for y, x in zip(ys[brightest], xs[brightest], strict=True):
@@ -525,25 +753,25 @@ def _match_shift(previous_stars: np.ndarray, stars: np.ndarray) -> tuple[tuple[f
     votes : `int`
         How many pairs agreed.
     """
-    if len(previous_stars) < MINIMUM_MATCH_VOTES or len(stars) < MINIMUM_MATCH_VOTES:
+    minimum_votes = resolve(MINIMUM_MATCH_VOTES).value
+    bin_pixels = resolve(_SHIFT_BIN_PIXELS).value
+    if len(previous_stars) < minimum_votes or len(stars) < minimum_votes:
         return None, 0
     offsets = (stars[None, :, :2] - previous_stars[:, None, :2]).reshape(-1, 2)
-    extent = int(np.abs(offsets).max()) + _SHIFT_BIN_PIXELS
-    bins = np.arange(-extent, extent + 1, _SHIFT_BIN_PIXELS)
+    extent = int(np.abs(offsets).max()) + bin_pixels
+    bins = np.arange(-extent, extent + 1, bin_pixels)
     histogram, y_edges, x_edges = np.histogram2d(offsets[:, 0], offsets[:, 1], bins=[bins, bins])
     peak_y, peak_x = np.unravel_index(histogram.argmax(), histogram.shape)
-    centre_y = y_edges[peak_y] + _SHIFT_BIN_PIXELS / 2
-    centre_x = x_edges[peak_x] + _SHIFT_BIN_PIXELS / 2
+    centre_y = y_edges[peak_y] + bin_pixels / 2
+    centre_x = x_edges[peak_x] + bin_pixels / 2
     agree = (np.abs(offsets[:, 0] - centre_y) < 6) & (np.abs(offsets[:, 1] - centre_x) < 6)
     votes = int(agree.sum())
-    if votes < MINIMUM_MATCH_VOTES:
+    if votes < minimum_votes:
         return None, votes
     return (float(offsets[agree, 0].mean()), float(offsets[agree, 1].mean())), votes
 
 
-def measure_raw_frame(
-    path: str, trail_min_diagonal_fraction: float = TRAIL_MIN_DIAGONAL_FRACTION
-) -> dict[str, Any]:
+def measure_raw_frame(path: str, trail_min_diagonal_fraction: float | None = None) -> dict[str, Any]:
     """Measure one raw frame's stars, sky, saturation and straight trails.
 
     Parameters
@@ -569,6 +797,8 @@ def measure_raw_frame(
         the test `fits_access.frame_uses_color_filter_array` makes),
         ``width_px``, and the private ``_stars`` array used for matching.
     """
+    if trail_min_diagonal_fraction is None:
+        trail_min_diagonal_fraction = resolve(TRAIL_MIN_DIAGONAL_FRACTION).value
     with open_primary_hdu(path) as hdu:
         image = np.asarray(hdu.data, dtype=float)
         camera = hdu.header.get("INSTRUME")
@@ -620,6 +850,12 @@ def flag_frames(measurements: Sequence[dict[str, Any]]) -> None:
     trail_median = statistics.median(m["longest_trail_px"] for m in measurements)
     widths = [m["fwhm_px"] for m in measurements if m["fwhm_px"] is not None]
     fwhm_median = statistics.median(widths) if widths else None
+    low_star_fraction = resolve(LOW_STAR_FRACTION).value
+    high_star_multiple = resolve(HIGH_STAR_MULTIPLE).value
+    trail_limit = max(resolve(TRAIL_FLOOR_PIXELS).value, resolve(TRAIL_MULTIPLE).value * trail_median)
+    soft_fwhm_multiple = resolve(SOFT_FWHM_MULTIPLE).value
+    round_star_ratio = resolve(ROUND_STAR_RATIO).value
+    shift_fraction_of_width = resolve(SHIFT_FRACTION_OF_WIDTH).value
 
     for index, measurement in enumerate(measurements):
         flags: list[str] = []
@@ -628,12 +864,12 @@ def flag_frames(measurements: Sequence[dict[str, Any]]) -> None:
                 "Could not match its stars to the previous frame: "
                 "the field moved far or the stars are trailed."
             )
-        if len(measurements) > 1 and measurement["star_count"] < LOW_STAR_FRACTION * star_median:
+        if len(measurements) > 1 and measurement["star_count"] < low_star_fraction * star_median:
             flags.append(
                 f"Only {measurement['star_count']} stars against a typical {star_median:.0f}: "
                 "trailed or clouded."
             )
-        if len(measurements) > 1 and measurement["star_count"] > HIGH_STAR_MULTIPLE * star_median:
+        if len(measurements) > 1 and measurement["star_count"] > high_star_multiple * star_median:
             flags.append(
                 f"{measurement['star_count']} stars against a typical {star_median:.0f}: "
                 "more bright regions than stars alone explain (a trail, light leak or hot pixels)."
@@ -643,24 +879,23 @@ def flag_frames(measurements: Sequence[dict[str, Any]]) -> None:
                 f"A faint straight trail {measurement['line_trail_px']} px long at "
                 f"{measurement['line_trail_angle_deg']:.1f} degrees: a satellite or aircraft."
             )
-        trail_limit = max(TRAIL_FLOOR_PIXELS, TRAIL_MULTIPLE * trail_median)
         if len(measurements) > 1 and measurement["longest_trail_px"] > trail_limit:
             flags.append(f"A star streak {measurement['longest_trail_px']} px long: trailed.")
         if (
             len(measurements) > 1
             and fwhm_median is not None
             and measurement["fwhm_px"] is not None
-            and measurement["fwhm_px"] > SOFT_FWHM_MULTIPLE * fwhm_median
+            and measurement["fwhm_px"] > soft_fwhm_multiple * fwhm_median
         ):
             flags.append(
                 f"Star width {measurement['fwhm_px']:.1f} px against a typical {fwhm_median:.1f}: soft."
             )
-        if measurement["roundness"] is not None and measurement["roundness"] < ROUND_STAR_RATIO:
+        if measurement["roundness"] is not None and measurement["roundness"] < round_star_ratio:
             flags.append(f"Stars are elongated (roundness {measurement['roundness']:.2f}).")
         shift = measurement.get("shift_from_previous_px")
         if (
             shift is not None
-            and max(abs(shift[0]), abs(shift[1])) > SHIFT_FRACTION_OF_WIDTH * measurement["width_px"]
+            and max(abs(shift[0]), abs(shift[1])) > shift_fraction_of_width * measurement["width_px"]
         ):
             flags.append(f"The field moved {shift[0]:+.0f}, {shift[1]:+.0f} px since the previous frame.")
         measurement["flags"] = flags
@@ -670,7 +905,7 @@ def check_raw_frames(
     paths: Sequence[str] | None = None,
     folder: str | None = None,
     last_count: int | None = None,
-    trail_min_diagonal_fraction: float = TRAIL_MIN_DIAGONAL_FRACTION,
+    trail_min_diagonal_fraction: float | None = None,
 ) -> dict[str, Any]:
     """Check raw light frames and flag the ones that stand out.
 
@@ -699,6 +934,8 @@ def check_raw_frames(
     InvalidArgumentError
         If neither `paths` nor `folder` is given.
     """
+    if trail_min_diagonal_fraction is None:
+        trail_min_diagonal_fraction = resolve(TRAIL_MIN_DIAGONAL_FRACTION).value
     if paths is None:
         if folder is None:
             raise InvalidArgumentError("Give either paths or a folder of FITS frames.")

@@ -382,7 +382,7 @@ def test_the_residual_gate_stores_the_fraction_of_a_star_width_and_its_limit() -
     assert residual.check_outcome is GateStatus.FAILED
     assert residual.value == pytest.approx(5.7 / (1.9 * 3.0))
     assert residual.check_limit is not None
-    assert residual.check_limit.value == pytest.approx(rg.MAXIMUM_RESIDUAL_FRACTION_OF_FWHM)
+    assert residual.check_limit.value == pytest.approx(rg.MAXIMUM_RESIDUAL_FRACTION_OF_FWHM.default)
     assert residual.check_limit.tier is LimitTier.DESIGN_ESTIMATE
     assert residual.check_limit.register_entry == "AST-04"
 

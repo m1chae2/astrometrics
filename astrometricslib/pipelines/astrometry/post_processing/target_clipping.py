@@ -77,8 +77,15 @@ from astropy.wcs.utils import proj_plane_pixel_scales
 from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, read_data
 from astrometricslib.foundation.errors import AstrometricsError
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.camera_profile import CameraProfile
 from astrometricslib.models.quality.measurement import MeasurementStatus, QualityMeasurement
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.astrometry.metrics import (
     ASTROMETRY_FRAME_TARGET_CLIPPED_FRACTION,
     ASTROMETRY_FRAME_TARGET_NONLINEAR_FRACTION,
@@ -140,7 +147,18 @@ MAXIMUM_READ_SECONDS = 120.0
 # A frame is not measured when less than this share of the disc lies inside the
 # image. A disc cut by the edge would count clipped pixels over a much smaller
 # area than it names.
-MINIMUM_DISC_SHARE_INSIDE = 0.5
+MINIMUM_DISC_SHARE_INSIDE = TunedParameter(
+    name="astrometry.minimum_disc_share_inside",
+    default=0.5,
+    unit="fraction",
+    description=(
+        "Smallest share of the target disc that must lie inside the image for a frame to be measured."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="AST-D16",
+)
 
 # The disc's brightest pixel on the stack must stand at least this many sky
 # noise sigma above the local sky for a source to count as seen. Under pure
@@ -154,17 +172,56 @@ MINIMUM_DISC_SHARE_INSIDE = 0.5
 # limit of the check: 97.8 percent of random discs passed, because the field
 # is full of stars. The check finds a target record placed on blank sky. It
 # cannot tell the target from a field star in a crowded field.
-MINIMUM_PEAK_SIGMA = 5.0
+MINIMUM_PEAK_SIGMA = TunedParameter(
+    name="astrometry.minimum_peak_sigma",
+    default=5.0,
+    unit="sigma",
+    description=(
+        "How many sky noise sigma the disc's brightest pixel must stand "
+        "above the local sky for a source to count as seen."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="AST-19",
+)
 
 # The ring that gives the local sky and its noise reaches from this multiple of
 # the disc radius to the next. The inner edge clears the target's wings and the
 # outer edge stays near enough for the sky to be the same.
-SKY_RING_INNER_FACTOR = 1.5
-SKY_RING_OUTER_FACTOR = 2.5
+SKY_RING_INNER_FACTOR = TunedParameter(
+    name="astrometry.sky_ring_inner_factor",
+    default=1.5,
+    unit="× disc radius",
+    description="Inner edge of the sky ring, as a multiple of the disc radius.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="AST-D16",
+)
+SKY_RING_OUTER_FACTOR = TunedParameter(
+    name="astrometry.sky_ring_outer_factor",
+    default=2.5,
+    unit="× disc radius",
+    description="Outer edge of the sky ring, as a multiple of the disc radius.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="AST-D16",
+)
 
 # The fewest ring pixels for a sky estimate. A median and a scatter of fewer
 # than this are too uncertain to set a 5 sigma bar against.
-SKY_RING_MINIMUM_PIXELS = 100
+SKY_RING_MINIMUM_PIXELS = TunedParameter(
+    name="astrometry.sky_ring_minimum_pixels",
+    default=100,
+    unit="pixels",
+    description="Fewest finite ring pixels for a sky estimate.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="AST-D16",
+)
 
 # Converts the median absolute deviation of Gaussian noise to its sigma.
 MAD_TO_SIGMA = 1.4826
@@ -386,8 +443,11 @@ def peak_sigma_above_sky(
         `None` when the disc has no finite pixel, the ring has fewer than
         `SKY_RING_MINIMUM_PIXELS` finite pixels or its noise is zero.
     """
+    ring_inner_factor = resolve(SKY_RING_INNER_FACTOR).value
+    ring_outer_factor = resolve(SKY_RING_OUTER_FACTOR).value
+    ring_minimum_pixels = resolve(SKY_RING_MINIMUM_PIXELS).value
     rows, columns, window = _disc_window(
-        pixels.shape, center_row, center_column, SKY_RING_OUTER_FACTOR * radius_px
+        pixels.shape, center_row, center_column, ring_outer_factor * radius_px
     )
     if rows.size == 0:
         return None
@@ -397,10 +457,10 @@ def peak_sigma_above_sky(
     in_disc = finite & (distance_squared <= radius_px**2)
     in_ring = (
         finite
-        & (distance_squared >= (SKY_RING_INNER_FACTOR * radius_px) ** 2)
-        & (distance_squared <= (SKY_RING_OUTER_FACTOR * radius_px) ** 2)
+        & (distance_squared >= (ring_inner_factor * radius_px) ** 2)
+        & (distance_squared <= (ring_outer_factor * radius_px) ** 2)
     )
-    if not in_disc.any() or np.count_nonzero(in_ring) < SKY_RING_MINIMUM_PIXELS:
+    if not in_disc.any() or np.count_nonzero(in_ring) < ring_minimum_pixels:
         return None
     ring = values[in_ring]
     sky = float(np.median(ring))
@@ -584,10 +644,11 @@ def target_clipping_measurements(
             f"the sky around the target's position could not be measured on the stack, so a source there "
             f"cannot be confirmed (used {place}; {pixel_place})"
         )
-    if peak_sigma < MINIMUM_PEAK_SIGMA:
+    minimum_peak_sigma = resolve(MINIMUM_PEAK_SIGMA).value
+    if peak_sigma < minimum_peak_sigma:
         return all_missing(
             f"no source at the target position (used {place}; {pixel_place}): the disc's brightest pixel "
-            f"stands {peak_sigma:.1f} sigma above the local sky, under the {MINIMUM_PEAK_SIGMA:g} sigma "
+            f"stands {peak_sigma:.1f} sigma above the local sky, under the {minimum_peak_sigma:g} sigma "
             "needed"
         )
     position_note = (
@@ -653,6 +714,7 @@ def _frame_measurements(
     rows : `list` of `QualityMeasurement`
         Two rows for each frame, in the record's order.
     """
+    minimum_disc_share_inside = resolve(MINIMUM_DISC_SHARE_INSIDE).value
     candidates = [
         position
         for position, (frame, included) in enumerate(zip(frames, record.included, strict=True))
@@ -688,6 +750,7 @@ def _frame_measurements(
                     profiles,
                     configuration,
                     position_note,
+                    minimum_disc_share_inside,
                 )
             )
     return rows
@@ -728,6 +791,7 @@ def _rows_of_one_frame(
     profiles: dict[str, CameraProfile],
     configuration: object,
     position_note: str,
+    minimum_disc_share_inside: float,
 ) -> list[QualityMeasurement]:
     """Count the target's clipped pixels in one frame and build its two rows.
 
@@ -752,6 +816,8 @@ def _rows_of_one_frame(
         Where the camera profiles live.
     position_note : `str`
         How the target was placed, for the reason of each row.
+    minimum_disc_share_inside : `float`
+        The smallest share of the disc that must lie inside the frame.
 
     Returns
     -------
@@ -777,7 +843,7 @@ def _rows_of_one_frame(
     counts = count_pixels_in_disc(
         pixels, row, column, radius_px, levels.clip_level_adu, levels.linearity_level_adu
     )
-    if counts.inside < MINIMUM_DISC_SHARE_INSIDE * counts.disc_area_px:
+    if counts.inside < minimum_disc_share_inside * counts.disc_area_px:
         return _missing(
             frame,
             context,

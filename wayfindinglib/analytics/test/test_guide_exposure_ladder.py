@@ -123,7 +123,7 @@ def test_white_noise_in_the_positions_is_recovered() -> None:
 
 def test_too_few_positions_give_no_noise() -> None:
     """Verify four frames are not enough."""
-    assert position_noise_pixels([(0.0, 0.0)] * (MINIMUM_FRAMES - 1)) is None
+    assert position_noise_pixels([(0.0, 0.0)] * (MINIMUM_FRAMES.default - 1)) is None
 
 
 def test_a_bright_star_needs_only_a_short_exposure() -> None:

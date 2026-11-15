@@ -34,9 +34,9 @@ SENSOR_PIXELS = 3008 * 3008
 """Pixels on the ASI533 sensor."""
 
 CAPTURE_LIMITS = CaptureLimits(
-    saturated_star_minimum_pixels=SATURATED_BLOB_MINIMUM_PIXELS,
-    clipped_frame_fraction=SATURATED_FRAME_FRACTION,
-    dark_temperature_tolerance_c=DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+    saturated_star_minimum_pixels=SATURATED_BLOB_MINIMUM_PIXELS.default,
+    clipped_frame_fraction=SATURATED_FRAME_FRACTION.default,
+    dark_temperature_tolerance_c=DEFAULT_DARK_TEMPERATURE_TOLERANCE_C.default,
 )
 """The science library's limits, as the capture analysis reads them."""
 

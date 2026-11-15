@@ -34,6 +34,14 @@ import numpy as np
 from scipy import ndimage
 
 from astrometricslib._internal.drivers.fits_access import read_data, read_header, write_image
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.stacking.post_processing.stack_image import robust_sigma
 
 logger = logging.getLogger(__name__)
@@ -44,13 +52,31 @@ logger = logging.getLogger(__name__)
 # stack: a knee of 0.5 capped the brightest stars at 0.88, and the user
 # preferred the 0.65 version. No pixel of that picture stayed above 0.95.
 # Not validated on other targets.
-HIGHLIGHT_KNEE = 0.65
+HIGHLIGHT_KNEE = TunedParameter(
+    name="stacking.highlight_knee",
+    default=0.65,
+    unit="fraction",
+    description="Stretched value at or below which the soft highlight curve leaves values alone.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-32",
+)
 
 # The power the star light is raised to. 1.0 changes nothing. Chosen by eye on
 # the Bubble Nebula stack: the user compared 1.4 and 1.8 and picked 1.8, which
 # leaves a few clearly brighter stars over a haze of faint ones. Not
 # validated on other targets.
-STAR_DIMMING_POWER = 1.8
+STAR_DIMMING_POWER = TunedParameter(
+    name="stacking.star_dimming_power",
+    default=1.8,
+    unit="power",
+    description="Power to which the star light is raised.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-32",
+)
 
 # Star light (stretched units above the local background) below the first
 # value is left alone, light above the second is fully dimmed, and the weight
@@ -60,8 +86,26 @@ STAR_DIMMING_POWER = 1.8
 # spikes of M 45 were removed. Stars of the Bubble Nebula stack that reach
 # more than 0.12 above the background were dimmed as the user chose. Both
 # limits were set by eye on the Bubble Nebula, M 81, M 45 and NGC 2244 stacks.
-STAR_DIMMING_STARTS_AT = 0.05
-STAR_DIMMING_FULL_AT = 0.12
+STAR_DIMMING_STARTS_AT = TunedParameter(
+    name="stacking.star_dimming_starts_at",
+    default=0.05,
+    unit="fraction",
+    description="Star light below which stars are not dimmed.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-32",
+)
+STAR_DIMMING_FULL_AT = TunedParameter(
+    name="stacking.star_dimming_full_at",
+    default=0.12,
+    unit="fraction",
+    description="Star light above which stars are fully dimmed.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-32",
+)
 
 # The star light that counts is also kept above this many sky-noise widths.
 # The background under the stars is the local minimum, which lies 2 to 3 noise
@@ -72,12 +116,31 @@ STAR_DIMMING_FULL_AT = 0.12
 # toning halved the sky level and smeared the arms of M 81. Six widths clears
 # the noise. Where the noise is small, the 0.05 and 0.12 limits above apply
 # unchanged. The factor is a design choice from those measurements.
-NOISE_WIDTHS_ABOVE_THE_BACKGROUND = 6.0
+NOISE_WIDTHS_ABOVE_THE_BACKGROUND = TunedParameter(
+    name="stacking.noise_widths_above_the_background",
+    default=6.0,
+    unit="sigma",
+    description="Sky-noise widths above the background the star light must also stay.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-32",
+)
 
 # The noise is measured on the picture minus a blurred copy of it, so the
 # large-scale structure of a galaxy or nebula does not count as noise. The
 # blur width, in pixels, is larger than a star and smaller than the structure.
-_NOISE_BLUR_PIXELS = 3.0
+_NOISE_BLUR_PIXELS = TunedParameter(
+    name="stacking.noise_blur_pixels",
+    default=3.0,
+    unit="pixels",
+    description="Width of the blur taken away before the noise is measured.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D55",
+    pending_conversion=True,
+)
 
 # The background under the stars is found with a grey-scale opening (erode,
 # then dilate) over a square of this many pixels on a side. The opening
@@ -86,18 +149,38 @@ _NOISE_BLUR_PIXELS = 3.0
 # and nebulae are tens to hundreds of pixels wide. The size was set by eye on
 # the Bubble Nebula stack, where the Bubble stayed out of the star light, and
 # has not been tuned further.
-_BACKGROUND_BOX_PIXELS = 15
+_BACKGROUND_BOX_PIXELS = TunedParameter(
+    name="stacking.background_box_pixels",
+    default=15,
+    unit="pixels",
+    description="Side of the square opening that finds the background under the stars.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D55",
+    pending_conversion=True,
+)
 
 # The opening leaves a faint blocky edge. A Gaussian blur of this many pixels
 # hides it. It is small next to the box, so real structure is kept.
-_BACKGROUND_SMOOTHING_PIXELS = 2.0
+_BACKGROUND_SMOOTHING_PIXELS = TunedParameter(
+    name="stacking.background_smoothing_pixels",
+    default=2.0,
+    unit="pixels",
+    description="Width of the smoothing that hides the blocky edge of the opening.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D55",
+    pending_conversion=True,
+)
 
 # The smallest room left above the background, so a bright background never
 # divides by zero.
 _MINIMUM_ROOM = 1e-6
 
 
-def soft_highlights(image: np.ndarray, knee: float = HIGHLIGHT_KNEE) -> np.ndarray:
+def soft_highlights(image: np.ndarray, knee: float | None = None) -> np.ndarray:
     """Compress the brightest values with a smooth curve.
 
     Parameters
@@ -106,6 +189,7 @@ def soft_highlights(image: np.ndarray, knee: float = HIGHLIGHT_KNEE) -> np.ndarr
         A stretched picture with values between 0 and 1.
     knee : `float`, optional
         The value above which compression starts, strictly between 0 and 1.
+        If `None`, the value of `HIGHLIGHT_KNEE` is used.
 
     Returns
     -------
@@ -113,6 +197,8 @@ def soft_highlights(image: np.ndarray, knee: float = HIGHLIGHT_KNEE) -> np.ndarr
         The picture with values at or below `knee` unchanged and values above
         it compressed smoothly toward, but never reaching, 1.
     """
+    if knee is None:
+        knee = resolve(HIGHLIGHT_KNEE).value
     return np.where(image <= knee, image, knee + (1.0 - knee) * np.tanh((image - knee) / (1.0 - knee)))
 
 
@@ -131,11 +217,11 @@ def estimate_noise(image: np.ndarray) -> float:
         found from the median absolute deviation of the picture minus a
         blurred copy. Smooth structure and the few stars barely change it.
     """
-    detail = image - ndimage.gaussian_filter(image, _NOISE_BLUR_PIXELS)
+    detail = image - ndimage.gaussian_filter(image, resolve(_NOISE_BLUR_PIXELS).value)
     return float(robust_sigma(detail))
 
 
-def dim_stars(image: np.ndarray, power: float = STAR_DIMMING_POWER) -> np.ndarray:
+def dim_stars(image: np.ndarray, power: float | None = None) -> np.ndarray:
     """Dim the stars in a stretched picture, faint ones most.
 
     Parameters
@@ -144,6 +230,7 @@ def dim_stars(image: np.ndarray, power: float = STAR_DIMMING_POWER) -> np.ndarra
         A 2-D stretched picture with values between 0 and 1.
     power : `float`, optional
         The power the star light is raised to. 1.0 changes nothing.
+        If `None`, the value of `STAR_DIMMING_POWER` is used.
 
     Returns
     -------
@@ -157,14 +244,20 @@ def dim_stars(image: np.ndarray, power: float = STAR_DIMMING_POWER) -> np.ndarra
         `NOISE_WIDTHS_ABOVE_THE_BACKGROUND` noise widths: sky noise is never
         taken for a star.
     """
+    if power is None:
+        power = resolve(STAR_DIMMING_POWER).value
+    star_dimming_starts_at = resolve(STAR_DIMMING_STARTS_AT).value
+    background_box_pixels = resolve(_BACKGROUND_BOX_PIXELS).value
     background = ndimage.gaussian_filter(
-        ndimage.grey_opening(image, size=(_BACKGROUND_BOX_PIXELS, _BACKGROUND_BOX_PIXELS)),
-        _BACKGROUND_SMOOTHING_PIXELS,
+        ndimage.grey_opening(image, size=(background_box_pixels, background_box_pixels)),
+        resolve(_BACKGROUND_SMOOTHING_PIXELS).value,
     )
     star_light = np.clip(image - background, 0.0, None)
     room = np.clip(1.0 - background, _MINIMUM_ROOM, None)
-    starts_at = max(STAR_DIMMING_STARTS_AT, NOISE_WIDTHS_ABOVE_THE_BACKGROUND * estimate_noise(image))
-    full_at = starts_at + (STAR_DIMMING_FULL_AT - STAR_DIMMING_STARTS_AT)
+    starts_at = max(
+        star_dimming_starts_at, resolve(NOISE_WIDTHS_ABOVE_THE_BACKGROUND).value * estimate_noise(image)
+    )
+    full_at = starts_at + (resolve(STAR_DIMMING_FULL_AT).value - star_dimming_starts_at)
     ramp = np.clip((star_light - starts_at) / (full_at - starts_at), 0.0, 1.0)
     weight = ramp * ramp * (3.0 - 2.0 * ramp)
     dimmed = room * (star_light / room) ** power

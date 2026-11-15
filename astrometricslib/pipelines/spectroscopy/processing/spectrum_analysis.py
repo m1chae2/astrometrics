@@ -15,9 +15,16 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from astrometricslib._internal.drivers.interfaces.reddening_driver import ReddeningEstimate
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.spectroscopy_quality import CatalogComparison
 from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
 from astrometricslib.models.stellar_source import NO_GOOD_MATCH_RMS, ladder_steps_between
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_catalog import compare_to_catalog
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction import ExtinctionCorrection
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
@@ -144,7 +151,18 @@ EXTENDED_TARGET_SPECTRAL_TYPE = "Cluster"
 # measured about 80 A across against a 50 A resolution element, so the window
 # is two resolution elements (100 A, 2.9 sigma of that line) either side to
 # leave under 2% of its height in the comparison. Checked on that one star.
-EMISSION_EXCLUSION_HALF_WIDTH_RESOLUTION_ELEMENTS = 2.0
+EMISSION_EXCLUSION_HALF_WIDTH_RESOLUTION_ELEMENTS = TunedParameter(
+    name="spectroscopy.emission_exclusion_half_width_resolution_elements",
+    default=2.0,
+    unit="× resolution",
+    description=(
+        "An emission line is left out of the classification over this many resolution elements either side."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-D45",
+)
 
 
 def _emission_windows(
@@ -170,7 +188,9 @@ def _emission_windows(
     names : `list` [`str`]
         The short names of those lines, for example ``"H-alpha"``.
     """
-    half_width = EMISSION_EXCLUSION_HALF_WIDTH_RESOLUTION_ELEMENTS * resolution_element_angstrom
+    half_width = (
+        resolve(EMISSION_EXCLUSION_HALF_WIDTH_RESOLUTION_ELEMENTS).value * resolution_element_angstrom
+    )
     windows: list[tuple[float, float]] = []
     names: list[str] = []
     for feature in features:
@@ -192,7 +212,19 @@ def _emission_windows(
 # left out anyway: that is the more cautious reading of missing evidence,
 # not a measured value. Provisional, no real pair has been checked with this
 # threshold yet.
-NEIGHBOR_CONTAMINATION_MINIMUM_FLUX_RATIO = 0.05
+NEIGHBOR_CONTAMINATION_MINIMUM_FLUX_RATIO = TunedParameter(
+    name="spectroscopy.neighbor_contamination_minimum_flux_ratio",
+    default=0.05,
+    unit="fraction",
+    description=(
+        "A flagged neighbour is left out of the comparison only "
+        "when its flux is at least this fraction of the target's."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="SPE-D45",
+)
 
 
 def _neighbor_contamination_windows(
@@ -214,12 +246,13 @@ def _neighbor_contamination_windows(
         The windows severe enough to leave out of the comparison (see
         `NEIGHBOR_CONTAMINATION_MINIMUM_FLUX_RATIO`).
     """
+    neighbor_contamination_minimum_flux_ratio = resolve(NEIGHBOR_CONTAMINATION_MINIMUM_FLUX_RATIO).value
     if not possible_neighbor_contamination:
         return []
     windows: list[tuple[float, float]] = []
     for window in possible_neighbor_contamination:
         ratio = window.get("neighbor_flux_ratio")
-        if ratio is not None and ratio < NEIGHBOR_CONTAMINATION_MINIMUM_FLUX_RATIO:
+        if ratio is not None and ratio < neighbor_contamination_minimum_flux_ratio:
             continue
         windows.append((float(window["wavelength_low_angstrom"]), float(window["wavelength_high_angstrom"])))
     return windows
@@ -426,12 +459,12 @@ def analyze_spectrum(
     signal_to_noise = estimate_spectrum_signal_to_noise(
         wavelength_angstrom, intensity, resolution_element_angstrom
     )
-    if signal_to_noise is not None and signal_to_noise < MINIMUM_SPECTRUM_SIGNAL_TO_NOISE:
+    if signal_to_noise is not None and signal_to_noise < resolve(MINIMUM_SPECTRUM_SIGNAL_TO_NOISE).value:
         return SpectrumAnalysis(
             unclassified_result(
                 "no measurable spectrum: the star is too faint here, its signal-to-noise is "
                 f"{signal_to_noise:.1f} per resolution element and at least "
-                f"{MINIMUM_SPECTRUM_SIGNAL_TO_NOISE:g} is needed"
+                f"{resolve(MINIMUM_SPECTRUM_SIGNAL_TO_NOISE).value:g} is needed"
             ),
             [],
             False,
@@ -465,14 +498,15 @@ def analyze_spectrum(
     # extended target goes on to the extended-target branches below as before.
     if (
         signal_to_noise is not None
-        and signal_to_noise < MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE
+        and signal_to_noise < resolve(MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE).value
         and not is_extended_target
     ):
         return SpectrumAnalysis(
             unclassified_result(
                 "spectrum kept without feature analysis or classification: its signal-to-noise is "
                 f"{signal_to_noise:.1f} per resolution element and at least "
-                f"{MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE:g} is needed to find an absorption line; "
+                f"{resolve(MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE).value:g} "
+                f"is needed to find an absorption line; "
                 "emission lines were still tested"
             ),
             [],
@@ -669,7 +703,7 @@ def analyze_spectrum(
     if (
         expected_reference_type is None
         and classification["spectral_type"] != "Unknown"
-        and float(classification["classification_rms"]) <= NO_GOOD_MATCH_RMS
+        and float(classification["classification_rms"]) <= resolve(NO_GOOD_MATCH_RMS).value
     ):
         features = detect_named_features(
             wavelength_angstrom,

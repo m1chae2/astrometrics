@@ -14,7 +14,14 @@ from dataclasses import dataclass
 
 from astrometricslib._internal.drivers.camera_profile_store import camera_identity
 from astrometricslib.foundation.observatory_setups import ObservatorySetups, OpticConfig
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.warn_once import warn_once
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +33,16 @@ UNKNOWN_TELESCOPE_NAME = "Unknown"
 # tolerance of 2% cannot mix them up. It only has to allow for a focal length
 # that was rounded, or typed slightly differently in the config. It was not
 # tuned on any data.
-FOCAL_LENGTH_TOLERANCE_FRACTION = 0.02
+FOCAL_LENGTH_TOLERANCE_FRACTION = TunedParameter(
+    name="shared.focal_length_tolerance_fraction",
+    default=0.02,
+    unit="fraction",
+    description="Largest relative focal length difference at which two frames share an optical setup.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D71",
+)
 
 REASON_FOCAL_LENGTH = "focal_length"
 REASON_ONLY_SETUP = "only_setup_for_camera"
@@ -134,7 +150,7 @@ def resolve_frame_telescope(
             optic
             for optic in candidate_optics
             if abs(focal_length_mm - optic.focal_length_mm) / optic.focal_length_mm
-            <= FOCAL_LENGTH_TOLERANCE_FRACTION
+            <= resolve(FOCAL_LENGTH_TOLERANCE_FRACTION).value
         ]
         if close_enough:
             closest = min(close_enough, key=lambda optic: abs(focal_length_mm - optic.focal_length_mm))

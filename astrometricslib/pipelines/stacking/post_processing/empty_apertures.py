@@ -28,6 +28,12 @@ from dataclasses import dataclass
 import numpy as np
 from astropy.io import fits
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     APERTURE_RADIUS_PX,
     RING_INNER_PX,
@@ -154,7 +160,16 @@ APERTURE_FILE_VERSION = 3
 # sources 1.4 times fainter then stand above the noise and the older mask
 # misses them. Smaller factors would change the set too often to compare
 # stacks of a growing target; this is a design choice (see STK-36).
-REPLACEMENT_DEPTH_FACTOR = 2.0
+REPLACEMENT_DEPTH_FACTOR = TunedParameter(
+    name="stacking.replacement_depth_factor",
+    default=2.0,
+    unit="× frame count",
+    description="Times the defining stack's frame count that a library stack needs to replace a stored set.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    register_entry="STK-36",
+    pending_conversion=True,
+)
 
 # The setup key of a stack whose header names neither camera, telescope nor
 # focal length.
@@ -165,9 +180,9 @@ UNSPECIFIED_SETUP = "unspecified"
 # matched (see `is_legacy_setup_key`).
 EXPOSURE_KEY_MARKER = "|exp="
 
-REFERENCE_RING_GAP_PX = RING_INNER_PX - APERTURE_RADIUS_PX
+REFERENCE_RING_GAP_PX = resolve(RING_INNER_PX).value - resolve(APERTURE_RADIUS_PX).value
 
-REFERENCE_RING_WIDTH_PX = RING_OUTER_PX - RING_INNER_PX
+REFERENCE_RING_WIDTH_PX = resolve(RING_OUTER_PX).value - resolve(RING_INNER_PX).value
 
 
 class ApertureSetMismatchError(ValueError):
@@ -392,9 +407,9 @@ class ApertureSet:
             The set, with every number a plain `float`.
         """
         return {
-            "aperture_radius_px": APERTURE_RADIUS_PX,
-            "ring_inner_px": RING_INNER_PX,
-            "ring_outer_px": RING_OUTER_PX,
+            "aperture_radius_px": resolve(APERTURE_RADIUS_PX).value,
+            "ring_inner_px": resolve(RING_INNER_PX).value,
+            "ring_outer_px": resolve(RING_OUTER_PX).value,
             "wcs_source": self.wcs_source,
             "pixel_scale_arcsec": self.pixel_scale_arcsec,
             "created_from": self.created_from,
@@ -567,7 +582,7 @@ def is_much_deeper(depth: StackDepth | None, aperture_set: ApertureSet) -> bool:
     defining = aperture_set.defining_effective_frame_count
     if depth is None or defining is None or defining <= 0:
         return False
-    return depth.effective_frame_count >= REPLACEMENT_DEPTH_FACTOR * defining
+    return depth.effective_frame_count >= resolve(REPLACEMENT_DEPTH_FACTOR).value * defining
 
 
 __all__ = [

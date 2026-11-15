@@ -34,7 +34,7 @@ def test_the_blue_is_dimmed_more_than_the_red() -> None:
 
 def test_the_ratio_in_the_b_band_matches_the_known_value() -> None:
     """Verify A(4400 A) / A(V) is about 1.32, the value for R_V = 3.1."""
-    ratio = ccm89_extinction_ratio(np.array([4400.0]), STANDARD_R_V)
+    ratio = ccm89_extinction_ratio(np.array([4400.0]), STANDARD_R_V.default)
     assert ratio[0] == pytest.approx(1.32, abs=0.02)
 
 

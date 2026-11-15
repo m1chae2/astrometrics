@@ -25,18 +25,56 @@ fields used so far is about 0.03 to 0.1 mag.
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
+
 # The wavelength windows, in Angstroms, that stand in for the B and V filters.
 # Both lie inside 4200-8000 A, where the instrument response is valid. The B
 # window stops short of H-beta (4861 A) and starts after H-gamma (4340 A), and
 # the V window avoids the Na D doublet (5893 A), so a strong line does not
 # move the colour. Chosen by judgement, then checked on the library stars.
-B_WINDOW_ANGSTROM = (4350.0, 4800.0)
-V_WINDOW_ANGSTROM = (5250.0, 5800.0)
+B_WINDOW_ANGSTROM = TunedParameter(
+    name="spectroscopy.b_window_angstrom",
+    default=(4350.0, 4800.0),
+    unit="Å",
+    description="The wavelength window that stands in for the B filter.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D46",
+    pending_conversion=True,
+)
+V_WINDOW_ANGSTROM = TunedParameter(
+    name="spectroscopy.v_window_angstrom",
+    default=(5250.0, 5800.0),
+    unit="Å",
+    description="The wavelength window that stands in for the V filter.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D46",
+    pending_conversion=True,
+)
 
 # The fewest samples that must fall in each window for a colour to be read.
 # One window sample spans about 11 A, so 10 samples is about 110 A: a quarter
 # of the B window and a fifth of the V window.
-MINIMUM_SAMPLES_PER_WINDOW = 10
+MINIMUM_SAMPLES_PER_WINDOW = TunedParameter(
+    name="spectroscopy.synthetic_colour.minimum_samples_per_window",
+    default=10,
+    unit="count",
+    description="The fewest samples that must fall in each colour window for a colour to be read.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D46",
+    pending_conversion=True,
+)
 
 # Approximate intrinsic B-V of the bundled dwarf references, from standard
 # tabulations of dwarf colours (for example Pecaut and Mamajek 2013), rounded
@@ -105,7 +143,7 @@ def _window_mean(
         average is not above zero.
     """
     inside = (wavelength_angstrom >= window[0]) & (wavelength_angstrom < window[1]) & np.isfinite(flux)
-    if int(inside.sum()) < MINIMUM_SAMPLES_PER_WINDOW:
+    if int(inside.sum()) < resolve(MINIMUM_SAMPLES_PER_WINDOW).value:
         return None
     mean = float(np.mean(flux[inside]))
     return mean if mean > 0.0 else None
@@ -131,8 +169,8 @@ def window_colour_index(wavelength_angstrom: np.ndarray, flux: np.ndarray) -> fl
     """
     wavelengths = np.asarray(wavelength_angstrom, dtype=float)
     values = np.asarray(flux, dtype=float)
-    blue = _window_mean(wavelengths, values, B_WINDOW_ANGSTROM)
-    visual = _window_mean(wavelengths, values, V_WINDOW_ANGSTROM)
+    blue = _window_mean(wavelengths, values, resolve(B_WINDOW_ANGSTROM).value)
+    visual = _window_mean(wavelengths, values, resolve(V_WINDOW_ANGSTROM).value)
     if blue is None or visual is None:
         return None
     return float(-2.5 * np.log10(blue / visual))

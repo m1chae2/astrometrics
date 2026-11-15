@@ -363,7 +363,7 @@ def test_when_no_group_can_be_stacked_there_is_no_result(tmp_path: Path) -> None
 
 def test_the_registration_threshold_tolerates_a_few_lost_frames() -> None:
     """One frame in ten may be lost without a retry."""
-    assert 0.5 < MINIMUM_REGISTERED_FRACTION <= 0.95
+    assert 0.5 < MINIMUM_REGISTERED_FRACTION.default <= 0.95
 
 
 def test_a_failed_standard_run_is_reported_as_a_failure_not_a_percentage(

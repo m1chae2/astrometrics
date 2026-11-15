@@ -80,7 +80,7 @@ def test_parts_reached_on_too_few_nights_are_gaps(make_nights: Any) -> None:
     assert "pier_side East" in quality.gaps
     assert "altitude 30-45 deg" not in quality.gaps
     assert "altitude 0-15 deg" not in [bin_.label for bin_ in quality.coverage]
-    assert quality.minimum_nights_per_bin == MINIMUM_NIGHTS_PER_BIN
+    assert quality.minimum_nights_per_bin == MINIMUM_NIGHTS_PER_BIN.default
 
 
 def test_star_roundness_does_not_count_a_frame_twice(make_night: Any) -> None:
@@ -135,7 +135,7 @@ def test_nothing_poor_says_so(make_nights: Any) -> None:
     assert "sky_coverage_gap" in kinds
     assert [r.rule for r in analysis.recommendations if r.kind == StatementKind.WARNING] == []
     assert analysis.pipeline_name == "sky"
-    assert analysis.resolved_parameters["minimum_nights_per_bin"] == MINIMUM_NIGHTS_PER_BIN
+    assert analysis.resolved_parameters["minimum_nights_per_bin"] == MINIMUM_NIGHTS_PER_BIN.default
 
 
 def test_a_dimension_nobody_compared_along_is_explained(make_nights: Any) -> None:

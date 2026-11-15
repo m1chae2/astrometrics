@@ -1,8 +1,9 @@
 """Purpose: Test the parameter table generator.
 
 Description: ``build/documentation/generate_parameter_table.py`` reads the
-validation register and writes a review table of every tuned parameter. These
-tests run it on the real register and check its output and its bullet parser.
+parameter registries of ``astrometricslib`` and ``wayfindinglib`` and the
+validation register, and writes a review table of every tuned parameter.
+These tests run it on the real repository and check its output.
 """
 
 import csv
@@ -36,7 +37,7 @@ def generator() -> ModuleType:
 
 @pytest.fixture(scope="module")
 def output_folder(generator: ModuleType, tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Run the generator on the real register.
+    """Run the generator on the real repository.
 
     Parameters
     ----------
@@ -55,6 +56,28 @@ def output_folder(generator: ModuleType, tmp_path_factory: pytest.TempPathFactor
     return out
 
 
+@pytest.fixture(scope="module")
+def rows(generator: ModuleType, output_folder: Path) -> list[dict[str, str]]:
+    """Read the CSV the generator wrote.
+
+    Parameters
+    ----------
+    generator : `types.ModuleType`
+        The loaded generator, for its column list.
+    output_folder : `pathlib.Path`
+        The generator's output folder.
+
+    Returns
+    -------
+    rows : `list` [`dict` [`str`, `str`]]
+        One dictionary per CSV row.
+    """
+    with (output_folder / "parameter_table.csv").open(encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        assert tuple(reader.fieldnames or ()) == generator.COLUMNS
+        return list(reader)
+
+
 def test_writes_the_csv_and_every_markdown_page(generator: ModuleType, output_folder: Path) -> None:
     """The CSV, one page per register file and the equipment page exist."""
     assert (output_folder / "parameter_table.csv").is_file()
@@ -65,41 +88,35 @@ def test_writes_the_csv_and_every_markdown_page(generator: ModuleType, output_fo
         assert "generate_parameter_table.py" in page.read_text(encoding="utf-8")
 
 
-def test_has_rows_from_every_register_file(generator: ModuleType, output_folder: Path) -> None:
-    """Each register file contributes at least one row."""
-    with (output_folder / "parameter_table.csv").open(encoding="utf-8", newline="") as handle:
-        rows = list(csv.DictReader(handle))
-    assert set(rows[0]) == set(generator.COLUMNS)
-    registers = {row["register"] for row in rows}
-    assert set(generator.REGISTER_FILES) <= registers
-    assert {"register entry", "design estimate"} <= {row["source"] for row in rows}
+def test_has_declared_and_backlog_rows_from_every_register_file(
+    generator: ModuleType, rows: list[dict[str, str]]
+) -> None:
+    """Declared parameters fill every register page; backlog rows follow."""
+    assert {row["row_type"] for row in rows} == {"declared", "backlog"}
+    declared = {row["register"] for row in rows if row["row_type"] == "declared"}
+    assert set(generator.REGISTER_FILES) <= declared
+    assert all(row["status"] for row in rows if row["row_type"] == "declared")
 
 
-def test_known_setting_has_live_value_and_location(output_folder: Path) -> None:
-    """``MAXIMUM_FLAT_NOISE_FRACTION`` in STK-05 shows 0.005 and its line."""
-    with (output_folder / "parameter_table.csv").open(encoding="utf-8", newline="") as handle:
-        rows = [row for row in csv.DictReader(handle) if row["setting"] == "MAXIMUM_FLAT_NOISE_FRACTION"]
-    row = next(row for row in rows if row["entry_id"] == "STK-05")
-    assert row["live_value"] == "0.005"
-    assert "flat_calibration.py:" in row["code_location"]
-    assert row["status"] in {"Measured", "Partly measured"}
-
-
-def test_bullet_parser_reads_a_marked_line(generator: ModuleType) -> None:
-    """The example line of ``validation/index.md`` Section 2.2 parses fully."""
-    line = (
-        "  - code constant `MAXIMUM_FLAT_NOISE_FRACTION` = 0.005 in `flat_calibration.py`. "
-        "Relation: derived from this entry. Role: automatic (gives a verdict). "
-        "Source: fixed in code. Equipment: camera, telescope. <!-- impl: a.b.C -->"
+def test_known_parameter_has_default_location_and_entry(rows: list[dict[str, str]]) -> None:
+    """The flat noise fraction shows 0.005, its file and line, and STK-05."""
+    row = next(row for row in rows if row["parameter"] == "stacking.maximum_flat_noise_fraction")
+    assert row["default"] == "0.005"
+    assert row["constant"] == "MAXIMUM_FLAT_NOISE_FRACTION"
+    assert row["location"].startswith(
+        "astrometricslib/pipelines/stacking/pre_processing/flat_calibration.py:"
     )
-    parsed = generator.parse_setting_bullet(line)
-    assert parsed == {
-        "setting": "MAXIMUM_FLAT_NOISE_FRACTION",
-        "relation": "derived from",
-        "impl_link": "a.b.C",
-        "role": "automatic (gives a verdict)",
-        "source_of_value": "fixed in code",
-        "equipment": "camera, telescope",
-    }
-    unmarked = generator.parse_setting_bullet("  - `X_Y` in `a.py`. Relation: sanity check only.")
-    assert unmarked["role"] == "" and unmarked["equipment"] == ""
+    assert row["location"].rsplit(":", 1)[1].isdigit()
+    assert row["register_entry"] == "STK-05"
+    assert row["status"] in {"Measured", "Partly measured"}
+    assert row["role"] == "judgment"
+
+
+def test_equipment_page_has_a_section_for_each_kind_including_site(
+    generator: ModuleType, output_folder: Path
+) -> None:
+    """The equipment page lists every equipment kind and the site."""
+    text = (output_folder / "parameter_table_by_equipment.md").read_text(encoding="utf-8")
+    assert "site" in generator.EQUIPMENT_KINDS
+    for kind in generator.EQUIPMENT_KINDS:
+        assert f"## {kind} (" in text

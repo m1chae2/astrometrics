@@ -26,6 +26,13 @@ from collections import defaultdict
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from typing import Any
 
+from astrometricslib.parameters import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from astrometricslib.reports import MeasurementStatus, observing_night_id
 from wayfindinglib.analytics.performance_envelope import (
     MINIMUM_ATTEMPTS_PER_NIGHT,
@@ -310,14 +317,32 @@ def usable_star_frames(frames: Iterable[CaptureFrame], minimum_exposure_seconds:
     ]
 
 
-MINIMUM_FRAMES_PER_EXPOSURE_LENGTH = 10
+MINIMUM_FRAMES_PER_EXPOSURE_LENGTH = TunedParameter(
+    name="wayfinding.minimum_frames_per_exposure_length",
+    default=10,
+    unit="frames",
+    description="Fewest frames an exposure length needs to count as one in use.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D125",
+)
 """Fewest frames an exposure length needs to count as one in use.
 
 An exposure length tried a few times while testing is not a length the
 equipment is used with.
 """
 
-MAXIMUM_EXPOSURE_LENGTHS = 6
+MAXIMUM_EXPOSURE_LENGTHS = TunedParameter(
+    name="wayfinding.maximum_exposure_lengths",
+    default=6,
+    unit="exposure lengths",
+    description="Most exposure lengths the exposure-length view reports, most used first.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D125",
+)
 """Most exposure lengths the exposure-length view reports, most used first."""
 
 
@@ -345,10 +370,12 @@ def exposure_lengths_in_use(frames: Iterable[CaptureFrame], minimum_exposure_sec
         if frame.exposure_seconds >= minimum_exposure_seconds:
             counts[round(frame.exposure_seconds, 3)] += 1
     used = [
-        (length, count) for length, count in counts.items() if count >= MINIMUM_FRAMES_PER_EXPOSURE_LENGTH
+        (length, count)
+        for length, count in counts.items()
+        if count >= resolve_parameter(MINIMUM_FRAMES_PER_EXPOSURE_LENGTH).value
     ]
     used.sort(key=lambda item: -item[1])
-    return sorted(length for length, _ in used[:MAXIMUM_EXPOSURE_LENGTHS])
+    return sorted(length for length, _ in used[: resolve_parameter(MAXIMUM_EXPOSURE_LENGTHS).value])
 
 
 def capture_kind(capture: EkosCapture) -> str:
@@ -443,18 +470,18 @@ def collect_capture_baseline_values(
     for night, night_frames in sorted(frames_by_night(frames).items()):
         if before_night is not None and night >= before_night:
             continue
-        if len(night_frames) < MINIMUM_FRAMES_PER_NIGHT:
+        if len(night_frames) < resolve_parameter(MINIMUM_FRAMES_PER_NIGHT).value:
             continue
         if minimum_exposure_seconds is not None:
             measured = usable_star_frames(night_frames, minimum_exposure_seconds)
-            if len(measured) >= MINIMUM_FRAMES_PER_NIGHT:
+            if len(measured) >= resolve_parameter(MINIMUM_FRAMES_PER_NIGHT).value:
                 widths.append(statistics.median(frame.star_width_arcsec for frame in measured))
                 night_roundness = [frame.roundness for frame in measured if frame.roundness is not None]
-                if len(night_roundness) >= MINIMUM_FRAMES_PER_NIGHT:
+                if len(night_roundness) >= resolve_parameter(MINIMUM_FRAMES_PER_NIGHT).value:
                     roundnesses.append(statistics.median(night_roundness))
         captures, aborted, has_record = night_captures(contexts, night)
         attempts = len(captures) + aborted
-        if has_record and attempts >= MINIMUM_ATTEMPTS_PER_NIGHT:
+        if has_record and attempts >= resolve_parameter(MINIMUM_ATTEMPTS_PER_NIGHT).value:
             abort_fractions.append(aborted / attempts)
     return {
         "night_star_width": widths,

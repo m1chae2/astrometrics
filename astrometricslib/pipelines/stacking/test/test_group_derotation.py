@@ -88,7 +88,7 @@ def test_a_negligible_angle_returns_the_image_unchanged() -> None:
     """An angle under the negligible threshold is not resampled at all."""
     image = _tilted_streak(300, 150.0, 150.0, 3.0)
 
-    rotated = rotate_about_point(image, 150.0, 150.0, NEGLIGIBLE_ROTATION_DEGREES / 2.0)
+    rotated = rotate_about_point(image, 150.0, 150.0, NEGLIGIBLE_ROTATION_DEGREES.default / 2.0)
 
     assert np.array_equal(rotated, image.astype(np.float32))
 

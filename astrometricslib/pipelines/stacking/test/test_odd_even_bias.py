@@ -205,7 +205,7 @@ def test_the_kept_radius_is_inside_the_apertures_clearance() -> None:
         FAINT_SOURCE_CLEARANCE_PX,
     )
 
-    assert KEEP_RADIUS_PX < FAINT_SOURCE_CLEARANCE_PX
+    assert KEEP_RADIUS_PX.default < FAINT_SOURCE_CLEARANCE_PX
 
 
 def test_the_whole_flow_stacks_two_halves_and_the_whole_and_leaves_no_trace(

@@ -248,7 +248,7 @@ def test_adu_scale_noisy_spectrum_gives_few_candidates_including_the_true_dips(s
     dips = SpectroscopyCalibrationTuner._detect_absorption_dips(smoothed)
     centers = SpectroscopyCalibrationTuner._refine_dip_centers(smoothed, dips)
 
-    assert 3 <= len(dips) <= _MAX_DIP_CANDIDATES
+    assert 3 <= len(dips) <= _MAX_DIP_CANDIDATES.default
     assert dips == sorted(dips)
     for true_center in _ADU_DIP_CENTERS:
         assert min(abs(np.array(centers) - true_center)) < 1.0
@@ -284,8 +284,8 @@ def test_candidates_are_capped_to_the_deepest_dips() -> None:
 
     dips = SpectroscopyCalibrationTuner._detect_absorption_dips(smoothed)
 
-    assert len(dips) == _MAX_DIP_CANDIDATES
-    np.testing.assert_allclose(dips, centers[-_MAX_DIP_CANDIDATES:], atol=1.0)
+    assert len(dips) == _MAX_DIP_CANDIDATES.default
+    np.testing.assert_allclose(dips, centers[-_MAX_DIP_CANDIDATES.default :], atol=1.0)
 
 
 @pytest.mark.parametrize("fraction", [0.0, 0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9])

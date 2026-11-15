@@ -1,2 +1,7 @@
 file,name,draft_role,draft_source,draft_equipment,related_entry,note
-astrometricslib/_internal/drivers/calibration_library.py,BAADER_BESSEL_ASI533_TRANSFORM_COEFFICIENTS,automatic: shapes results,fixed,camera; filter or grating,,"Measured transform coefficients for one camera and filter set, used as is"
+astrometricslib/_internal/drivers/calibration_library.py,BAADER_BESSEL_ASI533_TRANSFORM_COEFFICIENTS,measurement,tuned parameter,camera; filter or grating,,"Measured transform coefficients for one camera and filter set, used as is"
+astrometricslib/pipelines/astrometry/post_processing/expected_residual.py,PIXEL_PHASE_RMS_PX_BY_FWHM_PX,judgment,tuned parameter,camera; telescope,,"Table of pairs; the value is a nested tuple, so it is not a TunedParameter yet"
+astrometricslib/pipelines/spectroscopy/post_processing/compare_to_gaia_xp.py,XP_RESOLUTION_FWHM_NODES_ANGSTROM,judgment,hardcoded,,,"Table of pairs; the value is a nested tuple, so it is not a TunedParameter yet"
+astrometricslib/pipelines/stacking/post_processing/exposure_saturation.py,CHECKED_ESTIMATE_RANGE_ROOM_MULTIPLES_BY_CAMERA,judgment,tuned parameter,camera,,"Dict keyed by camera name; the value is a dict, so it is not a TunedParameter yet"
+wayfindinglib/analytics/depth_goal.py,LEVEL_DEPTHS,recommendation,hardcoded,,,"Dict of depth levels; the value is a dict, so it is not a TunedParameter yet"
+wayfindinglib/data_access/site_profile_reader.py,FALLBACK_SITE,measurement,tuned parameter,site,,"Dict of fallback site coordinates; the value is a dict, so it is not a TunedParameter yet"

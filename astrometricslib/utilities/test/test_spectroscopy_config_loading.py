@@ -166,7 +166,7 @@ def test_the_spectrum_start_wavelength_defaults_to_380_nm() -> None:
     """Check the value the tuner used to have hard-coded."""
     config = load("Test Full Camera", FULL_CAMERA_SECTION)
     assert config.extraction_start_wavelength_nm == pytest.approx(380.0)
-    assert DEFAULT_EXTRACTION_START_WAVELENGTH_NM == pytest.approx(380.0)
+    assert DEFAULT_EXTRACTION_START_WAVELENGTH_NM.default == pytest.approx(380.0)
 
 
 def test_the_spectrum_start_wavelength_can_be_set_for_one_camera() -> None:

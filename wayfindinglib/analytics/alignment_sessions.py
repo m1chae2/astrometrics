@@ -33,6 +33,13 @@ from __future__ import annotations
 import itertools
 import math
 
+from astrometricslib.parameters import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.models.session.telemetry import (
     AlignmentAttempt,
     AlignmentTargetSession,
@@ -41,19 +48,69 @@ from wayfindinglib.models.session.telemetry import (
 
 __all__ = ["group_alignment_attempts", "mean_position_deg", "pooled_jitter_arcsec"]
 
-SAME_TARGET_RADIUS_DEG = 0.5
+SAME_TARGET_RADIUS_DEG = TunedParameter(
+    name="wayfinding.same_target_radius_deg",
+    default=0.5,
+    unit="deg",
+    description="An unnamed solve within this distance of a group's first solve joins it.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D123",
+    pending_conversion=True,
+)
 """An unnamed solve within this distance of a group's first solve joins it."""
 
-RUN_GAP_SECONDS = 7200.0
+RUN_GAP_SECONDS = TunedParameter(
+    name="wayfinding.run_gap_seconds",
+    default=7200.0,
+    unit="s",
+    description="A gap longer than this (two hours) between solves starts a new run.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D123",
+    pending_conversion=True,
+)
 """A gap longer than this (two hours) between solves starts a new run."""
 
-SLEW_ERROR_ARCSEC = 120.0
+SLEW_ERROR_ARCSEC = TunedParameter(
+    name="wayfinding.slew_error_arcsec",
+    default=120.0,
+    unit="arcsec",
+    description="A solve further off than this is a slew, not tracking.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D123",
+    pending_conversion=True,
+)
 """A solve further off than this is a slew, not tracking."""
 
-ASSUMED_CADENCE_SECONDS = 5.0
+ASSUMED_CADENCE_SECONDS = TunedParameter(
+    name="wayfinding.assumed_cadence_seconds",
+    default=5.0,
+    unit="s",
+    description="Spacing assumed between solves that carry no time.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D123",
+    pending_conversion=True,
+)
 """Spacing assumed between solves that carry no time."""
 
-MINIMUM_DRIFT_SPAN_SECONDS = 10.0
+MINIMUM_DRIFT_SPAN_SECONDS = TunedParameter(
+    name="wayfinding.minimum_drift_span_seconds",
+    default=10.0,
+    unit="s",
+    description="A drift rate is fitted only over more time than this.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="WAY-D123",
+    pending_conversion=True,
+)
 """A drift rate is fitted only over more time than this."""
 
 
@@ -168,7 +225,7 @@ def _group_by_target(attempts: list[AlignmentAttempt]) -> list[list[AlignmentAtt
         key = (attempt.target_name or "").strip()
         if not key:
             ra, dec = attempt.ra % 360.0, attempt.dec
-            nearest, nearest_distance = None, SAME_TARGET_RADIUS_DEG
+            nearest, nearest_distance = None, resolve_parameter(SAME_TARGET_RADIUS_DEG).value
             for existing_key, group in groups.items():
                 distance = _separation_deg(ra, dec, group[0].ra % 360.0, group[0].dec)
                 if distance < nearest_distance:
@@ -194,7 +251,11 @@ def _split_runs(attempts: list[AlignmentAttempt]) -> list[list[AlignmentAttempt]
     runs = [[attempts[0]]]
     for previous, current in itertools.pairwise(attempts):
         gap = (current.timestamp or 0.0) - (previous.timestamp or 0.0)
-        if previous.timestamp is not None and current.timestamp is not None and gap > RUN_GAP_SECONDS:
+        if (
+            previous.timestamp is not None
+            and current.timestamp is not None
+            and gap > resolve_parameter(RUN_GAP_SECONDS).value
+        ):
             runs.append([current])
         else:
             runs[-1].append(current)
@@ -222,7 +283,9 @@ def _jitter(runs: list[list[AlignmentAttempt]]) -> tuple[float, float, float]:
         if len(run) < 2:
             continue
         start, end = run[0].timestamp or 0.0, run[-1].timestamp or 0.0
-        elapsed += end - start if end >= start else (len(run) - 1) * ASSUMED_CADENCE_SECONDS
+        elapsed += (
+            end - start if end >= start else (len(run) - 1) * resolve_parameter(ASSUMED_CADENCE_SECONDS).value
+        )
         settled = run[1:] if len(run) >= 3 else run
         count = len(settled)
         mean_ra = sum(a.delta_ra_arcsec or 0.0 for a in settled) / count
@@ -250,7 +313,7 @@ def _drift(points: list[AlignmentTrackPoint], elapsed_seconds: float) -> tuple[f
     drift_ra, drift_dec : `float`
         The slopes in arcseconds per minute, or 0 when they cannot be fitted.
     """
-    if len(points) < 2 or elapsed_seconds <= MINIMUM_DRIFT_SPAN_SECONDS:
+    if len(points) < 2 or elapsed_seconds <= resolve_parameter(MINIMUM_DRIFT_SPAN_SECONDS).value:
         return 0.0, 0.0
     count = len(points)
     minutes = [p.elapsed_seconds / 60.0 for p in points]
@@ -288,16 +351,22 @@ def _summarize(group: list[AlignmentAttempt], index: int) -> AlignmentTargetSess
     fallback_name = f"Target Session #{index + 1}" if len(group) > 1 else f"Sync #{index + 1}"
     mean_ra, mean_dec = mean_position_deg([(a.ra, a.dec) for a in group])
 
-    tracking = [a for a in group if a.status != "warning" and _total_error(a) <= SLEW_ERROR_ARCSEC]
+    tracking = [
+        a
+        for a in group
+        if a.status != "warning" and _total_error(a) <= resolve_parameter(SLEW_ERROR_ARCSEC).value
+    ]
     elapsed, rms_ra, rms_dec = _jitter(_split_runs(tracking or group))
     if elapsed <= 0:
-        elapsed = (len(group) - 1) * ASSUMED_CADENCE_SECONDS
+        elapsed = (len(group) - 1) * resolve_parameter(ASSUMED_CADENCE_SECONDS).value
 
     t0 = first.timestamp or 0.0
     points = []
     for position, attempt in enumerate(group):
         timestamp = (
-            attempt.timestamp if attempt.timestamp is not None else t0 + position * ASSUMED_CADENCE_SECONDS
+            attempt.timestamp
+            if attempt.timestamp is not None
+            else t0 + position * resolve_parameter(ASSUMED_CADENCE_SECONDS).value
         )
         points.append(
             AlignmentTrackPoint(

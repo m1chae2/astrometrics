@@ -35,6 +35,13 @@ from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib.exceptions import AstrometricsError
+from astrometricslib.parameters import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from astrometricslib.reports import observing_night_id
 from wayfindinglib.drivers.ekos.analyze_log_parser import parse_ekos_analyze_log
 from wayfindinglib.drivers.phd2.guide_log_parser import parse_guide_log_file
@@ -48,7 +55,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-GUIDE_SCALE_AGREEMENT_FRACTION = 0.02
+GUIDE_SCALE_AGREEMENT_FRACTION = TunedParameter(
+    name="wayfinding.guide_scale_agreement_fraction",
+    default=0.02,
+    unit="fraction",
+    description="Two guide plate scales agree if they differ by no more than this fraction.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D141",
+)
 """Two guide plate scales agree if they differ by no more than this fraction.
 
 The scale in a log is rounded to two decimals (6.39), and the configured
@@ -57,7 +73,16 @@ even when everything is right. 2 percent is well above that rounding (0.2
 percent at 6.39) and well below a real change of optics.
 """
 
-SESSION_TIME_MARGIN_SECONDS = 1800.0
+SESSION_TIME_MARGIN_SECONDS = TunedParameter(
+    name="wayfinding.session_time_margin_seconds",
+    default=1800.0,
+    unit="seconds",
+    description="How far outside a session's own time span a log or frame still counts.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D141",
+)
 """How far outside a session's own time span a log or frame still counts.
 
 Guiding sometimes starts a few minutes before the first entry of the
@@ -197,8 +222,9 @@ def attribute_session_equipment(
         be determined is left `None` and shows as ``unknown`` in the
         fingerprint, so such a session is never pooled with a known setup.
     """
-    window_start = context.started_at - SESSION_TIME_MARGIN_SECONDS
-    window_end = context.ended_at + SESSION_TIME_MARGIN_SECONDS
+    session_time_margin_seconds = resolve_parameter(SESSION_TIME_MARGIN_SECONDS).value
+    window_start = context.started_at - session_time_margin_seconds
+    window_end = context.ended_at + session_time_margin_seconds
 
     guide_optics: collections.Counter[tuple[float, float]] = collections.Counter()
     for section in guide_sections:
@@ -227,7 +253,7 @@ def attribute_session_equipment(
             abs(guide_pixel_scale - configured_guide_pixel_scale_arcsec_per_px)
             / configured_guide_pixel_scale_arcsec_per_px
         )
-        matches_configuration = relative_difference <= GUIDE_SCALE_AGREEMENT_FRACTION
+        matches_configuration = relative_difference <= resolve_parameter(GUIDE_SCALE_AGREEMENT_FRACTION).value
 
     return SessionEquipmentAttribution(
         guide_focal_length_mm=guide_focal_length_mm,

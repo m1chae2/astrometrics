@@ -24,8 +24,15 @@ from astrometricslib._internal.drivers.catalog_access import POSITION_ONLY_STAR_
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import AstrometricsError
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import Target
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.photometry.pre_processing.observation_times import (
     TIME_BASIS_BJD_TDB_GEOCENTRIC,
 )
@@ -43,7 +50,19 @@ logger = logging.getLogger(__name__)
 # the spectral analysis follows (`MAXIMUM_TRACKED_STARS_PER_FRAME`). The
 # brightest stars are chosen because their light curves are the least noisy.
 # Any other star can still be searched from the Astronomy Manager.
-MAXIMUM_BRIGHTEST_STARS_FOR_PERIOD_SEARCH = 10
+MAXIMUM_BRIGHTEST_STARS_FOR_PERIOD_SEARCH = TunedParameter(
+    name="photometry.maximum_brightest_stars_for_period_search",
+    default=10,
+    unit="stars",
+    description=(
+        "How many of a target's brightest stars get a period search automatically, besides the "
+        "target's own star."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="PHO-D20",
+)
 
 
 def _field_position_deg(target: Target | None, identify_result: Any | None) -> tuple[float, float] | None:
@@ -766,7 +785,7 @@ def select_period_search_stars(
     stellar_objects: list[StellarObject],
     center_ra: float | None,
     center_dec: float | None,
-    limit: int = MAXIMUM_BRIGHTEST_STARS_FOR_PERIOD_SEARCH,
+    limit: int | None = None,
 ) -> list[StellarObject]:
     """Choose the stars that get a period search automatically.
 
@@ -799,6 +818,8 @@ def select_period_search_stars(
         The target's star first (when it can be found), then up to `limit`
         stars from brightest to faintest.
     """
+    if limit is None:
+        limit = resolve(MAXIMUM_BRIGHTEST_STARS_FOR_PERIOD_SEARCH).value
     searchable = [star for star in stellar_objects if star.can_run_period_search]
     target_star = find_target_star(searchable, center_ra, center_dec)
 
@@ -929,7 +950,7 @@ def search_periods_and_save(
     stellar_objects: list[StellarObject],
     target: Target,
     catalog_access: Any,
-    limit: int = MAXIMUM_BRIGHTEST_STARS_FOR_PERIOD_SEARCH,
+    limit: int | None = None,
 ) -> int:
     """Search the main and brightest stars for repeating patterns, and save.
 
@@ -953,6 +974,8 @@ def search_periods_and_save(
     searched_count : `int`
         How many stars had a search result saved.
     """
+    if limit is None:
+        limit = resolve(MAXIMUM_BRIGHTEST_STARS_FOR_PERIOD_SEARCH).value
     from astrometricslib.pipelines.photometry.processing.variability_analyzer import VariabilityAnalyzer
 
     center_ra, center_dec = resolve_target_center_hint(target)

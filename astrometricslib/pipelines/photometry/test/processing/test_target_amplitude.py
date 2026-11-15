@@ -56,7 +56,7 @@ def test_a_light_curve_covering_part_of_the_cycle_gives_no_amplitude() -> None:
     flux = 10.0 ** (-0.4 * 0.2 * np.sin(2 * np.pi * time_days / period))
     result = folded_amplitude(time_days, flux, period)
     assert result.amplitude_mag is None
-    assert result.filled_fraction < MINIMUM_FILLED_BIN_FRACTION
+    assert result.filled_fraction < MINIMUM_FILLED_BIN_FRACTION.default
     assert "phase bins" in result.reason
 
 
@@ -86,5 +86,5 @@ def test_magnitudes_are_relative_to_the_median_and_skip_non_positive_flux() -> N
 
 def test_the_bin_settings_are_the_documented_ones() -> None:
     """Ten bins, eight needed: the values the metric declarations quote."""
-    assert PHASE_BIN_COUNT == 10
-    assert MINIMUM_FILLED_BIN_FRACTION == pytest.approx(0.8)
+    assert PHASE_BIN_COUNT.default == 10
+    assert MINIMUM_FILLED_BIN_FRACTION.default == pytest.approx(0.8)

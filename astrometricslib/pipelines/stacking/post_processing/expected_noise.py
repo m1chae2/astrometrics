@@ -120,6 +120,7 @@ from photutils.aperture import CircularAnnulus, CircularAperture
 
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data
 from astrometricslib.foundation.constants import FULL_SCALE_COUNTS
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.camera_profile import ProvenancedValue, ProvenanceKind
 from astrometricslib.models.quality.measurement import MeasurementStatus, QualityMeasurement
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
@@ -156,7 +157,7 @@ __all__ = [
 # is 411 ADU, and the frames' own sky (the sky rate times the exposure divided
 # by the gain, bias level taken off) is of the same size (see register entry
 # STK-38). Frames stored as floating-point numbers would break the scale.
-STACK_UNITS_PER_ADU = 1.0 / FULL_SCALE_COUNTS
+STACK_UNITS_PER_ADU = 1.0 / resolve(FULL_SCALE_COUNTS).value
 
 # The median of n independent pixels has a variance of this many times the
 # pixel variance divided by n (for a bell curve; the standard error factor
@@ -318,9 +319,9 @@ class ExpectedNoiseOutcome:
 
 @cache
 def effective_aperture_area_px(
-    radius_px: float = APERTURE_RADIUS_PX,
-    ring_inner_px: float = RING_INNER_PX,
-    ring_outer_px: float = RING_OUTER_PX,
+    radius_px: float | None = None,
+    ring_inner_px: float | None = None,
+    ring_outer_px: float | None = None,
 ) -> float:
     """Count the pixels a pixel's variance is multiplied by in an aperture sum.
 
@@ -336,6 +337,7 @@ def effective_aperture_area_px(
         The aperture radius. The noise aperture's by default.
     ring_inner_px, ring_outer_px : `float`, optional
         The sky ring's radii.
+        If `None`, the values of RING_INNER_PX and RING_OUTER_PX are used.
 
     Returns
     -------
@@ -344,6 +346,12 @@ def effective_aperture_area_px(
         pixel. About 50 for the sum itself and 13 more for the ring with the
         default radii.
     """
+    if radius_px is None:
+        radius_px = resolve(APERTURE_RADIUS_PX).value
+    if ring_inner_px is None:
+        ring_inner_px = resolve(RING_INNER_PX).value
+    if ring_outer_px is None:
+        ring_outer_px = resolve(RING_OUTER_PX).value
     size = math.ceil(ring_outer_px) * 2 + 3
     centre = size // 2
     totals = []

@@ -7,6 +7,7 @@ plain-language sentence. The limits live in `stack_quality` and
 `shared/quality`.
 """
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.gate_result import (
     GateResult,
     failed_gate,
@@ -60,6 +61,10 @@ def output_quality_gates(
     gates : `list` [`GateResult`]
         Six gates, in a fixed order.
     """
+    default_rejected_fraction_flag_threshold = resolve(DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD).value
+    default_saturation_flag_threshold = resolve(DEFAULT_SATURATION_FLAG_THRESHOLD).value
+    default_negative_pixel_flag_percent = resolve(DEFAULT_NEGATIVE_PIXEL_FLAG_PERCENT).value
+    default_fwhm_degradation_ratio = resolve(DEFAULT_FWHM_DEGRADATION_RATIO).value
     gates: list[GateResult] = []
     rejected_source = "validated: normal sessions stay under 10%"
     if metrics.rejected_pixel_fraction is None:
@@ -75,7 +80,7 @@ def output_quality_gates(
                 REJECTED_GATE_NAME,
                 f"rejected pixel fraction {metrics.rejected_pixel_fraction:.1%} at or above threshold",
                 metrics.rejected_pixel_fraction,
-                DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD,
+                default_rejected_fraction_flag_threshold,
                 rejected_source,
             )
         )
@@ -84,7 +89,7 @@ def output_quality_gates(
             passed_gate(
                 REJECTED_GATE_NAME,
                 metrics.rejected_pixel_fraction,
-                DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD,
+                default_rejected_fraction_flag_threshold,
                 rejected_source,
             )
         )
@@ -121,13 +126,13 @@ def output_quality_gates(
                     f"stacked FWHM {metrics.stacked_fwhm_px:.2f}px degraded vs the "
                     f"{metrics.expected_stack_fwhm_px:.2f}px its input frames predict",
                     ratio,
-                    DEFAULT_FWHM_DEGRADATION_RATIO,
+                    default_fwhm_degradation_ratio,
                     sharpness_source,
                 )
             )
         else:
             gates.append(
-                passed_gate(SHARPNESS_GATE_NAME, ratio, DEFAULT_FWHM_DEGRADATION_RATIO, sharpness_source)
+                passed_gate(SHARPNESS_GATE_NAME, ratio, default_fwhm_degradation_ratio, sharpness_source)
             )
 
     registration_source = "zero-order star tracking per frame"
@@ -170,7 +175,7 @@ def output_quality_gates(
                 SATURATION_GATE_NAME,
                 f"saturated pixel fraction {metrics.saturated_pixel_fraction:.2%} at or above threshold",
                 metrics.saturated_pixel_fraction,
-                DEFAULT_SATURATION_FLAG_THRESHOLD,
+                default_saturation_flag_threshold,
                 saturation_source,
             )
         )
@@ -179,7 +184,7 @@ def output_quality_gates(
             passed_gate(
                 SATURATION_GATE_NAME,
                 metrics.saturated_pixel_fraction,
-                DEFAULT_SATURATION_FLAG_THRESHOLD,
+                default_saturation_flag_threshold,
                 saturation_source,
             )
         )
@@ -225,7 +230,7 @@ def output_quality_gates(
                 f"Siril reported up to {metrics.negative_pixel_max_percent}% negative pixels after "
                 "dark subtraction: calibration frames are probably incorrect",
                 float(metrics.negative_pixel_max_percent),
-                float(DEFAULT_NEGATIVE_PIXEL_FLAG_PERCENT),
+                float(default_negative_pixel_flag_percent),
                 negative_source,
             )
         )
@@ -236,7 +241,7 @@ def output_quality_gates(
                 float(metrics.negative_pixel_max_percent)
                 if metrics.negative_pixel_max_percent is not None
                 else None,
-                float(DEFAULT_NEGATIVE_PIXEL_FLAG_PERCENT),
+                float(default_negative_pixel_flag_percent),
                 negative_source,
                 "Siril printed no negative-pixel warning"
                 if metrics.negative_pixel_max_percent is None

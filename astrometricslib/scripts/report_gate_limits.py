@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from astrometricslib import Astrometrics
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.pipelines.shared.quality.saturation import DEFAULT_SATURATION_FLAG_THRESHOLD
 from astrometricslib.pipelines.stacking.post_processing.stack_quality import (
     DEFAULT_FWHM_DEGRADATION_RATIO,
@@ -149,7 +150,7 @@ METRICS: tuple[Metric, ...] = (
         "stacking",
         "rejected pixel fraction",
         _stack("rejectedPixelFraction"),
-        DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD,
+        resolve(DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD).value,
     ),
     Metric(
         "stacking",
@@ -158,19 +159,25 @@ METRICS: tuple[Metric, ...] = (
             dig(t, "stacking", "qualitySummary", "stackingMetrics", "stackedFwhmPx"),
             dig(t, "stacking", "qualitySummary", "stackingMetrics", "expectedStackFwhmPx"),
         ),
-        DEFAULT_FWHM_DEGRADATION_RATIO,
+        resolve(DEFAULT_FWHM_DEGRADATION_RATIO).value,
     ),
     Metric(
         "stacking",
         "saturated pixel fraction",
         _stack("saturatedPixelFraction"),
-        DEFAULT_SATURATION_FLAG_THRESHOLD,
+        resolve(DEFAULT_SATURATION_FLAG_THRESHOLD).value,
     ),
     Metric(
-        "stacking", "zero pixel fraction", _stack("zeroPixelFraction"), DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD
+        "stacking",
+        "zero pixel fraction",
+        _stack("zeroPixelFraction"),
+        resolve(DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD).value,
     ),
     Metric(
-        "stacking", "master flat noise fraction", _stack("flatNoiseFraction"), MAXIMUM_FLAT_NOISE_FRACTION
+        "stacking",
+        "master flat noise fraction",
+        _stack("flatNoiseFraction"),
+        resolve(MAXIMUM_FLAT_NOISE_FRACTION).value,
     ),
     Metric(
         "stacking",
@@ -233,7 +240,7 @@ METRICS: tuple[Metric, ...] = (
         "spectroscopy",
         "zero-order saturated fraction",
         _quality("spectroscopy", "spectroscopyMetrics", "zeroOrderSaturatedPixelFraction"),
-        DEFAULT_SATURATION_FLAG_THRESHOLD,
+        resolve(DEFAULT_SATURATION_FLAG_THRESHOLD).value,
     ),
 )
 

@@ -60,7 +60,7 @@ def test_a_noise_only_spectrum_has_no_signal() -> None:
     score = estimate_spectrum_signal_to_noise(WAVELENGTHS, _noise_only_spectrum(), 45.0)
 
     assert score is not None
-    assert score < MINIMUM_SPECTRUM_SIGNAL_TO_NOISE
+    assert score < MINIMUM_SPECTRUM_SIGNAL_TO_NOISE.default
 
 
 def test_a_real_continuum_scores_above_the_gate() -> None:
@@ -68,7 +68,7 @@ def test_a_real_continuum_scores_above_the_gate() -> None:
     score = estimate_spectrum_signal_to_noise(WAVELENGTHS, _star_spectrum(6.0), 45.0)
 
     assert score is not None
-    assert score > 2 * MINIMUM_SPECTRUM_SIGNAL_TO_NOISE
+    assert score > 2 * MINIMUM_SPECTRUM_SIGNAL_TO_NOISE.default
 
 
 def test_a_smooth_well_measured_spectrum_has_a_finite_score() -> None:
@@ -129,7 +129,7 @@ def test_the_analysis_declines_a_spectrum_that_is_only_noise() -> None:
     assert "no measurable spectrum" in str(analysis.classification["reason"])
     assert analysis.features == []
     assert analysis.signal_to_noise is not None
-    assert analysis.signal_to_noise < MINIMUM_SPECTRUM_SIGNAL_TO_NOISE
+    assert analysis.signal_to_noise < MINIMUM_SPECTRUM_SIGNAL_TO_NOISE.default
 
 
 def test_the_analysis_still_runs_on_a_real_spectrum() -> None:
@@ -142,7 +142,7 @@ def test_the_analysis_still_runs_on_a_real_spectrum() -> None:
     assert "no measurable spectrum" not in str(analysis.classification.get("reason"))
     assert analysis.features
     assert analysis.signal_to_noise is not None
-    assert analysis.signal_to_noise >= MINIMUM_SPECTRUM_SIGNAL_TO_NOISE
+    assert analysis.signal_to_noise >= MINIMUM_SPECTRUM_SIGNAL_TO_NOISE.default
 
 
 def _spectrum_with_a_dip_in_noise() -> np.ndarray:
@@ -179,14 +179,15 @@ def test_a_feature_measured_too_noisily_is_capped_at_inconclusive() -> None:
     """A dip whose depth is uncertain to 20% cannot be called possible."""
     entry = _mg_b(_spectrum_with_a_dip_in_noise())
 
-    assert float(entry["depth_uncertainty"]) > MAXIMUM_UNCERTAINTY_FOR_A_VERDICT
+    assert float(entry["depth_uncertainty"]) > MAXIMUM_UNCERTAINTY_FOR_A_VERDICT.default
     assert entry["limited_by_noise"] is True
     assert entry["verdict"] == VERDICT_INCONCLUSIVE
 
 
 def test_the_cap_is_what_holds_the_verdict_down(monkeypatch: pytest.MonkeyPatch) -> None:
     """With the cap lifted, the same dip is called possible or better."""
-    monkeypatch.setattr(feature_detector, "MAXIMUM_UNCERTAINTY_FOR_A_VERDICT", 10.0)
+    lifted = MAXIMUM_UNCERTAINTY_FOR_A_VERDICT.model_copy(update={"default": 10.0})
+    monkeypatch.setattr(feature_detector, "MAXIMUM_UNCERTAINTY_FOR_A_VERDICT", lifted)
 
     entry = _mg_b(_spectrum_with_a_dip_in_noise())
 
@@ -201,7 +202,7 @@ def test_a_precisely_measured_feature_is_not_capped() -> None:
 
     entry = _mg_b(spectrum)
 
-    assert float(entry["depth_uncertainty"]) < MAXIMUM_UNCERTAINTY_FOR_A_VERDICT
+    assert float(entry["depth_uncertainty"]) < MAXIMUM_UNCERTAINTY_FOR_A_VERDICT.default
     assert entry["limited_by_noise"] is False
     assert entry["verdict"] == "detected"
 
@@ -221,7 +222,9 @@ def _faint_but_real_spectrum() -> tuple[np.ndarray, float]:
     intensity = intensity * (1.0 - 0.7 * np.exp(-0.5 * ((WAVELENGTHS - 5175.0) / 25.0) ** 2))
     measured = estimate_spectrum_signal_to_noise(WAVELENGTHS, intensity, 45.0)
     assert measured is not None
-    assert MINIMUM_SPECTRUM_SIGNAL_TO_NOISE < measured < MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE
+    assert (
+        MINIMUM_SPECTRUM_SIGNAL_TO_NOISE.default < measured < MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE.default
+    )
     return intensity, measured
 
 
@@ -251,7 +254,9 @@ def test_a_strong_emission_line_between_the_floors_is_reported_without_features_
         intensity = intensity + 3e-3 * np.exp(-0.5 * ((WAVELENGTHS - centre) / 20.0) ** 2)
     measured = estimate_spectrum_signal_to_noise(WAVELENGTHS, intensity, 45.0)
     assert measured is not None
-    assert MINIMUM_SPECTRUM_SIGNAL_TO_NOISE < measured < MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE
+    assert (
+        MINIMUM_SPECTRUM_SIGNAL_TO_NOISE.default < measured < MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE.default
+    )
 
     analysis = analyze_spectrum(
         WAVELENGTHS, intensity, apply_instrument_response(WAVELENGTHS, intensity, RESPONSE)
@@ -278,7 +283,7 @@ def test_the_continuum_limit_keeps_its_meaning() -> None:
     analysis = analyze_spectrum(WAVELENGTHS, _noise_only_spectrum(), None)
 
     assert "no measurable spectrum" in str(analysis.classification["reason"])
-    assert MINIMUM_SPECTRUM_SIGNAL_TO_NOISE < MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE
+    assert MINIMUM_SPECTRUM_SIGNAL_TO_NOISE.default < MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE.default
 
 
 def test_an_extended_target_below_the_feature_limit_still_gets_the_emission_test() -> None:
@@ -298,7 +303,7 @@ def test_a_spectrum_above_the_feature_limit_is_analyzed_as_before() -> None:
     intensity = _star_spectrum(40.0)
     measured = estimate_spectrum_signal_to_noise(WAVELENGTHS, intensity, 45.0)
     assert measured is not None
-    assert measured > MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE
+    assert measured > MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE.default
 
     analysis = analyze_spectrum(
         WAVELENGTHS, intensity, apply_instrument_response(WAVELENGTHS, intensity, RESPONSE)

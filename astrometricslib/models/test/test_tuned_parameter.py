@@ -199,3 +199,48 @@ def test_parameter_is_frozen() -> None:
     parameter = _build()
     with pytest.raises(ValidationError):
         parameter.default = 1.0  # type: ignore[misc]
+
+
+def test_pending_conversion_is_refused_for_a_hardcoded_value() -> None:
+    """A hardcoded value is already final, so it cannot be pending."""
+    with pytest.raises(ValueError, match="nothing to convert"):
+        TunedParameter(
+            name="stacking.example_pending",
+            default=1.0,
+            unit="px",
+            description="An example.",
+            role=ParameterRole.MEASUREMENT,
+            source=ParameterSource.HARDCODED,
+            kind=HardcodedKind.RELATIVE,
+            pending_conversion=True,
+        )
+
+
+def test_a_pending_tuned_parameter_needs_no_range_yet() -> None:
+    """A value waiting to become tuned is accepted without its range."""
+    parameter = TunedParameter(
+        name="stacking.example_pending_tuned",
+        default=0.8,
+        unit="ratio",
+        description="An example.",
+        role=ParameterRole.EXCLUSION_CRITERIA,
+        source=ParameterSource.TUNED_PARAMETER,
+        equipment=frozenset({EquipmentKind.MOUNT}),
+        pending_conversion=True,
+    )
+    assert parameter.allowed_range is None
+
+
+def test_a_tuned_value_may_depend_on_the_site() -> None:
+    """A value tuned for the observing site is accepted."""
+    parameter = TunedParameter(
+        name="spectroscopy.example_site_extinction",
+        default=0.2,
+        unit="mag per airmass",
+        description="An example.",
+        role=ParameterRole.MEASUREMENT,
+        source=ParameterSource.TUNED_PARAMETER,
+        equipment=frozenset({EquipmentKind.SITE}),
+        pending_conversion=True,
+    )
+    assert EquipmentKind.SITE in parameter.equipment

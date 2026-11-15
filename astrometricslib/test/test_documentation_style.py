@@ -31,6 +31,7 @@ from pathlib import Path
 
 import pytest
 
+from astrometricslib.parameters import TunedParameter
 from astrometricslib.test.test_architecture_doc_claims import _resolve
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -288,6 +289,8 @@ def test_register_values_match_the_code() -> None:
             if not dotted.endswith("." + name):
                 continue
             live = _resolve(dotted)
+            if isinstance(live, TunedParameter):
+                live = live.default
             if not isinstance(live, (int, float)) or isinstance(live, bool):
                 continue
             checked += 1

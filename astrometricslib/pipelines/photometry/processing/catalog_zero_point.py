@@ -82,7 +82,15 @@ import numpy as np
 from astropy.stats import mad_std
 from scipy.stats import theilslopes
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.stellar_source import BRIGHTEST_CATALOG_MAGNITUDE, StellarObject
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.quality.frame_statistics import (
     BOOTSTRAP_RESAMPLE_COUNT,
     BOOTSTRAP_SEED,
@@ -99,27 +107,69 @@ logger = logging.getLogger(__name__)
 # square frame's area, and is about 34 arcminutes across on the 3008 px ASI
 # 533MM field. The real-data check in the register (PHO-15) compares the
 # offsets of the inner and outer stars of one frame.
-CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION = 0.5
+CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION = TunedParameter(
+    name="photometry.central_radius_half_diagonal_fraction",
+    default=0.5,
+    unit="fraction",
+    description=(
+        "How far from the frame center, as a share of the half-diagonal, a star may be and still "
+        "set the zero point."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="PHO-15",
+    pending_conversion=True,
+)
 
 # The fewest stars a session's fixed set, and a frame, needs for a median
 # worth storing. Ten is twice the five that the Moffat width bootstrap in
 # `frame_measurement` needs, because the stars here also scatter from the
 # catalog magnitudes' own errors (a few hundredths of a magnitude for SIMBAD,
 # a few thousandths for Gaia G). A design estimate.
-MINIMUM_STARS_FOR_ZERO_POINT = 10
+MINIMUM_STARS_FOR_ZERO_POINT = TunedParameter(
+    name="photometry.minimum_stars_for_zero_point",
+    default=10,
+    unit="stars",
+    description="Fewest stars a session's fixed set, and a frame, needs for a zero point worth storing.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    register_entry="PHO-15",
+    pending_conversion=True,
+)
 
 # A star joins the session's fixed set when it passes the cuts in at least
 # this share of the session's frames. 80 percent tolerates the share of
 # frames a night loses to passing cloud or a bad exposure (8 of 61 frames,
 # 13 percent, on the M 57 night of PHO-15) and still asks a star to be bright
 # enough to be seen in nearly every frame. A design estimate.
-SESSION_STAR_FRAME_SHARE = 0.8
+SESSION_STAR_FRAME_SHARE = TunedParameter(
+    name="photometry.session_star_frame_share",
+    default=0.8,
+    unit="fraction",
+    description=(
+        "Share of a session's frames in which a star must pass the cuts to join the session's fixed set."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    register_entry="PHO-15",
+    pending_conversion=True,
+)
 
 # The fewest frames a night needs for a spread worth storing by the helper
 # `zero_point_scatter`. Ten frames give a spread whose own error is about a
 # quarter of its value (the standard error of a robust sigma is near
 # 1.2 sigma / sqrt(n)). A design estimate.
-MINIMUM_FRAMES_FOR_SCATTER = 10
+MINIMUM_FRAMES_FOR_SCATTER = TunedParameter(
+    name="photometry.minimum_frames_for_scatter",
+    default=10,
+    unit="frames",
+    description="Fewest frames a night needs for a zero-point spread worth storing.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-16",
+)
 
 # A star is used only when its flux is at least this many times its own
 # 1-sigma error. A faint star's aperture flux is clamped at zero when the sky
@@ -129,7 +179,18 @@ MINIMUM_FRAMES_FOR_SCATTER = 10
 # `pre_processing/detector_noise.py`); when no gain is known the pipeline
 # assumes 1 electron per ADU and the zero point rows are marked assumed. A
 # design estimate.
-MINIMUM_SIGNAL_TO_NOISE = 20.0
+MINIMUM_SIGNAL_TO_NOISE = TunedParameter(
+    name="photometry.minimum_signal_to_noise",
+    default=20.0,
+    unit="ratio",
+    description=(
+        "Least ratio of a star's flux to its own 1-sigma error for the star to be used in the zero point."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    register_entry="PHO-15",
+    pending_conversion=True,
+)
 
 # The color slope needs this many stars with a B-V color, after the cuts
 # above, and a spread of colors at least this wide (95th minus 5th percentile,
@@ -137,8 +198,26 @@ MINIMUM_SIGNAL_TO_NOISE = 20.0
 # The photometry fields hold B-V from about 0.0 to 1.6 for G, K and M stars
 # (the SIMBAD fields M 57, M 27 and M 13 hold 220, 363 and 296 such stars).
 # A design estimate.
-MINIMUM_STARS_FOR_COLOR_SLOPE = 20
-MINIMUM_COLOR_RANGE_MAG = 0.4
+MINIMUM_STARS_FOR_COLOR_SLOPE = TunedParameter(
+    name="photometry.minimum_stars_for_color_slope",
+    default=20,
+    unit="stars",
+    description="Fewest stars with a B-V color needed to fit the color slope.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-D25",
+)
+MINIMUM_COLOR_RANGE_MAG = TunedParameter(
+    name="photometry.minimum_color_range_mag",
+    default=0.4,
+    unit="mag",
+    description="Least spread of colors (95th minus 5th percentile) needed to fit the color slope.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-D25",
+)
 
 # For normally distributed data the standard error of a median is this many
 # times the standard deviation over the square root of the sample size
@@ -366,9 +445,10 @@ def central_candidates_by_band(
     summary : `str`
         How many stars each filter left, for a reason text.
     """
+    central_radius_half_diagonal_fraction = resolve(CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION).value
     height, width = frame_shape
     center_x, center_y = (width - 1) / 2.0, (height - 1) / 2.0
-    radius_px = CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION * math.hypot(width, height) / 2.0
+    radius_px = central_radius_half_diagonal_fraction * math.hypot(width, height) / 2.0
     members: dict[CatalogBand, list[int]] = {band: [] for band in CatalogBand}
     with_magnitude = with_band = unambiguous = 0
     for index, star in enumerate(stars):
@@ -429,6 +509,7 @@ def usable_star_mask(
     usable : `numpy.ndarray`
         A boolean array of the same shape.
     """
+    minimum_signal_to_noise = resolve(MINIMUM_SIGNAL_TO_NOISE).value
     with np.errstate(invalid="ignore", divide="ignore"):
         return (
             np.isfinite(flux_rates)
@@ -436,7 +517,7 @@ def usable_star_mask(
             & ~is_saturated
             & np.isfinite(flux_errors)
             & (flux_errors > 0.0)
-            & (flux_rates >= MINIMUM_SIGNAL_TO_NOISE * flux_errors)
+            & (flux_rates >= minimum_signal_to_noise * flux_errors)
             & np.isfinite(peak_adu)
             & (peak_adu <= linearity_limit_adu)
         )
@@ -456,9 +537,10 @@ def fixed_star_rows(usable: np.ndarray) -> np.ndarray:
         The rows whose share of passing frames is at least
         `SESSION_STAR_FRAME_SHARE`.
     """
+    session_star_frame_share = resolve(SESSION_STAR_FRAME_SHARE).value
     if usable.shape[1] == 0:
         return np.empty(0, dtype=int)
-    return np.flatnonzero(usable.mean(axis=1) >= SESSION_STAR_FRAME_SHARE)
+    return np.flatnonzero(usable.mean(axis=1) >= session_star_frame_share)
 
 
 def standard_error_of_median(values: np.ndarray) -> float:
@@ -513,6 +595,8 @@ def differential_frame_estimates(
     estimates : `list` [`FrameZeroPointEstimate`]
         One per frame (column), each with a value or the reason it has none.
     """
+    minimum_stars_for_zero_point = resolve(MINIMUM_STARS_FOR_ZERO_POINT).value
+    minimum_signal_to_noise = resolve(MINIMUM_SIGNAL_TO_NOISE).value
     star_count, frame_count = flux_rates.shape
     with np.errstate(invalid="ignore", divide="ignore"):
         offsets = np.where(
@@ -528,12 +612,12 @@ def differential_frame_estimates(
     for column in range(frame_count):
         passed = usable[:, column]
         passed_count = int(passed.sum())
-        if passed_count < MINIMUM_STARS_FOR_ZERO_POINT:
+        if passed_count < minimum_stars_for_zero_point:
             reason = (
                 f"only {passed_count} of the {star_count} stars of the session's fixed set passed the cuts "
                 f"in this frame (positive flux, not saturated, below the linearity limit, signal-to-noise "
-                f"of at least {MINIMUM_SIGNAL_TO_NOISE:g}); at least "
-                f"{MINIMUM_STARS_FOR_ZERO_POINT} are needed"
+                f"of at least {minimum_signal_to_noise:g}); at least "
+                f"{minimum_stars_for_zero_point} are needed"
             )
             estimates.append(FrameZeroPointEstimate(None, None, passed_count, reason, None, reason))
             continue
@@ -572,20 +656,22 @@ def _color_slope(offsets: np.ndarray, colors: np.ndarray, band: CatalogBand) -> 
     reason : `str`
         Why there is no slope, or an empty string.
     """
+    minimum_stars_for_color_slope = resolve(MINIMUM_STARS_FOR_COLOR_SLOPE).value
+    minimum_color_range_mag = resolve(MINIMUM_COLOR_RANGE_MAG).value
     if band is not CatalogBand.SIMBAD_V:
         return None, "color term not fitted: Gaia G stars carry no B-V color in this library"
     known = np.isfinite(colors)
     known_count = int(known.sum())
-    if known_count < MINIMUM_STARS_FOR_COLOR_SLOPE:
+    if known_count < minimum_stars_for_color_slope:
         return None, (
             f"color term not fitted: only {known_count} used stars have a B-V color "
-            f"(at least {MINIMUM_STARS_FOR_COLOR_SLOPE} are needed)"
+            f"(at least {minimum_stars_for_color_slope} are needed)"
         )
     spread = float(np.percentile(colors[known], 95) - np.percentile(colors[known], 5))
-    if spread < MINIMUM_COLOR_RANGE_MAG:
+    if spread < minimum_color_range_mag:
         return None, (
             f"color term not fitted: the colors span only {spread:.2f} mag from the 5th to the 95th "
-            f"percentile (at least {MINIMUM_COLOR_RANGE_MAG:g} mag are needed)"
+            f"percentile (at least {minimum_color_range_mag:g} mag are needed)"
         )
     slope = float(theilslopes(offsets[known], colors[known])[0])
     return slope, ""
@@ -683,6 +769,8 @@ def session_zero_points(
         One record per frame, sorted by exposure start. With no usable band,
         each frame's estimate says so.
     """
+    minimum_stars_for_zero_point = resolve(MINIMUM_STARS_FOR_ZERO_POINT).value
+    session_star_frame_share = resolve(SESSION_STAR_FRAME_SHARE).value
     # Every star's light curve holds the same frames in the same order, so the
     # first one that has any names them.
     timestamps = next(
@@ -718,7 +806,7 @@ def session_zero_points(
             usable = usable_star_mask(flux, flux_error, saturated, peak, photometric_linearity_limit_adu)
             rows = fixed_star_rows(usable)
             counts[candidate_band] = int(rows.size)
-            if rows.size >= MINIMUM_STARS_FOR_ZERO_POINT:
+            if rows.size >= minimum_stars_for_zero_point:
                 band = candidate_band
                 star_set_size = int(rows.size)
                 chosen_indices = [indices[row] for row in rows]
@@ -744,7 +832,7 @@ def session_zero_points(
             band_reason = (
                 f"{NO_BAND_REASON_PREFIX}: of the stars in the central region, {counts[CatalogBand.GAIA_G]} "
                 f"Gaia G and {counts[CatalogBand.SIMBAD_V]} SIMBAD V passed the cuts in at least "
-                f"{SESSION_STAR_FRAME_SHARE:.0%} of the frames, and {MINIMUM_STARS_FOR_ZERO_POINT} are "
+                f"{session_star_frame_share:.0%} of the frames, and {minimum_stars_for_zero_point} are "
                 f"needed ({candidate_summary})"
             )
     if band is None:
@@ -776,13 +864,14 @@ def zero_point_scatter(zero_points_mag: Sequence[float]) -> ZeroPointScatter:
         The spread, its error and the frame count, or the reason there is no
         spread.
     """
+    minimum_frames_for_scatter = resolve(MINIMUM_FRAMES_FOR_SCATTER).value
     values = np.array([value for value in zero_points_mag if math.isfinite(value)], dtype=float)
-    if values.size < MINIMUM_FRAMES_FOR_SCATTER:
+    if values.size < minimum_frames_for_scatter:
         return ZeroPointScatter(
             None,
             None,
             int(values.size),
-            f"only {values.size} frames have a zero point (at least {MINIMUM_FRAMES_FOR_SCATTER} are needed)",
+            f"only {values.size} frames have a zero point (at least {minimum_frames_for_scatter} are needed)",
         )
     spread = float(mad_std(values))
     generator = np.random.default_rng(BOOTSTRAP_SEED)

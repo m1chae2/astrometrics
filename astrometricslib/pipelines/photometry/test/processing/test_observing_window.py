@@ -70,7 +70,7 @@ def test_nightly_sampling_puts_the_strongest_peak_at_one_cycle_per_day() -> None
     times = _nights([float(day) for day in range(8)])
     peaks, reason = strongest_window_peaks(times)
     assert reason == ""
-    assert len(peaks) == ALIAS_PEAK_COUNT
+    assert len(peaks) == ALIAS_PEAK_COUNT.default
     assert peaks[0].frequency_per_day == pytest.approx(1.0, abs=0.03)
     assert peaks[0].power_fraction > 0.9
     powers = [peak.power_fraction for peak in peaks]

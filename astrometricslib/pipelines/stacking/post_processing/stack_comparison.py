@@ -35,7 +35,14 @@ from skimage.registration import phase_cross_correlation
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data
 from astrometricslib.foundation.errors import ProcessingError
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.stack_comparison import StackComparison, StackMeasurements
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
 from astrometricslib.pipelines.stacking.post_processing.aperture_storage import APERTURE_FILE_NAME
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
@@ -50,15 +57,45 @@ logger = logging.getLogger(__name__)
 # The window, in pixels, matched to find how far a stack was trimmed
 # (see `_crop_offset`), and the smallest window worth matching. A star field
 # this size holds hundreds of stars, enough to fix a whole-pixel offset.
-_CROP_MATCH_WINDOW_PIXELS = 1024
-_CROP_MATCH_MINIMUM_PIXELS = 128
+_CROP_MATCH_WINDOW_PIXELS = TunedParameter(
+    name="stacking.crop_match_window_pixels",
+    default=1024,
+    unit="pixels",
+    description="Window matched to find how far a stack was trimmed.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D57",
+    pending_conversion=True,
+)
+_CROP_MATCH_MINIMUM_PIXELS = TunedParameter(
+    name="stacking.crop_match_minimum_pixels",
+    default=128,
+    unit="pixels",
+    description="Smallest window worth matching to find a trim.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D57",
+    pending_conversion=True,
+)
 
 # The flatness is measured on blocks of this many pixels on a side. A star is
 # a few pixels wide and is ignored by the median of such a block, while
 # vignetting and dust shadows (tens to hundreds of pixels) show up. Chosen on
 # the ASI533MM Pro stacks (3008 x 3008): 64 px resolves a vignette across the
 # frame and still averages 4096 pixels per block.
-FLATNESS_BLOCK_PIXELS = 64
+FLATNESS_BLOCK_PIXELS = TunedParameter(
+    name="stacking.flatness_block_pixels",
+    default=64,
+    unit="pixels",
+    description="Side of the blocks on which flatness is measured.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D57",
+    pending_conversion=True,
+)
 
 # A block is left out of the flatness when its median is more than this many
 # robust standard deviations above the median of all blocks. That drops blocks
@@ -67,25 +104,75 @@ FLATNESS_BLOCK_PIXELS = 64
 # corners dark, and dropping them would hide the very pattern the number is
 # meant to show. Checked on the Bubble Nebula and M 27 stacks, where the
 # dropped blocks sit on the nebula and the brightest stars.
-FLATNESS_BLOCK_OUTLIER_SIGMA = 4.0
+FLATNESS_BLOCK_OUTLIER_SIGMA = TunedParameter(
+    name="stacking.flatness_block_outlier_sigma",
+    default=4.0,
+    unit="sigma",
+    description="Robust sigmas above the median of all blocks at which a block is left out of the flatness.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D57",
+    pending_conversion=True,
+)
 
 # Pixels brighter than the sky by more than this many robust standard
 # deviations are treated as stars and left out of the noise estimate.
-NOISE_STAR_SIGMA = 3.0
+NOISE_STAR_SIGMA = TunedParameter(
+    name="stacking.noise_star_sigma",
+    default=3.0,
+    unit="sigma",
+    description="Robust sigmas above the sky at which pixels are treated as stars in the noise estimate.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D57",
+    pending_conversion=True,
+)
 
 # A block of the flatness grid is used only if at least this share of its
 # pixels hold data. The median of a mostly empty block (the ragged edge of a
 # registered stack) reflects the edge, not the sky. A design choice, not tuned.
-MINIMUM_USABLE_BLOCK_SHARE = 0.5
+MINIMUM_USABLE_BLOCK_SHARE = TunedParameter(
+    name="stacking.minimum_usable_block_share",
+    default=0.5,
+    unit="fraction",
+    description="Least share of a block's pixels that must hold data.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D57",
+    pending_conversion=True,
+)
 
 # Fewest usable blocks for a flatness number to mean anything.
-MINIMUM_FLATNESS_BLOCKS = 4
+MINIMUM_FLATNESS_BLOCKS = TunedParameter(
+    name="stacking.minimum_flatness_blocks",
+    default=4,
+    unit="blocks",
+    description="Fewest usable blocks for a flatness number.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D57",
+    pending_conversion=True,
+)
 
 # A change smaller than this fraction is reported as "unchanged". Two
 # measurements of the same stack agree to about this much (the noise
 # estimate repeated on the Bubble Nebula and M 27 stacks differed by under
 # 1%), so a smaller change is not a real one.
-UNCHANGED_FRACTION = 0.02
+UNCHANGED_FRACTION = TunedParameter(
+    name="stacking.unchanged_fraction",
+    default=0.02,
+    unit="fraction",
+    description="Change below which a comparison is reported as unchanged.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D57",
+    pending_conversion=True,
+)
 
 
 def _crop_offset(reference: np.ndarray, combined: np.ndarray) -> tuple[int, int] | None:
@@ -112,8 +199,8 @@ def _crop_offset(reference: np.ndarray, combined: np.ndarray) -> tuple[int, int]
     """
     extra_rows = reference.shape[0] - combined.shape[0]
     extra_columns = reference.shape[1] - combined.shape[1]
-    window = min(_CROP_MATCH_WINDOW_PIXELS, *combined.shape)
-    if extra_rows < 0 or extra_columns < 0 or window < _CROP_MATCH_MINIMUM_PIXELS:
+    window = min(resolve(_CROP_MATCH_WINDOW_PIXELS).value, *combined.shape)
+    if extra_rows < 0 or extra_columns < 0 or window < resolve(_CROP_MATCH_MINIMUM_PIXELS).value:
         return None
     row = (combined.shape[0] - window) // 2
     column = (combined.shape[1] - window) // 2
@@ -258,7 +345,7 @@ def measure_stack_array(data: np.ndarray, path: str = "") -> StackMeasurements:
     if sky_sigma <= 0:
         raise ProcessingError("The stack has no measurable sky.")
 
-    limit = sky + NOISE_STAR_SIGMA * sky_sigma
+    limit = sky + resolve(NOISE_STAR_SIGMA).value * sky_sigma
     left, right = image[:, :-1], image[:, 1:]
     sky_pairs = usable[:, :-1] & usable[:, 1:] & (left < limit) & (right < limit)
     fine_grain = (
@@ -276,7 +363,7 @@ def measure_stack_array(data: np.ndarray, path: str = "") -> StackMeasurements:
     if fine_grain is None:
         measurements.not_measured["fine_grain_noise_fraction"] = "no pairs of neighbouring sky pixels"
 
-    block = FLATNESS_BLOCK_PIXELS
+    block = resolve(FLATNESS_BLOCK_PIXELS).value
     rows, columns = (image.shape[0] // block) * block, (image.shape[1] // block) * block
     if rows == 0 or columns == 0:
         reason = "the stack is smaller than one flatness block"
@@ -290,9 +377,9 @@ def measure_stack_array(data: np.ndarray, path: str = "") -> StackMeasurements:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
             block_medians = np.nanmedian(filled, axis=(1, 3))
-        block_medians = block_medians[share >= MINIMUM_USABLE_BLOCK_SHARE]
+        block_medians = block_medians[share >= resolve(MINIMUM_USABLE_BLOCK_SHARE).value]
         block_medians = block_medians[np.isfinite(block_medians)]
-        if block_medians.size < MINIMUM_FLATNESS_BLOCKS:
+        if block_medians.size < resolve(MINIMUM_FLATNESS_BLOCKS).value:
             reason = f"only {block_medians.size} flatness blocks hold enough data"
             measurements.not_measured["flatness_rms"] = measurements.not_measured["flatness_peak_to_peak"] = (
                 reason
@@ -300,7 +387,9 @@ def measure_stack_array(data: np.ndarray, path: str = "") -> StackMeasurements:
         else:
             centre = float(np.median(block_medians))
             spread = MAD_TO_SIGMA * float(np.median(np.abs(block_medians - centre)))
-            kept = block_medians[block_medians - centre < FLATNESS_BLOCK_OUTLIER_SIGMA * spread]
+            kept = block_medians[
+                block_medians - centre < resolve(FLATNESS_BLOCK_OUTLIER_SIGMA).value * spread
+            ]
             if kept.size < 4:
                 kept = block_medians
             measurements.flatness_rms = float(np.std(kept) / centre)
@@ -473,7 +562,7 @@ def _sentence(
     change = after / before - 1.0
     if error is not None and abs(after - before) < error:
         word = "unchanged within the measurement error"
-    elif error is None and abs(change) < UNCHANGED_FRACTION:
+    elif error is None and abs(change) < resolve(UNCHANGED_FRACTION).value:
         word = "unchanged"
     else:
         word = f"{'down' if change < 0 else 'up'} {abs(change):.0%}"

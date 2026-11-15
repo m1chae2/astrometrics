@@ -70,7 +70,7 @@ def test_two_different_fields_are_not_trusted() -> None:
     """Unrelated fields have no true offset and fall below the floor."""
     result = measure_alignment(make_star_field(1), make_star_field(2))
 
-    assert result.correlation < MINIMUM_ALIGNMENT_CORRELATION
+    assert result.correlation < MINIMUM_ALIGNMENT_CORRELATION.default
     assert not result.trusted
 
 
@@ -130,7 +130,7 @@ def test_a_negligible_shift_leaves_the_image_untouched() -> None:
     """A shift under the threshold is not applied, so nothing is smoothed."""
     field = make_star_field(7)
 
-    shifted, covered = apply_shift(field, NEGLIGIBLE_SHIFT_PIXELS / 2, 0.0)
+    shifted, covered = apply_shift(field, NEGLIGIBLE_SHIFT_PIXELS.default / 2, 0.0)
 
     np.testing.assert_array_equal(shifted, field)
     assert covered.all()
@@ -489,7 +489,7 @@ def test_too_few_stars_keep_the_initial_result() -> None:
 
 def test_a_rotation_beyond_the_limit_is_refused() -> None:
     """A 1 degree turn is more than two stacks of one field differ by."""
-    assert 1.0 > REFINEMENT_MAX_ROTATION_DEGREES
+    assert 1.0 > REFINEMENT_MAX_ROTATION_DEGREES.default
     reference, moving, _, _ = make_moved_pair(1.0, 1.0, 3.0, 2.0)
     initial = measure_alignment(reference, moving)
 

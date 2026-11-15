@@ -13,7 +13,24 @@ import math
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-PIXEL_SCALE_SIGNIFICANT_FIGURES = 4
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
+
+PIXEL_SCALE_SIGNIFICANT_FIGURES = TunedParameter(
+    name="models.pixel_scale_significant_figures",
+    default=4,
+    unit="digits",
+    description="Significant figures kept when rounding a pixel scale to identify a setup.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D29",
+)
 """How many significant figures of the pixel scale a setting keeps.
 
 The scale comes from the frame's FITS header, and capture programs write the
@@ -52,7 +69,7 @@ def round_pixel_scale(value: float | None) -> float | None:
     """
     if value is None or value == 0 or not math.isfinite(value):
         return value
-    digits = PIXEL_SCALE_SIGNIFICANT_FIGURES - 1 - math.floor(math.log10(abs(value)))
+    digits = resolve(PIXEL_SCALE_SIGNIFICANT_FIGURES).value - 1 - math.floor(math.log10(abs(value)))
     return round(value, digits)
 
 

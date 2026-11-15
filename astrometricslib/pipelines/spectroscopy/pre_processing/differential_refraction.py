@@ -70,6 +70,13 @@ from astropy.coordinates import AltAz, EarthLocation, SkyCoord
 from astropy.time import Time, TimeDelta
 
 from astrometricslib.foundation.observatory_site import ObservatorySite
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_refraction import (
     MINIMUM_ALTITUDE_DEGREES,
     AtmosphericConditions,
@@ -88,8 +95,28 @@ logger = logging.getLogger(__name__)
 # The two wavelengths, in Angstroms, at which the record reports the
 # displacement. They are the ends of the range the instrument response and the
 # classifier use.
-BLUE_REPORT_WAVELENGTH_ANGSTROM = 4200.0
-RED_REPORT_WAVELENGTH_ANGSTROM = 8000.0
+BLUE_REPORT_WAVELENGTH_ANGSTROM = TunedParameter(
+    name="spectroscopy.blue_report_wavelength_angstrom",
+    default=4200.0,
+    unit="Å",
+    description="The blue wavelength at which the record reports the refraction displacement.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D31",
+    pending_conversion=True,
+)
+RED_REPORT_WAVELENGTH_ANGSTROM = TunedParameter(
+    name="spectroscopy.red_report_wavelength_angstrom",
+    default=8000.0,
+    unit="Å",
+    description="The red wavelength at which the record reports the refraction displacement.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D31",
+    pending_conversion=True,
+)
 
 # How far, in pixels, the dispersion direction is followed on the image to
 # find its position angle on the sky. The angle does not depend on it for a
@@ -159,7 +186,7 @@ class RefractionGeometry:
     @property
     def is_usable(self) -> bool:
         """`bool`: Whether the plane-parallel model may be used."""
-        return self.altitude_degrees >= MINIMUM_ALTITUDE_DEGREES
+        return self.altitude_degrees >= resolve(MINIMUM_ALTITUDE_DEGREES).value
 
     def displacement_arcsec(self, wavelength_angstrom: np.ndarray | float) -> tuple[np.ndarray, np.ndarray]:
         """Give how far the light of a wavelength sits from the model's place.
@@ -563,7 +590,7 @@ def measure_refraction_geometry(
         )
         true_zenith_distance = 90.0 - altitude
         apparent_zenith_distance = true_zenith_distance
-        if altitude >= MINIMUM_ALTITUDE_DEGREES:
+        if altitude >= resolve(MINIMUM_ALTITUDE_DEGREES).value:
             # Refraction lifts the star, so the zenith distance the telescope
             # sees is smaller than the true one by the refraction at 5000 A.
             lift_degrees = refraction_arcsec(5000.0, max(true_zenith_distance, 0.0), conditions) / 3600.0
@@ -664,7 +691,10 @@ def _describe(
         "atmosphere_source": geometry.conditions.source,
     }
     if geometry.is_usable:
-        wavelengths = np.array([BLUE_REPORT_WAVELENGTH_ANGSTROM, RED_REPORT_WAVELENGTH_ANGSTROM])
+        wavelengths = np.array([
+            resolve(BLUE_REPORT_WAVELENGTH_ANGSTROM).value,
+            resolve(RED_REPORT_WAVELENGTH_ANGSTROM).value,
+        ])
         along, across = geometry.displacement_arcsec(wavelengths)
         along_angstrom = along / geometry.pixel_scale_arcsec * dispersion_angstrom_per_px(wavelengths)
         fields.update(
@@ -756,7 +786,7 @@ def correct_differential_refraction(
             geometry,
             dispersion_angstrom_per_px,
             is_applied=False,
-            reason=f"{REASON_LOW_ALTITUDE} ({MINIMUM_ALTITUDE_DEGREES:.0f} degrees)",
+            reason=f"{REASON_LOW_ALTITUDE} ({resolve(MINIMUM_ALTITUDE_DEGREES).value:.0f} degrees)",
         )
         return wavelength.copy(), record
     if not apply_correction:

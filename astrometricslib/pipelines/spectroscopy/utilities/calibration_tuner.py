@@ -27,6 +27,14 @@ from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ProcessingError
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
 from astrometricslib.pipelines.spectroscopy.pipeline import (
     SpectroscopyPipeline,
@@ -48,19 +56,52 @@ logger = logging.getLogger(__name__)
 # If more than this fraction of the pixels at the theoretical dispersion
 # start are still saturated, the star's own flare/astigmatism is judged to
 # be bleeding into the spectrum, and flare-masked extraction is turned on.
-_FLARE_CONTAMINATION_FRACTION_THRESHOLD = 0.1
+_FLARE_CONTAMINATION_FRACTION_THRESHOLD = TunedParameter(
+    name="spectroscopy.flare_contamination_fraction_threshold",
+    default=0.1,
+    unit="fraction",
+    description=(
+        "If more than this fraction of pixels at the dispersion start are "
+        "saturated, the star's flare is judged to bleed into the spectrum."
+    ),
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="SPE-D54",
+    pending_conversion=True,
+)
 
 # Width, in samples, of the running median that estimates the continuum. It
 # must be much wider than an absorption line so the median ignores the line.
 # The Balmer lines are about 4 to 14 samples wide, so 101 samples (about
 # 1100 A at this dispersion) leaves them well outside the median's reach.
-_CONTINUUM_WINDOW_SAMPLES = 101
+_CONTINUUM_WINDOW_SAMPLES = TunedParameter(
+    name="spectroscopy.continuum_window_samples",
+    default=101,
+    unit="samples",
+    description="Width of the running median that estimates the continuum.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D22",
+    pending_conversion=True,
+)
 
 # A dip must be at least this many times deeper than the local noise. The
 # smoothing makes neighbouring samples share their noise, so a pure-noise
 # spectrum still shows some dips at 3 to 4 times the noise. 5 times rejects
 # nearly all of them, while a real Balmer line is tens of times deeper.
-_NOISE_PROMINENCE_MULTIPLE = 5.0
+_NOISE_PROMINENCE_MULTIPLE = TunedParameter(
+    name="spectroscopy.noise_prominence_multiple",
+    default=5.0,
+    unit="× noise",
+    description="A dip must be at least this many times deeper than the local noise.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D22",
+    pending_conversion=True,
+)
 
 # Converts a median absolute deviation (MAD) to a standard deviation for
 # Gaussian noise.
@@ -69,17 +110,56 @@ _MAD_TO_SIGMA = 1.4826
 # The most dips passed on to the search over groups of three. The search
 # fits C(N, 3) groups, which is 220 for 12 and tens of thousands for a
 # noisy spectrum with dozens of dips.
-_MAX_DIP_CANDIDATES = 12
+_MAX_DIP_CANDIDATES = TunedParameter(
+    name="spectroscopy.max_dip_candidates",
+    default=12,
+    unit="count",
+    description="The most dips passed on to the search over groups of three.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="SPE-12",
+)
 
 # The smallest dip depth, as a fraction of the continuum, that is tried
 # first, the last one tried, and the step between them.
-_FIRST_FRACTIONAL_PROMINENCE = 0.01
-_LAST_FRACTIONAL_PROMINENCE = 0.001
+_FIRST_FRACTIONAL_PROMINENCE = TunedParameter(
+    name="spectroscopy.first_fractional_prominence",
+    default=0.01,
+    unit="fraction",
+    description="The smallest dip depth, as a fraction of the continuum, that is tried first.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D22",
+    pending_conversion=True,
+)
+_LAST_FRACTIONAL_PROMINENCE = TunedParameter(
+    name="spectroscopy.last_fractional_prominence",
+    default=0.001,
+    unit="fraction",
+    description="The smallest dip depth, as a fraction of the continuum, that is tried last.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D22",
+    pending_conversion=True,
+)
 _FRACTIONAL_PROMINENCE_STEP = 0.002
 
 # Dips closer than this many samples to either end of the spectrum are
 # ignored, because the smoothing and the continuum are unreliable there.
-_DIP_EDGE_MARGIN_SAMPLES = 5
+_DIP_EDGE_MARGIN_SAMPLES = TunedParameter(
+    name="spectroscopy.dip_edge_margin_samples",
+    default=5,
+    unit="samples",
+    description="Dips closer than this many samples to either end of the spectrum are ignored.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D22",
+    pending_conversion=True,
+)
 
 
 class SpectroscopyCalibrationTuner:
@@ -325,7 +405,7 @@ class SpectroscopyCalibrationTuner:
         if cutout.size == 0:
             return False
         fraction = compute_saturated_pixel_fraction(cutout, saturation_threshold_adu)
-        return fraction > _FLARE_CONTAMINATION_FRACTION_THRESHOLD
+        return fraction > resolve(_FLARE_CONTAMINATION_FRACTION_THRESHOLD).value
 
     @staticmethod
     def _detect_max_extraction_length_px(
@@ -451,7 +531,7 @@ class SpectroscopyCalibrationTuner:
             odd, for a spectrum shorter than that). A line much narrower
             than the window does not move the median.
         """
-        window = min(_CONTINUUM_WINDOW_SAMPLES, len(spectrum))
+        window = min(resolve(_CONTINUUM_WINDOW_SAMPLES).value, len(spectrum))
         window -= 1 - window % 2
         return median_filter(spectrum, size=max(window, 1), mode="nearest")
 
@@ -497,7 +577,7 @@ class SpectroscopyCalibrationTuner:
         noise : `numpy.ndarray`
             The noise at each sample, as a fraction of the continuum.
         """
-        window = min(_CONTINUUM_WINDOW_SAMPLES, len(normalized))
+        window = min(resolve(_CONTINUUM_WINDOW_SAMPLES).value, len(normalized))
         window -= 1 - window % 2
         size = max(window, 1)
         residual = normalized - median_filter(normalized, size=size, mode="nearest")
@@ -523,13 +603,15 @@ class SpectroscopyCalibrationTuner:
             `_NOISE_PROMINENCE_MULTIPLE` times the local noise, away from
             both ends of the spectrum.
         """
+        dip_edge_margin_samples = resolve(_DIP_EDGE_MARGIN_SAMPLES).value
+        noise_prominence_multiple = resolve(_NOISE_PROMINENCE_MULTIPLE).value
         noise = SpectroscopyCalibrationTuner._local_noise(normalized)
         peak_indices, properties = find_peaks(-normalized, prominence=minimum_prominence, wlen=31, distance=6)
         return [
             (int(index), float(prominence))
             for index, prominence in zip(peak_indices, properties["prominences"], strict=True)
-            if _DIP_EDGE_MARGIN_SAMPLES <= index < len(normalized) - _DIP_EDGE_MARGIN_SAMPLES
-            and prominence >= _NOISE_PROMINENCE_MULTIPLE * noise[index]
+            if dip_edge_margin_samples <= index < len(normalized) - dip_edge_margin_samples
+            and prominence >= noise_prominence_multiple * noise[index]
         ]
 
     @staticmethod
@@ -547,9 +629,10 @@ class SpectroscopyCalibrationTuner:
             The index and prominence of each dip found at the first depth
             that gave at least 3, or at the last depth tried when none did.
         """
-        minimum_prominence = _FIRST_FRACTIONAL_PROMINENCE
+        last_fractional_prominence = resolve(_LAST_FRACTIONAL_PROMINENCE).value
+        minimum_prominence = resolve(_FIRST_FRACTIONAL_PROMINENCE).value
         dips: list[tuple[int, float]] = []
-        while len(dips) < 3 and minimum_prominence >= _LAST_FRACTIONAL_PROMINENCE:
+        while len(dips) < 3 and minimum_prominence >= last_fractional_prominence:
             dips = SpectroscopyCalibrationTuner._find_significant_dips(normalized, minimum_prominence)
             minimum_prominence -= _FRACTIONAL_PROMINENCE_STEP
         return dips
@@ -615,7 +698,7 @@ class SpectroscopyCalibrationTuner:
                 f"Found dips at indices: {[index for index, _ in dips]}"
             )
 
-        deepest = sorted(dips, key=lambda dip: dip[1], reverse=True)[:_MAX_DIP_CANDIDATES]
+        deepest = sorted(dips, key=lambda dip: dip[1], reverse=True)[: resolve(_MAX_DIP_CANDIDATES).value]
         return sorted(index for index, _ in deepest)
 
     @staticmethod

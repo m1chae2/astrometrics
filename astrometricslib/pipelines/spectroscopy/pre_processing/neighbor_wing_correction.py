@@ -46,6 +46,14 @@ from typing import Any
 import numpy as np
 
 from astrometricslib.foundation.camera_names import normalize_camera_name
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_trail_deblending import (
     EmpiricalBlur,
     NeighborFit,
@@ -77,7 +85,17 @@ NEIGHBOR_WING_CORRECTION_IS_ON = False
 # together with the star. The stored blur reaches 75 px either side, so a
 # neighbour farther than 60 px would put its centre near the edge of what can
 # be fitted, and its wing at the star is already tiny.
-MAXIMUM_NEIGHBOR_DISTANCE_PX = 60.0
+MAXIMUM_NEIGHBOR_DISTANCE_PX = TunedParameter(
+    name="spectroscopy.maximum_neighbor_distance_px",
+    default=60.0,
+    unit="px",
+    description="A neighbour this far or nearer across the streak is fitted together with the star.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D48",
+    pending_conversion=True,
+)
 
 # At most this many neighbors per star get their own position shift and are
 # modeled in the stretch fit; the others are left out of the fit. Every
@@ -88,16 +106,45 @@ MAXIMUM_NEIGHBOR_DISTANCE_PX = 60.0
 # `cap8` run in validation entry SPE-D27). On M 13 and Albireo (two images
 # only), the set of stars with a reliable fit did not change, and no feature
 # verdict flipped. Design estimate until more targets are measured.
-MAXIMUM_FITTED_NEIGHBORS = 8
+MAXIMUM_FITTED_NEIGHBORS = TunedParameter(
+    name="spectroscopy.maximum_fitted_neighbors",
+    default=8,
+    unit="count",
+    description="The most neighbors per star that get their own shift in the stretch fit.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="SPE-D27",
+)
 
 # Two streaks closer than this across the streak are treated as the same star
 # (for example a star listed twice), not as a neighbour.
-MINIMUM_NEIGHBOR_DISTANCE_PX = 3.0
+MINIMUM_NEIGHBOR_DISTANCE_PX = TunedParameter(
+    name="spectroscopy.minimum_neighbor_distance_px",
+    default=3.0,
+    unit="px",
+    description="Two streaks closer than this across the streak are treated as the same star.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D48",
+    pending_conversion=True,
+)
 
 # The share of a star's samples that a neighbour's streak must run alongside
 # for the neighbour to count. A streak that only touches the star's end
 # leaves most of the spectrum unaffected.
-MINIMUM_OVERLAP_FRACTION = 0.5
+MINIMUM_OVERLAP_FRACTION = TunedParameter(
+    name="spectroscopy.minimum_overlap_fraction",
+    default=0.5,
+    unit="fraction",
+    description="The share of a star's samples a neighbour's streak must run alongside to count.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D48",
+    pending_conversion=True,
+)
 
 # What the status of a star that has no neighbour, and so was not corrected,
 # is called. The pipeline records nothing for these stars.
@@ -113,8 +160,28 @@ STATUS_NOT_APPLIED_TURNED_OFF = "not applied: the correction is turned off"
 # enough to hold many sky pixels and narrow enough to stay near the star. The
 # blur reaches 75 px either side, so the cross window matches it. Used as in
 # the SPE-34 test; not varied there.
-_SKY_SCATTER_HALF_LENGTH_PX = 100
-_SKY_SCATTER_HALF_WIDTH_PX = 75
+_SKY_SCATTER_HALF_LENGTH_PX = TunedParameter(
+    name="spectroscopy.sky_scatter_half_length_px",
+    default=100,
+    unit="px",
+    description="Half-length of the sky box used to measure scatter for the neighbor-share estimate.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D48",
+    pending_conversion=True,
+)
+_SKY_SCATTER_HALF_WIDTH_PX = TunedParameter(
+    name="spectroscopy.sky_scatter_half_width_px",
+    default=75,
+    unit="px",
+    description="Half-width of the sky box used to measure scatter for the neighbor-share estimate.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D48",
+    pending_conversion=True,
+)
 
 
 @dataclass(frozen=True)
@@ -513,6 +580,9 @@ def _find_neighbors(
         Each neighbor with its cross-streak offset from the star at every
         sample (not a number where the neighbor's streak does not reach).
     """
+    minimum_overlap_fraction = resolve(MINIMUM_OVERLAP_FRACTION).value
+    minimum_neighbor_distance_px = resolve(MINIMUM_NEIGHBOR_DISTANCE_PX).value
+    maximum_neighbor_distance_px = resolve(MAXIMUM_NEIGHBOR_DISTANCE_PX).value
     target = placed[target_index]
     neighbors = []
     for other_index, other in enumerate(placed):
@@ -523,10 +593,10 @@ def _find_neighbors(
         )
         offset = cross_at_target - target.cross_px
         covered = np.isfinite(offset)
-        if covered.mean() < MINIMUM_OVERLAP_FRACTION:
+        if covered.mean() < minimum_overlap_fraction:
             continue
         median_offset = float(np.median(offset[covered]))
-        if MINIMUM_NEIGHBOR_DISTANCE_PX <= abs(median_offset) <= MAXIMUM_NEIGHBOR_DISTANCE_PX:
+        if minimum_neighbor_distance_px <= abs(median_offset) <= maximum_neighbor_distance_px:
             neighbors.append((other, offset))
     return neighbors
 
@@ -620,8 +690,11 @@ def _sky_scatter_near(working_image: np.ndarray, target: _PlacedTrace) -> float:
     row = int(np.median(target.along_px))
     column = int(np.median(target.cross_px))
     window = working_image[
-        max(row - _SKY_SCATTER_HALF_LENGTH_PX, 0) : row + _SKY_SCATTER_HALF_LENGTH_PX,
-        max(column - _SKY_SCATTER_HALF_WIDTH_PX, 0) : column + _SKY_SCATTER_HALF_WIDTH_PX + 1,
+        max(row - resolve(_SKY_SCATTER_HALF_LENGTH_PX).value, 0) : row
+        + resolve(_SKY_SCATTER_HALF_LENGTH_PX).value,
+        max(column - resolve(_SKY_SCATTER_HALF_WIDTH_PX).value, 0) : column
+        + resolve(_SKY_SCATTER_HALF_WIDTH_PX).value
+        + 1,
     ]
     return float(1.4826 * np.median(np.abs(window - np.median(window))))
 
@@ -720,7 +793,7 @@ def _place_trace(frame: WorkingFrame, trace: StarTrace | None) -> _PlacedTrace |
 
 
 def brightest_neighbor_indices(
-    neighbor_box_fluxes: Sequence[np.ndarray], maximum: int = MAXIMUM_FITTED_NEIGHBORS
+    neighbor_box_fluxes: Sequence[np.ndarray], maximum: int | None = None
 ) -> list[int]:
     """Pick which neighbors get their own position shift in the fit.
 
@@ -738,6 +811,8 @@ def brightest_neighbor_indices(
         flux), in their original order. All of them when there are no more
         than `maximum`.
     """
+    if maximum is None:
+        maximum = resolve(MAXIMUM_FITTED_NEIGHBORS).value
     count = len(neighbor_box_fluxes)
     if count <= maximum:
         return list(range(count))

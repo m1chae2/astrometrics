@@ -54,7 +54,15 @@ from typing import Any
 import numpy as np
 
 from astrometricslib.foundation.constants import FULL_SCALE_COUNTS
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.camera_profile import CameraProfile
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.photometry.pre_processing.detector_noise import resolve_detector_noise
 from astrometricslib.pipelines.shared.quality.saturation import is_normalised_stack_scale
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction import (
@@ -81,29 +89,94 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution i
 # 0.982 for n = 5, 7, 9, 11, 15 and 21. The forms `n / (n + 1.4)` for even `n`
 # and `n / (n + 0.4)` for odd `n` reproduce every one of those to within 0.012.
 MEDIAN_VARIANCE_PI_OVER_TWO = math.pi / 2.0
-MEDIAN_VARIANCE_EVEN_OFFSET = 1.4
-MEDIAN_VARIANCE_ODD_OFFSET = 0.4
+MEDIAN_VARIANCE_EVEN_OFFSET = TunedParameter(
+    name="spectroscopy.median_variance_even_offset",
+    default=1.4,
+    unit="count",
+    description="Offset in the small-sample median variance estimate for an even sample count.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-07",
+)
+MEDIAN_VARIANCE_ODD_OFFSET = TunedParameter(
+    name="spectroscopy.median_variance_odd_offset",
+    default=0.4,
+    unit="count",
+    description="Offset in the small-sample median variance estimate for an odd sample count.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-07",
+)
 
 # The wavelength range over which the signal-to-noise numbers are taken, in
 # Angstroms. Below 4200 A the spectrum is faint and the Balmer lines crowd
 # together, and above 8000 A the sensor's quantum efficiency falls steeply
 # (see `instrument_response`). This is the range the instrument response is
 # fitted over, so it is the range later stages trust.
-SIGNAL_TO_NOISE_MINIMUM_WAVELENGTH_ANGSTROM = 4200.0
-SIGNAL_TO_NOISE_MAXIMUM_WAVELENGTH_ANGSTROM = 8000.0
+SIGNAL_TO_NOISE_MINIMUM_WAVELENGTH_ANGSTROM = TunedParameter(
+    name="spectroscopy.signal_to_noise_minimum_wavelength_angstrom",
+    default=4200.0,
+    unit="Å",
+    description="The short end of the wavelength range over which signal-to-noise is taken.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D31",
+    pending_conversion=True,
+)
+SIGNAL_TO_NOISE_MAXIMUM_WAVELENGTH_ANGSTROM = TunedParameter(
+    name="spectroscopy.signal_to_noise_maximum_wavelength_angstrom",
+    default=8000.0,
+    unit="Å",
+    description="The long end of the wavelength range over which signal-to-noise is taken.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D31",
+    pending_conversion=True,
+)
 
 # A sample whose own signal-to-noise is below this counts toward
 # `fraction_samples_snr_below_5`. Five is the usual rule of thumb for "a
 # measurement you can read by eye"; it is a convention, not a measured limit.
-LOW_SAMPLE_SIGNAL_TO_NOISE = 5.0
+LOW_SAMPLE_SIGNAL_TO_NOISE = TunedParameter(
+    name="spectroscopy.low_sample_signal_to_noise",
+    default=5.0,
+    unit="signal-to-noise",
+    description="A sample whose own signal-to-noise is below this counts as low.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D38",
+)
 
 # The fewest resolution elements the like-for-like signal-to-noise needs, the
 # same minimum as the post-hoc estimator (`spectrum_signal`).
-_MINIMUM_ELEMENTS = 8
+_MINIMUM_ELEMENTS = TunedParameter(
+    name="spectroscopy.minimum_elements",
+    default=8,
+    unit="count",
+    description="The fewest resolution elements the like-for-like signal-to-noise needs.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D38",
+)
 
 # A resolution element window is used only when at least this share of the
 # samples inside it have a finite brightness and error.
-_MINIMUM_WINDOW_VALID_FRACTION = 0.8
+_MINIMUM_WINDOW_VALID_FRACTION = TunedParameter(
+    name="spectroscopy.minimum_window_valid_fraction",
+    default=0.8,
+    unit="fraction",
+    description="The least share of valid samples a resolution element window needs to be used.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D38",
+)
 
 
 def median_variance_factor(sample_count: int) -> float:
@@ -122,7 +195,11 @@ def median_variance_factor(sample_count: int) -> float:
         and ``(pi / 2) / (n + 0.4)`` for an odd one. Multiply it by the pixel
         variance to get the variance of the sky level.
     """
-    offset = MEDIAN_VARIANCE_EVEN_OFFSET if sample_count % 2 == 0 else MEDIAN_VARIANCE_ODD_OFFSET
+    offset = (
+        resolve(MEDIAN_VARIANCE_EVEN_OFFSET).value
+        if sample_count % 2 == 0
+        else resolve(MEDIAN_VARIANCE_ODD_OFFSET).value
+    )
     return MEDIAN_VARIANCE_PI_OVER_TWO / (sample_count + offset)
 
 
@@ -339,7 +416,7 @@ def build_pixel_noise_model(
     frames = 1
     frames_assumed = False
     if is_normalised_stack_scale(data):
-        adu_per_unit = float(FULL_SCALE_COUNTS)
+        adu_per_unit = float(resolve(FULL_SCALE_COUNTS).value)
         try:
             frames = int(header.get("STACKCNT", 0) or 0) if header is not None else 0
         except TypeError, ValueError:
@@ -613,7 +690,7 @@ def resolution_element_signal_to_noise(
     signal = signal_cumulative[last] - signal_cumulative[first]
     variance = variance_cumulative[last] - variance_cumulative[first]
     enough = (window_size > 0) & (
-        window_usable >= _MINIMUM_WINDOW_VALID_FRACTION * np.maximum(window_size, 1)
+        window_usable >= resolve(_MINIMUM_WINDOW_VALID_FRACTION).value * np.maximum(window_size, 1)
     )
     with np.errstate(divide="ignore", invalid="ignore"):
         ratio = np.where(enough & (variance > 0), signal / np.sqrt(variance), np.nan)
@@ -673,7 +750,7 @@ def variance_based_signal_to_noise(
     _, inverse, counts = np.unique(element_index, return_inverse=True, return_counts=True)
     element_means = np.bincount(inverse, weights=values) / counts
     element_noise = np.sqrt(np.bincount(inverse, weights=sigma**2)) / counts
-    if element_means.size < _MINIMUM_ELEMENTS:
+    if element_means.size < resolve(_MINIMUM_ELEMENTS).value:
         return None
     signal = float(np.median(element_means))
     noise = float(np.median(element_noise))
@@ -718,8 +795,8 @@ def summarize_spectrum_noise(
     sigma = np.asarray(errors, dtype=float)
     in_range = (
         np.isfinite(wavelength)
-        & (wavelength >= SIGNAL_TO_NOISE_MINIMUM_WAVELENGTH_ANGSTROM)
-        & (wavelength <= SIGNAL_TO_NOISE_MAXIMUM_WAVELENGTH_ANGSTROM)
+        & (wavelength >= resolve(SIGNAL_TO_NOISE_MINIMUM_WAVELENGTH_ANGSTROM).value)
+        & (wavelength <= resolve(SIGNAL_TO_NOISE_MAXIMUM_WAVELENGTH_ANGSTROM).value)
     )
 
     element_snr = resolution_element_signal_to_noise(
@@ -730,7 +807,9 @@ def summarize_spectrum_noise(
 
     sample_ok = in_range & np.isfinite(values) & np.isfinite(sigma) & (sigma > 0)
     sample_snr = values[sample_ok] / sigma[sample_ok]
-    fraction_low = float(np.mean(sample_snr < LOW_SAMPLE_SIGNAL_TO_NOISE)) if sample_snr.size else None
+    fraction_low = (
+        float(np.mean(sample_snr < resolve(LOW_SAMPLE_SIGNAL_TO_NOISE).value)) if sample_snr.size else None
+    )
 
     ratio = None
     comparable = variance_based_signal_to_noise(wavelength, values, sigma, resolution_element_angstrom)

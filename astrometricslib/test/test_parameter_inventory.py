@@ -1,23 +1,26 @@
-"""Purpose: Keep every numeric library constant either registered or judged.
+"""Purpose: Keep plain numeric constants listed and declarations evidenced.
 
-Description: ``build/documentation/parameter_inventory.py`` finds the numeric
-constants and config defaults of ``astrometricslib`` and ``wayfindinglib``.
-These tests check that each one is named in the validation register or is in
-exactly one of the two lists in ``build/documentation/parameter_inventory/``,
-and that the lists stay tidy: no stale rows, no duplicates, and no row for a
-value that the register now names.
+Description: Every tuned value is a ``TunedParameter`` declaration.
+``build/documentation/parameter_inventory.py`` finds the plain numeric
+constants and config defaults of ``astrometricslib`` and ``wayfindinglib``
+that are left. These tests check that each one is in exactly one of the two
+lists in ``build/documentation/parameter_inventory/`` (decided not tuning, or
+tuning that is not declared yet), and that the lists stay tidy: no stale rows
+and no duplicates. They also check that each declaration names a register
+entry that exists.
 """
 
 import importlib.util
 import sys
 import textwrap
 from collections import Counter
-from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 import pytest
+
+from astrometricslib.parameters import ParameterSource, collect_parameters
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = REPO_ROOT / "build" / "documentation" / "parameter_inventory.py"
@@ -52,25 +55,6 @@ def found() -> list[Any]:
         The candidates.
     """
     return inventory.find_parameters(REPO_ROOT)
-
-
-@pytest.fixture(scope="module")
-def registered(found: list[Any]) -> Callable[[str, str], bool]:
-    """Build a check of whether the register names one parameter.
-
-    Parameters
-    ----------
-    found : `list`
-        The parameters in the code, used to tell shared names apart.
-
-    Returns
-    -------
-    covers : `collections.abc.Callable`
-        Takes a file and a qualified name; True when the register names it.
-    """
-    registration = inventory.registered_names(REPO_ROOT)
-    name_counts = Counter(candidate.bare_name for candidate in found)
-    return lambda file, name: registration.covers(file, name, name_counts)
 
 
 @pytest.fixture(scope="module")
@@ -113,24 +97,24 @@ def _keys(rows: list[dict[str, str]]) -> list[tuple[str, str]]:
     return [(row["file"], row["name"]) for row in rows]
 
 
-def test_every_parameter_is_registered_or_listed(
+def test_every_plain_constant_is_listed(
     found: list[Any],
-    registered: Callable[[str, str], bool],
     not_tuning_rows: list[dict[str, str]],
     backlog_rows: list[dict[str, str]],
 ) -> None:
-    """Check every found parameter is registered or listed."""
+    """Check every plain numeric constant is on one of the two lists."""
     listed = set(_keys(not_tuning_rows)) | set(_keys(backlog_rows))
     missing = sorted({
         f"{candidate.file}:{candidate.line} {candidate.name} = {candidate.value}"
         for candidate in found
-        if not registered(candidate.file, candidate.name) and (candidate.file, candidate.name) not in listed
+        if (candidate.file, candidate.name) not in listed
     })
     assert not missing, (
-        "These numeric values are not in the validation register or in the parameter lists. "
-        "If one is a tuning value, register it in documentation/library_design/validation/. "
-        "If it is not tuning, add it to build/documentation/parameter_inventory/not_tuning.csv "
-        "with a reason:\n" + "\n".join(missing)
+        "These plain numeric values are on neither parameter list. If one is a tuning value, declare it "
+        "as a TunedParameter. If it cannot be declared yet (a dict or nested-tuple value), add it to "
+        "build/documentation/parameter_inventory/tuning_not_registered.csv with a note. If it is not "
+        "tuning, add it to build/documentation/parameter_inventory/not_tuning.csv with a reason:\n"
+        + "\n".join(missing)
     )
 
 
@@ -155,32 +139,6 @@ def test_no_parameter_is_in_both_lists_or_twice(
     assert not both, f"These parameters are in both lists: {both}"
     repeated = sorted(key for key, count in Counter(not_tuning_keys + backlog_keys).items() if count > 1)
     assert not repeated, f"These rows are duplicated: {repeated}"
-
-
-def test_registered_backlog_rows_are_deleted(
-    registered: Callable[[str, str], bool],
-    backlog_rows: list[dict[str, str]],
-) -> None:
-    """A backlog row whose name the register now mentions must be deleted."""
-    done = sorted((row["file"], row["name"]) for row in backlog_rows if registered(row["file"], row["name"]))
-    assert not done, (
-        "These values are now registered; delete their rows from "
-        f"build/documentation/parameter_inventory/tuning_not_registered.csv: {done}"
-    )
-
-
-def test_registered_values_are_not_listed_as_not_tuning(
-    registered: Callable[[str, str], bool],
-    not_tuning_rows: list[dict[str, str]],
-) -> None:
-    """A value cannot be both registered and judged not tuning."""
-    clash = sorted(
-        (row["file"], row["name"]) for row in not_tuning_rows if registered(row["file"], row["name"])
-    )
-    assert not clash, (
-        "These values are named in the register, so they are tuning; delete their rows from "
-        f"build/documentation/parameter_inventory/not_tuning.csv: {clash}"
-    )
 
 
 def test_find_parameters_on_a_small_tree(tmp_path: Path) -> None:
@@ -224,23 +182,65 @@ def test_find_parameters_on_a_small_tree(tmp_path: Path) -> None:
     assert names["[Processing] port"].bare_name == "port"
 
 
-def test_registration_tells_shared_names_apart(tmp_path: Path) -> None:
-    """A shared name written with its file registers only that constant."""
-    register = tmp_path / "documentation" / "library_design" / "validation"
-    register.mkdir(parents=True)
-    (register / "example.md").write_text(
-        "- code constant `READOUT_SECONDS` = 2 in `guide_camera.py`. Relation: derived from this entry.\n"
-        "- config key `[Processing] threshold` (default 0.5). Relation: confirmed by this entry.\n"
-        "- `SHARED_LIMIT` is mentioned with no file.\n"
-        "Some prose mentions port without backticks.\n"
+def _load_generator() -> ModuleType:
+    """Load the parameter table generator from its file.
+
+    Returns
+    -------
+    module : `types.ModuleType`
+        The loaded ``generate_parameter_table`` module.
+    """
+    path = REPO_ROOT / "build" / "documentation" / "generate_parameter_table.py"
+    spec = importlib.util.spec_from_file_location("generate_parameter_table", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="module")
+def declarations() -> list[Any]:
+    """Collect every declared parameter of both libraries.
+
+    Returns
+    -------
+    parameters : `list` [`TunedParameter`]
+        The declarations of ``astrometricslib`` and ``wayfindinglib``.
+    """
+    return [
+        parameter
+        for library in ("astrometricslib", "wayfindinglib")
+        for parameter in collect_parameters(library).all()
+    ]
+
+
+def test_every_declaration_names_an_existing_register_entry(declarations: list[Any]) -> None:
+    """Each ``register_entry`` is an entry or design-estimate row ID."""
+    index = _load_generator().read_register_index(REPO_ROOT)
+    missing = sorted(
+        f"{parameter.name} -> {parameter.register_entry}"
+        for parameter in declarations
+        if parameter.register_entry not in index
     )
-    registration = inventory.registered_names(tmp_path)
-    counts = Counter({"READOUT_SECONDS": 2, "threshold": 1, "SHARED_LIMIT": 2, "port": 1})
-    assert registration.covers("wayfindinglib/drivers/guide_camera.py", "READOUT_SECONDS", counts)
-    assert not registration.covers(
-        "wayfindinglib/drivers/simulators/guiding_simulator.py", "READOUT_SECONDS", counts
+    assert not missing, f"These declarations name a register entry that does not exist: {missing}"
+
+
+def test_hardcoded_parameters_have_a_kind_and_no_equipment(declarations: list[Any]) -> None:
+    """A hardcoded value has a kind and no equipment (the model checks it)."""
+    broken = sorted(
+        parameter.name
+        for parameter in declarations
+        if parameter.source is ParameterSource.HARDCODED and (parameter.kind is None or parameter.equipment)
     )
-    assert registration.covers("astrometricslib/foundation/config.py", "[Processing] threshold", counts)
-    assert not registration.covers("a/b.py", "SHARED_LIMIT", counts)
-    assert registration.covers("a/b.py", "SHARED_LIMIT", Counter({"SHARED_LIMIT": 1}))
-    assert not registration.covers("a/b.py", "port", counts)
+    assert not broken, f"These hardcoded parameters need a kind and no equipment: {broken}"
+
+
+def test_collecting_and_reading_the_register_print_nothing(capsys: pytest.CaptureFixture[str]) -> None:
+    """Collecting the registries and reading the register print nothing."""
+    generator = _load_generator()
+    for library in ("astrometricslib", "wayfindinglib"):
+        collect_parameters(library)
+    generator.read_register_index(REPO_ROOT)
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err == ""

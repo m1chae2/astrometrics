@@ -49,4 +49,4 @@ def test_calibration_query_states_the_dark_temperature_tolerance() -> None:
 
     answer = catalog.query()
 
-    assert answer.dark_temperature_tolerance_c == DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
+    assert answer.dark_temperature_tolerance_c == DEFAULT_DARK_TEMPERATURE_TOLERANCE_C.default

@@ -151,7 +151,7 @@ def test_a_25_angstrom_zero_point_error_with_three_lines_is_corrected(seed: int)
     assert record.offset_angstrom == pytest.approx(ZERO_POINT_ERROR_ANGSTROM, abs=2.0)
     assert np.max(np.abs(corrected - true_wavelengths)) < 2.0
     assert record.agreement_p_value is not None
-    assert record.agreement_p_value >= AGREEMENT_MINIMUM_P_VALUE
+    assert record.agreement_p_value >= AGREEMENT_MINIMUM_P_VALUE.default
 
 
 def test_a_negative_zero_point_error_is_corrected_too() -> None:
@@ -270,7 +270,7 @@ def test_lines_that_disagree_are_measured_but_not_applied() -> None:
 
     assert record.line_count == 2
     assert record.agreement_p_value is not None
-    assert record.agreement_p_value < AGREEMENT_MINIMUM_P_VALUE
+    assert record.agreement_p_value < AGREEMENT_MINIMUM_P_VALUE.default
     assert record.is_applied is False
     assert checkpoint_metrics["wavelength_zero_point_applied"].value == pytest.approx(0.0)
 
@@ -345,7 +345,7 @@ def test_the_offset_metric_has_a_designed_limit_and_fails_above_it() -> None:
         "wavelength_zero_point_offset_angstrom"
     ]
 
-    assert ZERO_POINT_OFFSET_LIMIT_ANGSTROM == pytest.approx(20.0)
+    assert ZERO_POINT_OFFSET_LIMIT_ANGSTROM.default == pytest.approx(20.0)
     assert offset_metric.limit == pytest.approx(20.0)
     assert "designed" in offset_metric.note
     assert offset_metric.passed is False

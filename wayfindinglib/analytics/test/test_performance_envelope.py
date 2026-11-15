@@ -128,7 +128,7 @@ def test_the_guiding_limit_widens_the_star_by_exactly_the_tolerance() -> None:
     guiding_blur = SIGMA_TO_FWHM * envelope.value("guiding_rms_limit")
     widened = math.hypot(fwhm, guiding_blur)
 
-    assert widened == pytest.approx(fwhm * (1.0 + DEFAULT_BLUR_TOLERANCE_FRACTION))
+    assert widened == pytest.approx(fwhm * (1.0 + DEFAULT_BLUR_TOLERANCE_FRACTION.default))
 
 
 def test_the_trailing_limit_widens_the_star_by_exactly_the_tolerance() -> None:
@@ -138,7 +138,7 @@ def test_the_trailing_limit_widens_the_star_by_exactly_the_tolerance() -> None:
 
     widened = math.hypot(fwhm, envelope.value("trailing_limit"))
 
-    assert widened == pytest.approx(fwhm * (1.0 + DEFAULT_BLUR_TOLERANCE_FRACTION))
+    assert widened == pytest.approx(fwhm * (1.0 + DEFAULT_BLUR_TOLERANCE_FRACTION.default))
 
 
 def test_the_budget_limits_scale_with_the_measured_star_width() -> None:

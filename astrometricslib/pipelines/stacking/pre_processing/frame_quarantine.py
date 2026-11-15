@@ -39,9 +39,17 @@ from typing import Any
 
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import AstrometricsError
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.excluded_frames import QuarantinePreview, SetAsideFrame
 from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.models.target import Target
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.shared.quality import raw_frame_check
 from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
@@ -77,7 +85,16 @@ MANIFEST_FILE_NAME = "excluded_frames.json"
 GATE_NAME = "frame_quarantine"
 """The record, inside each `_excluded` folder, of the frames moved there."""
 
-MINIMUM_FRAMES_TO_JUDGE = 8
+MINIMUM_FRAMES_TO_JUDGE = TunedParameter(
+    name="stacking.minimum_frames_to_judge",
+    default=8,
+    unit="frames",
+    description="Fewest frames a batch needs before any frame is judged for quarantine.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-01",
+)
 """A batch needs at least this many frames before any is judged.
 
 The judgement compares each frame with the batch median. With fewer frames
@@ -89,7 +106,16 @@ stayed within 5.8% to 18.3%. The star limit below (half the median) leaves
 room for that spread.
 """
 
-MAXIMUM_QUARANTINED_FRACTION = 0.25
+MAXIMUM_QUARANTINED_FRACTION = TunedParameter(
+    name="stacking.maximum_quarantined_fraction",
+    default=0.25,
+    unit="fraction",
+    description="Largest share of a batch the quarantine step will move; above it the step moves none.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-03",
+)
 """The most of one batch this step will move; above it, the step moves none.
 
 Run on the real library without moving anything, the step picked 4 of 56
@@ -100,7 +126,7 @@ the largest of those. A larger share means the batch itself is the problem
 the stacker's weighting is the better tool.
 """
 
-CLOUD_STAR_FRACTION = raw_frame_check.LOW_STAR_FRACTION
+CLOUD_STAR_FRACTION = resolve(raw_frame_check.LOW_STAR_FRACTION).value
 """A frame with fewer stars than this share of its batch median is moved.
 
 Reuses the raw-frame check's limit (0.5). On the 2026-10-02 target the
@@ -111,7 +137,16 @@ times normal. It stays in the stack, where the stacker's weighting lowers
 its influence.
 """
 
-CLOUD_SKY_MULTIPLE = 1.15
+CLOUD_SKY_MULTIPLE = TunedParameter(
+    name="stacking.cloud_sky_multiple",
+    default=1.15,
+    unit="× median sky",
+    description="Sky level, as a multiple of the batch median, above which a low-star frame is called cloud.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-01",
+)
 """A low-star frame with sky this much above the batch median is called cloud.
 
 Only the wording of the reason depends on it. Clean frames of the
@@ -119,7 +154,17 @@ Only the wording of the reason depends on it. Clean frames of the
 moon rose. The two clouded frames reached 2.25 and 3.52 times.
 """
 
-TRAILED_ROUNDNESS_LIMIT = 0.80
+TRAILED_ROUNDNESS_LIMIT = TunedParameter(
+    name="stacking.trailed_roundness_limit",
+    default=0.80,
+    unit="ratio",
+    description="Median star roundness below which a frame may have trailed stars.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="STK-01",
+    pending_conversion=True,
+)
 """A frame whose median star roundness is below this may have trailed stars.
 
 Roundness is the narrow width divided by the wide width of a star, 1.0 for
@@ -133,7 +178,17 @@ A satellite or aircraft trail does not lower the median roundness, and
 the stacker's pixel rejection removes it, so such a frame stays.
 """
 
-ROUNDNESS_DROP_BELOW_MEDIAN = 0.15
+ROUNDNESS_DROP_BELOW_MEDIAN = TunedParameter(
+    name="stacking.roundness_drop_below_median",
+    default=0.15,
+    unit="ratio",
+    description="How far below the batch's median roundness a frame must be to count as trailed.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.MOUNT}),
+    register_entry="STK-01",
+    pending_conversion=True,
+)
 """A frame must also be this far below the batch's median roundness.
 
 Some sessions are mildly elongated throughout. The M 27 session of
@@ -145,7 +200,17 @@ only mildly elongated. On the 2026-10-02 target (median 0.98) the cut-off
 stays at the fixed 0.80.
 """
 
-COLOUR_CAMERA_ROUNDNESS_DROP_BELOW_MEDIAN = 0.20
+COLOUR_CAMERA_ROUNDNESS_DROP_BELOW_MEDIAN = TunedParameter(
+    name="stacking.colour_camera_roundness_drop_below_median",
+    default=0.20,
+    unit="ratio",
+    description="Roundness drop below the median that counts as trailed for a colour camera.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-02",
+    pending_conversion=True,
+)
 """The drop below the median for a colour (Bayer) camera, instead of 0.15.
 
 A colour sensor puts one red, green or blue filter over each pixel. At
@@ -174,7 +239,16 @@ wide, and it caught 24 more frames in the eight targets, mostly good ones in
 crowded fields (IC 1396 044: 0.96 on the mosaic, 0.46 binned).
 """
 
-SESSION_GAP_SECONDS = 4 * 3600
+SESSION_GAP_SECONDS = TunedParameter(
+    name="stacking.session_gap_seconds",
+    default=4 * 3600,
+    unit="s",
+    description="Gap between frames that starts a new session.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D13",
+)
 """A gap this long between frames starts a new session.
 
 Frames of one night are minutes apart; a night's exposures last seconds to
@@ -348,6 +422,7 @@ def split_into_batches(frames: Sequence[Any]) -> list[list[Any]]:
     batches : `list` [`list`]
         The batches, each in time order.
     """
+    session_gap_seconds = resolve(SESSION_GAP_SECONDS).value
     by_setup: dict[tuple[str, str, str], list[Any]] = defaultdict(list)
     for frame in frames:
         setup = (str(frame.camera), str(getattr(frame.filter, "value", frame.filter)), str(frame.exposure))
@@ -362,7 +437,7 @@ def split_into_batches(frames: Sequence[Any]) -> list[list[Any]]:
             if (
                 frame.timestamp is not None
                 and previous_time is not None
-                and frame.timestamp - previous_time > SESSION_GAP_SECONDS
+                and frame.timestamp - previous_time > session_gap_seconds
             ):
                 batches.append(current)
                 current = []
@@ -388,20 +463,22 @@ def judge_batch(measurements: Sequence[dict[str, Any]]) -> list[QuarantineDecisi
         The frames to move, in the order given. Empty when the batch is
         too small to judge.
     """
-    if len(measurements) < MINIMUM_FRAMES_TO_JUDGE:
+    trailed_roundness_limit = resolve(TRAILED_ROUNDNESS_LIMIT).value
+    cloud_sky_multiple = resolve(CLOUD_SKY_MULTIPLE).value
+    if len(measurements) < resolve(MINIMUM_FRAMES_TO_JUDGE).value:
         return []
     typical_stars = statistics.median(m["star_count"] for m in measurements)
     typical_sky = statistics.median(m["sky_median_adu"] for m in measurements)
     roundness_values = [m["roundness"] for m in measurements if m["roundness"] is not None]
-    roundness_limit = TRAILED_ROUNDNESS_LIMIT
+    roundness_limit = trailed_roundness_limit
     if roundness_values:
         drop_below_median = (
-            COLOUR_CAMERA_ROUNDNESS_DROP_BELOW_MEDIAN
+            resolve(COLOUR_CAMERA_ROUNDNESS_DROP_BELOW_MEDIAN).value
             if any(m.get("colour_camera") for m in measurements)
-            else ROUNDNESS_DROP_BELOW_MEDIAN
+            else resolve(ROUNDNESS_DROP_BELOW_MEDIAN).value
         )
         roundness_limit = min(
-            TRAILED_ROUNDNESS_LIMIT, statistics.median(roundness_values) - drop_below_median
+            trailed_roundness_limit, statistics.median(roundness_values) - drop_below_median
         )
 
     decisions: list[QuarantineDecision] = []
@@ -414,7 +491,7 @@ def judge_batch(measurements: Sequence[dict[str, Any]]) -> list[QuarantineDecisi
             kind = "trailed"
             reason = f"star roundness {roundness:.2f}, below {roundness_limit:.2f}"
         elif star_count < CLOUD_STAR_FRACTION * typical_stars:
-            cloudy_sky = typical_sky > 0 and sky > CLOUD_SKY_MULTIPLE * typical_sky
+            cloudy_sky = typical_sky > 0 and sky > cloud_sky_multiple * typical_sky
             # Few stars under a normal sky is stored as "trailed" too. The
             # name is kept, because it is stored in the quality rows and in
             # `excluded_frames.json`; readers word it as "stars smeared, or far
@@ -528,32 +605,35 @@ def find_frames_to_quarantine(
         the batches left alone, ``unreadable`` the frames that could not be
         measured.
     """
+    minimum_frames_to_judge = resolve(MINIMUM_FRAMES_TO_JUDGE).value
+    maximum_quarantined_fraction = resolve(MAXIMUM_QUARANTINED_FRACTION).value
     report = QuarantineReport()
     batches = split_into_batches(frames)
     # Only batches big enough to judge are measured, so only they are counted.
     progress = LoopProgress(
-        "Checked", sum(len(batch) for batch in batches if len(batch) >= MINIMUM_FRAMES_TO_JUDGE)
+        "Checked",
+        sum(len(batch) for batch in batches if len(batch) >= minimum_frames_to_judge),
     )
     for batch in batches:
-        if len(batch) < MINIMUM_FRAMES_TO_JUDGE:
+        if len(batch) < minimum_frames_to_judge:
             report.batches_too_small += 1
             report.notes.append(
                 f"{len(batch)} frame(s) of one session are too few to judge "
-                f"(at least {MINIMUM_FRAMES_TO_JUDGE} needed); none moved."
+                f"(at least {minimum_frames_to_judge} needed); none moved."
             )
             continue
         measurements, unreadable = _measure_frames(batch, measure, progress)
         report.unreadable.extend(unreadable)
         report.measurements.extend(measurements)
-        if len(measurements) < MINIMUM_FRAMES_TO_JUDGE:
+        if len(measurements) < minimum_frames_to_judge:
             report.batches_too_small += 1
             report.notes.append(
                 f"Only {len(measurements)} of {len(batch)} frame(s) of one session could be read "
-                f"(at least {MINIMUM_FRAMES_TO_JUDGE} needed to judge); none moved."
+                f"(at least {minimum_frames_to_judge} needed to judge); none moved."
             )
             continue
         decisions = judge_batch(measurements)
-        allowed = int(MAXIMUM_QUARANTINED_FRACTION * len(measurements))
+        allowed = int(maximum_quarantined_fraction * len(measurements))
         if len(decisions) > allowed:
             report.batches_over_cap += 1
             report.notes.append(
@@ -588,16 +668,17 @@ def quarantine_gate(report: QuarantineReport) -> GateResult:
     gate : `GateResult`
         The result, named ``frame_quarantine``.
     """
+    maximum_quarantined_fraction = resolve(MAXIMUM_QUARANTINED_FRACTION).value
     source = (
-        f"at least {MINIMUM_FRAMES_TO_JUDGE} frames per session; "
-        f"at most {MAXIMUM_QUARANTINED_FRACTION:.0%} moved"
+        f"at least {resolve(MINIMUM_FRAMES_TO_JUDGE).value} frames per session; "
+        f"at most {maximum_quarantined_fraction:.0%} moved"
     )
     if report.batches_over_cap:
         return failed_gate(
             GATE_NAME,
             f"{report.batches_over_cap} session(s) had too many bad frames to move safely; "
             "the bad frames are still in the stack",
-            limit=MAXIMUM_QUARANTINED_FRACTION,
+            limit=maximum_quarantined_fraction,
             limit_source=source,
         )
     if report.batches_judged == 0:
@@ -609,7 +690,7 @@ def quarantine_gate(report: QuarantineReport) -> GateResult:
     detail = f"{report.batches_judged} session(s) checked, {len(report.moved)} frame(s) moved"
     if report.batches_too_small:
         detail += f"; {report.batches_too_small} session(s) too small to check"
-    return passed_gate(GATE_NAME, limit=MAXIMUM_QUARANTINED_FRACTION, limit_source=source, detail=detail)
+    return passed_gate(GATE_NAME, limit=maximum_quarantined_fraction, limit_source=source, detail=detail)
 
 
 def _unused_destination(directory: str, file_name: str) -> str:

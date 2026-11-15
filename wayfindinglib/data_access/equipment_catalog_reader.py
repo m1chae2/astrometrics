@@ -37,6 +37,13 @@ from typing import Any
 
 from astrometricslib import AppConfiguration
 from astrometricslib.exceptions import ConfigurationError
+from astrometricslib.parameters import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
 from wayfindinglib.models.equipment_and_site.driver_protocols import (
     CAMERA_PROTOCOLS,
     FILTER_WHEEL_PROTOCOLS,
@@ -69,7 +76,17 @@ ACTIVE_GUIDE_SCOPE_KEY = "active_guide_scope"
 
 _BOOL_TRUE_STRINGS = {"true", "1", "yes", "on"}
 
-DEFAULT_MERIDIAN_FLIP_DELAY_MIN = 5.0
+DEFAULT_MERIDIAN_FLIP_DELAY_MIN = TunedParameter(
+    name="wayfinding.default_meridian_flip_delay_min",
+    default=5.0,
+    unit="min",
+    description="Meridian-flip delay used when the configuration does not set one.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D131",
+    pending_conversion=True,
+)
 """Meridian-flip delay used when the configuration does not set one."""
 
 
@@ -465,6 +482,8 @@ def get_meridian_flip_delay_min(config: Any) -> float:
     """
     return float(
         config.app_config.get(
-            TELESCOPE_SECTION, "meridian_flip_delay_min", fallback=str(DEFAULT_MERIDIAN_FLIP_DELAY_MIN)
+            TELESCOPE_SECTION,
+            "meridian_flip_delay_min",
+            fallback=str(resolve_parameter(DEFAULT_MERIDIAN_FLIP_DELAY_MIN).value),
         )
     )

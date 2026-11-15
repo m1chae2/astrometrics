@@ -44,6 +44,7 @@ from scipy.stats import median_abs_deviation
 from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_header_and_data
 from astrometricslib.foundation.observatory_site import ObservatorySite
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.photometry_quality import InputQualityAssessment
 from astrometricslib.models.quality.quality_summary import ExcludedFrame, FrameEnsembleComposition
 from astrometricslib.models.stellar_source import (
@@ -51,6 +52,12 @@ from astrometricslib.models.stellar_source import (
     MINIMUM_POINTS_FOR_TRANSIT_SEARCH,
     PhotometryResult,
     StellarObject,
+)
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
 )
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
 from astrometricslib.pipelines.photometry.post_processing.assess_output_quality import (
@@ -125,12 +132,30 @@ logger = logging.getLogger(__name__)
 # per-frame registration data showed centroid drift of 30-140+ px and the
 # detected star count collapsing to near zero, exactly what this check
 # exists to catch.
-MINIMUM_FRAMES_FOR_OUTLIER_REJECTION = 5
+MINIMUM_FRAMES_FOR_OUTLIER_REJECTION = TunedParameter(
+    name="photometry.minimum_frames_for_outlier_rejection",
+    default=5,
+    unit="frames",
+    description="Fewest frames a session needs before a bad frame is rejected as a statistical outlier.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-D08",
+)
 
 # A run of this many consecutive points on the same side of the median, each
 # beyond the clipping limit, is treated as a real change and kept. A single
 # point is treated as a glitch (a cosmic ray, a bad centroid) and clipped.
-MINIMUM_RUN_LENGTH_KEPT_AS_REAL_CHANGE = 2
+MINIMUM_RUN_LENGTH_KEPT_AS_REAL_CHANGE = TunedParameter(
+    name="photometry.minimum_run_length_kept_as_real_change",
+    default=2,
+    unit="points",
+    description="Consecutive points beyond the clipping limit that are treated as a real change and kept.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-D08",
+)
 
 
 def flux_mean_and_coefficient_of_variation(photometry: Any) -> tuple[float, float] | None:
@@ -202,7 +227,18 @@ def _compute_star_coefficients_of_variation(stellar_objects: list[StellarObject]
 # multiplier is therefore not what limits the search: the photometry's own
 # scatter (median 0.29 mag across targets) hides most variables. See the
 # `variability_discrimination` and `detectable_amplitude` gates.
-DEFAULT_VARIABILITY_SIGMA_THRESHOLD = 7.4
+DEFAULT_VARIABILITY_SIGMA_THRESHOLD = TunedParameter(
+    name="photometry.default_variability_sigma_threshold",
+    default=7.4,
+    unit="MAD",
+    description=(
+        "Multiplier of the field's median absolute deviation (MAD) in the coefficient-of-variation cutoff."
+    ),
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-10",
+)
 
 
 def median_light_curve_scatter_mag(stellar_objects: list[StellarObject]) -> float | None:
@@ -373,6 +409,7 @@ def flag_variable_stars(
         The candidate stars, and the noise model and thresholds that picked
         them (both `None` when the CV cutoff was used).
     """
+    minimum_points_for_indices = resolve(MINIMUM_POINTS_FOR_INDICES).value
     cv_list = _compute_star_coefficients_of_variation(stellar_objects)
 
     if not cv_list:
@@ -409,7 +446,7 @@ def flag_variable_stars(
         if star.photometry.coefficient_of_variation is not None
         and star.photometry.coefficient_of_variation > cutoff_stats.cutoff
         and len(star.photometry.fluxes_detrended or star.photometry.fluxes_normalized)
-        >= MINIMUM_POINTS_FOR_INDICES
+        >= minimum_points_for_indices
     ]
     return variable_candidates, assessment
 
@@ -440,12 +477,42 @@ def _flag_variable_stars_by_adaptive_cutoff(
 # The long-term search compares the star's median normalized flux in each
 # observing session. A median needs a few points to mean anything, and a
 # change needs two sessions to be measured at all.
-MINIMUM_SESSIONS_FOR_LONG_TERM_SEARCH = 2
-MINIMUM_POINTS_PER_SESSION_FOR_LONG_TERM_SEARCH = 3
+MINIMUM_SESSIONS_FOR_LONG_TERM_SEARCH = TunedParameter(
+    name="photometry.minimum_sessions_for_long_term_search",
+    default=2,
+    unit="sessions",
+    description="Fewest usable observing sessions a star needs for the long-term change search.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-D18",
+)
+MINIMUM_POINTS_PER_SESSION_FOR_LONG_TERM_SEARCH = TunedParameter(
+    name="photometry.minimum_points_per_session_for_long_term_search",
+    default=3,
+    unit="points",
+    description="Fewest points a session needs to give a median for the long-term change search.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-D18",
+)
 
 # How many times its expected error the difference between the brightest and
 # faintest session medians must be before the star is flagged.
-DEFAULT_LONG_TERM_SIGNIFICANCE_THRESHOLD = 3.0
+DEFAULT_LONG_TERM_SIGNIFICANCE_THRESHOLD = TunedParameter(
+    name="photometry.default_long_term_significance_threshold",
+    default=3.0,
+    unit="sigma",
+    description=(
+        "How many times its expected error the difference between the brightest and faintest "
+        "session medians must be to flag the star."
+    ),
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-D18",
+)
 
 # The smallest between-session change, in magnitudes, that is flagged however
 # well it is measured. A bright star's median is so well determined that a
@@ -453,7 +520,16 @@ DEFAULT_LONG_TERM_SIGNIFICANCE_THRESHOLD = 3.0
 # comparison ensembles of two nights differ by about this much (see
 # `SessionPhotometrySummary`). 0.02 mag matches the 2% floor of the
 # within-session CV cutoff.
-MINIMUM_LONG_TERM_AMPLITUDE_MAG = 0.02
+MINIMUM_LONG_TERM_AMPLITUDE_MAG = TunedParameter(
+    name="photometry.minimum_long_term_amplitude_mag",
+    default=0.02,
+    unit="mag",
+    description="Smallest between-session change flagged however well it is measured.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="PHO-D18",
+)
 
 # The standard error of a sample median of normally distributed values is
 # sqrt(pi / 2) = 1.2533 times the standard error of their mean.
@@ -487,6 +563,10 @@ def _between_session_change(star: StellarObject) -> tuple[float, float] | None:
         unitless). `None` when fewer than two sessions have enough usable
         points.
     """
+    minimum_points_per_session_for_long_term_search = resolve(
+        MINIMUM_POINTS_PER_SESSION_FOR_LONG_TERM_SEARCH
+    ).value
+    minimum_sessions_for_long_term_search = resolve(MINIMUM_SESSIONS_FOR_LONG_TERM_SEARCH).value
     if star.photometry is None:
         return None
     usable = [
@@ -495,9 +575,9 @@ def _between_session_change(star: StellarObject) -> tuple[float, float] | None:
         if summary.median_normalized_flux is not None
         and summary.median_normalized_flux > 0
         and summary.normalized_flux_scatter is not None
-        and summary.point_count >= MINIMUM_POINTS_PER_SESSION_FOR_LONG_TERM_SEARCH
+        and summary.point_count >= minimum_points_per_session_for_long_term_search
     ]
-    if len(usable) < MINIMUM_SESSIONS_FOR_LONG_TERM_SEARCH:
+    if len(usable) < minimum_sessions_for_long_term_search:
         return None
 
     brightest = max(usable, key=lambda summary: summary.median_normalized_flux)
@@ -526,7 +606,7 @@ def _between_session_change(star: StellarObject) -> tuple[float, float] | None:
 
 def identify_long_term_variable_candidates(
     stellar_objects: list[StellarObject],
-    significance_threshold: float = DEFAULT_LONG_TERM_SIGNIFICANCE_THRESHOLD,
+    significance_threshold: float | None = None,
 ) -> list[StellarObject]:
     """Find stars whose brightness differs between observing sessions.
 
@@ -576,6 +656,9 @@ def identify_long_term_variable_candidates(
         `between_session_amplitude_mag` (magnitudes) and
         `between_session_significance` (unitless) on its photometry.
     """
+    minimum_long_term_amplitude_mag = resolve(MINIMUM_LONG_TERM_AMPLITUDE_MAG).value
+    if significance_threshold is None:
+        significance_threshold = resolve(DEFAULT_LONG_TERM_SIGNIFICANCE_THRESHOLD).value
     variable_candidates = []
     for star in stellar_objects:
         if star.photometry is None:
@@ -588,7 +671,7 @@ def identify_long_term_variable_candidates(
         amplitude_mag, significance = change
         star.photometry.between_session_amplitude_mag = round(amplitude_mag, 4)
         star.photometry.between_session_significance = round(significance, 2)
-        if significance > significance_threshold and amplitude_mag >= MINIMUM_LONG_TERM_AMPLITUDE_MAG:
+        if significance > significance_threshold and amplitude_mag >= minimum_long_term_amplitude_mag:
             variable_candidates.append(star)
     return variable_candidates
 
@@ -611,6 +694,7 @@ def _isolated_flagged_points(flagged: np.ndarray, above: np.ndarray) -> np.ndarr
         `MINIMUM_RUN_LENGTH_KEPT_AS_REAL_CHANGE` flagged neighbours in a row
         on the same side of the median, including itself.
     """
+    minimum_run_length_kept_as_real_change = resolve(MINIMUM_RUN_LENGTH_KEPT_AS_REAL_CHANGE).value
     isolated = np.zeros(flagged.size, dtype=bool)
     start = 0
     while start < flagged.size:
@@ -620,7 +704,7 @@ def _isolated_flagged_points(flagged: np.ndarray, above: np.ndarray) -> np.ndarr
         end = start
         while end + 1 < flagged.size and flagged[end + 1] and above[end + 1] == above[start]:
             end += 1
-        if end - start + 1 < MINIMUM_RUN_LENGTH_KEPT_AS_REAL_CHANGE:
+        if end - start + 1 < minimum_run_length_kept_as_real_change:
             isolated[start : end + 1] = True
         start = end + 1
     return isolated
@@ -677,7 +761,7 @@ class VariabilityAnalyzer:
         self,
         config: Any = None,
         *,
-        maximum_comparison_stars: int = DEFAULT_MAXIMUM_COMPARISON_STARS,
+        maximum_comparison_stars: int | None = None,
         ensemble_airmass_correction: bool = False,
     ) -> None:
         """Start an analyzer with no stars and no frames measured yet.
@@ -695,8 +779,11 @@ class VariabilityAnalyzer:
             derived from the comparison stars. Off by default, in which case
             the detrended light curve equals the normalized one.
         """
+        minimum_comparison_stars = resolve(MINIMUM_COMPARISON_STARS).value
+        if maximum_comparison_stars is None:
+            maximum_comparison_stars = resolve(DEFAULT_MAXIMUM_COMPARISON_STARS).value
         self.config = config
-        self.maximum_comparison_stars = max(maximum_comparison_stars, MINIMUM_COMPARISON_STARS)
+        self.maximum_comparison_stars = max(maximum_comparison_stars, minimum_comparison_stars)
         self.ensemble_airmass_correction = ensemble_airmass_correction
         self.light_curves: dict[str, PhotometryResult] = {}
         self.stellar_objects: list[StellarObject] = []
@@ -1400,8 +1487,9 @@ class VariabilityAnalyzer:
         kept : `set` [`datetime.datetime`]
             The frames that were not rejected.
         """
+        minimum_frames_for_outlier_rejection = resolve(MINIMUM_FRAMES_FOR_OUTLIER_REJECTION).value
         factors_list = sorted(levels.items())
-        if len(factors_list) < MINIMUM_FRAMES_FOR_OUTLIER_REJECTION:
+        if len(factors_list) < minimum_frames_for_outlier_rejection:
             return {timestamp for timestamp, _ in factors_list}
 
         times = [item[0] for item in factors_list]
@@ -1671,9 +1759,7 @@ class VariabilityAnalyzer:
                     if not star.photometry.time_bjd_tdb:
                         star.photometry.time_basis = None
 
-    def identify_variable_stars(
-        self, sigma_threshold: float = DEFAULT_VARIABILITY_SIGMA_THRESHOLD
-    ) -> list[StellarObject]:
+    def identify_variable_stars(self, sigma_threshold: float | None = None) -> list[StellarObject]:
         """Find the stars that vary more than their noise explains.
 
         Sets the variability indices on each star's light curve and keeps the
@@ -1691,6 +1777,8 @@ class VariabilityAnalyzer:
         variable_candidates : `list[StellarObject]`
             The stars that look like real variable stars.
         """
+        if sigma_threshold is None:
+            sigma_threshold = resolve(DEFAULT_VARIABILITY_SIGMA_THRESHOLD).value
         candidates, assessment = flag_variable_stars(self.stellar_objects, sigma_threshold)
         self.noise_model = assessment.noise_model
         self.variability_thresholds = assessment.thresholds
@@ -1829,13 +1917,14 @@ class VariabilityAnalyzer:
             The search result (check its ``verdict``), or `None` if there
             were fewer than 8 measurements.
         """
+        minimum_points_for_transit_search = resolve(MINIMUM_POINTS_FOR_TRANSIT_SEARCH).value
         if not star.can_run_transit_search:
             return None
 
         from astrometricslib.pipelines.photometry.processing.periodicity_search import box_search
 
         time_days, fluxes = self._light_curve_arrays(star)
-        if fluxes.size < MINIMUM_POINTS_FOR_TRANSIT_SEARCH or np.mean(fluxes) <= 0:
+        if fluxes.size < minimum_points_for_transit_search or np.mean(fluxes) <= 0:
             return None
         candidate = box_search(
             time_days, fluxes, shuffle_count=shuffle_count, flux_errors=self.light_curve_errors(star)
@@ -1866,13 +1955,14 @@ class VariabilityAnalyzer:
             The search result (check its ``verdict``), or `None` if there
             were fewer than 5 measurements.
         """
+        minimum_points_for_period_search = resolve(MINIMUM_POINTS_FOR_PERIOD_SEARCH).value
         if not star.can_run_period_search:
             return None
 
         from astrometricslib.pipelines.photometry.processing.periodicity_search import lomb_scargle_search
 
         time_days, fluxes = self._light_curve_arrays(star)
-        if fluxes.size < MINIMUM_POINTS_FOR_PERIOD_SEARCH:
+        if fluxes.size < minimum_points_for_period_search:
             return None
         result = lomb_scargle_search(
             time_days, fluxes, shuffle_count=shuffle_count, flux_errors=self.light_curve_errors(star)

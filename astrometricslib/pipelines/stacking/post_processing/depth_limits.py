@@ -51,6 +51,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     APERTURE_RADIUS_PX,
     MAD_TO_SIGMA,
@@ -79,13 +86,43 @@ INDEPENDENT_PIXEL_EXPONENT = 0.5
 # The detection threshold of the point-source depth, in sigma of the noise in
 # the aperture. 5 is the usual statement of a point-source depth in NASA and
 # ESA mission papers.
-POINT_SOURCE_SIGMA = 5.0
+POINT_SOURCE_SIGMA = TunedParameter(
+    name="stacking.point_source_sigma",
+    default=5.0,
+    unit="sigma",
+    description="Detection threshold of the point-source depth, in sigma of the aperture noise.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D34",
+    pending_conversion=True,
+)
 
 # The detection threshold of the surface-brightness limit, in sigma of the
 # noise in the box. 3 sigma over 10 arcsec boxes is the convention of Roman et
 # al. (2020) and of Euclid's surface-brightness limit.
-SURFACE_BRIGHTNESS_SIGMA = 3.0
-SURFACE_BRIGHTNESS_BOX_ARCSEC = 10.0
+SURFACE_BRIGHTNESS_SIGMA = TunedParameter(
+    name="stacking.surface_brightness_sigma",
+    default=3.0,
+    unit="sigma",
+    description="Detection threshold of the surface-brightness limit, in sigma of the box noise.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D34",
+    pending_conversion=True,
+)
+SURFACE_BRIGHTNESS_BOX_ARCSEC = TunedParameter(
+    name="stacking.surface_brightness_box_arcsec",
+    default=10.0,
+    unit="arcsec",
+    description="Side of the box over which the surface-brightness limit is stated.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D34",
+    pending_conversion=True,
+)
 
 # A stored reference star is matched to a Gaia star within this distance. It is
 # about 1.5 pixels at 1.9 arcsec per pixel: wider than the position error of
@@ -93,20 +130,50 @@ SURFACE_BRIGHTNESS_BOX_ARCSEC = 10.0
 # `stack_noise.MAXIMUM_ROTATION_DEG`) and than a Gaia star moves in the 10
 # years since 2016 at the usual 100 mas/yr, and small enough that a wrong star
 # is rarely inside it. A design estimate.
-STAR_MATCH_RADIUS_ARCSEC = 3.0
+STAR_MATCH_RADIUS_ARCSEC = TunedParameter(
+    name="stacking.star_match_radius_arcsec",
+    default=3.0,
+    unit="arcsec",
+    description="Distance within which a stored reference star is matched to a Gaia star.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D34",
+    pending_conversion=True,
+)
 
 # A reference star is left out when another Gaia star inside its large
 # measuring aperture is brighter than the star's magnitude plus this. A
 # companion 3 mag fainter adds 6% to the aperture's light, which is 0.06 mag
 # of zero-point error for one star and much less for the median. A design
 # estimate.
-CONTAMINATION_MAGNITUDE_MARGIN = 3.0
+CONTAMINATION_MAGNITUDE_MARGIN = TunedParameter(
+    name="stacking.contamination_magnitude_margin",
+    default=3.0,
+    unit="magnitudes",
+    description="Margin below a star's magnitude within which a brighter neighbor leaves the star out.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D34",
+    pending_conversion=True,
+)
 
 # At least this many matched stars are needed for a median and its error. Three
 # is the fewest for which the scatter says anything; the 10 stored stars are
 # the brightest isolated ones, so most are expected to match. A design
 # estimate.
-MINIMUM_ZERO_POINT_STARS = 3
+MINIMUM_ZERO_POINT_STARS = TunedParameter(
+    name="stacking.minimum_zero_point_stars",
+    default=3,
+    unit="stars",
+    description="Fewest matched stars needed for a median zero point and its error.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D34",
+    pending_conversion=True,
+)
 
 # Why a stack has no zero point when its aperture set's sky positions did not
 # come from a plate solve of the stack that chose it (such positions can be
@@ -120,7 +187,17 @@ UNTRUSTED_SKY_POSITIONS_REASON = (
 # true positions has stars within about 1 arcsec (M 13: 0.1 to 0.9 arcsec); a
 # set with wrong positions has them 11 to 50 arcsec off. Three radii is
 # between the two (a design estimate, to be checked on the next real run).
-POSITION_MISFIT_RADIUS_FACTOR = 3.0
+POSITION_MISFIT_RADIUS_FACTOR = TunedParameter(
+    name="stacking.position_misfit_radius_factor",
+    default=3.0,
+    unit="× match radius",
+    description="Match radii the median distance to the nearest Gaia star may reach before a misfit shows.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D34",
+    pending_conversion=True,
+)
 
 # A Gaia lookup takes a star's right ascension and declination (degrees) and a
 # radius (degrees) and gives the rows ``(right ascension, declination, G)`` of
@@ -278,12 +355,15 @@ def gaia_zero_point(
     reason : `str`
         Why there is none. Empty when there is one.
     """
+    minimum_zero_point_stars = resolve(MINIMUM_ZERO_POINT_STARS).value
+    star_match_radius_arcsec = resolve(STAR_MATCH_RADIUS_ARCSEC).value
+    contamination_magnitude_margin = resolve(CONTAMINATION_MAGNITUDE_MARGIN).value
     if gaia_lookup is None:
         return None, "no Gaia star data were available to match the reference stars"
     if not star_fluxes:
         return None, "the stack has no measured reference stars"
     aperture_arcsec = reference_radius_px * pixel_scale_arcsec
-    search_deg = (aperture_arcsec + STAR_MATCH_RADIUS_ARCSEC) / 3600.0
+    search_deg = (aperture_arcsec + star_match_radius_arcsec) / 3600.0
     offsets = []
     nearest_separations = []
     for right_ascension, declination, flux in star_fluxes:
@@ -302,33 +382,33 @@ def gaia_zero_point(
         )
         nearest = int(np.argmin(distance_arcsec))
         nearest_separations.append(float(distance_arcsec[nearest]))
-        if distance_arcsec[nearest] > STAR_MATCH_RADIUS_ARCSEC:
+        if distance_arcsec[nearest] > star_match_radius_arcsec:
             continue
         star_magnitude = float(table[nearest, 2])
         others = np.arange(len(table)) != nearest
         crowded = np.any(
             others
             & (distance_arcsec <= aperture_arcsec)
-            & (table[:, 2] < star_magnitude + CONTAMINATION_MAGNITUDE_MARGIN)
+            & (table[:, 2] < star_magnitude + contamination_magnitude_margin)
         )
         if crowded:
             continue
         offsets.append(star_magnitude + 2.5 * math.log10(flux))
-    if len(offsets) < MINIMUM_ZERO_POINT_STARS:
+    if len(offsets) < minimum_zero_point_stars:
         if not nearest_separations:
             return None, (
                 "the local Gaia cache holds no stars near the reference stars yet "
                 "(the cache is filled when the astrometry step runs on this field)"
             )
         median_separation = float(np.median(nearest_separations)) if nearest_separations else 0.0
-        if median_separation > POSITION_MISFIT_RADIUS_FACTOR * STAR_MATCH_RADIUS_ARCSEC:
+        if median_separation > resolve(POSITION_MISFIT_RADIUS_FACTOR).value * star_match_radius_arcsec:
             return None, (
                 "the stored reference-star positions do not land on Gaia stars "
                 f"(median nearest separation {median_separation:.0f} arcsec)"
             )
         return None, (
             f"only {len(offsets)} of {len(star_fluxes)} reference stars matched an uncrowded Gaia G "
-            f"star in the local cache; {MINIMUM_ZERO_POINT_STARS} are needed"
+            f"star in the local cache; {minimum_zero_point_stars} are needed"
         )
     values = np.asarray(offsets)
     zero_point = float(np.median(values))
@@ -371,18 +451,19 @@ def _noise_at_area(result: StackNoiseResult, area_px: float) -> tuple[float, flo
         How the scaling was done, including whether it reaches beyond the
         measured areas.
     """
+    aperture_radius_px = resolve(APERTURE_RADIUS_PX).value
     relative_error = result.noise_uncertainty_adu / result.noise_adu
     outcome = result.size_noise
     measured = outcome.result if outcome is not None else None
     if measured is None or not math.isfinite(measured.exponent):
-        base_area = math.pi * APERTURE_RADIUS_PX**2
+        base_area = math.pi * aperture_radius_px**2
         base_noise = result.noise_adu
         exponent = INDEPENDENT_PIXEL_EXPONENT
         exponent_error = 0.0
         assumed = True
         extrapolated = False
         basis = (
-            f"The noise at {area_px:.1f} px comes from the {APERTURE_RADIUS_PX:g} px aperture's noise "
+            f"The noise at {area_px:.1f} px comes from the {aperture_radius_px:g} px aperture's noise "
             "with an exponent of 0.5: assumes independent pixels (a lower noise, so a deeper, optimistic "
             "limit)"
         )
@@ -455,6 +536,7 @@ def measure_depth_limits(
         Both depths, each with its uncertainty and a note, or with the reason
         it could not be worked out.
     """
+    surface_brightness_box_arcsec = resolve(SURFACE_BRIGHTNESS_BOX_ARCSEC).value
     if result is None:
         missing = _not_measured(reason or "the stack's noise was not measured")
         return DepthLimits(missing, missing)
@@ -515,7 +597,7 @@ def measure_depth_limits(
     if stacked_fwhm_px is not None and math.isfinite(stacked_fwhm_px) and stacked_fwhm_px > 0:
         point_source = limit(
             math.pi * stacked_fwhm_px**2,
-            POINT_SOURCE_SIGMA,
+            resolve(POINT_SOURCE_SIGMA).value,
             None,
             (
                 f"5 sigma in a circular aperture of radius {stacked_fwhm_px:.2f} px (one star width); "
@@ -523,13 +605,13 @@ def measure_depth_limits(
                 "(0.07 mag)."
             ),
         )
-    box_pixels = (SURFACE_BRIGHTNESS_BOX_ARCSEC / result.pixel_scale_arcsec) ** 2
+    box_pixels = (surface_brightness_box_arcsec / result.pixel_scale_arcsec) ** 2
     surface = limit(
         box_pixels,
-        SURFACE_BRIGHTNESS_SIGMA,
-        SURFACE_BRIGHTNESS_BOX_ARCSEC**2,
+        resolve(SURFACE_BRIGHTNESS_SIGMA).value,
+        surface_brightness_box_arcsec**2,
         (
-            f"3 sigma over a {SURFACE_BRIGHTNESS_BOX_ARCSEC:g} by {SURFACE_BRIGHTNESS_BOX_ARCSEC:g} arcsec "
+            f"3 sigma over a {surface_brightness_box_arcsec:g} by {surface_brightness_box_arcsec:g} arcsec "
             f"box ({box_pixels:.1f} px at {result.pixel_scale_arcsec:.2f} arcsec per pixel, treated as the "
             "circle of the same area)."
         ),

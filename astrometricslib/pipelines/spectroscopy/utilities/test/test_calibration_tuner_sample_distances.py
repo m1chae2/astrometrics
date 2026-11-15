@@ -427,7 +427,7 @@ def test_noisy_adu_frame_gives_few_candidates_and_finishes_quickly(seed: int) ->
     )
     elapsed_s = time.perf_counter() - started
 
-    assert 3 <= len(dips) <= _MAX_DIP_CANDIDATES
+    assert 3 <= len(dips) <= _MAX_DIP_CANDIDATES.default
     candidate_distances_px = SpectroscopyCalibrationTuner._positions_to_distances_px(
         centers, sample_distances_px
     )

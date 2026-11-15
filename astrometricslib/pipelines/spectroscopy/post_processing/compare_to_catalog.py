@@ -10,8 +10,16 @@ the wrong object).
 
 import numpy as np
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.spectroscopy_quality import CatalogComparison
 from astrometricslib.models.stellar_source import DIFFERS_FROM_CATALOG_SUBTYPES, types_differ_on_ladder
+from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier import (
     is_catalog_giant,
     luminosity_class,
@@ -24,7 +32,16 @@ from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier impor
 # A catalog colour redder than this is not compared. The references stop at
 # M4V (B-V 1.64), so the map from window colour to B-V is not calibrated for
 # later types.
-MAXIMUM_CALIBRATED_B_MINUS_V = 1.7
+MAXIMUM_CALIBRATED_B_MINUS_V = TunedParameter(
+    name="spectroscopy.maximum_calibrated_b_minus_v",
+    default=1.7,
+    unit="mag",
+    description="A catalog colour redder than this is not compared.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="SPE-D19",
+)
 
 # A spectrum is flagged when its colour differs from the catalog's by more
 # than this many magnitudes. On 2026-09-24, 30 of the 36 stars stayed within
@@ -35,7 +52,17 @@ MAXIMUM_CALIBRATED_B_MINUS_V = 1.7
 # judgement call from that one data set: it is above every ordinary star seen
 # and well above the 0.09 mag median excess for F, G and early K stars, so
 # ordinary reddening does not trigger it, but the gap is thin.
-COLOUR_DISAGREEMENT_MAGNITUDES = 0.4
+COLOUR_DISAGREEMENT_MAGNITUDES = TunedParameter(
+    name="spectroscopy.colour_disagreement_magnitudes",
+    default=0.4,
+    unit="mag",
+    description="A spectrum is flagged when its colour differs from the catalog's by more than this.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-27",
+    pending_conversion=True,
+)
 
 
 def catalog_disagreement_note(catalog_spectral_type: str | None, classified_type: str | None) -> str:
@@ -63,8 +90,8 @@ def catalog_disagreement_note(catalog_spectral_type: str | None, classified_type
         return ""
     return (
         f"the spectrum matches {classified_type} but the catalog gives {catalog_spectral_type}, "
-        f"more than {DIFFERS_FROM_CATALOG_SUBTYPES:.0f} subtype steps "
-        f"({DIFFERS_FROM_CATALOG_SUBTYPES / 10:g} spectral classes) apart: "
+        f"more than {resolve(DIFFERS_FROM_CATALOG_SUBTYPES).value:.0f} subtype steps "
+        f"({resolve(DIFFERS_FROM_CATALOG_SUBTYPES).value / 10:g} spectral classes) apart: "
         "the spectrum may not be this star's "
         "(a bright neighbour, glare from a very bright star, or a wrong name)"
     )
@@ -134,10 +161,10 @@ def colour_disagreement_note(catalog_b_minus_v: float | None, synthetic_colour: 
         return ""
     if not (np.isfinite(catalog_b_minus_v) and np.isfinite(synthetic_colour)):
         return ""
-    if catalog_b_minus_v > MAXIMUM_CALIBRATED_B_MINUS_V:
+    if catalog_b_minus_v > resolve(MAXIMUM_CALIBRATED_B_MINUS_V).value:
         return ""
     difference = synthetic_colour - catalog_b_minus_v
-    if abs(difference) <= COLOUR_DISAGREEMENT_MAGNITUDES:
+    if abs(difference) <= resolve(COLOUR_DISAGREEMENT_MAGNITUDES).value:
         return ""
     direction = "redder" if difference > 0 else "bluer"
     return (
@@ -184,7 +211,7 @@ def compare_to_catalog(
     b_minus_v_difference_mag = None
     if catalog_b_minus_v is not None and synthetic_colour is not None:
         if np.isfinite(catalog_b_minus_v) and np.isfinite(synthetic_colour):
-            if catalog_b_minus_v <= MAXIMUM_CALIBRATED_B_MINUS_V:
+            if catalog_b_minus_v <= resolve(MAXIMUM_CALIBRATED_B_MINUS_V).value:
                 b_minus_v_difference_mag = float(synthetic_colour - catalog_b_minus_v)
 
     return CatalogComparison(

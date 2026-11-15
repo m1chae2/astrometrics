@@ -45,7 +45,9 @@ from wayfindinglib.models.equipment_and_site.performance_envelope import Trackin
 __all__ = [
     "CAUTION_SCORE",
     "HIGH_SCORE",
+    "BlendSettings",
     "TrackedTarget",
+    "blended_score",
     "build_tracking_risk_map",
     "prior_risk",
     "rms_risk_score",
@@ -92,7 +94,8 @@ INFLUENCE_RADIUS_DEG = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="WAY-D130",
-    pending_conversion=True,
+    allowed_range=(2.0, 90.0),
+    minimum_sample=5,  # a sample is one measured target (a group of solves with a position and a jitter)
 )
 """Width of the Gaussian pull of a measured target."""
 
@@ -105,7 +108,8 @@ FULL_CONFIDENCE_SOLVES = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="WAY-D130",
-    pending_conversion=True,
+    allowed_range=(2.0, 200.0),
+    minimum_sample=5,  # a sample is one measured target
 )
 """A measured target with this many solves has its full weight."""
 
@@ -118,7 +122,8 @@ MAX_MEASURED_SHARE = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="WAY-D130",
-    pending_conversion=True,
+    allowed_range=(0.1, 1.0),
+    minimum_sample=5,  # a sample is one measured target
 )
 """The largest share of a score that measured targets can decide."""
 
@@ -169,6 +174,40 @@ class TrackedTarget:
     dec_deg: float
     rms_arcsec: float
     solve_count: int
+
+
+@dataclass(frozen=True)
+class BlendSettings:
+    """The three numbers that decide how measured targets pull a score.
+
+    Attributes
+    ----------
+    influence_radius_deg : `float`
+        Width of a measured target's Gaussian pull, in degrees.
+    full_confidence_solves : `float`
+        Solve count at which a measured target has its full weight.
+    max_measured_share : `float`
+        The largest share of a score that measured targets can decide.
+    """
+
+    influence_radius_deg: float
+    full_confidence_solves: float
+    max_measured_share: float
+
+    @classmethod
+    def from_parameters(cls) -> BlendSettings:
+        """Read the three numbers from the resolved parameters.
+
+        Returns
+        -------
+        settings : `BlendSettings`
+            The numbers in use for the current run.
+        """
+        return cls(
+            influence_radius_deg=resolve_parameter(INFLUENCE_RADIUS_DEG).value,
+            full_confidence_solves=resolve_parameter(FULL_CONFIDENCE_SOLVES).value,
+            max_measured_share=resolve_parameter(MAX_MEASURED_SHARE).value,
+        )
 
 
 def _rms_limits(plate_scale_arcsec_per_px: float | None) -> tuple[float, float]:
@@ -290,12 +329,13 @@ def _separation_deg(ha1: float, dec1: float, ha2: float, dec2: float) -> float:
     return math.degrees(2 * math.atan2(math.sqrt(a), math.sqrt(max(0.0, 1 - a))))
 
 
-def _score(
+def blended_score(
     ha_deg: float,
     dec_deg: float,
     latitude_deg: float,
     targets: list[TrackedTarget],
     plate_scale_arcsec_per_px: float | None,
+    settings: BlendSettings | None = None,
 ) -> float:
     """Blend the prior score with the measured targets at one grid point.
 
@@ -309,25 +349,30 @@ def _score(
         Measured targets.
     plate_scale_arcsec_per_px : `float` or `None`
         Camera plate scale.
+    settings : `BlendSettings`, optional
+        Trial numbers for the pull of the targets, used by the tuner. The
+        resolved parameters are used when it is left out.
 
     Returns
     -------
     score : `float`
         The blended score, 0 to 1.
     """
+    if settings is None:
+        settings = BlendSettings.from_parameters()
     prior = prior_risk(ha_deg, dec_deg, _altitude_deg(ha_deg, dec_deg, latitude_deg))
     total_weight = weighted_sum = 0.0
     for target in targets:
         distance = _separation_deg(ha_deg, dec_deg, target.ha_deg, target.dec_deg)
-        if distance >= resolve_parameter(INFLUENCE_RADIUS_DEG).value * 1.8:
+        if distance >= settings.influence_radius_deg * 1.8:
             continue
-        confidence = min(1.0, target.solve_count / resolve_parameter(FULL_CONFIDENCE_SOLVES).value)
-        weight = math.exp(-0.5 * (distance / resolve_parameter(INFLUENCE_RADIUS_DEG).value) ** 2) * confidence
+        confidence = min(1.0, target.solve_count / settings.full_confidence_solves)
+        weight = math.exp(-0.5 * (distance / settings.influence_radius_deg) ** 2) * confidence
         weighted_sum += rms_risk_score(target.rms_arcsec, plate_scale_arcsec_per_px) * weight
         total_weight += weight
     if total_weight <= 0.001:
         return prior
-    share = min(resolve_parameter(MAX_MEASURED_SHARE).value, total_weight)
+    share = min(settings.max_measured_share, total_weight)
     return prior * (1.0 - share) + (weighted_sum / total_weight) * share
 
 
@@ -360,7 +405,10 @@ def build_tracking_risk_map(
     ha_values = [-180.0 + HA_STEP_DEG * i for i in range(int(360 / HA_STEP_DEG) + 1)]
     dec_values = [-90.0 + DEC_STEP_DEG * i for i in range(int(180 / DEC_STEP_DEG) + 1)]
     scores = [
-        [round(_score(ha, dec, latitude_deg, measured, plate_scale_arcsec_per_px), 3) for ha in ha_values]
+        [
+            round(blended_score(ha, dec, latitude_deg, measured, plate_scale_arcsec_per_px), 3)
+            for ha in ha_values
+        ]
         for dec in dec_values
     ]
     ideal, trailing = _rms_limits(plate_scale_arcsec_per_px)

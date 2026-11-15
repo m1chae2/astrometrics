@@ -64,7 +64,9 @@ SECOND_ORDER_RISKY_SHARE_OF_BRIGHTNESS = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D18",
-    pending_conversion=True,
+    allowed_range=(0.02, 0.5),
+    # A sample is a stored star spectrum.
+    minimum_sample=20,
 )
 
 # The largest ratio that is ever stored. Where the star is dim or

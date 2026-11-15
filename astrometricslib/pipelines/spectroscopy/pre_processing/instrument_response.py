@@ -68,7 +68,9 @@ _LINE_SKIP_HALF_WIDTH_PER_FWHM = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D55",
-    pending_conversion=True,
+    allowed_range=(0.5, 4.0),
+    # A sample is a stored star spectrum with a bundled reference.
+    minimum_sample=3,
 )
 
 # The least the fit skips either side of a line, in Angstroms, whatever the
@@ -85,7 +87,9 @@ _MINIMUM_LINE_SKIP_HALF_WIDTH_ANGSTROM = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D55",
-    pending_conversion=True,
+    allowed_range=(20.0, 150.0),
+    # A sample is a stored star spectrum with a bundled reference.
+    minimum_sample=3,
 )
 
 # The default range the response is fitted over, and so the range spectra
@@ -140,7 +144,9 @@ DEFAULT_RESPONSE_WAVELENGTH_RANGE_ANGSTROM = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-13",
-    pending_conversion=True,
+    allowed_range=(3800.0, 10000.0),
+    # A sample is a stored star spectrum.
+    minimum_sample=20,
 )
 
 # Degree of the polynomial fitted to the logarithm of (observed /
@@ -157,7 +163,9 @@ _RESPONSE_POLYNOMIAL_DEGREE = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D55",
-    pending_conversion=True,
+    allowed_range=(2, 6),
+    # A sample is a stored star spectrum with a bundled reference.
+    minimum_sample=3,
 )
 
 # The polynomial is written in this scaled variable, (wavelength - 6000) /

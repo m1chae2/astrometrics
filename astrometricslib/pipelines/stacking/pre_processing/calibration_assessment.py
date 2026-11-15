@@ -211,7 +211,9 @@ DARK_CURRENT_ALLOWANCE_ADU_PER_SECOND = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA}),
     register_entry="STK-54",
-    pending_conversion=True,
+    allowed_range=(0.0, 0.05),
+    # A sample is one exposure group of dark frames used in the fit.
+    minimum_sample=4,
 )
 
 # The most frames of concern one set lists. A set of copies can hold hundreds.

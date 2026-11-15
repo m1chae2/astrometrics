@@ -32,6 +32,7 @@ astrometricslib/_internal/drivers/siril_interface/_pipes_windows.py,PIPE_RETRY_S
 astrometricslib/_internal/drivers/siril_interface/session.py,SIRIL_COMMAND_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
 astrometricslib/_internal/drivers/siril_interface/session.py,SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
 astrometricslib/_internal/drivers/siril_interface/staging.py,WORK_DIRECTORY_RETENTION_DAYS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/tuning_support.py,MAD_TO_SIGMA,Mathematical constant: median absolute deviation to standard deviation for a normal distribution
 astrometricslib/api/jobs.py,MAXIMUM_JOBS,Reply size cap; plumbing
 astrometricslib/api/jobs.py,MAXIMUM_LINEAGE_RUNS,Reply size cap; plumbing
 astrometricslib/api/jobs.py,MAXIMUM_LOG_LINES,software plumbing
@@ -87,6 +88,7 @@ astrometricslib/pipelines/astrometry/pre_processing/source_detection.py,BACKGROU
 astrometricslib/pipelines/astrometry/pre_processing/source_detection.py,_BACKGROUND_STATS_SUBSAMPLE_MIN_PIXELS,Speed switch for subsampling; no result choice
 astrometricslib/pipelines/astrometry/pre_processing/source_detection.py,_STAR_RADIUS_PEAK_FRACTION,Decided not tuning in the #175 review (AST-D18): radius drawn on the star overlay only
 astrometricslib/pipelines/astrometry/pre_processing/source_detection.py,_STAR_RADIUS_WINDOW_HALF_WIDTH_PX,Decided not tuning in the #175 review (AST-D18): radius drawn on the star overlay only
+astrometricslib/pipelines/astrometry/processing/pointing_tuning.py,ARCSEC_PER_DEGREE,Unit conversion
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,GAIA_CONSECUTIVE_FAILURE_LIMIT,Network retry limit; affects only failure handling
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,GAIA_ESA_TIMEOUT_SECONDS,Network timeout; affects only failure handling
 astrometricslib/pipelines/astrometry/processing/star_identifier.py,GAIA_ROW_LIMIT,Plumbing: query size
@@ -208,6 +210,8 @@ astrometricslib/pipelines/spectroscopy/processing/second_order_risk.py,MAXIMUM_S
 astrometricslib/pipelines/spectroscopy/processing/spectral_feature_detector.py,_MINIMUM_NOISE_WIDTH,"1.0 is the unit of the depth uncertainty, not a choice"
 astrometricslib/pipelines/spectroscopy/processing/synthetic_colour.py,DWARF_B_MINUS_V,Published dwarf intrinsic colours
 astrometricslib/pipelines/spectroscopy/runner.py,_CATALOG_SLICE_SIZE,Database read batch size
+astrometricslib/pipelines/spectroscopy/spectrum_tuning_data.py,MEDIAN_ABSOLUTE_DEVIATION_TO_SIGMA,Mathematical constant: median absolute deviation to standard deviation for a normal distribution
+astrometricslib/pipelines/spectroscopy/spectrum_tuning_data.py,_LOAD_CHUNK_SIZE,Batch size for reading stored stars in a tuning run; affects only memory use
 astrometricslib/pipelines/spectroscopy/utilities/calibration_tuner.py,_FRACTIONAL_PROMINENCE_STEP,Search step size
 astrometricslib/pipelines/spectroscopy/utilities/calibration_tuner.py,_MAD_TO_SIGMA,unit or physical constant
 astrometricslib/pipelines/spectroscopy/utilities/registration_quality.py,_UNBOUNDED_SIGMA,Unbounded sigma sentinel
@@ -249,6 +253,7 @@ astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,MAXIMU
 astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,MINIMUM_HOMOGRAPHY_SCALE,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,SECONDS_PER_HOUR,unit or physical constant
 astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,SLOPE_SAMPLE_SEED,software plumbing
+astrometricslib/pipelines/stacking/post_processing/stack_blank_tuning.py,PERCENT_PER_FRACTION,Unit conversion
 astrometricslib/pipelines/stacking/post_processing/stack_image.py,MAD_SIGMA_ERROR_FACTOR,Statistical constant
 astrometricslib/pipelines/stacking/post_processing/stack_image.py,MAD_TO_SIGMA,unit or physical constant
 astrometricslib/pipelines/stacking/post_processing/stack_image.py,MEDIAN_ERROR_FACTOR,"Sampling, numerics, plumbing or math constant."

@@ -84,7 +84,9 @@ HINT_MATCH_WARNING_ARCSEC = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="AST-D14",
-    pending_conversion=True,
+    allowed_range=(5.0, 300.0),
+    # A sample is one target (spectral stack plus solved stack).
+    minimum_sample=5,
 )
 
 # How far from the position hint the star at the frame centre may really be,
@@ -107,7 +109,9 @@ POINTING_ERROR_SEARCH_RADIUS_ARCSEC = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="AST-09",
-    pending_conversion=True,
+    allowed_range=(60.0, 700.0),
+    # A sample is one target (spectral stack plus solved stack).
+    minimum_sample=5,
 )
 
 # When the centre star is named by the target's name or by brightness, the
@@ -129,7 +133,9 @@ CENTRE_STAR_SEARCH_RADIUS_FRACTION = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="AST-09",
-    pending_conversion=True,
+    allowed_range=(0.02, 0.4),
+    # A sample is one target (spectral stack plus solved stack).
+    minimum_sample=5,
 )
 
 # The detection that gets the target's name must reach at least this fraction

@@ -152,7 +152,8 @@ MOON_EXTINCTION_PER_AIRMASS = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.SITE}),
     register_entry="WAY-D29",
-    pending_conversion=True,
+    allowed_range=(0.0, 0.6),
+    minimum_sample=5,  # a sample is one observing night with frames of a capture setting
 )
 """The extinction coefficient k, in magnitudes per airmass, used for the Moon's
 own light on its way to the air above the target. A typical V-band value for a
@@ -342,13 +343,19 @@ def moon_phase_function(phase_angle_deg: float) -> float:
     return 10.0 ** (-0.4 * magnitudes)
 
 
-def sky_features(geometry: SkyGeometry) -> tuple[float, float, float] | None:
+def sky_features(
+    geometry: SkyGeometry, extinction_per_airmass: float | None = None
+) -> tuple[float, float, float] | None:
     """Give the three model features of one moment.
 
     Parameters
     ----------
     geometry : `SkyGeometry`
         The target's and the Moon's place in the sky.
+    extinction_per_airmass : `float`, optional
+        The Moon's extinction coefficient k, in magnitudes per airmass. The
+        tuner of `MOON_EXTINCTION_PER_AIRMASS` passes trial values; leave it
+        out to use the resolved parameter.
 
     Returns
     -------
@@ -358,6 +365,8 @@ def sky_features(geometry: SkyGeometry) -> tuple[float, float, float] | None:
     """
     if geometry.airmass is None:
         return None
+    if extinction_per_airmass is None:
+        extinction_per_airmass = resolve_parameter(MOON_EXTINCTION_PER_AIRMASS).value
     moon_airmass = airmass_from_altitude(geometry.moon_altitude_deg)
     if moon_airmass is None:
         moon_term = 0.0
@@ -365,7 +374,7 @@ def sky_features(geometry: SkyGeometry) -> tuple[float, float, float] | None:
         moon_term = (
             moon_phase_function(moon_phase_angle_deg(geometry.moon_illumination_fraction))
             * moon_scatter_shape(geometry.moon_separation_deg)
-            * 10.0 ** (-0.4 * resolve_parameter(MOON_EXTINCTION_PER_AIRMASS).value * moon_airmass)
+            * 10.0 ** (-0.4 * extinction_per_airmass * moon_airmass)
             * geometry.airmass
         )
     return 1.0, geometry.airmass - 1.0, moon_term
@@ -424,6 +433,9 @@ def fit_sky_model(
     latitude_deg: float,
     longitude_deg: float,
     elevation_m: float,
+    *,
+    extinction_per_airmass: float | None = None,
+    geometries: Sequence[SkyGeometry] | None = None,
 ) -> SkyModelOutcome:
     """Fit the sky model for one capture setting.
 
@@ -437,6 +449,13 @@ def fit_sky_model(
         The key of that setting, kept on the model.
     latitude_deg, longitude_deg, elevation_m : `float`
         The observing site.
+    extinction_per_airmass : `float`, optional
+        A trial value of the Moon's extinction coefficient, used by the
+        tuner of `MOON_EXTINCTION_PER_AIRMASS`. The resolved parameter is
+        used when it is left out.
+    geometries : `Sequence` [`SkyGeometry`], optional
+        The sky geometry of each sample, when the caller has already worked
+        it out (it is the slow step), in the order of `samples`.
 
     Returns
     -------
@@ -445,18 +464,19 @@ def fit_sky_model(
         there are fewer than `MINIMUM_NIGHTS_FOR_SKY_MODEL` nights or
         `MINIMUM_FRAMES_FOR_SKY_MODEL` frames above the horizon.
     """
-    geometries = sky_geometry(
-        [s.epoch_seconds for s in samples],
-        [s.ra_deg for s in samples],
-        [s.dec_deg for s in samples],
-        latitude_deg,
-        longitude_deg,
-        elevation_m,
-    )
+    if geometries is None:
+        geometries = sky_geometry(
+            [s.epoch_seconds for s in samples],
+            [s.ra_deg for s in samples],
+            [s.dec_deg for s in samples],
+            latitude_deg,
+            longitude_deg,
+            elevation_m,
+        )
     rows: list[tuple[str, tuple[float, float, float], float]] = []
     skipped = 0
     for sample, geometry in zip(samples, geometries, strict=True):
-        found = sky_features(geometry)
+        found = sky_features(geometry, extinction_per_airmass)
         if found is None:
             skipped += 1
             continue

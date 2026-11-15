@@ -94,7 +94,9 @@ MAXIMUM_FITTED_WAVELENGTH_ANGSTROM = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D31",
-    pending_conversion=True,
+    allowed_range=(7000.0, 10000.0),
+    # A sample is one stored star spectrum (tuner `spectroscopy.usable_range`).
+    minimum_sample=20,
 )
 
 # The continuum is a polynomial of this degree. 2 is a gentle curve: a
@@ -109,7 +111,8 @@ CONTINUUM_POLYNOMIAL_DEGREE = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D40",
-    pending_conversion=True,
+    allowed_range=(1, 4),
+    minimum_sample=5,  # a sample is a stored spectrum of the grating
 )
 
 # The fewest samples a spectrum needs before a fit is attempted.
@@ -122,7 +125,8 @@ _MINIMUM_SPECTRUM_POINTS = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D40",
-    pending_conversion=True,
+    allowed_range=(8, 120),
+    minimum_sample=5,  # a sample is a stored spectrum of the grating
 )
 
 # The caller should pass the box half-width as (extraction box width in
@@ -147,7 +151,8 @@ BLEND_CORRELATION_THRESHOLD = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D40",
-    pending_conversion=True,
+    allowed_range=(0.3, 0.95),
+    minimum_sample=2,  # a sample is a stored nebula spectrum
 )
 
 # How many error bars above zero a line must be. 5 means "very unlikely to
@@ -185,7 +190,8 @@ MINIMUM_COVERED_FRACTION = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D40",
-    pending_conversion=True,
+    allowed_range=(0.2, 0.95),
+    minimum_sample=2,  # a sample is a stored nebula spectrum
 )
 
 # A spectrum is called an emission-line source when at least this many
@@ -200,7 +206,8 @@ MINIMUM_DETECTED_FOR_EMISSION_SOURCE = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D40",
-    pending_conversion=True,
+    allowed_range=(2, 5),
+    minimum_sample=5,  # a sample is a stored spectrum of the grating
 )
 
 # The noise inflation for correlated samples is never allowed to be larger
@@ -215,7 +222,8 @@ _MAXIMUM_INFLATION_FRACTION = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D40",
-    pending_conversion=True,
+    allowed_range=(0.01, 0.5),
+    minimum_sample=5,  # a sample is a stored spectrum of the grating
 )
 
 

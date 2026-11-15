@@ -124,7 +124,9 @@ SIGNAL_TO_NOISE_MINIMUM_WAVELENGTH_ANGSTROM = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D31",
-    pending_conversion=True,
+    allowed_range=(3800.0, 5000.0),
+    # A sample is a stored star spectrum.
+    minimum_sample=20,
 )
 SIGNAL_TO_NOISE_MAXIMUM_WAVELENGTH_ANGSTROM = TunedParameter(
     name="spectroscopy.signal_to_noise_maximum_wavelength_angstrom",
@@ -135,7 +137,9 @@ SIGNAL_TO_NOISE_MAXIMUM_WAVELENGTH_ANGSTROM = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D31",
-    pending_conversion=True,
+    allowed_range=(7000.0, 10000.0),
+    # A sample is a stored star spectrum.
+    minimum_sample=20,
 )
 
 # A sample whose own signal-to-noise is below this counts toward

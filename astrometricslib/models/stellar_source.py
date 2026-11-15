@@ -114,7 +114,9 @@ NO_GOOD_MATCH_RMS = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-16",
-    pending_conversion=True,
+    allowed_range=(0.08, 0.4),
+    # A sample is a stored star spectrum.
+    minimum_sample=10,
 )
 """Poor-match limit. Unit: relative RMS (the root-mean-square difference as a
 fraction of the spectrum's average brightness; 0.15 means a typical sample is
@@ -138,7 +140,9 @@ UNRELIABLE_MATCH_RMS = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-17",
-    pending_conversion=True,
+    allowed_range=(0.2, 1.0),
+    # A sample is a stored star spectrum.
+    minimum_sample=20,
 )
 """No-match limit. Unit: relative RMS, as for `NO_GOOD_MATCH_RMS`. When even
 the closest reference is further away than this, the classifier names no type
@@ -155,7 +159,9 @@ AMBIGUOUS_RMS_GAP = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-18",
-    pending_conversion=True,
+    allowed_range=(0.005, 0.1),
+    # A sample is a neighbouring pair of bundled references.
+    minimum_sample=10,
 )
 """Ambiguity limit. Unit: relative RMS (a difference between two RMS values,
 not a probability). The best match is ambiguous when the second-best

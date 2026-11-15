@@ -245,8 +245,26 @@ def _setup_context(setup_name: str | None, filter_name: str | None) -> Parameter
     configuration = get_configuration()
     setups = configuration.get_observatory_setups()
     setup = setups.setup_named(setup_name) if setup_name else setups.active_setup()
-    equipment = SetupEquipmentValues(configuration, setup, filter_name) if setup is not None else None
-    return ParameterContext(configuration=configuration, equipment=equipment)
+    if setup is None:
+        return ParameterContext(configuration=configuration)
+    return ParameterContext(
+        configuration=configuration,
+        equipment=SetupEquipmentValues(configuration, setup, filter_name),
+        tuned=_tuned_values(configuration, setup, filter_name),
+    )
+
+
+def _tuned_values(configuration: Any, setup: SetupConfig, filter_name: str | None) -> Any:
+    """Build the provider of the tuned values stored for a setup.
+
+    Returns
+    -------
+    tuned : `tuning.ConfigTunedValues`
+        The provider.
+    """
+    from astrometricslib.foundation.tuning import ConfigTunedValues
+
+    return ConfigTunedValues(configuration, setup, filter_name)
 
 
 @contextmanager
@@ -299,14 +317,17 @@ def frames_parameter_context(frames: Sequence[Any]) -> Generator[ParameterContex
 
     configuration = get_configuration()
     equipment = None
+    tuned = None
     if frames:
         first = frames[0]
         setup = configuration.get_observatory_setups().setup_for(
             str(getattr(first, "camera", "")), str(getattr(first, "telescope", ""))
         )
         if setup is not None:
-            equipment = SetupEquipmentValues(configuration, setup, _filter_section_name(first))
-    with parameter_context(configuration=configuration, equipment=equipment) as context:
+            filter_name = _filter_section_name(first)
+            equipment = SetupEquipmentValues(configuration, setup, filter_name)
+            tuned = _tuned_values(configuration, setup, filter_name)
+    with parameter_context(configuration=configuration, equipment=equipment, tuned=tuned) as context:
         yield context
 
 

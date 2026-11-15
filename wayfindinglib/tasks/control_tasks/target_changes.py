@@ -57,6 +57,7 @@ __all__ = [
     "POSITION_WINDOW_SECONDS",
     "find_target_changes",
     "match_library_target",
+    "slew_end_positions",
 ]
 
 MATCH_RADIUS_DEGREES = TunedParameter(
@@ -84,7 +85,8 @@ NEW_POSITION_DEGREES = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D56",
-    pending_conversion=True,
+    allowed_range=(0.02, 2.0),
+    minimum_sample=10,  # a sample is one distance between the ends of two slews that follow each other
 )
 """A slew counts as a new target only if it ends this far from the last
 listed change, in degrees. Design estimate, register entry WAY-D56: centering
@@ -235,6 +237,33 @@ def _pointing_at(
     )
     sky = horizontal.icrs
     return float(sky.ra.deg), float(sky.dec.deg), None
+
+
+def slew_end_positions(context: ControlContext) -> list[tuple[float, float]]:
+    """List where every recorded slew ended, in time order.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the recorded Ekos sessions and the observer location.
+
+    Returns
+    -------
+    positions : `list` [`tuple` [`float`, `float`]]
+        Right ascension and declination in degrees of each slew whose end
+        position could be worked out. Empty without an observer location.
+    """
+    location = context.observer_location()
+    if location is None:
+        return []
+    records = sorted(context.butler.get_all("ekos_session_context"), key=lambda record: record.started_at)
+    positions = []
+    for record in records:
+        for slew_started_at, tracking_at in _slew_ends(record):
+            ra_deg, dec_deg, _note = _pointing_at(record, slew_started_at, tracking_at, location)
+            if ra_deg is not None and dec_deg is not None:
+                positions.append((ra_deg, dec_deg))
+    return positions
 
 
 def find_target_changes(

@@ -82,7 +82,8 @@ EXCURSION_MEDIAN_MULTIPLE = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D136",
-    pending_conversion=True,
+    allowed_range=(1.5, 30.0),
+    minimum_sample=5,  # a sample is one observing night with enough guide samples
 )
 """An excursion is a guide error above this multiple of the session median.
 
@@ -103,7 +104,8 @@ EXCURSION_FLOOR_ARCSEC = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D136",
-    pending_conversion=True,
+    allowed_range=(0.5, 20.0),
+    minimum_sample=5,  # a sample is one observing night with enough guide samples
 )
 """The smallest excursion limit, whatever the median is.
 
@@ -120,7 +122,8 @@ EXCURSION_JOIN_SECONDS = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D136",
-    pending_conversion=True,
+    allowed_range=(2.0, 300.0),
+    minimum_sample=8,  # a sample is one excursion (a run of over-limit guide samples)
 )
 """Two over-limit runs closer together than this are one excursion.
 
@@ -179,7 +182,8 @@ MINIMUM_FRAMES_FOR_STAR_BASELINE = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D136",
-    pending_conversion=True,
+    allowed_range=(2.0, 20.0),
+    minimum_sample=100,  # a sample is one frame predicted from the frames before it
 )
 """Frames needed before a star-count baseline means anything."""
 
@@ -192,7 +196,8 @@ MAXIMUM_FRAMES_IN_STAR_BASELINE = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D136",
-    pending_conversion=True,
+    allowed_range=(5.0, 100.0),
+    minimum_sample=100,  # a sample is one frame predicted from the frames before it
 )
 """The most earlier frames the star-count baseline looks back over.
 
@@ -209,7 +214,8 @@ JUMP_FIRST_SAMPLE_FRACTION = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D136",
-    pending_conversion=True,
+    allowed_range=(0.05, 0.95),
+    minimum_sample=8,  # a sample is one excursion
 )
 """An excursion is a jump if its first sample is already this much of its peak.
 

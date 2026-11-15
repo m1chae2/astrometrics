@@ -61,7 +61,9 @@ COLOUR_DISAGREEMENT_MAGNITUDES = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-27",
-    pending_conversion=True,
+    allowed_range=(0.1, 1.0),
+    # A sample is a stored star with a catalog colour.
+    minimum_sample=20,
 )
 
 

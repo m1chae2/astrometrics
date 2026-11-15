@@ -163,7 +163,9 @@ TRAILED_ROUNDNESS_LIMIT = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="STK-01",
-    pending_conversion=True,
+    allowed_range=(0.5, 0.95),
+    # A sample is one session (target, night, capture setting).
+    minimum_sample=5,
 )
 """A frame whose median star roundness is below this may have trailed stars.
 
@@ -187,7 +189,9 @@ ROUNDNESS_DROP_BELOW_MEDIAN = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="STK-01",
-    pending_conversion=True,
+    allowed_range=(0.03, 0.4),
+    # A sample is one session (target, night, capture setting).
+    minimum_sample=5,
 )
 """A frame must also be this far below the batch's median roundness.
 
@@ -209,7 +213,9 @@ COLOUR_CAMERA_ROUNDNESS_DROP_BELOW_MEDIAN = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA}),
     register_entry="STK-02",
-    pending_conversion=True,
+    allowed_range=(0.05, 0.5),
+    # A sample is one session (target, night, capture setting).
+    minimum_sample=5,
 )
 """The drop below the median for a colour (Bayer) camera, instead of 0.15.
 

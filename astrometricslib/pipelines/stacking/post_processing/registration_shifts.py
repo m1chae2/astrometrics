@@ -137,7 +137,9 @@ MAXIMUM_PLAUSIBLE_STEP_PX = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-44",
-    pending_conversion=True,
+    allowed_range=(10.0, 500.0),
+    # A sample is one stack with measured step rows.
+    minimum_sample=5,
 )
 
 # The step rows are not measured when more than this share of the pairs of one

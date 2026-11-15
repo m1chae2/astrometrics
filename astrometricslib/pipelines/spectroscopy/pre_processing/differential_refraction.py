@@ -104,7 +104,9 @@ BLUE_REPORT_WAVELENGTH_ANGSTROM = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D31",
-    pending_conversion=True,
+    allowed_range=(3800.0, 5000.0),
+    # A sample is a stored star spectrum.
+    minimum_sample=20,
 )
 RED_REPORT_WAVELENGTH_ANGSTROM = TunedParameter(
     name="spectroscopy.red_report_wavelength_angstrom",
@@ -115,7 +117,9 @@ RED_REPORT_WAVELENGTH_ANGSTROM = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D31",
-    pending_conversion=True,
+    allowed_range=(7000.0, 10000.0),
+    # A sample is a stored star spectrum.
+    minimum_sample=20,
 )
 
 # How far, in pixels, the dispersion direction is followed on the image to

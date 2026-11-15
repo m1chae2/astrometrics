@@ -84,7 +84,8 @@ SLOW_FRAME_RATIO = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D142",
-    pending_conversion=True,
+    allowed_range=(1.2, 10.0),
+    minimum_sample=100,  # a sample is one frame with guide samples inside its exposure
 )
 """A frame whose guide error is above this multiple of the group's median
 is listed as worse than its neighbours. The ratio is relative, so it adapts

@@ -9,6 +9,7 @@ astrometry.background_2d_box_min_px,AST-16,measurement,Partly measured
 astrometry.background_2d_min_boxes_per_axis,AST-16,measurement,Partly measured
 astrometry.background_stats_sample_fraction,AST-16,measurement,Partly measured
 astrometry.blob_width_box_radius_px,AST-06,measurement,Partly measured
+astrometry.centre_search_recentering_margin,AST-09,measurement,Partly measured
 astrometry.centre_star_minimum_peak_fraction,AST-09,exclusion criteria,Partly measured
 astrometry.centre_star_search_radius_fraction,AST-09,measurement,Partly measured
 astrometry.clip_sigmas,AST-02,exclusion criteria,Partly measured
@@ -44,6 +45,7 @@ astrometry.minimum_matched_stars,AST-05,judgment,Partly measured
 astrometry.minimum_peak_sigma,AST-19,judgment,Partly measured
 astrometry.minimum_stars_for_depth_estimate,AST-D11,measurement,Design estimate
 astrometry.pointing_error_search_radius_arcsec,AST-09,measurement,Partly measured
+astrometry.pointing_search_margin,AST-09,measurement,Partly measured
 astrometry.refined_match_radius_pixels,AST-02,exclusion criteria,Partly measured
 astrometry.sip_degree,AST-02,measurement,Partly measured
 astrometry.sky_ring_inner_factor,AST-D16,exclusion criteria,Design estimate
@@ -243,11 +245,28 @@ spectroscopy.dispersion_angle_roi_half_width_px,SPE-D33,exclusion criteria,Desig
 spectroscopy.dispersion_angle_roi_minimum_half_width_px,SPE-D33,exclusion criteria,Design estimate
 spectroscopy.dispersion_angle_seed_slope_count,SPE-D33,exclusion criteria,Design estimate
 spectroscopy.emission_exclusion_half_width_resolution_elements,SPE-D45,exclusion criteria,Design estimate
+spectroscopy.emission_tuning.candidate_covered_fractions,SPE-D40,judgment,Design estimate
+spectroscopy.emission_tuning.candidate_point_counts,SPE-D40,judgment,Design estimate
+spectroscopy.emission_tuning.continuum_block_count,SPE-D40,judgment,Design estimate
+spectroscopy.emission_tuning.degree_tolerance,SPE-D40,judgment,Design estimate
+spectroscopy.emission_tuning.false_source_rate,SPE-D40,judgment,Design estimate
+spectroscopy.emission_tuning.inflation_coverage,SPE-D40,judgment,Design estimate
+spectroscopy.emission_tuning.injected_amplitude_sigmas,SPE-D40,judgment,Design estimate
+spectroscopy.emission_tuning.maximum_candidate_degree,SPE-D40,judgment,Design estimate
+spectroscopy.emission_tuning.minimum_pairs_for_blend_gap,SPE-D40,judgment,Design estimate
+spectroscopy.emission_tuning.noise_spread_tolerance,SPE-D40,judgment,Design estimate
+spectroscopy.emission_tuning.recovery_tolerance,SPE-D40,judgment,Design estimate
+spectroscopy.emission_tuning.spectra_coverage,SPE-D40,judgment,Design estimate
 spectroscopy.equivalent_width_window_line_spreads,SPE-23,measurement,Partly measured
 spectroscopy.excess_scatter_sigma,SPE-D39,exclusion criteria,Design estimate
 spectroscopy.expected_depth_fractional_uncertainty,SPE-D43,judgment,Design estimate
 spectroscopy.extraction_radius_minimum_px,SPE-D35,exclusion criteria,Design estimate
 spectroscopy.fallback_resolution_element_angstrom,SPE-05,measurement,Partly measured
+spectroscopy.feature_tuning.candidate_band_half_windows,SPE-D41,judgment,Design estimate
+spectroscopy.feature_tuning.candidate_inner_elements,SPE-D41,judgment,Design estimate
+spectroscopy.feature_tuning.continuum_tolerance,SPE-D41,judgment,Design estimate
+spectroscopy.feature_tuning.count_coverage,SPE-D41,judgment,Design estimate
+spectroscopy.feature_tuning.maximum_candidate_degree,SPE-D41,judgment,Design estimate
 spectroscopy.first_fractional_prominence,SPE-D22,exclusion criteria,Design estimate
 spectroscopy.flare_contamination_fraction_threshold,SPE-D54,measurement,Design estimate
 spectroscopy.gaia_xp_residual_rms_limit,SPE-D14,judgment,Design estimate
@@ -303,7 +322,6 @@ spectroscopy.minimum_line_skip_half_width_angstrom,SPE-D55,measurement,Design es
 spectroscopy.minimum_lines_to_apply,SPE-D08,measurement,Design estimate
 spectroscopy.minimum_neighbor_distance_px,SPE-D48,measurement,Design estimate
 spectroscopy.minimum_noise_samples_per_side,SPE-D32,exclusion criteria,Design estimate
-spectroscopy.minimum_offset_pair_count,SPE-D50,exclusion criteria,Design estimate
 spectroscopy.minimum_overlap_fraction,SPE-D48,measurement,Design estimate
 spectroscopy.minimum_overlap_points,SPE-D47,exclusion criteria,Design estimate
 spectroscopy.minimum_reported_depth,SPE-D43,judgment,Design estimate
@@ -333,6 +351,13 @@ spectroscopy.ratio_error_floor_fraction,SPE-D29,exclusion criteria,Design estima
 spectroscopy.red_report_wavelength_angstrom,SPE-D31,exclusion criteria,Design estimate
 spectroscopy.red_window_angstrom,SPE-D09,exclusion criteria,Design estimate
 spectroscopy.registration_reference_field_radius_deg,SPE-D53,exclusion criteria,Design estimate
+spectroscopy.registration_tuning.bin_coverage,SPE-D50,measurement,Design estimate
+spectroscopy.registration_tuning.blind_window_coverage,SPE-D50,measurement,Design estimate
+spectroscopy.registration_tuning.chance_vote_coverage,SPE-D50,measurement,Design estimate
+spectroscopy.registration_tuning.match_coverage,SPE-D50,measurement,Design estimate
+spectroscopy.registration_tuning.minimum_stars_per_target,SPE-D50,measurement,Design estimate
+spectroscopy.registration_tuning.true_peak_exclusion_bins,SPE-D50,measurement,Design estimate
+spectroscopy.registration_tuning.window_margin,SPE-D50,measurement,Design estimate
 spectroscopy.resolution_profile_band_angstrom,SPE-D37,exclusion criteria,Design estimate
 spectroscopy.resolved_pair_minimum_separation_px,SPE-D51,measurement,Design estimate
 spectroscopy.response_polynomial_degree,SPE-D55,measurement,Design estimate
@@ -368,9 +393,32 @@ spectroscopy.spectral_feature_detector.continuum_polynomial_degree,SPE-D41,exclu
 spectroscopy.spectral_feature_detector.minimum_spectrum_points,SPE-D41,exclusion criteria,Design estimate
 spectroscopy.spectrum_signal.minimum_elements,SPE-D38,exclusion criteria,Design estimate
 spectroscopy.standard_r_v,SPE-21,measurement,Partly measured
+spectroscopy.standard_star_tuning.coverage,SPE-D52,measurement,Design estimate
 spectroscopy.synthetic_colour.minimum_samples_per_window,SPE-D46,judgment,Design estimate
 spectroscopy.trail_contamination_maximum_sharpness,SPE-D33,exclusion criteria,Design estimate
 spectroscopy.translation_bin_px,SPE-D50,exclusion criteria,Design estimate
+spectroscopy.tuning_colour_limit_sigma_multiple,SPE-27,measurement,Partly measured
+spectroscopy.tuning_coverage_step_angstrom,SPE-D47,measurement,Design estimate
+spectroscopy.tuning_defocus_limit_sigma_multiple,SPE-D09,measurement,Design estimate
+spectroscopy.tuning_defocus_median_relative_error,SPE-D09,measurement,Design estimate
+spectroscopy.tuning_defocus_red_window_start_share,SPE-D09,measurement,Design estimate
+spectroscopy.tuning_defocus_window_width_angstrom,SPE-D09,measurement,Design estimate
+spectroscopy.tuning_gaia_limit_sigma_multiple,SPE-D14,measurement,Design estimate
+spectroscopy.tuning_range_band_angstrom,SPE-D31,measurement,Design estimate
+spectroscopy.tuning_range_minimum_stars_per_band,SPE-D31,measurement,Design estimate
+spectroscopy.tuning_range_peak_share,SPE-D31,measurement,Design estimate
+spectroscopy.tuning_response_cross_validation_blocks,SPE-D55,measurement,Design estimate
+spectroscopy.tuning_response_degree_tolerance,SPE-D55,measurement,Design estimate
+spectroscopy.tuning_response_highest_degree,SPE-D55,measurement,Design estimate
+spectroscopy.tuning_response_lowest_degree,SPE-D55,measurement,Design estimate
+spectroscopy.tuning_response_wing_bin_angstrom,SPE-D55,measurement,Design estimate
+spectroscopy.tuning_response_wing_bin_fwhm,SPE-D55,measurement,Design estimate
+spectroscopy.tuning_response_wing_search_angstrom,SPE-D55,measurement,Design estimate
+spectroscopy.tuning_response_wing_search_fwhm,SPE-D55,measurement,Design estimate
+spectroscopy.tuning_response_wing_tolerance,SPE-D55,measurement,Design estimate
+spectroscopy.tuning_right_match_within_steps,SPE-16,measurement,Partly measured
+spectroscopy.tuning_stable_class_share,SPE-D47,measurement,Design estimate
+spectroscopy.tuning_untyped_share_above_limit,SPE-17,measurement,Partly measured
 spectroscopy.unclear_significance,SPE-25,judgment,Partly measured
 spectroscopy.v_window_angstrom,SPE-D46,judgment,Design estimate
 spectroscopy.wavelength_scale_limit_angstrom,SPE-D12,judgment,Design estimate
@@ -403,6 +451,7 @@ stacking.cosmic_clarity_denoise_strength,STK-30,measurement,Partly measured
 stacking.cross_axis_end,STK-D58,measurement,Design estimate
 stacking.cross_axis_start,STK-D58,measurement,Design estimate
 stacking.dark_current_allowance_adu_per_second,STK-54,judgment,Partly measured
+stacking.dark_current_minimum_exposures,STK-54,judgment,Partly measured
 stacking.dark_exposure_match_seconds,STK-D07,exclusion criteria,Design estimate
 stacking.darkest_sky_level,STK-29,measurement,Partly measured
 stacking.default_fwhm_degradation_ratio,STK-25,judgment,Partly measured
@@ -516,6 +565,7 @@ stacking.ring_inner_px,STK-D23,measurement,Design estimate
 stacking.ring_outer_px,STK-D23,measurement,Design estimate
 stacking.rotation_step_px,STK-36,measurement,Partly measured
 stacking.roundness_drop_below_median,STK-01,exclusion criteria,Partly measured
+stacking.roundness_outlier_sigmas,STK-01,exclusion criteria,Partly measured
 stacking.saturated_fraction_limit,STK-33,judgment,Partly measured
 stacking.saturated_fraction_of_full_scale,STK-D18,judgment,Design estimate
 stacking.saturation_fraction_of_full_scale,STK-D11,exclusion criteria,Design estimate

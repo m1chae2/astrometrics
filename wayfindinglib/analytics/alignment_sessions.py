@@ -57,7 +57,8 @@ SAME_TARGET_RADIUS_DEG = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D123",
-    pending_conversion=True,
+    allowed_range=(0.05, 2.0),
+    minimum_sample=30,  # a sample is one solve after the first of its target and night
 )
 """An unnamed solve within this distance of a group's first solve joins it."""
 
@@ -70,7 +71,8 @@ RUN_GAP_SECONDS = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D123",
-    pending_conversion=True,
+    allowed_range=(600.0, 43200.0),
+    minimum_sample=100,  # a sample is one pause between neighboring solves of a target on a night
 )
 """A gap longer than this (two hours) between solves starts a new run."""
 
@@ -83,7 +85,8 @@ SLEW_ERROR_ARCSEC = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D123",
-    pending_conversion=True,
+    allowed_range=(30.0, 600.0),
+    minimum_sample=100,  # a sample is one solve after the settling solve of a run
 )
 """A solve further off than this is a slew, not tracking."""
 
@@ -96,7 +99,8 @@ ASSUMED_CADENCE_SECONDS = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D123",
-    pending_conversion=True,
+    allowed_range=(1.0, 300.0),
+    minimum_sample=100,  # a sample is one pause between neighboring solves
 )
 """Spacing assumed between solves that carry no time."""
 

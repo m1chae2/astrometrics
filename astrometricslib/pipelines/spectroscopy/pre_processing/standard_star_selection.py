@@ -36,7 +36,8 @@ MAXIMUM_STAR_OFFSET_FROM_CENTER_PX = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-D52",
-    pending_conversion=True,
+    allowed_range=(5.0, 100.0),
+    minimum_sample=5,  # a sample is a target whose own star has a stored zero-order position
 )
 
 

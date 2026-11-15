@@ -255,7 +255,9 @@ _MINIMUM_OVERLAP_POINTS = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D47",
-    pending_conversion=True,
+    allowed_range=(5, 300),
+    # A sample is a well-matched stored star spectrum.
+    minimum_sample=10,
 )
 
 # The widest range a comparison can use: where the reference spectra exist,
@@ -273,7 +275,9 @@ CLASSIFICATION_WAVELENGTH_RANGE_ANGSTROM = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D47",
-    pending_conversion=True,
+    allowed_range=(2500.0, 11000.0),
+    # A sample is a well-matched stored star spectrum.
+    minimum_sample=10,
 )
 
 # The observed spectrum must cover at least this much (in Angstroms) to be
@@ -291,7 +295,9 @@ MINIMUM_CLASSIFICATION_COVERAGE_ANGSTROM = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D47",
-    pending_conversion=True,
+    allowed_range=(1000.0, 3600.0),
+    # A sample is a well-matched stored star spectrum.
+    minimum_sample=10,
 )
 
 # The limits that the match scores are checked against live in

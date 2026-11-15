@@ -132,7 +132,9 @@ COMPARISON_RANGE_ANGSTROM = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D31",
-    pending_conversion=True,
+    allowed_range=(3800.0, 10000.0),
+    # A sample is a stored star spectrum.
+    minimum_sample=20,
 )
 
 # Both spectra are scaled to have the same median over this window, in
@@ -305,7 +307,9 @@ GAIA_XP_RESIDUAL_RMS_LIMIT = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D14",
-    pending_conversion=True,
+    allowed_range=(0.01, 0.2),
+    # A sample is a star compared with Gaia XP.
+    minimum_sample=10,
 )
 GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM = TunedParameter(
     name="spectroscopy.gaia_xp_slope_limit_percent_per_1000_angstrom",
@@ -316,7 +320,9 @@ GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D15",
-    pending_conversion=True,
+    allowed_range=(0.5, 10.0),
+    # A sample is a star compared with Gaia XP.
+    minimum_sample=10,
 )
 GAIA_XP_WAVELENGTH_SHIFT_LIMIT_ANGSTROM = TunedParameter(
     name="spectroscopy.gaia_xp_wavelength_shift_limit_angstrom",

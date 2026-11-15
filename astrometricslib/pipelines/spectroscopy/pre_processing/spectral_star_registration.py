@@ -45,7 +45,8 @@ _MIN_CONTROL_POINTS = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-D50",
-    pending_conversion=True,
+    allowed_range=(3, 12),
+    minimum_sample=5,  # a sample is a target with a plate-solved normal stack and stored spectra
 )
 
 # Default nearest-neighbour cutoff, in pixels, for accepting a
@@ -66,7 +67,8 @@ _DEFAULT_MAX_MATCH_DISTANCE_PX = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-D50",
-    pending_conversion=True,
+    allowed_range=(3.0, 40.0),
+    minimum_sample=5,  # a sample is a target with a plate-solved normal stack and stored spectra
 )
 
 # Default search window, in pixels, for the translation-only offset
@@ -83,7 +85,8 @@ _DEFAULT_MAX_TRANSLATION_OFFSET_PX = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-D50",
-    pending_conversion=True,
+    allowed_range=(50.0, 1000.0),
+    minimum_sample=5,  # a sample is a target with a plate-solved normal stack and stored spectra
 )
 
 # Bin width, in pixels, for the offset-vote histogram. Wide enough to
@@ -100,7 +103,8 @@ _TRANSLATION_BIN_PX = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-D50",
-    pending_conversion=True,
+    allowed_range=(2.0, 20.0),
+    minimum_sample=5,  # a sample is a target with a plate-solved normal stack and stored spectra
 )
 
 # Search window, in pixels, for the shift between a target's solved standard
@@ -120,7 +124,8 @@ _SOLUTION_MAX_TRANSLATION_OFFSET_PX = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-D50",
-    pending_conversion=True,
+    allowed_range=(200.0, 2000.0),
+    minimum_sample=5,  # a sample is a target with a plate-solved normal stack and stored spectra
 )
 
 # Two catalog stars at least this far apart are resolved (two separate zero
@@ -965,18 +970,10 @@ def _set_pixel_position(obj: StellarObject, position: np.ndarray) -> None:
 
 
 # The fewest identified stars needed to trust an offset between the two star
-# fields. Below this, one bad match could move the median.
-_MINIMUM_OFFSET_PAIR_COUNT = TunedParameter(
-    name="spectroscopy.minimum_offset_pair_count",
-    default=4,
-    unit="count",
-    description="The fewest identified stars needed to trust an offset between two star fields.",
-    role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
-    register_entry="SPE-D50",
-    pending_conversion=True,
-)
+# fields. Below this, one bad match could move the median. It is the same
+# limit, for the same reason, as the fewest votes the offset search needs
+# (`_MIN_CONTROL_POINTS`), so the two share one declaration and one tuner.
+_MINIMUM_OFFSET_PAIR_COUNT = _MIN_CONTROL_POINTS
 
 
 def _positions_through_wcs(stellar_objects: list[StellarObject], wcs: Any) -> dict[str, tuple[float, float]]:

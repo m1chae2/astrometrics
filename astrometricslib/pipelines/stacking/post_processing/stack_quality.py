@@ -148,7 +148,9 @@ DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA}),
     register_entry="STK-26",
-    pending_conversion=True,
+    allowed_range=(0.1, 0.95),
+    # A sample is one stack of the camera.
+    minimum_sample=10,
 )
 
 # The same test for spectral stacks. The stored zero pixel share of every
@@ -174,7 +176,9 @@ SPECTRAL_ZERO_FRACTION_FLAG_THRESHOLD = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA}),
     register_entry="STK-26",
-    pending_conversion=True,
+    allowed_range=(0.005, 0.5),
+    # A sample is one stack of the camera.
+    minimum_sample=10,
 )
 
 # Siril prints "many negative pixels (N%)" after subtracting the dark. In the
@@ -189,7 +193,9 @@ DEFAULT_NEGATIVE_PIXEL_FLAG_PERCENT = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA}),
     register_entry="STK-26",
-    pending_conversion=True,
+    allowed_range=(10, 95),
+    # A sample is one stack of the camera.
+    minimum_sample=10,
 )
 
 

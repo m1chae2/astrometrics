@@ -138,7 +138,8 @@ CONTINUUM_POLYNOMIAL_DEGREE = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D41",
-    pending_conversion=True,
+    allowed_range=(1, 4),
+    minimum_sample=5,  # a sample is a stored spectrum of the grating
 )
 
 # The continuum is a curve fitted to two bands on either side of the core.
@@ -163,7 +164,8 @@ SHOULDER_INNER_RESOLUTION_ELEMENTS = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D41",
-    pending_conversion=True,
+    allowed_range=(0.5, 3.0),
+    minimum_sample=5,  # a sample is a stored spectrum of the grating
 )
 
 # Each band is this many half-windows wide. It was 3 (from one half-window
@@ -178,7 +180,8 @@ SHOULDER_BAND_HALF_WINDOWS = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D41",
-    pending_conversion=True,
+    allowed_range=(1.0, 8.0),
+    minimum_sample=5,  # a sample is a stored spectrum of the grating
 )
 
 # Fewest samples allowed in a continuum band (both bands together must
@@ -193,7 +196,8 @@ _MINIMUM_SHOULDER_POINTS = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D41",
-    pending_conversion=True,
+    allowed_range=(4, 40),
+    minimum_sample=5,  # a sample is a stored spectrum of the grating
 )
 _MINIMUM_CORE_POINTS = TunedParameter(
     name="spectroscopy.minimum_core_points",
@@ -204,7 +208,8 @@ _MINIMUM_CORE_POINTS = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D41",
-    pending_conversion=True,
+    allowed_range=(1, 10),
+    minimum_sample=5,  # a sample is a stored spectrum of the grating
 )
 
 # A dip shallower than this fraction of the continuum is never reported,
@@ -424,7 +429,8 @@ _MINIMUM_SPECTRUM_POINTS = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D41",
-    pending_conversion=True,
+    allowed_range=(10, 300),
+    minimum_sample=5,  # a sample is a stored spectrum of the grating
 )
 
 

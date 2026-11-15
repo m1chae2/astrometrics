@@ -70,7 +70,9 @@ PROFILE_START_ANGSTROM = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D31",
-    pending_conversion=True,
+    allowed_range=(3800.0, 5000.0),
+    # A sample is a stored star spectrum.
+    minimum_sample=20,
 )
 PROFILE_END_ANGSTROM = TunedParameter(
     name="spectroscopy.profile_end_angstrom",
@@ -81,7 +83,9 @@ PROFILE_END_ANGSTROM = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D31",
-    pending_conversion=True,
+    allowed_range=(7000.0, 10000.0),
+    # A sample is a stored star spectrum.
+    minimum_sample=20,
 )
 PROFILE_BAND_ANGSTROM = TunedParameter(
     name="spectroscopy.profile_band_angstrom",
@@ -121,7 +125,9 @@ BLUE_WINDOW_ANGSTROM = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D09",
-    pending_conversion=True,
+    allowed_range=(3800.0, 10000.0),
+    # A sample is a stored star spectrum.
+    minimum_sample=20,
 )
 RED_WINDOW_ANGSTROM = TunedParameter(
     name="spectroscopy.red_window_angstrom",
@@ -132,7 +138,9 @@ RED_WINDOW_ANGSTROM = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D09",
-    pending_conversion=True,
+    allowed_range=(3800.0, 10000.0),
+    # A sample is a stored star spectrum.
+    minimum_sample=20,
 )
 
 # The fewest working width fits a window needs for its median to be used.
@@ -145,7 +153,9 @@ MINIMUM_SAMPLES_PER_WINDOW = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D09",
-    pending_conversion=True,
+    allowed_range=(3, 60),
+    # A sample is a stored star spectrum.
+    minimum_sample=20,
 )
 
 # H-alpha, where the measured and stored profiles are compared. The stored
@@ -171,7 +181,9 @@ CHROMATIC_DEFOCUS_RATIO_LIMIT = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D09",
-    pending_conversion=True,
+    allowed_range=(1.05, 2.0),
+    # A sample is a stored star spectrum.
+    minimum_sample=20,
 )
 
 

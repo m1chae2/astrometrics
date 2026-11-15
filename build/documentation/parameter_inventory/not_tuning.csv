@@ -1,3 +1,386 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:8df22420ba046dc517555e4452b6fbb7518327134087f28e99892446e83afa61
-size 43210
+file,name,reason
+astrometricslib/_internal/drivers/astrometry_net_driver.py,ONLINE_SOLVE_ATTEMPT_LIMIT,"Network retry, timeout or physical ratio; affects only failure handling"
+astrometricslib/_internal/drivers/astrometry_net_driver.py,ONLINE_SOLVE_RETRY_BACKOFF_SECONDS,"Network retry, timeout or physical ratio; affects only failure handling"
+astrometricslib/_internal/drivers/astroquery_gaia_reddening_driver.py,A_G_PER_E_B_V,Physical reddening ratio from published literature
+astrometricslib/_internal/drivers/astroquery_gaia_reddening_driver.py,CONSECUTIVE_FAILURE_LIMIT,"Network retry, timeout or physical ratio; affects only failure handling"
+astrometricslib/_internal/drivers/astroquery_gaia_reddening_driver.py,E_BP_RP_PER_E_B_V,Physical reddening ratio from published literature
+astrometricslib/_internal/drivers/astroquery_gaia_reddening_driver.py,GAIA_BATCH_SIZE,"Network retry, timeout or physical ratio; affects only failure handling"
+astrometricslib/_internal/drivers/astroquery_gaia_reddening_driver.py,GAIA_QUERY_TIMEOUT_SECONDS,"Network retry, timeout or physical ratio; affects only failure handling"
+astrometricslib/_internal/drivers/astroquery_simbad_driver.py,SIMBAD_COOLDOWN_SECONDS,"Network retry, timeout or physical ratio; affects only failure handling"
+astrometricslib/_internal/drivers/astroquery_simbad_driver.py,SIMBAD_QUERY_TIMEOUT_SECONDS,"Network retry, timeout or physical ratio; affects only failure handling"
+astrometricslib/_internal/drivers/camera_profile_store.py,MAXIMUM_CONFIG_BACKUPS,"Plumbing: backups, geometry margin, progress, timeouts"
+astrometricslib/_internal/drivers/catalog_access.py,_BOX_MARGIN_DEGREES,"Plumbing: backups, geometry margin, progress, timeouts"
+astrometricslib/_internal/drivers/catalog_access.py,_FULL_CIRCLE_DEGREES,"Plumbing: backups, geometry margin, progress, timeouts"
+astrometricslib/_internal/drivers/catalog_store.py,_COVERAGE_TOLERANCE_DEG,"Plumbing: backups, geometry margin, progress, timeouts"
+astrometricslib/_internal/drivers/frame_prefetch.py,DEFAULT_CHUNK_BYTES,software plumbing
+astrometricslib/_internal/drivers/frame_prefetch.py,PROGRESS_FRACTION,"Plumbing: backups, geometry margin, progress, timeouts"
+astrometricslib/_internal/drivers/frame_prefetch.py,PROGRESS_MINIMUM_FILES,"Plumbing: backups, geometry margin, progress, timeouts"
+astrometricslib/_internal/drivers/gaia_xp_driver.py,ANGSTROM_PER_NANOMETRE,unit or physical constant
+astrometricslib/_internal/drivers/gaia_xp_driver.py,DOWNLOAD_TIMEOUT_SECONDS,"Plumbing: backups, geometry margin, progress, timeouts"
+astrometricslib/_internal/drivers/gaia_xp_driver.py,RETRY_AFTER_FAILURE_SECONDS,"Plumbing: backups, geometry margin, progress, timeouts"
+astrometricslib/_internal/drivers/program_setup.py,DOWNLOAD_CHUNK_BYTES,software plumbing
+astrometricslib/_internal/drivers/program_setup.py,DOWNLOAD_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/program_setup.py,MSIEXEC_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/quality_store.py,LATEST_READ_MAXIMUM_ENTRIES,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/quality_store.py,MAXIMUM_SUBJECT_IDS_PER_QUERY,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/quality_store.py,SCHEMA_VERSION,software plumbing
+astrometricslib/_internal/drivers/siril_interface/_pipes_windows.py,PIPE_CONNECT_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/siril_interface/_pipes_windows.py,PIPE_RETRY_SECONDS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/siril_interface/session.py,SIRIL_COMMAND_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/siril_interface/session.py,SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/siril_interface/staging.py,WORK_DIRECTORY_RETENTION_DAYS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/api/jobs.py,MAXIMUM_JOBS,Reply size cap; plumbing
+astrometricslib/api/jobs.py,MAXIMUM_LINEAGE_RUNS,Reply size cap; plumbing
+astrometricslib/api/jobs.py,MAXIMUM_LOG_LINES,software plumbing
+astrometricslib/api/jobs.py,MAXIMUM_RESULT_LENGTH,Reply size cap; plumbing
+astrometricslib/api/jobs.py,MAXIMUM_TEXT_LENGTH,Reply size cap; plumbing
+astrometricslib/api/jobs.py,MAXIMUM_WARNINGS,Reply size cap; plumbing
+astrometricslib/api/jobs.py,STALE_AFTER_MINUTES,display timeout for a job shown as dead
+astrometricslib/api/visualization.py,_DEFAULT_FIGURE_SIZES,Plumbing or protocol constant
+astrometricslib/foundation/config.py,CONFIG_RECHECK_SECONDS,Plumbing or protocol constant
+astrometricslib/foundation/config.py,[Observatory.Guiding] phd2_port,Network port default
+astrometricslib/foundation/config.py,[Observatory.Telescope] focal_length_mm,0 means not set; equipment value
+astrometricslib/foundation/config.py,[Observatory.Telescope] focal_ratio,0 means not set; equipment value
+astrometricslib/foundation/config.py,[Observatory.Telescope] indi_port,Network port default
+astrometricslib/foundation/config.py,[Processing.Parallelism] worker_niceness,Process priority
+astrometricslib/foundation/errors.py,RPC_CODES,Plumbing or protocol constant
+astrometricslib/foundation/logging.py,_LOG_FILES_KEPT,software plumbing
+astrometricslib/foundation/logging.py,_MAX_LOG_BYTES,software plumbing
+astrometricslib/foundation/run_abandonment.py,REAP_TIMEOUT_SECONDS,Plumbing or protocol constant
+astrometricslib/foundation/run_abandonment.py,STOP_GRACE_SECONDS,Plumbing or protocol constant
+astrometricslib/foundation/storage/butler.py,_IDS_PER_QUERY,"Plumbing: query size, retry, report interval"
+astrometricslib/foundation/storage/local_database.py,WAL_SWITCH_ATTEMPTS,"Plumbing: query size, retry, report interval"
+astrometricslib/foundation/storage/local_database.py,WAL_SWITCH_RETRY_SECONDS,"Plumbing: query size, retry, report interval"
+astrometricslib/foundation/storage/process_locks.py,HOLDER_REPORT_INTERVAL_SECONDS,"Plumbing: query size, retry, report interval"
+astrometricslib/models/stellar_source.py,BRIGHTEST_CATALOG_MAGNITUDE,Physical limit of apparent magnitudes (Sirius)
+astrometricslib/pipelines/asteroid_detection/detection.py,_LINEAR_FIT_TOTAL_SUM_OF_SQUARES_EPSILON,Division-by-zero guard
+astrometricslib/pipelines/asteroid_detection/detection.py,_POLAR_COS_DEC_LIMIT,Switch to exact distance near poles; accuracy guard
+astrometricslib/pipelines/asteroid_detection/detection.py,_SECONDS_PER_HOUR,unit or physical constant
+astrometricslib/pipelines/asteroid_detection/ephemeris.py,_DEFAULT_SECONDS_BETWEEN_QUERIES,Politeness delay to public service
+astrometricslib/pipelines/asteroid_detection/mpc_report.py,_ADES_TRACKLET_WIDTH,MPC/ADES report format width
+astrometricslib/pipelines/asteroid_detection/mpc_report.py,_ARCSEC_PER_DEGREE,unit or physical constant
+astrometricslib/pipelines/asteroid_detection/mpc_report.py,_DAY_FRACTION_UNITS_PER_DAY,unit or physical constant
+astrometricslib/pipelines/asteroid_detection/mpc_report.py,_DEGREES_PER_HOUR_OF_RA,unit or physical constant
+astrometricslib/pipelines/asteroid_detection/mpc_report.py,_DESIGNATION_WIDTH,MPC/ADES report format width
+astrometricslib/pipelines/asteroid_detection/mpc_report.py,_HOURS_PER_DAY,unit or physical constant
+astrometricslib/pipelines/asteroid_detection/mpc_report.py,_MPC_LINE_LENGTH,MPC/ADES report format width
+astrometricslib/pipelines/asteroid_detection/mpc_report.py,_OBSERVATORY_CODE_WIDTH,MPC/ADES report format width
+astrometricslib/pipelines/asteroid_detection/mpc_report.py,_SECONDS_OF_TIME_PER_HOUR,unit or physical constant
+astrometricslib/pipelines/asteroid_detection/mpc_report.py,_SECONDS_PER_DAY,unit or physical constant
+astrometricslib/pipelines/asteroid_detection/pipeline.py,_MAD_TO_SIGMA,unit or physical constant
+astrometricslib/pipelines/astrometry/post_processing/target_clipping.py,MAD_TO_SIGMA,unit or physical constant
+astrometricslib/pipelines/astrometry/pre_processing/source_detection.py,BACKGROUND_SAMPLE_SEED,software plumbing
+astrometricslib/pipelines/astrometry/pre_processing/source_detection.py,_BACKGROUND_STATS_SUBSAMPLE_MIN_PIXELS,Speed switch for subsampling; no result choice
+astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,DEFAULT_MAX_ATTEMPTS,Retry count for remote service
+astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,DEFAULT_REQUEST_DELAY_SECONDS,Request pacing to remote service
+astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,_RETRY_BACKOFF_BASE_SECONDS,Retry backoff base
+astrometricslib/pipelines/photometry/post_processing/record_quality.py,MAXIMUM_TIMESTAMP_REASONS_SHOWN,Display cap on quoted reasons
+astrometricslib/pipelines/photometry/post_processing/variability_skill.py,_MAGNITUDES_PER_FRACTION,unit or physical constant
+astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,_MAXIMUM_UTC_OFFSET_HOURS,"Time zone range, not a choice"
+astrometricslib/pipelines/photometry/processing/catalog_zero_point.py,STANDARD_ERROR_OF_MEDIAN_FACTOR,Statistical constant sqrt(pi/2)
+astrometricslib/pipelines/photometry/processing/comparison_ensemble.py,MINIMUM_FRACTIONAL_NOISE,Divide-by-zero guard
+astrometricslib/pipelines/photometry/processing/comparison_ensemble.py,_CONSISTENT_CHI_SQUARE,Statistical definition of consistent star
+astrometricslib/pipelines/photometry/processing/comparison_ensemble.py,_MAD_TO_SIGMA,unit or physical constant
+astrometricslib/pipelines/photometry/processing/observing_window.py,MINIMUM_NIGHTS_FOR_ALIASES,A single night cannot have a daily echo
+astrometricslib/pipelines/photometry/processing/variability_analyzer.py,_MAXIMUM_REPORTED_SIGNIFICANCE,Cap for JSON storage
+astrometricslib/pipelines/photometry/processing/variability_analyzer.py,_MEDIAN_STANDARD_ERROR_FACTOR,Statistical constant sqrt(pi/2)
+astrometricslib/pipelines/photometry/processing/variability_indices.py,_MAD_TO_SIGMA,unit or physical constant
+astrometricslib/pipelines/shared/image_scaling.py,PREVIEW_SAMPLE_SEED,software plumbing
+astrometricslib/pipelines/shared/image_scaling.py,_AUTOSTRETCH_SKY_SAMPLE_COUNT,Sampling size for sky median
+astrometricslib/pipelines/shared/image_scaling.py,_MAD_TO_SIGMA,unit or physical constant
+astrometricslib/pipelines/shared/image_scaling.py,_PERCENTILE_SAMPLE_COUNT,"Sample size for display percentiles, seeded"
+astrometricslib/pipelines/shared/image_scaling.py,_SCALING_BLOCK_PIXELS,Memory block size
+astrometricslib/pipelines/shared/image_scaling.py,_WHITE_COUNT_STRIDE,Speed stride for counting
+astrometricslib/pipelines/shared/quality/calibration_frame_measurement.py,NEIGHBOR_NOISE_COLUMN_STEP,Pixel step set by color sensor pattern
+astrometricslib/pipelines/shared/quality/frame_statistics.py,BOOTSTRAP_RESAMPLE_COUNT,Bootstrap resample count
+astrometricslib/pipelines/shared/quality/frame_statistics.py,BOOTSTRAP_SEED,software plumbing
+astrometricslib/pipelines/shared/quality/raw_frame_check.py,NOISE_SAMPLE_STEP,Subsampling for speed
+astrometricslib/pipelines/shared/quality/raw_frame_check.py,TRAIL_ANGLE_STEP_DEGREES,Search resolution of line angles
+astrometricslib/pipelines/shared/quality/raw_frame_check.py,TRAIL_CANDIDATE_LINES,Search structure: lines checked in full
+astrometricslib/pipelines/shared/quality/record_measurements.py,UNKNOWN_DEFINITION_VERSION,software plumbing
+astrometricslib/pipelines/shared/quality/saturation.py,NORMALISED_STACK_MAXIMUM,Format fact: Siril stacks top out at 1.0
+astrometricslib/pipelines/shared/quality/star_profile_fitting.py,BAYER_CELL_SIZE_PX,Sensor structure (Bayer cell)
+astrometricslib/pipelines/shared/quality/star_profile_fitting.py,MOFFAT_BETA_START,Starting guess for fit; no effect on result
+astrometricslib/pipelines/shared/registration_record.py,HOMOGRAPHY_LENGTH,Homography has nine entries
+astrometricslib/pipelines/shared/registration_record.py,REGISTRATION_RECORD_VERSION,software plumbing
+astrometricslib/pipelines/shared/star_analysis.py,MAXIMUM_ROWS_PER_LIST,List length for display
+astrometricslib/pipelines/shared/star_analysis.py,TOP_CANDIDATES,List length for display
+astrometricslib/pipelines/shared/star_catalog_queries.py,MAXIMUM_MATCH_RANKING,Read cap for ranking
+astrometricslib/pipelines/shared/star_catalog_queries.py,QUERY_LIMITS,Reply size limits
+astrometricslib/pipelines/shared/star_catalog_queries.py,QUERY_MAXIMUM_RADIUS_DEGREES,Reply size cap on query radius
+astrometricslib/pipelines/shared/star_overlay.py,SUMMARY_PASS_MINIMUM,Overlay pass size
+astrometricslib/pipelines/shared/target_overview.py,MAXIMUM_FRAME_ROWS,Reply row cap
+astrometricslib/pipelines/shared/target_overview.py,QUALITY_LIST_LENGTH,Reply list length
+astrometricslib/pipelines/shared/target_sessions.py,SESSION_NIGHT_BOUNDARY_HOUR,Noon night boundary convention; duplicates item 193
+astrometricslib/pipelines/spectroscopy/batch.py,_BRIGHTEST_CATALOG_MAGNITUDE,"Brightest real catalog magnitude; instrument-reading sentinel, duplicated in backend"
+astrometricslib/pipelines/spectroscopy/pipeline.py,DISPERSION_ANGLE_MAXIMUM_REFIT_COUNT,Iteration cap; result settled before cap on tested stars
+astrometricslib/pipelines/spectroscopy/pipeline.py,DISPERSION_ANGLE_REFIT_TOLERANCE,"Convergence tolerance, below measured scatter"
+astrometricslib/pipelines/spectroscopy/post_processing/compare_to_gaia_xp.py,GRID_PADDING_ANGSTROM,Numerical edge padding for blur
+astrometricslib/pipelines/spectroscopy/post_processing/compare_to_gaia_xp.py,GRID_STEP_ANGSTROM,Numerical grid step finer than data sampling
+astrometricslib/pipelines/spectroscopy/post_processing/compare_to_gaia_xp.py,MINIMUM_BLUR_FWHM_ANGSTROM,Numerical floor for the gaussian filter
+astrometricslib/pipelines/spectroscopy/post_processing/compare_to_gaia_xp.py,SLOPE_REFERENCE_ANGSTROM,Derived: centre of the normalization window
+astrometricslib/pipelines/spectroscopy/pre_processing/atmospheric_extinction.py,MAXIMUM_VALID_AIRMASS,Plane-parallel validity sanity bound
+astrometricslib/pipelines/spectroscopy/pre_processing/atmospheric_extinction.py,MINIMUM_VALID_AIRMASS,Physical limit: airmass below 1 is impossible
+astrometricslib/pipelines/spectroscopy/pre_processing/atmospheric_refraction.py,CARBON_DIOXIDE_PPM,Ciddor CO2 reference; effect 0.005 percent
+astrometricslib/pipelines/spectroscopy/pre_processing/atmospheric_refraction.py,MAXIMUM_WAVELENGTH_ANGSTROM,Ciddor equation validity range
+astrometricslib/pipelines/spectroscopy/pre_processing/atmospheric_refraction.py,MINIMUM_WAVELENGTH_ANGSTROM,Ciddor equation validity range
+astrometricslib/pipelines/spectroscopy/pre_processing/atmospheric_refraction.py,_ARCSEC_PER_RADIAN,unit or physical constant
+astrometricslib/pipelines/spectroscopy/pre_processing/atmospheric_refraction.py,_COMPRESSIBILITY_A,Published Ciddor 1996 constant
+astrometricslib/pipelines/spectroscopy/pre_processing/atmospheric_refraction.py,_COMPRESSIBILITY_B,Published Ciddor 1996 constant
+astrometricslib/pipelines/spectroscopy/pre_processing/atmospheric_refraction.py,_COMPRESSIBILITY_C,Published Ciddor 1996 constant
+astrometricslib/pipelines/spectroscopy/pre_processing/atmospheric_refraction.py,_COMPRESSIBILITY_D,Published Ciddor 1996 constant
+astrometricslib/pipelines/spectroscopy/pre_processing/atmospheric_refraction.py,_COMPRESSIBILITY_E,Published Ciddor 1996 constant
+astrometricslib/pipelines/spectroscopy/pre_processing/atmospheric_refraction.py,_ENHANCEMENT,Published Ciddor 1996 constant
+astrometricslib/pipelines/spectroscopy/pre_processing/atmospheric_refraction.py,_GAS_CONSTANT,Published Ciddor 1996 constant
+astrometricslib/pipelines/spectroscopy/pre_processing/atmospheric_refraction.py,_SATURATION_A,Published Ciddor 1996 constant
+astrometricslib/pipelines/spectroscopy/pre_processing/atmospheric_refraction.py,_SATURATION_B,Published Ciddor 1996 constant
+astrometricslib/pipelines/spectroscopy/pre_processing/atmospheric_refraction.py,_SATURATION_C,Published Ciddor 1996 constant
+astrometricslib/pipelines/spectroscopy/pre_processing/atmospheric_refraction.py,_SATURATION_D,Published Ciddor 1996 constant
+astrometricslib/pipelines/spectroscopy/pre_processing/atmospheric_refraction.py,_STANDARD_PRESSURE_PA,Published Ciddor 1996 constant
+astrometricslib/pipelines/spectroscopy/pre_processing/atmospheric_refraction.py,_STANDARD_TEMPERATURE_K,Published Ciddor 1996 constant
+astrometricslib/pipelines/spectroscopy/pre_processing/atmospheric_refraction.py,_WATER_MOLAR_MASS,Published Ciddor 1996 constant
+astrometricslib/pipelines/spectroscopy/pre_processing/atmospheric_refraction.py,_WATER_REFERENCE_PRESSURE_PA,Published Ciddor 1996 constant
+astrometricslib/pipelines/spectroscopy/pre_processing/atmospheric_refraction.py,_WATER_REFERENCE_TEMPERATURE_K,Published Ciddor 1996 constant
+astrometricslib/pipelines/spectroscopy/pre_processing/differential_refraction.py,DIRECTION_PROBE_PX,Probe distance; angle does not depend on it
+astrometricslib/pipelines/spectroscopy/pre_processing/differential_refraction.py,ZENITH_PROBE_DEGREES,Numerical probe step
+astrometricslib/pipelines/spectroscopy/pre_processing/differential_refraction.py,_CORRECTION_PASSES,Fixed-point pass count; already converged
+astrometricslib/pipelines/spectroscopy/pre_processing/instrument_response.py,_LINES_TO_SKIP_ANGSTROM,Rest wavelengths of strong lines; line choice is fixed
+astrometricslib/pipelines/spectroscopy/pre_processing/instrument_response.py,_WAVELENGTH_CENTER_ANGSTROM,Variable scaling for numerical stability
+astrometricslib/pipelines/spectroscopy/pre_processing/instrument_response.py,_WAVELENGTH_SCALE_ANGSTROM,Variable scaling for numerical stability
+astrometricslib/pipelines/spectroscopy/pre_processing/intensity_scale.py,FLOAT_STACK_BITPIX,FITS format code
+astrometricslib/pipelines/spectroscopy/pre_processing/measured_line_spread.py,HALPHA_ANGSTROM,unit or physical constant
+astrometricslib/pipelines/spectroscopy/pre_processing/neighbor_trail_deblending.py,_FINE_SAMPLES_PER_PIXEL,Numerical sampling finer than blur
+astrometricslib/pipelines/spectroscopy/pre_processing/neighbor_trail_deblending.py,_MAXIMUM_CACHED_STAR_SHAPES,software plumbing
+astrometricslib/pipelines/spectroscopy/pre_processing/neighbor_trail_deblending.py,_SKY_AWARE_PLACE_COUNT,Sampling count along streak
+astrometricslib/pipelines/spectroscopy/pre_processing/optics_physics.py,BALMER_SERIES_NM,"Balmer rest wavelengths, physical"
+astrometricslib/pipelines/spectroscopy/pre_processing/spectral_frame_check.py,MAXIMUM_BLOBS_REPORTED,Length of reported list
+astrometricslib/pipelines/spectroscopy/pre_processing/spectral_frame_check.py,_MAD_TO_SIGMA,unit or physical constant
+astrometricslib/pipelines/spectroscopy/pre_processing/spectral_resolution.py,FWHM_PER_SIGMA,unit or physical constant
+astrometricslib/pipelines/spectroscopy/pre_processing/spectral_resolution.py,MINIMUM_RESOLUTION_ELEMENT_PIXELS,Nyquist floor: two samples per element
+astrometricslib/pipelines/spectroscopy/pre_processing/spectral_resolution.py,PROFILE_BLUR_LEVELS,Approximation level count
+astrometricslib/pipelines/spectroscopy/pre_processing/spectroscopy_instrument.py,_NM_TO_MM,unit or physical constant
+astrometricslib/pipelines/spectroscopy/pre_processing/spectrum_extractor.py,MEDIAN_STANDARD_ERROR_FACTOR,Statistical constant sqrt(pi/2)
+astrometricslib/pipelines/spectroscopy/pre_processing/wavelength_zero_point.py,SEARCH_STEP_ANGSTROM,Numerical search grid step
+astrometricslib/pipelines/spectroscopy/processing/class_gap_calibration.py,CLASS_GAP_DEFINITION_VERSION,software plumbing
+astrometricslib/pipelines/spectroscopy/processing/class_gap_calibration.py,_MAXIMUM_BISECTION_STEPS,Bisection step cap
+astrometricslib/pipelines/spectroscopy/processing/interstellar_extinction.py,CCM89_MAXIMUM_WAVELENGTH_ANGSTROM,CCM89 law validity range
+astrometricslib/pipelines/spectroscopy/processing/interstellar_extinction.py,CCM89_MINIMUM_WAVELENGTH_ANGSTROM,CCM89 law validity range
+astrometricslib/pipelines/spectroscopy/processing/interstellar_extinction.py,_OPTICAL_A,Published CCM89 constant
+astrometricslib/pipelines/spectroscopy/processing/interstellar_extinction.py,_OPTICAL_B,Published CCM89 constant
+astrometricslib/pipelines/spectroscopy/processing/interstellar_extinction.py,_OPTICAL_Y_OFFSET,Published CCM89 constant
+astrometricslib/pipelines/spectroscopy/processing/interstellar_extinction.py,_X_INFRARED_TO_OPTICAL,Published CCM89 constant
+astrometricslib/pipelines/spectroscopy/processing/interstellar_extinction.py,_X_OPTICAL_TO_ULTRAVIOLET,Published CCM89 constant
+astrometricslib/pipelines/spectroscopy/processing/interstellar_extinction.py,_X_ULTRAVIOLET_BUMP_END,Published CCM89 constant
+astrometricslib/pipelines/spectroscopy/processing/second_order_risk.py,MAXIMUM_STORED_RATIO,Numerical cap on stored ratio
+astrometricslib/pipelines/spectroscopy/processing/spectral_feature_detector.py,_MINIMUM_NOISE_WIDTH,"1.0 is the unit of the depth uncertainty, not a choice"
+astrometricslib/pipelines/spectroscopy/processing/synthetic_colour.py,DWARF_B_MINUS_V,Published dwarf intrinsic colours
+astrometricslib/pipelines/spectroscopy/runner.py,_CATALOG_SLICE_SIZE,Database read batch size
+astrometricslib/pipelines/spectroscopy/utilities/calibration_tuner.py,_FRACTIONAL_PROMINENCE_STEP,Search step size
+astrometricslib/pipelines/spectroscopy/utilities/calibration_tuner.py,_MAD_TO_SIGMA,unit or physical constant
+astrometricslib/pipelines/spectroscopy/utilities/registration_quality.py,_UNBOUNDED_SIGMA,Unbounded sigma sentinel
+astrometricslib/pipelines/stacking/calibration_measurement_run.py,CALIBRATION_MEASUREMENT_WORKERS,software plumbing
+astrometricslib/pipelines/stacking/calibration_measurement_run.py,FAILURE_NOTES_LIMIT,"Save interval, log limit or placeholder; plumbing only."
+astrometricslib/pipelines/stacking/calibration_measurement_run.py,STAMP_SAVE_INTERVAL_FRAMES,"Save interval, log limit or placeholder; plumbing only."
+astrometricslib/pipelines/stacking/folder_frame_measurement.py,_NO_CAPTURE_SETTING_ID,"Save interval, log limit or placeholder; plumbing only."
+astrometricslib/pipelines/stacking/frame_measurement_run.py,FAILURE_NOTES_LIMIT,"Save interval, log limit or placeholder; plumbing only."
+astrometricslib/pipelines/stacking/frame_measurement_run.py,MEASUREMENT_WORKER_NICENESS,"Process niceness; courtesy value, no effect on results."
+astrometricslib/pipelines/stacking/frame_measurement_run.py,STAMP_SAVE_INTERVAL_FRAMES,"Save interval, log limit or placeholder; plumbing only."
+astrometricslib/pipelines/stacking/frame_screening.py,BACKGROUND_WINDOW,Progress-bar windows; display only.
+astrometricslib/pipelines/stacking/frame_screening.py,QUALITY_ROWS_WINDOW,Progress-bar windows; display only.
+astrometricslib/pipelines/stacking/frame_screening.py,QUARANTINE_WINDOW,Progress-bar windows; display only.
+astrometricslib/pipelines/stacking/post_processing/aperture_placement.py,APERTURE_SEED,software plumbing
+astrometricslib/pipelines/stacking/post_processing/aperture_size_noise.py,_BOOTSTRAP_SEED,software plumbing
+astrometricslib/pipelines/stacking/post_processing/bright_object.py,_SAMPLE_STRIDE,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/depth_limits.py,INDEPENDENT_PIXEL_EXPONENT,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/difference_noise.py,PAIRED_BOOTSTRAP_SEED,software plumbing
+astrometricslib/pipelines/stacking/post_processing/empty_apertures.py,APERTURE_FILE_VERSION,software plumbing
+astrometricslib/pipelines/stacking/post_processing/empty_apertures.py,_IDENTITY_HASH_BITS,software plumbing
+astrometricslib/pipelines/stacking/post_processing/empty_apertures.py,_IDENTITY_HASH_DIGITS,software plumbing
+astrometricslib/pipelines/stacking/post_processing/empty_apertures.py,_MAXIMUM_IDENTITY_FILE_VERSION,software plumbing
+astrometricslib/pipelines/stacking/post_processing/expected_noise.py,_SKY_SAMPLE_STEP,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/expected_noise.py,_SUBPIXEL_PLACES,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/flat_match.py,DEFAULT_TIME_LIMIT_SECONDS,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/flat_match.py,MINIMUM_MAP_CELLS,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/flat_noise_contribution.py,_KERNEL_TRUNCATE,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/flat_noise_contribution.py,_SUBPIXEL_PLACES,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/half_pattern.py,BOOTSTRAP_SEED,software plumbing
+astrometricslib/pipelines/stacking/post_processing/half_pattern.py,SHIFTED_MASK_LEVEL,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/normalization_scale.py,EXPOSURE_MATCH_FRACTION,exposure equality check; the code says it is not tuned
+astrometricslib/pipelines/stacking/post_processing/odd_even_apertures.py,APERTURE_RECORD_VERSION,software plumbing
+astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,IDENTITY_TOLERANCE_PX,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,MAXIMUM_SLOPE_PAIRS,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,MINIMUM_HOMOGRAPHY_SCALE,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,SECONDS_PER_HOUR,unit or physical constant
+astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,SLOPE_SAMPLE_SEED,software plumbing
+astrometricslib/pipelines/stacking/post_processing/stack_image.py,MAD_TO_SIGMA,unit or physical constant
+astrometricslib/pipelines/stacking/post_processing/stack_image.py,MEDIAN_ERROR_FACTOR,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/stack_preview.py,COSMIC_CLARITY_TIMEOUT_SECONDS,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/stack_preview.py,GRAXPERT_TIMEOUT_SECONDS,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/stack_preview.py,PREVIEW_TIMEOUT_SECONDS,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/stack_preview.py,_STALE_SCRATCH_SECONDS,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/star_tone.py,_MINIMUM_ROOM,Divide-by-zero guard.
+astrometricslib/pipelines/stacking/pre_processing/calibration_assessment.py,MAXIMUM_FRAMES_OF_CONCERN,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/pre_processing/frame_quarantine.py,MEASUREMENT_THREADS,software plumbing
+astrometricslib/pipelines/stacking/pre_processing/sensor_noise.py,MAD_TO_STANDARD_DEVIATION,unit or physical constant
+astrometricslib/pipelines/stacking/pre_processing/stack_calibration_health.py,_BATCH_EXPOSURE_DECIMALS,software plumbing
+astrometricslib/pipelines/stacking/pre_processing/stack_inputs.py,STACKING_ALGORITHM_VERSION,software plumbing
+astrometricslib/pipelines/stacking/processing/group_alignment.py,COVERED_PIXEL_THRESHOLD,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/processing/group_star_gains.py,STAR_GAIN_EMPTY_APERTURE_ATTEMPTS,Attempt cap for placing apertures; plumbing.
+astrometricslib/pipelines/stacking/processing/group_star_gains.py,STAR_GAIN_EMPTY_APERTURE_SEED,software plumbing
+astrometricslib/pipelines/stacking/stage_progress.py,LOOP_LOG_EVERY_FRAMES,software plumbing
+astrometricslib/pipelines/stacking/stage_progress.py,LOOP_LOG_EVERY_SECONDS,software plumbing
+astrometricslib/pipelines/tasks.py,_ABANDONED_THREAD_JOIN_SECONDS,Thread join wait
+astrometricslib/pipelines/tasks.py,_STACKING_TIMEOUT_POLL_SECONDS,Poll interval
+astrometricslib/utilities/observing_night.py,SECONDS_BEFORE_MOMENT_FOR_NIGHT_NAME,Noon night boundary convention; duplicates item 190
+astrometricslib/utilities/stack_preview_path.py,PREVIEW_JPEG_QUALITY,Output file quality setting
+wayfindinglib/analytics/envelope_assembly.py,_SAMPLE_READ_LIMIT,Read limit never cuts a night; plumbing
+wayfindinglib/analytics/guiding_spectrum.py,_FREQUENCY_POINTS,Frequency grid resolution; algorithm structure
+wayfindinglib/analytics/guiding_spectrum.py,_MAXIMUM_FREQUENCY_HZ,Nyquist-type upper frequency tied to 2 s guide cycle
+wayfindinglib/analytics/guiding_spectrum.py,_MAXIMUM_PEAKS,Count of peaks reported; display size
+wayfindinglib/analytics/package_suggestions.py,RANKING_FINGERPRINT_VERSION,software plumbing
+wayfindinglib/analytics/performance_envelope.py,MAD_TO_SIGMA,unit or physical constant
+wayfindinglib/analytics/performance_envelope.py,SIDEREAL_RATE_ARCSEC_PER_SECOND,Physical sidereal rate
+wayfindinglib/analytics/result_quality/efficiency.py,ARCSEC_PER_RADIAN,unit or physical constant
+wayfindinglib/analytics/result_quality/efficiency.py,BASELINE_REFERENCE_VERSION,software plumbing
+wayfindinglib/analytics/result_quality/efficiency.py,PHYSICAL_REFERENCE_VERSION,software plumbing
+wayfindinglib/analytics/result_quality/efficiency.py,PINNED_METRIC_VERSIONS,software plumbing
+wayfindinglib/analytics/result_quality/fixed_pattern_location.py,MAXIMUM_REPORTED_SIGMAS,Numerical cap on reported sigma
+wayfindinglib/analytics/result_quality/focus_drift.py,BOOTSTRAP_SEED,software plumbing
+wayfindinglib/analytics/result_quality/forecast.py,PINNED_STACK_METRICS,Metric definition versions
+wayfindinglib/analytics/result_quality/forecast.py,_IDENTITY_HASH_BITS,software plumbing
+wayfindinglib/analytics/result_quality/forecast.py,_IDENTITY_HASH_DIGITS,software plumbing
+wayfindinglib/analytics/result_quality/judge_results.py,_KIND_ORDER,Display order of statements
+wayfindinglib/analytics/result_quality/judge_results.py,_SEVERITY_ORDER,Display order by severity
+wayfindinglib/analytics/result_quality/library_inputs.py,CAMERA_OBSERVATIONS_CACHE_MAXIMUM_ENTRIES,software plumbing
+wayfindinglib/analytics/result_quality/observing_values.py,KASTEN_YOUNG_OFFSET_DEG,Literature airmass constant
+wayfindinglib/analytics/result_quality/observing_values.py,KASTEN_YOUNG_POWER,Literature airmass constant
+wayfindinglib/analytics/result_quality/observing_values.py,KASTEN_YOUNG_SCALE,Literature airmass constant
+wayfindinglib/analytics/result_quality/sky_model.py,MIE_ANGLE_SCALE_DEG,Literature scattering constant
+wayfindinglib/analytics/result_quality/sky_model.py,MIE_EXPONENT_OFFSET,Literature scattering constant
+wayfindinglib/analytics/result_quality/sky_model.py,MOON_PHASE_LINEAR_COEFFICIENT,Krisciunas and Schaefer literature constant
+wayfindinglib/analytics/result_quality/sky_model.py,MOON_PHASE_MAGNITUDE_OFFSET,Krisciunas and Schaefer literature constant
+wayfindinglib/analytics/result_quality/sky_model.py,MOON_PHASE_QUARTIC_COEFFICIENT,Krisciunas and Schaefer literature constant
+wayfindinglib/analytics/result_quality/sky_model.py,RAYLEIGH_OFFSET,Literature scattering constant
+wayfindinglib/analytics/tracking_risk.py,DEC_STEP_DEG,Grid spacing for risk map; resolution only
+wayfindinglib/analytics/tracking_risk.py,HA_STEP_DEG,Grid spacing for risk map; resolution only
+wayfindinglib/analytics/unguided_mount_error.py,_GRID_OVERSAMPLING,numerical grid resolution
+wayfindinglib/analytics/unguided_mount_error.py,_MAD_TO_SIGMA,unit or physical constant
+wayfindinglib/analytics/unguided_mount_error.py,_NOISE_FLOOR_ARCSEC,Division guard for noise-free test data
+wayfindinglib/api/control/guiding.py,MAXIMUM_GUIDE_RATE_ARCSEC_PER_SEC,Input sanity limit
+wayfindinglib/api/control/guiding.py,MAXIMUM_PLATE_SCALE_ARCSEC_PER_PIXEL,Input sanity limit
+wayfindinglib/api/control/guiding.py,MAXIMUM_RECORD_ID_LENGTH,Input length limit
+wayfindinglib/api/control/guiding.py,MAXIMUM_SOURCE_NOTE_LENGTH,Input length limit
+wayfindinglib/api/control/imaging.py,MAXIMUM_BACKLASH_STEPS,Input sanity limit
+wayfindinglib/api/control/imaging.py,MAXIMUM_RECORD_ID_LENGTH,Input length limit
+wayfindinglib/api/control/imaging.py,MAXIMUM_SOURCE_NOTE_LENGTH,Input length limit
+wayfindinglib/api/control/imaging.py,MAXIMUM_THERMAL_COEFFICIENT_STEPS_PER_C,Input sanity limit
+wayfindinglib/api/planning.py,MAXIMUM_SOURCES,Reply size cap
+wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,DEFAULT_HEALPIX_LEVEL,Download chunking choice; no result change
+wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,DEFAULT_MAX_ATTEMPTS,Network retry count
+wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,DEFAULT_QUERY_TIMEOUT_SECONDS,Network query timeout
+wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,DEFAULT_REQUEST_DELAY_SECONDS,Politeness delay to archive
+wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,MEASURED_BYTES_PER_STAR,software plumbing
+wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,_ANONYMOUS_ASYNC_ROW_LIMIT,Archive row limit documented by astroquery
+wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,_CONSECUTIVE_FAILURE_LIMIT,Stops download after repeated failures; plumbing
+wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,_GAIA_HEALPIX_LEVEL,Gaia ID format constant
+wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,_RETRY_BACKOFF_BASE_SECONDS,Network retry backoff
+wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,_SAMPLES_PER_PIXEL_WIDTH,Sampling resolution for pixel coverage; structure
+wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,_SOURCE_ID_PIXEL_SHIFT,Gaia ID format constant
+wayfindinglib/drivers/catalog/deep_star_catalog_driver.py,_NO_MAGNITUDE_LIMIT,Sentinel meaning no limit
+wayfindinglib/drivers/catalog/deep_star_store.py,BRIGHT_TIER_MAX_MAGNITUDE,Storage tier split; no result change
+wayfindinglib/drivers/catalog/deep_star_store.py,COARSE_TILE_HEIGHT_DEGREES,Storage tile size
+wayfindinglib/drivers/catalog/deep_star_store.py,FINE_TILE_HEIGHT_DEGREES,Storage tile size
+wayfindinglib/drivers/catalog/deep_star_store.py,_EDGE_TOLERANCE_DEGREES,Float tolerance
+wayfindinglib/drivers/catalog/deep_star_store.py,_GRID_COARSE,Grid ID
+wayfindinglib/drivers/catalog/deep_star_store.py,_GRID_FINE,Grid ID
+wayfindinglib/drivers/catalog/deep_star_store.py,_MICRODEGREES_PER_DEGREE,unit or physical constant
+wayfindinglib/drivers/catalog/deep_star_store.py,_MILLIMAGNITUDES_PER_MAGNITUDE,unit or physical constant
+wayfindinglib/drivers/catalog/deep_star_store.py,_TILES_PER_QUERY,SQLite placeholder batch size
+wayfindinglib/drivers/catalog/deep_star_store.py,_TILE_NUMBER_STRIDE,Tile numbering stride; format
+wayfindinglib/drivers/ekos/analyze_log_parser.py,UTC_OFFSET_HOURS_BY_ABBREVIATION,Time zone offsets
+wayfindinglib/drivers/ekos/analyze_log_parser.py,_AUTOFOCUS_VALUES_PER_POINT,Ekos file format
+wayfindinglib/drivers/ekos/analyze_log_parser.py,_NOT_MEASURED,Ekos file format marker
+wayfindinglib/drivers/host_resolver.py,_MAX_PENDING_LOOKUPS,Thread concurrency cap
+wayfindinglib/drivers/indi/camera_controller.py,_IMAGE_POLL_SECONDS,Poll interval for image arrival
+wayfindinglib/drivers/indi/guiding_driver.py,_SMALLEST_PULSE_MS,Zero-pulse epsilon
+wayfindinglib/drivers/indi/pyindi_compatibility.py,PyIndiStub.B_ALSO,INDI protocol value
+wayfindinglib/drivers/indi/pyindi_compatibility.py,PyIndiStub.B_NEVER,INDI protocol value
+wayfindinglib/drivers/indi/pyindi_compatibility.py,PyIndiStub.B_ONLY,INDI protocol value
+wayfindinglib/drivers/indi/pyindi_compatibility.py,PyIndiStub.IPS_ALERT,INDI protocol value
+wayfindinglib/drivers/indi/pyindi_compatibility.py,PyIndiStub.IPS_BUSY,INDI protocol value
+wayfindinglib/drivers/indi/pyindi_compatibility.py,PyIndiStub.IPS_IDLE,INDI protocol value
+wayfindinglib/drivers/indi/pyindi_compatibility.py,PyIndiStub.IPS_OK,INDI protocol value
+wayfindinglib/drivers/indi/pyindi_compatibility.py,PyIndiStub.ISS_OFF,INDI protocol value
+wayfindinglib/drivers/indi/pyindi_compatibility.py,PyIndiStub.ISS_ON,INDI protocol value
+wayfindinglib/drivers/indi_worker.py,DEFAULT_CALL_TIMEOUT_SECONDS,Wedged-worker timeout; failure reporting
+wayfindinglib/drivers/indi_worker.py,_PARENT_LIVENESS_CHECK_SECONDS,Parent liveness poll
+wayfindinglib/drivers/phd2/guide_log_parser.py,_PERCENT_THRESHOLD,Percent versus fraction format detection
+wayfindinglib/drivers/phd2/phd2_client.py,DEFAULT_PHD2_PORT,software plumbing
+wayfindinglib/drivers/phd2/phd2_client.py,_DEFAULT_COMMAND_TIMEOUT_SECONDS,Command timeout; failure reporting
+wayfindinglib/drivers/phd2/phd2_client.py,_READ_CHUNK_BYTES,software plumbing
+wayfindinglib/drivers/phd2/phd2_client.py,_RECONNECT_COOLDOWN_SECONDS,Reconnect backoff; failure plumbing
+wayfindinglib/drivers/phd2/phd2_client.py,_SESSION_EVENT_LIMIT,Event buffer size
+wayfindinglib/drivers/phd2/phd2_client.py,_SOCKET_TIMEOUT_SECONDS,Socket poll timeout
+wayfindinglib/drivers/simulators/guiding_simulator.py,AGGRESSION,simulator stand-in
+wayfindinglib/drivers/simulators/guiding_simulator.py,DRIFT_STEP_ARCSEC,simulator stand-in
+wayfindinglib/drivers/simulators/guiding_simulator.py,MAXIMUM_PULSE_MS,simulator stand-in
+wayfindinglib/drivers/simulators/guiding_simulator.py,MINIMUM_PULSE_MS,simulator stand-in
+wayfindinglib/drivers/simulators/guiding_simulator.py,MOUNT_RESPONSE,simulator stand-in
+wayfindinglib/drivers/simulators/guiding_simulator.py,PULSE_MS_PER_ARCSEC,simulator stand-in
+wayfindinglib/drivers/simulators/guiding_simulator.py,READOUT_SECONDS,simulator stand-in
+wayfindinglib/drivers/ssh_port_forward.py,_POLL_SECONDS,Supervisor poll
+wayfindinglib/drivers/ssh_port_forward.py,_PROBE_TIMEOUT_SECONDS,Probe timeout
+wayfindinglib/drivers/ssh_port_forward.py,_RESTART_COOLDOWN_SECONDS,Restart backoff
+wayfindinglib/drivers/ssh_port_forward.py,_STDERR_LINES_KEPT,Error lines kept
+wayfindinglib/drivers/ssh_port_forward.py,_TERMINATE_WAIT_SECONDS,Terminate wait
+wayfindinglib/drivers/stellarmate_interface.py,_COMMAND_TIMEOUT_SECONDS,ssh command timeout; failure reporting
+wayfindinglib/drivers/stellarmate_interface.py,_OFFLINE_REPROBE_SECONDS,Offline reprobe interval
+wayfindinglib/drivers/stellarmate_interface.py,_RSYNC_OVERALL_LIMIT_SECONDS,Transfer safety limit
+wayfindinglib/drivers/stellarmate_interface.py,_RSYNC_STALL_TIMEOUT_SECONDS,Transfer stall timeout; failure reporting
+wayfindinglib/drivers/stellarmate_interface.py,_SSH_PORT,software plumbing
+wayfindinglib/models/equipment_and_site/equipment.py,PLATE_SCALE_CONSTANT,Unit conversion constant
+wayfindinglib/models/equipment_and_site/equipment.py,SIDEREAL_DEGREES_PER_HOUR,unit or physical constant
+wayfindinglib/models/equipment_and_site/equipment_fingerprint.py,_FOCAL_LENGTH_DECIMALS,software plumbing
+wayfindinglib/models/equipment_and_site/equipment_fingerprint.py,_PIXEL_SCALE_DECIMALS,software plumbing
+wayfindinglib/models/planning/sky_source.py,BRIGHTEST_CATALOG_MAGNITUDE,"validity limit copied from astrometricslib, held equal by a test"
+wayfindinglib/models/session/ekos_session.py,EKOS_SESSION_CONTEXT_SCHEMA_VERSION,software plumbing
+wayfindinglib/models/session/guiding_run.py,GUIDING_RUN_SCHEMA_VERSION,software plumbing
+wayfindinglib/session_analysis/capture/processing/measure_capture_performance.py,_EXPOSURE_DECIMALS,software plumbing
+wayfindinglib/session_analysis/live_status.py,RECENT_EXPOSURE_COUNT,List size for display
+wayfindinglib/session_analysis/live_status.py,SIDEREAL_RATE_ARCSEC_PER_SECOND,Physical sidereal rate
+wayfindinglib/session_analysis/recurring_issues.py,_SEVERITY_RANK,Severity ordering
+wayfindinglib/session_analysis/rule_support.py,_SEVERITY_ORDER,Severity ordering
+wayfindinglib/session_analysis/sky/processing/measure_sky_performance.py,_MINIMUM_SPREAD,Division guard
+wayfindinglib/session_analysis/sky/sky_bins.py,_AZIMUTH_SECTOR_WIDTH,360 degrees divided by the 8 named sectors
+wayfindinglib/tasks/control_tasks/centering_exposure.py,ARCSEC_PER_RADIAN,unit or physical constant
+wayfindinglib/tasks/control_tasks/frame_guiding.py,MAXIMUM_FRAMES,Reply size cap
+wayfindinglib/tasks/control_tasks/frame_guiding.py,MAXIMUM_QUALITY_FRAMES,Cost cap on measuring frames
+wayfindinglib/tasks/control_tasks/frame_status.py,EXAMPLE_COUNT,Example list size
+wayfindinglib/tasks/control_tasks/guide_exposure_ladder_tasks.py,_POLL_SECONDS,Poll interval
+wayfindinglib/tasks/control_tasks/guiding_log_ingestion.py,_REFIT_SAMPLE_LIMIT,Read limit; plumbing
+wayfindinglib/tasks/control_tasks/live_guiding.py,HISTORY_LIMIT,History buffer size
+wayfindinglib/tasks/control_tasks/live_guiding.py,RETRY_SECONDS,Retry pause between cycles
+wayfindinglib/tasks/control_tasks/mount_error_tasks.py,_SAMPLE_READ_LIMIT,Read limit; plumbing
+wayfindinglib/tasks/control_tasks/night_history.py,DEFAULT_LIMIT,Reply count default
+wayfindinglib/tasks/control_tasks/night_history.py,MAXIMUM_LIMIT,Reply count cap
+wayfindinglib/tasks/control_tasks/night_history.py,SHRINK_LEVELS,Reply shrinking steps; size only
+wayfindinglib/tasks/control_tasks/remote_transfer_tasks.py,EXAMPLE_FILE_COUNT,Example list size
+wayfindinglib/tasks/control_tasks/remote_transfer_tasks.py,PROGRESS_POLL_SECONDS,Progress poll interval
+wayfindinglib/tasks/control_tasks/safety_monitor.py,_NON_UNKNOWN_SEVERITY,Severity ordering
+wayfindinglib/tasks/control_tasks/session_analysis_tasks.py,_GUIDE_FINGERPRINT_FIELDS,Fingerprint field layout
+wayfindinglib/tasks/control_tasks/session_analysis_tasks.py,_SAMPLE_READ_LIMIT,Read limit; plumbing
+wayfindinglib/tasks/control_tasks/target_changes.py,_UNSOLVED_PLACEHOLDER,Sentinel for unsolved position
+wayfindinglib/tasks/execution_tasks/queue_runner.py,POLL_SECONDS,Queue poll interval
+wayfindinglib/tasks/planning_tasks/calibration_advisory_tasks.py,_EXPOSURE_MATCH_TOLERANCE_SECONDS,Float round-off tolerance
+wayfindinglib/tasks/planning_tasks/scheduling.py,_DEFAULT_STEP_MINUTES,Unused in file; step default dead
+wayfindinglib/tasks/planning_tasks/target_report_inputs.py,NOISE_HISTORY_CACHE_MAXIMUM_ENTRIES,software plumbing
+wayfindinglib/tasks/planning_tasks/target_report_tasks.py,EKOS_CONTEXT_CACHE_MAXIMUM_ENTRIES,software plumbing
+wayfindinglib/tasks/planning_tasks/target_report_tasks.py,GUIDE_SAMPLE_READ_LIMIT,Read limit; plumbing
+wayfindinglib/tasks/planning_tasks/target_report_tasks.py,STARTING_POINT_SAMPLE_STEP_HOURS,Sampling step for starting-point sky; resolution only
+wayfindinglib/tasks/planning_tasks/tonight_ranking_tasks.py,CLOCK_HOUR_SECONDS,Definition of one hour
+wayfindinglib/tasks/planning_tasks/visibility_report.py,ASTRONOMICAL_NIGHT_SUN_ALTITUDE_DEG,Standard astronomical night definition
+wayfindinglib/tasks/planning_tasks/visibility_report.py,DEFAULT_STEP_MINUTES,Display step default
+wayfindinglib/tasks/planning_tasks/visibility_report.py,MAXIMUM_SPAN_OBJECTS,Table size cap
+wayfindinglib/tasks/planning_tasks/visibility_report.py,MAXIMUM_TIME_STEPS,Table size cap
+wayfindinglib/tasks/planning_tasks/visibility_report.py,SIDEREAL_DAY_HOURS,unit or physical constant
+wayfindinglib/tasks/planning_tasks/visibility_report.py,SIDEREAL_RATE,unit or physical constant

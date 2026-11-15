@@ -1,5 +1,8 @@
 *.nc filter=lfs diff=lfs merge=lfs -text
 *.csv filter=lfs diff=lfs merge=lfs -text
+# The parameter inventory lists are small text files that tests read, so they stay plain
+# text: a checkout without Git LFS (such as the Windows CI job) still has their contents.
+build/documentation/parameter_inventory/*.csv -filter -diff -merge text
 *.fit filter=lfs diff=lfs merge=lfs -text
 *.fits filter=lfs diff=lfs merge=lfs -text
 

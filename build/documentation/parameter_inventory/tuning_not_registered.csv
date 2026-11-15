@@ -1,3 +1,2 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:a12b77a49522db219a3577cff43484dfd0d146742d06b54d6b594361a7f70c81
-size 305
+file,name,draft_role,draft_source,draft_equipment,related_entry,note
+astrometricslib/_internal/drivers/calibration_library.py,BAADER_BESSEL_ASI533_TRANSFORM_COEFFICIENTS,automatic: shapes results,fixed,camera; filter or grating,,"Measured transform coefficients for one camera and filter set, used as is"

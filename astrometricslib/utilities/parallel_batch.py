@@ -31,7 +31,6 @@ import contextlib
 import io
 import logging
 import multiprocessing
-import os
 import time
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
@@ -43,6 +42,7 @@ import psutil
 
 from astrometricslib.foundation.jobs import JOB_LOG_PACKAGES
 from astrometricslib.foundation.logging import configure_logging, get_job_log_router, log_context
+from astrometricslib.foundation.system import lower_process_priority
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,8 @@ def _initialize_worker_process(niceness: int = 10, max_memory_mb: int = 20480) -
 
     Runs once per worker process at pool startup, and sets up the worker's
     logging, since the worker is a program of its own. Lowers scheduling
-    priority via `os.nice` and applies a maximum virtual memory ceiling
+    priority (`lower_process_priority`: ``os.nice`` on Linux, the "below
+    normal" class on Windows) and applies a maximum virtual memory ceiling
     via POSIX `setrlimit(RLIMIT_AS)` where supported (Linux). Setting an
     explicit address-space limit ensures that if an individual worker
     encounters an explosive allocation or memory leak, Python raises a
@@ -98,8 +99,7 @@ def _initialize_worker_process(niceness: int = 10, max_memory_mb: int = 20480) -
         Maximum virtual memory in megabytes allowed for this process
         (default 20480 MB = 20 GB). Set to 0 or None to disable.
     """
-    if niceness:
-        os.nice(niceness)
+    lower_process_priority(niceness)
 
     if max_memory_mb and max_memory_mb > 0:
         try:

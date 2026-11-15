@@ -138,8 +138,9 @@ def test_library_folders_reads_any_settings_file_without_the_environment(
     monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "other.toml"))
     config = tmp_path / "mine.toml"
     config.write_text(
-        f'["Image Library"]\npath = "{tmp_path / "lib"}"\nstacks_path = "{tmp_path / "stacks"}"\n'
-        f'["Wayfinding Library"]\npath = "{tmp_path / "way"}"\n',
+        # Single-quoted (literal) strings: Windows backslashes are not escapes.
+        f"[\"Image Library\"]\npath = '{tmp_path / 'lib'}'\nstacks_path = '{tmp_path / 'stacks'}'\n"
+        f"[\"Wayfinding Library\"]\npath = '{tmp_path / 'way'}'\n",
         encoding="utf-8",
     )
 

@@ -16,6 +16,7 @@ service
 
 import logging
 import os
+import shutil
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -38,6 +39,33 @@ from backend.launch_contract import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: The INDI server program. When it is missing, INDI is not installed.
+INDI_SERVER_PROGRAM = "indiserver"
+
+
+def missing_programs_reason(missing: list[str]) -> str:
+    """Say why the simulator cannot run when programs are missing.
+
+    Parameters
+    ----------
+    missing : `list` [`str`]
+        The names of the programs the launcher did not find. Not empty.
+
+    Returns
+    -------
+    reason : `str`
+        Plain text for the settings tooltip and the error. When INDI's server
+        program is missing, it says so and that INDI has no Windows version,
+        so one short sentence fits a Linux computer without INDI (install
+        it) and a Windows computer (the simulator cannot run there).
+        Otherwise it lists the missing programs.
+    """
+    listed = ", ".join(missing)
+    if INDI_SERVER_PROGRAM in missing:
+        return "The simulator needs INDI, which is not on this computer (INDI has no Windows version)."
+    return f"The simulator needs these programs: {listed}."
+
 
 #: Why the source cannot change when no launcher runs the backend.
 NOT_LAUNCHED_REASON = (
@@ -127,13 +155,18 @@ class ObservatorySourceService:
         -------
         reason : `str` or `None`
             `None` when a launcher runs the backend and the simulator's
-            programs are present.
+            programs are present. INDI is checked first, on this computer
+            itself: where it is not installed (Windows, or a Linux computer
+            without it), that is the reason, even when no launcher started
+            the backend.
         """
+        if shutil.which(INDI_SERVER_PROGRAM) is None:
+            return missing_programs_reason([INDI_SERVER_PROGRAM])
         if not observatory_source.launched_by_launcher(self._environ):
             return NOT_LAUNCHED_REASON
         missing = self._missing_programs()
         if missing:
-            return f"The simulator needs these programs: {', '.join(missing)}."
+            return missing_programs_reason(missing)
         return None
 
     def get_source(self) -> dict[str, Any]:
@@ -226,6 +259,8 @@ class ObservatorySourceService:
         """
         if source not in SOURCES:
             raise InvalidArgumentError(f"The observatory source must be one of {SOURCES}.")
+        if source == SIMULATED and shutil.which(INDI_SERVER_PROGRAM) is None:
+            raise ConfigurationError(missing_programs_reason([INDI_SERVER_PROGRAM]))
         if not observatory_source.launched_by_launcher(self._environ):
             raise ConfigurationError(NOT_LAUNCHED_REASON)
         busy = self._busy_probe()
@@ -236,7 +271,7 @@ class ObservatorySourceService:
         if source == SIMULATED:
             missing = self._missing_programs()
             if missing:
-                raise ConfigurationError(f"The simulator needs these programs: {', '.join(missing)}.")
+                raise ConfigurationError(missing_programs_reason(missing))
         restarting = source != self.active_source
         if source != read_choice(self._environ).source:
             write_choice(SourceChoice(source), self._environ)

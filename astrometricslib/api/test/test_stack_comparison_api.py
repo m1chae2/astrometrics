@@ -129,7 +129,7 @@ def test_comparing_with_the_previous_stack_uses_the_kept_stack(
     )
 
     assert comparison is not None
-    assert comparison.before.path.endswith("_previous/M_27_L_Stacked.fits")
+    assert Path(comparison.before.path).as_posix().endswith("_previous/M_27_L_Stacked.fits")
     assert comparison.after.path == str(stack)
     assert comparison.changes["flatness_rms"] < -0.5
 

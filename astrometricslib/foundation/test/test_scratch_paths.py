@@ -1,17 +1,21 @@
 """Tests for the working-file folders in `foundation.paths`."""
 
 import os
+import sys
 from pathlib import Path
 
+import platformdirs
 import pytest
 
 from astrometricslib.foundation.paths import (
     catalog_cache_directory,
     config_directory,
     data_directory,
+    default_data_path,
     locks_directory,
     scratch_directory,
     siril_work_directory,
+    state_directory,
 )
 
 
@@ -31,13 +35,42 @@ def test_siril_directory_under_cache(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert os.path.isdir(work_path)
 
 
-def test_default_cache_root_is_home_dot_cache(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Without `XDG_CACHE_HOME`, the folders sit under `~/.cache`."""
-    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
-    monkeypatch.setattr(os, "makedirs", lambda *args, **kwargs: None)
-    expected_root = os.path.join(os.path.expanduser("~"), ".cache")
-    assert scratch_directory() == os.path.join(expected_root, "astrometrics")
-    assert siril_work_directory() == os.path.join(expected_root, "astrometrics", "siril")
+@pytest.fixture
+def linux_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Use a temporary home folder and clear every XDG variable.
+
+    Returns
+    -------
+    home : `pathlib.Path`
+        The temporary home folder.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    for variable in ("XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME"):
+        monkeypatch.delenv(variable, raising=False)
+    return home
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the default folders are the Linux ones")
+def test_default_folders_are_the_xdg_defaults_on_linux(linux_home: Path) -> None:
+    """Without XDG variables, the folders follow the XDG defaults."""
+    assert scratch_directory() == str(linux_home / ".cache" / "astrometrics")
+    assert siril_work_directory() == str(linux_home / ".cache" / "astrometrics" / "siril")
+    assert data_directory() == str(linux_home / ".local" / "share" / "astrometrics")
+    assert state_directory() == str(linux_home / ".local" / "state" / "astrometrics")
+    assert config_directory() == str(linux_home / ".config" / "astrometrics")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the default folders are the Linux ones")
+def test_default_data_path_follows_the_environment(
+    linux_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`XDG_DATA_HOME` wins when set; otherwise the Linux default is given."""
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "chosen"))
+    assert default_data_path() == str(tmp_path / "chosen" / "astrometrics")
+    monkeypatch.delenv("XDG_DATA_HOME")
+    assert default_data_path() == str(linux_home / ".local" / "share" / "astrometrics")
 
 
 def test_locks_and_catalog_folders_sit_inside_scratch(
@@ -59,12 +92,21 @@ def test_data_directory_uses_xdg_data_home(tmp_path: Path, monkeypatch: pytest.M
     assert os.path.isdir(data_path)
 
 
-def test_data_directory_default_is_local_share(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Without `XDG_DATA_HOME`, the folder is under `~/.local/share`."""
-    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
-    monkeypatch.setattr(os, "makedirs", lambda *args, **kwargs: None)
-    expected = os.path.join(os.path.expanduser("~"), ".local", "share", "astrometrics")
-    assert data_directory() == expected
+@pytest.mark.skipif(sys.platform != "win32", reason="the folders are in %LOCALAPPDATA% on Windows only")
+def test_windows_folders_are_in_local_app_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    r"""On Windows the folders are in ``%LOCALAPPDATA%\astrometrics``.
+
+    ``platformdirs`` asks Windows for the folder rather than reading the
+    ``LOCALAPPDATA`` variable, so the test compares with the real folder.
+    Only the functions that make no folder are called.
+    """
+    for variable in ("XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME"):
+        monkeypatch.delenv(variable, raising=False)
+    app_folder = Path(os.environ["LOCALAPPDATA"]) / "astrometrics"
+    assert Path(default_data_path()) == app_folder
+    assert Path(config_directory()) == app_folder
+    assert Path(platformdirs.user_state_dir("astrometrics", appauthor=False)) == app_folder
+    assert Path(platformdirs.user_cache_dir("astrometrics", appauthor=False)) == app_folder / "Cache"
 
 
 def test_config_directory_uses_xdg_config_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

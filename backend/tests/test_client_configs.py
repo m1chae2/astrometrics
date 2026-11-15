@@ -123,6 +123,22 @@ def test_developer_config_gives_developer_tools_only_where_they_exist() -> None:
     assert "astrometrics-gaps" in servers
 
 
+def test_python_servers_start_through_the_launcher_not_a_system_specific_path() -> None:
+    """Python servers start through the Node launcher, on Windows and Linux."""
+    for root_text in (generator.RELATIVE_ROOT, generator.EXAMPLE_ROOT, generator.CLAUDE_ROOT_VARIABLE):
+        servers = generator.build_claude_config(companion=False, root_text=root_text)["mcpServers"]
+        for spec in generator.SERVERS:
+            if not spec.python_module:
+                continue
+            entry = servers[spec.name]
+            assert entry["command"] == "node", spec.name
+            assert entry["args"][1] == spec.python_module, spec.name
+            assert entry["args"][0].endswith(generator.PYTHON_LAUNCHER), spec.name
+            assert "bin/python" not in json.dumps(entry), spec.name
+            assert "/tmp" not in json.dumps(entry), spec.name
+    assert (PROJECT_ROOT / generator.PYTHON_LAUNCHER).is_file()
+
+
 def test_gemini_settings_list_the_same_tools_and_trust_none() -> None:
     """Gemini gets the same allowlist as Claude, and trusts no server."""
     settings = generator.build_gemini_settings()

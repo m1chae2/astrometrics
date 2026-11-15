@@ -125,6 +125,23 @@ describe('Observatory source', () => {
     expect(screen.queryByText(/REPLAY/)).toBeNull();
   });
 
+  /** When the backend says the simulator cannot run (INDI is not installed), the button is off and its tooltip says why. */
+  it('turns SIMULATED off with the reason as its tooltip when the backend cannot simulate', async () => {
+    const reason = 'The simulator needs INDI, which is not on this computer (INDI has no Windows version).';
+    vi.mocked(getObservatorySource).mockResolvedValue(
+      report('real', { available: false, unavailable_reason: reason }) as never,
+    );
+    render(<ObservatorySourceControl />);
+    const simulated = await screen.findByRole('button', { name: 'SIMULATED' });
+    await waitFor(() => expect(simulated).toBeDisabled());
+    expect(simulated.getAttribute('title')).toBe(reason);
+    fireEvent.click(simulated);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(setObservatorySource).not.toHaveBeenCalled();
+    // The source in force stays usable.
+    expect(screen.getByRole('button', { name: 'REAL' })).not.toBeDisabled();
+  });
+
   it('offers REAL and SIMULATED and asks before switching to the simulator', async () => {
     vi.mocked(getObservatorySource).mockResolvedValue(report('real') as never);
     render(<ObservatorySourceControl />);

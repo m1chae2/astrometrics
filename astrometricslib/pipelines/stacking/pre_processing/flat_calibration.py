@@ -281,19 +281,25 @@ def _unique_files(paths: list[str]) -> list[str]:
     Parameters
     ----------
     paths : `list` [`str`]
-        Frame paths. Symbolic links count as the file they point to.
+        Frame paths. Symbolic links count as the file they point to, and so
+        do hard links (the same file under a second name): each file counts
+        once, however many names it has.
 
     Returns
     -------
     unique_paths : `list` [`str`]
         The paths, each real file once, in the original order.
     """
-    seen: set[str] = set()
+    seen: set[object] = set()
     unique = []
     for path in paths:
-        real_path = os.path.realpath(path)
-        if real_path not in seen:
-            seen.add(real_path)
+        try:
+            status = os.stat(path)
+            identity: object = (status.st_dev, status.st_ino)
+        except OSError:
+            identity = os.path.realpath(path)
+        if identity not in seen:
+            seen.add(identity)
             unique.append(path)
     return unique
 

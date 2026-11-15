@@ -5,6 +5,7 @@
  */
 
 import path from 'path';
+import process from 'process';
 
 /**
  * Base platform adapter providing default cross-platform behavior.
@@ -27,6 +28,23 @@ export class BasePlatform {
    */
   configureIdentity(app) {
     app.name = 'astrometrics';
+  }
+
+  /**
+   * Registers the app as the handler of `astrometrics://` links. A source run
+   * (`process.defaultApp`) registers Electron with the app's folder; an installed app
+   * registers itself.
+   *
+   * @param {Electron.App} app - The Electron app instance.
+   */
+  registerProtocolClient(app) {
+    if (process.defaultApp) {
+      if (process.argv.length >= 2) {
+        app.setAsDefaultProtocolClient('astrometrics', process.execPath, [path.resolve(process.argv[1])]);
+      }
+    } else {
+      app.setAsDefaultProtocolClient('astrometrics');
+    }
   }
 
   /**
@@ -107,6 +125,27 @@ export class BasePlatform {
    */
   resolveBackendExecutable(appPath, isPackaged, options = {}) {
     throw new Error('resolveBackendExecutable must be implemented by platform adapter');
+  }
+
+  /**
+   * Says how to start the backend and where its log is, for the "backend not running" dialog.
+   * The default is the Linux advice.
+   *
+   * @returns {string}
+   */
+  backendStartAdvice() {
+    return 'Start it with build/linux/run_backend.sh start ' +
+      '(check ~/.local/state/astrometrics/logs/run/backend.log if it stops), then retry.';
+  }
+
+  /**
+   * Says whether a click on the tray icon must open the menu by code. The default is yes
+   * (macOS and Windows); Linux shows the menu by itself.
+   *
+   * @returns {boolean}
+   */
+  needsTrayClickToOpenMenu() {
+    return true;
   }
 
   /**

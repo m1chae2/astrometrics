@@ -233,7 +233,7 @@ class SirilSpectralStacker(SirilStaging):
         stack_status_queue: queue.Queue[str] = queue.Queue()
         stack_script = [
             *SIRIL_SCRIPT_PREAMBLE,
-            f"cd {aligned_directory}",
+            f'cd "{aligned_directory}"',
             f"convert {ALIGNED_SIRIL_SEQUENCE_NAME} -out=.",
             f"stack {ALIGNED_SIRIL_SEQUENCE_NAME} " + " ".join(stack_options),
         ]

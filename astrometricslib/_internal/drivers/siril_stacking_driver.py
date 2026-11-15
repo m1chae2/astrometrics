@@ -14,7 +14,6 @@ The ``registration`` names are Siril's spectral star detection settings:
 
 import functools
 import re
-import shlex
 import subprocess
 from typing import Any
 
@@ -24,6 +23,7 @@ from astrometricslib._internal.drivers.interfaces.stacking_driver import (
     StackRunResult,
     StackSettings,
 )
+from astrometricslib.foundation.system import split_program_command
 
 
 class SirilStackingDriver(StackingDriver):
@@ -187,7 +187,7 @@ def _siril_version(siril_executable: str) -> str | None:
         The first version number found, or `None` when Siril is missing or
         prints none.
     """
-    parts = shlex.split(siril_executable)
+    parts = split_program_command(siril_executable)
     if "flatpak" in parts[0]:
         parts.insert(-1, "--command=siril-cli")
     try:

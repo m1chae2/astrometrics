@@ -37,10 +37,19 @@
 # See astrometricslib/foundation/launch_identity.py.
 
 ["Image Library"]
-# Folder for the databases. Leave it empty to use the user's data folder,
-# ~/.local/share/astrometrics. Captured frames go in a "frames" subfolder
-# of it unless frames_path says otherwise.
+# Folder for the databases. Leave it empty to use the user's data folder:
+# ~/.local/share/astrometrics on Linux, %LOCALAPPDATA%\astrometrics on
+# Windows. Keep it on the local disk: SQLite cannot safely use a network or
+# synced drive such as Google Drive (use backup_path below for a copy there).
+# Captured frames go in a "frames" subfolder of it unless frames_path says
+# otherwise.
 path = ""
+# OPTIONAL: a folder that receives copies of the databases, such as a Google
+# Drive folder. The backend copies them there every 4 hours while the app
+# runs (only when something changed) and when it stops, keeping the newest 5.
+# Each copy is made on the local disk first. Use single quotes for a Windows
+# path, so its backslashes are kept: 'G:\My Drive\Astrometrics Backups'.
+# backup_path = ""
 # EDIT ME: absolute path to the folder holding your raw frames.
 # frames_path = "/home/you/Astrometrics/Library"
 # OPTIONAL: where stacks, group stacks, rejection maps, previews and processed

@@ -3,13 +3,23 @@ r"""Back up the library databases and settings to a local folder.
 The script makes a safe copy of ``astrometrics.db``, ``astrometrics_log.db``
 and the observatory database ``wayfinding.db`` (SQLite's online backup, then
 an integrity check), adds ``calibration_frames.json`` and the configuration
-file, and stores them in ``~/.cache/astrometrics/backup/<YYYYmmdd_HHMMSS>/``.
-The copies are a safety net for changes to the app (a migration or a restack
-that goes wrong). Nothing is uploaded anywhere. It works whether or not the
-backend is running.
+file, and stores them in a ``<YYYYmmdd_HHMMSS>/`` folder. The copies are a
+safety net for changes to the app (a migration or a restack that goes wrong)
+and, with ``backup_path``, a copy off the computer.
 
-Only one backup runs at a time (an exclusive lock on ``.lock`` in the backup
-folder); a second run logs that and exits at once. It does nothing when none
+Where the copies go: ``--backup-root`` if given, else ``backup_path`` in the
+``[Image Library]`` settings (for example a Google Drive folder), else the
+local backup folder (``~/.cache/astrometrics/backup`` on Linux,
+``%LOCALAPPDATA%\astrometrics\Cache\backup`` on Windows). Each copy is made
+in the local backup folder first and moved to its destination only when
+complete, so a sync program never uploads a half-written database. This
+script itself uploads nothing; a sync program such as Google Drive does. It
+works whether or not the backend is running, and the backend runs it every
+few hours when ``backup_path`` is set.
+
+Only one backup runs at a time (an exclusive lock on ``.lock`` in the local
+backup folder); a second run logs that and exits at once. It does nothing when
+none
 of the files changed since the last snapshot (``--force`` overrides). It
 keeps the newest `KEEP_SNAPSHOTS` snapshots and deletes older ones, never the
 one it just made.
@@ -22,7 +32,6 @@ Run::
 """
 
 import argparse
-import fcntl
 import json
 import logging
 import re
@@ -31,7 +40,8 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import IO
+
+import filelock
 
 from astrometricslib._internal.drivers.local_database import snapshot_sqlite_database
 from astrometricslib.foundation.launch_identity import read_launch_identity
@@ -214,11 +224,45 @@ def apply_retention(backup_root: Path, protected_name: str | None, dry_run: bool
     return freed_bytes
 
 
-def acquire_lock(lock_path: Path) -> IO[str] | None:
+def publish_snapshot(staged_folder: Path, destination_root: Path, snapshot_name: str) -> Path:
+    """Move a finished snapshot from local staging to its destination.
+
+    When the destination is another folder (for example a Google Drive
+    folder), the copy goes into ``<name>.partial`` there and is renamed when
+    complete, so a sync program never sees a folder with that name only half
+    written. The local staging copy is then removed.
+
+    Parameters
+    ----------
+    staged_folder : `pathlib.Path`
+        The complete snapshot, in the local backup folder.
+    destination_root : `pathlib.Path`
+        The folder that keeps the snapshots.
+    snapshot_name : `str`
+        The snapshot's name (``YYYYmmdd_HHMMSS``).
+
+    Returns
+    -------
+    snapshot_folder : `pathlib.Path`
+        The snapshot in the destination.
+    """
+    snapshot_folder = destination_root / snapshot_name
+    if staged_folder.parent.resolve() == destination_root.resolve():
+        staged_folder.rename(snapshot_folder)
+        return snapshot_folder
+    partial_folder = destination_root / f"{snapshot_name}.partial"
+    shutil.rmtree(partial_folder, ignore_errors=True)
+    shutil.copytree(staged_folder, partial_folder)
+    partial_folder.rename(snapshot_folder)
+    shutil.rmtree(staged_folder, ignore_errors=True)
+    return snapshot_folder
+
+
+def acquire_lock(lock_path: Path) -> filelock.FileLock | None:
     """Take the exclusive lock that allows only one backup at a time.
 
-    The lock is released when the returned file is closed or the process
-    ends, even if it crashes.
+    The lock is released by `release_lock` or when the process ends, even if
+    it crashes. It does not wait: a second backup gives up at once.
 
     Parameters
     ----------
@@ -227,17 +271,27 @@ def acquire_lock(lock_path: Path) -> IO[str] | None:
 
     Returns
     -------
-    lock_file : `typing.IO` or `None`
-        The open lock file (keep it open while backing up), or `None` if
-        another backup already holds the lock.
+    lock : `filelock.FileLock` or `None`
+        The held lock (keep it while backing up), or `None` if another
+        backup already holds the lock.
     """
-    lock_file = open(lock_path, "w")
+    lock = filelock.FileLock(str(lock_path), timeout=0)
     try:
-        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        lock_file.close()
+        lock.acquire()
+    except filelock.Timeout:
         return None
-    return lock_file
+    return lock
+
+
+def release_lock(lock: filelock.FileLock) -> None:
+    """Release the lock taken by `acquire_lock`.
+
+    Parameters
+    ----------
+    lock : `filelock.FileLock`
+        The lock `acquire_lock` returned.
+    """
+    lock.release()
 
 
 def read_state(state_path: Path) -> dict:
@@ -304,7 +358,10 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         "--backup-root",
         type=Path,
         default=None,
-        help="Folder that holds the snapshots. Default: ~/.cache/astrometrics/backup.",
+        help=(
+            "Folder that keeps the snapshots. Default: backup_path in [Image Library], "
+            "else the local backup folder."
+        ),
     )
     return parser
 
@@ -328,12 +385,14 @@ def main(argv: list[str] | None = None) -> int:
 
     library_path = arguments.library_path
     config_file_path = arguments.config_path
-    if library_path is None or config_file_path is None:
+    backup_root = arguments.backup_root
+    if library_path is None or config_file_path is None or backup_root is None:
         from astrometricslib.foundation.config import get_configuration
 
         configuration = get_configuration()
         library_path = library_path or Path(str(configuration.get_library_path()))
         config_file_path = config_file_path or configuration.config_file_path
+        backup_root = backup_root or configuration.get_backup_path()
     if library_is_disposable(config_file_path):
         # A launch can say its library is a throwaway (a simulated observatory
         # holds temporary copies). They are not worth a snapshot, and the
@@ -342,20 +401,29 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     # The observatory database, at wayfindinglib's default location.
     extra_database_paths = (Path(data_directory()) / WAYFINDING_DATABASE_RELATIVE_PATH,)
-    backup_root = arguments.backup_root or Path(backup_directory())
+    # The lock and the half-made copy always stay on the local disk: a synced
+    # or network folder may not support file locks, and its sync program must
+    # never pick up a copy that is still being written.
+    work_root = Path(backup_directory())
+    backup_root = Path(backup_root) if backup_root is not None else work_root
     state_path = backup_root / STATE_FILE_NAME
     dry_run = arguments.dry_run
 
-    backup_root.mkdir(parents=True, exist_ok=True)
-    lock_file = acquire_lock(backup_root / LOCK_FILE_NAME)
-    if lock_file is None:
+    try:
+        backup_root.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        logger.exception("Cannot reach the backup folder %s", backup_root)
+        return 1
+    lock = acquire_lock(work_root / LOCK_FILE_NAME)
+    if lock is None:
         logger.info("Another backup is already running; exiting")
         return 0
     try:
         # A folder left by a crashed run was never finished; remove it.
-        for partial_folder in backup_root.glob("*.partial"):
-            if not dry_run:
-                shutil.rmtree(partial_folder, ignore_errors=True)
+        for root in {work_root, backup_root}:
+            for partial_folder in root.glob("*.partial"):
+                if not dry_run:
+                    shutil.rmtree(partial_folder, ignore_errors=True)
 
         fingerprint = compute_source_fingerprint(library_path, config_file_path, extra_database_paths)
         saved_state = read_state(state_path)
@@ -371,14 +439,21 @@ def main(argv: list[str] | None = None) -> int:
             apply_retention(backup_root, snapshot_name, dry_run)
             return 0
 
-        # Write into a ".partial" folder and rename when complete, so a
-        # snapshot folder is always whole.
-        partial_folder = backup_root / f"{snapshot_name}.partial"
+        # Write into a local ".partial" folder, then move it into place when
+        # complete, so a snapshot folder is always whole.
+        partial_folder = work_root / f"{snapshot_name}.partial"
         if not stage_snapshot(library_path, config_file_path, partial_folder, extra_database_paths):
             logger.error("A database snapshot failed; removing %s", partial_folder)
             shutil.rmtree(partial_folder, ignore_errors=True)
             return 1
-        partial_folder.rename(snapshot_folder)
+        try:
+            snapshot_folder = publish_snapshot(partial_folder, backup_root, snapshot_name)
+        except OSError:
+            # The destination may be a drive that is not there right now (a
+            # Drive folder while Drive is not running). Try again next time.
+            logger.exception("Could not move the snapshot to %s", backup_root)
+            shutil.rmtree(partial_folder, ignore_errors=True)
+            return 1
         state_path.write_text(
             json.dumps({
                 "fingerprint": fingerprint,
@@ -390,7 +465,7 @@ def main(argv: list[str] | None = None) -> int:
         apply_retention(backup_root, snapshot_name, dry_run)
         return 0
     finally:
-        lock_file.close()
+        release_lock(lock)
 
 
 if __name__ == "__main__":

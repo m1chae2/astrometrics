@@ -44,7 +44,7 @@ Usage::
 """
 
 import argparse
-import fcntl
+import contextlib
 import json
 import logging
 import os
@@ -58,6 +58,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
+
+import filelock
 
 from astrometricslib.drivers import OFFLINE_VARIABLE
 from simulator import phd2_launch
@@ -120,6 +122,8 @@ GUIDER_VARIABLE = "ASTROMETRICS_SIMULATOR_GUIDER"
 SIMULATOR_FOLDER_NAME = "astrometrics-simulator"
 #: Name of the lock file, inside the simulator folder.
 LOCK_FILE_NAME = "launcher.lock"
+#: Name of the file, beside the lock, with the lock holder's process number.
+PROCESS_NUMBER_FILE_NAME = "launcher.pid"
 #: Exit code when another launcher holds the lock (``EX_CANTCREAT``).
 LOCKED_EXIT_CODE = 73
 #: Exit code when the connection guard ended the session (``EX_SOFTWARE``).
@@ -195,12 +199,14 @@ class World:
     notes: list[str] = field(default_factory=list)
 
 
-def acquire_world_lock(root: Path) -> int | None:
+def acquire_world_lock(root: Path) -> filelock.FileLock | None:
     """Take the exclusive lock of a simulator folder, without waiting.
 
-    The lock is an ``flock`` on ``<root>/launcher.lock``. The system drops it
-    when the process ends, even after a crash, so it never goes stale. The
-    descriptor is not inherited by child processes.
+    The lock is on ``<root>/launcher.lock``, taken with `filelock`. The system
+    drops it when the process ends, even after a crash, so it never goes
+    stale. While the lock is held, ``<root>/launcher.pid`` holds the holder's
+    process number, for the message of a second launcher. The side file is
+    removed when the lock is released.
 
     Parameters
     ----------
@@ -209,34 +215,32 @@ def acquire_world_lock(root: Path) -> int | None:
 
     Returns
     -------
-    descriptor : `int` or `None`
-        The open descriptor that holds the lock (close it to release), or
-        `None` when another process holds the lock.
+    lock : `filelock.FileLock` or `None`
+        The held lock (pass it to `release_world_lock`), or `None` when
+        another process holds the lock.
     """
     root.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(root / LOCK_FILE_NAME, os.O_RDWR | os.O_CREAT, 0o600)
+    lock = filelock.FileLock(str(root / LOCK_FILE_NAME), timeout=0, mode=0o600)
     try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        os.close(descriptor)
+        lock.acquire()
+    except filelock.Timeout:
         return None
-    os.ftruncate(descriptor, 0)
-    os.write(descriptor, f"{os.getpid()}\n".encode())
-    return descriptor
+    with contextlib.suppress(OSError):
+        (root / PROCESS_NUMBER_FILE_NAME).write_text(f"{os.getpid()}\n", encoding="utf-8")
+    return lock
 
 
-def release_world_lock(descriptor: int) -> None:
+def release_world_lock(lock: filelock.FileLock) -> None:
     """Release a lock taken by `acquire_world_lock`.
 
     Parameters
     ----------
-    descriptor : `int`
-        The descriptor it returned.
+    lock : `filelock.FileLock`
+        The lock it returned.
     """
-    try:
-        fcntl.flock(descriptor, fcntl.LOCK_UN)
-    finally:
-        os.close(descriptor)
+    with contextlib.suppress(OSError):
+        (Path(lock.lock_file).parent / PROCESS_NUMBER_FILE_NAME).unlink()
+    lock.release()
 
 
 def remove_leftovers(root: Path) -> None:
@@ -781,13 +785,13 @@ class Launcher:
         status : `int`
             The backend's exit code.
         """
-        descriptor = acquire_world_lock(self.root)
-        if descriptor is not None:
+        world_lock = acquire_world_lock(self.root)
+        if world_lock is not None:
             # Nobody runs a world here, so what a crash left can go.
             try:
                 remove_leftovers(self.root)
             finally:
-                release_world_lock(descriptor)
+                release_world_lock(world_lock)
         child_environment = {
             **self.environ,
             LAUNCHER_VARIABLE: "1",
@@ -805,13 +809,13 @@ class Launcher:
         status : `int`
             The backend's exit code, or `LOCKED_EXIT_CODE`.
         """
-        descriptor = acquire_world_lock(self.root)
-        if descriptor is None:
+        world_lock = acquire_world_lock(self.root)
+        if world_lock is None:
             logger.error(
-                "Another launcher holds the simulator folder %s (see %s). "
+                "Another launcher holds the simulator folder %s (its process number is in %s). "
                 "Nothing was changed. Stop that launcher first.",
                 self.root,
-                self.root / LOCK_FILE_NAME,
+                self.root / PROCESS_NUMBER_FILE_NAME,
             )
             return LOCKED_EXIT_CODE
         world: World | None = None
@@ -840,7 +844,7 @@ class Launcher:
         finally:
             if world is not None:
                 self._tear_down(world)
-            release_world_lock(descriptor)
+            release_world_lock(world_lock)
 
     def _start_backend(self, environment: dict[str, str]) -> subprocess.Popen:
         """Start the backend as a child.

@@ -53,7 +53,6 @@ configure_logging(
 
 logger = logging.getLogger(__name__)
 
-
 # Astropy must use its bundled Earth-rotation (IERS) table and never download
 # one. Importing astrometricslib already does this; the call states it here
 # because the backend depends on it.

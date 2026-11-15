@@ -1039,19 +1039,16 @@ class VariabilityAnalyzer:
                 for path in image_paths[1:]
             ]
 
-            # Explicit 'fork' context: Python 3.14 changed the default
-            # start method on Linux to 'forkserver', which re-imports the
-            # entry-point script in a fresh interpreter to bootstrap --
-            # that breaks when this module is reached via a script
-            # invoked as `python /path/to/script.py` rather than
-            # `python -m`, raising "attempt has been made to start a new
-            # process before the current process has finished its
-            # bootstrapping phase". 'fork' duplicates the already-running
-            # process instead, sidestepping that re-import entirely; it's
-            # safe here because none of the pool workers touch the
-            # SIMBAD/Gaia locks held by other threads in the parent.
+            # "spawn", never "fork": the backend runs many threads, and
+            # Python's documentation warns that forking a program with
+            # threads is unsafe (the child can inherit a lock that another
+            # thread held). The worker function is at module level and its
+            # arguments (paths, star lists, numbers and a `DetectorNoise`)
+            # can be sent to a fresh process. A script that reaches this
+            # pool needs an ``if __name__ == "__main__":`` guard, because
+            # "spawn" imports the script again in each worker.
             with ProcessPoolExecutor(
-                max_workers=max_workers, mp_context=multiprocessing.get_context("fork")
+                max_workers=max_workers, mp_context=multiprocessing.get_context("spawn")
             ) as executor:
                 results = list(executor.map(_process_single_frame_worker, worker_arguments))
 

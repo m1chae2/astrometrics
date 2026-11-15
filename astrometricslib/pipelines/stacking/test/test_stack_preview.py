@@ -6,6 +6,7 @@ the module asks each program to do and how it reacts when one succeeds or
 fails.
 """
 
+import json
 import os
 from contextlib import nullcontext
 from pathlib import Path
@@ -30,6 +31,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
     flatten_background,
     has_plate_solution,
     is_colour_image,
+    preview_is_out_of_date,
     read_preview_settings,
     run_preview_script,
     write_stack_preview,
@@ -1382,6 +1384,78 @@ def test_a_preview_with_no_overrides_is_not_custom(
     assert record["custom"] is False
     assert record["settings_used"]["denoise"] is False
     assert record["settings_used"]["denoise_strength"] is None
+
+
+def test_a_preview_records_the_picture_settings_in_force(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The record keeps the picture settings, which then match."""
+    _configure(monkeypatch, "siril-cli", "graxpert-gpu", "/opt/cc/denoise", strength=0.5, star_tone=True)
+    _Programs().install(monkeypatch)
+
+    assert write_stack_preview(str(stack)) is not None
+
+    record = read_preview_settings(str(stack))
+    assert record is not None
+    assert record["configuration"] == {
+        "graxpert_executable": "graxpert-gpu",
+        "cosmic_clarity_executable": "/opt/cc/denoise",
+        "cosmic_clarity_strength": 0.5,
+        "colour_calibration": False,
+        "colour_calibration_method": "stars",
+        "remove_green_noise": True,
+        "star_toning": True,
+    }
+    assert preview_is_out_of_date(str(stack)) is None
+
+
+def test_a_picture_is_out_of_date_when_graxpert_is_newly_set_up(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Setting up GraXpert after the picture was made calls for a new one."""
+    _configure(monkeypatch, "siril-cli", None)
+    _Programs().install(monkeypatch)
+    assert write_stack_preview(str(stack)) is not None
+
+    _configure(monkeypatch, "siril-cli", "graxpert-gpu")
+
+    assert preview_is_out_of_date(str(stack)) == "the picture settings changed (graxpert executable)"
+
+
+def test_a_missing_picture_is_out_of_date(stack: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A stack with no picture gets one."""
+    _configure(monkeypatch, "siril-cli", None)
+    assert preview_is_out_of_date(str(stack)) == "the stack has no preview picture"
+
+
+def test_a_custom_picture_is_never_replaced(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A picture made with one-run choices is kept when settings change."""
+    _configure(monkeypatch, "siril-cli", None)
+    _Programs().install(monkeypatch)
+    assert write_stack_preview(str(stack), PreviewSettings(star_toning=True)) is not None
+
+    _configure(monkeypatch, "siril-cli", "graxpert-gpu")
+
+    assert preview_is_out_of_date(str(stack)) is None
+
+
+def test_a_picture_with_an_older_record_is_kept(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A record without the settings gives nothing to compare: keep it."""
+    _configure(monkeypatch, "siril-cli", None)
+    _Programs().install(monkeypatch)
+    assert write_stack_preview(str(stack)) is not None
+    record_path = preview_settings_path_for(str(stack))
+    record = json.loads(Path(record_path).read_text(encoding="utf-8"))
+    del record["configuration"]
+    Path(record_path).write_text(json.dumps(record), encoding="utf-8")
+
+    _configure(monkeypatch, "siril-cli", "graxpert-gpu")
+
+    assert preview_is_out_of_date(str(stack)) is None
 
 
 def test_a_bright_object_record_says_the_cleanup_was_skipped(

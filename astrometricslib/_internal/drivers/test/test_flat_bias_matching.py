@@ -143,7 +143,18 @@ def staged_targets(processor: siril_interface.ImageProcessing, folder: str) -> l
         The link targets, sorted.
     """
     directory = os.path.join(processor.workdir, "target", folder)
-    return sorted(os.path.realpath(os.path.join(directory, name)) for name in os.listdir(directory))
+    staged = [os.path.join(directory, name) for name in os.listdir(directory)]
+    # A staged frame is a symbolic link or, where the system allows none, the
+    # library file under a second name (hard link): either way the library
+    # file is the one outside the work folder that is the same file.
+    work = Path(processor.workdir)
+    library_files = [path for path in work.parent.rglob("*.fits") if work not in path.parents]
+    return sorted(
+        str(library_file)
+        for path in staged
+        for library_file in library_files
+        if os.path.samefile(path, library_file)
+    )
 
 
 def flat_bias_flags(processor: siril_interface.ImageProcessing) -> list[str]:
@@ -284,7 +295,7 @@ def test_the_script_builds_the_flat_bias_master_only_when_it_is_staged() -> None
     different = build_master_calibration_commands(
         "/w", StagedFrameCounts(5, 5, 5, 20, flat_biases=4), set(), False, None
     )
-    assert "cd /w/flat_biases" in different
+    assert f'cd "{os.path.join("/w", "flat_biases")}"' in different
     assert "stack flatbias rej 3 3 -nonorm -out=flat_bias_stacked" in different
     assert "calibrate flat -bias=flat_bias_stacked" in different
     # The lights' own bias master is still built.

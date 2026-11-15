@@ -11,52 +11,168 @@ import { execSync } from 'child_process';
 import { BasePlatform } from './base.js';
 
 /**
+ * The app's fixed notification activator ID (a COM class ID). It must match `$ToastActivatorId`
+ * in `build/windows/install_desktop_icon.ps1`, which writes it onto the Start menu shortcut.
+ */
+export const TOAST_ACTIVATOR_CLSID = '{2CEFF8B0-F01F-4064-B293-17520A983AE2}';
+
+/** The workspaces the taskbar's Jump List opens, as `--mode` names and their descriptions. */
+const JUMP_LIST_MODES = [
+  ['Planetarium', 'Open Planetarium', 'Navigate the celestial sphere'],
+  ['Observatory Manager', 'Observatory Manager', 'Mount, guider, and equipment controls'],
+  ['Image Processing', 'Image Processing', 'FITS stacking, astrometry, and spectroscopy']
+];
+
+/**
+ * Gives the app's own folder, `%LOCALAPPDATA%\Astrometrics`, as the Python side does.
+ *
+ * Local, not Roaming (`%APPDATA%`): its files belong to this computer, and caches and logs
+ * should not be copied to other computers with the user's profile.
+ *
+ * @param {Electron.App} app
+ * @returns {string}
+ */
+export function windowsAppFolder(app) {
+  const localAppData = process.env.LOCALAPPDATA || path.join(app.getPath('home'), 'AppData', 'Local');
+  return path.join(localAppData, 'Astrometrics');
+}
+
+/**
+ * Gives the state folder, which holds the logs: `$XDG_STATE_HOME/astrometrics` when that is
+ * set (as on Linux), otherwise the app's own folder, `%LOCALAPPDATA%\Astrometrics`, as the
+ * Python side does (on Windows the state folder and the data folder are the same folder).
+ *
+ * @param {Electron.App} app
+ * @returns {string}
+ */
+export function windowsStateFolder(app) {
+  if (process.env.XDG_STATE_HOME) return path.join(process.env.XDG_STATE_HOME, 'astrometrics');
+  return windowsAppFolder(app);
+}
+
+/**
+ * Gives the command that starts the app the way its desktop shortcut does: Windows PowerShell
+ * running `build\windows\run_astrometrics.ps1` from the app's folder, with no window.
+ *
+ * @param {Electron.App} app
+ * @returns {{ program: string, args: string[] }}
+ */
+export function launcherCommand(app) {
+  const launcher = path.join(app.getAppPath(), 'build', 'windows', 'run_astrometrics.ps1');
+  const program = path.join(
+    process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'
+  );
+  return { program, args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', launcher] };
+}
+
+/**
  * Windows-specific platform implementation.
  */
 export class WindowsPlatform extends BasePlatform {
   /**
-   * Sets AppUserModelId for taskbar grouping and notification routing.
+   * Asks Windows for the high-performance graphics card (an NVIDIA or AMD card next to an
+   * Intel one), so the Planetarium and the image viewer draw on it. Windows otherwise often
+   * picks the power-saving card. On a computer with one card this changes nothing. Unlike
+   * Linux's `auto` choice, it does not switch to the power-saving card on battery.
+   *
+   * @param {Electron.App} app
+   */
+  initCommandLine(app) {
+    app.commandLine.appendSwitch('force_high_performance_gpu');
+  }
+
+  /**
+   * Sets AppUserModelId for taskbar grouping and notification routing, and keeps Electron's
+   * own files (its browser caches, window position) in `%LOCALAPPDATA%\Astrometrics\Electron` (its own folder, apart from the Python files).
+   * Electron's default is the Roaming profile, which Windows copies between computers.
    *
    * @param {Electron.App} app
    */
   configureIdentity(app) {
     app.name = 'astrometrics';
     app.setAppUserModelId('astrometrics');
+    // The notification activator ID that the Start menu shortcut also carries
+    // (install_desktop_icon.ps1). Electron otherwise makes up a new one each run, finds no
+    // shortcut carrying it, and makes its own Start menu shortcut named "Electron".
+    if (typeof app.setToastActivatorCLSID === 'function') {
+      app.setToastActivatorCLSID(TOAST_ACTIVATOR_CLSID);
+    }
+    app.setPath('userData', path.join(windowsAppFolder(app), 'Electron'));
+  }
+
+  /**
+   * Says how to start the backend and where its log is, for the "backend not running" dialog.
+   *
+   * @returns {string}
+   */
+  backendStartAdvice() {
+    return 'Start Astrometrics again from its shortcut (build\\windows\\run_astrometrics.ps1). ' +
+      'If it stops again, check logs\\run\\backend.err.log in %LOCALAPPDATA%\\Astrometrics, then retry.';
+  }
+
+  /**
+   * Says that a click on the tray icon must open the menu by code: Windows does not show the
+   * menu by itself.
+   *
+   * @returns {boolean}
+   */
+  needsTrayClickToOpenMenu() {
+    return true;
+  }
+
+  /**
+   * Writes Electron's log next to the backend's, in the state folder's `logs`, as on Linux.
+   *
+   * @param {Electron.App} app
+   * @param {Object} log
+   * @returns {string}
+   */
+  configureLogging(app, log) {
+    super.configureLogging(app, log);
+    const logPath = path.join(windowsStateFolder(app), 'logs', 'main.log');
+    log.transports.file.resolvePathFn = () => logPath;
+    return logPath;
+  }
+
+  /**
+   * Registers the launcher, `build\windows\run_astrometrics.ps1`, as the handler of
+   * `astrometrics://` links, as the desktop shortcut and the Jump List use it. The app runs
+   * from its source folder, where `electron.exe` alone would start without the Vite server.
+   * Windows adds the link after the arguments, so it arrives as the launcher's `-Url`. When
+   * the app is already open, the new Electron hands the link to the open window.
+   *
+   * @param {Electron.App} app
+   */
+  registerProtocolClient(app) {
+    const { program, args } = launcherCommand(app);
+    app.setAsDefaultProtocolClient('astrometrics', program, [...args, '-Url']);
   }
 
   /**
    * Configures the Windows Jump List tasks on the taskbar icon.
    *
+   * Each task runs the same launcher as the desktop shortcut,
+   * `build\windows\run_astrometrics.ps1`, with `-Mode`. The app runs from its source folder,
+   * where `electron.exe` alone would open an empty Electron window. When the app is already
+   * open, the launcher reuses its backend and Vite server, and the new Electron hands the mode
+   * to the open window (the `second-instance` event).
+   *
    * @param {Electron.App} app
    */
   setupUserTasks(app) {
+    const { program, args } = launcherCommand(app);
+    // Paths are quoted, since a folder name may hold a space.
+    const quoted = args.map((arg) => (/[\s\\/]/.test(arg) ? `"${arg}"` : arg)).join(' ');
+    const icon = path.join(app.getAppPath(), 'assets', 'orbit.ico');
     try {
-      app.setUserTasks([
-        {
-          program: process.execPath,
-          arguments: '--mode="Planetarium"',
-          title: 'Open Planetarium',
-          description: 'Navigate the celestial sphere',
-          iconPath: process.execPath,
-          iconIndex: 0
-        },
-        {
-          program: process.execPath,
-          arguments: '--mode="Observatory Manager"',
-          title: 'Observatory Manager',
-          description: 'Mount, guider, and equipment controls',
-          iconPath: process.execPath,
-          iconIndex: 0
-        },
-        {
-          program: process.execPath,
-          arguments: '--mode="Image Processing"',
-          title: 'Image Processing',
-          description: 'FITS stacking, astrometry, and spectroscopy',
-          iconPath: process.execPath,
-          iconIndex: 0
-        }
-      ]);
+      app.setUserTasks(JUMP_LIST_MODES.map(([mode, title, description]) => ({
+        program,
+        arguments: `${quoted} -Mode "${mode}"`,
+        title,
+        description,
+        iconPath: icon,
+        iconIndex: 0
+      })));
     } catch {
       // User tasks may fail if taskbar is unavailable during headless tests
     }
@@ -111,9 +227,14 @@ export class WindowsPlatform extends BasePlatform {
       }
     }
 
-    // Dev or unpackaged fallback
-    const venvPython = path.join(appPath, '.venv', 'Scripts', 'python.exe');
-    if (fs.existsSync(venvPython)) {
+    // Dev or unpackaged fallback. build/windows/setup_windows.ps1 makes
+    // `.venv-win`, so a checkout shared with Linux (whose `.venv` is there too)
+    // keeps both. A plain `.venv` is still used when it is the only one.
+    const venvPython = [
+      path.join(appPath, '.venv-win', 'Scripts', 'python.exe'),
+      path.join(appPath, '.venv', 'Scripts', 'python.exe')
+    ].find(candidate => fs.existsSync(candidate));
+    if (venvPython) {
       return { command: venvPython, args: ['-m', 'backend.main_backend'], isBinary: false };
     }
 

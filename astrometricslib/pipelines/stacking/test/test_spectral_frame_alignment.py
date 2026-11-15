@@ -7,6 +7,7 @@ writes a contiguously-numbered aligned sequence, and leaves out a frame
 that cannot be confidently aligned instead of silently misaligning it.
 """
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -59,7 +60,7 @@ def test_align_calibrated_frames_recovers_a_known_shift_and_writes_a_sequence(tm
 
     assert counts == {"registered": 2, "failed": 0}
     assert len(aligned_paths) == 2
-    assert [p.split("/")[-1] for p in aligned_paths] == [
+    assert [os.path.basename(p) for p in aligned_paths] == [
         "raw_aligned_00001.fits",
         "raw_aligned_00002.fits",
     ]

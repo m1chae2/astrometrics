@@ -38,6 +38,20 @@ class PyIndiStub:
             """
             return False
 
+        def disconnectServer(self) -> bool:
+            """Do nothing, since the stub never connects.
+
+            The driver calls this when it replaces a client that lost its
+            server. On a computer without PyIndi, such as Windows, there is
+            nothing to close.
+
+            Returns
+            -------
+            disconnected : `bool`
+                Always `True`.
+            """
+            return True
+
         def isServerConnected(self) -> bool:
             """Report that the stub server is never connected.
 

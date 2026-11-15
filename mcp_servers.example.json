@@ -1,9 +1,9 @@
 {
   "mcpServers": {
     "astrometricslib-core": {
-      "command": "/path/to/astrometrics/.venv/bin/python",
+      "command": "node",
       "args": [
-        "-m",
+        "/path/to/astrometrics/build/mcp/run_python_server.mjs",
         "mcp_servers.astrometrics_core"
       ],
       "cwd": "/path/to/astrometrics",
@@ -13,9 +13,9 @@
       }
     },
     "wayfindinglib-core": {
-      "command": "/path/to/astrometrics/.venv/bin/python",
+      "command": "node",
       "args": [
-        "-m",
+        "/path/to/astrometrics/build/mcp/run_python_server.mjs",
         "mcp_servers.wayfinding_core"
       ],
       "cwd": "/path/to/astrometrics",
@@ -25,23 +25,22 @@
       }
     },
     "astrometrics-backend": {
-      "command": "/path/to/astrometrics/.venv/bin/python",
+      "command": "node",
       "args": [
-        "-m",
+        "/path/to/astrometrics/build/mcp/run_python_server.mjs",
         "mcp_servers.backend"
       ],
       "cwd": "/path/to/astrometrics",
       "env": {
         "ASTROMETRICS_API_BASE": "http://127.0.0.1:5000",
         "ASTROMETRICS_MCP_PROFILE": "investigator",
-        "MPLCONFIGDIR": "/tmp/matplotlib",
         "PYTHONPATH": "/path/to/astrometrics"
       }
     },
     "astrometrics-gaps": {
-      "command": "/path/to/astrometrics/.venv/bin/python",
+      "command": "node",
       "args": [
-        "-m",
+        "/path/to/astrometrics/build/mcp/run_python_server.mjs",
         "mcp_servers.gaps"
       ],
       "cwd": "/path/to/astrometrics",

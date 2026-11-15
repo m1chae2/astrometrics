@@ -1,5 +1,6 @@
 """Tests for the optional frame pre-fetch step and its hook in stacking."""
 
+import os
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -7,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from astrometricslib._internal.drivers import frame_prefetch, siril_interface
+from astrometricslib._internal.drivers.file_staging import stage_file
 from astrometricslib._internal.drivers.siril_interface import staging
 from astrometricslib.foundation.config import AppConfiguration
 
@@ -103,7 +105,7 @@ def _staged_folder(tmp_path: Path) -> Path:
     real = tmp_path / "real.fits"
     real.write_bytes(b"x")
     (tmp_path / "work" / "lights").mkdir(parents=True)
-    (tmp_path / "work" / "lights" / "light_00001.fits").symlink_to(real)
+    stage_file(str(real), str(tmp_path / "work" / "lights" / "light_00001.fits"))
     return tmp_path / "work"
 
 
@@ -126,4 +128,8 @@ def test_stacking_hook_runs_only_when_enabled(tmp_path: Path, monkeypatch: pytes
 
     driver.config.get_prefetch_frames.return_value = True
     driver._prefetch_staged_frames(str(work), MagicMock())
-    assert calls == [([str((tmp_path / "real.fits").resolve())], 2)]
+    # A symbolic link leads to the library file and a hard link is the library
+    # file under a second name, so either way the path reads the same file.
+    [(paths, workers)] = calls
+    assert workers == 2
+    assert len(paths) == 1 and os.path.samefile(paths[0], tmp_path / "real.fits")

@@ -45,21 +45,26 @@ export const useCanvasDrawer = (
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
+        // The bitmap's pixels are screen pixels: the canvas holds exactly
+        // those pixels, and its on-screen (CSS) size is that divided by the
+        // display's scaling. The bitmap is then drawn 1:1. (It used to be
+        // drawn through a 1/dpr scale as well, which shrank it into the
+        // top-left part of the canvas whenever the display scaling was not
+        // 100%: 0.8 of the canvas at 125%.)
         const dpr = window.devicePixelRatio || 1;
         const logicalW = Math.round(bitmap.width / dpr);
         const logicalH = Math.round(bitmap.height / dpr);
 
-        canvas.width = logicalW * dpr;
-        canvas.height = logicalH * dpr;
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
         canvas.style.width = `${logicalW}px`;
         canvas.style.height = `${logicalH}px`;
         // Ensure no leftover filters
         canvas.style.filter = 'none';
 
-        ctx.clearRect(0, 0, logicalW, logicalH);
-        ctx.scale(1 / dpr, 1 / dpr);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
         const drawn = drawBitmapSafely(ctx, bitmap);
-        ctx.setTransform(1, 0, 0, 1, 0, 0); // reset
         if (!drawn) return;
 
         setDrawnSize({ w: logicalW, h: logicalH });

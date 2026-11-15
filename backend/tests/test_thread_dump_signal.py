@@ -20,7 +20,7 @@ def test_registers_sigusr1_for_all_threads(monkeypatch: pytest.MonkeyPatch) -> N
         """Record the call instead of installing a handler."""
         calls.append((args, kwargs))
 
-    monkeypatch.setattr(faulthandler, "register", fake_register)
+    monkeypatch.setattr(faulthandler, "register", fake_register, raising=False)
 
     assert main_backend.register_thread_dump_signal() is True
 
@@ -36,7 +36,7 @@ def test_noop_without_sigusr1(monkeypatch: pytest.MonkeyPatch) -> None:
         """Record the call instead of installing a handler."""
         calls.append(args)
 
-    monkeypatch.setattr(faulthandler, "register", fake_register)
+    monkeypatch.setattr(faulthandler, "register", fake_register, raising=False)
 
     assert main_backend.register_thread_dump_signal() is False
     assert calls == []
@@ -55,6 +55,6 @@ def test_registration_failure_returns_false(monkeypatch: pytest.MonkeyPatch) -> 
         """
         raise OSError("cannot register")
 
-    monkeypatch.setattr(faulthandler, "register", failing_register)
+    monkeypatch.setattr(faulthandler, "register", failing_register, raising=False)
 
     assert main_backend.register_thread_dump_signal() is False

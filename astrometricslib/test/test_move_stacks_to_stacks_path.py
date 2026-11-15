@@ -7,6 +7,7 @@ temporary folder and check each step.
 """
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 
@@ -75,7 +76,8 @@ def test_the_plan_moves_stacks_and_groups_but_not_raw_frames_or_pictures(tmp_pat
         "M_27_exp60s.fits",
         "starless_M_27_Stacked.fits",
     ]
-    assert moves[f"{old_lights}/M 27/groups/M_27_exp60s.fits"] == f"{new_lights}/M 27/groups/M_27_exp60s.fits"
+    groups = os.path.join("M 27", "groups", "M_27_exp60s.fits")
+    assert moves[os.path.join(old_lights, groups)] == os.path.join(new_lights, groups)
 
 
 def test_copy_and_verify_copies_and_skips_a_complete_copy(tmp_path: Path) -> None:

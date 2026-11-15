@@ -4,7 +4,10 @@
 
 .DESCRIPTION
     Creates `.venv-win` (not `.venv`, which the Ubuntu/WSL side of this checkout may already use),
-    installs the project into it, seeds the local config file, and runs `npm install`.
+    installs the project into it, seeds the local config file, sets up Siril and GraXpert
+    (the stacking and gradient-removal programs, each downloaded from its own project and checked
+    against a pinned checksum), runs `npm install`, and builds the UI MCP server in ui\mcp.
+    At the end it warns when Windows long paths are turned off, and says how to turn them on.
     Astrometrics needs Python 3.14 or newer. Run it from anywhere:
 
         powershell -ExecutionPolicy Bypass -File build\windows\setup_windows.ps1
@@ -52,7 +55,15 @@ if (-not (Test-Path $Config) -and (Test-Path $Template)) {
     Write-Host "Created $Config - edit it to set frames_path." -ForegroundColor Yellow
 }
 
-# 5. Node packages.
+# 5. Siril (stacking) and GraXpert (gradient removal): each downloaded from its own project,
+# checked against its pinned checksum, unpacked into the data folder and set in the settings.
+# A program already named in the settings is kept.
+Write-Host "Setting up Siril and GraXpert..." -ForegroundColor Yellow
+$env:PYTHONPATH = $ProjectRoot
+& $VenvPython -m astrometricslib.scripts.set_up_programs
+if ($LASTEXITCODE -ne 0) { throw "Setting up Siril or GraXpert failed." }
+
+# 6. Node packages.
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
     Write-Host "Node.js / npm not found. Install it with: winget install OpenJS.NodeJS.LTS" -ForegroundColor Red
     exit 1
@@ -65,6 +76,31 @@ if ($LASTEXITCODE -ne 0) { throw "npm install failed." }
 if (-not (Test-Path "node_modules\electron\dist\electron.exe")) {
     node node_modules\electron\install.js
     if ($LASTEXITCODE -ne 0) { throw "Electron download failed." }
+}
+
+# 7. The UI MCP server (ui/mcp) has its own packages and must be compiled; .mcp.json runs
+# ui\mcp\dist\index.js. Without this, Claude Code shows the "astrometrics-ui" server as failed.
+Write-Host "Building the UI MCP server..." -ForegroundColor Yellow
+Push-Location (Join-Path $ProjectRoot "ui\mcp")
+try {
+    npm ci --ignore-scripts --no-audit --no-fund
+    if ($LASTEXITCODE -ne 0) { throw "npm ci in ui\mcp failed." }
+    npm run build
+    if ($LASTEXITCODE -ne 0) { throw "Building the UI MCP server failed." }
+} finally {
+    Pop-Location
+}
+
+# 8. Long paths. Windows limits a path to 260 characters unless long paths are turned on, and a
+# library on Google Drive (G:\My Drive\Library\lights\<target>\<telescope>\<camera>\...) plus
+# Siril's file names can pass that. Turning them on needs administrator rights, so this only
+# warns and says how; it changes nothing.
+$LongPaths = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name LongPathsEnabled -ErrorAction SilentlyContinue).LongPathsEnabled
+if ($LongPaths -ne 1) {
+    Write-Host "Long paths are turned off on this computer. Paths longer than 260 characters," -ForegroundColor Yellow
+    Write-Host "for example deep folders in a Google Drive library, can then fail to open." -ForegroundColor Yellow
+    Write-Host "To turn them on, run this once in PowerShell as administrator, then restart:" -ForegroundColor Yellow
+    Write-Host '    New-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force' -ForegroundColor Yellow
 }
 
 Write-Host "Setup complete. Next: build\windows\install_desktop_icon.ps1" -ForegroundColor Green

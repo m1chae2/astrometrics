@@ -74,9 +74,9 @@ def test_stacks_folder_is_listed_under_the_frames_prefix() -> None:
     """A separate stacks folder shares the frames prefix."""
     configuration = _configuration(Path("/data/library"), Path("/mnt/frames"), Path("/home/u/stacks"))
     assert static_mounts(configuration) == [
-        {"root": "/data/library", "urlPrefix": "/static"},
-        {"root": "/mnt/frames", "urlPrefix": "/static/frames"},
-        {"root": "/home/u/stacks", "urlPrefix": "/static/frames"},
+        {"root": str(Path("/data/library")), "urlPrefix": "/static"},
+        {"root": str(Path("/mnt/frames")), "urlPrefix": "/static/frames"},
+        {"root": str(Path("/home/u/stacks")), "urlPrefix": "/static/frames"},
     ]
 
 
@@ -84,5 +84,5 @@ def test_frames_folder_equal_to_library_has_one_mount() -> None:
     """With no separate frames folder, only the library mount is listed."""
     library = Path("/data/library")
     assert static_mounts(_configuration(library, library, library)) == [
-        {"root": "/data/library", "urlPrefix": "/static"}
+        {"root": str(Path("/data/library")), "urlPrefix": "/static"}
     ]

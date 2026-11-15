@@ -25,7 +25,7 @@ from astrometricslib.models.provenance import (
     WasGeneratedBy,
 )
 
-_SCHEMA_PATH = __file__.rsplit("/", 1)[0] + "/data/prov.xsd"
+_SCHEMA_PATH = str(Path(__file__).parent / "data" / "prov.xsd")
 
 
 def load_schema() -> etree.XMLSchema:

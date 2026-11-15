@@ -30,11 +30,18 @@ from backend.public_interface import (
     read_choice,
     write_choice,
 )
+from backend.services.observatory import observatory_source_service as source_service_module
 from backend.services.observatory.observatory_source_service import ObservatorySourceService
 
 SIMULATOR_IDENTITY = LaunchIdentity(
     label="SIMULATOR", live_hardware=False, disposable_library=True, offline=True, locked_keys=("A.b",)
 )
+
+
+@pytest.fixture(autouse=True)
+def indi_installed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make INDI look installed, whatever this computer has."""
+    monkeypatch.setattr(source_service_module.shutil, "which", lambda program: f"/usr/bin/{program}")
 
 
 @pytest.fixture
@@ -120,16 +127,20 @@ def test_a_failed_simulator_is_reported_with_its_reason(environment: dict[str, s
 
 
 def test_programs_the_launcher_found_missing_are_reported(environment: dict[str, str]) -> None:
-    """The settings control learns which programs the simulator lacks."""
-    environment[MISSING_PROGRAMS_VARIABLE] = "indiserver,phd2"
+    """The settings control learns which programs the simulator lacks.
+
+    INDI is present here; a missing INDI has its own short reason (see
+    `test_missing_indiserver_says_indiserver_is_not_installed`).
+    """
+    environment[MISSING_PROGRAMS_VARIABLE] = "phd2,xvfb-run"
     service = _service(environment)
 
     state = service.get_source()
 
-    assert state["missing_programs"] == ["indiserver", "phd2"]
+    assert state["missing_programs"] == ["phd2", "xvfb-run"]
     assert state["available"] is False
-    assert "indiserver, phd2" in state["unavailable_reason"]
-    with pytest.raises(ConfigurationError, match="indiserver"):
+    assert "phd2, xvfb-run" in state["unavailable_reason"]
+    with pytest.raises(ConfigurationError, match="phd2"):
         service.set_source(SIMULATED)
     assert read_choice(environment).source == REAL
 
@@ -244,3 +255,40 @@ def test_launch_notes_are_reported_and_never_block_a_source_change(environment: 
     assert state["notes"] == ["gsc (star catalog): stars are not drawn"]
     assert state["missing_programs"] == []
     assert state["available"] is True
+
+
+def test_missing_indiserver_says_indiserver_is_not_installed(environment: dict[str, str]) -> None:
+    """Without INDI the simulator is off, and choosing it is refused."""
+    environment[MISSING_PROGRAMS_VARIABLE] = "indiserver"
+    restarts: list[object] = []
+    service = _service(environment, restarts=restarts)
+
+    state = service.get_source()
+
+    assert state["available"] is False
+    assert (
+        state["unavailable_reason"]
+        == "The simulator needs INDI, which is not on this computer (INDI has no Windows version)."
+    )
+    with pytest.raises(ConfigurationError, match="INDI, which is not on this computer"):
+        service.set_source(SIMULATED)
+    assert read_choice(environment).source == REAL
+    assert restarts == []
+
+
+def test_no_indi_on_this_computer_is_the_reason_without_a_launcher(
+    environment: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Where INDI is not installed (as on Windows), that is the reason."""
+    monkeypatch.setattr(source_service_module.shutil, "which", lambda program: None)
+    environment.pop("ASTROMETRICS_LAUNCHER", None)
+    service = _service(environment)
+
+    state = service.get_source()
+
+    assert state["available"] is False
+    assert state["unavailable_reason"] == (
+        "The simulator needs INDI, which is not on this computer (INDI has no Windows version)."
+    )
+    with pytest.raises(ConfigurationError, match="INDI, which is not on this computer"):
+        service.set_source(SIMULATED)

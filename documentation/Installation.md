@@ -1,11 +1,22 @@
 # Installation
 
-*Version 2.0 · 2026-10-15 · Status: current*
+*Version 2.1 · 2026-11-14 · Status: current*
 
-This page shows how to install the Astrometrics desktop app from source on Linux, check that it works, update it, and remove it. It is for people who want to run the app. To use only the Python library, see the [library quick start](how_to/library_quick_start.md).
+This page shows how to install the Astrometrics desktop app from source on Linux, check that it works, update it, and remove it. Windows 11 has its own setup, described in the note below. It is for people who want to run the app. To use only the Python library, see the [library quick start](how_to/library_quick_start.md).
 
 :::{note}
-Windows is not supported. The install scripts are written for Ubuntu and use the `apt` package manager.
+Ubuntu is the main supported system, and the rest of this page is written for it. Windows 11 runs the app from source for work on frames that are already on disk: viewing, stacking with Siril and the quality measurements. Run `build\windows\setup_windows.ps1` once in PowerShell. It needs Python 3.14 and Node.js, sets up a Python environment and the Node packages, and downloads Siril (stacking) and GraXpert (removes the sky's gradient from the preview picture) from their own projects, each checked against a pinned checksum, with no administrator rights needed. Then start the app with `build\windows\run_astrometrics.ps1`, or from the shortcut that `build\windows\install_desktop_icon.ps1` makes. That script also adds Astrometrics to the **Open with** menu of `.fits` and `.fit` files. Opening a file that way starts the app, but the app does not yet show the file it is given.
+
+These parts do not work on Windows yet:
+
+- Telescope control and the simulated observatory. Both need INDI, which is not available on Windows.
+- Downloading frames from the telescope computer, which uses `rsync`.
+- The local plate solver. Plate solving uses the online astrometry.net service instead, which needs an API key.
+- A packaged installer. Windows runs from a copy of the source code.
+
+Windows limits a path to 260 characters unless long paths are turned on, and a deep library folder, for example on Google Drive, can pass that. The setup script warns when they are off and prints the one-line command that turns them on. It needs administrator rights and a restart.
+
+Keep the frames on the same drive as `%LOCALAPPDATA%`, usually `C:`. Siril reads them through hard links, which cost no space or time but work only within one NTFS drive. A stack of frames on another drive, or in a Google Drive or network folder, stops with an error that says so.
 :::
 
 ## What you need
@@ -111,9 +122,13 @@ On Linux, a laptop with an Intel card and an NVIDIA card can draw the app window
 
 The app chooses at start. It cannot switch cards while it runs, so plugging in or unplugging the charger changes nothing until you restart the app. The start-up log (`electron.log`) says which card was asked for and which one the window got. If NVIDIA was chosen but the window did not get it, the app restarts once on Intel.
 
+On Windows the `gpu` setting does nothing. The app asks Windows for the high-performance card (the NVIDIA or AMD card next to an Intel one) every time it starts, on battery too. On a computer with one card this changes nothing. The start-up log, `main.log` in `%LOCALAPPDATA%\astrometrics\logs`, names the card the window got, on the line that starts with `GPU:`.
+
+GraXpert, which removes the sky's gradient from the preview picture, chooses its card on its own. On Windows it uses the graphics card through DirectML, Microsoft's interface for running AI models on any graphics card.
+
 ### Storage layout
 
-Astrometrics keeps each kind of file in its own place. The library folders follow your settings. The other folders follow the Linux standard for program files (the XDG Base Directory layout), so a backup tool can skip the disposable ones and a cache can be wiped in one step.
+Astrometrics keeps each kind of file in its own place. The library folders follow your settings. The other folders follow the Linux standard for program files (the XDG Base Directory layout), so a backup tool can skip the disposable ones and a cache can be wiped in one step. On Windows they are in `%LOCALAPPDATA%\astrometrics`, the folder Windows keeps for each user's program files on this computer. The databases and the settings file are in that folder itself, the disposable files are in `Cache` inside it, and the logs, including the launcher's `logs\run`, are in `logs`. The Electron app's browser profile goes to `Electron` in the same folder, not to the roaming profile (`%APPDATA%`), which Windows copies between computers.
 
 | Tier | What it holds | Example location | Setting |
 | --- | --- | --- | --- |
@@ -126,7 +141,9 @@ Astrometrics keeps each kind of file in its own place. The library folders follo
 
 The working library is on the local disk, so frames and stacks open at disk speed and work offline. Set `frames_mount_point` only when the library is on a drive that can be missing, such as a USB disk. Keep the databases on the local disk too. SQLite needs real file locking, and a network mount does not provide it reliably.
 
-**Backups.** Optional scripts keep two kinds of copy. One copies the library's frames to Google Drive with rclone, a command-line program that syncs files with cloud storage. The other saves snapshots of the databases to the local `backup/` folder only, to undo a change to the app that goes wrong; it never uploads them. The `build/linux/install_backup_timer.sh` script sets up the systemd user timers that run them. Each script, its limits and its options are described in `astrometricslib/scripts/README.md`.
+**Backups.** Optional scripts keep two kinds of copy. One copies the library's frames to Google Drive with rclone, a command-line program that syncs files with cloud storage. The other saves snapshots of the databases to the local `backup/` folder, to undo a change to the app that goes wrong. The `build/linux/install_backup_timer.sh` script sets up the systemd user timers that run them. Each script, its limits and its options are described in `astrometricslib/scripts/README.md`.
+
+**Database copies on a synced folder.** Set `backup_path` in `[Image Library]` to keep the database snapshots in a folder that a sync program copies off the computer, such as a Google Drive folder. The databases stay on the local disk. Each snapshot is made there and moved to `backup_path` only when it is complete, so the sync program never uploads a half-written copy. With `backup_path` set, the backend runs the backup every 4 hours while the app is open and once when it stops. This is the way to back up the databases on Windows, which has no systemd timer.
 
 **Cleanup.** `./build/linux/clean_caches.sh` deletes disposable files from `~/.cache/astrometrics`. Add `--dry-run` to list what it would remove first.
 
@@ -134,7 +151,7 @@ The working library is on the local disk, so frames and stacks open at disk spee
 
 To work on the app with your telescope off, open **Settings**, then **Observatory**, and set **Observatory source** to **Simulated**. The app then shows a temporary copy of your library and a fake telescope on this computer. New simulated frames download, analyze and review with the normal code. Your real library is only read: every change goes to a temporary folder in `~/.local/share/astrometrics-simulator`, which is deleted when you switch back to **Real**.
 
-Switching restarts the backend and waits until the fake telescope is up. A **SIMULATOR** chip stays in the top bar; **SIMULATOR FAILED** means it could not start, and the app then has no telescope at all (never your real one). It needs `fuse-overlayfs`, `indiserver`, the `indi_simulator_*` drivers and `rsync`, and does not run in the packaged app.
+Switching restarts the backend and waits until the fake telescope is up. A **SIMULATOR** chip stays in the top bar; **SIMULATOR FAILED** means it could not start, and the app then has no telescope at all (never your real one). It needs `fuse-overlayfs`, `indiserver`, the `indi_simulator_*` drivers and `rsync`, and does not run in the packaged app. It does not run on Windows either, where INDI is not available: the **Simulated** button is turned off, and its tooltip says why.
 
 ## Check that it works
 
@@ -159,6 +176,13 @@ Stop the app with `./astrometrics.sh stop`.
 3. Run `./build/linux/setup_venv.sh` again, then `npm install`.
 4. Start the app with `./astrometrics.sh start`.
 
+On Windows, in PowerShell:
+
+1. Close the app, or stop its services with `build\windows\run_astrometrics.ps1 -Stop`.
+2. Get the new code with `git pull`.
+3. Run `build\windows\setup_windows.ps1` again. It updates the Python and Node packages and rebuilds the UI MCP server. When the new code pins a newer Siril or GraXpert, it sets that version up. It never replaces a Siril or GraXpert you installed yourself.
+4. Start the app from its shortcut.
+
 The setup script never overwrites an existing configuration file. If a new version adds settings, compare your file with `astrometricslib/astrometrics.config.example.toml`.
 
 ## Uninstall
@@ -171,6 +195,16 @@ No uninstall script exists. To remove the app by hand:
 4. Optional: if you ran `build/linux/install_backup_timer.sh`, disable its systemd user units and delete them from `~/.config/systemd/user`. If you ran `build/linux/install_desktop_icon.sh`, delete the launcher it wrote to `~/.local/share/applications`.
 
 The system packages stay installed. Remove them with `apt` only if no other program needs them. Your frames are in the `frames_path` folder, which the steps above leave alone.
+
+On Windows:
+
+1. Close the app, then run `build\windows\run_astrometrics.ps1 -Stop`.
+2. Delete the `Astrometrics` shortcuts from the Desktop and the Start menu, and unpin it from the taskbar. Also delete the hidden `Electron.lnk` in `%APPDATA%\Microsoft\Windows\Start Menu\Programs`, which the app needs to show notifications.
+3. Delete the repository folder. This also removes `.venv-win` and `node_modules`.
+4. Optional: delete `%LOCALAPPDATA%\astrometrics`. It holds your databases and settings, the Siril and GraXpert that setup installed, the logs (`logs`), the scratch files (`Cache`) and the app's browser profile (`Electron`). Back up the database files first if you may want them again.
+5. Optional: delete `~\.config\astrometrics`, which holds the settings, and the link handler the app registered, with `reg delete HKCU\Software\Classes\astrometrics /f`.
+
+Your frames, and any database copies in `backup_path`, are in folders that the steps above leave alone.
 
 ## Troubleshooting
 

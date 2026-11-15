@@ -8,6 +8,7 @@ FWHM fields and the degradation flag on the stack's quality summary.
 """
 
 import logging
+import multiprocessing
 from typing import Any
 
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS
@@ -98,15 +99,20 @@ def _measure_sample_fwhms(paths: list[str], worker_count: int) -> list[float | N
         skipped.
     """
     if worker_count > 1 and len(paths) > 1:
-        import multiprocessing
         from concurrent.futures import ProcessPoolExecutor
         from concurrent.futures.process import BrokenProcessPool
 
         try:
-            # 'fork' like the photometry pool: 'spawn' re-imports the entry
-            # script, which fails for scripts run as `python script.py`.
+            # "spawn", never "fork": the backend runs many threads, and
+            # Python's documentation warns that forking a program with
+            # threads is unsafe (the child can inherit a lock that another
+            # thread held). The worker function is at module level and its
+            # argument is a path string, so it can be sent to a fresh
+            # process. A script that reaches this pool needs an
+            # ``if __name__ == "__main__":`` guard, because "spawn" imports
+            # the script again in each worker.
             with ProcessPoolExecutor(
-                max_workers=worker_count, mp_context=multiprocessing.get_context("fork")
+                max_workers=worker_count, mp_context=multiprocessing.get_context("spawn")
             ) as executor:
                 return list(executor.map(_measure_one_frame_fwhm, paths))
         except (BrokenProcessPool, OSError) as pool_error:

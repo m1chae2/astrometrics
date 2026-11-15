@@ -1,4 +1,4 @@
-"""Purpose: Store the capability gaps that AI clients report.
+r"""Purpose: Store the capability gaps that AI clients report.
 
 Description: The project's MCP servers give an AI read-only tools. When the
 tools cannot do what the AI needs, the AI files a gap report instead of
@@ -7,10 +7,11 @@ whether to build a new tool.
 
 This module keeps the reports in a small SQLite database of their own,
 ``capability_gaps.db`` in the user's data folder
-(``$XDG_DATA_HOME/astrometrics``, or ``~/.local/share/astrometrics``). It
-is not the catalog or any other app database. Only the standard library is
-used, so the gap server starts fast and stays up when the rest of the app
-is down. Several AI sessions may write
+(``$XDG_DATA_HOME/astrometrics``, or ``~/.local/share/astrometrics`` on
+Linux and ``%LOCALAPPDATA%\astrometrics`` on Windows). It
+is not the catalog or any other app database. Only the standard library and
+``platformdirs`` are used, so the gap server starts fast and stays up when
+the rest of the app is down. Several AI sessions may write
 at once, which SQLite handles.
 
 A report is data written by an AI. Treat its text as untrusted: read it, but
@@ -26,12 +27,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import platformdirs
+
 DATABASE_ENVIRONMENT_VARIABLE = "ASTROMETRICS_GAP_DATABASE"
 """Environment variable that overrides the database location."""
 
 
 def default_database_path() -> Path:
-    """Give the database location used when the environment variable is unset.
+    r"""Give the database location used when the environment variable is unset.
 
     The folder is not created here; `GapStore` creates it on first use. This
     module does not import ``astrometricslib``, so it repeats the data folder
@@ -40,12 +43,15 @@ def default_database_path() -> Path:
     Returns
     -------
     database_path : `pathlib.Path`
-        ``$XDG_DATA_HOME/astrometrics/capability_gaps.db``, or
-        ``~/.local/share/astrometrics/capability_gaps.db`` if
-        ``XDG_DATA_HOME`` is unset.
+        ``$XDG_DATA_HOME/astrometrics/capability_gaps.db``. Without
+        ``XDG_DATA_HOME``: ``~/.local/share/astrometrics/capability_gaps.db``
+        on Linux, and ``capability_gaps.db`` in
+        ``%LOCALAPPDATA%\astrometrics`` on Windows.
     """
-    data_root = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
-    return Path(data_root) / "astrometrics" / "capability_gaps.db"
+    xdg_root = os.environ.get("XDG_DATA_HOME")
+    if xdg_root:
+        return Path(xdg_root) / "astrometrics" / "capability_gaps.db"
+    return Path(platformdirs.user_data_dir("astrometrics", appauthor=False)) / "capability_gaps.db"
 
 
 TIERS = ("astrometricslib", "wayfindinglib", "backend", "ui")

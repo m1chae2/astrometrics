@@ -28,17 +28,12 @@ thread does not inherit a context variable.
 
 import contextlib
 import contextvars
-import logging
-import os
-import signal
 import subprocess  # ruff: ignore[suspicious-subprocess-import] -- stopping the run's own processes is the point
 import threading
-import time
 from collections.abc import Callable, Generator, Sequence
 
 from astrometricslib.foundation.errors import ProcessingError
-
-logger = logging.getLogger(__name__)
+from astrometricslib.foundation.system import stop_process_tree
 
 __all__ = [
     "RunAbandonedError",
@@ -141,31 +136,17 @@ def stop_process_group(process: subprocess.Popen) -> None:
     """Stop one process and everything it started, ignoring errors.
 
     Siril runs under flatpak or bwrap, so the real program is a descendant of
-    the process we started. The process was started as the leader of its own
-    group (``start_new_session=True``), so signalling the group reaches all of
-    them. Only that group is signalled: nothing is matched by name.
+    the process we started. `stop_process_tree` stops the whole tree: on Linux
+    through the process group (the process leads its own group, started with
+    ``start_new_session=True``), on Windows through ``taskkill``. Nothing is
+    matched by name.
 
     Parameters
     ----------
     process : `subprocess.Popen`
         The process to stop.
     """
-    if process.poll() is not None:
-        return
-    try:
-        process_group_id = os.getpgid(process.pid)
-    except OSError:
-        return
-    for signal_number in (signal.SIGTERM, signal.SIGKILL):
-        try:
-            os.killpg(process_group_id, signal_number)
-        except OSError as signal_error:
-            logger.debug("Signal %s to group %s failed: %s", signal_number, process_group_id, signal_error)
-            break
-        if signal_number == signal.SIGTERM:
-            time.sleep(STOP_GRACE_SECONDS)
-    with contextlib.suppress(OSError, subprocess.TimeoutExpired):
-        process.wait(timeout=REAP_TIMEOUT_SECONDS)
+    stop_process_tree(process, STOP_GRACE_SECONDS, REAP_TIMEOUT_SECONDS)
 
 
 _bound_abandonment: contextvars.ContextVar[RunAbandonment | None] = contextvars.ContextVar(

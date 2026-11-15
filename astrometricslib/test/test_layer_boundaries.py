@@ -107,7 +107,7 @@ def _find_raw_fits_access_sites() -> set[str]:
                 and node.func.value.id == "fits"
             )
             if calls_raw_fits_method:
-                files_with_access.add(str(module_path.relative_to(ASTROMETRICSLIB_ROOT)))
+                files_with_access.add(module_path.relative_to(ASTROMETRICSLIB_ROOT).as_posix())
                 break
 
     return files_with_access
@@ -193,7 +193,7 @@ def _find_wall_clock_sites() -> set[str]:
             owner = node.func.value
             owner_name = owner.id if isinstance(owner, ast.Name) else getattr(owner, "attr", None)
             if owner_name == "datetime":
-                files_with_clock.add(str(module_path.relative_to(ASTROMETRICSLIB_ROOT)))
+                files_with_clock.add(module_path.relative_to(ASTROMETRICSLIB_ROOT).as_posix())
                 break
 
     return files_with_clock
@@ -342,7 +342,7 @@ def _find_unseeded_random_sites() -> set[str]:
 
         tree = ast.parse(module_path.read_text(), filename=str(module_path))
         if any(_is_unseeded_random_call(node) for node in ast.walk(tree)):
-            files_with_random.add(str(module_path.relative_to(ASTROMETRICSLIB_ROOT)))
+            files_with_random.add(module_path.relative_to(ASTROMETRICSLIB_ROOT).as_posix())
 
     return files_with_random
 

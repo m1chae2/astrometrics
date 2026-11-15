@@ -45,7 +45,6 @@
     "@uiw/react-codemirror": "^4.25.12",
     "electron-is-dev": "^3.0.1",
     "electron-log": "^5.4.4",
-    "electron-squirrel-startup": "^1.0.1",
     "electron-updater": "^6.8.11",
     "events": "^3.3.0",
     "jsfitsio": "^3.1.0",
@@ -59,7 +58,6 @@
   "devDependencies": {
     "@electron-forge/cli": "^8.0.1",
     "@electron-forge/maker-deb": "^8.0.1",
-    "@electron-forge/maker-squirrel": "^8.0.1",
     "@electron-forge/maker-zip": "^8.0.1",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.65.0",

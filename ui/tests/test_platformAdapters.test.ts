@@ -4,6 +4,8 @@
  * blur dismissal, Linux Wayland decorators, and macOS menubar/dock behaviors.
  */
 
+import fs from 'fs';
+import path from 'path';
 import { describe, it, expect, vi } from 'vitest';
 import { BasePlatform } from '../../electron/platforms/base.js';
 import { WindowsPlatform } from '../../electron/platforms/windows.js';
@@ -25,22 +27,59 @@ describe('Electron Platform Adapters', () => {
   describe('WindowsPlatform', () => {
     const platform = new WindowsPlatform();
 
-    /** Verifies app identity configuration */
-    it('sets app.name and app.setAppUserModelId on Windows', () => {
+    /** Verifies app identity configuration and the local (not roaming) Electron folder */
+    it('sets app.name, app.setAppUserModelId and a local userData folder on Windows', () => {
+      vi.stubEnv('LOCALAPPDATA', 'C:/Users/u/AppData/Local');
       const mockApp = {
         name: '',
-        setAppUserModelId: vi.fn()
+        setAppUserModelId: vi.fn(),
+        setPath: vi.fn(),
+        setToastActivatorCLSID: vi.fn(),
+        getPath: vi.fn(() => 'C:/Users/u')
       } as any;
 
       platform.configureIdentity(mockApp);
       expect(mockApp.name).toBe('astrometrics');
       expect(mockApp.setAppUserModelId).toHaveBeenCalledWith('astrometrics');
+      // The fixed notification activator ID the Start menu shortcut also carries.
+      expect(mockApp.setToastActivatorCLSID).toHaveBeenCalledWith('{2CEFF8B0-F01F-4064-B293-17520A983AE2}');
+      expect(mockApp.setPath).toHaveBeenCalledWith(
+        'userData', path.join('C:/Users/u/AppData/Local', 'Astrometrics', 'Electron')
+      );
+      vi.unstubAllEnvs();
+    });
+
+    /** Verifies Electron's log sits next to the backend's logs in the state folder */
+    it('writes the Electron log into the state folder on Windows', () => {
+      vi.stubEnv('XDG_STATE_HOME', '');
+      vi.stubEnv('LOCALAPPDATA', 'C:/Users/u/AppData/Local');
+      const mockLog = { transports: { file: {} as any }, hooks: [] } as any;
+      const mockApp = { getPath: vi.fn(() => 'C:/Users/u') } as any;
+
+      const logPath = platform.configureLogging(mockApp, mockLog);
+      expect(logPath).toBe(path.join('C:/Users/u/AppData/Local', 'Astrometrics', 'logs', 'main.log'));
+      expect(mockLog.transports.file.resolvePathFn()).toBe(logPath);
+      vi.unstubAllEnvs();
+    });
+
+    /** Verifies the advice names the Windows launcher and the Windows log folder */
+    it('gives Windows advice for a backend that is not running', () => {
+      const advice = platform.backendStartAdvice();
+      expect(advice).toContain('run_astrometrics.ps1');
+      expect(advice).toContain('%LOCALAPPDATA%\\Astrometrics');
+      expect(advice).not.toContain('State');
+    });
+
+    /** Verifies a tray click must open the menu by code on Windows */
+    it('needs a tray click to open the menu', () => {
+      expect(platform.needsTrayClickToOpenMenu()).toBe(true);
     });
 
     /** Verifies Windows user tasks (Jump List) registration */
     it('registers user tasks for Planetarium, Observatory, and Image Processing', () => {
       const mockApp = {
-        setUserTasks: vi.fn()
+        setUserTasks: vi.fn(),
+        getAppPath: vi.fn(() => 'C:/src/astrometrics')
       } as any;
 
       platform.setupUserTasks(mockApp);
@@ -50,6 +89,35 @@ describe('Electron Platform Adapters', () => {
       expect(tasks[0].title).toBe('Open Planetarium');
       expect(tasks[1].title).toBe('Observatory Manager');
       expect(tasks[2].title).toBe('Image Processing');
+      // Each task runs the launcher with its workspace, not a bare electron.exe.
+      const launcher = path.join('C:/src/astrometrics', 'build', 'windows', 'run_astrometrics.ps1');
+      expect(tasks[0].program).toMatch(/powershell\.exe$/);
+      expect(tasks[0].arguments).toContain(`-File "${launcher}"`);
+      expect(tasks[0].arguments).toContain('-Mode "Planetarium"');
+      expect(tasks[2].arguments).toContain('-Mode "Image Processing"');
+    });
+
+    /** Verifies the app asks Windows for the high-performance graphics card */
+    it('asks for the high-performance graphics card on Windows', () => {
+      const mockApp = { commandLine: { appendSwitch: vi.fn() } } as any;
+
+      platform.initCommandLine(mockApp);
+      expect(mockApp.commandLine.appendSwitch).toHaveBeenCalledWith('force_high_performance_gpu');
+    });
+
+    /** Verifies astrometrics:// links start the launcher, with the link as -Url */
+    it('registers the launcher as the astrometrics:// handler on Windows', () => {
+      const mockApp = {
+        setAsDefaultProtocolClient: vi.fn(),
+        getAppPath: vi.fn(() => 'C:/src/astrometrics')
+      } as any;
+
+      platform.registerProtocolClient(mockApp);
+      const [scheme, program, args] = mockApp.setAsDefaultProtocolClient.mock.calls[0];
+      expect(scheme).toBe('astrometrics');
+      expect(program).toMatch(/powershell\.exe$/);
+      expect(args).toContain(path.join('C:/src/astrometrics', 'build', 'windows', 'run_astrometrics.ps1'));
+      expect(args[args.length - 1]).toBe('-Url');
     });
 
     /** Verifies notification option adapting for Windows Toast */
@@ -80,6 +148,32 @@ describe('Electron Platform Adapters', () => {
         symbolColor: '#e0e0e0',
         height: 48
       });
+    });
+
+    /** Verifies the dev backend uses the Windows virtual environment that setup_windows.ps1 makes */
+    it('starts the dev backend from .venv-win before .venv', () => {
+      const exists = vi.spyOn(fs, 'existsSync').mockImplementation(() => true);
+      try {
+        const resolved = platform.resolveBackendExecutable('C:\\app', false);
+        expect(resolved.command).toBe(path.join('C:\\app', '.venv-win', 'Scripts', 'python.exe'));
+        expect(resolved.args).toEqual(['-m', 'backend.main_backend']);
+        expect(resolved.isBinary).toBe(false);
+      } finally {
+        exists.mockRestore();
+      }
+    });
+
+    /** Verifies a checkout with only a plain .venv still finds its Python */
+    it('falls back to .venv when .venv-win is missing', () => {
+      const exists = vi.spyOn(fs, 'existsSync').mockImplementation(
+        candidate => !String(candidate).includes('.venv-win')
+      );
+      try {
+        const resolved = platform.resolveBackendExecutable('C:\\app', false);
+        expect(resolved.command).toBe(path.join('C:\\app', '.venv', 'Scripts', 'python.exe'));
+      } finally {
+        exists.mockRestore();
+      }
     });
   });
 
@@ -214,6 +308,15 @@ describe('Electron Platform Adapters', () => {
       expect(resumeResult).toBe(true);
       expect(mockExec).toHaveBeenCalledWith('pkill -CONT -f siril-cli || true', expect.any(Function));
       expect(mockExec).toHaveBeenCalledWith('pkill -CONT -f solve-field || true', expect.any(Function));
+    });
+  });
+
+  describe('Linux tray and advice', () => {
+    /** Verifies Linux shows the tray menu by itself and gives the Linux start advice */
+    it('needs no tray click code and points to run_backend.sh', () => {
+      const linux = new LinuxPlatform();
+      expect(linux.needsTrayClickToOpenMenu()).toBe(false);
+      expect(linux.backendStartAdvice()).toContain('build/linux/run_backend.sh start');
     });
   });
 

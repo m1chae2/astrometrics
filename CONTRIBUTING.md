@@ -29,6 +29,33 @@ Use the `.venv` interpreter for everything.
 
 Every file starts with a description block, and every class, function, method and test has a docstring. For changes under `ui/`, also run `npm run type-check` and `npm test`.
 
+### Tests on Windows
+
+Ubuntu is the main system, and every test runs there. The Python tests also run on Windows, in the `windows CI` workflow (`.github/workflows/windows.yml`) and on a Windows checkout set up with `build\windows\setup_windows.ps1`, which makes `.venv-win`:
+
+```powershell
+.venv-win\Scripts\python -m pytest -n auto -o addopts="" -m "not trio"
+```
+
+Windows leaves out the tests of parts that exist only on Linux. The root `conftest.py` holds the list, `LINUX_ONLY_TEST_PATHS`, with the reason for each folder or file: the simulator, the TPM harness and INDI, which Windows does not have, and Siril's Linux pipes and process cleanup, whose Windows versions have their own tests. A run on Windows names each left-out path at the top of its output.
+
+A single test of Linux-only behavior carries the `linux_only` marker with its reason, and Windows skips it:
+
+```python
+@pytest.mark.linux_only("the test uses Linux mount points such as /mnt/nas")
+def test_a_mounted_drive_passes(...):
+```
+
+Linux runs every test, marked or not. Before you mark a test, check whether it can run on both systems. Most tests that fail on Windows assume something about Linux:
+
+- **A path written with `/`.** Compare with `Path(...).as_posix()`, or build the expected path with `os.path.join`.
+- **A symbolic link.** Windows makes these only in Developer Mode. Stage a file with `file_staging.stage_file` (`astrometricslib/_internal/drivers/file_staging.py`), as the app does: a symbolic link on Linux, a hard link on Windows.
+- **A fake program written as a script.** Windows does not run a script by its `#!` line. Put a `.cmd` file in front of it that starts the script with `sys.executable`.
+- **`os.kill(pid, 0)` to see whether a process runs.** On Windows this ends the process. Use `psutil.pid_exists` there.
+- **A Windows path in TOML.** Put it in single quotes (`path = 'C:\...'`). In double quotes, `\U` is read as an escape.
+
+The library keeps the two systems alike. It uses libraries that already handle both (`platformdirs` for folders, `filelock` for locks, `psutil` for processes), and it tries an action and falls back rather than checking the system. The few rules that really differ have one module per system, chosen once at import: `astrometricslib/foundation/system.py` (with `_system_posix.py` and `_system_windows.py`) and the Siril pipes in `siril_interface/pipes.py`. Code outside those modules does not check `sys.platform`. Test each module on its own system: skip a Windows-only test off Windows instead of patching `sys.platform`.
+
 Frontend unit tests never reach a backend: `ui/setupTests.ts` mocks `fetch` and refuses `fetch`, `XMLHttpRequest` and `WebSocket` calls to the default backend port (5000). A few files need a real backend and carry the marker `@requires-test-backend`. They are skipped unless you set `ASTROMETRICS_LIVE_BACKEND_TESTS=1`. With it set, `ui/globalSetup.ts` starts a throwaway backend of its own (its own library, a random port, the INDI simulator), and the marked tests use only that one. Never point these tests at a backend that is connected to real hardware or the real library, and keep device commands, policy changes, library writes and ingestion starts out of them.
 
 ## UI controls

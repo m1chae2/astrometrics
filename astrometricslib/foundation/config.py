@@ -476,8 +476,9 @@ class AppConfiguration:
         """Populate the config with sensible defaults if it's empty."""
         defaults = {
             "Image Library": {
-                # Empty means the user's data folder,
-                # ~/.local/share/astrometrics.
+                # Empty means the user's data folder:
+                # ~/.local/share/astrometrics on Linux,
+                # %LOCALAPPDATA%\astrometrics on Windows.
                 "path": "",
             },
             "Observatory.Telescope": {
@@ -1535,6 +1536,30 @@ class AppConfiguration:
             return self.get_frames_path()
         return resolve_library_setting(path_str, self.get_project_root())
 
+    def get_backup_path(self) -> Path | None:
+        """Return the folder that receives copies of the library databases.
+
+        Reads the optional ``"backup_path"`` entry from the ``[Image Library]``
+        section. It is meant for a folder that a sync program copies off the
+        computer, such as a Google Drive folder. The databases themselves stay
+        on the local disk, because SQLite cannot safely be used on a synced or
+        network drive; each copy is made locally and then moved here.
+
+        Returns
+        -------
+        backup_path : `Path` or `None`
+            Absolute path of the folder, or `None` when the entry is omitted
+            or empty (copies then stay in the local backup folder only). The
+            folder is not created here.
+        """
+        try:
+            path_str = self.app_config.get("Image Library", "backup_path")
+        except configparser.NoSectionError, configparser.NoOptionError, KeyError:
+            path_str = None
+        if not path_str:
+            return None
+        return resolve_library_setting(path_str, self.get_project_root())
+
     def get_library_file_path(self, filename: str) -> Path:
         """Return the absolute path to a file within `library`.
 
@@ -1558,11 +1583,12 @@ class AppConfiguration:
         return str(self.get_library_file_path("astrometrics_log.db"))
 
     def get_data_path(self) -> Path:
-        """Return the user's data folder, for files that must be kept.
+        r"""Return the user's data folder, for files that must be kept.
 
-        This is ``$XDG_DATA_HOME/astrometrics``, or
-        ``~/.local/share/astrometrics`` if ``XDG_DATA_HOME`` is unset. The
-        databases live here unless the configuration names another place.
+        This is ``$XDG_DATA_HOME/astrometrics``. If ``XDG_DATA_HOME`` is
+        unset, it is ``~/.local/share/astrometrics`` on Linux and
+        ``%LOCALAPPDATA%\astrometrics`` on Windows. The databases live
+        here unless the configuration names another place.
 
         Returns
         -------
@@ -1572,11 +1598,12 @@ class AppConfiguration:
         return Path(data_directory()).absolute()
 
     def get_logs_path(self) -> Path:
-        """Return the absolute path to the logs directory.
+        r"""Return the absolute path to the logs directory.
 
         The logs live in the user's state folder, not in the project folder:
-        ``$XDG_STATE_HOME/astrometrics/logs``, or
-        ``~/.local/state/astrometrics/logs`` if ``XDG_STATE_HOME`` is unset.
+        ``$XDG_STATE_HOME/astrometrics/logs``. If ``XDG_STATE_HOME`` is unset,
+        ``~/.local/state/astrometrics/logs`` on Linux and
+        ``%LOCALAPPDATA%\astrometrics\logs`` on Windows.
 
         Returns
         -------

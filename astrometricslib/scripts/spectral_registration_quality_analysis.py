@@ -29,7 +29,6 @@ import itertools
 import json
 import logging
 import os
-import shlex
 import shutil
 import subprocess
 import sys
@@ -46,6 +45,7 @@ from astrometricslib._internal.errors import DATA_ERRORS
 from astrometricslib._internal.processing_scripts import detect_point_sources
 from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.foundation.paths import siril_work_directory
+from astrometricslib.foundation.system import split_program_command
 from astrometricslib.pipelines.spectroscopy.utilities.registration_quality import (
     MIN_MATCHED_STAR_PAIRS,
     ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA,
@@ -124,7 +124,7 @@ def run_siril_script(work_dir: str, commands: list[str], timeout: int = 600) -> 
         for cmd in commands:
             script_file.write(cmd + "\n")
 
-    parts = shlex.split(siril_executable)
+    parts = split_program_command(siril_executable)
     if "flatpak" in parts[0] and "run" in parts:
         idx = parts.index("run")
         parts.insert(idx + 1, "--filesystem=host")

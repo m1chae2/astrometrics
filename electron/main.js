@@ -3,7 +3,6 @@
  * Orchestrates application lifecycle, window management, and backend services.
  */
 import { app, ipcMain, protocol, BrowserWindow, Notification, Tray, Menu, nativeImage, session, nativeTheme, screen, dialog, powerMonitor, shell } from 'electron';
-import squirrelStartup from 'electron-squirrel-startup';
 import path from 'path';
 import fs from 'fs';
 import process from 'process';
@@ -28,11 +27,6 @@ import { harnessWebPreferences, harnessWindowOptions, showMainWindow } from './h
 const platform = getPlatform();
 const pythonTerminalManager = new PythonTerminalManager({ platform });
 
-// Handle squirrel startup for Windows
-if (squirrelStartup) {
-  app.quit();
-}
-
 // Early platform command-line arguments (e.g. Wayland window decorations)
 platform.initCommandLine(app);
 
@@ -52,8 +46,9 @@ platform.configureIdentity(app);
 function extractFilePath(args) {
   if (!Array.isArray(args)) return null;
   for (const arg of args) {
-    if (!arg || arg.startsWith('-') || arg === '.') continue;
-    if (arg.endsWith('electron') || arg.endsWith('electron.js') || arg.endsWith('main.js')) continue;
+    if (!arg || arg.startsWith('-') || arg === '.' || arg.startsWith('astrometrics://')) continue;
+    // The program itself: `electron` on Linux, `electron.exe` on Windows.
+    if (arg.endsWith('electron') || arg.endsWith('electron.exe') || arg.endsWith('electron.js') || arg.endsWith('main.js')) continue;
     return path.resolve(arg);
   }
   return null;
@@ -134,13 +129,7 @@ let queuedModeToOpen = extractModeArg(process.argv);
 let queuedUrlToOpen = extractUrlArg(process.argv);
 
 // Register Custom URL Protocol (astrometrics://)
-if (process.defaultApp) {
-  if (process.argv.length >= 2) {
-    app.setAsDefaultProtocolClient('astrometrics', process.execPath, [path.resolve(process.argv[1])]);
-  }
-} else {
-  app.setAsDefaultProtocolClient('astrometrics');
-}
+platform.registerProtocolClient(app);
 
 // Configure OS user tasks / Jump Lists / Dock
 platform.setupUserTasks(app);
@@ -319,9 +308,7 @@ async function openMainWindowWhenBackendIsWarm() {
       type: 'error',
       title: 'Astrometrics backend not running',
       message: 'The Astrometrics backend is not running.',
-      detail:
-        `Nothing answered on ${backendBaseUrl()}. Start it with ` +
-        'build/linux/run_backend.sh start (check ~/.local/state/astrometrics/logs/run/backend.log if it stops), then retry.',
+      detail: `Nothing answered on ${backendBaseUrl()}. ${platform.backendStartAdvice()}`,
       buttons: ['Retry', 'Quit'],
       defaultId: 0,
       cancelId: 1,
@@ -909,7 +896,7 @@ app.on('ready', () => {
       getMainWindow: () => mainWindow,
       quit: () => app.quit(),
       notify: (title, body) => new Notification({ title, body }).show(),
-      platform: process.platform,
+      needsClickToOpenMenu: platform.needsTrayClickToOpenMenu(),
       log,
     });
   } catch (err) {

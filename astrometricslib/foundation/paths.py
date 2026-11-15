@@ -1,10 +1,17 @@
-"""Purpose: Name the folders for working files, and handle mounted-drive paths.
+r"""Purpose: Name the folders for working files and handle mounted drives.
 
 Description: Two groups of paths live here.
 
-* Where temporary working files go. On many Linux systems ``/tmp`` is kept in
-  RAM, so large scratch files there use up memory. These functions point to
-  folders under ``~/.cache`` on the local disk instead.
+* Where this program keeps its own files on the local disk: working files
+  (cache), durable data (databases, the observatory library), run state
+  (logs) and the settings file. The ``platformdirs`` package chooses each
+  folder for the system the program runs on. On Linux they follow the XDG
+  convention (``~/.cache``, ``~/.local/share``, ``~/.local/state``,
+  ``~/.config``); on many Linux systems ``/tmp`` is kept in RAM, so large
+  scratch files there would use up memory. On Windows the data, state and
+  settings folders are ``%LOCALAPPDATA%\astrometrics``, the per-user,
+  per-computer folder Windows provides for this, and the cache is its
+  ``Cache`` subfolder. An ``XDG_*`` variable, when set, wins on both systems.
 * The two ways Linux spells the path of a mounted drive. Desktop Linux mounts
   a drive under ``/media/<user>/`` on some systems and ``/run/media/<user>/``
   on others. A configuration file written on one system and read on the other
@@ -18,30 +25,51 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+import platformdirs
 
-def _cache_root() -> str:
-    """Give the folder under which this program keeps its working files.
+APPLICATION_NAME = "astrometrics"
+"""The folder name for this program inside each user folder."""
+
+
+def _user_folder(xdg_variable: str, system_folder: str) -> str:
+    """Give one of this program's own folders, without creating it.
+
+    Parameters
+    ----------
+    xdg_variable : `str`
+        The XDG variable that overrides the folder, such as
+        ``"XDG_CACHE_HOME"``.
+    system_folder : `str`
+        The folder ``platformdirs`` gives for this system when the variable
+        is not set.
 
     Returns
     -------
-    cache_root : `str`
-        ``$XDG_CACHE_HOME`` if it is set, otherwise ``~/.cache``.
+    folder : `str`
+        ``$<xdg_variable>/astrometrics`` when the variable is set, otherwise
+        `system_folder`.
     """
-    return os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    xdg_root = os.environ.get(xdg_variable)
+    if xdg_root:
+        return os.path.join(xdg_root, APPLICATION_NAME)
+    return system_folder
 
 
 def scratch_directory() -> str:
-    """Give the folder for Python's temporary working files, creating it.
+    r"""Give the folder for Python's temporary working files, creating it.
 
-    This is ``~/.cache/astrometrics`` on the local disk. It is used instead of
-    the system temporary folder, which is often held in RAM.
+    This is ``~/.cache/astrometrics`` on Linux and
+    ``%LOCALAPPDATA%\astrometrics\Cache`` on Windows, on the local disk. It is
+    used instead of the system temporary folder, which is often held in RAM.
 
     Returns
     -------
     scratch_path : `str`
         The absolute path of the folder, which exists when this returns.
     """
-    scratch_path = os.path.join(_cache_root(), "astrometrics")
+    scratch_path = _user_folder(
+        "XDG_CACHE_HOME", platformdirs.user_cache_dir(APPLICATION_NAME, appauthor=False)
+    )
     os.makedirs(scratch_path, exist_ok=True)
     return scratch_path
 
@@ -64,29 +92,41 @@ def siril_work_directory() -> str:
     return work_path
 
 
-def data_directory() -> str:
-    """Give the folder for this program's durable local state, creating it.
-
-    This is ``~/.local/share/astrometrics``. Unlike the cache folder, nothing
-    here may be deleted to free space.
+def default_data_path() -> str:
+    r"""Give the folder for this program's durable data, without creating it.
 
     Returns
     -------
     data_path : `str`
-        ``$XDG_DATA_HOME/astrometrics`` if ``XDG_DATA_HOME`` is set,
-        otherwise ``~/.local/share/astrometrics``. The folder exists when
-        this returns.
+        ``$XDG_DATA_HOME/astrometrics`` if ``XDG_DATA_HOME`` is set.
+        Otherwise ``%LOCALAPPDATA%\astrometrics`` on Windows and
+        ``~/.local/share/astrometrics`` on Linux.
     """
-    data_root = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
-    data_path = os.path.join(data_root, "astrometrics")
+    return _user_folder("XDG_DATA_HOME", platformdirs.user_data_dir(APPLICATION_NAME, appauthor=False))
+
+
+def data_directory() -> str:
+    r"""Give the folder for this program's durable local state, creating it.
+
+    This is ``~/.local/share/astrometrics`` on Linux and
+    ``%LOCALAPPDATA%\astrometrics`` on Windows. Unlike the cache folder,
+    nothing here may be deleted to free space.
+
+    Returns
+    -------
+    data_path : `str`
+        The folder `default_data_path` names. It exists when this returns.
+    """
+    data_path = default_data_path()
     os.makedirs(data_path, exist_ok=True)
     return data_path
 
 
 def config_directory() -> str:
-    """Give the folder for this program's settings file, without creating it.
+    r"""Give the folder for this program's settings file, without creating it.
 
-    This is ``~/.config/astrometrics``. It holds
+    This is ``~/.config/astrometrics`` on Linux and
+    ``%LOCALAPPDATA%\astrometrics`` on Windows. It holds
     ``astrometrics.config.toml``. The folder is not created here, so that
     only saving the settings creates it.
 
@@ -94,28 +134,29 @@ def config_directory() -> str:
     -------
     config_path : `str`
         ``$XDG_CONFIG_HOME/astrometrics`` if ``XDG_CONFIG_HOME`` is set,
-        otherwise ``~/.config/astrometrics``.
+        otherwise the folder above.
     """
-    config_root = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
-    return os.path.join(config_root, "astrometrics")
+    return _user_folder("XDG_CONFIG_HOME", platformdirs.user_config_dir(APPLICATION_NAME, appauthor=False))
 
 
 def state_directory() -> str:
-    """Give the folder for this program's run logs and state, creating it.
+    r"""Give the folder for this program's run logs and state, creating it.
 
-    This is ``~/.local/state/astrometrics``. It holds records of what the
-    program did, such as log files. They are worth keeping for a while but
-    can be rebuilt by running the program again.
+    This is ``~/.local/state/astrometrics`` on Linux and
+    ``%LOCALAPPDATA%\astrometrics`` on Windows (the same folder as the data
+    folder there, so the log folder is ``logs`` inside it). It holds records
+    of what the program did, such as log files. They are worth keeping for a
+    while but can be rebuilt by running the program again.
 
     Returns
     -------
     state_path : `str`
         ``$XDG_STATE_HOME/astrometrics`` if ``XDG_STATE_HOME`` is set,
-        otherwise ``~/.local/state/astrometrics``. The folder exists when
-        this returns.
+        otherwise the folder above. It exists when this returns.
     """
-    state_root = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
-    state_path = os.path.join(state_root, "astrometrics")
+    state_path = _user_folder(
+        "XDG_STATE_HOME", platformdirs.user_state_dir(APPLICATION_NAME, appauthor=False)
+    )
     os.makedirs(state_path, exist_ok=True)
     return state_path
 
@@ -331,7 +372,8 @@ def library_folders(
         The settings file.
     default_data_home : `str` or `os.PathLike`, optional
         The folder whose ``astrometrics`` subfolder holds the libraries when
-        the file does not name them. Default: ``~/.local/share``.
+        the file does not name them. Default: the data folder itself
+        (`default_data_path`).
 
     Returns
     -------
@@ -339,13 +381,15 @@ def library_folders(
         The folders. A missing or damaged settings file gives the defaults.
     """
     path = Path(config_file)
-    data_home = Path(default_data_home) if default_data_home is not None else Path.home() / ".local" / "share"
     try:
         settings = tomllib.loads(path.read_text(encoding="utf-8"))
     except OSError, ValueError:
         settings = {}
     root = Path(__file__).resolve().parents[2]
-    default_library = data_home / "astrometrics"
+    if default_data_home is not None:
+        default_library = Path(default_data_home) / "astrometrics"
+    else:
+        default_library = Path(default_data_path())
 
     text = _setting_text(settings, "Image Library", "path")
     library = resolve_library_setting(text, root, search_package=True) if text else default_library

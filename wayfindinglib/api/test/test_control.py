@@ -53,6 +53,8 @@ def utc_host_timezone() -> Iterator[None]:
     machine whose local zone happens to match the fixture data's author,
     not in CI or for a contributor elsewhere.
     """
+    if not hasattr(time, "tzset"):
+        pytest.skip("Windows cannot change the time zone of a running program (no time.tzset)")
     original_tz = os.environ.get("TZ")
     os.environ["TZ"] = "UTC"
     time.tzset()

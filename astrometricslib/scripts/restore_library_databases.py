@@ -71,7 +71,7 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         "--backup-root",
         type=Path,
         default=None,
-        help="Folder that holds the snapshots. Default: ~/.cache/astrometrics/backup.",
+        help="Folder that holds the snapshots. Default: backup_path in [Image Library], else the local one.",
     )
     return parser
 
@@ -91,7 +91,12 @@ def main(argv: list[str] | None = None) -> int:
     """
     parser = _build_argument_parser()
     arguments = parser.parse_args(argv)
-    backup_root = arguments.backup_root or Path(backup_directory())
+    backup_root = arguments.backup_root
+    if backup_root is None:
+        # Where the backup script puts the copies: backup_path, else local.
+        from astrometricslib.foundation.config import get_configuration
+
+        backup_root = get_configuration().get_backup_path() or Path(backup_directory())
 
     if arguments.list:
         names = (

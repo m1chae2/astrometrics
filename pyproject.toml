@@ -70,6 +70,8 @@ dependencies = [
     "uvicorn",
     "websockets",
     "psutil",
+    "platformdirs", # the user's data, cache and state folders on Linux and Windows
+    "filelock", # one file lock for Linux (flock) and Windows (msvcrt)
     "pandas",
     "prov", # W3C PROV-XML export/validation for ProvenanceStore.export_target_lineage_as_prov_xml
     "lxml", # validates exported PROV-XML against the vendored W3C schema in tests
@@ -304,6 +306,9 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "backend/services/infrastructure/system_status_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
 "backend/services/infrastructure/handoff_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "backend/services/infrastructure/phone_share.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"backend/services/infrastructure/library_backup_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"] # runs the library backup script with this interpreter
+"astrometricslib/foundation/_system_windows.py" = ["subprocess-without-shell-equals-true", "start-process-with-partial-path"] # runs taskkill on Windows to stop our own processes
+"astrometricslib/_internal/drivers/program_setup.py" = ["subprocess-without-shell-equals-true", "start-process-with-partial-path"] # runs msiexec to unpack a checked download
 "wayfindinglib/drivers/stellarmate_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "wayfindinglib/drivers/ssh_port_forward.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/_internal/drivers/test/test_target_records.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]

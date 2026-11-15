@@ -161,22 +161,12 @@ export default {
         }
       }
     },
-    {
-      name: '@electron-forge/maker-squirrel',
-      config: {
-        name: 'astrometrics',
-        authors: 'Astrometrics Team',
-        exe: 'astrometrics.exe',
-        setupExe: 'AstrometricsSetup.exe',
-        setupIcon: path.join(__dirname, 'assets', 'orbit.ico'),
-        iconUrl: 'https://raw.githubusercontent.com/m1chae2/astrometrics/main/assets/orbit.ico',
-        loadingGif: path.join(__dirname, 'assets', 'loading.gif'),
-        description: 'A clean modern looking visualization app for astrophotography images and spectroscopy'
-      }
-    },
+    // No Windows installer: Windows runs from the source folder (build/windows/setup_windows.ps1).
+    // A Squirrel installer would also own %LOCALAPPDATA%\Astrometrics, the folder that holds the
+    // app's data, and its uninstaller would delete that folder.
     {
       name: '@electron-forge/maker-zip',
-      platforms: ['darwin', 'win32']
+      platforms: ['darwin']
     }
   ],
 

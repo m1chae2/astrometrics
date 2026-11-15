@@ -41,6 +41,7 @@ def test_no_check_when_no_mount_point_is_set() -> None:
     require_mounted_storage("/anywhere/at/all", _Settings(None))
 
 
+@pytest.mark.linux_only("the test uses Linux mount points such as /mnt/nas")
 def test_a_mounted_drive_passes(monkeypatch: pytest.MonkeyPatch) -> None:
     """A destination below a mounted mount point is allowed."""
     _pretend_mounted(monkeypatch, {"/mnt/nas"})
@@ -73,12 +74,14 @@ def test_a_path_outside_the_mount_point_is_not_checked(monkeypatch: pytest.Monke
     require_mounted_storage("/home/someone/library/frames", _Settings("/mnt/nas"))
 
 
+@pytest.mark.linux_only("the test uses Linux mount points such as /mnt/nas")
 def test_the_other_media_spelling_of_a_mounted_drive_passes(monkeypatch: pytest.MonkeyPatch) -> None:
     """A drive mounted under /run/media satisfies a /media mount point."""
     _pretend_mounted(monkeypatch, {"/run/media/michael/OS"})
     require_mounted_storage("/media/michael/OS/Library/lights", _Settings("/media/michael/OS"))
 
 
+@pytest.mark.linux_only("the test uses Linux mount points such as /mnt/nas")
 def test_the_other_media_spelling_of_the_destination_is_still_checked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -103,6 +106,7 @@ def _config_with_mount_point(tmp_path: Path, mount_point: str | None) -> AppConf
     return config
 
 
+@pytest.mark.linux_only("the test uses Linux mount points such as /mnt/nas")
 def test_the_setting_is_read_from_the_image_library_section(tmp_path: Path) -> None:
     """The configured folder comes back as an absolute path."""
     config = _config_with_mount_point(tmp_path, "/mnt/nas")

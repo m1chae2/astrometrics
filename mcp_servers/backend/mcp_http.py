@@ -62,7 +62,10 @@ async def request_backend(
             )
             resp.raise_for_status()
             return resp.json()
-        except httpx.ConnectError as exc:
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            # Linux refuses a connection to a port nobody listens on at once
+            # (ConnectError); Windows tries again for a few seconds and then
+            # gives up (ConnectTimeout). Both mean the backend is not there.
             raise ExternalServiceError(
                 f"Could not connect to the backend at {API_BASE}.", details={"endpoint": endpoint}
             ) from exc

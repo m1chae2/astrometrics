@@ -113,10 +113,12 @@ def _source_files() -> list[Path]:
     return sorted(files)
 
 
-@pytest.mark.parametrize("path", _source_files(), ids=lambda path: str(path.relative_to(REPOSITORY_ROOT)))
+@pytest.mark.parametrize(
+    "path", _source_files(), ids=lambda path: path.relative_to(REPOSITORY_ROOT).as_posix()
+)
 def test_only_entry_points_configure_logging(path: Path) -> None:
     """Fail when a module outside the allowed files configures logging."""
-    relative = str(path.relative_to(REPOSITORY_ROOT))
+    relative = path.relative_to(REPOSITORY_ROOT).as_posix()
     calls = _configuring_calls(path)
     if relative in ALLOWED_FILES:
         return

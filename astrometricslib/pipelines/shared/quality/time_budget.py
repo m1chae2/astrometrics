@@ -72,9 +72,12 @@ class Stopwatch:
         Returns
         -------
         expired : `bool`
-            `True` once the elapsed time exceeds the budget.
+            `True` once the elapsed time reaches the budget, so a budget of
+            zero is used up from the start. ``>=`` rather than ``>`` matters
+            on Windows, where the thread's CPU clock moves in steps of about
+            15.6 ms: a short first step there reads exactly 0 s.
         """
-        return self.elapsed() > self.budget_seconds
+        return self.elapsed() >= self.budget_seconds
 
     def reason(self) -> str:
         """Give the sentence stored when a step is skipped for lack of time.

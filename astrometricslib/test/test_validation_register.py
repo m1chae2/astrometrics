@@ -69,7 +69,10 @@ SUPPORTING_RELATIONS = ("derived from", "confirmed by")
 # The words of validation/index.md Section 2.2. A table cell holds the bare
 # words; a setting line holds "Role: <words>." and so on after its relation.
 ROLE_WORDS = r"(?:automatic \((?:sets data aside|gives a verdict|limits hardware|shapes results)\)|advisory)"
-SOURCE_WORDS = r"(?:computed each run|from equipment settings|fixed)(?: with a fixed fallback)?"
+SOURCE_WORDS = (
+    r"(?:computed each run|from configuration|from equipment settings|from tuning results|fixed in code)"
+    r"(?: with a fallback in code)?"
+)
 EQUIPMENT_ITEM = r"(?:mount|telescope|camera|filter or grating)"
 EQUIPMENT_WORDS = rf"(?:none|{EQUIPMENT_ITEM}(?:, {EQUIPMENT_ITEM})*)"
 MARK_WORDS = {"Role": ROLE_WORDS, "Source": SOURCE_WORDS, "Equipment": EQUIPMENT_WORDS}
@@ -366,7 +369,7 @@ def test_mark_check_accepts_the_allowed_words_and_refuses_others() -> None:
     good = (
         "  - code constant `MAXIMUM_FLAT_NOISE_FRACTION` = 0.005 in `flat_calibration.py`. "
         "Relation: derived from this entry. Role: automatic (gives a verdict). "
-        "Source: fixed. Equipment: camera, telescope."
+        "Source: fixed in code. Equipment: camera, telescope."
     )
     assert _mark_problems(good) == []
     assert _mark_problems("  - `X` in `a.py`. Relation: confirmed by this entry.") == []
@@ -376,7 +379,8 @@ def test_mark_check_accepts_the_allowed_words_and_refuses_others() -> None:
     assert _mark_problems(good.replace(" Equipment: camera, telescope.", "")) == [
         "Equipment missing or not an allowed word"
     ]
-    assert _mark_problems(good.replace("Source: fixed.", "Source: fixed with a fixed fallback.")) == []
+    configured = good.replace("Source: fixed in code.", "Source: from configuration with a fallback in code.")
+    assert _mark_problems(configured) == []
     assert re.fullmatch(EQUIPMENT_WORDS, "filter or grating, mount")
     assert not re.fullmatch(EQUIPMENT_WORDS, "camera,telescope")
 

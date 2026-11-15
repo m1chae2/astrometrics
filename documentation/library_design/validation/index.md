@@ -65,7 +65,7 @@ Each file ends with a table of design estimates. These are values that have not 
 
 ### 2.2 Role, source and equipment
 
-Three facts say how much a setting matters and when it needs checking again. They answer three questions. Does the software act on the value with no person checking? Is the value worked out each time, or fixed? Would different equipment need a different value?
+Three facts say how much a setting matters and when it needs checking again. They answer three questions. Does the software act on the value with no person checking? Is the value worked out each time, read from settings, or fixed in the code? Would different equipment need a different value?
 
 **Role.** What the software does with the value.
 
@@ -81,16 +81,18 @@ A setting with more than one automatic use takes the role with the largest effec
 
 - `computed each run`: worked out from the data being processed, for example a limit set at three times the star width of the frames in hand. The setting is the rule, such as the factor 3.
 - `from equipment settings`: read from the camera profile, the telescope settings or the mount's performance envelope. It changes when the equipment does.
-- `fixed`: a number in the code or the configuration file. Its status says whether it was set from data (Measured or Partly measured) or by reasoning (Design estimate).
+- `from configuration`: a key in the configuration file, which a user can change without editing the code.
+- `from tuning results`: set by a tuning run that analyzes many frames from the telescope and stores the result.
+- `fixed in code`: a number written in the code. Its status says whether it was set from data (Measured or Partly measured) or by reasoning (Design estimate).
 
-A source may end with `with a fixed fallback` when a fixed number is used only if the measured or equipment value is missing. The fallback is a constant like any other: when the software acts on it with no person checking, it is automatic and needs a Measured entry, however rarely it is used.
+A source may end with `with a fallback in code` when a number written in the code is used only if the computed, configured, equipment or tuned value is missing. The fallback is a constant like any other: when the software acts on it with no person checking, it is automatic and needs a Measured entry, however rarely it is used.
 
 **Equipment.** The equipment whose change would call for a different value: any of `mount`, `telescope`, `camera` and `filter or grating`, separated by commas, or `none`. A value in pixels usually depends on both the telescope and the camera, because together they set the pixel scale (arcseconds per pixel). A value that is `computed each run` or `from equipment settings` still lists the equipment it follows; its source says that it follows it without editing.
 
 In an entry, the three facts follow the relation on the setting's line:
 
 ```text
-- code constant `MAXIMUM_FLAT_NOISE_FRACTION` = 0.005 in `flat_calibration.py`. Relation: derived from this entry. Role: automatic (gives a verdict). Source: fixed. Equipment: camera, telescope.
+- code constant `MAXIMUM_FLAT_NOISE_FRACTION` = 0.005 in `flat_calibration.py`. Relation: derived from this entry. Role: automatic (gives a verdict). Source: fixed in code. Equipment: camera, telescope.
 ```
 
 In a design-estimate table, they fill the Role, Source and Equipment columns.

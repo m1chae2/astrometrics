@@ -1,6 +1,6 @@
 # Validation register
 
-*Version 1.2 · 2026-10-15 · Status: current*
+*Version 1.3 · 2026-11-15 · Status: current*
 
 ## Abstract
 
@@ -28,7 +28,7 @@ Each pipeline has its own file, and each entry has an ID made of the pipeline's 
 Every entry has the same fields, in this order:
 
 1. **Claim.** What the evidence shows.
-2. **Settings it supports.** The settings the evidence bears on, and where each one lives. A config key can be changed in the configuration file. A code constant can only be changed by editing the code. Each setting ends with `Relation:` and one of four relations to the entry. *Derived from* means the value was set from this evidence. *Confirmed by* means the value was chosen earlier or on other grounds and this evidence agrees with it. *Sanity check only* means the evidence shows the value is not absurd but does not fix it. *Challenged by* means the evidence argues against the value. Only a derived or confirmed setting counts as supported. A setting listed in a design-estimate table has no measurement behind it, so an entry cannot derive or confirm it.
+2. **Settings it supports.** The settings the evidence bears on, and where each one lives. A config key can be changed in the configuration file. A code constant can only be changed by editing the code. Each setting ends with `Relation:` and one of four relations to the entry. *Derived from* means the value was set from this evidence. *Confirmed by* means the value was chosen earlier or on other grounds and this evidence agrees with it. *Sanity check only* means the evidence shows the value is not absurd but does not fix it. *Challenged by* means the evidence argues against the value. Only a derived or confirmed setting counts as supported. A setting listed in a design-estimate table has no measurement behind it, so an entry cannot derive or confirm it. After the relation, a setting states its role, source and equipment (Section 2.2).
 3. **Status.** One of the three labels in Section 3, then a sentence saying why. The form is `**Status:** Partly measured. <why>.` A retired entry reads `**Status:** Retired. Superseded by [ID](link).`
 4. **Data you need.** The kind of frames or records the check needs. This describes the data, not our files.
 5. **Procedure.** The steps, with the library calls that were made. The calls use the public API (the names exported by `astrometricslib`) where one exists. A step that needs an internal function says so, because internal functions can change between versions.
@@ -53,7 +53,7 @@ New and updated entries also record four facts a reader needs to judge a result.
 
 Entries written before these fields were added hold them only where the original record had them. They are not filled in after the fact. A missing field is written as "not recorded", never guessed.
 
-Each file ends with a table of design estimates. These are values that have not been measured. Each row has a stable ID such as `STK-D01`, the value, where it lives, the risk if the value is wrong, and a note on how it could be measured. A row ID is never reused.
+Each file ends with a table of design estimates. These are values that have not been measured. Each row has a stable ID such as `STK-D01`, the value, where it lives, the risk if the value is wrong, and a note on how it could be measured. A row ID is never reused. A design-estimate table also has Role, Source and Equipment columns, with the words of Section 2.2.
 
 ### 2.1 Re-running, superseding and retiring entries
 
@@ -62,6 +62,38 @@ Each file ends with a table of design estimates. These are values that have not 
 - A re-run of an entry's procedure adds a row to the entry's **Runs** table. The columns are Date, Code version, Verdict and Record. The other fields describe the current run, and **Our result** shows it. The table holds the history.
 - Only an entry that has been run more than once has a **Runs** table. So far these are MOV-01 and MOV-03.
 - The raw record of a re-run is a new file in `documentation/evidence/`. A saved record is never edited (see the [evidence README](https://github.com/m1chae2/astrometrics/blob/main/documentation/evidence/README.md)).
+
+### 2.2 Role, source and equipment
+
+Three facts say how much a setting matters and when it needs checking again. They answer three questions. Does the software act on the value with no person checking? Is the value worked out each time, or fixed? Would different equipment need a different value?
+
+**Role.** What the software does with the value.
+
+- `automatic (sets data aside)`: the value decides which frames, stars, pixels or records are left out.
+- `automatic (gives a verdict)`: the value turns a check into pass or fail, or picks a class.
+- `automatic (limits hardware)`: the value refuses or stops a command to the mount, camera, focuser or guider.
+- `automatic (shapes results)`: the value changes the numbers or images the software produces, such as a rejection limit, an aperture size or a fit window.
+- `advisory`: the value only changes advice a person reads before acting, such as a recommendation, a warning, a ranking or a suggested number.
+
+A setting with more than one automatic use takes the role with the largest effect, in the order of the list. An automatic value needs a Measured entry ([Documentation conventions](../../Documentation_Conventions.md), Section 2). An advisory value may stay Partly measured or Design estimate, because a person sees it before anything happens.
+
+**Source.** Where the number the software acts on comes from.
+
+- `computed each run`: worked out from the data being processed, for example a limit set at three times the star width of the frames in hand. The setting is the rule, such as the factor 3.
+- `from equipment settings`: read from the camera profile, the telescope settings or the mount's performance envelope. It changes when the equipment does.
+- `fixed`: a number in the code or the configuration file. Its status says whether it was set from data (Measured or Partly measured) or by reasoning (Design estimate).
+
+A source may end with `with a fixed fallback` when a fixed number is used only if the measured or equipment value is missing. The fallback is a constant like any other: when the software acts on it with no person checking, it is automatic and needs a Measured entry, however rarely it is used.
+
+**Equipment.** The equipment whose change would call for a different value: any of `mount`, `telescope`, `camera` and `filter or grating`, separated by commas, or `none`. A value in pixels usually depends on both the telescope and the camera, because together they set the pixel scale (arcseconds per pixel). A value that is `computed each run` or `from equipment settings` still lists the equipment it follows; its source says that it follows it without editing.
+
+In an entry, the three facts follow the relation on the setting's line:
+
+```text
+- code constant `MAXIMUM_FLAT_NOISE_FRACTION` = 0.005 in `flat_calibration.py`. Relation: derived from this entry. Role: automatic (gives a verdict). Source: fixed. Equipment: camera, telescope.
+```
+
+In a design-estimate table, they fill the Role, Source and Equipment columns.
 
 ## 3. Status labels
 

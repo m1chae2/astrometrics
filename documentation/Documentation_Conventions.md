@@ -1,6 +1,6 @@
 # Documentation conventions
 
-*Version 1.1 · 2026-10-15 · Status: current*
+*Version 1.2 · 2026-11-15 · Status: current*
 
 ## Abstract
 
@@ -47,7 +47,12 @@ Every tuned value of the Astrometrics library carries exactly one of three label
 - **Partly measured.** Backed by an incomplete measurement (synthetic data only, one target, a small sample, or a model of an outside tool).
 - **Design estimate.** Chosen by reasoning and not yet measured.
 
-The Wayfinding library has no validation register yet. Its implementation paper says once that its settings are design choices not yet measured, and its values carry no labels.
+The Wayfinding library's values use the same labels, in their own register file (`library_design/validation/wayfinding.md`).
+
+Each tuned setting also has a role: automatic, when the software acts on it with no person checking (it sets data aside, gives a verdict, limits hardware or shapes results), or advisory, when it only changes advice a person reads before acting. The words for role, source and equipment are defined in `library_design/validation/index.md`, Section 2.2. The rule:
+
+- An automatic value needs a Measured entry.
+- An advisory value may stay Partly measured or Design estimate.
 
 No other labels are used (for example `designed`, `design value`, `empirical` or `provisional`). Plain qualifiers after a label, such as "not validated on real fields", are fine.
 

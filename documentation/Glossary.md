@@ -1,6 +1,6 @@
 # Glossary
 
-*Version 1.1 · 2026-10-15 · Status: current*
+*Version 1.2 · 2026-11-15 · Status: current*
 
 These are the terms used across the documentation, in alphabetical order within each library. Every page also defines a term the first time it uses it.
 
@@ -103,6 +103,7 @@ These are the terms used across the documentation, in alphabetical order within 
 | Residual | The misfit left after fitting a model: a data point minus the model's value at that point. |
 | RMS (root mean square) | The square root of the mean of the squared values. For residuals, a typical size of the misfit. |
 | ROC curve (receiver operating characteristic) | A plot of the share of true cases a score flags against the share of false cases it flags, as the cutoff is swept from strict to loose. Its area is the AUC. |
+| Role (of a setting) | Whether the software acts on a tuned setting by itself. An *automatic* setting sets data aside, gives a verdict, limits hardware or shapes results with no person checking, and needs a Measured register entry. An *advisory* setting only changes advice a person reads before acting. The [validation register](library_design/validation/index.md) defines the words, with each setting's source and equipment. |
 | Roundness | How round a star image is. Two scales are used. Stacking uses the narrow width over the wide width, 0 to 1, where 1 is a circle. The DAOFIND star finder (astrometry, moving objects) uses a symmetry measure from about −1 to 1, where 0 is round. |
 | Saturation | A pixel that reached its largest value. Its true brightness is unknown. |
 | Šidák correction | A correction for running many tests. It tightens each test's false-alarm limit so that the chance of any false alarm in the whole set stays at the chosen level. |

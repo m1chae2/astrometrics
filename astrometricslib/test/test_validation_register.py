@@ -9,6 +9,8 @@ ID instead of repeating its numbers. These tests keep that chain unbroken:
 - every entry has the fields a reviewer needs to repeat it on their own data,
   in the template order of ``validation/index.md``;
 - every status, verdict and setting relation uses the allowed words;
+- every role, source and equipment mark, where a setting or design-estimate
+  row has one, uses the words of ``validation/index.md`` Section 2.2;
 - every row of a design-estimate table has a stable ID, and no setting is both
   supported by an entry and listed as a design estimate;
 - every ``<!-- impl: -->`` link in the register names code that exists;
@@ -64,6 +66,14 @@ RETIRED_FORM = re.compile(r"^Retired\. Superseded by \[([A-Z]{3}-\d{2,3})\]\([^)
 VERDICT_FORM = re.compile(r"^(Pass|Fail|Inconclusive|Not judged)\b")
 RELATION_FORM = re.compile(r"Relation: (derived from|confirmed by|sanity check only|challenged by)\b")
 SUPPORTING_RELATIONS = ("derived from", "confirmed by")
+# The words of validation/index.md Section 2.2. A table cell holds the bare
+# words; a setting line holds "Role: <words>." and so on after its relation.
+ROLE_WORDS = r"(?:automatic \((?:sets data aside|gives a verdict|limits hardware|shapes results)\)|advisory)"
+SOURCE_WORDS = r"(?:computed each run|from equipment settings|fixed)(?: with a fixed fallback)?"
+EQUIPMENT_ITEM = r"(?:mount|telescope|camera|filter or grating)"
+EQUIPMENT_WORDS = rf"(?:none|{EQUIPMENT_ITEM}(?:, {EQUIPMENT_ITEM})*)"
+MARK_WORDS = {"Role": ROLE_WORDS, "Source": SOURCE_WORDS, "Equipment": EQUIPMENT_WORDS}
+MARK_LABEL = re.compile(r"\b(Role|Source|Equipment):")
 NO_SETTING = re.compile(r"^(None|No tuned value)\b")
 RUNS_HEADER = "| Date | Code version | Verdict | Record |"
 DESIGN_HEADING = "## Design estimates"
@@ -290,6 +300,85 @@ def test_every_setting_states_its_relation_to_the_entry(name: str) -> None:
         if not bullets or missing:
             bad[entry_id] = missing or ["no setting bullets"]
     assert not bad, f"{name}: settings without a relation: {bad}"
+
+
+def _mark_problems(line: str) -> list[str]:
+    """Check the role, source and equipment marks of one setting line.
+
+    Parameters
+    ----------
+    line : `str`
+        One setting bullet of an entry.
+
+    Returns
+    -------
+    problems : `list` [`str`]
+        One note per mark that is missing or uses a word outside Section 2.2.
+        Empty when the line has all three marks in the allowed words, or none
+        of them (a setting not yet marked).
+    """
+    if not MARK_LABEL.search(line):
+        return []
+    problems = []
+    for label, words in MARK_WORDS.items():
+        if not re.search(rf"\b{label}: {words}\.", line):
+            problems.append(f"{label} missing or not an allowed word")
+    return problems
+
+
+@pytest.mark.parametrize("name", sorted(REGISTER_FILES))
+def test_setting_marks_use_the_allowed_words(name: str) -> None:
+    """A marked setting gives role, source and equipment in allowed words."""
+    bad = {}
+    for entry_id, body in _entries(REGISTER_DIR / name).items():
+        settings = _fields(body).get("Settings it supports", "")
+        for line in settings.splitlines():
+            if not line.startswith("  - "):
+                continue
+            problems = _mark_problems(line)
+            if problems:
+                bad.setdefault(entry_id, []).extend(problems)
+    assert not bad, f"{name}: setting marks that break the form: {bad}"
+
+
+@pytest.mark.parametrize("name", sorted(REGISTER_FILES))
+def test_design_estimate_marks_use_the_allowed_words(name: str) -> None:
+    """Role, Source and Equipment columns, if present, use allowed words."""
+    text = (REGISTER_DIR / name).read_text(encoding="utf-8")
+    header = next(line for line in text[text.index(DESIGN_HEADING) :].splitlines() if line.startswith("|"))
+    columns = [cell.strip() for cell in header.strip("|").split("|")]
+    marked = [label for label in MARK_WORDS if label in columns]
+    if not marked:
+        return
+    assert marked == list(MARK_WORDS), f"{name}: design table has only some mark columns: {marked}"
+    bad = {}
+    for row in _design_rows(REGISTER_DIR / name):
+        cells = [cell.strip() for cell in row.strip("|").split("|")]
+        for label in marked:
+            cell = cells[columns.index(label)] if columns.index(label) < len(cells) else ""
+            if not re.fullmatch(MARK_WORDS[label], cell):
+                bad.setdefault(cells[0], []).append(f"{label}: {cell[:40]}")
+    assert not bad, f"{name}: design-estimate marks that break the form: {bad}"
+
+
+def test_mark_check_accepts_the_allowed_words_and_refuses_others() -> None:
+    """The mark check passes the guide's example and catches bad marks."""
+    good = (
+        "  - code constant `MAXIMUM_FLAT_NOISE_FRACTION` = 0.005 in `flat_calibration.py`. "
+        "Relation: derived from this entry. Role: automatic (gives a verdict). "
+        "Source: fixed. Equipment: camera, telescope."
+    )
+    assert _mark_problems(good) == []
+    assert _mark_problems("  - `X` in `a.py`. Relation: confirmed by this entry.") == []
+    assert _mark_problems(good.replace("gives a verdict", "decides")) == [
+        "Role missing or not an allowed word"
+    ]
+    assert _mark_problems(good.replace(" Equipment: camera, telescope.", "")) == [
+        "Equipment missing or not an allowed word"
+    ]
+    assert _mark_problems(good.replace("Source: fixed.", "Source: fixed with a fixed fallback.")) == []
+    assert re.fullmatch(EQUIPMENT_WORDS, "filter or grating, mount")
+    assert not re.fullmatch(EQUIPMENT_WORDS, "camera,telescope")
 
 
 @pytest.mark.parametrize("name", sorted(REGISTER_FILES))

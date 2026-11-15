@@ -13,15 +13,14 @@ import logging
 import os
 import queue
 import shutil
-import signal
 import subprocess
 import threading
 import time
-import uuid
 import weakref
 from collections.abc import Generator
 from typing import Any
 
+from astrometricslib._internal.drivers.siril_interface import pipes
 from astrometricslib._internal.drivers.siril_output_parsing import (
     parse_negative_pixel_percentage,
     parse_registration_totals,
@@ -30,13 +29,13 @@ from astrometricslib._internal.drivers.siril_output_parsing import (
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ConfigurationError, ExternalServiceError
 from astrometricslib.foundation.paths import scratch_directory
-from astrometricslib.foundation.platform_tools import on_windows, split_program_command
 from astrometricslib.foundation.run_abandonment import (
     launch_registered,
     raise_if_abandoned,
     stop_process_group,
 )
 from astrometricslib.foundation.run_tally import RunTally, add_to_bound_tally, bind_tally
+from astrometricslib.foundation.system import split_program_command
 
 logger = logging.getLogger(__name__)
 
@@ -219,65 +218,6 @@ def siril_process_lock(
             stop_open_wait()
 
 
-WINDOWS_PIPE_PREFIX = r"\\.\pipe" + "\\"
-"""Where Windows keeps named pipes; Siril creates them there by name."""
-
-WINDOWS_PIPE_RETRY_SECONDS = 0.05
-"""Wait between tries to open a pipe Siril has not created yet (Windows)."""
-
-
-def _open_named_pipe(path: str, mode: str, keep_trying: Any = None) -> Any:
-    """Open one end of a Siril pipe.
-
-    On Linux the pipe is a file this program made (``mkfifo``), and `open`
-    waits until Siril opens the other end. On Windows the pipe exists only
-    after Siril has created it, so opening fails until then; it is tried
-    again every `WINDOWS_PIPE_RETRY_SECONDS` while ``keep_trying()`` says so.
-
-    Parameters
-    ----------
-    path : `str`
-        The pipe.
-    mode : `str`
-        ``"r"`` or ``"w"``.
-    keep_trying : `~collections.abc.Callable`, optional
-        Called between tries on Windows; return `False` to stop. Default:
-        try for `SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS`.
-
-    Returns
-    -------
-    pipe : file object
-        The open pipe.
-
-    Raises
-    ------
-    OSError
-        If the pipe cannot be opened (on Windows, once the tries end).
-    """
-    if not on_windows():
-        return open(path, mode)
-    if keep_trying is None:
-        deadline = time.monotonic() + SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS
-
-        def keep_trying() -> bool:
-            """Say whether the connect time is not used up yet.
-
-            Returns
-            -------
-            more : `bool`
-                `True` until `SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS` have passed.
-            """
-            return time.monotonic() < deadline
-
-    while True:
-        try:
-            return open(path, mode)
-        except OSError:
-            if not keep_trying():
-                raise
-            time.sleep(WINDOWS_PIPE_RETRY_SECONDS)
-
-
 def _open_pipe_or_die(
     path: str,
     mode: str,
@@ -324,7 +264,7 @@ def _open_pipe_or_die(
 
     def attempt_open() -> None:
         try:
-            outcome["pipe"] = _open_named_pipe(path, mode, keep_trying=lambda: not give_up.is_set())
+            outcome["pipe"] = pipes.open_pipe(path, mode, keep_trying=lambda: not give_up.is_set())
         except OSError as os_error:
             outcome["error"] = os_error
 
@@ -408,26 +348,6 @@ def launch_siril_gui(siril_executable: str, file_path: str) -> None:
         logger.debug("Failed to launch Siril GUI for '%s': %s", file_path, exc)
 
 
-def _kill_other_processes(find_command: list[str]) -> None:
-    """Force-kill the processes a command lists, but never this program.
-
-    This program can have a Siril pipe open itself: the thread that writes
-    commands holds the pipe while it waits for Siril to answer. If Siril dies
-    during that wait, the program is one of the processes using the pipe, so
-    killing everything on the list would kill the program too.
-
-    Parameters
-    ----------
-    find_command : `list` [`str`]
-        A command that prints process ids on standard output, such as
-        ``fuser`` or ``pgrep``. Anything else it prints is ignored.
-    """
-    found = subprocess.run(find_command, capture_output=True, text=True).stdout
-    for process_id in {int(word) for word in found.split() if word.isdigit()} - {os.getpid()}:
-        with contextlib.suppress(OSError):
-            os.kill(process_id, signal.SIGKILL)
-
-
 class SirilSession:
     """Run Siril over named pipes and read what it reports.
 
@@ -457,53 +377,32 @@ class SirilSession:
     def _kill_process_tree(
         self, process: subprocess.Popen, job_logger: logging.Logger | None = None, workdir: str | None = None
     ) -> None:
-        """Terminate a Siril subprocess and its entire process group.
+        """Terminate a Siril subprocess and everything it started.
 
         Siril is launched via flatpak/bwrap, which sandboxes the
-        actual `siril` binary as a descendant process. Signaling
+        actual `siril` binary as a descendant process. Stopping
         process.pid alone can miss that descendant entirely, leaving it
-        running indefinitely as an orphan. SIGTERM and SIGKILL are sent to
-        the process group and clean up lingering child processes associated
-        with the work directory pipes.
+        running indefinitely as an orphan, so `stop_process_group` stops the
+        whole tree. Then any helper still tied to the work directory pipes
+        is cleaned up (`pipes.stop_pipe_holders`).
+
+        Parameters
+        ----------
+        process : `subprocess.Popen`
+            The Siril process.
+        job_logger : `logging.Logger`, optional
+            Not used; kept so callers need not change.
+        workdir : `str`, optional
+            The work folder holding the pipes. If given, helpers still tied
+            to it are stopped too.
         """
-        if on_windows():
-            # No process groups, fuser or pgrep on Windows: taskkill /T /F
-            # stops Siril and anything it started.
-            stop_process_group(process)
-            return
-        log = job_logger.info if job_logger else logger.info
-        try:
-            pgid = os.getpgid(process.pid)
-            try:
-                os.killpg(pgid, signal.SIGTERM)
-            except OSError as exc:
-                logger.debug("SIGTERM to process group %s failed (likely already exited): %s", pgid, exc)
-            time.sleep(0.2)
-            try:
-                os.killpg(pgid, signal.SIGKILL)
-            except OSError as exc:
-                logger.debug("SIGKILL to process group %s failed (likely already exited): %s", pgid, exc)
-            process.wait(timeout=2)
-        except OSError, subprocess.TimeoutExpired:
-            log("Process group termination completed.")
-
-        if workdir and os.path.exists(workdir):
-            try:
-                import glob
-
-                pipes = glob.glob(os.path.join(workdir, "siril_command.*"))
-                for pipe in pipes:
-                    try:
-                        _kill_other_processes(["fuser", pipe])
-                    except (OSError, subprocess.SubprocessError) as exc:
-                        logger.debug("fuser cleanup failed for pipe '%s': %s", pipe, exc)
-                # Safety net for sandboxed processes linked to workdir pipes
-                _kill_other_processes(["pgrep", "-f", workdir])
-            except (OSError, subprocess.SubprocessError) as exc:
-                logger.debug("Failed to force-kill lingering Siril processes for '%s': %s", workdir, exc)
+        del job_logger
+        stop_process_group(process)
+        if workdir:
+            pipes.stop_pipe_holders(workdir)
 
     def create_named_pipes(self, base_path: str) -> tuple[str, str]:
-        """Create the FIFOs used to send commands to/read output from Siril.
+        """Create the pipes that carry commands to and output from Siril.
 
         Parameters
         ----------
@@ -517,22 +416,7 @@ class SirilSession:
         output_pipe : `str`
             Path to the pipe Siril writes status output to.
         """
-        if on_windows():
-            # Windows pipes are not files: Siril creates them by name when it
-            # starts. A unique name keeps two Siril runs apart.
-            name = f"astrometrics_siril_{uuid.uuid4().hex}"
-            return f"{WINDOWS_PIPE_PREFIX}{name}.in", f"{WINDOWS_PIPE_PREFIX}{name}.out"
-        command_pipe = os.path.join(base_path, "siril_command.in")
-        output_pipe = os.path.join(base_path, "siril_command.out")
-        for pipe in [command_pipe, output_pipe]:
-            if os.path.exists(pipe):
-                os.remove(pipe)
-            os.mkfifo(pipe)
-            # Owner-only: both ends (this process and the spawned Siril
-            # subprocess) run as the current user, so wider access isn't
-            # needed.
-            os.chmod(pipe, 0o600)
-        return command_pipe, output_pipe
+        return pipes.create_pipes(base_path)
 
     def run_siril_headless(
         self,
@@ -638,7 +522,7 @@ class SirilSession:
         """
         try:
             if process is None:
-                pipe_context = _open_named_pipe(command_pipe, "w")
+                pipe_context = pipes.open_pipe(command_pipe, "w")
             else:
                 pipe_context = _open_pipe_or_die(command_pipe, "w", process)
             with pipe_context as pipe:
@@ -737,7 +621,7 @@ class SirilSession:
         log = job_logger.info if job_logger else logger.info
         try:
             if process is None:
-                pipe_context = _open_named_pipe(output_pipe, "r")
+                pipe_context = pipes.open_pipe(output_pipe, "r")
             else:
                 pipe_context = _open_pipe_or_die(output_pipe, "r", process)
             with pipe_context as pipe:

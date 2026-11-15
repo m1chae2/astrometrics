@@ -8,8 +8,6 @@ import logging
 import os
 from dataclasses import dataclass
 
-from astrometricslib.foundation.platform_tools import quote_siril_path
-
 logger = logging.getLogger(__name__)
 
 
@@ -423,24 +421,24 @@ def build_master_calibration_commands(
     """
     script: list[str] = []
     if counts.biases > 0 and "bias" not in restored_master_kinds:
-        script += [f"cd {quote_siril_path(os.path.join(target_folder, 'biases'))}"]
+        script += [f'cd "{os.path.join(target_folder, "biases")}"']
         script += build_bias_master_commands(counts.biases)
 
     flat_master_is_needed = counts.flats > 0 and "flat" not in restored_master_kinds
     # The flats' own bias master is built only to make a flat master, so it is
     # skipped when the flat master itself comes from the cache.
     if counts.flat_biases > 0 and flat_master_is_needed and "flat_bias" not in restored_master_kinds:
-        script += [f"cd {quote_siril_path(os.path.join(target_folder, 'flat_biases'))}"]
+        script += [f'cd "{os.path.join(target_folder, "flat_biases")}"']
         script += build_bias_master_commands(
             counts.flat_biases, FLAT_BIAS_SEQUENCE_NAME, FLAT_BIAS_MASTER_NAME
         )
 
     if counts.darks > 0 and "dark" not in restored_master_kinds:
-        script += [f"cd {quote_siril_path(os.path.join(target_folder, 'darks'))}"]
+        script += [f'cd "{os.path.join(target_folder, "darks")}"']
         script += build_dark_master_commands(counts.darks)
 
     if flat_master_is_needed:
-        script += [f"cd {quote_siril_path(os.path.join(target_folder, 'flats'))}"]
+        script += [f'cd "{os.path.join(target_folder, "flats")}"']
         script += build_flat_master_commands(
             counts.flats,
             counts.biases > 0 or counts.flat_biases > 0,
@@ -545,7 +543,7 @@ def build_light_script(target_folder: str, settings: LightScriptSettings) -> Lig
     filter_round = settings.filter_round
 
     # Process Lights
-    script = [f"cd {quote_siril_path(os.path.join(target_folder, 'lights'))}"]
+    script = [f'cd "{os.path.join(target_folder, "lights")}"']
     # only set in the multi-frame branch below; single-frame
     # stacks skip registration entirely
     seq = None

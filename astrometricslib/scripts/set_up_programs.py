@@ -4,7 +4,7 @@ Run by ``build/windows/setup_windows.ps1`` after the Python and Node packages,
 the same way it installs them. For each program it downloads one pinned
 release from the project's own site, checks it against the recorded size and
 SHA-256 checksum, unpacks it into
-``%LOCALAPPDATA%\Astrometrics\Data\<program>\<version>`` and sets the
+``%LOCALAPPDATA%\astrometrics\<program>\<version>`` and sets the
 program's setting (``siril_executable``, ``graxpert_executable``). No
 administrator rights are needed. The pinned releases are listed in
 ``astrometricslib/_internal/drivers/program_setup.py``.
@@ -35,7 +35,7 @@ from astrometricslib._internal.drivers.program_setup import (
 )
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
 from astrometricslib.foundation.errors import AstrometricsError
-from astrometricslib.foundation.platform_tools import on_windows
+from astrometricslib.foundation.system import on_windows
 
 
 class _ProgressPrinter:

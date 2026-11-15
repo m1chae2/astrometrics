@@ -68,6 +68,15 @@ export class LinuxPlatform extends BasePlatform {
   }
 
   /**
+   * Says that the tray icon shows its menu by itself on Linux, so a click needs no code.
+   *
+   * @returns {boolean}
+   */
+  needsTrayClickToOpenMenu() {
+    return false;
+  }
+
+  /**
    * Formats notification options according to Freedesktop notification daemon standards.
    *
    * @param {Object} options

@@ -14,7 +14,7 @@ import pytest
 from astropy.io import fits
 from scipy.ndimage import gaussian_filter
 
-from astrometricslib.foundation.platform_tools import stage_file
+from astrometricslib._internal.drivers.file_staging import stage_file
 from astrometricslib.pipelines.stacking.pre_processing import flat_calibration as fc
 
 SIZE = 160

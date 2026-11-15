@@ -8,9 +8,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from astrometricslib._internal.drivers import frame_prefetch, siril_interface
+from astrometricslib._internal.drivers.file_staging import stage_file
 from astrometricslib._internal.drivers.siril_interface import staging
 from astrometricslib.foundation.config import AppConfiguration
-from astrometricslib.foundation.platform_tools import stage_file
 
 
 def test_prefetch_reads_all_files_and_skips_missing(tmp_path: Path) -> None:
@@ -128,10 +128,8 @@ def test_stacking_hook_runs_only_when_enabled(tmp_path: Path, monkeypatch: pytes
 
     driver.config.get_prefetch_frames.return_value = True
     driver._prefetch_staged_frames(str(work), MagicMock())
-    # Linux follows the staged link to the library file. A Windows hard link
-    # is the library file under a second name, so either name reads it.
+    # A symbolic link leads to the library file and a hard link is the library
+    # file under a second name, so either way the path reads the same file.
     [(paths, workers)] = calls
     assert workers == 2
     assert len(paths) == 1 and os.path.samefile(paths[0], tmp_path / "real.fits")
-    if os.name != "nt":
-        assert paths == [str((tmp_path / "real.fits").resolve())]

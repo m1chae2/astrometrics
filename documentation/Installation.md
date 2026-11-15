@@ -122,13 +122,13 @@ On Linux, a laptop with an Intel card and an NVIDIA card can draw the app window
 
 The app chooses at start. It cannot switch cards while it runs, so plugging in or unplugging the charger changes nothing until you restart the app. The start-up log (`electron.log`) says which card was asked for and which one the window got. If NVIDIA was chosen but the window did not get it, the app restarts once on Intel.
 
-On Windows the `gpu` setting does nothing. The app asks Windows for the high-performance card (the NVIDIA or AMD card next to an Intel one) every time it starts, on battery too. On a computer with one card this changes nothing. The start-up log, `main.log` in `%LOCALAPPDATA%\Astrometrics\State\logs`, names the card the window got, on the line that starts with `GPU:`.
+On Windows the `gpu` setting does nothing. The app asks Windows for the high-performance card (the NVIDIA or AMD card next to an Intel one) every time it starts, on battery too. On a computer with one card this changes nothing. The start-up log, `main.log` in `%LOCALAPPDATA%\astrometrics\logs`, names the card the window got, on the line that starts with `GPU:`.
 
 GraXpert, which removes the sky's gradient from the preview picture, chooses its card on its own. On Windows it uses the graphics card through DirectML, Microsoft's interface for running AI models on any graphics card.
 
 ### Storage layout
 
-Astrometrics keeps each kind of file in its own place. The library folders follow your settings. The other folders follow the Linux standard for program files (the XDG Base Directory layout), so a backup tool can skip the disposable ones and a cache can be wiped in one step. On Windows they are `Data`, `State` and `Cache` inside `%LOCALAPPDATA%\Astrometrics`, the folder Windows keeps for each user's program files on this computer. Logs, including the launcher's `logs\run`, go to `State`. The Electron app's browser profile goes to `Electron` in the same folder, not to the roaming profile (`%APPDATA%`), which Windows copies between computers. Settings stay in `~\.config\astrometrics`.
+Astrometrics keeps each kind of file in its own place. The library folders follow your settings. The other folders follow the Linux standard for program files (the XDG Base Directory layout), so a backup tool can skip the disposable ones and a cache can be wiped in one step. On Windows they are in `%LOCALAPPDATA%\astrometrics`, the folder Windows keeps for each user's program files on this computer. The databases and the settings file are in that folder itself, the disposable files are in `Cache` inside it, and the logs, including the launcher's `logs\run`, are in `logs`. The Electron app's browser profile goes to `Electron` in the same folder, not to the roaming profile (`%APPDATA%`), which Windows copies between computers.
 
 | Tier | What it holds | Example location | Setting |
 | --- | --- | --- | --- |
@@ -201,7 +201,7 @@ On Windows:
 1. Close the app, then run `build\windows\run_astrometrics.ps1 -Stop`.
 2. Delete the `Astrometrics` shortcuts from the Desktop and the Start menu, and unpin it from the taskbar. Also delete the hidden `Electron.lnk` in `%APPDATA%\Microsoft\Windows\Start Menu\Programs`, which the app needs to show notifications.
 3. Delete the repository folder. This also removes `.venv-win` and `node_modules`.
-4. Optional: delete `%LOCALAPPDATA%\Astrometrics`. It holds your databases (`Data`), the Siril and GraXpert that setup installed, the logs (`State`), the scratch files (`Cache`) and the app's browser profile (`Electron`). Back up `Data` first if you may want the databases again.
+4. Optional: delete `%LOCALAPPDATA%\astrometrics`. It holds your databases and settings, the Siril and GraXpert that setup installed, the logs (`logs`), the scratch files (`Cache`) and the app's browser profile (`Electron`). Back up the database files first if you may want them again.
 5. Optional: delete `~\.config\astrometrics`, which holds the settings, and the link handler the app registered, with `reg delete HKCU\Software\Classes\astrometrics /f`.
 
 Your frames, and any database copies in `backup_path`, are in folders that the steps above leave alone.

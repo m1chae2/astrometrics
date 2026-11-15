@@ -6,7 +6,7 @@ preview picture is stretched. On Linux they come from the system's package
 manager. On Windows the app sets them up for the user, each from one pinned
 release on its own project's site: the file is downloaded, checked against a
 recorded size and SHA-256 checksum, unpacked into the app's data folder
-(``%LOCALAPPDATA%\Astrometrics\Data\<program>\<version>``) and the program's
+(``%LOCALAPPDATA%\astrometrics\<program>\<version>``) and the program's
 setting is pointed at it. No administrator rights are needed and nothing is
 installed system-wide. A download that does not match its checksum is refused
 and deleted. To move to a newer version, change that program's
@@ -39,7 +39,7 @@ from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ConfigurationError, ExternalServiceError
 from astrometricslib.foundation.offline import require_online
 from astrometricslib.foundation.paths import data_directory, scratch_directory
-from astrometricslib.foundation.platform_tools import on_windows, split_program_command
+from astrometricslib.foundation.system import on_windows, split_program_command
 
 logger = logging.getLogger(__name__)
 

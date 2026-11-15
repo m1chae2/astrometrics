@@ -39,14 +39,15 @@ export function windowsAppFolder(app) {
 
 /**
  * Gives the state folder, which holds the logs: `$XDG_STATE_HOME/astrometrics` when that is
- * set (as on Linux), otherwise `%LOCALAPPDATA%\Astrometrics\State`, as the Python side does.
+ * set (as on Linux), otherwise the app's own folder, `%LOCALAPPDATA%\Astrometrics`, as the
+ * Python side does (on Windows the state folder and the data folder are the same folder).
  *
  * @param {Electron.App} app
  * @returns {string}
  */
 export function windowsStateFolder(app) {
   if (process.env.XDG_STATE_HOME) return path.join(process.env.XDG_STATE_HOME, 'astrometrics');
-  return path.join(windowsAppFolder(app), 'State');
+  return windowsAppFolder(app);
 }
 
 /**
@@ -82,7 +83,7 @@ export class WindowsPlatform extends BasePlatform {
 
   /**
    * Sets AppUserModelId for taskbar grouping and notification routing, and keeps Electron's
-   * own files (its browser caches, window position) in `%LOCALAPPDATA%\Astrometrics\Electron`.
+   * own files (its browser caches, window position) in `%LOCALAPPDATA%\Astrometrics\Electron` (its own folder, apart from the Python files).
    * Electron's default is the Roaming profile, which Windows copies between computers.
    *
    * @param {Electron.App} app
@@ -97,6 +98,26 @@ export class WindowsPlatform extends BasePlatform {
       app.setToastActivatorCLSID(TOAST_ACTIVATOR_CLSID);
     }
     app.setPath('userData', path.join(windowsAppFolder(app), 'Electron'));
+  }
+
+  /**
+   * Says how to start the backend and where its log is, for the "backend not running" dialog.
+   *
+   * @returns {string}
+   */
+  backendStartAdvice() {
+    return 'Start Astrometrics again from its shortcut (build\\windows\\run_astrometrics.ps1). ' +
+      'If it stops again, check logs\\run\\backend.err.log in %LOCALAPPDATA%\\Astrometrics, then retry.';
+  }
+
+  /**
+   * Says that a click on the tray icon must open the menu by code: Windows does not show the
+   * menu by itself.
+   *
+   * @returns {boolean}
+   */
+  needsTrayClickToOpenMenu() {
+    return true;
   }
 
   /**

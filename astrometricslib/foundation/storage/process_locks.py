@@ -8,9 +8,9 @@ permission slips for those resources.
 The locks live in real files on disk and are enforced by the operating
 system, which matters: a lock kept only in memory would be invisible to
 a second program. Because these use the operating system's file locks
-(POSIX advisory locks, or `msvcrt` on Windows), the batch script and the
-backend service can both ask for "the Siril slot" and the operating system
-will make one of them wait.
+(through the `filelock` package, which uses the right kind of lock on each
+system), the batch script and the backend service can both ask for "the
+Siril slot" and the operating system will make one of them wait.
 
 This module is about coordinating programs, not about storing data --
 the storage side lives in `astrometricslib.foundation.storage.local_database`.
@@ -21,21 +21,17 @@ import contextvars
 import json
 import logging
 import os
-import sys
 import threading
 import time
 from collections.abc import Generator
-from typing import TextIO
+
+import filelock
+import psutil
 
 from astrometricslib.foundation.errors import ConflictError
 from astrometricslib.foundation.paths import locks_directory
 
 logger = logging.getLogger(__name__)
-
-if sys.platform == "win32":
-    import msvcrt
-else:
-    import fcntl
 
 
 # How often a work item that is waiting for a slot reports who it is waiting
@@ -133,24 +129,13 @@ def _process_is_alive(process_id: int) -> bool:
     Returns
     -------
     alive : `bool`
-        `False` only when the system says no such process exists. A process
-        we may not signal still counts as alive.
+        `False` only when the system says no such process exists (`psutil`
+        reads the process list, so a process we may not signal still counts
+        as alive).
     """
     if process_id <= 0:
         return False
-    if sys.platform == "win32":
-        # os.kill(pid, 0) would terminate the process on Windows, so ask the
-        # system's process list instead.
-        import psutil
-
-        return psutil.pid_exists(process_id)
-    try:
-        os.kill(process_id, 0)
-    except ProcessLookupError:
-        return False
-    except OSError:
-        return True
-    return True
+    return psutil.pid_exists(process_id)
 
 
 def list_slot_holders(resource_name: str, max_slots: int = 1) -> list[dict]:
@@ -225,55 +210,16 @@ def describe_slot_holders(resource_name: str, max_slots: int = 1) -> str:
     )
 
 
-def lock_open_file(fh: TextIO, blocking: bool) -> None:
-    """Take an exclusive lock on an open file.
-
-    Parameters
-    ----------
-    fh : `io.TextIOWrapper`
-        Open file to lock.
-    blocking : `bool`
-        If `True`, wait for the lock; otherwise fail at once.
-
-    Raises
-    ------
-    BlockingIOError
-        Raised if the lock is held elsewhere and `blocking` is `False`.
-    """
-    if sys.platform == "win32":
-        # Windows has no flock. msvcrt locks one byte at the file's start.
-        while True:
-            try:
-                fh.seek(0)
-                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
-                return
-            except OSError as e:
-                if not blocking:
-                    raise BlockingIOError(str(e)) from e
-                time.sleep(0.05)
-    else:
-        fcntl.flock(fh, fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB)
-
-
-def unlock_open_file(fh: TextIO) -> None:
-    """Release the lock taken by `lock_open_file`.
-
-    Parameters
-    ----------
-    fh : `io.TextIOWrapper`
-        Open file that was locked.
-    """
-    if sys.platform == "win32":
-        with contextlib.suppress(OSError):
-            fh.seek(0)
-            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
-    else:
-        fcntl.flock(fh, fcntl.LOCK_UN)
-
-
 @contextlib.contextmanager
-def file_lock(lock_path: str, blocking: bool = False) -> Generator[TextIO]:
-    """Acquire a process-safe file lock (`fcntl` or `msvcrt`).
+def file_lock(lock_path: str, blocking: bool = False) -> Generator[filelock.FileLock]:
+    """Acquire a process-safe file lock (`filelock`).
+
+    The lock is exclusive and held by an open file until the `with` block
+    ends. Each call makes its own `filelock.FileLock` (not a shared,
+    reusable one), so a second request for the same path fails or waits,
+    whether it comes from another process or from another thread of this
+    one. `filelock` keeps one lock per object, and a reused object would let
+    a second thread in.
 
     Parameters
     ----------
@@ -288,29 +234,30 @@ def file_lock(lock_path: str, blocking: bool = False) -> Generator[TextIO]:
 
     Yields
     ------
-    lock_file_handle : `io.TextIOWrapper`
-        Open file handle for the held lock, for the duration of the
-        `with` block.
+    lock : `filelock.FileLock`
+        The held lock, for the duration of the `with` block.
 
     Raises
     ------
     DeviceInUseError
         Raised if the target descriptor lock file is held by another
-        process and `blocking` is `False`.
+        process or thread and `blocking` is `False`.
     """
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)
-    fh = open(lock_path, "w")
+    # `is_singleton=False` and `thread_local=True` are the defaults, written
+    # out because the behavior depends on them (see above).
+    lock = filelock.FileLock(lock_path, timeout=-1 if blocking else 0, is_singleton=False, thread_local=True)
     try:
-        lock_open_file(fh, blocking)
-        yield fh
-    except BlockingIOError as e:
+        lock.acquire()
+    except filelock.Timeout as lock_held:
         raise DeviceInUseError(
             f"Resource descriptor is locked by another active process: {lock_path}",
             details={"lock_path": lock_path},
-        ) from e
+        ) from lock_held
+    try:
+        yield lock
     finally:
-        unlock_open_file(fh)
-        fh.close()
+        lock.release()
 
 
 @contextlib.contextmanager
@@ -332,7 +279,7 @@ def acquire_resource_slot(
     multiprocessing.Semaphore, this is respected by any process on the
     machine invoking the same resource (e.g. the offline batch script
     and the backend service both running Siril), since it is backed by
-    POSIX advisory file locks rather than in-memory state scoped to one
+    operating-system file locks rather than in-memory state scoped to one
     process tree.
 
     Parameters

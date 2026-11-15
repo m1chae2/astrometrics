@@ -23,7 +23,7 @@ from astrometricslib._internal.drivers.interfaces.stacking_driver import (
     StackRunResult,
     StackSettings,
 )
-from astrometricslib.foundation.platform_tools import split_program_command
+from astrometricslib.foundation.system import split_program_command
 
 
 class SirilStackingDriver(StackingDriver):

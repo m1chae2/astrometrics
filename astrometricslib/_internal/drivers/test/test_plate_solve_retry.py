@@ -213,8 +213,8 @@ def test_hinted_solve_exhausting_its_timeout_skips_the_blind_retry(
         lambda command, working_directory, timeout: run_solve_field_calls.append(command) or None,
     )
 
-    # The local solve links the image into a scratch folder; on Windows that
-    # is a hard link or a copy, which needs a file that exists.
+    # The local solve stages the image into a scratch folder; a hard link or
+    # a copy, the fallbacks, need a file that exists.
     image = tmp_path / "image.fits"
     image.write_bytes(b"image")
     result = solver._solve_locally(
@@ -243,8 +243,8 @@ def test_hinted_solve_failing_quickly_still_retries_blind(
         lambda command, working_directory, timeout: run_solve_field_calls.append(command) or None,
     )
 
-    # The local solve links the image into a scratch folder; on Windows that
-    # is a hard link or a copy, which needs a file that exists.
+    # The local solve stages the image into a scratch folder; a hard link or
+    # a copy, the fallbacks, need a file that exists.
     image = tmp_path / "image.fits"
     image.write_bytes(b"image")
     result = solver._solve_locally(

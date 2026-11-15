@@ -20,8 +20,10 @@ import pytest
 from astrometricslib.foundation.paths import locks_directory
 from astrometricslib.foundation.storage import process_locks
 from astrometricslib.foundation.storage.process_locks import (
+    DeviceInUseError,
     acquire_resource_slot,
     describe_slot_holders,
+    file_lock,
     list_slot_holders,
 )
 
@@ -232,3 +234,130 @@ def test_a_waiter_reports_the_live_holder_it_is_behind(
     holder_thread.join(timeout=WAIT_SECONDS)
     assert any("M 13" in m and "NGC 2403" in m for m in messages)
     assert not waiter_thread.is_alive()
+
+
+def test_a_held_lock_refuses_a_second_request_from_the_same_thread(tmp_path: Path) -> None:
+    """Two requests for one path conflict, even inside one thread."""
+    lock_path = str(tmp_path / "same_thread.lock")
+    with file_lock(lock_path):
+        with pytest.raises(DeviceInUseError, match="locked by another active process"), file_lock(lock_path):
+            pass
+    # Released: the path can be taken again.
+    with file_lock(lock_path):
+        pass
+
+
+def test_a_held_lock_refuses_a_request_from_another_thread(tmp_path: Path) -> None:
+    """Two threads of one process do not share a lock; the second fails."""
+    lock_path = str(tmp_path / "two_threads.lock")
+    outcome: list[str] = []
+
+    def other_thread() -> None:
+        """Ask for the held lock without waiting and record the result."""
+        try:
+            with file_lock(lock_path):
+                outcome.append("taken")
+        except DeviceInUseError:
+            outcome.append("refused")
+
+    with file_lock(lock_path):
+        assert run_in_threads([other_thread]) == [True]
+    assert outcome == ["refused"]
+
+
+def test_two_threads_asking_for_the_same_single_slot_take_it_one_at_a_time(tmp_path: Path) -> None:
+    """With one slot, the second thread waits until the first lets go."""
+    configuration = make_configuration(tmp_path)
+    first_holds_slot = threading.Event()
+    release_first = threading.Event()
+    order: list[str] = []
+
+    def first() -> None:
+        """Hold the only slot until told to let go."""
+        with acquire_resource_slot(configuration, "one_slot", 1, work_name="first"):
+            order.append("first in")
+            first_holds_slot.set()
+            release_first.wait(timeout=WAIT_SECONDS)
+            order.append("first out")
+
+    def second() -> None:
+        """Ask for the slot while the first thread holds it."""
+        first_holds_slot.wait(timeout=WAIT_SECONDS)
+        with acquire_resource_slot(
+            configuration, "one_slot", 1, poll_interval_seconds=0.02, work_name="second"
+        ):
+            order.append("second in")
+
+    first_thread = threading.Thread(target=first, daemon=True)
+    second_thread = threading.Thread(target=second, daemon=True)
+    first_thread.start()
+    second_thread.start()
+    first_holds_slot.wait(timeout=WAIT_SECONDS)
+    time.sleep(0.3)
+    assert order == ["first in"]
+    release_first.set()
+    first_thread.join(timeout=WAIT_SECONDS)
+    second_thread.join(timeout=WAIT_SECONDS)
+    assert order == ["first in", "first out", "second in"]
+
+
+def test_a_blocking_request_waits_for_the_lock(tmp_path: Path) -> None:
+    """A blocking request returns once the holder lets go."""
+    lock_path = str(tmp_path / "blocking.lock")
+    got_it = threading.Event()
+
+    def waiter() -> None:
+        """Wait for the lock, then note that it was taken."""
+        with file_lock(lock_path, blocking=True):
+            got_it.set()
+
+    waiter_thread = threading.Thread(target=waiter, daemon=True)
+    with file_lock(lock_path):
+        waiter_thread.start()
+        time.sleep(0.3)
+        assert not got_it.is_set()
+    waiter_thread.join(timeout=WAIT_SECONDS)
+    assert got_it.is_set()
+
+
+def test_a_lock_held_by_another_process_refuses_a_request(tmp_path: Path) -> None:
+    """A lock taken by a separate program stops this one, and ends with it."""
+    lock_path = str(tmp_path / "other_process.lock")
+    holder = subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true] -- fixed argv
+        [
+            sys.executable,
+            "-c",
+            "import sys, time;"
+            "from astrometricslib.foundation.storage.process_locks import file_lock;"
+            "manager = file_lock(sys.argv[1]);manager.__enter__();"
+            "print('held', flush=True);"
+            "time.sleep(60)",
+            lock_path,
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout.readline().strip() == "held"
+        with pytest.raises(DeviceInUseError), file_lock(lock_path):
+            pass
+    finally:
+        holder.kill()
+        holder.wait()
+    # The system drops the lock when its process ends.
+    with file_lock(lock_path):
+        pass
+
+
+def test_a_lock_in_a_missing_folder_makes_the_folder(tmp_path: Path) -> None:
+    """The folder of the lock file is created when needed."""
+    lock_path = tmp_path / "new" / "folder" / "made.lock"
+    with file_lock(str(lock_path)):
+        assert lock_path.exists()
+
+
+def test_the_process_check_uses_the_process_list() -> None:
+    """The running process exists; zero and negative numbers never do."""
+    assert process_locks._process_is_alive(os.getpid())
+    assert not process_locks._process_is_alive(0)
+    assert not process_locks._process_is_alive(-5)

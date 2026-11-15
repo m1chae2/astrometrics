@@ -9,7 +9,7 @@
     The backend's process id goes to `.run_pids\backend.pid`, which Electron reads to notice a
     backend that died while starting. A backend or Vite server that is already running is
     reused. When the Electron window closes, only the processes this run started are stopped.
-    Logs go to `logs\run` in the state folder (`%LOCALAPPDATA%\Astrometrics\State`, or
+    Logs go to `logs\run` in the state folder (`%LOCALAPPDATA%\Astrometrics`, or
     `$XDG_STATE_HOME\astrometrics` when that is set), next to the app's own logs, as on Linux;
     `launcher.log` there has the time of each start-up step. Errors show in a message box,
     because the desktop shortcut runs this script in a hidden window. `-Mode` opens a workspace;
@@ -33,7 +33,7 @@ $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 Set-Location $Root
 $StateDir = if ($env:XDG_STATE_HOME) { Join-Path $env:XDG_STATE_HOME "astrometrics" } else {
-    Join-Path $env:LOCALAPPDATA "Astrometrics\State" }
+    Join-Path $env:LOCALAPPDATA "Astrometrics" }
 $LogDir = Join-Path $StateDir "logs\run"
 New-Item -ItemType Directory -Force $LogDir | Out-Null
 $BackendPort = 5000

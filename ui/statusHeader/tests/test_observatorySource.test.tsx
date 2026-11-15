@@ -125,9 +125,9 @@ describe('Observatory source', () => {
     expect(screen.queryByText(/REPLAY/)).toBeNull();
   });
 
-  /** On Windows the backend says the simulator cannot run; the button is off and its tooltip says why. */
+  /** When the backend says the simulator cannot run (INDI is not installed), the button is off and its tooltip says why. */
   it('turns SIMULATED off with the reason as its tooltip when the backend cannot simulate', async () => {
-    const reason = 'The simulator needs INDI, which is not available on Windows.';
+    const reason = 'The simulator needs INDI, which is not on this computer (INDI has no Windows version).';
     vi.mocked(getObservatorySource).mockResolvedValue(
       report('real', { available: false, unavailable_reason: reason }) as never,
     );

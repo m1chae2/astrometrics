@@ -5,16 +5,15 @@ sleeps, with a grandchild of its own), because what matters is that the whole
 process group is stopped and that other runs' processes are left alone.
 """
 
-import os
 import subprocess  # ruff: ignore[suspicious-subprocess-import] -- real child processes are the point
 import sys
 import threading
 import time
 from pathlib import Path
 
+import psutil
 import pytest
 
-from astrometricslib.foundation.platform_tools import stop_windows_process_tree
 from astrometricslib.foundation.run_abandonment import (
     RunAbandonedError,
     RunAbandonment,
@@ -22,6 +21,7 @@ from astrometricslib.foundation.run_abandonment import (
     launch_registered,
     raise_if_abandoned,
     run_registered,
+    stop_process_group,
 )
 
 # A child that starts a sleeping grandchild, prints the grandchild's id and
@@ -58,22 +58,9 @@ def process_exists(process_id: int) -> bool:
     exists : `bool`
         `True` if the process can still be signalled and is not a zombie.
     """
-    if sys.platform == "win32":
-        # os.kill(pid, 0) ends the process on Windows; ask the process list.
-        import psutil
-
-        try:
-            return psutil.Process(process_id).status() != psutil.STATUS_ZOMBIE
-        except psutil.NoSuchProcess:
-            return False
     try:
-        os.kill(process_id, 0)
-    except ProcessLookupError:
-        return False
-    try:
-        with open(f"/proc/{process_id}/stat", encoding="utf-8") as stat_file:
-            return stat_file.read().rsplit(")", 1)[1].split()[0] != "Z"
-    except OSError:
+        return psutil.Process(process_id).status() != psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
         return False
 
 
@@ -141,10 +128,7 @@ def test_launch_registered_without_a_bound_run_starts_the_process_plainly() -> N
     try:
         assert process.poll() is None
     finally:
-        if sys.platform == "win32":
-            stop_windows_process_tree(process)
-        else:
-            os.killpg(os.getpgid(process.pid), 9)
+        stop_process_group(process)
         process.wait()
 
 

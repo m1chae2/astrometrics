@@ -45,7 +45,7 @@ from astrometricslib._internal.errors import DATA_ERRORS
 from astrometricslib._internal.processing_scripts import detect_point_sources
 from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.foundation.paths import siril_work_directory
-from astrometricslib.foundation.platform_tools import split_program_command
+from astrometricslib.foundation.system import split_program_command
 from astrometricslib.pipelines.spectroscopy.utilities.registration_quality import (
     MIN_MATCHED_STAR_PAIRS,
     ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA,

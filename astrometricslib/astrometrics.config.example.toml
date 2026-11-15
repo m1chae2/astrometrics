@@ -38,7 +38,7 @@
 
 ["Image Library"]
 # Folder for the databases. Leave it empty to use the user's data folder:
-# ~/.local/share/astrometrics on Linux, %LOCALAPPDATA%\Astrometrics\Data on
+# ~/.local/share/astrometrics on Linux, %LOCALAPPDATA%\astrometrics on
 # Windows. Keep it on the local disk: SQLite cannot safely use a network or
 # synced drive such as Google Drive (use backup_path below for a copy there).
 # Captured frames go in a "frames" subfolder of it unless frames_path says

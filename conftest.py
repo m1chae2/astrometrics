@@ -65,9 +65,11 @@ test_calibration_path.mkdir(parents=True, exist_ok=True)
 
 
 # Tests of parts that exist only on Linux, which Windows does not collect at
-# all. Each Windows difference these parts have is tested on its own (see
-# `astrometricslib/foundation/platform_tools.py` and the "windows CI"
-# workflow). Path (relative to the project, with "/") -> why.
+# all. The rules that differ between the systems live in per-system modules
+# (`foundation/_system_posix.py` and `_system_windows.py`, and the Siril
+# pipes in `siril_interface/_pipes_posix.py` and `_pipes_windows.py`); each
+# is tested on its own system, Windows by the "windows CI" workflow.
+# Path (relative to the project, with "/") -> why.
 LINUX_ONLY_TEST_PATHS = {
     "simulator/": "the simulator runs INDI, which is not available on Windows",
     "build/tpm/": "the TPM harness runs the simulator and Linux shell tools",
@@ -75,7 +77,7 @@ LINUX_ONLY_TEST_PATHS = {
         "Siril's Linux pipes are FIFOs; the Windows named pipes are tested in test_siril_windows.py"
     ),
     "astrometricslib/_internal/drivers/test/test_siril_process_cleanup.py": (
-        "the cleanup uses fuser, pgrep and process groups; Windows uses taskkill (test_platform_tools.py)"
+        "the cleanup uses fuser, pgrep and process groups; Windows uses taskkill (test_system_windows.py)"
     ),
     "backend/tests/test_copy_path_guard.py": "it tests the Linux-only real-data runs of build/agent_tools",
     "wayfindinglib/test/test_bright_star_catalog_read_only.py": "it uses Unix file owners and modes",

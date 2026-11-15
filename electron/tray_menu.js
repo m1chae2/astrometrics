@@ -155,7 +155,8 @@ export function buildTrayMenuTemplate(status, actions) {
  * @param {() => (Electron.BrowserWindow|null)} deps.getMainWindow Returns the main window, if any.
  * @param {() => void} deps.quit Quits the app.
  * @param {(title: string, body: string) => void} deps.notify Shows a desktop notice.
- * @param {string} deps.platform Value of `process.platform`.
+ * @param {boolean} deps.needsClickToOpenMenu Whether a click on the icon must open the menu by code
+ *   (the platform adapter's `needsTrayClickToOpenMenu()`).
  * @param {object} [deps.log] A logger with `warn`.
  * @param {() => Promise<object>} [deps.fetchStatus] Reads the status (for tests).
  * @param {() => Promise<{ok: boolean, error?: string}>} [deps.park] Parks the mount (for tests).
@@ -164,7 +165,7 @@ export function buildTrayMenuTemplate(status, actions) {
  *   target line, and `stop` ends the timer.
  */
 export function createTrayMenu({
-  tray, Menu, getMainWindow, quit, notify, platform, log = console,
+  tray, Menu, getMainWindow, quit, notify, needsClickToOpenMenu, log = console,
   fetchStatus = fetchTrayStatus, park = emergencyPark,
 }) {
   let status = { ...OFFLINE_STATUS };
@@ -237,8 +238,8 @@ export function createTrayMenu({
     rebuild();
   };
 
-  // Linux shows the menu by itself; macOS and Windows need the call.
-  if (platform !== 'linux' && typeof tray.on === 'function') {
+  // Some desktops (Linux) show the menu by themselves; the others need the call.
+  if (needsClickToOpenMenu && typeof tray.on === 'function') {
     tray.on('click', () => {
       try { tray.popUpContextMenu(); } catch (error) { log.warn('[Tray] Could not open the menu:', error); }
     });

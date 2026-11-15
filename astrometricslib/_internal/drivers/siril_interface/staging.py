@@ -26,10 +26,10 @@ from astrometricslib._internal.drivers.calibration_library import (
     format_binning,
     header_binning,
 )
+from astrometricslib._internal.drivers.file_staging import STAGED_BY_COPY, stage_file
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_data, read_header
 from astrometricslib._internal.drivers.frame_prefetch import prefetch_frames
 from astrometricslib._internal.drivers.siril_interface.session import SirilSession
-from astrometricslib.foundation.platform_tools import STAGED_BY_COPY, on_windows, stage_file
 
 logger = logging.getLogger(__name__)
 
@@ -192,12 +192,12 @@ def _describe_bias_settings(selection: CalibrationSelection) -> str:
 def _calibration_source_fingerprint(frames_directory: str, recipe: str = "") -> str | None:
     """Fingerprint the calibration frames staged in a directory.
 
-    Each staged frame is a symlink into the shared calibration library,
-    so the *link targets* are fingerprinted, not the links. Windows stages
-    by hard link or copy instead (see `stage_file`), so there the frame's
-    file number on its drive identifies it: a hard link shares the library
-    frame's number, and a copy gets a new one, so its master is rebuilt
-    rather than wrongly reused.
+    A staged frame is usually a symbolic link into the shared calibration
+    library, so the *link target* is fingerprinted, not the link. When the
+    system allowed no symbolic link, `stage_file` made a hard link or a
+    copy, and the frame's file number on its drive identifies it: a hard
+    link shares the library frame's number, and a copy gets a new one, so
+    its master is rebuilt rather than wrongly reused.
 
     Parameters
     ----------
@@ -231,10 +231,10 @@ def _calibration_source_fingerprint(frames_directory: str, recipe: str = "") -> 
             # stat() follows the symlink, so this describes the real
             # library frame rather than the link this run just made.
             stat_result = os.stat(frame_path)
-            if on_windows():
-                identity = f"{stat_result.st_dev}:{stat_result.st_ino}"
-            else:
+            if os.path.islink(frame_path):
                 identity = os.path.realpath(frame_path)
+            else:
+                identity = f"{stat_result.st_dev}:{stat_result.st_ino}"
             digest.update(identity.encode("utf-8"))
             digest.update(str(stat_result.st_size).encode("utf-8"))
             digest.update(str(int(stat_result.st_mtime)).encode("utf-8"))

@@ -128,6 +128,27 @@ export class BasePlatform {
   }
 
   /**
+   * Says how to start the backend and where its log is, for the "backend not running" dialog.
+   * The default is the Linux advice.
+   *
+   * @returns {string}
+   */
+  backendStartAdvice() {
+    return 'Start it with build/linux/run_backend.sh start ' +
+      '(check ~/.local/state/astrometrics/logs/run/backend.log if it stops), then retry.';
+  }
+
+  /**
+   * Says whether a click on the tray icon must open the menu by code. The default is yes
+   * (macOS and Windows); Linux shows the menu by itself.
+   *
+   * @returns {boolean}
+   */
+  needsTrayClickToOpenMenu() {
+    return true;
+  }
+
+  /**
    * Determines whether closing all application windows should quit the process.
    *
    * @returns {boolean}

@@ -162,10 +162,10 @@ def lock_is_free(root: Path) -> bool:
     free : `bool`
         `True` when nobody holds the lock.
     """
-    descriptor = acquire_world_lock(root)
-    if descriptor is None:
+    world_lock = acquire_world_lock(root)
+    if world_lock is None:
         return False
-    release_world_lock(descriptor)
+    release_world_lock(world_lock)
     return True
 
 
@@ -231,8 +231,8 @@ def test_simulated_choice_pins_the_backend_to_the_world(tmp_path: Path) -> None:
 def test_a_second_launcher_does_not_touch_a_locked_world(tmp_path: Path) -> None:
     """A held lock gives the locked exit code and changes nothing."""
     rig = Rig(tmp_path, "exit:0", SIMULATED)
-    descriptor = acquire_world_lock(rig.root)
-    assert descriptor is not None
+    world_lock = acquire_world_lock(rig.root)
+    assert world_lock is not None
     try:
         before = sorted(path.name for path in rig.root.iterdir())
         assert rig.launcher().run() == LOCKED_EXIT_CODE
@@ -240,14 +240,29 @@ def test_a_second_launcher_does_not_touch_a_locked_world(tmp_path: Path) -> None
         assert not rig.record.exists()
         assert sorted(path.name for path in rig.root.iterdir()) == before
     finally:
-        release_world_lock(descriptor)
+        release_world_lock(world_lock)
+
+
+def test_the_lock_holder_writes_its_process_number_and_removes_it_on_release(tmp_path: Path) -> None:
+    """The holder's process number is in launcher.pid while held."""
+    first_lock = acquire_world_lock(tmp_path)
+    assert first_lock is not None
+    try:
+        assert (tmp_path / launch.PROCESS_NUMBER_FILE_NAME).read_text().strip() == str(os.getpid())
+        # A second request, even from this process, is refused.
+        assert acquire_world_lock(tmp_path) is None
+        assert (tmp_path / launch.PROCESS_NUMBER_FILE_NAME).read_text().strip() == str(os.getpid())
+    finally:
+        release_world_lock(first_lock)
+    assert not (tmp_path / launch.PROCESS_NUMBER_FILE_NAME).exists()
+    assert lock_is_free(tmp_path)
 
 
 def test_a_second_process_is_refused_with_a_clear_message(tmp_path: Path) -> None:
     """A second process against a locked folder exits 73 and says why."""
     rig = Rig(tmp_path, "exit:0", SIMULATED)
-    descriptor = acquire_world_lock(rig.root)
-    assert descriptor is not None
+    world_lock = acquire_world_lock(rig.root)
+    assert world_lock is not None
     try:
         completed = subprocess.run(
             [sys.executable, "-m", "simulator.launch", "--root", str(rig.root), "--port", "59998"],
@@ -258,7 +273,7 @@ def test_a_second_process_is_refused_with_a_clear_message(tmp_path: Path) -> Non
             check=False,
         )
     finally:
-        release_world_lock(descriptor)
+        release_world_lock(world_lock)
     assert completed.returncode == LOCKED_EXIT_CODE
     assert "Another launcher holds the simulator folder" in completed.stderr
     assert sorted(path.name for path in rig.root.iterdir()) == ["launcher.lock"]

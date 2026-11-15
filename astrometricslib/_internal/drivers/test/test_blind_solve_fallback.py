@@ -32,9 +32,9 @@ def solver() -> AstrometryNetPlateSolveDriver:
 def image_path(tmp_path: Path) -> str:
     """Give an image file that exists, as the app's images always do.
 
-    The local solve links the image into a scratch folder first. A Linux
-    symbolic link may point at a missing file; a Windows hard link or copy
-    needs a real one.
+    The local solve stages the image into a scratch folder first. A symbolic
+    link may point at a missing file, but a hard link or copy needs a real
+    one, and the staging may fall back to either.
 
     Returns
     -------

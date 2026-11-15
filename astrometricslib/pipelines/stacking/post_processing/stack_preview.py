@@ -71,8 +71,8 @@ from astrometricslib._internal.drivers.siril_interface import siril_process_lock
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import NotFoundError, StorageError
 from astrometricslib.foundation.paths import siril_work_directory
-from astrometricslib.foundation.platform_tools import split_program_command
 from astrometricslib.foundation.run_abandonment import run_registered
+from astrometricslib.foundation.system import split_program_command
 from astrometricslib.pipelines.shared.image_scaling import AUTOSTRETCH_SHADOWS_CLIP_SIGMA
 from astrometricslib.pipelines.shared.stack_preview_path import (
     PREVIEW_JPEG_QUALITY,

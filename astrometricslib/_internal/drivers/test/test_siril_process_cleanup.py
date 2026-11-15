@@ -9,8 +9,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib._internal.drivers.siril_interface import session
+from astrometricslib._internal.drivers.siril_interface import _pipes_posix, session
 from astrometricslib._internal.drivers.siril_stacking_driver import SirilStackingDriver
+
+pytestmark = pytest.mark.linux_only("reads /proc and uses fuser, pgrep and SIGKILL")
 
 # A stand-in for Siril: it starts a sleeping helper (as flatpak and bwrap start
 # the real program), writes the helper's id to the file named by its first
@@ -83,7 +85,7 @@ def test_the_cleanup_kills_a_listed_process_but_not_this_program() -> None:
     """A listed process dies; this program, listed with it, lives."""
     other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:
-        session._kill_other_processes(["echo", f"{os.getpid()} {other.pid}"])
+        _pipes_posix._kill_other_processes(["echo", f"{os.getpid()} {other.pid}"])
         assert other.wait(timeout=10) == -9
     finally:
         other.kill()
@@ -94,9 +96,9 @@ def test_the_cleanup_really_spares_a_program_holding_the_pipe(tmp_path: Path) ->
     pipe = tmp_path / "siril_command.in"
     pipe.touch()
     script = (
-        "import sys; from astrometricslib._internal.drivers.siril_interface import session;"
+        "import sys; from astrometricslib._internal.drivers.siril_interface import _pipes_posix;"
         "held = open(sys.argv[1]);"
-        "session._kill_other_processes(['fuser', sys.argv[1]]);"
+        "_pipes_posix._kill_other_processes(['fuser', sys.argv[1]]);"
         "print('alive')"
     )
     done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] -- fixed argv

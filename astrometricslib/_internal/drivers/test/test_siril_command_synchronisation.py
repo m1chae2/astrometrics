@@ -29,6 +29,8 @@ from astrometricslib._internal.drivers import siril_interface
 from astrometricslib._internal.drivers.siril_interface import session
 from astrometricslib.foundation.errors import ExternalServiceError
 
+pytestmark = pytest.mark.linux_only("the pipes are FIFO files made with os.mkfifo")
+
 
 @pytest.fixture
 def processor(monkeypatch: pytest.MonkeyPatch) -> siril_interface.ImageProcessing:

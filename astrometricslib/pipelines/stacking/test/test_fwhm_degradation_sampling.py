@@ -5,23 +5,18 @@ nights is judged against all of them, and it compares the stack with the
 width its inputs predict.
 """
 
-import sys
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import numpy as np
 import pytest
+from astropy.io import fits
 
 from astrometricslib.models.quality.quality_summary import StackingPipelineQualityMetrics
 from astrometricslib.pipelines.stacking import fwhm_sampling
 
 MEASURE = "astrometricslib.pipelines.astrometry.pre_processing.fwhm.measure_image_fwhm"
-
-
-_SPAWNED_WORKERS_SKIP = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="Windows starts workers with spawn, which imports the real function, not the patched one",
-)
-"""Parallel tests patch the measurer; only forked workers inherit it."""
 
 
 @pytest.fixture(autouse=True)
@@ -133,52 +128,61 @@ def test_a_width_far_above_the_inputs_still_flags_the_stack() -> None:
     assert metrics.stacked_fwhm_px / metrics.expected_stack_fwhm_px > 1.2
 
 
-def fake_width_by_name(path: str) -> float | None:
-    """Give a width from the file name, for use in worker processes.
+def write_star_frame(path: Path, star_sigma_pixels: float, seed: int) -> str:
+    """Write a small frame of Gaussian stars on a noisy sky.
+
+    Worker processes start fresh ("spawn"), so they cannot see a patched
+    measurer; they read real files instead.
 
     Parameters
     ----------
-    path : `str`
-        A frame path; "bad" raises, "none" has no width.
+    path : `pathlib.Path`
+        Where to write the FITS file.
+    star_sigma_pixels : `float`
+        Width (standard deviation) of every star, in pixels.
+    seed : `int`
+        Seed of the random generator, so each frame is repeatable.
 
     Returns
     -------
-    width : `float` or `None`
-        The number in the name, or `None` for "none".
-
-    Raises
-    ------
-    ValueError
-        For the path "bad".
+    path_text : `str`
+        The path as text, as the sampling code takes it.
     """
-    if path == "bad":
-        raise ValueError("unreadable")
-    return None if path == "none" else float(path)
+    random_generator = np.random.default_rng(seed)
+    image = random_generator.normal(1000.0, 5.0, (400, 400))
+    rows, columns = np.mgrid[0:400, 0:400]
+    for _ in range(40):
+        star_x, star_y = random_generator.uniform(30, 370, 2)
+        squared_distance = (columns - star_x) ** 2 + (rows - star_y) ** 2
+        image += 3000.0 * np.exp(-squared_distance / (2.0 * star_sigma_pixels**2))
+    fits.PrimaryHDU(image.astype("float32")).writeto(path, overwrite=True)
+    return str(path)
 
 
-@_SPAWNED_WORKERS_SKIP
-def test_parallel_measurement_keeps_order_and_skips_failures() -> None:
-    """Worker processes give the same ordered widths as a serial loop."""
-    paths = ["1.5", "bad", "3.5", "none", "2.5", "4.5"]
-    with patch(MEASURE, side_effect=fake_width_by_name):
-        serial = fwhm_sampling._measure_sample_fwhms(paths, 1)
-        parallel = fwhm_sampling._measure_sample_fwhms(paths, 3)
-    assert serial == [1.5, None, 3.5, None, 2.5, 4.5]
+def test_parallel_measurement_keeps_order_and_skips_failures(tmp_path: Path) -> None:
+    """Spawned workers give the same ordered widths as a serial loop."""
+    good_paths = [
+        write_star_frame(tmp_path / f"frame_{index}.fits", 1.5 + index / 2, index) for index in range(3)
+    ]
+    paths = [good_paths[0], str(tmp_path / "missing.fits"), good_paths[1], good_paths[2]]
+    serial = fwhm_sampling._measure_sample_fwhms(paths, 1)
+    parallel = fwhm_sampling._measure_sample_fwhms(paths, 3)
+    assert serial[1] is None
+    assert serial[0] < serial[2] < serial[3]
     assert parallel == serial
 
 
-@_SPAWNED_WORKERS_SKIP
-def test_parallel_widths_give_the_same_summary_as_serial() -> None:
+def test_parallel_widths_give_the_same_summary_as_serial(tmp_path: Path) -> None:
     """The median and expected width do not depend on the worker count."""
-    frames = [SimpleNamespace(path=str(1 + index / 10)) for index in range(12)]
+    frames = [
+        SimpleNamespace(path=write_star_frame(tmp_path / f"frame_{index}.fits", 1.5 + index / 10, index))
+        for index in range(6)
+    ]
     results = []
-    for count in (1, 4):
+    for count in (1, 3):
         summary = make_summary()
-        with (
-            patch(MEASURE, side_effect=fake_width_by_name),
-            patch.object(fwhm_sampling, "_fwhm_worker_count", return_value=count),
-        ):
-            fwhm_sampling.measure_fwhm_degradation(summary, "stack.fits", frames, stacked_fwhm=1.5)
+        with patch.object(fwhm_sampling, "_fwhm_worker_count", return_value=count):
+            fwhm_sampling.measure_fwhm_degradation(summary, "stack.fits", frames, stacked_fwhm=3.5)
         metrics = summary.stacking_metrics
         results.append((metrics.median_input_fwhm_px, metrics.expected_stack_fwhm_px))
     assert results[0] == results[1]

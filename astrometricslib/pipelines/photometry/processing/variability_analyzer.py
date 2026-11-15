@@ -29,6 +29,7 @@ has it.
 
 import logging
 import math
+import multiprocessing
 import os
 import statistics
 from concurrent.futures import ProcessPoolExecutor
@@ -43,7 +44,6 @@ from scipy.stats import median_abs_deviation
 from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_header_and_data
 from astrometricslib.foundation.observatory_site import ObservatorySite
-from astrometricslib.foundation.platform_tools import worker_process_context
 from astrometricslib.models.quality.photometry_quality import InputQualityAssessment
 from astrometricslib.models.quality.quality_summary import ExcludedFrame, FrameEnsembleComposition
 from astrometricslib.models.stellar_source import (
@@ -1039,21 +1039,16 @@ class VariabilityAnalyzer:
                 for path in image_paths[1:]
             ]
 
-            # Explicit 'fork' context: Python 3.14 changed the default
-            # start method on Linux to 'forkserver', which re-imports the
-            # entry-point script in a fresh interpreter to bootstrap --
-            # that breaks when this module is reached via a script
-            # invoked as `python /path/to/script.py` rather than
-            # `python -m`, raising "attempt has been made to start a new
-            # process before the current process has finished its
-            # bootstrapping phase". 'fork' duplicates the already-running
-            # process instead, sidestepping that re-import entirely; it's
-            # safe here because none of the pool workers touch the
-            # SIMBAD/Gaia locks held by other threads in the parent.
-            # Windows has no 'fork' and uses 'spawn' (see
-            # `worker_process_context`).
+            # "spawn", never "fork": the backend runs many threads, and
+            # Python's documentation warns that forking a program with
+            # threads is unsafe (the child can inherit a lock that another
+            # thread held). The worker function is at module level and its
+            # arguments (paths, star lists, numbers and a `DetectorNoise`)
+            # can be sent to a fresh process. A script that reaches this
+            # pool needs an ``if __name__ == "__main__":`` guard, because
+            # "spawn" imports the script again in each worker.
             with ProcessPoolExecutor(
-                max_workers=max_workers, mp_context=worker_process_context()
+                max_workers=max_workers, mp_context=multiprocessing.get_context("spawn")
             ) as executor:
                 results = list(executor.map(_process_single_frame_worker, worker_arguments))
 

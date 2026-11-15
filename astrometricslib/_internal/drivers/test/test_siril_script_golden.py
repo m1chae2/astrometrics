@@ -334,15 +334,40 @@ def _run_case(name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dic
     })
 
 
-@pytest.mark.linux_only("the stored scripts are the Linux ones; Windows quotes its Siril paths")
+def _with_portable_paths(value: Any, work_root: str) -> Any:
+    """Write every path in a record the same way on Linux and Windows.
+
+    Parameters
+    ----------
+    value : `object`
+        A record, or one part of it (a `dict`, `list` or `str`).
+    work_root : `str`
+        The temporary work folder, which becomes ``<TMP>``.
+
+    Returns
+    -------
+    portable : `object`
+        The same structure, with the work folder replaced and every
+        backslash after it turned into ``/``.
+    """
+    if isinstance(value, dict):
+        return {key: _with_portable_paths(item, work_root) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_with_portable_paths(item, work_root) for item in value]
+    if isinstance(value, str) and work_root in value:
+        return value.replace(work_root, "<TMP>").replace("\\", "/")
+    return value
+
+
 @pytest.mark.parametrize("name", sorted(CASES))
 def test_process_target_matches_stored_scripts_and_records(
     name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The scripts, reader arguments and diagnostics equal the stored copy."""
     record = _run_case(name, tmp_path, monkeypatch)
-    # The work folder is a temporary path; compare with it replaced.
-    record = json.loads(json.dumps(record).replace(str(tmp_path), "<TMP>"))
+    # The work folder is a temporary path; compare with it replaced, and with
+    # Windows path separators written as "/", so one stored copy serves both.
+    record = _with_portable_paths(record, str(tmp_path))
     stored: dict[str, Any] = json.loads(GOLDEN_PATH.read_text()) if GOLDEN_PATH.exists() else {}
     if os.environ.get("UPDATE_SIRIL_GOLDEN") == "1":
         stored[name] = record

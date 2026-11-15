@@ -478,7 +478,7 @@ class AppConfiguration:
             "Image Library": {
                 # Empty means the user's data folder:
                 # ~/.local/share/astrometrics on Linux,
-                # %LOCALAPPDATA%\Astrometrics\Data on Windows.
+                # %LOCALAPPDATA%\astrometrics on Windows.
                 "path": "",
             },
             "Observatory.Telescope": {
@@ -1587,7 +1587,7 @@ class AppConfiguration:
 
         This is ``$XDG_DATA_HOME/astrometrics``. If ``XDG_DATA_HOME`` is
         unset, it is ``~/.local/share/astrometrics`` on Linux and
-        ``%LOCALAPPDATA%\Astrometrics\Data`` on Windows. The databases live
+        ``%LOCALAPPDATA%\astrometrics`` on Windows. The databases live
         here unless the configuration names another place.
 
         Returns
@@ -1603,7 +1603,7 @@ class AppConfiguration:
         The logs live in the user's state folder, not in the project folder:
         ``$XDG_STATE_HOME/astrometrics/logs``. If ``XDG_STATE_HOME`` is unset,
         ``~/.local/state/astrometrics/logs`` on Linux and
-        ``%LOCALAPPDATA%\Astrometrics\State\logs`` on Windows.
+        ``%LOCALAPPDATA%\astrometrics\logs`` on Windows.
 
         Returns
         -------

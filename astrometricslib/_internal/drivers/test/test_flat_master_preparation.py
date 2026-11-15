@@ -13,12 +13,12 @@ import pytest
 from astropy.io import fits
 
 from astrometricslib._internal.drivers import siril_interface
+from astrometricslib._internal.drivers.file_staging import stage_file
 from astrometricslib._internal.drivers.siril_interface import build_flat_master_commands
 from astrometricslib._internal.drivers.siril_interface.staging import (
     _calibration_source_fingerprint,
     _master_recipe,
 )
-from astrometricslib.foundation.platform_tools import stage_file
 from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import assess_flats
 
 SIZE = 96

@@ -57,7 +57,7 @@ function setup(overrides: Record<string, unknown> = {}) {
     focus: vi.fn(), webContents: { send: vi.fn() },
   };
   const deps = {
-    tray, Menu, getMainWindow: () => win, quit: vi.fn(), notify: vi.fn(), platform: 'linux',
+    tray, Menu, getMainWindow: () => win, quit: vi.fn(), notify: vi.fn(), needsClickToOpenMenu: false,
     log: { warn: vi.fn() }, fetchStatus: vi.fn().mockResolvedValue(TRACKING),
     park: vi.fn().mockResolvedValue({ ok: true }), ...overrides,
   };
@@ -283,7 +283,7 @@ describe('createTrayMenu', () => {
     const linux = setup();
     expect(linux.tray.on).not.toHaveBeenCalled();
     linux.controller.stop();
-    const mac = setup({ platform: 'darwin' });
+    const mac = setup({ needsClickToOpenMenu: true });
     expect(mac.tray.on).toHaveBeenCalledWith('click', expect.any(Function));
     mac.tray.on.mock.calls[0][1]();
     expect(mac.tray.popUpContextMenu).toHaveBeenCalled();

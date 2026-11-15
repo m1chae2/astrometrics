@@ -51,7 +51,7 @@ from pathlib import Path
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.offline import network_is_offline
 from astrometricslib.foundation.paths import locks_directory, scratch_directory
-from astrometricslib.foundation.storage.process_locks import lock_open_file
+from astrometricslib.foundation.storage.process_locks import file_lock
 
 logger = logging.getLogger(__name__)
 
@@ -403,10 +403,8 @@ def main(argv: list[str] | None = None) -> int:
     state_path = state_directory / STATE_FILE_NAME
     lock_path = Path(locks_directory()) / "library_upload.lock"
 
-    with open(lock_path, "w") as lock_file:
-        # Waits for another run to finish. `flock` on Linux, `msvcrt` on
-        # Windows; closing the file releases the lock.
-        lock_open_file(lock_file, blocking=True)
+    # Waits for another run to finish; leaving the block releases the lock.
+    with file_lock(str(lock_path), blocking=True):
         file_count = count_library_files(library_path)
         state = {} if arguments.accept_file_count else read_state(state_path)
         refusal = check_library_is_safe(library_path, file_count, state)

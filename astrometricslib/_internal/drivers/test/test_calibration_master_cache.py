@@ -9,9 +9,9 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from astrometricslib._internal.drivers import siril_interface
+from astrometricslib._internal.drivers.file_staging import stage_file
 from astrometricslib._internal.drivers.siril_interface import CALIBRATION_MASTER_CACHE_DIRECTORY_NAME
 from astrometricslib._internal.drivers.siril_interface.staging import _calibration_source_fingerprint
-from astrometricslib.foundation.platform_tools import stage_file
 
 
 def _make_processor(tmp_path: Path):  # ruff: ignore[missing-return-type-private-function]
@@ -32,8 +32,8 @@ def _make_processor(tmp_path: Path):  # ruff: ignore[missing-return-type-private
 def _stage_frames(target_folder: str, subdirectory: str, library_directory: str, count: int) -> str:
     """Stage `count` library frames into a staging folder, as the app does.
 
-    The frames are staged with `stage_file`: a symbolic link on Linux, a
-    hard link on Windows.
+    The frames are staged with `stage_file`: a symbolic link, or a hard link
+    or copy where the system allows no symbolic link.
 
     Skips writing a library frame that already has the expected content,
     rather than rewriting it unconditionally: `_calibration_source_fingerprint`
@@ -100,6 +100,41 @@ def test_fingerprint_changes_when_a_source_frame_is_modified(tmp_path: Path) -> 
     os.utime(edited, (1_800_000_000, 1_800_000_000))
 
     assert _calibration_source_fingerprint(staging) != fingerprint_before
+
+
+def test_fingerprint_follows_the_library_frame_through_a_hard_link(tmp_path: Path) -> None:
+    """A hard link keeps the library frame's identity; a copy does not."""
+    library = tmp_path / "library"
+    library.mkdir()
+    dark = library / "dark.fits"
+    dark.write_bytes(b"dark data")
+    first_run = tmp_path / "run1"
+    second_run = tmp_path / "run2"
+    copy_run = tmp_path / "run3"
+    for folder in (first_run, second_run, copy_run):
+        folder.mkdir()
+    os.link(dark, first_run / "dark_00001.fits")
+    os.link(dark, second_run / "dark_00001.fits")
+    (copy_run / "dark_00001.fits").write_bytes(dark.read_bytes())
+    os.utime(copy_run / "dark_00001.fits", (dark.stat().st_atime, dark.stat().st_mtime))
+
+    assert _calibration_source_fingerprint(str(first_run)) == _calibration_source_fingerprint(str(second_run))
+    assert _calibration_source_fingerprint(str(copy_run)) != _calibration_source_fingerprint(str(first_run))
+
+
+def test_fingerprint_follows_a_symbolic_link_to_the_library_frame(tmp_path: Path) -> None:
+    """Two symbolic links to one library frame give one fingerprint."""
+    library = tmp_path / "library"
+    library.mkdir()
+    dark = library / "dark.fits"
+    dark.write_bytes(b"dark data")
+    fingerprints = []
+    for name in ("run1", "run2"):
+        folder = tmp_path / name
+        folder.mkdir()
+        os.symlink(dark, folder / "dark_00001.fits")
+        fingerprints.append(_calibration_source_fingerprint(str(folder)))
+    assert fingerprints[0] == fingerprints[1]
 
 
 def test_empty_directory_has_no_fingerprint(tmp_path: Path) -> None:

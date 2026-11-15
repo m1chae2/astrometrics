@@ -10,7 +10,7 @@ and, with ``backup_path``, a copy off the computer.
 Where the copies go: ``--backup-root`` if given, else ``backup_path`` in the
 ``[Image Library]`` settings (for example a Google Drive folder), else the
 local backup folder (``~/.cache/astrometrics/backup`` on Linux,
-``%LOCALAPPDATA%\Astrometrics\Cache\backup`` on Windows). Each copy is made
+``%LOCALAPPDATA%\astrometrics\Cache\backup`` on Windows). Each copy is made
 in the local backup folder first and moved to its destination only when
 complete, so a sync program never uploads a half-written database. This
 script itself uploads nothing; a sync program such as Google Drive does. It
@@ -40,12 +40,12 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import IO
+
+import filelock
 
 from astrometricslib._internal.drivers.local_database import snapshot_sqlite_database
 from astrometricslib.foundation.launch_identity import read_launch_identity
 from astrometricslib.foundation.paths import backup_directory, data_directory
-from astrometricslib.foundation.storage.process_locks import lock_open_file, unlock_open_file
 
 logger = logging.getLogger(__name__)
 
@@ -258,11 +258,11 @@ def publish_snapshot(staged_folder: Path, destination_root: Path, snapshot_name:
     return snapshot_folder
 
 
-def acquire_lock(lock_path: Path) -> IO[str] | None:
+def acquire_lock(lock_path: Path) -> filelock.FileLock | None:
     """Take the exclusive lock that allows only one backup at a time.
 
-    The lock is released when the returned file is closed or the process
-    ends, even if it crashes.
+    The lock is released by `release_lock` or when the process ends, even if
+    it crashes. It does not wait: a second backup gives up at once.
 
     Parameters
     ----------
@@ -271,32 +271,27 @@ def acquire_lock(lock_path: Path) -> IO[str] | None:
 
     Returns
     -------
-    lock_file : `typing.IO` or `None`
-        The open lock file (keep it open while backing up), or `None` if
-        another backup already holds the lock.
+    lock : `filelock.FileLock` or `None`
+        The held lock (keep it while backing up), or `None` if another
+        backup already holds the lock.
     """
-    lock_file = open(lock_path, "w")
+    lock = filelock.FileLock(str(lock_path), timeout=0)
     try:
-        # `flock` on Linux, `msvcrt` on Windows.
-        lock_open_file(lock_file, blocking=False)
-    except OSError:
-        lock_file.close()
+        lock.acquire()
+    except filelock.Timeout:
         return None
-    return lock_file
+    return lock
 
 
-def release_lock(lock_file: IO[str]) -> None:
-    """Release the lock taken by `acquire_lock` and close its file.
+def release_lock(lock: filelock.FileLock) -> None:
+    """Release the lock taken by `acquire_lock`.
 
     Parameters
     ----------
-    lock_file : `typing.IO`
-        The file `acquire_lock` returned.
+    lock : `filelock.FileLock`
+        The lock `acquire_lock` returned.
     """
-    try:
-        unlock_open_file(lock_file)
-    finally:
-        lock_file.close()
+    lock.release()
 
 
 def read_state(state_path: Path) -> dict:
@@ -419,8 +414,8 @@ def main(argv: list[str] | None = None) -> int:
     except OSError:
         logger.exception("Cannot reach the backup folder %s", backup_root)
         return 1
-    lock_file = acquire_lock(work_root / LOCK_FILE_NAME)
-    if lock_file is None:
+    lock = acquire_lock(work_root / LOCK_FILE_NAME)
+    if lock is None:
         logger.info("Another backup is already running; exiting")
         return 0
     try:
@@ -470,7 +465,7 @@ def main(argv: list[str] | None = None) -> int:
         apply_retention(backup_root, snapshot_name, dry_run)
         return 0
     finally:
-        release_lock(lock_file)
+        release_lock(lock)
 
 
 if __name__ == "__main__":

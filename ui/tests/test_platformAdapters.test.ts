@@ -57,9 +57,22 @@ describe('Electron Platform Adapters', () => {
       const mockApp = { getPath: vi.fn(() => 'C:/Users/u') } as any;
 
       const logPath = platform.configureLogging(mockApp, mockLog);
-      expect(logPath).toBe(path.join('C:/Users/u/AppData/Local', 'Astrometrics', 'State', 'logs', 'main.log'));
+      expect(logPath).toBe(path.join('C:/Users/u/AppData/Local', 'Astrometrics', 'logs', 'main.log'));
       expect(mockLog.transports.file.resolvePathFn()).toBe(logPath);
       vi.unstubAllEnvs();
+    });
+
+    /** Verifies the advice names the Windows launcher and the Windows log folder */
+    it('gives Windows advice for a backend that is not running', () => {
+      const advice = platform.backendStartAdvice();
+      expect(advice).toContain('run_astrometrics.ps1');
+      expect(advice).toContain('%LOCALAPPDATA%\\Astrometrics');
+      expect(advice).not.toContain('State');
+    });
+
+    /** Verifies a tray click must open the menu by code on Windows */
+    it('needs a tray click to open the menu', () => {
+      expect(platform.needsTrayClickToOpenMenu()).toBe(true);
     });
 
     /** Verifies Windows user tasks (Jump List) registration */
@@ -295,6 +308,15 @@ describe('Electron Platform Adapters', () => {
       expect(resumeResult).toBe(true);
       expect(mockExec).toHaveBeenCalledWith('pkill -CONT -f siril-cli || true', expect.any(Function));
       expect(mockExec).toHaveBeenCalledWith('pkill -CONT -f solve-field || true', expect.any(Function));
+    });
+  });
+
+  describe('Linux tray and advice', () => {
+    /** Verifies Linux shows the tray menu by itself and gives the Linux start advice */
+    it('needs no tray click code and points to run_backend.sh', () => {
+      const linux = new LinuxPlatform();
+      expect(linux.needsTrayClickToOpenMenu()).toBe(false);
+      expect(linux.backendStartAdvice()).toContain('build/linux/run_backend.sh start');
     });
   });
 

@@ -42,7 +42,7 @@ import psutil
 
 from astrometricslib.foundation.jobs import JOB_LOG_PACKAGES
 from astrometricslib.foundation.logging import configure_logging, get_job_log_router, log_context
-from astrometricslib.foundation.platform_tools import lower_process_priority
+from astrometricslib.foundation.system import lower_process_priority
 
 logger = logging.getLogger(__name__)
 

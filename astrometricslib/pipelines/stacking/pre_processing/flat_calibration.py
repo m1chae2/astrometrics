@@ -26,7 +26,6 @@ Colour (Bayer) sensors are measured but not smoothed, because blurring the
 mosaic would mix the colour channels.
 """
 
-import contextlib
 import logging
 import math
 import os
@@ -37,7 +36,6 @@ import numpy as np
 from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import NotFoundError, StorageError
-from astrometricslib.foundation.platform_tools import on_windows
 
 logger = logging.getLogger(__name__)
 
@@ -283,9 +281,9 @@ def _unique_files(paths: list[str]) -> list[str]:
     Parameters
     ----------
     paths : `list` [`str`]
-        Frame paths. Symbolic links count as the file they point to. On
-        Windows, where staged frames are hard links (the same file under a
-        second name), names of one file count once too.
+        Frame paths. Symbolic links count as the file they point to, and so
+        do hard links (the same file under a second name): each file counts
+        once, however many names it has.
 
     Returns
     -------
@@ -295,11 +293,11 @@ def _unique_files(paths: list[str]) -> list[str]:
     seen: set[object] = set()
     unique = []
     for path in paths:
-        identity: object = os.path.realpath(path)
-        if on_windows():
-            with contextlib.suppress(OSError):
-                status = os.stat(path)
-                identity = (status.st_dev, status.st_ino)
+        try:
+            status = os.stat(path)
+            identity: object = (status.st_dev, status.st_ino)
+        except OSError:
+            identity = os.path.realpath(path)
         if identity not in seen:
             seen.add(identity)
             unique.append(path)

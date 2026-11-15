@@ -37,12 +37,12 @@ from astropy.table import Table
 from astroquery.astrometry_net import AstrometryNet
 from astroquery.exceptions import TimeoutError as AstroqueryTimeoutError
 
+from astrometricslib._internal.drivers.file_staging import stage_file
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
 from astrometricslib._internal.drivers.interfaces.plate_solve_driver import PlateSolveDriver, PlateSolveHeader
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
 from astrometricslib.foundation.offline import OfflineModeError, require_online
 from astrometricslib.foundation.paths import scratch_directory
-from astrometricslib.foundation.platform_tools import stage_file
 from astrometricslib.foundation.run_abandonment import run_registered
 from astrometricslib.foundation.run_tally import RunTally, add_to_bound_tally, bind_tally
 
@@ -411,8 +411,8 @@ class AstrometryNetPlateSolveDriver(PlateSolveDriver):
                 original_path = os.path.abspath(os.path.expanduser(image_path))
                 # Put the image in the temp dir under a plain name, which keeps
                 # the output files isolated and avoids spaces in the path:
-                # a symlink on Linux, a hard link or copy on Windows, which
-                # allows symlinks only in Developer Mode (`stage_file`).
+                # a symbolic link, a hard link or a copy, whichever the system
+                # allows (`stage_file`).
                 working_path = os.path.join(tmp_dir, "input_image.fits")
                 stage_file(original_path, working_path)
 

@@ -8,7 +8,8 @@ file whose checksum does not match is refused and deleted, that a zip holding
 a path outside its folder is refused, that Linux refuses, and that the setup
 script keeps a program the user installed, moves its own older copy to the
 pinned release, and goes on to the next program when one fails. The system
-is chosen by patching ``on_windows``.
+is a feature switch, not a system check: the tests patch ``on_windows`` to run
+the Windows-only setup on any system.
 """
 
 import contextlib
@@ -20,7 +21,6 @@ from pathlib import Path
 import pytest
 
 from astrometricslib._internal.drivers import program_setup
-from astrometricslib.foundation import platform_tools
 from astrometricslib.foundation.errors import ConfigurationError, ExternalServiceError
 from astrometricslib.scripts import set_up_programs as setup_script
 
@@ -268,7 +268,6 @@ def windows_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     data = tmp_path / "data"
     data.mkdir()
     monkeypatch.setattr(setup_script, "on_windows", lambda: True)
-    monkeypatch.setattr(platform_tools, "on_windows", lambda: True)
     monkeypatch.setattr(program_setup, "data_directory", lambda: str(data))
     return data
 
@@ -277,7 +276,7 @@ def test_the_script_keeps_programs_the_settings_already_name(
     windows_script: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Someone with their own Siril and GraXpert keeps them."""
-    own = tmp_path / "My Tools"
+    own = tmp_path / "own_tools"
     own.mkdir()
     (own / "siril-cli.exe").write_bytes(b"")
     (own / "GraXpert.exe").write_bytes(b"")

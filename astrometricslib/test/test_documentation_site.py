@@ -1,7 +1,8 @@
 """Purpose: Keep the documentation site's navigation simple and consistent.
 
 Description: The Sphinx site under ``documentation/`` is organized into seven
-sections (``documentation/Documentation_Conventions.md``, Section 1.1). The
+sections (``.claude/skills/documentation-style/CONVENTIONS.md``,
+Section 1.1). The
 root page lists only the section pages, and each section page lists its own
 pages. These tests check, from the source files alone:
 

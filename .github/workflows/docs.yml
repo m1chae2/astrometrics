@@ -59,7 +59,7 @@ jobs:
         run: pip install vale==3.22.0.0
 
       - name: Lint Documentation
-        # Rules: documentation/Documentation_Conventions.md, .vale.ini,
+        # Rules: .claude/skills/documentation-style/CONVENTIONS.md, .vale.ini,
         # .markdownlint-cli2.jsonc and build/documentation/vale/styles/.
         run: bash build/documentation/lint_docs.sh
 

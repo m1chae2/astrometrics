@@ -57,7 +57,7 @@ repos:
       - id: documentation-lint
         name: Documentation Lint (Vale and markdownlint)
         # Spelling, terms, units, status labels and Markdown mechanics; see
-        # documentation/Documentation_Conventions.md. Needs vale
+        # .claude/skills/documentation-style/CONVENTIONS.md. Needs vale
         # (.venv/bin/pip install vale) and Node.js for markdownlint-cli2.
         entry: build/documentation/lint_docs.sh
         language: system

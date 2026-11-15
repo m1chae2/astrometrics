@@ -1,6 +1,7 @@
 """Purpose: Hold the register to the rule that automatic values are measured.
 
-Description: ``documentation/Documentation_Conventions.md`` Section 2 says a
+Description: ``.claude/skills/documentation-style/CONVENTIONS.md``
+Section 2 says a
 setting the software acts on with no person checking (an automatic role, see
 ``validation/index.md`` Section 2.2) needs a Measured register entry. Most
 automatic settings are not measured yet, so they are listed in
@@ -70,7 +71,7 @@ def test_every_unmeasured_automatic_setting_is_on_the_allow_list(
     assert not new, (
         "These automatic settings have no Measured register entry. Measure them before they act on data, "
         "or mark them advisory if a person reads them before anything happens "
-        f"(Documentation_Conventions.md, Section 2): {new}"
+        f"(.claude/skills/documentation-style/CONVENTIONS.md, Section 2): {new}"
     )
 
 

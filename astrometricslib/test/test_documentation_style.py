@@ -1,6 +1,6 @@
 r"""Purpose: Enforce the layout and linking rules of the library documentation.
 
-Description: ``documentation/Documentation_Conventions.md`` sets how the
+Description: ``.claude/skills/documentation-style/CONVENTIONS.md`` sets how the
 library's documents are laid out and linked. These tests check the rules a
 script can check exactly:
 
@@ -168,7 +168,7 @@ def test_readme_has_glossary_line_and_code_pointer(path: Path) -> None:
     """Every library README links the glossary and points back to the code."""
     text = path.read_text(encoding="utf-8")
     assert "Glossary.md" in text and GLOSSARY_SENTENCE in text, (
-        f"{path.relative_to(REPO_ROOT)} lacks the glossary line (Documentation_Conventions.md §6.5)"
+        f"{path.relative_to(REPO_ROOT)} lacks the glossary line (documentation conventions §6.5)"
     )
     last_line = text.rstrip().splitlines()[-1].strip()
     assert last_line == CODE_POINTER, (
@@ -263,7 +263,7 @@ def test_readme_register_links_carry_a_status_label() -> None:
                 problems.append(f"{path.relative_to(REPO_ROOT)}:{line}: {match.group(0)[:70]}")
     assert not problems, (
         "Each link into the validation register sits in a parenthesis with its status label, as in "
-        "'(partly measured; see [STK-08](...))' (Documentation_Conventions.md §2): " + "; ".join(problems)
+        "'(partly measured; see [STK-08](...))' (documentation conventions §2): " + "; ".join(problems)
     )
 
 
@@ -361,12 +361,18 @@ def test_relative_links_and_anchors_resolve() -> None:
 
 @pytest.mark.parametrize("skill", ["documentation-style", "code-documentation-style", "answer-from-docs"])
 def test_agent_skill_copies_match(skill: str) -> None:
-    """The ``.agent`` copy of each shared skill equals the ``.claude`` copy."""
-    original = REPO_ROOT / ".claude" / "skills" / skill / "SKILL.md"
-    copy = REPO_ROOT / ".agent" / "skills" / skill / "SKILL.md"
-    assert copy.read_bytes() == original.read_bytes(), (
-        f"{copy.relative_to(REPO_ROOT)} differs from {original.relative_to(REPO_ROOT)}; copy it over"
+    """Each shared skill's ``.agent`` files equal its ``.claude`` files."""
+    original_dir = REPO_ROOT / ".claude" / "skills" / skill
+    copy_dir = REPO_ROOT / ".agent" / "skills" / skill
+    names = sorted(path.name for path in original_dir.glob("*.md"))
+    assert names == sorted(path.name for path in copy_dir.glob("*.md")), (
+        f"{copy_dir.relative_to(REPO_ROOT)} and {original_dir.relative_to(REPO_ROOT)} hold different files"
     )
+    for name in names:
+        original, copy = original_dir / name, copy_dir / name
+        assert copy.read_bytes() == original.read_bytes(), (
+            f"{copy.relative_to(REPO_ROOT)} differs from {original.relative_to(REPO_ROOT)}; copy it over"
+        )
 
 
 DISPLAY_MATH = re.compile(r"^[ \t]*\$\$\n(.*?)^[ \t]*\$\$", re.MULTILINE | re.DOTALL)

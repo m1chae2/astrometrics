@@ -1,10 +1,10 @@
 # Documentation conventions
 
-*Version 1.3 · 2026-11-15 · Status: current*
+*Version 1.4 · 2026-11-15 · Status: current*
 
 ## Abstract
 
-This page is the single reference for how the Astrometrics documentation is organized and written. It covers where each kind of content lives, the layout of each document type, and the spelling, terms, units and Markdown rules. The two style skills used by AI assistants (`.claude/skills/documentation-style/` and `.claude/skills/code-documentation-style/`) summarize this page and point back to it. Tests and linters enforce most of the rules; Section 9 lists which.
+This file, kept with the `documentation-style` skill for AI assistants, is the single reference for how the Astrometrics documentation is organized and written. It covers where each kind of content lives, the layout of each document type, and the spelling, terms, units and Markdown rules. The two style skills (`.claude/skills/documentation-style/` and `.claude/skills/code-documentation-style/`) summarize it and point back to it. Tests and linters enforce most of the rules; Section 9 lists which.
 
 ## 1. Where content lives
 

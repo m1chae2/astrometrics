@@ -4,7 +4,7 @@
 
 ## Abstract
 
-This page maps the Astrometrics documentation. It lists each document, what kind it is, who it is for, whether it is written by hand or generated, and what checks it. The kinds follow the four-part split of tutorial, how-to guide, reference and explanation, plus an evidence kind for measured results. The rules for writing and placing content are in [Documentation conventions](Documentation_Conventions.md).
+This page maps the Astrometrics documentation. It lists each document, what kind it is, who it is for, whether it is written by hand or generated, and what checks it. The kinds follow the four-part split of tutorial, how-to guide, reference and explanation, plus an evidence kind for measured results.
 
 Terms are defined in the [glossary](Glossary.md). This document also defines each term the first time it appears.
 
@@ -54,7 +54,6 @@ The site has seven sections, one per kind of document plus a section about the d
 | [Astrometrics library implementation](library_design/Astrometrics_Library_Implementation.md) | Reference | Developers and reviewers | Hand-written | `test_architecture_doc_claims.py` |
 | [Wayfinding library implementation](library_design/Wayfinding_Library_Implementation.md) | Reference | Developers and reviewers | Hand-written | `wayfindinglib/test/test_documentation_papers.py` |
 | [Validation register](library_design/validation/index.md) | Evidence | Reviewers and anyone tuning the tool | Hand-written | `test_validation_register.py`, `test_documentation_rules.py` |
-| [Documentation conventions](Documentation_Conventions.md) | About the docs (reference) | Contributors | Hand-written | Docs build, Vale, markdownlint |
 
 The PDF download on Read the Docs holds the papers only: the two architecture papers, the two implementation papers, and the Wayfinding quality judgment paper, starting from `papers.rst`; the rest of the site is meant to be searched online. The site's layout itself is checked by `test_documentation_site.py`: every page has one place in the navigation and one name. The Wayfinding library has no validation register yet, so its settings are design choices that have not been measured.
 
@@ -64,4 +63,4 @@ AI coding agents start from [`llms.txt`](https://github.com/m1chae2/astrometrics
 
 ## 4. Editing rules
 
-Generated files are never edited by hand. Edit the generator in `build/documentation/` and run it again. Hand-written files follow [Documentation conventions](Documentation_Conventions.md). The steps for common changes are in the [how-to guides](how_to/index.md), and [Contributing](https://github.com/m1chae2/astrometrics/blob/main/CONTRIBUTING.md#documentation) lists the checks to run before a commit.
+Generated files are never edited by hand. Edit the generator in `build/documentation/` and run it again. Hand-written files follow rules that the documentation tests and linters enforce. The steps for common changes are in the [how-to guides](how_to/index.md), and [Contributing](https://github.com/m1chae2/astrometrics/blob/main/CONTRIBUTING.md#documentation) lists the checks to run before a commit.

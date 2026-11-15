@@ -2,13 +2,13 @@
 
 > A desktop app and two Python libraries for astrophotography, photometry, spectroscopy and observatory control. astrometricslib turns telescope frames into measurements; wayfindinglib plans, runs and protects an observing night. This file maps each topic to the documents that explain it and the code that implements it. Read the documents first to learn what something is meant to do and where it lives, then confirm in the code. When a document and the code disagree, the code is the current behavior: say so and treat the document as needing a fix.
 
-Paths are relative to the repository root. Theory is in the architecture papers, code names and tuned values in the implementation papers, and evidence in the validation register (documentation/Documentation_Conventions.md, Section 1). Terms are in documentation/Glossary.md.
+Paths are relative to the repository root. Theory is in the architecture papers, code names and tuned values in the implementation papers, and evidence in the validation register (.claude/skills/documentation-style/CONVENTIONS.md, Section 1). Terms are in documentation/Glossary.md.
 
 ## Start here
 
 - [Application overview](documentation/explanation.md): how the application fits together, seen as data models, algorithms and workflows.
 - [About these docs](documentation/About_These_Docs.md): the map of every document, its kind and what checks it.
-- [Documentation conventions](documentation/Documentation_Conventions.md): where each kind of content lives and the rules the documents follow.
+- [Documentation conventions](.claude/skills/documentation-style/CONVENTIONS.md): where each kind of content lives and the rules the documents follow.
 - [Glossary](documentation/Glossary.md): definitions of the terms used everywhere.
 - [Installation](documentation/Installation.md): setting up the app and its environment.
 - [Library quick start](documentation/how_to/library_quick_start.md): a first call to the Python library.

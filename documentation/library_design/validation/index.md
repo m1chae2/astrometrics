@@ -75,7 +75,7 @@ Three facts say how much a setting matters and when it needs checking again. The
 - `automatic (shapes results)`: the value changes the numbers or images the software produces, such as a rejection limit, an aperture size or a fit window.
 - `advisory`: the value only changes advice a person reads before acting, such as a recommendation, a warning, a ranking or a suggested number.
 
-A setting with more than one automatic use takes the role with the largest effect, in the order of the list. An automatic value needs a Measured entry ([Documentation conventions](../../Documentation_Conventions.md), Section 2). An advisory value may stay Partly measured or Design estimate, because a person sees it before anything happens.
+A setting with more than one automatic use takes the role with the largest effect, in the order of the list. An automatic value needs a Measured entry. An advisory value may stay Partly measured or Design estimate, because a person sees it before anything happens.
 
 **Source.** Where the number the software acts on comes from.
 

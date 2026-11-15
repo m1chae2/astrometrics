@@ -14,7 +14,7 @@ nor one of the first two lists.
   entry that may already cover the value. The backlog only shrinks.
 
 A third list holds the register side of the rule that automatic values are measured
-(`Documentation_Conventions.md`, Section 2):
+(`.claude/skills/documentation-style/CONVENTIONS.md`, Section 2):
 
 - `automatic_not_measured.csv` (`register,id,setting,role,status`): register settings and
   design-estimate rows with an automatic role whose entry is not Measured.

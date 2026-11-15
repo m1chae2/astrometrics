@@ -1,4 +1,4 @@
-# Documentation_Conventions.md §7: rewrite any sentence over 40 words.
+# .claude/skills/documentation-style/CONVENTIONS.md §7: rewrite any sentence over 40 words.
 extends: occurrence
 message: "Sentence longer than 40 words; split it."
 level: warning

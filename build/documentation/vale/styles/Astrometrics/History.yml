@@ -1,4 +1,4 @@
-# Documentation_Conventions.md §7: state current behavior, not its history.
+# .claude/skills/documentation-style/CONVENTIONS.md §7: state current behavior, not its history.
 extends: existence
 message: "'%s' narrates history. State the current behavior and its reason."
 level: warning

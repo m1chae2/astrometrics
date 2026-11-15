@@ -1,8 +1,9 @@
 r"""Purpose: Keep the mathematical notation of the review guides consistent.
 
 Description: The architecture paper's Appendix A is the one list of symbols
-for the documentation set (``documentation/Documentation_Conventions.md``,
-Section 6.4). Each pipeline review guide restates some of the paper's
+for the documentation set
+(``.claude/skills/documentation-style/CONVENTIONS.md``, Section 6.4).
+Each pipeline review guide restates some of the paper's
 equations and adds symbols of its own, which it lists in a "Notation"
 subsection generated from ``GUIDE_NOTATION`` in
 ``build/documentation/generate_pipeline_review_docs.py``. These tests check:

@@ -202,10 +202,10 @@ def test_the_result_turns_into_plain_data_for_a_json_file() -> None:
 def test_the_kept_radius_is_inside_the_apertures_clearance() -> None:
     """No real pixel can lie in an empty aperture."""
     from astrometricslib.pipelines.stacking.post_processing.aperture_placement import (
-        FAINT_SOURCE_CLEARANCE_PX,
+        faint_source_clearance_px,
     )
 
-    assert KEEP_RADIUS_PX.default < FAINT_SOURCE_CLEARANCE_PX
+    assert KEEP_RADIUS_PX.reference_value < faint_source_clearance_px()
 
 
 def test_the_whole_flow_stacks_two_halves_and_the_whole_and_leaves_no_trace(

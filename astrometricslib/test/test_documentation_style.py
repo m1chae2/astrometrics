@@ -290,7 +290,9 @@ def test_register_values_match_the_code() -> None:
                 continue
             live = _resolve(dotted)
             if isinstance(live, TunedParameter):
-                live = live.default
+                # A value that follows a basis is written as a factor; the
+                # register states its value on the reference setup.
+                live = live.reference_value if live.basis is not None else live.default
             if not isinstance(live, (int, float)) or isinstance(live, bool):
                 continue
             checked += 1

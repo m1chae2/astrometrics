@@ -24,7 +24,6 @@ import numpy as np
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.tuned_parameter import (
-    EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
@@ -51,10 +50,9 @@ MINIMUM_TEMPERATURE_SPAN_FOR_TREND_C = TunedParameter(
     unit="deg C",
     description="Smallest temperature change that makes a fitted width slope meaningful.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="WAY-D143",
-    pending_conversion=True,
 )
 
 

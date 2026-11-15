@@ -38,7 +38,6 @@ from typing import Any
 import numpy as np
 
 from astrometricslib.parameters import (
-    EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
@@ -55,10 +54,9 @@ LOST_STAR_CYCLES = TunedParameter(
     unit="× guide cycle",
     description="A gap longer than this many guide cycles means the star was lost.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.MOUNT}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="WAY-D135",
-    pending_conversion=True,
 )
 """A gap longer than this many guide cycles means the star was lost.
 
@@ -87,10 +85,9 @@ _STRIDE_FRACTION = TunedParameter(
     unit="× exposure length",
     description="Start times are tried every this fraction of the exposure length.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.MOUNT}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="WAY-D135",
-    pending_conversion=True,
 )
 """Start times are tried every this fraction of the exposure length."""
 
@@ -100,10 +97,9 @@ _MINIMUM_WINDOWS = TunedParameter(
     unit="windows per exposure length",
     description="Fewest windows for a length to be reported.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.MOUNT}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="WAY-D135",
-    pending_conversion=True,
 )
 """Fewest windows for a length to be reported. Fewer would be a few exposures'
 worth of night."""

@@ -24,6 +24,7 @@ from astrometricslib.foundation.camera_names import normalize_camera_name
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
     TunedParameter,
@@ -50,10 +51,9 @@ STAR_NEIGHBOUR_FRACTION = TunedParameter(
     unit="fraction",
     description="Fraction of the way from sky to peak that the four neighbors must reach for a real star.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D60",
-    pending_conversion=True,
 )
 
 # When the brightest star is clipped, its peak is estimated from the unclipped
@@ -70,10 +70,9 @@ MOFFAT_BETA = TunedParameter(
     unit="none",
     description="Shape exponent of the star profile used to estimate the peak of a clipped star.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D60",
-    pending_conversion=True,
 )
 
 # FWHM in pixels of the stars in these stacks: 2.8 to 3.8 (2026 ASI533
@@ -203,10 +202,9 @@ CORE_RING_OFFSET_PIXELS = TunedParameter(
     unit="pixels",
     description="Distance outside the clipped core at which pixels are used for the peak estimate.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D60",
-    pending_conversion=True,
 )
 CORE_RING_WIDTH_PIXELS = TunedParameter(
     name="stacking.core_ring_width_pixels",
@@ -214,10 +212,9 @@ CORE_RING_WIDTH_PIXELS = TunedParameter(
     unit="pixels",
     description="Width of the band of pixels used for the peak estimate.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D60",
-    pending_conversion=True,
 )
 
 

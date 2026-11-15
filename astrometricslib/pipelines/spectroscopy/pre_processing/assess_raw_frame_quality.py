@@ -25,6 +25,7 @@ from collections.abc import Mapping, Sequence
 import numpy as np
 
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.quality.spectroscopy_quality import (
     StageQualityCheckpoint,
     StageQualityMetric,
@@ -34,6 +35,7 @@ from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.quality.saturation import DEFAULT_SATURATION_FLAG_THRESHOLD
@@ -54,10 +56,13 @@ STAGE = "raw_frame"
 # resolution element of this setup at 5000 A, which is about 40 A (35 to
 # 48 A measured on Vega; see `spectral_resolution`). A spread of 20 A moves
 # a line by half of what the instrument can tell apart.
+# It stands for about half a resolution element (20 on the reference setup,
+# 0.46 × the spectral resolution), so it follows the spectral resolution the
+# run measures.
 DAR_ALONG_DISPERSION_LIMIT_ANGSTROM = TunedParameter(
     name="spectroscopy.dar_along_dispersion_limit_angstrom",
-    default=20.0,
-    unit="× resolution",
+    default=factor_for(20.0, RunBasis.SPECTRAL_RESOLUTION_ANGSTROM),
+    unit="× spectral resolution",
     description=(
         "The largest refraction wavelength error between the blue and red ends accepted without a flag."
     ),
@@ -65,7 +70,8 @@ DAR_ALONG_DISPERSION_LIMIT_ANGSTROM = TunedParameter(
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D05",
-    pending_conversion=True,
+    basis=RunBasis.SPECTRAL_RESOLUTION_ANGSTROM,
+    reference_value=20.0,
 )
 
 

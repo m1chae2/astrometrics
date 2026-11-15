@@ -386,6 +386,8 @@ def resolve(
     ParameterUnavailableError
         If the value is missing and the parameter must refuse.
     """
+    if parameter.source is ParameterSource.DETERMINED_EACH_RUN and parameter.basis is not None:
+        return _resolve_with_basis(parameter)
     if parameter.source in (ParameterSource.HARDCODED, ParameterSource.DETERMINED_EACH_RUN):
         return ResolvedValue(name=parameter.name, value=parameter.default, origin=parameter.source)
     if parameter.pending_conversion:
@@ -412,6 +414,41 @@ def resolve(
         context.note(notice)
         warn_once(logger, notice)
     return ResolvedValue(name=parameter.name, value=parameter.default, origin="default", notice=notice)
+
+
+def _resolve_with_basis(parameter: TunedParameter) -> ResolvedValue:
+    """Give factor × basis for a value that is determined each run.
+
+    The basis is the one the run measured, else the setup's. When neither is
+    known, the reference value (the value on the reference setup) stands in,
+    with a notice.
+
+    Parameters
+    ----------
+    parameter : `TunedParameter`
+        A declaration with a basis.
+
+    Returns
+    -------
+    resolved : `ResolvedValue`
+        The value and its origin.
+    """
+    from astrometricslib.foundation.run_bases import scale_by_basis
+
+    context = current_parameter_context() or default_parameter_context()
+    basis = parameter.basis
+    basis_value = context.basis_value(basis) if basis is not None else None
+    if basis_value is not None:
+        return ResolvedValue(
+            name=parameter.name, value=scale_by_basis(parameter, basis_value), origin=parameter.source
+        )
+    # The model requires a reference value with a basis; the default is a
+    # last resort that cannot be reached for a valid declaration.
+    reference = parameter.reference_value if parameter.reference_value is not None else parameter.default
+    notice = f"{parameter.name}: no {basis} is known; using the reference-setup value {reference}"
+    context.note(notice)
+    warn_once(logger, notice)
+    return ResolvedValue(name=parameter.name, value=reference, origin="default", notice=notice)
 
 
 def _format_default(parameter: TunedParameter) -> str:

@@ -1205,6 +1205,7 @@ class ProcessingPipelines:
         plan_only: bool = False,
         kind: StackKind = "imaging",
         camera_id: str | None = None,
+        focal_length_mm: float | None = None,
         force: bool = False,
         denoise: bool | None = None,
         denoise_strength: float | None = None,
@@ -1224,7 +1225,8 @@ class ProcessingPipelines:
         it sets aside bad frames, stacks, trims the noisy edges, records the
         quality summary and the preview, and saves the target. Imaging and
         spectroscopy frames are never mixed, so ``kind`` picks one, and
-        frames from two cameras are never stacked together. An unchanged
+        frames from two cameras, or from two optics (focal lengths), are
+        never stacked together. An unchanged
         stack is kept unless ``force`` is set. A target, camera or frame
         choice that matches nothing raises `NotFoundError`; a stacking stage
         that finishes without making a stack raises `ProcessingError`.
@@ -1257,6 +1259,12 @@ class ProcessingPipelines:
             before any other frame check. A target with frames from more
             than one camera needs this; without it the answer is an error
             that names the cameras and how many frames each took.
+        focal_length_mm : `float`, optional
+            Only frames taken at this focal length, such as ``405``, rounded
+            to whole millimeters. Chosen with ``camera_id``, before any other
+            frame check. A target with frames from more than one optic needs
+            this; without it the answer is an error that names the focal
+            lengths and how many frames each has.
         force : `bool`, optional
             Rebuild even if nothing changed since the stack on disk.
         denoise : `bool`, optional
@@ -1299,11 +1307,12 @@ class ProcessingPipelines:
         InvalidArgumentError
             If ``kind`` or ``denoise_strength`` is out of range, a time
             cannot be read, ``frames`` is combined with a frame choice, or
-            the frames come from more than one camera.
+            the frames come from more than one camera or optic.
         """
         from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
         from astrometricslib.pipelines.stacking.post_processing.stack_preview import PreviewSettings
         from astrometricslib.pipelines.stacking.pre_processing.camera_selection import ensure_single_camera
+        from astrometricslib.pipelines.stacking.pre_processing.optic_selection import ensure_single_optic
         from astrometricslib.pipelines.stacking.stack_request import (
             SirilOptions,
             choose_frames_to_stack,
@@ -1315,21 +1324,22 @@ class ProcessingPipelines:
             raise InvalidArgumentError("denoise_strength must be between 0 and 1.")
         resolved = self._resolve(target)
         if frames is not None:
-            choices = (filter_name, first_file, last_file, since, until, camera_id)
+            choices = (filter_name, first_file, last_file, since, until, camera_id, focal_length_mm)
             if any(value is not None for value in choices):
                 raise InvalidArgumentError(
-                    "Pass frames, or choose them with filter_name, first_file, last_file, since, until "
-                    "and camera_id, not both."
+                    "Pass frames, or choose them with filter_name, first_file, last_file, since, until, "
+                    "camera_id and focal_length_mm, not both."
                 )
             if not frames:
                 raise InvalidArgumentError("frames is empty: there is nothing to stack.")
             ensure_single_camera(frames, target_id=resolved.id)
+            ensure_single_optic(frames, target_id=resolved.id)
             chosen = list(frames)
         else:
             selection = make_frame_selection(
                 filter_name, first_file, last_file, since, until, kind == "spectral"
             )
-            chosen = choose_frames_to_stack(resolved, kind, selection, camera_id)
+            chosen = choose_frames_to_stack(resolved, kind, selection, camera_id, focal_length_mm)
         return run_stack(
             resolved,
             chosen,

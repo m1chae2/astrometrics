@@ -21,11 +21,11 @@ from astropy.wcs import WCS
 from astrometricslib.models.camera_profile import ProvenanceKind
 from astrometricslib.pipelines.stacking.post_processing import aperture_placement
 from astrometricslib.pipelines.stacking.post_processing.aperture_placement import (
-    APERTURE_SEPARATION_PX,
-    FAINT_SOURCE_CLEARANCE_PX,
     MINIMUM_USABLE_APERTURES,
     FaintSourceAnalysis,
     analyze_faint_sources,
+    aperture_separation_px,
+    faint_source_clearance_px,
     faint_source_distance,
     place_empty_apertures,
 )
@@ -172,8 +172,8 @@ def test_noise_of_white_sky_is_recovered_within_its_uncertainty(tmp_path: Path) 
     stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=1), _sky_header())
     outcome = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME))
     assert outcome.result is not None
-    area = math.pi * APERTURE_RADIUS_PX.default**2
-    ring_pixels = math.pi * (RING_OUTER_PX.default**2 - RING_INNER_PX.default**2)
+    area = math.pi * APERTURE_RADIUS_PX.reference_value**2
+    ring_pixels = math.pi * (RING_OUTER_PX.reference_value**2 - RING_INNER_PX.reference_value**2)
     expected = 2.0 * math.sqrt(area + area**2 / ring_pixels)
     result = outcome.result
     assert result.aperture_count >= 90
@@ -208,7 +208,7 @@ def test_apertures_are_reused_by_a_later_stack_of_the_target(tmp_path: Path) -> 
     )
     assert load_apertures(apertures).created_from == "first.fits"
     stored_set = next(iter(json.loads(stored)["sets"].values()))
-    assert stored_set["aperture_radius_px"] == APERTURE_RADIUS_PX.default
+    assert stored_set["aperture_radius_px"] == APERTURE_RADIUS_PX.reference_value
 
 
 def test_apertures_follow_the_sky_when_the_stack_is_shifted(tmp_path: Path) -> None:
@@ -616,8 +616,8 @@ def test_apertures_are_at_least_the_separation_apart(tmp_path: Path) -> None:
     points = np.column_stack([columns, rows])
     distances = np.hypot(*(points[:, None, :] - points[None, :, :]).transpose(2, 0, 1))
     np.fill_diagonal(distances, np.inf)
-    assert distances.min() >= APERTURE_SEPARATION_PX - 1e-6
-    assert APERTURE_SEPARATION_PX >= 2 * RING_OUTER_PX.default
+    assert distances.min() >= aperture_separation_px() - 1e-6
+    assert aperture_separation_px() >= 2 * RING_OUTER_PX.reference_value
 
 
 def test_each_camera_and_optic_keeps_its_own_apertures_and_they_can_be_reset(tmp_path: Path) -> None:
@@ -744,7 +744,7 @@ def test_a_faint_source_keeps_the_apertures_away() -> None:
     positions = place_empty_apertures(image, np.empty((0, 2)))
     assert len(positions) >= MINIMUM_USABLE_APERTURES.default
     nearest = min(math.hypot(row - 300, column - 600) for row, column in positions)
-    assert nearest > FAINT_SOURCE_CLEARANCE_PX
+    assert nearest > faint_source_clearance_px()
 
 
 def test_the_mask_on_pure_noise_leaves_the_noise_unbiased_within_its_error() -> None:
@@ -841,7 +841,7 @@ def _identity_stack(tmp_path: Path, name: str, seed: int, center_ra: float = 150
 
 def test_the_mask_clearance_covers_the_rounding_of_the_center() -> None:
     """The clearance is the ring's outer radius plus one pixel."""
-    assert FAINT_SOURCE_CLEARANCE_PX == pytest.approx(RING_OUTER_PX.default + 1.0)
+    assert faint_source_clearance_px() == pytest.approx(RING_OUTER_PX.reference_value + 1.0)
 
 
 def test_the_mask_scale_ignores_the_empty_edge() -> None:

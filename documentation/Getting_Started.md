@@ -81,7 +81,7 @@ Stacking is the first step most people run. It aligns your frames and combines t
 4. Watch the panel above it. Open its Analysis tab to see the log. It reads "Processing Active" while the job runs and "Processing Successful" when it ends. Click Cancel to stop the job.
 5. Open the Data tab to see the stacked image. The FITS Viewer can show it.
 
-The Stack Frames button does not appear when the target has no frames. It reads "Stacking requires matching cameras" when the frames come from more than one camera. Stacking runs Siril, so the Siril settings in your configuration must be correct. See [Installation](Installation.md#configure-the-app).
+The Stack Frames button does not appear when the target has no frames. It reads "Stacking requires matching cameras" when the frames come from more than one camera, and "Pick one optic to stack" when they were taken through more than one telescope or lens. Stacking runs Siril, so the Siril settings in your configuration must be correct. See [Installation](Installation.md#configure-the-app).
 
 The Analyze Target button in the same panel runs the analysis step on your stack. The tutorial linked below covers it.
 

@@ -68,6 +68,8 @@ const ImageProcessingDisplayInner: React.FC = () => {
 
   const {
     allFiles, isLoadingFiles, filteredFiles, exposureCounts, fileFilterText, setFileFilterText,
+    selectedCamera: fileBrowserCamera, setSelectedCamera: setFileBrowserCamera,
+    selectedOptic, setSelectedOptic,
     selectedFile, setSelectedFile, filesToDelete, handleRequestDeleteFiles, confirmDeleteFiles,
     showFileDeleteConfirm, setShowFileDeleteConfirm,
     checkedFiles, setCheckedFiles, toggleFile, toggleAllFiles,
@@ -164,7 +166,6 @@ const ImageProcessingDisplayInner: React.FC = () => {
     setHeaderModalPath(path || selectedFile);
     setIsHeaderModalOpen(true);
   }, [selectedFile]);
-  const [fileBrowserCamera, setFileBrowserCamera] = useState('All');
 
   const { saveTarget, confirmDeleteTarget, handleCreateTarget } = useTargetActions();
 
@@ -442,6 +443,8 @@ const ImageProcessingDisplayInner: React.FC = () => {
       setFileFilterText={setFileFilterText}
       fileBrowserCamera={fileBrowserCamera}
       setFileBrowserCamera={setFileBrowserCamera}
+      selectedOptic={selectedOptic}
+      setSelectedOptic={setSelectedOptic}
       checkedFiles={checkedFiles}
       handleRequestDeleteFiles={handleRequestDeleteFiles}
       onOpenHeaderModal={handleOpenHeaderModal}

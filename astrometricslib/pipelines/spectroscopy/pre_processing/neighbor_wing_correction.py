@@ -47,11 +47,13 @@ import numpy as np
 
 from astrometricslib.foundation.camera_names import normalize_camera_name
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_trail_deblending import (
@@ -85,16 +87,20 @@ NEIGHBOR_WING_CORRECTION_IS_ON = False
 # together with the star. The stored blur reaches 75 px either side, so a
 # neighbour farther than 60 px would put its centre near the edge of what can
 # be fitted, and its wing at the star is already tiny.
+# It stands for a distance across the streak of many trail widths (60 on the
+# reference setup, 15 × the trail width), so it follows the trail width the
+# run measures.
 MAXIMUM_NEIGHBOR_DISTANCE_PX = TunedParameter(
     name="spectroscopy.maximum_neighbor_distance_px",
-    default=60.0,
-    unit="px",
+    default=factor_for(60.0, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
     description="A neighbour this far or nearer across the streak is fitted together with the star.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-D48",
-    pending_conversion=True,
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=60.0,
 )
 
 # At most this many neighbors per star get their own position shift and are
@@ -119,16 +125,19 @@ MAXIMUM_FITTED_NEIGHBORS = TunedParameter(
 
 # Two streaks closer than this across the streak are treated as the same star
 # (for example a star listed twice), not as a neighbour.
+# It stands for less than one trail width (3 on the reference setup, 0.77 ×
+# the trail width), so it follows the trail width the run measures.
 MINIMUM_NEIGHBOR_DISTANCE_PX = TunedParameter(
     name="spectroscopy.minimum_neighbor_distance_px",
-    default=3.0,
-    unit="px",
+    default=factor_for(3.0, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
     description="Two streaks closer than this across the streak are treated as the same star.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-D48",
-    pending_conversion=True,
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=3.0,
 )
 
 # The share of a star's samples that a neighbour's streak must run alongside
@@ -140,10 +149,9 @@ MINIMUM_OVERLAP_FRACTION = TunedParameter(
     unit="fraction",
     description="The share of a star's samples a neighbour's streak must run alongside to count.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="SPE-D48",
-    pending_conversion=True,
 )
 
 # What the status of a star that has no neighbour, and so was not corrected,
@@ -166,21 +174,24 @@ _SKY_SCATTER_HALF_LENGTH_PX = TunedParameter(
     unit="px",
     description="Half-length of the sky box used to measure scatter for the neighbor-share estimate.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="SPE-D48",
-    pending_conversion=True,
 )
+# It stands for how far the blur of a star reaches on each side of its streak
+# (75 on the reference setup, 19 × the trail width), so it follows the trail
+# width the run measures.
 _SKY_SCATTER_HALF_WIDTH_PX = TunedParameter(
     name="spectroscopy.sky_scatter_half_width_px",
-    default=75,
-    unit="px",
+    default=factor_for(75, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
     description="Half-width of the sky box used to measure scatter for the neighbor-share estimate.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-D48",
-    pending_conversion=True,
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=75,
 )
 
 

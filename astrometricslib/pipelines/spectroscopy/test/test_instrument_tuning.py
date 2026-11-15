@@ -70,10 +70,12 @@ def test_signal_to_noise_by_band_gives_the_median_in_each_band() -> None:
         wavelength,
         np.full(wavelength.size, 100.0),
         np.full(wavelength.size, 10.0),
-        np.array([4000.0, 4500.0, 6000.0]),
+        np.array([4000.0, 4500.0, 5000.0, 6000.0]),
     )
     assert result[0] == pytest.approx(10.0)
-    assert np.isnan(result[1])
+    assert result[1] == pytest.approx(10.0)
+    # The spectrum ends at 4990 Å, so the band from 5000 Å holds no sample.
+    assert np.isnan(result[2])
 
 
 def test_signal_to_noise_by_band_is_nan_for_an_empty_band() -> None:

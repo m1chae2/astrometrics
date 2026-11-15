@@ -61,12 +61,14 @@ import numpy as np
 
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.quality.measurement import QualityMeasurement
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
@@ -210,16 +212,19 @@ STEP_JUMP_SIGMAS = TunedParameter(
 # count. The smallest median absolute deviation of the steps of a real run is
 # 0.05 px (M 81 on 2026-01-14, 1.4826 x 0.05 = 0.07 px); 0.1 px is above it
 # and below the 0.2 px of the usual run.
+# On the reference setup this stands for 0.1 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
 MINIMUM_STEP_SCALE_PX = TunedParameter(
     name="stacking.minimum_step_scale_px",
-    default=0.1,
-    unit="pixels",
+    default=factor_for(0.1, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=0.1,
+    unit="× star width",
     description="Floor of the robust deviation of the pointing steps.",
     role=ParameterRole.RECOMMENDATION,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D51",
-    pending_conversion=True,
 )
 
 # The robust drift line takes the median slope over all pairs of frames of a
@@ -239,10 +244,9 @@ MINIMUM_STEPS = TunedParameter(
     unit="steps",
     description="Fewest steps for which a median step is reported.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D51",
-    pending_conversion=True,
 )
 
 # Fewest frames of one night for a straight-line fit of its pointings. A line
@@ -254,10 +258,9 @@ MINIMUM_FRAMES_FOR_DRIFT_FIT = TunedParameter(
     unit="frames",
     description="Fewest frames of one night for a straight-line fit of its pointings.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D51",
-    pending_conversion=True,
 )
 
 # A night's drift counts only when its length (slope) is at least this many
@@ -269,10 +272,9 @@ DRIFT_SIGNIFICANCE = TunedParameter(
     unit="× standard error",
     description="How many standard errors of the slope a night's drift must exceed to count.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D51",
-    pending_conversion=True,
 )
 
 # The axes of the nights must agree at least this well for one axis to be
@@ -285,10 +287,9 @@ MINIMUM_AXIS_AGREEMENT = TunedParameter(
     unit="fraction",
     description="Least agreement between the nights' drift axes for one axis to be named.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D51",
-    pending_conversion=True,
 )
 
 SECONDS_PER_HOUR = 3600.0

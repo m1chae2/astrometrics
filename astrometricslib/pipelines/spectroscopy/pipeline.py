@@ -18,6 +18,7 @@ from astrometricslib._internal.drivers.interfaces.gaia_xp_driver import GaiaXpDr
 from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.foundation.observatory_site import ObservatorySite
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.quality.gaia_xp_comparison import GaiaXpComparison
 from astrometricslib.models.stellar_source import (
     DifferentialRefractionRecord,
@@ -31,6 +32,7 @@ from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
@@ -356,10 +358,12 @@ DISPERSION_ANGLE_MINIMUM_TRAIL_CONTRAST_SIGMA = TunedParameter(
 # neighbour's trail runs alongside. Below this the aperture (2 * radius + 1
 # wide) is too narrow to hold a trail whose own width is a few pixels.
 # Not tuned beyond that geometric reasoning.
+# It stands for a little under one trail width (3 on the reference setup,
+# 0.77 × the trail width), so it follows the trail width the run measures.
 EXTRACTION_RADIUS_MINIMUM_PX = TunedParameter(
     name="spectroscopy.extraction_radius_minimum_px",
-    default=3,
-    unit="px",
+    default=factor_for(3, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
     description=(
         "The smallest extraction radius a star's aperture is "
         "shrunk to when a neighbour's trail runs alongside."
@@ -368,7 +372,8 @@ EXTRACTION_RADIUS_MINIMUM_PX = TunedParameter(
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-D35",
-    pending_conversion=True,
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=3,
 )
 
 

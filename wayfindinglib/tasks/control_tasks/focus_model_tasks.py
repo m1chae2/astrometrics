@@ -24,7 +24,6 @@ import numpy as np
 
 from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.parameters import (
-    EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
@@ -61,10 +60,9 @@ MINIMUM_TEMPERATURE_SPAN_C = TunedParameter(
     unit="degrees Celsius",
     description="Narrowest temperature range a focus fit may rest on.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="WAY-D121",
-    pending_conversion=True,
 )
 """Narrowest temperature range a fit may rest on, in degrees Celsius. A
 focuser step is a fraction of a micrometer, and a slope measured over less

@@ -85,7 +85,6 @@ from scipy.stats import theilslopes
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.stellar_source import BRIGHTEST_CATALOG_MAGNITUDE, StellarObject
 from astrometricslib.models.tuned_parameter import (
-    EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
@@ -116,10 +115,9 @@ CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION = TunedParameter(
         "set the zero point."
     ),
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="PHO-15",
-    pending_conversion=True,
 )
 
 # The fewest stars a session's fixed set, and a frame, needs for a median
@@ -133,9 +131,9 @@ MINIMUM_STARS_FOR_ZERO_POINT = TunedParameter(
     unit="stars",
     description="Fewest stars a session's fixed set, and a frame, needs for a zero point worth storing.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="PHO-15",
-    pending_conversion=True,
 )
 
 # A star joins the session's fixed set when it passes the cuts in at least
@@ -151,9 +149,9 @@ SESSION_STAR_FRAME_SHARE = TunedParameter(
         "Share of a session's frames in which a star must pass the cuts to join the session's fixed set."
     ),
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="PHO-15",
-    pending_conversion=True,
 )
 
 # The fewest frames a night needs for a spread worth storing by the helper
@@ -187,9 +185,9 @@ MINIMUM_SIGNAL_TO_NOISE = TunedParameter(
         "Least ratio of a star's flux to its own 1-sigma error for the star to be used in the zero point."
     ),
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="PHO-15",
-    pending_conversion=True,
 )
 
 # The color slope needs this many stars with a B-V color, after the cuts

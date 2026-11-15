@@ -205,10 +205,9 @@ MAP_CELL_PX = TunedParameter(
     unit="pixels",
     description="Sensor pixels along one side of a flat-match map cell.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D47",
-    pending_conversion=True,
 )
 
 # Gaussian widths of the band pass, in cells. The low width (2 cells, 16
@@ -226,10 +225,9 @@ LOW_PASS_SIGMA_CELLS = TunedParameter(
     unit="cells",
     description="Width of the smaller Gaussian of the flat-match band pass.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D47",
-    pending_conversion=True,
 )
 HIGH_PASS_SIGMA_CELLS = TunedParameter(
     name="stacking.high_pass_sigma_cells",
@@ -237,10 +235,9 @@ HIGH_PASS_SIGMA_CELLS = TunedParameter(
     unit="cells",
     description="Width of the larger Gaussian of the flat-match band pass.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D47",
-    pending_conversion=True,
 )
 
 # Frames read at most. The flats are bright (about 28,000 ADU) and the dust
@@ -338,10 +335,9 @@ STAR_MASK_SIGMAS = TunedParameter(
     unit="sigma",
     description="Robust sigmas above the local sky at which a cell counts as a star or hot pixel.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D47",
-    pending_conversion=True,
 )
 STAR_WING_SIGMAS = TunedParameter(
     name="stacking.star_wing_sigmas",
@@ -349,10 +345,9 @@ STAR_WING_SIGMAS = TunedParameter(
     unit="sigma",
     description="Lower limit in sigmas used to grow a star mask over its wings.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D47",
-    pending_conversion=True,
 )
 STAR_MASK_GROW_CELLS = TunedParameter(
     name="stacking.star_mask_grow_cells",
@@ -360,10 +355,9 @@ STAR_MASK_GROW_CELLS = TunedParameter(
     unit="cells",
     description="Cells by which star masks are enlarged.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D47",
-    pending_conversion=True,
 )
 # The second pass on the median map (see `_build_light_maps`).
 MAP_STAR_LOCAL_SIGMA_CELLS = TunedParameter(
@@ -372,10 +366,9 @@ MAP_STAR_LOCAL_SIGMA_CELLS = TunedParameter(
     unit="cells",
     description="Width of the local sky estimate in the second star pass on the median map.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D47",
-    pending_conversion=True,
 )
 MAP_STAR_CORE_SIGMAS = TunedParameter(
     name="stacking.map_star_core_sigmas",
@@ -383,10 +376,9 @@ MAP_STAR_CORE_SIGMAS = TunedParameter(
     unit="sigma",
     description="Sigmas above the local sky at which a map cell is a star core.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D47",
-    pending_conversion=True,
 )
 MAP_STAR_WING_SIGMAS = TunedParameter(
     name="stacking.map_star_wing_sigmas",
@@ -394,10 +386,9 @@ MAP_STAR_WING_SIGMAS = TunedParameter(
     unit="sigma",
     description="Sigmas above the local sky down to which star wings are masked on the map.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D47",
-    pending_conversion=True,
 )
 
 # A dust shadow in the flat map: at least this deep (standard deviations of the
@@ -414,10 +405,9 @@ SHADOW_MINIMUM_SIGMAS = TunedParameter(
     unit="sigma",
     description="Least depth of a dust shadow, in standard deviations of the flat map's noise.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D48",
-    pending_conversion=True,
 )
 SHADOW_MINIMUM_DEPTH_FRACTION = TunedParameter(
     name="stacking.shadow_minimum_depth_fraction",
@@ -425,10 +415,9 @@ SHADOW_MINIMUM_DEPTH_FRACTION = TunedParameter(
     unit="fraction",
     description="Least depth of a dust shadow, as a fraction of the flat map's level.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D48",
-    pending_conversion=True,
 )
 SHADOW_MINIMUM_AREA_CELLS = TunedParameter(
     name="stacking.shadow_minimum_area_cells",
@@ -436,10 +425,9 @@ SHADOW_MINIMUM_AREA_CELLS = TunedParameter(
     unit="cells",
     description="Least area of a dust shadow.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D48",
-    pending_conversion=True,
 )
 # The shadows are enlarged by this many cells before the control correlation
 # leaves them out, so their soft edges are out too (a shadow's edge is about
@@ -450,10 +438,9 @@ SHADOW_MASK_GROW_CELLS = TunedParameter(
     unit="cells",
     description="Cells by which dust shadows are enlarged before the control correlation.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D48",
-    pending_conversion=True,
 )
 
 # The degree of the polynomial that removes the vignetting before the band pass
@@ -464,10 +451,9 @@ TREND_DEGREE = TunedParameter(
     unit="degree",
     description="Degree of the polynomial that removes vignetting before the band pass.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D47",
-    pending_conversion=True,
 )
 
 # Cells this close to the edge are not compared: near the edge the smoothing
@@ -479,10 +465,9 @@ EDGE_MARGIN_CELLS = TunedParameter(
     unit="cells",
     description="Distance from the edge within which cells are not compared.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D48",
-    pending_conversion=True,
 )
 
 # Search range, in cells. Dust that moved more than 160 pixels is not the same
@@ -493,10 +478,9 @@ MAXIMUM_SHIFT_CELLS = TunedParameter(
     unit="cells",
     description="Search range of the shift between the flat map and the light map.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D49",
-    pending_conversion=True,
 )
 COARSE_ANGLE_RANGE_DEG = TunedParameter(
     name="stacking.coarse_angle_range_deg",
@@ -504,10 +488,9 @@ COARSE_ANGLE_RANGE_DEG = TunedParameter(
     unit="degrees",
     description="Range of the coarse rotation search.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D49",
-    pending_conversion=True,
 )
 COARSE_ANGLE_STEP_DEG = TunedParameter(
     name="stacking.coarse_angle_step_deg",
@@ -515,10 +498,9 @@ COARSE_ANGLE_STEP_DEG = TunedParameter(
     unit="degrees",
     description="Step of the coarse rotation search.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D49",
-    pending_conversion=True,
 )
 FINE_ANGLE_STEP_DEG = TunedParameter(
     name="stacking.fine_angle_step_deg",
@@ -526,10 +508,9 @@ FINE_ANGLE_STEP_DEG = TunedParameter(
     unit="degrees",
     description="Step of the fine rotation search.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D49",
-    pending_conversion=True,
 )
 FINE_ANGLE_COUNT = TunedParameter(
     name="stacking.fine_angle_count",
@@ -537,10 +518,9 @@ FINE_ANGLE_COUNT = TunedParameter(
     unit="steps",
     description="Number of fine rotation steps on each side of the coarse best.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D49",
-    pending_conversion=True,
 )
 
 # The chance level of the correlation. Two maps of a few broad shadows
@@ -555,10 +535,9 @@ DISPLACED_MINIMUM_SHIFT_CELLS = TunedParameter(
     unit="cells",
     description="Smallest shift at which the correlation is at chance level.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D49",
-    pending_conversion=True,
 )
 DISPLACED_MAXIMUM_SHIFT_CELLS = TunedParameter(
     name="stacking.displaced_maximum_shift_cells",
@@ -566,10 +545,9 @@ DISPLACED_MAXIMUM_SHIFT_CELLS = TunedParameter(
     unit="cells",
     description="Largest shift at which the correlation is at chance level.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D49",
-    pending_conversion=True,
 )
 
 # The null of the search. The search takes the best of 25 angles and 41 x 41
@@ -601,10 +579,9 @@ PLACEMENT_LIMIT_SIGMAS = TunedParameter(
     unit="sigma",
     description="Null spreads above the mean null score at which a placement is described.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D49",
-    pending_conversion=True,
 )
 
 # The error of the method itself, from injecting 8 known displacements into 8
@@ -618,10 +595,9 @@ METHOD_SHIFT_ERROR_PX = TunedParameter(
     unit="pixels",
     description="Error of the shift method itself, from injected known displacements.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D49",
-    pending_conversion=True,
 )
 METHOD_ROTATION_ERROR_DEG = TunedParameter(
     name="stacking.method_rotation_error_deg",
@@ -629,10 +605,9 @@ METHOD_ROTATION_ERROR_DEG = TunedParameter(
     unit="degrees",
     description="Error of the rotation method itself, from injected known displacements.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D49",
-    pending_conversion=True,
 )
 
 # A sensor of fewer cells than this cannot hold the band pass.

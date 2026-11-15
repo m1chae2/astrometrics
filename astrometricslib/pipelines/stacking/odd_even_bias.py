@@ -86,11 +86,13 @@ from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.fits_access import open_primary_hdu, write_image
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
@@ -149,10 +151,14 @@ __all__ = [
 # for s = 3 px, under 1% of the variance. A wider smoothing would leave less
 # but would flatten more of the sky's real structure. Design estimate; no data
 # set chose it.
+# On the reference setup this stands for 3.0 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
 SMOOTHING_SIGMA_PX = TunedParameter(
     name="stacking.smoothing_sigma_px",
-    default=3.0,
-    unit="× FWHM",
+    default=factor_for(3.0, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=3.0,
+    unit="× star width",
     description=(
         "Width of the Gaussian that smooths the sky of a real frame before the odd-even bias is judged."
     ),
@@ -160,23 +166,25 @@ SMOOTHING_SIGMA_PX = TunedParameter(
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D35",
-    pending_conversion=True,
 )
 
 # Real pixels are kept within this distance of any pixel the faint-source mask
 # flags (stars included), so a star keeps its real core and wings. The empty
 # apertures stay 13 px from flagged pixels, so none of their pixels is a real
 # one. Design estimate; no data set chose it.
+# On the reference setup this stands for 4.0 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
 KEEP_RADIUS_PX = TunedParameter(
     name="stacking.keep_radius_px",
-    default=4.0,
-    unit="× FWHM",
+    default=factor_for(4.0, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=4.0,
+    unit="× star width",
     description="Distance around flagged pixels within which real pixels are kept in the odd-even bias test.",
     role=ParameterRole.RECOMMENDATION,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D35",
-    pending_conversion=True,
 )
 
 

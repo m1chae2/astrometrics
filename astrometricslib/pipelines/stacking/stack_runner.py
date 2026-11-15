@@ -1323,7 +1323,7 @@ def _join_group_diagnostics(
         [result.summary_index for result in used],
     )
     # Where every combined group has data. Empty-sky apertures keep out of the
-    # rest (see `aperture_placement.UNCOVERED_CLEARANCE_PX`).
+    # rest (see `aperture_placement.uncovered_clearance_px()`).
     merged_diagnostics["covered_in_every_group"] = np.logical_and.reduce(combination.covered_masks)
     if stacked_fwhm is not None:
         merged_diagnostics["stacked_fwhm_px"] = stacked_fwhm

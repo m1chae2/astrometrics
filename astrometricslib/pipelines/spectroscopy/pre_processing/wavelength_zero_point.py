@@ -75,12 +75,14 @@ import numpy as np
 from scipy.stats import chi2
 
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.quality.spectroscopy_quality import StageQualityMetric, metric
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.models.wavelength_scale import WavelengthZeroPointLine, WavelengthZeroPointRecord
@@ -203,16 +205,20 @@ AGREEMENT_MINIMUM_P_VALUE = TunedParameter(
 # 5000 A. Designed, not measured. The resolution element is about 40 A there
 # (Vega: 38 to 43 A, see `spectral_resolution`), so the limit is about 20 A.
 # An offset this large moves a line by half its own blur.
+# It stands for about half a resolution element (20 on the reference setup,
+# 0.46 × the spectral resolution), so it follows the spectral resolution the
+# run measures.
 ZERO_POINT_OFFSET_LIMIT_ANGSTROM = TunedParameter(
     name="spectroscopy.zero_point_offset_limit_angstrom",
-    default=20.0,
-    unit="× resolution",
+    default=factor_for(20.0, RunBasis.SPECTRAL_RESOLUTION_ANGSTROM),
+    unit="× spectral resolution",
     description="The limit on the size of a spectrum's wavelength zero-point offset.",
     role=ParameterRole.JUDGMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D07",
-    pending_conversion=True,
+    basis=RunBasis.SPECTRAL_RESOLUTION_ANGSTROM,
+    reference_value=20.0,
 )
 
 # Step of the search for a line's centre, in Angstroms. Far below the fit

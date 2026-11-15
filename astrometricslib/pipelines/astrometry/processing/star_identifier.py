@@ -44,18 +44,24 @@ from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.foundation.offline import network_is_offline
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.astrometry.post_processing.assess_match_quality import assess_match_quality
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_blob_width_from_data
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
-from astrometricslib.pipelines.astrometry.processing.wcs_refinement import WcsRefinement, refine_wcs_with_gaia
+from astrometricslib.pipelines.astrometry.processing.wcs_refinement import (
+    WcsRefinement,
+    record_plate_scale,
+    refine_wcs_with_gaia,
+)
 from astrometricslib.pipelines.shared.catalog_star_identity import (
     CATALOG_MATCH_RADIUS_ARCSEC,
     gaia_dr3_source_id_from_names,
@@ -219,16 +225,20 @@ MAXIMUM_PLATE_SOLVE_SOURCES = 100
 # that showed the problem: the spectrum was K-type, but the star was named
 # after the companion because it happened to be nearer by a fraction of a
 # pixel. A judgement call, checked on that one pair.
+# Stands for the sky distance within which a catalog neighbor blends with a
+# star. It follows the star width: the value is a factor times the star
+# width the run measured (3.0 on the reference setup).
 UNRESOLVED_COMPANION_RADIUS_ARCSEC = TunedParameter(
     name="astrometry.unresolved_companion_radius_arcsec",
-    default=3.0,
-    unit="arcsec",
+    default=factor_for(3.0, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Catalog entries closer together than this cannot be told apart in a frame.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=3.0,
     equipment=frozenset({EquipmentKind.TELESCOPE}),
     register_entry="AST-10",
-    pending_conversion=True,
 )
 
 # --- Gaia Search Depth and Epoch --------------------------------------------
@@ -254,10 +264,9 @@ GAIA_DEFAULT_MAGNITUDE_LIMIT = TunedParameter(
     unit="magnitude",
     description="Gaia G magnitude limit used when the frame gives no depth estimate.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.TELESCOPE}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="AST-D11",
-    pending_conversion=True,
 )
 GAIA_MAGNITUDE_LIMIT_MARGIN = TunedParameter(
     name="astrometry.gaia_magnitude_limit_margin",
@@ -265,10 +274,9 @@ GAIA_MAGNITUDE_LIMIT_MARGIN = TunedParameter(
     unit="magnitudes",
     description="Margin added to the faintest detected star's magnitude to set the Gaia search depth.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.TELESCOPE}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="AST-D11",
-    pending_conversion=True,
 )
 GAIA_MINIMUM_MAGNITUDE_LIMIT = TunedParameter(
     name="astrometry.gaia_minimum_magnitude_limit",
@@ -276,10 +284,9 @@ GAIA_MINIMUM_MAGNITUDE_LIMIT = TunedParameter(
     unit="magnitude",
     description="Brightest Gaia search depth the frame estimate may give.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.TELESCOPE}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="AST-D11",
-    pending_conversion=True,
 )
 GAIA_MAXIMUM_MAGNITUDE_LIMIT = TunedParameter(
     name="astrometry.gaia_maximum_magnitude_limit",
@@ -287,10 +294,9 @@ GAIA_MAXIMUM_MAGNITUDE_LIMIT = TunedParameter(
     unit="magnitude",
     description="Faintest Gaia search depth the frame estimate may give.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.TELESCOPE}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="AST-D11",
-    pending_conversion=True,
 )
 MINIMUM_STARS_FOR_DEPTH_ESTIMATE = TunedParameter(
     name="astrometry.minimum_stars_for_depth_estimate",
@@ -298,10 +304,9 @@ MINIMUM_STARS_FOR_DEPTH_ESTIMATE = TunedParameter(
     unit="stars",
     description="Fewest catalog-identified stars needed to estimate the Gaia search depth from the frame.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.TELESCOPE}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="AST-D11",
-    pending_conversion=True,
 )
 
 # The most rows one Gaia cone search may return. The old limit was 10,000.
@@ -1528,6 +1533,7 @@ class StarIdentifier:
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore", FITSFixedWarning)
                         wcs = WCS(solved_header, naxis=2)
+                    record_plate_scale(wcs)
                     if solve_only:
                         if refit_from_cache:
                             wcs = self._refine_wcs_against_gaia(
@@ -2311,6 +2317,7 @@ class StarIdentifier:
         if not stellar_objects:
             return stellar_objects
 
+        record_plate_scale(wcs)
         logger.info("Starting SIMBAD identification for %s sources...", len(stellar_objects))
 
         try:

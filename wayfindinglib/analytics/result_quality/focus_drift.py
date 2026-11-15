@@ -117,10 +117,9 @@ MINIMUM_TEMPERATURE_CHANGE_DEGC = TunedParameter(
         " start of its segment."
     ),
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.TELESCOPE}),
     register_entry="WAY-D09",
-    pending_conversion=True,
 )
 
 # The lowest efficiency the seeing factor may fall to before a refocus. Batch 2

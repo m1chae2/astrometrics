@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING
 from astrometricslib.exceptions import ConflictError, ExternalServiceError, HardwareError
 from astrometricslib.parameters import (
     EquipmentKind,
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
     TunedParameter,
@@ -74,11 +75,10 @@ TRACKING_CHECKS = TunedParameter(
     unit="checks",
     description="How many times the loop checks that the mount tracks before it starts.",
     role=ParameterRole.HARDWARE_LIMIT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.MOUNT}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="WAY-D140",
     when_missing=WhenMissing.REFUSE,
-    pending_conversion=True,
 )
 """How many times the loop checks that the mount tracks before it starts."""
 
@@ -88,11 +88,10 @@ TRACKING_RETRY_SECONDS = TunedParameter(
     unit="seconds",
     description="Wait between the tracking checks.",
     role=ParameterRole.HARDWARE_LIMIT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.MOUNT}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="WAY-D140",
     when_missing=WhenMissing.REFUSE,
-    pending_conversion=True,
 )
 """Wait between those checks."""
 
@@ -102,11 +101,10 @@ LOST_TRACKING_LIMIT = TunedParameter(
     unit="cycles",
     description="Cycles in a row without tracking after which the guide loop stops.",
     role=ParameterRole.HARDWARE_LIMIT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.MOUNT}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="WAY-D140",
     when_missing=WhenMissing.REFUSE,
-    pending_conversion=True,
 )
 """Cycles in a row without tracking after which the loop stops."""
 

@@ -52,10 +52,13 @@ from dataclasses import dataclass
 import numpy as np
 
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
@@ -92,10 +95,9 @@ POINT_SOURCE_SIGMA = TunedParameter(
     unit="sigma",
     description="Detection threshold of the point-source depth, in sigma of the aperture noise.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D34",
-    pending_conversion=True,
 )
 
 # The detection threshold of the surface-brightness limit, in sigma of the
@@ -107,10 +109,9 @@ SURFACE_BRIGHTNESS_SIGMA = TunedParameter(
     unit="sigma",
     description="Detection threshold of the surface-brightness limit, in sigma of the box noise.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D34",
-    pending_conversion=True,
 )
 SURFACE_BRIGHTNESS_BOX_ARCSEC = TunedParameter(
     name="stacking.surface_brightness_box_arcsec",
@@ -118,10 +119,9 @@ SURFACE_BRIGHTNESS_BOX_ARCSEC = TunedParameter(
     unit="arcsec",
     description="Side of the box over which the surface-brightness limit is stated.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.PUBLISHED_CONSTANT,
     register_entry="STK-D34",
-    pending_conversion=True,
 )
 
 # A stored reference star is matched to a Gaia star within this distance. It is
@@ -130,16 +130,20 @@ SURFACE_BRIGHTNESS_BOX_ARCSEC = TunedParameter(
 # `stack_noise.MAXIMUM_ROTATION_DEG`) and than a Gaia star moves in the 10
 # years since 2016 at the usual 100 mas/yr, and small enough that a wrong star
 # is rarely inside it. A design estimate.
+# On the reference setup this stands for 3.0 arcsec; the code scales it as a
+# multiple of the plate scale, so it follows the plate scale the run
+# measures.
 STAR_MATCH_RADIUS_ARCSEC = TunedParameter(
     name="stacking.star_match_radius_arcsec",
-    default=3.0,
-    unit="arcsec",
+    default=factor_for(3.0, RunBasis.PLATE_SCALE_ARCSEC_PER_PX),
+    basis=RunBasis.PLATE_SCALE_ARCSEC_PER_PX,
+    reference_value=3.0,
+    unit="× plate scale",
     description="Distance within which a stored reference star is matched to a Gaia star.",
     role=ParameterRole.JUDGMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D34",
-    pending_conversion=True,
 )
 
 # A reference star is left out when another Gaia star inside its large
@@ -153,10 +157,9 @@ CONTAMINATION_MAGNITUDE_MARGIN = TunedParameter(
     unit="magnitudes",
     description="Margin below a star's magnitude within which a brighter neighbor leaves the star out.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D34",
-    pending_conversion=True,
 )
 
 # At least this many matched stars are needed for a median and its error. Three
@@ -169,10 +172,9 @@ MINIMUM_ZERO_POINT_STARS = TunedParameter(
     unit="stars",
     description="Fewest matched stars needed for a median zero point and its error.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D34",
-    pending_conversion=True,
 )
 
 # Why a stack has no zero point when its aperture set's sky positions did not
@@ -193,10 +195,9 @@ POSITION_MISFIT_RADIUS_FACTOR = TunedParameter(
     unit="× match radius",
     description="Match radii the median distance to the nearest Gaia star may reach before a misfit shows.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D34",
-    pending_conversion=True,
 )
 
 # A Gaia lookup takes a star's right ascension and declination (degrees) and a

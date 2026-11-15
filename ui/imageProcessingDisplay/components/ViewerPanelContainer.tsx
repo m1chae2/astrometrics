@@ -35,6 +35,8 @@ interface ViewerPanelContainerProps {
   setFileFilterText: (text: string) => void;
   fileBrowserCamera: string;
   setFileBrowserCamera: (camera: string) => void;
+  selectedOptic?: string;
+  setSelectedOptic?: (optic: string) => void;
   checkedFiles: Set<string>;
   handleRequestDeleteFiles: (paths: string[]) => void;
   onOpenHeaderModal: (path?: string) => void;
@@ -53,7 +55,7 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
   autoPanTrigger, disableStretch, stretch, toggleStretch,
   overlayStars, showAstrometryOverlay, onToggleAstrometryOverlay, isLoadingOverlay, overlayReason, onStarClick,
   selectedStarId,
-  allFiles, filteredFiles, fileFilterText, setFileFilterText, fileBrowserCamera, setFileBrowserCamera,
+  allFiles, filteredFiles, fileFilterText, setFileFilterText, fileBrowserCamera, setFileBrowserCamera, selectedOptic, setSelectedOptic,
   checkedFiles, handleRequestDeleteFiles, onOpenHeaderModal, onFileClick, selectedFile,
   toggleFile, toggleAllFiles, analysisResults
 }) => {
@@ -129,6 +131,8 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
             onSearchChange={setFileFilterText}
             selectedCamera={fileBrowserCamera}
             onCameraChange={setFileBrowserCamera}
+            selectedOptic={selectedOptic}
+            onOpticChange={setSelectedOptic}
             checkedFiles={checkedFiles}
             onDeleteFiles={handleRequestDeleteFiles}
             onShowHeader={() => onOpenHeaderModal(selectedFile || undefined)}

@@ -36,7 +36,6 @@ from scipy.ndimage import median_filter
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data, read_header, write_image
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.tuned_parameter import (
-    EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
@@ -60,10 +59,9 @@ STRIP_PIXELS = TunedParameter(
     unit="pixels",
     description="Width of the strips in which the edge profile is measured.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-23",
-    pending_conversion=True,
 )
 
 # Strips whose noise exceeds the interior's by more than this factor are
@@ -78,9 +76,9 @@ MAXIMUM_EDGE_NOISE_RATIO = TunedParameter(
     unit="ratio",
     description="Ratio of strip noise to interior noise above which a strip is trimmed.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-23",
-    pending_conversion=True,
 )
 
 # The profile along one axis is measured on the middle of the other axis, so a
@@ -115,9 +113,9 @@ MAXIMUM_TRIM_FRACTION = TunedParameter(
     unit="fraction",
     description="Largest share of its length by which a side may be trimmed.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-23",
-    pending_conversion=True,
 )
 
 # A trim this small is not worth making. Dithering of a few pixels leaves
@@ -128,10 +126,9 @@ _MINIMUM_WORTH_TRIMMING_PX = TunedParameter(
     unit="pixels",
     description="Smallest trim worth making.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D58",
-    pending_conversion=True,
 )
 
 # Pixels brighter than the sky by more than this many robust standard

@@ -30,10 +30,13 @@ from scipy import ndimage
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import AstrometricsError, ProcessingError
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.quality.saturation import (
@@ -41,16 +44,19 @@ from astrometricslib.pipelines.shared.quality.saturation import (
     resolve_saturation_threshold,
 )
 
+# It stands for about two star widths (6 on the reference setup, 2 × the star
+# width), so it follows the star width the run measures.
 ZERO_ORDER_PEAK_HALF_WINDOW_PX = TunedParameter(
     name="spectroscopy.zero_order_peak_half_window_px",
-    default=6,
-    unit="px",
+    default=factor_for(6, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Half-size of the box around the zero order in which its peak is read.",
     role=ParameterRole.RECOMMENDATION,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-D36",
-    pending_conversion=True,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=6,
 )
 """Half-size of the box around the zero order in which its peak is read."""
 
@@ -60,10 +66,9 @@ BAND_ALONG_PX = TunedParameter(
     unit="px",
     description="Length along the streak of each band used to follow it and measure its width.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="SPE-D36",
-    pending_conversion=True,
 )
 """Length along the streak of each band used to follow it and measure its
 width. Ten rows average away pixel noise and still resolve the change in
@@ -75,10 +80,9 @@ TRACE_SEARCH_HALF_WIDTH_PX = TunedParameter(
     unit="px",
     description="How far across from the zero order's column the streak is looked for in each band.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D36",
-    pending_conversion=True,
 )
 """How far across, from the zero order's own column, the streak is looked
 for in each band. A tilt of 5 degrees moves a 630 px streak by 55 px."""
@@ -89,40 +93,45 @@ MINIMUM_BAND_PEAK_SIGMA = TunedParameter(
     unit="noise sigma",
     description="A band counts as holding the streak when its peak stands this far above the sky.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="SPE-D36",
-    pending_conversion=True,
 )
 """A band counts as holding the streak when its peak stands this many noise
 units above the sky."""
 
+# It stands for a fraction of a trail width (1.5 on the reference setup, 0.38
+# × the trail width), so it follows the trail width the run measures.
 CENTRE_SMOOTHING_SIGMA_PX = TunedParameter(
     name="spectroscopy.centre_smoothing_sigma_px",
-    default=1.5,
-    unit="px",
+    default=factor_for(1.5, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
     description="Smoothing used only to locate the streak centre in a noisy band.",
     role=ParameterRole.RECOMMENDATION,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-D36",
-    pending_conversion=True,
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=1.5,
 )
 """Smoothing used only to locate the streak's centre in a noisy band."""
 
 MAXIMUM_BLOBS_REPORTED = 5
 """Most saturated patches listed for one frame."""
 
+# It stands for about four star widths (12 on the reference setup, 4 × the
+# star width), so it follows the star width the run measures.
 ZERO_ORDER_SATURATION_RADIUS_PX = TunedParameter(
     name="spectroscopy.zero_order_saturation_radius_px",
-    default=12,
-    unit="px",
+    default=factor_for(12, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="A saturated patch this close to the zero order is taken to be the zero order itself.",
     role=ParameterRole.RECOMMENDATION,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-D36",
-    pending_conversion=True,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=12,
 )
 """A saturated patch this close to the zero order is the zero order itself."""
 

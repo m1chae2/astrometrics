@@ -23,6 +23,7 @@ from astrometricslib.foundation.parameter_context import (
     equipment_values_to_write,
     frames_parameter_context,
     parameter_context,
+    record_basis,
     setup_parameter_context,
 )
 from astrometricslib.foundation.parameters import (
@@ -52,6 +53,7 @@ from astrometricslib.models.tuned_parameter import (
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
     WhenMissing,
 )
@@ -68,6 +70,7 @@ __all__ = [
     "ParameterRole",
     "ParameterSource",
     "ResolvedValue",
+    "RunBasis",
     "SetupEquipmentValues",
     "TunedParameter",
     "TunedRecord",
@@ -85,6 +88,7 @@ __all__ = [
     "frames_parameter_context",
     "parameter_context",
     "read_tuned_record",
+    "record_basis",
     "resolve_parameter",
     "run_tuning",
     "setup_parameter_context",

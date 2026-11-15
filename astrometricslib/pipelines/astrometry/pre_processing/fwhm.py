@@ -32,11 +32,15 @@ from astropy.stats import gaussian_sigma_to_fwhm, sigma_clipped_stats
 from scipy import optimize
 
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data
+from astrometricslib.foundation.parameter_context import record_basis
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
@@ -54,42 +58,54 @@ GAUSSIAN_SIGMA_TO_FWHM = gaussian_sigma_to_fwhm
 # sees the whole core: 10 pixels covers stars up to a FWHM of about 7 px.
 # Checked on the Bubble Nebula and M 27 stacks (FWHM 2.4 px) and on synthetic
 # stars of 4.0 and 7.1 px.
+# Stands for the radius of the box that holds a star for the width fit. It
+# follows the star width: the value is a factor times the star width the run
+# measured (10 on the reference setup).
 FWHM_FIT_BOX_RADIUS_PX = TunedParameter(
     name="astrometry.fwhm_fit_box_radius_px",
-    default=10,
-    unit="px",
+    default=factor_for(10, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Half the side of the square box around a star that is fitted.",
     role=ParameterRole.EXCLUSION_CRITERIA,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=10,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="AST-07",
-    pending_conversion=True,
 )
 
 # A star that fits wider than this standard deviation (a FWHM of about
 # 7 px) is fitted again in the larger box below, because the first box
 # cuts off the wings of a soft star.
+# Stands for the largest star sigma the soft-star refit accepts. It follows
+# the star width: the value is a factor times the star width the run
+# measured (3.0 on the reference setup).
 FWHM_REFIT_SIGMA_PX = TunedParameter(
     name="astrometry.fwhm_refit_sigma_px",
-    default=3.0,
-    unit="px",
+    default=factor_for(3.0, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Fitted standard deviation above which a star is fitted again in the larger box.",
     role=ParameterRole.EXCLUSION_CRITERIA,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=3.0,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="AST-D17",
-    pending_conversion=True,
 )
+# Stands for the radius of the larger box that holds a soft star in the
+# refit. It follows the star width: the value is a factor times the star
+# width the run measured (15 on the reference setup).
 FWHM_REFIT_BOX_RADIUS_PX = TunedParameter(
     name="astrometry.fwhm_refit_box_radius_px",
-    default=15,
-    unit="px",
+    default=factor_for(15, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Half the side of the larger box used to refit a soft star.",
     role=ParameterRole.EXCLUSION_CRITERIA,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=15,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="AST-D17",
-    pending_conversion=True,
 )
 
 # The number of the brightest unsaturated stars measured, and how many
@@ -105,10 +121,9 @@ FWHM_MEASUREMENT_STAR_COUNT = TunedParameter(
     unit="stars",
     description="How many of the brightest unsaturated stars are measured.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="AST-06",
-    pending_conversion=True,
 )
 FWHM_MEASUREMENT_CANDIDATE_COUNT = TunedParameter(
     name="astrometry.fwhm_measurement_candidate_count",
@@ -116,10 +131,9 @@ FWHM_MEASUREMENT_CANDIDATE_COUNT = TunedParameter(
     unit="candidates",
     description="How many candidate stars are looked at to find the stars to measure.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="AST-D17",
-    pending_conversion=True,
 )
 
 # The image's brightest value counts as a saturation level only when at least
@@ -131,10 +145,9 @@ FWHM_SATURATED_PLATEAU_PX = TunedParameter(
     unit="px",
     description="Fewest pixels at the image's brightest value for it to count as a saturation level.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="AST-D17",
-    pending_conversion=True,
 )
 
 # With a saturation level, a star is skipped when any pixel of its box
@@ -149,10 +162,9 @@ FWHM_SATURATION_FRACTION = TunedParameter(
     unit="× saturation level",
     description="Fraction of the saturation level at which a star in the box is skipped.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="AST-07",
-    pending_conversion=True,
 )
 
 # A fit is kept only if it explains this fraction of the variance of the
@@ -166,24 +178,27 @@ FWHM_MINIMUM_FIT_R_SQUARED = TunedParameter(
     unit="R squared",
     description="Smallest share of the cutout's variance a fit must explain to be kept.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="AST-07",
-    pending_conversion=True,
 )
 
 # The fitted centre must stay within this many pixels of the detected one.
 # A fit that wanders further has locked onto a neighbour.
+# Stands for the farthest the fitted center may move from the detected one.
+# It follows the star width: the value is a factor times the star width the
+# run measured (2.5 on the reference setup).
 FWHM_MAXIMUM_CENTRE_SHIFT_PX = TunedParameter(
     name="astrometry.fwhm_maximum_centre_shift_px",
-    default=2.5,
-    unit="px",
+    default=factor_for(2.5, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Farthest the fitted centre may sit from the detected centre.",
     role=ParameterRole.EXCLUSION_CRITERIA,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=2.5,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="AST-D17",
-    pending_conversion=True,
 )
 
 # How stretched out a measured "star" is allowed to look before it is
@@ -207,10 +222,9 @@ FWHM_MEASUREMENT_MAX_ELONGATION = TunedParameter(
     unit="ratio",
     description="Largest ratio of the long to the short fitted width before a star counts as contaminated.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="AST-D17",
-    pending_conversion=True,
 )
 
 # A candidate is skipped unless its flux is at least this fraction of
@@ -228,10 +242,9 @@ FWHM_MEASUREMENT_MIN_RELATIVE_FLUX = TunedParameter(
     unit="× brightest flux",
     description="Smallest flux, relative to the brightest candidate, for a candidate to be measured.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="AST-D17",
-    pending_conversion=True,
 )
 
 # A star is skipped when the exclusion mask (see `measure_fwhm_from_data`) is
@@ -241,16 +254,20 @@ FWHM_MEASUREMENT_MIN_RELATIVE_FLUX = TunedParameter(
 # stack of 2026-10-03 all 15 stars the check measured sat on such a core (peak
 # 1.35 to 1.45 in the combined image, saturated at 1.00 in the 60 s group) and
 # read a median of 3.40 px, while 5,000 stars off those cores read 2.38 px.
+# Stands for the distance within which a masked pixel spoils the star
+# profile. It follows the star width: the value is a factor times the star
+# width the run measured (3 on the reference setup).
 FWHM_EXCLUDED_CORE_RADIUS_PX = TunedParameter(
     name="astrometry.fwhm_excluded_core_radius_px",
-    default=3,
-    unit="px",
+    default=factor_for(3, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Distance from a masked pixel within which a star is skipped.",
     role=ParameterRole.EXCLUSION_CRITERIA,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=3,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="AST-07",
-    pending_conversion=True,
 )
 
 
@@ -360,6 +377,11 @@ def measure_fwhm_from_data(
     fwhm : `float` or `None`
         The median FWHM in pixels, or None if it couldn't be calculated.
     """
+    # The image's short side is a basis the run now knows. The star width is
+    # recorded only after the stars are measured below, so this estimator
+    # never uses the width it is measuring: until then its limits follow the
+    # setup's typical width.
+    record_basis(RunBasis.IMAGE_SHORT_SIDE_PX, float(min(data.shape[-2:])))
     if n_stars is None:
         n_stars = resolve(FWHM_MEASUREMENT_STAR_COUNT).value
     minimum_relative_flux = resolve(FWHM_MEASUREMENT_MIN_RELATIVE_FLUX).value
@@ -396,7 +418,11 @@ def measure_fwhm_from_data(
         if fwhm is not None:
             fwhms.append(fwhm)
 
-    return float(np.median(fwhms)) if fwhms else None
+    if not fwhms:
+        return None
+    median_fwhm = float(np.median(fwhms))
+    record_basis(RunBasis.STAR_WIDTH_PX, median_fwhm)
+    return median_fwhm
 
 
 def _touches_mask(mask: np.ndarray, x: int, y: int, radius: int) -> bool:
@@ -573,16 +599,20 @@ def _fit_gaussian(cutout: np.ndarray, minimum_r_squared: float) -> tuple[float, 
 
 
 # Half the side, in pixels, of the box the blob width is measured in.
+# Stands for the radius of the box around a bloated blob for its width. It
+# follows the star width: the value is a factor times the star width the run
+# measured (15 on the reference setup).
 BLOB_WIDTH_BOX_RADIUS_PX = TunedParameter(
     name="astrometry.blob_width_box_radius_px",
-    default=15,
-    unit="px",
+    default=factor_for(15, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Half the side of the box the blob width is measured in.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=15,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="AST-06",
-    pending_conversion=True,
 )
 
 

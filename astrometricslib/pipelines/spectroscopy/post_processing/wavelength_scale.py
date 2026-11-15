@@ -20,12 +20,15 @@ from typing import Any
 import numpy as np
 
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.models.quality.spectroscopy_quality import StageQualityCheckpoint
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.models.wavelength_scale import WavelengthScaleSummary
@@ -37,16 +40,20 @@ WAVELENGTH_SCALE_GATE_NAME = "wavelength_scale"
 # A per pixel (see `spectral_resolution`). A designed limit, not a measured
 # one: a scale that is off by more than one pixel puts a line in the wrong
 # sample.
+# It stands for about one pixel of dispersion in wavelength (11 on the
+# reference setup, 0.97 × the dispersion), so it follows the dispersion the
+# run measures.
 WAVELENGTH_SCALE_LIMIT_ANGSTROM = TunedParameter(
     name="spectroscopy.wavelength_scale_limit_angstrom",
-    default=11.0,
-    unit="× resolution",
+    default=factor_for(11.0, RunBasis.DISPERSION_ANGSTROM_PER_PX),
+    unit="× dispersion",
     description="The largest RMS of the wavelength offsets left after correction before the gate fails.",
     role=ParameterRole.JUDGMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D12",
-    pending_conversion=True,
+    basis=RunBasis.DISPERSION_ANGSTROM_PER_PX,
+    reference_value=11.0,
 )
 
 # The fewest spectra with a measured offset needed before the gate judges the
@@ -57,10 +64,9 @@ MINIMUM_SPECTRA_FOR_WAVELENGTH_SCALE = TunedParameter(
     unit="count",
     description="The fewest spectra with a measured offset needed before the gate judges the run.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="SPE-D12",
-    pending_conversion=True,
 )
 
 _OFFSET_METRIC = "wavelength_zero_point_offset_angstrom"

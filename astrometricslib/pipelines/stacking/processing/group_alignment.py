@@ -31,12 +31,15 @@ from scipy.spatial import cKDTree
 from skimage.registration import phase_cross_correlation
 
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.foundation.parameter_context import record_basis
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.stacking.processing.star_pattern_candidates import (
@@ -49,16 +52,20 @@ from astrometricslib.pipelines.stacking.processing.star_pattern_candidates impor
 # `documentation/evidence/stack_exposure_groups_20260920.json`); 8 px is a
 # little under three
 # FWHM, wide enough to leave a star's profile alone.
+#
+# Stands for a width wider than a star's profile, so it is a multiple of the
+# star width and follows it.
 ALIGNMENT_HIGH_PASS_SIGMA_PIXELS = TunedParameter(
     name="stacking.alignment_high_pass_sigma_pixels",
-    default=8.0,
-    unit="× FWHM",
+    default=factor_for(8.0, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Width above which structure is removed before the offset between group stacks is measured.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D64",
-    pending_conversion=True,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=8.0,
 )
 
 # After high-pass filtering, values are clipped at this many noise sigmas so
@@ -69,10 +76,9 @@ ALIGNMENT_CLIP_SIGMAS = TunedParameter(
     unit="noise sigmas",
     description="Level, in noise sigmas, at which filtered values are clipped before the offset is measured.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D64",
-    pending_conversion=True,
 )
 
 # The offset is measured to 1/20 of a pixel. Real offsets between group
@@ -84,10 +90,9 @@ ALIGNMENT_UPSAMPLE_FACTOR = TunedParameter(
     unit="× pixel precision",
     description="Factor by which the offset search is refined below one pixel.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D64",
-    pending_conversion=True,
 )
 
 # An offset smaller than this is not applied: resampling smooths the image, and
@@ -98,10 +103,9 @@ NEGLIGIBLE_SHIFT_PIXELS = TunedParameter(
     unit="px",
     description="Offset below which a shift between group stacks is not applied.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D64",
-    pending_conversion=True,
 )
 
 # The offset is trusted when, after moving one stack onto the other, the two
@@ -144,10 +148,9 @@ SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION = TunedParameter(
     unit="fraction of frame size",
     description="Central share of each dimension used to align spectral group stacks.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D67",
-    pending_conversion=True,
 )
 
 # Aligning spectral group stacks on the zero-order star instead of on the
@@ -160,16 +163,20 @@ SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION = TunedParameter(
 # position in each stack agreed to 1 px across the 1 s to 5 s groups. The star
 # is found as the brightest spot of the image smoothed by this many pixels
 # (seeing spreads the star over a few pixels).
+#
+# Stands for a blur sized to the zero-order star image, so it is a multiple of
+# the star width and follows it.
 ZERO_ORDER_SMOOTHING_SIGMA_PIXELS = TunedParameter(
     name="stacking.zero_order_smoothing_sigma_pixels",
-    default=2.0,
-    unit="× FWHM",
+    default=factor_for(2.0, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Width of the smoothing applied before the zero-order star is looked for.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="STK-D67",
-    pending_conversion=True,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=2.0,
 )
 
 # The star is looked for only within this many pixels of the centre of the
@@ -183,16 +190,22 @@ ZERO_ORDER_SMOOTHING_SIGMA_PIXELS = TunedParameter(
 # four times that and stays well inside the 350 px to the trail. A target
 # framed farther from the centre is not found, and the images are correlated
 # instead.
+#
+# Stands for the framing accuracy of the pointing, which is a length on the
+# sky, so it takes fewer pixels on a coarser plate scale (the angle divided
+# by the sky size of one pixel).
 ZERO_ORDER_SEARCH_HALF_WIDTH_PIXELS = TunedParameter(
     name="stacking.zero_order_search_half_width_pixels",
-    default=150,
-    unit="px",
+    default=factor_for(150, RunBasis.PLATE_SCALE_ARCSEC_PER_PX, inverse=True),
+    unit="px (an angle on the sky ÷ plate scale)",
     description="Distance from the image centre within which the zero-order star is looked for.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="STK-17",
-    pending_conversion=True,
+    basis=RunBasis.PLATE_SCALE_ARCSEC_PER_PX,
+    basis_inverse=True,
+    reference_value=150,
 )
 
 # The star's centre is the brightness-weighted centre of the pixels within this
@@ -202,16 +215,20 @@ ZERO_ORDER_SEARCH_HALF_WIDTH_PIXELS = TunedParameter(
 # plateau is not. The window is wider than a saturated plateau (about 15 px
 # across on the Vega 5 s stack, unmeasured elsewhere) and far narrower than the
 # 40 px separation below.
+#
+# Stands for the size of the zero-order star image, so it is a multiple of the
+# star width and follows it.
 ZERO_ORDER_CENTROID_HALF_WINDOW_PIXELS = TunedParameter(
     name="stacking.zero_order_centroid_half_window_pixels",
-    default=25,
-    unit="× FWHM",
+    default=factor_for(25, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Half width of the window in which the zero-order star's centre is measured.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="STK-D67",
-    pending_conversion=True,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=25,
 )
 ZERO_ORDER_CENTROID_FRACTION_OF_PEAK = TunedParameter(
     name="stacking.zero_order_centroid_fraction_of_peak",
@@ -221,10 +238,9 @@ ZERO_ORDER_CENTROID_FRACTION_OF_PEAK = TunedParameter(
         "Share of the peak below which pixels are ignored when the zero-order star's centre is measured."
     ),
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D67",
-    pending_conversion=True,
 )
 
 # The star is only believed when nothing else at least this far away is
@@ -233,16 +249,20 @@ ZERO_ORDER_CENTROID_FRACTION_OF_PEAK = TunedParameter(
 # ambiguous, and then the caller falls back to correlating the images.
 # Unvalidated choices: on the Vega group stacks the brightest spot away from
 # the star was well under half the star's brightness.
+#
+# Stands for the distance beyond which a spot is another object and not the
+# star's wings, so it is a multiple of the star width and follows it.
 ZERO_ORDER_RIVAL_SEPARATION_PIXELS = TunedParameter(
     name="stacking.zero_order_rival_separation_pixels",
-    default=40,
-    unit="× FWHM",
+    default=factor_for(40, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Distance beyond which a brighter spot makes the zero-order star ambiguous.",
     role=ParameterRole.JUDGMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-17",
-    pending_conversion=True,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=40,
 )
 ZERO_ORDER_MAX_RIVAL_FRACTION = TunedParameter(
     name="stacking.zero_order_max_rival_fraction",
@@ -252,9 +272,9 @@ ZERO_ORDER_MAX_RIVAL_FRACTION = TunedParameter(
         "Largest brightness of a rival spot, as a share of the star, that still lets the star be believed."
     ),
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-17",
-    pending_conversion=True,
 )
 
 # Extended targets (a globular cluster, a galaxy, a nebula). The point-source
@@ -275,10 +295,9 @@ EXTENDED_TARGET_BLOCK_PIXELS = TunedParameter(
     unit="px",
     description="Size of the blocks averaged before the centre of an extended target is searched for.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D66",
-    pending_conversion=True,
 )
 EXTENDED_TARGET_SMOOTHING_SIGMA_PIXELS = TunedParameter(
     name="stacking.extended_target_smoothing_sigma_pixels",
@@ -301,10 +320,9 @@ EXTENDED_TARGET_INDEPENDENT_PEAK_SIGMAS = TunedParameter(
     unit="smoothing sigmas",
     description="Distance, in smoothing sigmas, beyond which two peaks count as independent.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D66",
-    pending_conversion=True,
 )
 
 # The brightest smoothed peak must lie inside the same central search window as
@@ -313,8 +331,24 @@ EXTENDED_TARGET_INDEPENDENT_PEAK_SIGMAS = TunedParameter(
 # accepted just because its competitor lies a little beyond it. Rivals
 # farther than 300 px are ignored: on M 13 other smoothed peaks of similar
 # height lie 380 px (row 1502, column 1122) and 520 px away, so a wider
-# rival window would reject every M 13 frame.
-EXTENDED_TARGET_RIVAL_HALF_WIDTH_PIXELS = 2 * resolve(ZERO_ORDER_SEARCH_HALF_WIDTH_PIXELS).value
+# rival window would reject every M 13 frame. The width is worked out when it
+# is used (`extended_target_rival_half_width_pixels`), so it follows the search
+# window when that follows the plate scale.
+EXTENDED_TARGET_RIVAL_WINDOW_FACTOR = 2
+
+
+def extended_target_rival_half_width_pixels() -> float:
+    """Give the half width of the window in which rival peaks are looked for.
+
+    Returns
+    -------
+    half_width : `float`
+        Twice the half width of the central search window, in pixels
+        (`ZERO_ORDER_SEARCH_HALF_WIDTH_PIXELS`), so it is 300 px on the
+        reference setup.
+    """
+    return EXTENDED_TARGET_RIVAL_WINDOW_FACTOR * resolve(ZERO_ORDER_SEARCH_HALF_WIDTH_PIXELS).value
+
 
 # The peak is accepted only when the tallest independent rival is at most this
 # fraction of it, both measured above the frame's sky level (the median of the
@@ -332,9 +366,9 @@ EXTENDED_TARGET_MAX_RIVAL_FRACTION = TunedParameter(
         "lets it be accepted."
     ),
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-18",
-    pending_conversion=True,
 )
 
 # The centre is the brightness-weighted centre of the smoothed pixels, within
@@ -351,10 +385,9 @@ EXTENDED_TARGET_CENTROID_FRACTION_OF_PEAK = TunedParameter(
         "centre is measured."
     ),
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D66",
-    pending_conversion=True,
 )
 
 # Refining the offset with the stars themselves (imaging stacks only).
@@ -377,9 +410,9 @@ REFINEMENT_STAR_COUNT = TunedParameter(
     unit="stars",
     description="Number of the brightest stars of each stack that are matched in the refinement.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-14",
-    pending_conversion=True,
 )
 
 # A star must rise this many robust sigmas above the smoothed,
@@ -392,10 +425,9 @@ REFINEMENT_DETECTION_SIGMAS = TunedParameter(
     unit="robust sigmas",
     description="Height, in robust sigmas, a star must rise above the smoothed background to be used.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D65",
-    pending_conversion=True,
 )
 
 # Stars above this share of the image's 99.99th percentile are skipped: a
@@ -407,39 +439,47 @@ REFINEMENT_SATURATION_FRACTION = TunedParameter(
     unit="fraction of peak",
     description="Share of the image's 99.99th percentile above which a star is skipped as saturated.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D65",
-    pending_conversion=True,
 )
 
 # Stars closer than this to the frame edge are skipped, so the centroid window
 # stays inside the frame and clear of the zero-filled border a shift leaves.
+#
+# Stands for the pointing shift between nights, which is a length on the sky;
+# it follows the plate scale (the sky size of one pixel).
 REFINEMENT_EDGE_MARGIN_PIXELS = TunedParameter(
     name="stacking.refinement_edge_margin_pixels",
-    default=60,
-    unit="px",
+    default=factor_for(60, RunBasis.PLATE_SCALE_ARCSEC_PER_PX, inverse=True),
+    unit="px (an angle on the sky ÷ plate scale)",
     description="Distance from the frame edge within which stars are skipped.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D65",
-    pending_conversion=True,
+    basis=RunBasis.PLATE_SCALE_ARCSEC_PER_PX,
+    basis_inverse=True,
+    reference_value=60,
 )
 
 # Half the width of the window in which a star's centre is measured, and the
 # share of the window's peak below which a pixel is ignored. A star with a
 # FWHM of 2 to 3 px has almost all of its light within 4 px.
+#
+# Stands for the part of a star that holds almost all its light, so it is a
+# multiple of the star width and follows it.
 REFINEMENT_CENTROID_HALF_WINDOW_PIXELS = TunedParameter(
     name="stacking.refinement_centroid_half_window_pixels",
-    default=4,
-    unit="× FWHM",
+    default=factor_for(4, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Half width of the window in which a star's centre is measured.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D65",
-    pending_conversion=True,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=4,
 )
 REFINEMENT_CENTROID_FLOOR_FRACTION = TunedParameter(
     name="stacking.refinement_centroid_floor_fraction",
@@ -447,20 +487,22 @@ REFINEMENT_CENTROID_FLOOR_FRACTION = TunedParameter(
     unit="fraction of peak",
     description="Share of the window's peak below which a pixel is ignored in the centre measurement.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D65",
-    pending_conversion=True,
 )
 
 # A star in one stack matches one in the other when, after the first shift,
 # they lie within this many pixels. The largest miss of the first shift on the
 # three pairs was 1.9 px, and 3 px is far below the spacing of the 400
 # brightest stars (about 150 px).
+#
+# Stands for how far a star can sit from its partner after the first shift, so
+# it is a multiple of the star width and follows it.
 REFINEMENT_MATCH_RADIUS_PIXELS = TunedParameter(
     name="stacking.refinement_match_radius_pixels",
-    default=3.0,
-    unit="× FWHM",
+    default=factor_for(3.0, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description=(
         "Distance within which a star in one stack matches a star in the other after the first shift."
     ),
@@ -468,7 +510,8 @@ REFINEMENT_MATCH_RADIUS_PIXELS = TunedParameter(
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D65",
-    pending_conversion=True,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=3.0,
 )
 
 # At least this many matched stars are needed. The fit has four unknowns and
@@ -480,9 +523,9 @@ REFINEMENT_MINIMUM_PAIRS = TunedParameter(
     unit="pairs",
     description="Fewest matched stars needed for the refinement fit.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-14",
-    pending_conversion=True,
 )
 
 # The fit is repeated after dropping stars farther than this many robust sigmas
@@ -493,10 +536,9 @@ REFINEMENT_CLIP_SIGMAS = TunedParameter(
     unit="robust sigmas",
     description="Distance, in robust sigmas, beyond which a matched pair is dropped from the fit.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D65",
-    pending_conversion=True,
 )
 REFINEMENT_CLIP_PASSES = TunedParameter(
     name="stacking.refinement_clip_passes",
@@ -504,10 +546,9 @@ REFINEMENT_CLIP_PASSES = TunedParameter(
     unit="passes",
     description="Most times the fit is repeated after dropping poorly matched stars.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D65",
-    pending_conversion=True,
 )
 
 # A rotation or scale outside these limits is not believed and the plain shift
@@ -520,10 +561,9 @@ REFINEMENT_MAX_ROTATION_DEGREES = TunedParameter(
     unit="degrees",
     description="Largest rotation the refinement fit may report before it is not believed.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.MOUNT}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-14",
-    pending_conversion=True,
 )
 REFINEMENT_MAX_SCALE_DEVIATION = TunedParameter(
     name="stacking.refinement_max_scale_deviation",
@@ -531,18 +571,20 @@ REFINEMENT_MAX_SCALE_DEVIATION = TunedParameter(
     unit="fraction",
     description="Largest change of scale the refinement fit may report before it is not believed.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-14",
-    pending_conversion=True,
 )
 
 # The fit is believed only if the stars it leaves behind are this close to
 # their partners (root mean square). The three real pairs left 0.05 to 0.06 px.
+#
+# Stands for how closely matched star centers can agree, so it is a multiple of
+# the star width and follows it.
 REFINEMENT_MAX_RESIDUAL_PIXELS = TunedParameter(
     name="stacking.refinement_max_residual_pixels",
-    default=0.5,
-    unit="× FWHM",
+    default=factor_for(0.5, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description=(
         "Largest root-mean-square leftover between matched stars for the refinement fit to be believed."
     ),
@@ -550,7 +592,8 @@ REFINEMENT_MAX_RESIDUAL_PIXELS = TunedParameter(
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-14",
-    pending_conversion=True,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=0.5,
 )
 
 # Star-pattern matching (`find_alignment_from_star_patterns`) finds the move
@@ -571,10 +614,9 @@ PATTERN_REFIT_PASSES = TunedParameter(
     unit="passes",
     description="Times the star-pattern fit is repeated with a wider search of matches.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D14",
-    pending_conversion=True,
 )
 
 # The leftover allowed after a star-pattern match is looser than
@@ -590,16 +632,20 @@ PATTERN_REFIT_PASSES = TunedParameter(
 # off); M 51 300 s's is random scatter of the star centres (the four halves of
 # the frame agree to under 0.1 px), a soft stack, not a poor fit. 1.5 px is
 # just over the largest seen. It stays far under the 3 px pairing radius.
+#
+# Stands for how well star centers can be measured, so it is a multiple of the
+# star width and follows it.
 PATTERN_MAX_RESIDUAL_PIXELS = TunedParameter(
     name="stacking.pattern_max_residual_pixels",
-    default=1.5,
-    unit="× FWHM",
+    default=factor_for(1.5, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Largest root-mean-square leftover after a star-pattern match for it to be believed.",
     role=ParameterRole.JUDGMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-15",
-    pending_conversion=True,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=1.5,
 )
 
 
@@ -836,7 +882,7 @@ def find_extended_zero_order_position(plane: np.ndarray) -> tuple[float, float] 
     4. Take the brightest local maximum inside the central search window
        (`ZERO_ORDER_SEARCH_HALF_WIDTH_PIXELS`).
     5. Find the brightest other local maximum inside the wider rival window
-       (`EXTENDED_TARGET_RIVAL_HALF_WIDTH_PIXELS`).
+       (`extended_target_rival_half_width_pixels`).
     6. Refuse the peak when the rival is brighter than
        `EXTENDED_TARGET_MAX_RIVAL_FRACTION` of it.
     7. Return the brightness-weighted centre of the pixels around the peak
@@ -890,9 +936,10 @@ def find_extended_zero_order_position(plane: np.ndarray) -> tuple[float, float] 
     if not in_search_window.any():
         return None
     best = int(np.nonzero(in_search_window)[0][np.argmax(heights[in_search_window])])
+    rival_half_width_pixels = extended_target_rival_half_width_pixels()
     in_rival_window = (
-        (away_rows <= EXTENDED_TARGET_RIVAL_HALF_WIDTH_PIXELS)
-        & (away_columns <= EXTENDED_TARGET_RIVAL_HALF_WIDTH_PIXELS)
+        (away_rows <= rival_half_width_pixels)
+        & (away_columns <= rival_half_width_pixels)
         & (np.arange(heights.size) != best)
     )
     rival = float(heights[in_rival_window].max(initial=0.0))
@@ -1525,6 +1572,10 @@ def align_images_to_reference(
     covered_masks: list[np.ndarray | None] = []
     results: list[AlignmentResult | None] = []
     reference_stars: np.ndarray | None = None
+    if 0 <= reference_index < len(images) and np.ndim(images[reference_index]) >= 2:
+        # The group stacks are the run's own images, so their size is the
+        # image size that size-based values follow.
+        record_basis(RunBasis.IMAGE_SHORT_SIDE_PX, float(min(np.shape(images[reference_index])[-2:])))
     for index, image in enumerate(images):
         if index == reference_index:
             aligned.append(np.asarray(image, dtype=np.float32))

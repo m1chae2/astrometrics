@@ -42,7 +42,6 @@ from astrometricslib.models.quality.measurement import QualityMeasurement
 from astrometricslib.models.quality.metric_spec import MetricSpec
 from astrometricslib.models.quality.quality_summary import AstrometryPipelineQualityMetrics
 from astrometricslib.models.tuned_parameter import (
-    EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
@@ -130,10 +129,9 @@ MINIMUM_MATCHED_STARS = TunedParameter(
     unit="stars",
     description="Fewest catalog-matched stars for the plate-solve residual to mean anything.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.TELESCOPE}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="AST-05",
-    pending_conversion=True,
 )
 
 # The share of catalog lookups that may fail before the star names cannot be

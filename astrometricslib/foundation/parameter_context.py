@@ -38,6 +38,7 @@ from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     ParameterSource,
     ParameterValue,
+    RunBasis,
     TunedParameter,
 )
 
@@ -156,7 +157,12 @@ class ParameterContext:
     equipment : `SetupEquipmentValues` or `None`
         The equipment values of the setup in use.
     tuned : `Any` or `None`
-        The tuned values (``tuned_value(parameter)``); none yet.
+        The tuned values (``tuned_value(parameter)``).
+    setup_bases : `Any` or `None`
+        The bases the setup implies (`run_bases.SetupBases`), used before
+        the run measures its own.
+    bases : `dict` [`RunBasis`, `float`]
+        The bases the run has measured (`record_basis`).
     notices : `list` [`str`]
         One line for each parameter whose default stood in, in the order
         first seen.
@@ -165,7 +171,26 @@ class ParameterContext:
     configuration: Any = None
     equipment: SetupEquipmentValues | None = None
     tuned: Any = None
+    setup_bases: Any = None
+    bases: dict[RunBasis, float] = field(default_factory=dict)
     notices: list[str] = field(default_factory=list)
+
+    def basis_value(self, basis: RunBasis) -> float | None:
+        """Return a basis: the run's measurement, else the setup's value.
+
+        Parameters
+        ----------
+        basis : `RunBasis`
+            The basis.
+
+        Returns
+        -------
+        value : `float` or `None`
+            The value, or `None` when neither the run nor the setup has it.
+        """
+        if basis in self.bases:
+            return self.bases[basis]
+        return self.setup_bases.value(basis) if self.setup_bases is not None else None
 
     def note(self, notice: str) -> None:
         """Record a notice once.
@@ -177,6 +202,26 @@ class ParameterContext:
         """
         if notice not in self.notices:
             self.notices.append(notice)
+
+
+def record_basis(basis: RunBasis, value: float) -> None:
+    """Record a basis the running code has measured, for the rest of the run.
+
+    Call it once the run knows the value, for example after the star width of
+    a stack is measured. Outside any run context it does nothing, because no
+    run would read it.
+
+    Parameters
+    ----------
+    basis : `RunBasis`
+        What was measured.
+    value : `float`
+        The measured value; ignored unless it is a positive finite number.
+    """
+    context = _CURRENT_CONTEXT.get()
+    if context is None or not (value > 0.0 and value < float("inf")):
+        return
+    context.bases[basis] = float(value)
 
 
 _CURRENT_CONTEXT: contextvars.ContextVar[ParameterContext | None] = contextvars.ContextVar(
@@ -251,7 +296,21 @@ def _setup_context(setup_name: str | None, filter_name: str | None) -> Parameter
         configuration=configuration,
         equipment=SetupEquipmentValues(configuration, setup, filter_name),
         tuned=_tuned_values(configuration, setup, filter_name),
+        setup_bases=_setup_bases(configuration, setup),
     )
+
+
+def _setup_bases(configuration: Any, setup: SetupConfig) -> Any:
+    """Build the bases a setup implies.
+
+    Returns
+    -------
+    bases : `run_bases.SetupBases`
+        The setup's bases.
+    """
+    from astrometricslib.foundation.run_bases import SetupBases
+
+    return SetupBases(configuration, setup)
 
 
 def _tuned_values(configuration: Any, setup: SetupConfig, filter_name: str | None) -> Any:
@@ -318,6 +377,7 @@ def frames_parameter_context(frames: Sequence[Any]) -> Generator[ParameterContex
     configuration = get_configuration()
     equipment = None
     tuned = None
+    setup_bases = None
     if frames:
         first = frames[0]
         setup = configuration.get_observatory_setups().setup_for(
@@ -327,7 +387,9 @@ def frames_parameter_context(frames: Sequence[Any]) -> Generator[ParameterContex
             filter_name = _filter_section_name(first)
             equipment = SetupEquipmentValues(configuration, setup, filter_name)
             tuned = _tuned_values(configuration, setup, filter_name)
+            setup_bases = _setup_bases(configuration, setup)
     with parameter_context(configuration=configuration, equipment=equipment, tuned=tuned) as context:
+        context.setup_bases = setup_bases
         yield context
 
 
@@ -428,5 +490,6 @@ __all__ = [
     "equipment_values_to_write",
     "frames_parameter_context",
     "parameter_context",
+    "record_basis",
     "setup_parameter_context",
 ]

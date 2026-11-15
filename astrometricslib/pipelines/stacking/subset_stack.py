@@ -274,6 +274,7 @@ def stack_frame_subset(
         path is not absolute.
     """
     from astrometricslib.pipelines.stacking.pre_processing.camera_selection import ensure_single_camera
+    from astrometricslib.pipelines.stacking.pre_processing.optic_selection import ensure_single_optic
     from astrometricslib.pipelines.stacking.stack_runner import run_stack
     from astrometricslib.pipelines.stacking.stack_settings import (
         choose_weight_for_frames,
@@ -290,6 +291,7 @@ def stack_frame_subset(
         raise InvalidArgumentError("The subset stack's output path must be absolute.")
     frames_to_stack = [frame.model_copy(deep=True) for frame in frames]
     ensure_single_camera(frames_to_stack)
+    ensure_single_optic(frames_to_stack)
     is_spectral = any(frame_is_spectral(frame) for frame in frames_to_stack)
     # The library stack's own helper makes the choice, so a subset is weighted
     # exactly as the library stack is.

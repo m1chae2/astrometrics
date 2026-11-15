@@ -23,12 +23,14 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 
@@ -53,16 +55,20 @@ SAME_STAR_POSITION_TOLERANCE_ARCSEC = TunedParameter(
 # for the two to count as the same physical star. This 10-arcsecond limit is
 # used when matching detected stars to the SIMBAD and Gaia catalogs, and when
 # reusing an existing position-only star's id (see `star_recording`).
+# Stands for the sky distance within which two catalog positions are the
+# same star. It follows the plate scale: the value is a factor times the
+# plate scale the run measured (10.0 on the reference setup).
 CATALOG_MATCH_RADIUS_ARCSEC = TunedParameter(
     name="shared.catalog_match_radius_arcsec",
-    default=10.0,
-    unit="arcsec",
+    default=factor_for(10.0, RunBasis.PLATE_SCALE_ARCSEC_PER_PX),
+    unit="× plate scale",
     description="Radius within which a detected star is matched to a catalog star.",
     role=ParameterRole.EXCLUSION_CRITERIA,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.PLATE_SCALE_ARCSEC_PER_PX,
+    reference_value=10.0,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="AST-D07",
-    pending_conversion=True,
 )
 
 # Names that beat every other catalog, best first. A name matching the

@@ -37,6 +37,10 @@ from astrometricslib.pipelines.stacking.pre_processing.camera_selection import (
     ensure_single_camera,
     split_frames_by_camera,
 )
+from astrometricslib.pipelines.stacking.pre_processing.optic_selection import (
+    choose_optic_frames,
+    ensure_single_optic,
+)
 
 if TYPE_CHECKING:
     from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
@@ -87,6 +91,7 @@ def choose_frames_to_stack(
     kind: StackKind,
     selection: FrameSelection,
     camera_id: str | None,
+    focal_length_mm: float | None = None,
 ) -> list[FrameRecord]:
     """Pick the light frames of one kind that a selection names.
 
@@ -101,16 +106,26 @@ def choose_frames_to_stack(
     camera_id : `str` or `None`
         Keep only this camera's frames (a name or part of one). Applied
         before the other choices.
+    focal_length_mm : `float`, optional
+        Keep only the frames taken at this focal length, rounded to whole
+        millimeters. Applied with ``camera_id``, before the other choices.
 
     Returns
     -------
     chosen : `list` [`FrameRecord`]
-        The frames, in file-name order, all from one camera.
+        The frames, in file-name order, all from one camera and one optic.
 
     Raises
     ------
     NotFoundError
-        If no frame matches, or no camera matches ``camera_id``.
+        If no frame matches, no camera matches ``camera_id``, or no frame
+        was taken at ``focal_length_mm``.
+
+    Notes
+    -----
+    An invalid-argument error is raised, through `ensure_single_camera` and
+    `ensure_single_optic`, when the chosen frames come from more than one
+    camera or optic.
     """
     spectral = kind == "spectral"
     lights = [
@@ -124,12 +139,19 @@ def choose_frames_to_stack(
         lights, camera_problem = choose_camera_frames(lights, camera_id)
         if camera_problem:
             raise NotFoundError(camera_problem, details={"target": target.id, "camera_id": camera_id})
+    if focal_length_mm is not None:
+        lights, optic_problem = choose_optic_frames(lights, focal_length_mm)
+        if optic_problem:
+            raise NotFoundError(
+                optic_problem, details={"target": target.id, "focal_length_mm": focal_length_mm}
+            )
     chosen = select_library_frames(lights, selection)
     if not chosen:
         raise NotFoundError(
             f"No {kind} light frames of {target.id!r} match that selection.", details={"target": target.id}
         )
     ensure_single_camera(chosen, target_id=target.id)
+    ensure_single_optic(chosen, target_id=target.id)
     return chosen
 
 

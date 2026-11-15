@@ -258,6 +258,7 @@ export interface FileItem {
   exposure?: string;
   filter?: string;
   date?: string;
+  focalLengthMm?: number | null;
 }
 
 /**

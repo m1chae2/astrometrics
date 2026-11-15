@@ -23,20 +23,24 @@ from astropy.wcs import WCS
 from scipy.ndimage import distance_transform_edt, gaussian_filter
 from scipy.spatial import cKDTree
 
+from astrometricslib.foundation.parameter_context import record_basis
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
 from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
-    REFERENCE_RING_GAP_PX,
-    REFERENCE_RING_WIDTH_PX,
     UNSPECIFIED_SETUP,
     ApertureSet,
     StackDepth,
+    reference_ring_gap_px,
+    reference_ring_width_px,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     MAD_TO_SIGMA,
@@ -59,10 +63,9 @@ NOISE_APERTURE_COUNT = TunedParameter(
     unit="apertures",
     description="How many empty apertures are placed to measure the noise of a stack.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-36",
-    pending_conversion=True,
 )
 
 # The reference stars are measured in a larger aperture than the noise, so
@@ -74,16 +77,19 @@ NOISE_APERTURE_COUNT = TunedParameter(
 # the noise ring has around the noise aperture. The radius is never below
 # 8 px (twice the noise aperture's), which a star width under 2.7 px would
 # otherwise give.
+# On the reference setup this stands for 3.0 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
 REFERENCE_APERTURE_FWHM_MULTIPLE = TunedParameter(
     name="stacking.reference_aperture_fwhm_multiple",
-    default=3.0,
-    unit="× FWHM",
+    default=factor_for(3.0, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=3.0,
+    unit="× star width",
     description="Radius of the reference-star aperture, as a multiple of the star width of the stack.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-36",
-    pending_conversion=True,
 )
 
 REFERENCE_APERTURE_MINIMUM_RADIUS_PX = TunedParameter(
@@ -92,10 +98,9 @@ REFERENCE_APERTURE_MINIMUM_RADIUS_PX = TunedParameter(
     unit="pixels",
     description="Smallest radius of the reference-star aperture.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D23",
-    pending_conversion=True,
 )
 
 # How many reference stars fix the flux scale, and the fewest that must be
@@ -107,9 +112,9 @@ REFERENCE_STAR_COUNT = TunedParameter(
     unit="stars",
     description="How many reference stars fix the flux scale of a stack.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-36",
-    pending_conversion=True,
 )
 
 MINIMUM_USABLE_REFERENCE_STARS = TunedParameter(
@@ -118,9 +123,9 @@ MINIMUM_USABLE_REFERENCE_STARS = TunedParameter(
     unit="stars",
     description="Fewest reference stars that must be measurable on a stack.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-36",
-    pending_conversion=True,
 )
 
 # A stack needs this many usable apertures (20 gives a 28% error on the
@@ -131,15 +136,24 @@ MINIMUM_USABLE_APERTURES = TunedParameter(
     unit="apertures",
     description="Fewest usable empty apertures a stack needs to give a noise spread.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D32",
-    pending_conversion=True,
 )
+
 
 # An empty aperture stays this far from every detected star, so a star's wings
 # cannot reach the aperture or its ring: twice the ring's outer radius.
-STAR_CLEARANCE_PX = 2.0 * resolve(RING_OUTER_PX).value
+def star_clearance_px() -> float:
+    """Give how far an empty aperture stays from every detected star.
+
+    Returns
+    -------
+    value : `float`
+        Pixels.
+    """
+    return 2.0 * resolve(RING_OUTER_PX).value
+
 
 # Faint sources are kept out of the empty apertures by a mask made from the
 # stack itself, before any aperture is drawn (so the rule never looks at an
@@ -155,28 +169,35 @@ STAR_CLEARANCE_PX = 2.0 * resolve(RING_OUTER_PX).value
 # little of to move it, and which keeps the correlation of the stacked noise
 # that smoothing does not remove. A crowded field raises the scale and so the
 # effective threshold (validation entry STK-36 gives the measured rise).
+# On the reference setup this stands for 12.0 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
 FAINT_SOURCE_HIGH_PASS_SIGMA_PX = TunedParameter(
     name="stacking.faint_source_high_pass_sigma_px",
-    default=12.0,
-    unit="pixels",
+    default=factor_for(12.0, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=12.0,
+    unit="× star width",
     description="Width of the Gaussian taken away from the stack before faint sources are flagged.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-36",
-    pending_conversion=True,
 )
 
+# On the reference setup this stands for (1.5, 3.0, 6.0) pixels; the code
+# scales it as a multiple of the star width, so it follows the star width the
+# run measures.
 FAINT_SOURCE_SMOOTHING_SIGMAS_PX = TunedParameter(
     name="stacking.faint_source_smoothing_sigmas_px",
-    default=(1.5, 3.0, 6.0),
-    unit="pixels",
+    default=factor_for((1.5, 3.0, 6.0), RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=(1.5, 3.0, 6.0),
+    unit="× star width",
     description="Smoothing widths at which faint sources are searched for.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-36",
-    pending_conversion=True,
 )
 
 # A smoothed pixel is flagged above this many robust sigmas. For pure noise a
@@ -190,26 +211,53 @@ FAINT_SOURCE_THRESHOLD_SIGMAS = TunedParameter(
     unit="sigma",
     description="Robust sigmas above which a smoothed pixel is flagged as a faint source.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-36",
-    pending_conversion=True,
 )
+
 
 # An aperture stays this far from every flagged pixel (measured from the
 # rounded pixel of its center): the ring's outer radius plus 1 px. Rounding the
 # center to a pixel moves it by up to 0.71 px, and the ring reaches the pixels
 # whose centers lie within the outer radius, so 1 px more guarantees that no
 # flagged pixel lies in the aperture or in its sky ring.
-FAINT_SOURCE_CLEARANCE_PX = resolve(RING_OUTER_PX).value + 1.0
+def faint_source_clearance_px() -> float:
+    """Give how far an aperture stays from every flagged pixel.
+
+    Returns
+    -------
+    value : `float`
+        Pixels.
+    """
+    return resolve(RING_OUTER_PX).value + 1.0
+
 
 # Two apertures stay at least this far apart: twice the ring's outer radius.
 # Then no two rings share a pixel, so the sky level taken for one aperture
 # does not feed another, and the sums are independent of each other.
-APERTURE_SEPARATION_PX = 2.0 * resolve(RING_OUTER_PX).value
+def aperture_separation_px() -> float:
+    """Give how far apart two apertures stay.
+
+    Returns
+    -------
+    value : `float`
+        Pixels.
+    """
+    return 2.0 * resolve(RING_OUTER_PX).value
+
 
 # Apertures stay this far from the edge so the whole ring is on the image.
-EDGE_MARGIN_PX = math.ceil(resolve(RING_OUTER_PX).value) + 1
+def edge_margin_px() -> int:
+    """Give how far apertures stay from the image edge.
+
+    Returns
+    -------
+    value : `int`
+        Pixels.
+    """
+    return math.ceil(resolve(RING_OUTER_PX).value) + 1
+
 
 # How far an empty aperture stays from a pixel that one of the exposure groups
 # of a group stack does not cover (its shifted border; see
@@ -218,7 +266,16 @@ EDGE_MARGIN_PX = math.ceil(resolve(RING_OUTER_PX).value) + 1
 # border; the aperture's sky ring must not reach it. The outer ring radius
 # plus one pixel is the same reach `signed_aperture_sum` keeps from the image
 # edge. Design choice, not tuned.
-UNCOVERED_CLEARANCE_PX = resolve(RING_OUTER_PX).value + 1.0
+def uncovered_clearance_px() -> float:
+    """Give how far an aperture stays from an uncovered pixel.
+
+    Returns
+    -------
+    value : `float`
+        Pixels.
+    """
+    return resolve(RING_OUTER_PX).value + 1.0
+
 
 # How many stars to detect when choosing apertures and the reference stars.
 DETECTED_STAR_COUNT = TunedParameter(
@@ -227,10 +284,9 @@ DETECTED_STAR_COUNT = TunedParameter(
     unit="stars",
     description="How many stars are detected when apertures and reference stars are chosen.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D23",
-    pending_conversion=True,
 )
 
 # Random positions are drawn from a generator with this seed, so choosing
@@ -321,7 +377,7 @@ def choose_apertures_with_reason(
     covered_mask : `numpy.ndarray`, optional
         `True` where every exposure group of a group stack has data, on the
         same pixel grid as `plane`. An aperture is kept at least
-        `UNCOVERED_CLEARANCE_PX` from any pixel where it is `False`, because
+        `uncovered_clearance_px` from any pixel where it is `False`, because
         a group that does not reach a pixel changes how the others are
         weighted there.
     sky_from_plate_solve : `bool`, optional
@@ -332,8 +388,8 @@ def choose_apertures_with_reason(
     -------
     aperture_set : `ApertureSet` or `None`
         The apertures (positions drawn from a generator with a fixed seed, at
-        least `APERTURE_SEPARATION_PX` apart, at least `STAR_CLEARANCE_PX`
-        from every detected star, at least `FAINT_SOURCE_CLEARANCE_PX` from
+        least `aperture_separation_px` apart, at least `star_clearance_px`
+        from every detected star, at least `faint_source_clearance_px` from
         every faint source found by `faint_source_distance`, and kept only
         where `signed_aperture_sum` works) and the brightest
         `REFERENCE_STAR_COUNT` isolated stars that are not saturated. `None`
@@ -348,12 +404,13 @@ def choose_apertures_with_reason(
     fwhm = measure_fwhm_from_data(plane)
     if fwhm is None or not math.isfinite(fwhm) or fwhm <= 0:
         return None, "the stack's star width could not be measured, so the reference aperture has no size"
+    record_basis(RunBasis.STAR_WIDTH_PX, fwhm)
     radius = max(
         resolve(REFERENCE_APERTURE_FWHM_MULTIPLE).value * fwhm,
         resolve(REFERENCE_APERTURE_MINIMUM_RADIUS_PX).value,
     )
-    ring_inner = radius + REFERENCE_RING_GAP_PX
-    ring_outer = ring_inner + REFERENCE_RING_WIDTH_PX
+    ring_inner = radius + reference_ring_gap_px()
+    ring_outer = ring_inner + reference_ring_width_px()
     # Every bright star counts for the clearance and the isolation, saturated
     # or not: a saturated star has the widest wings.
     stars = detect_star_centroids(plane, count=detected_star_count, skip_saturated=False)
@@ -374,7 +431,7 @@ def choose_apertures_with_reason(
         percentile_screen = detect_star_centroids(plane, count=detected_star_count, skip_saturated=True)
     reference: list[tuple[float, float]] = []
     baseline: list[float] = []
-    for row, column in _isolated_stars(stars, clearance=max(STAR_CLEARANCE_PX, ring_outer + 1.0)):
+    for row, column in _isolated_stars(stars, clearance=max(star_clearance_px(), ring_outer + 1.0)):
         if saturation is not None and saturation.is_saturated(row, column):
             continue
         if percentile_screen is not None and (
@@ -431,12 +488,12 @@ def place_empty_apertures(
     """Draw empty-sky aperture positions, away from stars and faint sources.
 
     Positions are drawn from a generator with a fixed seed. A draw is kept
-    when it is at least `EDGE_MARGIN_PX` from the edge, at least
-    `STAR_CLEARANCE_PX` from every given star, at least
-    `FAINT_SOURCE_CLEARANCE_PX` from every faint source (see
-    `faint_source_distance`), at least `APERTURE_SEPARATION_PX` from every
+    when it is at least `edge_margin_px` from the edge, at least
+    `star_clearance_px` from every given star, at least
+    `faint_source_clearance_px` from every faint source (see
+    `faint_source_distance`), at least `aperture_separation_px` from every
     kept position, and where `signed_aperture_sum` works. When a covered mask
-    is given, a draw is also kept at least `UNCOVERED_CLEARANCE_PX` from every
+    is given, a draw is also kept at least `uncovered_clearance_px` from every
     pixel the mask marks as not covered. No test looks at an aperture's sum,
     so the choice cannot favor quiet apertures.
 
@@ -469,18 +526,21 @@ def place_empty_apertures(
     generator = np.random.default_rng(APERTURE_SEED)
     positions: list[tuple[float, float]] = []
     for _ in range(40 * noise_aperture_count):
-        row = generator.uniform(EDGE_MARGIN_PX, height - EDGE_MARGIN_PX)
-        column = generator.uniform(EDGE_MARGIN_PX, width - EDGE_MARGIN_PX)
-        if star_tree is not None and star_tree.query([row, column])[0] <= STAR_CLEARANCE_PX:
+        row = generator.uniform(edge_margin_px(), height - edge_margin_px())
+        column = generator.uniform(edge_margin_px(), width - edge_margin_px())
+        if star_tree is not None and star_tree.query([row, column])[0] <= star_clearance_px():
             continue
-        if source_distance[round(row), round(column)] <= FAINT_SOURCE_CLEARANCE_PX:
+        if source_distance[round(row), round(column)] <= faint_source_clearance_px():
             continue
         if (
             uncovered_distance is not None
-            and uncovered_distance[round(row), round(column)] <= UNCOVERED_CLEARANCE_PX
+            and uncovered_distance[round(row), round(column)] <= uncovered_clearance_px()
         ):
             continue
-        if positions and np.min(np.hypot(*(np.array(positions) - (row, column)).T)) < APERTURE_SEPARATION_PX:
+        if (
+            positions
+            and np.min(np.hypot(*(np.array(positions) - (row, column)).T)) < aperture_separation_px()
+        ):
             continue
         if signed_aperture_sum(plane, column, row) is None:
             continue
@@ -509,7 +569,7 @@ class FaintSourceAnalysis:
     usable_fraction : `float`
         The share of all pixels that hold data (finite and not exactly zero).
     excluded_fraction : `float`
-        The share of all pixels within `FAINT_SOURCE_CLEARANCE_PX` of a flagged
+        The share of all pixels within `faint_source_clearance_px` of a flagged
         pixel, where no aperture may be centered. This is the share that limits
         placement; it is larger than the flagged share.
     """
@@ -576,7 +636,7 @@ def analyze_faint_sources(plane: np.ndarray) -> FaintSourceAnalysis:
         distance = np.full(image.shape, np.inf, dtype=np.float32)
     else:
         distance = distance_transform_edt(~flagged)
-    excluded_fraction = float(np.count_nonzero(distance <= FAINT_SOURCE_CLEARANCE_PX)) / distance.size
+    excluded_fraction = float(np.count_nonzero(distance <= faint_source_clearance_px())) / distance.size
     return FaintSourceAnalysis(distance, tuple(scales), flagged_fraction, usable_fraction, excluded_fraction)
 
 
@@ -599,7 +659,7 @@ def faint_source_distance(plane: np.ndarray) -> np.ndarray:
     return analyze_faint_sources(plane).distance
 
 
-def _isolated_stars(stars: np.ndarray, clearance: float = STAR_CLEARANCE_PX) -> np.ndarray:
+def _isolated_stars(stars: np.ndarray, clearance: float | None = None) -> np.ndarray:
     """Keep the stars that have no detected neighbor within the clearance.
 
     Parameters
@@ -607,7 +667,7 @@ def _isolated_stars(stars: np.ndarray, clearance: float = STAR_CLEARANCE_PX) -> 
     stars : `numpy.ndarray`
         Star centers, shape ``(n, 2)`` as (row, column), brightest first.
     clearance : `float`, optional
-        How far the nearest neighbor must be.
+        How far the nearest neighbor must be; the star clearance if left out.
 
     Returns
     -------
@@ -617,6 +677,8 @@ def _isolated_stars(stars: np.ndarray, clearance: float = STAR_CLEARANCE_PX) -> 
     """
     if len(stars) < 2:
         return stars
+    if clearance is None:
+        clearance = star_clearance_px()
     nearest = cKDTree(stars).query(stars, k=2)[0][:, 1]
     return stars[nearest > clearance]
 

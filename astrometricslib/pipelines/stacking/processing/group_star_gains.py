@@ -19,11 +19,13 @@ from scipy.spatial import cKDTree
 
 from astrometricslib.foundation.constants import FULL_SCALE_COUNTS
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import measure_aperture_photometry
@@ -70,28 +72,34 @@ STAR_GAIN_APERTURE_RADIUS_PIXELS = TunedParameter(
     register_entry="STK-19",
 )
 
+# Stands for a radius outside the star's wings and its flux circle, so it is a
+# multiple of the star width and follows it.
 STAR_GAIN_SKY_INNER_PIXELS = TunedParameter(
     name="stacking.star_gain_sky_inner_pixels",
-    default=19.0,
-    unit="× FWHM",
+    default=factor_for(19.0, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Inner radius of the sky ring around a star in the star-flux gain.",
     role=ParameterRole.JUDGMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D70",
-    pending_conversion=True,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=19.0,
 )
 
+# Stands for the outer sky radius and the isolation distance between stars, so
+# it is a multiple of the star width and follows it.
 STAR_GAIN_SKY_OUTER_PIXELS = TunedParameter(
     name="stacking.star_gain_sky_outer_pixels",
-    default=25.0,
-    unit="× FWHM",
+    default=factor_for(25.0, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Outer radius of the sky ring around a star in the star-flux gain.",
     role=ParameterRole.JUDGMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D70",
-    pending_conversion=True,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=25.0,
 )
 
 # How many of the reference's brightest stars are looked for. A star is
@@ -105,10 +113,9 @@ STAR_GAIN_DETECTION_COUNT = TunedParameter(
     unit="stars",
     description="Number of the reference's brightest stars looked for in the star-flux gain.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D70",
-    pending_conversion=True,
 )
 
 # A star is measured only when no pixel in its circle or sky ring, in either
@@ -168,10 +175,9 @@ STAR_GAIN_EMPTY_APERTURES = TunedParameter(
     unit="apertures",
     description="Number of empty apertures measured to find the noise in the star-flux gain.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D70",
-    pending_conversion=True,
 )
 
 STAR_GAIN_NOISE_PROBE_STARS = TunedParameter(
@@ -180,10 +186,9 @@ STAR_GAIN_NOISE_PROBE_STARS = TunedParameter(
     unit="stars",
     description="Number of stars used to probe the noise in the star-flux gain.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D70",
-    pending_conversion=True,
 )
 
 STAR_GAIN_EMPTY_APERTURE_ATTEMPTS = 3000
@@ -213,10 +218,9 @@ STAR_GAIN_MINIMUM_STARS_PER_QUARTILE = TunedParameter(
     unit="stars",
     description="Fewest shared stars the star-flux gain needs in each brightness quartile.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D70",
-    pending_conversion=True,
 )
 
 

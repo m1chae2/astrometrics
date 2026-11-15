@@ -32,11 +32,13 @@ from scipy import ndimage
 from astrometricslib._internal.drivers.fits_access import open_primary_hdu
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.quality.saturation import resolve_saturation_threshold
@@ -49,10 +51,9 @@ DETECTION_SIGMA = TunedParameter(
     unit="× noise",
     description="Threshold above the noise for a star to be detected in a raw frame check.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D38",
-    pending_conversion=True,
 )
 """A bright region must stand this many noise units above the background.
 
@@ -64,16 +65,20 @@ noise units) let the halos of bright stars merge into regions hundreds of
 pixels long and flagged clean frames as trailed.
 """
 
+# Stands for the side of a background block, wider than the stars it
+# ignores. It follows the star width: the value is a factor times the star
+# width the run measured (32 on the reference setup).
 BACKGROUND_BLOCK_PIXELS = TunedParameter(
     name="shared.background_block_pixels",
-    default=32,
-    unit="pixels",
+    default=factor_for(32, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Side of the block used to measure the background of a raw frame.",
     role=ParameterRole.EXCLUSION_CRITERIA,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=32,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D38",
-    pending_conversion=True,
 )
 """Side of the square blocks whose medians estimate the sky background.
 
@@ -92,23 +97,26 @@ MAXIMUM_STARS_MEASURED = TunedParameter(
     unit="stars",
     description="Most stars measured in a raw frame, taking the brightest.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D38",
-    pending_conversion=True,
 )
 """Brightest stars used for width, roundness and frame-to-frame matching."""
 
+# Stands for the half width of the box that holds a star for its centroid.
+# It follows the star width: the value is a factor times the star width the
+# run measured (7 on the reference setup).
 CENTROID_HALF_BOX_PIXELS = TunedParameter(
     name="shared.centroid_half_box_pixels",
-    default=7,
-    unit="pixels",
+    default=factor_for(7, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Half the side of the box used to find a star centroid.",
     role=ParameterRole.EXCLUSION_CRITERIA,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=7,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D38",
-    pending_conversion=True,
 )
 """Half-width of the box used to measure one star's centre and size."""
 
@@ -118,9 +126,9 @@ LOW_STAR_FRACTION = TunedParameter(
     unit="× median",
     description="Fraction of the median star count below which a frame has too few stars.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-34",
-    pending_conversion=True,
 )
 """A frame with fewer stars than this fraction of the batch median is flagged.
 
@@ -134,9 +142,9 @@ HIGH_STAR_MULTIPLE = TunedParameter(
     unit="× median",
     description="Multiple of the median star count above which a frame has too many stars.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-34",
-    pending_conversion=True,
 )
 """A frame with more stars than this multiple of the batch median is flagged.
 
@@ -157,23 +165,26 @@ TRAIL_MULTIPLE = TunedParameter(
     unit="× median",
     description="Multiple of the median trail length above which a frame is trailed.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D40",
-    pending_conversion=True,
 )
 """A longest streak above this multiple of the batch median is a trail."""
 
+# Stands for the shortest trail that flags a frame. It follows the star
+# width: the value is a factor times the star width the run measured (60 on
+# the reference setup).
 TRAIL_FLOOR_PIXELS = TunedParameter(
     name="shared.trail_floor_pixels",
-    default=60,
-    unit="pixels",
+    default=factor_for(60, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Shortest trail length that can flag a frame as trailed.",
     role=ParameterRole.RECOMMENDATION,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=60,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D40",
-    pending_conversion=True,
 )
 """The shortest streak that can count as a trail, whatever the batch median.
 
@@ -238,10 +249,9 @@ TRAIL_MIN_DIAGONAL_FRACTION = TunedParameter(
     unit="× diagonal",
     description="Shortest trail, as a fraction of the frame diagonal, that is reported.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-34",
-    pending_conversion=True,
 )
 """A straight trail must be at least this fraction of the frame diagonal.
 
@@ -253,16 +263,20 @@ on the spectroscopy frame, where the spectrum itself is a straight streak).
 The trailed light gave 3,220 pixels.
 """
 
+# Stands for the side of a trail search block. It follows the star width:
+# the value is a factor times the star width the run measured (4 on the
+# reference setup).
 TRAIL_BLOCK_PIXELS = TunedParameter(
     name="shared.trail_block_pixels",
-    default=4,
-    unit="pixels",
+    default=factor_for(4, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Side of the block used when searching a frame for star trails.",
     role=ParameterRole.RECOMMENDATION,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=4,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-34",
-    pending_conversion=True,
 )
 """Side of the square blocks averaged before looking for straight trails.
 
@@ -277,10 +291,9 @@ TRAIL_THRESHOLD_SIGMA = TunedParameter(
     unit="× noise",
     description="Block brightness above the noise that counts as part of a trail.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-34",
-    pending_conversion=True,
 )
 """A block counts as bright when it is this many block-noise units high.
 
@@ -297,10 +310,9 @@ TRAIL_STAR_SIGMA = TunedParameter(
     unit="× noise",
     description="Peak brightness above the noise that counts as a star and is masked from the trail search.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-34",
-    pending_conversion=True,
 )
 """Blocks near smoothed values above this many noise units are masked as stars.
 
@@ -317,10 +329,9 @@ TRAIL_STAR_MARGIN_BLOCKS = TunedParameter(
     unit="blocks",
     description="Margin, in blocks, masked around each star in the trail search.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D40",
-    pending_conversion=True,
 )
 """Blocks added around each masked star, to cover its halo (8 pixels)."""
 
@@ -333,10 +344,9 @@ TRAIL_STRIP_HALF_WIDTH_BLOCKS = TunedParameter(
     unit="blocks",
     description="Half the width of the strip that must contain a trail.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D40",
-    pending_conversion=True,
 )
 """A bright block lies on a candidate line when it is this close to it."""
 
@@ -346,10 +356,9 @@ TRAIL_MAXIMUM_GAP_BLOCKS = TunedParameter(
     unit="blocks",
     description="Largest gap along a trail that still counts as one trail.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D40",
-    pending_conversion=True,
 )
 """Longest stretch of a trail that may be missing (16 pixels).
 
@@ -363,10 +372,9 @@ TRAIL_MINIMUM_HIT_FRACTION = TunedParameter(
     unit="fraction",
     description="Share of the trail length that must be bright blocks.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D40",
-    pending_conversion=True,
 )
 """At least this share of the blocks along a trail must be bright.
 
@@ -383,10 +391,9 @@ TRAIL_MAXIMUM_BRIGHT_FRACTION = TunedParameter(
     unit="fraction",
     description="Largest share of bright blocks for which a trail search is still meaningful.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D40",
-    pending_conversion=True,
 )
 """If more of the blocks than this are bright, the line search is skipped.
 
@@ -406,16 +413,20 @@ MINIMUM_MATCH_VOTES = TunedParameter(
 )
 """Matching star pairs needed before a frame-to-frame shift is trusted."""
 
+# Stands for the width of a histogram bin for matching star patterns. It
+# follows the star width: the value is a factor times the star width the run
+# measured (4 on the reference setup).
 _SHIFT_BIN_PIXELS = TunedParameter(
     name="shared.shift_bin_pixels",
-    default=4,
-    unit="pixels",
+    default=factor_for(4, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Bin size of the offset histogram used to match star patterns.",
     role=ParameterRole.RECOMMENDATION,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=4,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D39",
-    pending_conversion=True,
 )
 """Bin size of the offset histogram used to match star patterns."""
 

@@ -26,6 +26,7 @@ import numpy as np
 
 from astrometricslib.parameters import (
     EquipmentKind,
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
     TunedParameter,
@@ -68,10 +69,9 @@ MINIMUM_SAMPLES_PER_RUN = TunedParameter(
     unit="guide samples in a run",
     description="Fewest samples a run needs to get its own guiding error.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.MOUNT}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="WAY-D135",
-    pending_conversion=True,
 )
 """Fewest samples a run needs to get its own guiding error.
 

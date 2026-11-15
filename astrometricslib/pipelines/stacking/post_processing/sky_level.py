@@ -37,11 +37,13 @@ from scipy.ndimage import median_filter
 from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import NotFoundError, StorageError
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.image_scaling import (
@@ -131,16 +133,19 @@ EXTENDED_LIGHT_BRIGHTNESS = TunedParameter(
 # The stack is cut into blocks of this many pixels on a side. A star is a few
 # pixels wide, so the median of such a block ignores it. Real extended light
 # (nebulae, galaxy halos) is many blocks wide and survives.
+# On the reference setup this stands for 8 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
 _BLOCK_PIXELS = TunedParameter(
     name="stacking.block_pixels",
-    default=8,
-    unit="pixels",
+    default=factor_for(8, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=8,
+    unit="× star width",
     description="Side of the blocks the stack is cut into to find its sky.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D54",
-    pending_conversion=True,
 )
 
 # A second, small median filter (in blocks) removes stars that were bigger
@@ -151,10 +156,9 @@ _BLOCK_FILTER_SIZE = TunedParameter(
     unit="blocks",
     description="Size of the small median filter that removes stars bigger than one block.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D54",
-    pending_conversion=True,
 )
 
 # The brightest extended light the rule looks at is the 99th percentile of
@@ -166,10 +170,9 @@ _EXTENDED_LIGHT_PERCENTILE = TunedParameter(
     unit="percentile",
     description="Percentile of the star-free map taken as the brightest extended light.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D54",
-    pending_conversion=True,
 )
 
 

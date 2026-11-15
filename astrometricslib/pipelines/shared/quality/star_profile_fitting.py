@@ -24,12 +24,14 @@ from scipy import optimize
 from scipy.spatial import cKDTree
 
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.camera_profile import CameraProfile
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.quality.frame_statistics import (
@@ -88,32 +90,40 @@ MOFFAT_CANDIDATES_PER_CELL = TunedParameter(
 # absorbs the wings beyond the box, so a star wider than about 7 px reads a
 # little narrow. It matches `FWHM_FIT_BOX_RADIUS_PX` of the Gaussian fit in
 # `astrometry/pre_processing/fwhm.py`.
+# Stands for the half width of the star fit box. It follows the star width:
+# the value is a factor times the star width the run measured (10 on the
+# reference setup).
 MOFFAT_FIT_BOX_HALF_WIDTH_PX = TunedParameter(
     name="shared.moffat_fit_box_half_width_px",
-    default=10,
-    unit="pixels",
+    default=factor_for(10, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Half the side of the box a star is fitted in.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=10,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="AST-17",
-    pending_conversion=True,
 )
 
 # A star is isolated when no other detected source lies within this many pixels
 # of it. The fit box reaches 10 px (14 px along its diagonal), and a neighbor
 # just outside would still add its wing to the box corners. 14 px puts every
 # neighbor's core beyond the corner of the box.
+# Stands for the distance within which a neighbor counts as crowding. It
+# follows the star width: the value is a factor times the star width the run
+# measured (14.0 on the reference setup).
 MOFFAT_ISOLATION_RADIUS_PX = TunedParameter(
     name="shared.moffat_isolation_radius_px",
-    default=14.0,
-    unit="pixels",
+    default=factor_for(14.0, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Radius within which no other source may lie for a star to count as isolated.",
     role=ParameterRole.EXCLUSION_CRITERIA,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=14.0,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="AST-17",
-    pending_conversion=True,
 )
 
 # A star is skipped when any pixel of its fit box reaches this fraction of the
@@ -205,16 +215,20 @@ MOFFAT_MINIMUM_R_SQUARED = TunedParameter(
 # The fitted center must stay within this many pixels of the detected one; a
 # fit that wanders further has locked onto a neighbor. Same as
 # `FWHM_MAXIMUM_CENTRE_SHIFT_PX` in `fwhm.py`.
+# Stands for the farthest the fitted center may move. It follows the star
+# width: the value is a factor times the star width the run measured (2.5 on
+# the reference setup).
 MOFFAT_MAXIMUM_CENTER_SHIFT_PX = TunedParameter(
     name="shared.moffat_maximum_center_shift_px",
-    default=2.5,
-    unit="pixels",
+    default=factor_for(2.5, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Farthest the fitted center may move from the detected one.",
     role=ParameterRole.EXCLUSION_CRITERIA,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=2.5,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="AST-17",
-    pending_conversion=True,
 )
 
 # A fitted width outside this range (in pixels, FWHM) is a fit gone wrong, not
@@ -276,10 +290,9 @@ MOMENT_APERTURE_MINIMUM_RADIUS_PX = TunedParameter(
     unit="pixels",
     description="Smallest radius of the window the second moments are taken in.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="AST-17",
-    pending_conversion=True,
 )
 
 # The blur a square pixel adds to a star, as a multiple of the pixel side
@@ -873,34 +886,41 @@ STAR_FINDER_BOX_FRACTION = TunedParameter(
     unit="× short side",
     description="Size of the star finder's background box as a fraction of the frame's short side.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="AST-16",
-    pending_conversion=True,
 )
 
+# Stands for the smallest background box of the star finder. It follows the
+# star width: the value is a factor times the star width the run measured
+# (20 on the reference setup).
 STAR_FINDER_BOX_MINIMUM_PX = TunedParameter(
     name="shared.star_finder_box_minimum_px",
-    default=20,
-    unit="pixels",
+    default=factor_for(20, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Smallest size of the star finder's background box.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=20,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="AST-16",
-    pending_conversion=True,
 )
 
+# Stands for the largest background box of the star finder. It follows the
+# image size: the value is a factor times the image size the run measured
+# (200 on the reference setup).
 STAR_FINDER_BOX_MAXIMUM_PX = TunedParameter(
     name="shared.star_finder_box_maximum_px",
-    default=200,
-    unit="pixels",
+    default=factor_for(200, RunBasis.IMAGE_SHORT_SIDE_PX),
+    unit="× image size",
     description="Largest size of the star finder's background box.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.IMAGE_SHORT_SIDE_PX,
+    reference_value=200,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="AST-16",
-    pending_conversion=True,
 )
 
 STAR_FINDER_MINIMUM_BOXES_PER_AXIS = TunedParameter(
@@ -909,10 +929,9 @@ STAR_FINDER_MINIMUM_BOXES_PER_AXIS = TunedParameter(
     unit="boxes",
     description="Fewest background boxes per axis for the star finder to use a background map.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="AST-16",
-    pending_conversion=True,
 )
 
 

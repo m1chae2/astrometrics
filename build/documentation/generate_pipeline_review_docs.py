@@ -782,7 +782,11 @@ def get_symbol(module_path: str, symbol_name: str) -> Any:
     except ImportError, AttributeError:
         return None
     # A tuned value is declared as a parameter; the guide quotes its default.
-    return symbol.default if isinstance(symbol, TunedParameter) else symbol
+    if isinstance(symbol, TunedParameter):
+        # A value that follows a basis is a factor; the guides show its value
+        # on the reference setup.
+        return symbol.reference_value if symbol.basis is not None else symbol.default
+    return symbol
 
 
 def require_symbol(module_path: str, symbol_name: str) -> Any:
@@ -812,7 +816,7 @@ def require_symbol(module_path: str, symbol_name: str) -> Any:
     symbol = getattr(module, symbol_name)
     # A tuned value is declared as a parameter; the guide quotes its default.
     if isinstance(symbol, TunedParameter):
-        return symbol.default
+        return symbol.reference_value if symbol.basis is not None else symbol.default
     return symbol
 
 
@@ -3218,7 +3222,10 @@ def build_stacking_doc() -> str:
             "`INSTRUME` (or `CAMERA`)",
             "Recommended",
             "`str`",
-            "Camera name; frames from two cameras are never stacked together.",
+            (
+                "Camera name; frames from two cameras are never stacked together, "
+                "and neither are frames of one camera at two focal lengths."
+            ),
             "The camera of the frame record.",
         ],
     ])

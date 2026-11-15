@@ -21,9 +21,9 @@ from astropy.io import fits
 from astrometricslib._internal import stacking as stacking_group
 from astrometricslib.pipelines.stacking import stack_runner
 from astrometricslib.pipelines.stacking.post_processing.aperture_placement import (
-    EDGE_MARGIN_PX,
-    UNCOVERED_CLEARANCE_PX,
+    edge_margin_px,
     place_empty_apertures,
+    uncovered_clearance_px,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
     determine_stack_members,
@@ -635,8 +635,8 @@ def test_empty_apertures_keep_out_of_a_groups_uncovered_border() -> None:
 
     assert min(column for _, column in without) < 300
     assert len(with_mask) > 0
-    assert min(column for _, column in with_mask) > 300 + UNCOVERED_CLEARANCE_PX
-    assert min(row for row, _ in with_mask) >= EDGE_MARGIN_PX
+    assert min(column for _, column in with_mask) > 300 + uncovered_clearance_px()
+    assert min(row for row, _ in with_mask) >= edge_margin_px()
 
 
 def _run_two_group_stack(tmp_path: Path, read_noise_fails: bool = False) -> tuple[str, dict]:

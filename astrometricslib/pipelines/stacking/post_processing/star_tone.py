@@ -35,11 +35,13 @@ from scipy import ndimage
 
 from astrometricslib._internal.drivers.fits_access import read_data, read_header, write_image
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_image import robust_sigma
@@ -130,16 +132,19 @@ NOISE_WIDTHS_ABOVE_THE_BACKGROUND = TunedParameter(
 # The noise is measured on the picture minus a blurred copy of it, so the
 # large-scale structure of a galaxy or nebula does not count as noise. The
 # blur width, in pixels, is larger than a star and smaller than the structure.
+# On the reference setup this stands for 3.0 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
 _NOISE_BLUR_PIXELS = TunedParameter(
     name="stacking.noise_blur_pixels",
-    default=3.0,
-    unit="pixels",
+    default=factor_for(3.0, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=3.0,
+    unit="× star width",
     description="Width of the blur taken away before the noise is measured.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D55",
-    pending_conversion=True,
 )
 
 # The background under the stars is found with a grey-scale opening (erode,
@@ -149,16 +154,19 @@ _NOISE_BLUR_PIXELS = TunedParameter(
 # and nebulae are tens to hundreds of pixels wide. The size was set by eye on
 # the Bubble Nebula stack, where the Bubble stayed out of the star light, and
 # has not been tuned further.
+# On the reference setup this stands for 15 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
 _BACKGROUND_BOX_PIXELS = TunedParameter(
     name="stacking.background_box_pixels",
-    default=15,
-    unit="pixels",
+    default=factor_for(15, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=15,
+    unit="× star width",
     description="Side of the square opening that finds the background under the stars.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D55",
-    pending_conversion=True,
 )
 
 # The opening leaves a faint blocky edge. A Gaussian blur of this many pixels
@@ -169,10 +177,9 @@ _BACKGROUND_SMOOTHING_PIXELS = TunedParameter(
     unit="pixels",
     description="Width of the smoothing that hides the blocky edge of the opening.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D55",
-    pending_conversion=True,
 )
 
 # The smallest room left above the background, so a bright background never

@@ -106,11 +106,13 @@ from scipy.ndimage import binary_dilation, median_filter
 from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.intensity_variance import (
@@ -157,10 +159,9 @@ _MINIMUM_CROSS_SECTION_SAMPLES = TunedParameter(
     unit="px",
     description="The fewest pixels needed to find the centre of the spectrum line.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="SPE-D35",
-    pending_conversion=True,
 )
 
 # How wide to make the reading box, compared to the measured width of the
@@ -172,9 +173,9 @@ APERTURE_SIGMA_MULTIPLIER = TunedParameter(
     unit="× sigma",
     description="How wide to make the reading box, as a multiple of the measured spectrum width.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="SPE-04",
-    pending_conversion=True,
 )
 
 # How many neighbouring steps the width is smoothed over before it sets the
@@ -192,10 +193,9 @@ APERTURE_SIGMA_SMOOTHING_STEPS = TunedParameter(
     unit="steps",
     description="How many neighbouring steps the width is smoothed over before it sets the box size.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="SPE-04",
-    pending_conversion=True,
 )
 
 # The smallest box half-width the traced extraction will use, in pixels.
@@ -205,10 +205,9 @@ _MINIMUM_APERTURE_HALF_WIDTH_PX = TunedParameter(
     unit="px",
     description="The smallest box half-width the traced extraction uses.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="SPE-D35",
-    pending_conversion=True,
 )
 
 # The narrowest line width (in pixels) we'll accept as a real measurement,
@@ -229,10 +228,9 @@ _MINIMUM_FIT_SIGMA_PX = TunedParameter(
     unit="px",
     description="The narrowest line width accepted as a real measurement.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="SPE-D35",
-    pending_conversion=True,
 )
 
 # --- Sky background subtraction (see the module docstring) ---------------
@@ -256,16 +254,20 @@ _MINIMUM_FIT_SIGMA_PX = TunedParameter(
 # for most of the others (see
 # documentation/evidence/k_star_sky_investigation_20260919.json),
 # but no sweep of the gap was run there.
+# It stands for a gap of about one and a half trail widths (6 on the
+# reference setup, 1.5 × the trail width), so it follows the trail width the
+# run measures.
 SKY_BAND_GAP_PX = TunedParameter(
     name="spectroscopy.sky_band_gap_px",
-    default=6,
-    unit="px",
+    default=factor_for(6, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
     description="The gap between the reading box and each sky band.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-01",
-    pending_conversion=True,
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=6,
 )
 
 # Wider bands give a steadier median (more pixels, less noise). Narrower
@@ -281,10 +283,9 @@ SKY_BAND_WIDTH_PX = TunedParameter(
     unit="px",
     description="The width of each sky band.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="SPE-01",
-    pending_conversion=True,
 )
 
 # The fewest sky pixels we will trust in one band. Near the edge of the image
@@ -481,16 +482,19 @@ def fit_trail_centerline_polynomial(raw_centers: list[float | None], degree: int
 # spikes were a median 7 pixels wide (5-11 for the middle 80%, including the
 # dilation below), so 31 pixels is comfortably wide enough. It is a first
 # choice, checked only on M 27 and M 57 and not tuned.
+# It stands for about eight trail widths (31 on the reference setup, 7.9 ×
+# the trail width), so it follows the trail width the run measures.
 CONTAMINANT_BASELINE_WIDTH_PX = TunedParameter(
     name="spectroscopy.contaminant_baseline_width_px",
-    default=31,
-    unit="px",
+    default=factor_for(31, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
     description="Width of the smoothing that separates a narrow contaminating spike from a smooth box.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-D34",
-    pending_conversion=True,
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=31,
 )
 
 # A pixel counts as part of a contaminating spike when it stands this many
@@ -502,25 +506,27 @@ CONTAMINANT_THRESHOLD_SIGMA = TunedParameter(
     unit="noise sigma",
     description="A pixel is part of a contaminating spike when it stands this far above the smoothed copy.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="SPE-D34",
-    pending_conversion=True,
 )
 
 # Each side of a flagged spike is also replaced, because a trail's faint
 # edges sit below the threshold but still carry its light. Two pixels is a
 # judgement, not a measurement: on M 27 it leaves 5.9% of the box replaced.
+# It stands for about half a trail width (2 on the reference setup, 0.51 ×
+# the trail width), so it follows the trail width the run measures.
 CONTAMINANT_DILATION_PX = TunedParameter(
     name="spectroscopy.contaminant_dilation_px",
-    default=2,
-    unit="px",
+    default=factor_for(2, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
     description="How many pixels each side of a flagged spike are also replaced.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-D34",
-    pending_conversion=True,
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=2,
 )
 
 

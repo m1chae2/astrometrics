@@ -26,6 +26,7 @@ each other. They are not comparable with numbers from another tool.
 
 import json
 import logging
+import math
 import os
 import warnings
 
@@ -35,12 +36,16 @@ from skimage.registration import phase_cross_correlation
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data
 from astrometricslib.foundation.errors import ProcessingError
+from astrometricslib.foundation.parameter_context import record_basis
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.quality.stack_comparison import StackComparison, StackMeasurements
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
@@ -57,16 +62,19 @@ logger = logging.getLogger(__name__)
 # The window, in pixels, matched to find how far a stack was trimmed
 # (see `_crop_offset`), and the smallest window worth matching. A star field
 # this size holds hundreds of stars, enough to fix a whole-pixel offset.
+# On the reference setup this stands for 1024 pixels; the code scales it as a
+# multiple of the image size, so it follows the image size the run measures.
 _CROP_MATCH_WINDOW_PIXELS = TunedParameter(
     name="stacking.crop_match_window_pixels",
-    default=1024,
-    unit="pixels",
+    default=factor_for(1024, RunBasis.IMAGE_SHORT_SIDE_PX),
+    basis=RunBasis.IMAGE_SHORT_SIDE_PX,
+    reference_value=1024,
+    unit="× image size",
     description="Window matched to find how far a stack was trimmed.",
     role=ParameterRole.RECOMMENDATION,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D57",
-    pending_conversion=True,
 )
 _CROP_MATCH_MINIMUM_PIXELS = TunedParameter(
     name="stacking.crop_match_minimum_pixels",
@@ -74,10 +82,9 @@ _CROP_MATCH_MINIMUM_PIXELS = TunedParameter(
     unit="pixels",
     description="Smallest window worth matching to find a trim.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D57",
-    pending_conversion=True,
 )
 
 # The flatness is measured on blocks of this many pixels on a side. A star is
@@ -85,16 +92,19 @@ _CROP_MATCH_MINIMUM_PIXELS = TunedParameter(
 # vignetting and dust shadows (tens to hundreds of pixels) show up. Chosen on
 # the ASI533MM Pro stacks (3008 x 3008): 64 px resolves a vignette across the
 # frame and still averages 4096 pixels per block.
+# On the reference setup this stands for 64 pixels; the code scales it as a
+# multiple of the image size, so it follows the image size the run measures.
 FLATNESS_BLOCK_PIXELS = TunedParameter(
     name="stacking.flatness_block_pixels",
-    default=64,
-    unit="pixels",
+    default=factor_for(64, RunBasis.IMAGE_SHORT_SIDE_PX),
+    basis=RunBasis.IMAGE_SHORT_SIDE_PX,
+    reference_value=64,
+    unit="× image size",
     description="Side of the blocks on which flatness is measured.",
     role=ParameterRole.RECOMMENDATION,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D57",
-    pending_conversion=True,
 )
 
 # A block is left out of the flatness when its median is more than this many
@@ -110,10 +120,9 @@ FLATNESS_BLOCK_OUTLIER_SIGMA = TunedParameter(
     unit="sigma",
     description="Robust sigmas above the median of all blocks at which a block is left out of the flatness.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D57",
-    pending_conversion=True,
 )
 
 # Pixels brighter than the sky by more than this many robust standard
@@ -124,10 +133,9 @@ NOISE_STAR_SIGMA = TunedParameter(
     unit="sigma",
     description="Robust sigmas above the sky at which pixels are treated as stars in the noise estimate.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D57",
-    pending_conversion=True,
 )
 
 # A block of the flatness grid is used only if at least this share of its
@@ -139,10 +147,9 @@ MINIMUM_USABLE_BLOCK_SHARE = TunedParameter(
     unit="fraction",
     description="Least share of a block's pixels that must hold data.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D57",
-    pending_conversion=True,
 )
 
 # Fewest usable blocks for a flatness number to mean anything.
@@ -152,10 +159,9 @@ MINIMUM_FLATNESS_BLOCKS = TunedParameter(
     unit="blocks",
     description="Fewest usable blocks for a flatness number.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D57",
-    pending_conversion=True,
 )
 
 # A change smaller than this fraction is reported as "unchanged". Two
@@ -168,10 +174,9 @@ UNCHANGED_FRACTION = TunedParameter(
     unit="fraction",
     description="Change below which a comparison is reported as unchanged.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D57",
-    pending_conversion=True,
 )
 
 
@@ -199,6 +204,7 @@ def _crop_offset(reference: np.ndarray, combined: np.ndarray) -> tuple[int, int]
     """
     extra_rows = reference.shape[0] - combined.shape[0]
     extra_columns = reference.shape[1] - combined.shape[1]
+    record_basis(RunBasis.IMAGE_SHORT_SIDE_PX, float(min(combined.shape[:2])))
     window = min(resolve(_CROP_MATCH_WINDOW_PIXELS).value, *combined.shape)
     if extra_rows < 0 or extra_columns < 0 or window < resolve(_CROP_MATCH_MINIMUM_PIXELS).value:
         return None
@@ -289,7 +295,10 @@ def measure_stack_fwhm(path: str) -> float | None:
         measured.
     """
     image = np.asarray(collapse_to_2d(np.asarray(read_data(path), dtype=np.float64)))
-    return measure_fwhm_from_data(image, excluded_mask=combined_stack_excluded_mask(path, image.shape))
+    fwhm = measure_fwhm_from_data(image, excluded_mask=combined_stack_excluded_mask(path, image.shape))
+    if fwhm is not None and math.isfinite(fwhm):
+        record_basis(RunBasis.STAR_WIDTH_PX, fwhm)
+    return fwhm
 
 
 def _usable_pixels(image: np.ndarray) -> np.ndarray:
@@ -363,6 +372,7 @@ def measure_stack_array(data: np.ndarray, path: str = "") -> StackMeasurements:
     if fine_grain is None:
         measurements.not_measured["fine_grain_noise_fraction"] = "no pairs of neighbouring sky pixels"
 
+    record_basis(RunBasis.IMAGE_SHORT_SIDE_PX, float(min(image.shape[:2])))
     block = resolve(FLATNESS_BLOCK_PIXELS).value
     rows, columns = (image.shape[0] // block) * block, (image.shape[1] // block) * block
     if rows == 0 or columns == 0:
@@ -400,6 +410,8 @@ def measure_stack_array(data: np.ndarray, path: str = "") -> StackMeasurements:
     )
     if measurements.fwhm_px is None:
         measurements.not_measured["fwhm_px"] = "too few stars could be fitted"
+    elif math.isfinite(measurements.fwhm_px):
+        record_basis(RunBasis.STAR_WIDTH_PX, measurements.fwhm_px)
     return measurements
 
 

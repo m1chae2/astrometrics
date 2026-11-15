@@ -18,11 +18,13 @@ from scipy.ndimage import zoom
 
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.star_finding import find_sources_above_background
@@ -61,9 +63,9 @@ _BACKGROUND_STATS_SAMPLE_FRACTION = TunedParameter(
     unit="fraction of pixels",
     description="The share of pixels sampled to estimate the global background of a large image.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="AST-16",
-    pending_conversion=True,
 )
 # Seed for the random subsample above. The sample feeds the detection
 # threshold, so an unseeded sample would nudge the threshold a little on
@@ -88,32 +90,39 @@ _BACKGROUND_2D_BOX_FRACTION = TunedParameter(
     unit="× shorter image axis",
     description="Side of a background box, as a fraction of the image's shorter axis.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="AST-16",
-    pending_conversion=True,
 )
+# Stands for the smallest background box, which must stay several star
+# widths across. It follows the star width: the value is a factor times the
+# star width the run measured (20 on the reference setup).
 _BACKGROUND_2D_BOX_MIN_PX = TunedParameter(
     name="astrometry.background_2d_box_min_px",
-    default=20,
-    unit="px",
+    default=factor_for(20, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Smallest side of a background box.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=20,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="AST-16",
-    pending_conversion=True,
 )
+# Stands for the largest background box, which sets how finely a gradient is
+# followed. It follows the image size: the value is a factor times the image
+# size the run measured (200 on the reference setup).
 _BACKGROUND_2D_BOX_MAX_PX = TunedParameter(
     name="astrometry.background_2d_box_max_px",
-    default=200,
-    unit="px",
+    default=factor_for(200, RunBasis.IMAGE_SHORT_SIDE_PX),
+    unit="× image size",
     description="Largest side of a background box.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.IMAGE_SHORT_SIDE_PX,
+    reference_value=200,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="AST-16",
-    pending_conversion=True,
 )
 # Background2D needs several boxes per axis to interpolate a map at
 # all; below this, per-box statistics are too noisy to be meaningful
@@ -124,10 +133,9 @@ _BACKGROUND_2D_MIN_BOXES_PER_AXIS = TunedParameter(
     unit="boxes",
     description="Fewest background boxes along each axis for the 2D background map to be used.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="AST-16",
-    pending_conversion=True,
 )
 
 # A star's radius is the distance from its centre at which it falls to this

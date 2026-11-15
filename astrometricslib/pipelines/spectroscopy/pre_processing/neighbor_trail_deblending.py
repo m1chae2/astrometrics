@@ -83,11 +83,13 @@ from scipy.interpolate import CubicSpline
 from scipy.optimize import least_squares
 
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor import (
@@ -108,16 +110,20 @@ _FINE_SAMPLES_PER_PIXEL = 12
 # the sky came from where the wings still hold light, took it off, and the
 # predicted neighbour light ran 15% too low; widening the window to 75 px
 # brought it to 10% too low.
+# It stands for how far the blur of a star reaches on each side of its streak
+# (75 on the reference setup, 19 × the trail width), so it follows the trail
+# width the run measures.
 DEFAULT_HALF_WIDTH_PX = TunedParameter(
     name="spectroscopy.default_half_width_px",
-    default=75,
-    unit="px",
+    default=factor_for(75, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
     description="The default half-width of the window and sky used when deblending neighbour trails.",
     role=ParameterRole.JUDGMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-D49",
-    pending_conversion=True,
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=75,
 )
 SKY_EDGE_SAMPLES = TunedParameter(
     name="spectroscopy.sky_edge_samples",
@@ -125,37 +131,43 @@ SKY_EDGE_SAMPLES = TunedParameter(
     unit="px",
     description="How many samples at each window edge are used to measure the sky.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="SPE-D49",
-    pending_conversion=True,
 )
 
 # The centre of a star's streak is found from the middle few pixels.
+# It stands for about one trail width on each side of the streak centre (4 on
+# the reference setup, 1 × the trail width), so it follows the trail width
+# the run measures.
 _CENTROID_HALF_WIDTH_PX = TunedParameter(
     name="spectroscopy.centroid_half_width_px",
-    default=4,
-    unit="px",
+    default=factor_for(4, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
     description="The half-width of the middle strip used to find a streak centre.",
     role=ParameterRole.JUDGMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-D49",
-    pending_conversion=True,
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=4,
 )
 
 # How far a star's fitted position may move from where the centre line says,
 # in pixels. The centre lines are measured, so this is only a small correction.
+# It stands for about half a trail width (2 on the reference setup, 0.51 ×
+# the trail width), so it follows the trail width the run measures.
 _MAXIMUM_CENTRE_SHIFT_PX = TunedParameter(
     name="spectroscopy.maximum_centre_shift_px",
-    default=2.0,
-    unit="px",
+    default=factor_for(2.0, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
     description="How far a star's fitted position may move from where the centre line says.",
     role=ParameterRole.JUDGMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-D49",
-    pending_conversion=True,
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=2.0,
 )
 
 # How many places along the streak `sky_aware_neighbor_wing_flux` works out
@@ -175,10 +187,9 @@ MINIMUM_DILATION = TunedParameter(
     unit="ratio",
     description="The least the measured blur may be squeezed to match the crowded image.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="SPE-D49",
-    pending_conversion=True,
 )
 MAXIMUM_DILATION = TunedParameter(
     name="spectroscopy.maximum_dilation",
@@ -186,10 +197,9 @@ MAXIMUM_DILATION = TunedParameter(
     unit="ratio",
     description="The most the measured blur may be stretched to match the crowded image.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="SPE-D49",
-    pending_conversion=True,
 )
 
 # A fit is only trusted when the profile is matched to within this fraction

@@ -58,6 +58,9 @@ astrometricslib/foundation/logging.py,_MAX_LOG_BYTES,software plumbing
 astrometricslib/foundation/parameter_context.py,DEFAULT_CONTEXT_REUSE_SECONDS,"Cache lifetime of the default parameter context, matching the config recheck interval; plumbing"
 astrometricslib/foundation/run_abandonment.py,REAP_TIMEOUT_SECONDS,Plumbing or protocol constant
 astrometricslib/foundation/run_abandonment.py,STOP_GRACE_SECONDS,Plumbing or protocol constant
+astrometricslib/foundation/run_bases.py,ANGSTROM_PER_MILLIMETER,Unit conversion
+astrometricslib/foundation/run_bases.py,ARCSEC_PER_DEGREE,Unit conversion
+astrometricslib/foundation/run_bases.py,PLATE_SCALE_CONSTANT,"Physical constant: arcseconds per radian over 1000, in the plate-scale formula"
 astrometricslib/foundation/storage/butler.py,_IDS_PER_QUERY,"Plumbing: query size, retry, report interval"
 astrometricslib/foundation/storage/local_database.py,WAL_SWITCH_ATTEMPTS,"Plumbing: query size, retry, report interval"
 astrometricslib/foundation/storage/local_database.py,WAL_SWITCH_RETRY_SECONDS,"Plumbing: query size, retry, report interval"
@@ -80,6 +83,7 @@ astrometricslib/pipelines/asteroid_detection/mpc_report.py,_OBSERVATORY_CODE_WID
 astrometricslib/pipelines/asteroid_detection/mpc_report.py,_SECONDS_OF_TIME_PER_HOUR,unit or physical constant
 astrometricslib/pipelines/asteroid_detection/mpc_report.py,_SECONDS_PER_DAY,unit or physical constant
 astrometricslib/pipelines/asteroid_detection/pipeline.py,_MAD_TO_SIGMA,unit or physical constant
+astrometricslib/pipelines/asteroid_detection/pipeline.py,_POSITION_ERROR_MATCH_RADIUS_VOTE_BINS,Fixed multiple of the vote bin (MOV-D09: three vote bins); relative
 astrometricslib/pipelines/astrometry/post_processing/target_clipping.py,MAD_TO_SIGMA,unit or physical constant
 astrometricslib/pipelines/astrometry/post_processing/target_clipping.py,MAXIMUM_FRAMES_READ,Plumbing: read cap
 astrometricslib/pipelines/astrometry/post_processing/target_clipping.py,MAXIMUM_READ_SECONDS,Plumbing: read time limit
@@ -100,6 +104,7 @@ astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,_RETRY_BACKOFF
 astrometricslib/pipelines/photometry/post_processing/record_noise_budget.py,[Observatory.Location] elevation,Site setting; the default of zero stands for sea level
 astrometricslib/pipelines/photometry/post_processing/record_quality.py,MAXIMUM_TIMESTAMP_REASONS_SHOWN,Display cap on quoted reasons
 astrometricslib/pipelines/photometry/post_processing/variability_skill.py,_MAGNITUDES_PER_FRACTION,unit or physical constant
+astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,CENTROID_SEARCH_HALF_WIDTH_PX,Default search half width of the centroid locator; the drift limit is half of it (PHO-D16); method choice
 astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,_MAXIMUM_UTC_OFFSET_HOURS,"Time zone range, not a choice"
 astrometricslib/pipelines/photometry/processing/catalog_zero_point.py,STANDARD_ERROR_OF_MEDIAN_FACTOR,Statistical constant sqrt(pi/2)
 astrometricslib/pipelines/photometry/processing/comparison_ensemble.py,MINIMUM_FRACTIONAL_NOISE,Divide-by-zero guard
@@ -268,6 +273,7 @@ astrometricslib/pipelines/stacking/pre_processing/sensor_noise.py,MAD_TO_STANDAR
 astrometricslib/pipelines/stacking/pre_processing/stack_calibration_health.py,_BATCH_EXPOSURE_DECIMALS,software plumbing
 astrometricslib/pipelines/stacking/pre_processing/stack_inputs.py,STACKING_ALGORITHM_VERSION,software plumbing
 astrometricslib/pipelines/stacking/processing/group_alignment.py,COVERED_PIXEL_THRESHOLD,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/processing/group_alignment.py,EXTENDED_TARGET_RIVAL_WINDOW_FACTOR,Fixed multiple of the zero-order search window; relative
 astrometricslib/pipelines/stacking/processing/group_star_gains.py,STAR_GAIN_EMPTY_APERTURE_ATTEMPTS,Attempt cap for placing apertures; plumbing.
 astrometricslib/pipelines/stacking/processing/group_star_gains.py,STAR_GAIN_EMPTY_APERTURE_SEED,software plumbing
 astrometricslib/pipelines/stacking/stage_progress.py,LOOP_LOG_EVERY_FRAMES,software plumbing

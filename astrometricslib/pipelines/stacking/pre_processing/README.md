@@ -16,6 +16,8 @@ These terms appear throughout:
 
 Before the numbered checks, the stage keeps the stack to one camera (`camera_selection.py`). Frames from two cameras differ in pixel size, gain, noise and calibration frames, so a stack that mixes them has no single meaning. `choose_camera_frames` picks a named camera's frames for `ProcessingPipelines.stack`. `ensure_single_camera` stops the stage with an error when the frames still come from more than one camera. Frames with no camera recorded do not count.
 
+The stage also keeps the stack to one optic (`optic_selection.py`). A camera used behind two telescopes or lenses makes frames at two image scales, so a stack that mixes them has no single pixel scale. An optic is known by its focal length in whole millimeters. `choose_optic_frames` picks the frames at one focal length when `ProcessingPipelines.stack` is given `focal_length_mm`. `ensure_single_optic` stops the stage with an error when the frames still come from more than one optic. Frames with no focal length recorded do not count.
+
 1. Gain check (`frame_homogeneity.py`). Frames taken at different camera gain settings have different read noise, so mixing them hurts the stack. The check keeps the most common gain and sets the others aside.
 2. Frame-quality check (`frame_quarantine.py`). It measures each light frame's stars and moves a frame with clouds or trailed stars into an `_excluded` folder beside it. It skips spectral frames. [The frame-quality check](#the-frame-quality-check) describes it.
 3. Background check (`background_homogeneity.py`). It compares each frame's sky background with the others of the same exposure length. It sets aside a frame taken through cloud or twilight (partly measured; see [STK-04](../../../../documentation/library_design/validation/stacking.md#stk-04)). `shared/quality/background_measurement.py` measures the sky.
@@ -68,6 +70,7 @@ The limits are in `frame_quarantine.py`.
 ## Files
 
 - `camera_selection.py`: the one-camera rule.
+- `optic_selection.py`: the one-optic rule.
 - `frame_homogeneity.py`: the gain check.
 - `frame_quarantine.py`: the frame-quality check and its limits.
 - `background_homogeneity.py`: the background check.

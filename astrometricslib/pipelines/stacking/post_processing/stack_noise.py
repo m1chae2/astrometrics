@@ -131,12 +131,14 @@ from astrometricslib._internal.drivers.camera_profile_store import resolve_camer
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data, read_header
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.camera_profile import ProvenanceKind
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.applied_camera_profile import camera_name_from_header
@@ -201,10 +203,9 @@ MAXIMUM_PIXEL_SCALE_CHANGE = TunedParameter(
     unit="fraction",
     description="Largest change of pixel scale before the stored apertures are refused.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D52",
-    pending_conversion=True,
 )
 
 # The check that a reference frame's solution fits the stack: this many of the
@@ -217,10 +218,9 @@ WCS_CHECK_STAR_COUNT = TunedParameter(
     unit="stars",
     description="Number of the stack's brightest stars that must have a match in the reference frame.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D52",
-    pending_conversion=True,
 )
 WCS_CHECK_MINIMUM_MATCHES = TunedParameter(
     name="stacking.wcs_check_minimum_matches",
@@ -228,21 +228,23 @@ WCS_CHECK_MINIMUM_MATCHES = TunedParameter(
     unit="stars",
     description="Fewest matches for a reference frame's solution to fit the stack.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D52",
-    pending_conversion=True,
 )
+# On the reference setup this stands for 3.0 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
 WCS_CHECK_TOLERANCE_PX = TunedParameter(
     name="stacking.wcs_check_tolerance_px",
-    default=3.0,
-    unit="pixels",
+    default=factor_for(3.0, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=3.0,
+    unit="× star width",
     description="Distance within which a star counts as matched in the solution check.",
     role=ParameterRole.JUDGMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D52",
-    pending_conversion=True,
 )
 
 # Moving a solution onto the stored apertures. The stored reference stars are
@@ -252,21 +254,36 @@ WCS_CHECK_TOLERANCE_PX = TunedParameter(
 # for a night-to-night pointing error, and is still small enough that the
 # stars of a field do not line up by chance (4000 star pairs in a window of
 # 1,000,000 square pixels, against a 3 px agreement).
+# On the reference setup this is 500.0 pixels. It stands for an angle on the
+# sky, so it is divided by the plate scale and follows the plate scale the run
+# measures.
 SEED_SEARCH_RADIUS_PX = TunedParameter(
     name="stacking.seed_search_radius_px",
-    default=500.0,
-    unit="pixels",
+    default=factor_for(500.0, RunBasis.PLATE_SCALE_ARCSEC_PER_PX, inverse=True),
+    basis=RunBasis.PLATE_SCALE_ARCSEC_PER_PX,
+    basis_inverse=True,
+    reference_value=500.0,
+    unit="px (an angle on the sky ÷ plate scale)",
     description="Search radius for moving a solution onto the stored apertures.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-36",
-    pending_conversion=True,
 )
+
 
 # Reference stars agree on a shift when their shifts differ by less than this.
 # It is the tolerance of the other star checks in this module.
-SEED_AGREEMENT_PX = resolve(WCS_CHECK_TOLERANCE_PX).value
+def seed_agreement_px() -> float:
+    """Give how closely reference stars must agree on a shift.
+
+    Returns
+    -------
+    value : `float`
+        Pixels.
+    """
+    return resolve(WCS_CHECK_TOLERANCE_PX).value
+
 
 # The largest rotation, in degrees, between a stack's solution and the stored
 # stars that is searched for and accepted. The apertures are placed by a shift
@@ -289,27 +306,25 @@ MAXIMUM_ROTATION_DEG = TunedParameter(
     unit="degrees",
     description="Largest rotation between a stack's solution and the stored stars that is searched for.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-36",
-    pending_conversion=True,
 )
 
 # Trial rotations are this many pixels apart at the farthest corner of the
 # image (the step is this distance divided by the corner's distance from the
 # center). The nearest trial is then at most half of it off anywhere in the
-# image, well inside SEED_AGREEMENT_PX, so a star at the right rotation always
-# votes with the others.
+# image, well inside `seed_agreement_px`, so a star at the right rotation
+# always votes with the others.
 ROTATION_STEP_PX = TunedParameter(
     name="stacking.rotation_step_px",
     default=1.0,
     unit="pixels",
     description="Distance at the farthest corner between trial rotations.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-36",
-    pending_conversion=True,
 )
 
 # The rotation must also exceed this many times its own error to count.
@@ -339,10 +354,9 @@ NEGLIGIBLE_SHIFT_PX = TunedParameter(
     unit="pixels",
     description="Shift below which the solution is left as it is.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D30",
-    pending_conversion=True,
 )
 NEGLIGIBLE_ROTATION_DEG = TunedParameter(
     name="stacking.negligible_rotation_deg",
@@ -350,10 +364,9 @@ NEGLIGIBLE_ROTATION_DEG = TunedParameter(
     unit="degrees",
     description="Rotation below which the solution is left as it is.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D30",
-    pending_conversion=True,
 )
 
 # A move onto the stored stars that leaves more than this rms is a poor fit.
@@ -369,10 +382,9 @@ POOR_ALIGNMENT_RMS_PX = TunedParameter(
     unit="pixels",
     description="Rms above which a move onto the stored stars is a poor fit.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D30",
-    pending_conversion=True,
 )
 
 NO_WCS_REASON = "no WCS for this stack"
@@ -802,7 +814,7 @@ def _plate_solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> t
     AST-02 in the astrometry validation register), so sets chosen from the
     two kinds of solution can be told apart by the stored source. The
     apertures are picked on the stack's own pixels, at least
-    `FAINT_SOURCE_CLEARANCE_PX` from every detected source, so the choice does
+    `faint_source_clearance_px` from every detected source, so the choice does
     not depend on the solution. The solution only gives each aperture its sky
     position, for carrying the set to other stacks. The stack file
     is only read here: the stacking stage saves a solution in the header
@@ -1065,7 +1077,7 @@ def _vote_for_shift(
 
     Every pair of a predicted star and a detected star suggests a shift. The
     true shift is the one the most different predicted stars suggest together
-    (within `SEED_AGREEMENT_PX`); when two shifts tie, the smaller one wins.
+    (within `seed_agreement_px`); when two shifts tie, the smaller one wins.
 
     Parameters
     ----------
@@ -1099,7 +1111,7 @@ def _vote_for_shift(
     # Each shift counts the distinct stars among the shifts within the
     # agreement distance of it (itself included). Done on arrays: a list of
     # sets per shift is too slow when it is repeated for every trial rotation.
-    pairs = tree.query_pairs(r=SEED_AGREEMENT_PX, output_type="ndarray")
+    pairs = tree.query_pairs(r=seed_agreement_px(), output_type="ndarray")
     first = np.concatenate([pairs[:, 0], pairs[:, 1], np.arange(len(shifts))])
     second = np.concatenate([pairs[:, 1], pairs[:, 0], np.arange(len(shifts))])
     star_count = len(predicted)
@@ -1107,7 +1119,7 @@ def _vote_for_shift(
     distinct_counts = np.bincount(distinct_keys // star_count, minlength=len(shifts))
     tied = np.flatnonzero(distinct_counts == distinct_counts.max())
     best = int(tied[np.argmin(np.hypot(shifts[tied, 0], shifts[tied, 1]))])
-    members = np.asarray(tree.query_ball_point(shifts[best], r=SEED_AGREEMENT_PX))
+    members = np.asarray(tree.query_ball_point(shifts[best], r=seed_agreement_px()))
     return shifts, owner, pair_detected, members, int(distinct_counts[best])
 
 
@@ -1400,7 +1412,7 @@ def measure_stack_noise(
         For a stack combined from exposure groups, `True` where every group
         has data, on the grid the stack had before its edges were trimmed.
         Apertures this stack chooses keep out of the pixels it marks `False`
-        (see `aperture_placement.UNCOVERED_CLEARANCE_PX`). Left out for a stack
+        (see `aperture_placement.uncovered_clearance_px`). Left out for a stack
         of one group.
     member_frame_paths : `Sequence` of `str`, optional
         Frames of the group the stack was lined up with, best first. Used only

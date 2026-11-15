@@ -28,11 +28,13 @@ from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
@@ -75,16 +77,21 @@ _FLARE_CONTAMINATION_FRACTION_THRESHOLD = TunedParameter(
 # must be much wider than an absorption line so the median ignores the line.
 # The Balmer lines are about 4 to 14 samples wide, so 101 samples (about
 # 1100 A at this dispersion) leaves them well outside the median's reach.
+# It stands for a fixed span of about 1100 A, so its count of samples is that
+# span divided by the dispersion the run measures (101 samples at the
+# reference setup's 11.4 A per pixel; fewer on a coarser grating).
 _CONTINUUM_WINDOW_SAMPLES = TunedParameter(
     name="spectroscopy.continuum_window_samples",
-    default=101,
-    unit="samples",
+    default=factor_for(101, RunBasis.DISPERSION_ANGSTROM_PER_PX, inverse=True),
+    unit="samples (a span in Å ÷ dispersion)",
     description="Width of the running median that estimates the continuum.",
     role=ParameterRole.EXCLUSION_CRITERIA,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D22",
-    pending_conversion=True,
+    basis=RunBasis.DISPERSION_ANGSTROM_PER_PX,
+    basis_inverse=True,
+    reference_value=101,
 )
 
 # A dip must be at least this many times deeper than the local noise. The
@@ -97,10 +104,9 @@ _NOISE_PROMINENCE_MULTIPLE = TunedParameter(
     unit="× noise",
     description="A dip must be at least this many times deeper than the local noise.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="SPE-D22",
-    pending_conversion=True,
 )
 
 # Converts a median absolute deviation (MAD) to a standard deviation for
@@ -129,10 +135,9 @@ _FIRST_FRACTIONAL_PROMINENCE = TunedParameter(
     unit="fraction",
     description="The smallest dip depth, as a fraction of the continuum, that is tried first.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="SPE-D22",
-    pending_conversion=True,
 )
 _LAST_FRACTIONAL_PROMINENCE = TunedParameter(
     name="spectroscopy.last_fractional_prominence",
@@ -140,10 +145,9 @@ _LAST_FRACTIONAL_PROMINENCE = TunedParameter(
     unit="fraction",
     description="The smallest dip depth, as a fraction of the continuum, that is tried last.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="SPE-D22",
-    pending_conversion=True,
 )
 _FRACTIONAL_PROMINENCE_STEP = 0.002
 
@@ -155,10 +159,9 @@ _DIP_EDGE_MARGIN_SAMPLES = TunedParameter(
     unit="samples",
     description="Dips closer than this many samples to either end of the spectrum are ignored.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="SPE-D22",
-    pending_conversion=True,
 )
 
 

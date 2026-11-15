@@ -27,7 +27,12 @@ from astrometricslib._internal.drivers.interfaces.simbad_driver import SimbadDri
 from astrometricslib.foundation.errors import ExternalServiceError, InvalidArgumentError
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.target import TargetObjectType
-from astrometricslib.models.tuned_parameter import ParameterRole, ParameterSource, TunedParameter
+from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+)
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS
 from astrometricslib.utilities.target_classification import classify_target_name
@@ -60,9 +65,9 @@ POSITION_TOLERANCE_FLOOR_ARCMIN = TunedParameter(
     unit="arcmin",
     description="Smallest distance from the catalog position at which a target still counts as found.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="AST-20",
-    pending_conversion=True,
 )
 
 # An extended object may be framed anywhere over its body, so the tolerance
@@ -75,9 +80,9 @@ EXTENT_TOLERANCE_FACTOR = TunedParameter(
     unit="× half axis",
     description="Share of an object's half axis added to the position tolerance.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="AST-20",
-    pending_conversion=True,
 )
 
 # How far outside the solved frame, in arcminutes, a catalog position may lie

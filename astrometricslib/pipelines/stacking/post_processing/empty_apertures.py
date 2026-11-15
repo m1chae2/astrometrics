@@ -30,6 +30,7 @@ from astropy.io import fits
 
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
     TunedParameter,
@@ -166,9 +167,9 @@ REPLACEMENT_DEPTH_FACTOR = TunedParameter(
     unit="× frame count",
     description="Times the defining stack's frame count that a library stack needs to replace a stored set.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-36",
-    pending_conversion=True,
 )
 
 # The setup key of a stack whose header names neither camera, telescope nor
@@ -180,9 +181,27 @@ UNSPECIFIED_SETUP = "unspecified"
 # matched (see `is_legacy_setup_key`).
 EXPOSURE_KEY_MARKER = "|exp="
 
-REFERENCE_RING_GAP_PX = resolve(RING_INNER_PX).value - resolve(APERTURE_RADIUS_PX).value
 
-REFERENCE_RING_WIDTH_PX = resolve(RING_OUTER_PX).value - resolve(RING_INNER_PX).value
+def reference_ring_gap_px() -> float:
+    """Give the gap between the aperture and its sky ring.
+
+    Returns
+    -------
+    value : `float`
+        Pixels.
+    """
+    return resolve(RING_INNER_PX).value - resolve(APERTURE_RADIUS_PX).value
+
+
+def reference_ring_width_px() -> float:
+    """Give the width of the sky ring.
+
+    Returns
+    -------
+    value : `float`
+        Pixels.
+    """
+    return resolve(RING_OUTER_PX).value - resolve(RING_INNER_PX).value
 
 
 class ApertureSetMismatchError(ValueError):
@@ -289,7 +308,7 @@ class ApertureSet:
     flagged_fraction : `float` or `None`
         The share of the defining stack's pixels the mask flagged.
     excluded_fraction : `float` or `None`
-        The share within `FAINT_SOURCE_CLEARANCE_PX` of a flagged pixel, where
+        The share within `faint_source_clearance_px` of a flagged pixel, where
         no aperture could be placed.
     sky_positions_from_plate_solve : `bool`
         True when the stored right ascensions and declinations came from a
@@ -385,7 +404,7 @@ class ApertureSet:
         radius : `float`
             Pixels.
         """
-        return self.reference_radius_px + REFERENCE_RING_GAP_PX
+        return self.reference_radius_px + reference_ring_gap_px()
 
     @property
     def reference_ring_outer_px(self) -> float:
@@ -396,7 +415,7 @@ class ApertureSet:
         radius : `float`
             Pixels.
         """
-        return self.reference_ring_inner_px + REFERENCE_RING_WIDTH_PX
+        return self.reference_ring_inner_px + reference_ring_width_px()
 
     def to_json(self) -> dict:
         """Turn the set into plain JSON data.

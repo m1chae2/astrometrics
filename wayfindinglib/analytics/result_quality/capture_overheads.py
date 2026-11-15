@@ -95,10 +95,9 @@ DITHER_EVERY_FRAMES = TunedParameter(
     unit="frames between dithers",
     description="Frames between dithers, when a run of frames is priced and the sequence says nothing else.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE}),
+    source=ParameterSource.PROCESSING_SETTING,
     register_entry="WAY-D71",
-    pending_conversion=True,
+    config_key=("Wayfinding.Planning", "dither_every_frames"),
 )
 """Frames between dithers, when a run of frames is priced and the sequence says
 nothing else. It is the cadence of the wall-clock example (60 frames of
@@ -114,10 +113,9 @@ AUTOFOCUS_RUNS_PER_HOUR = TunedParameter(
         "Autofocus runs per hour of imaging, when a run of frames is priced and the plan says nothing else."
     ),
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE}),
+    source=ParameterSource.PROCESSING_SETTING,
     register_entry="WAY-D71",
-    pending_conversion=True,
+    config_key=("Wayfinding.Planning", "autofocus_runs_per_hour"),
 )
 """Autofocus runs per hour of imaging, when a run of frames is priced and the
 plan says nothing else. Ekos refocuses on a filter change or a temperature

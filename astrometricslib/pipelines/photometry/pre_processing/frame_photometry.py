@@ -44,11 +44,13 @@ from photutils.centroids import centroid_com
 
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_header_and_data
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.photometry.pre_processing.detector_noise import DetectorNoise
@@ -189,8 +191,17 @@ def read_observation_time(header: Any) -> datetime:
     return parse_observation_time(value)
 
 
+# Half-width, in pixels, of the box around a star's expected position that
+# `locate_star_centroid` searches. The unstable-tracking limit in
+# `assess_input_quality` is a fraction of it.
+CENTROID_SEARCH_HALF_WIDTH_PX = 40
+
+
 def locate_star_centroid(
-    data: np.ndarray, expected_x: float, expected_y: float, search_half_width: int = 40
+    data: np.ndarray,
+    expected_x: float,
+    expected_y: float,
+    search_half_width: int = CENTROID_SEARCH_HALF_WIDTH_PX,
 ) -> tuple[float, float] | None:
     """Find the exact center of a star if we already know roughly where it is.
 
@@ -322,10 +333,9 @@ ALIGNMENT_REFINEMENT_PASSES = TunedParameter(
     unit="passes",
     description="How many times the anchors are re-centered and the rotation and scale fitted again.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="PHO-04",
-    pending_conversion=True,
 )
 
 # How far, in pixels, an anchor's centroid may sit from where the alignment so
@@ -337,19 +347,22 @@ ALIGNMENT_REFINEMENT_PASSES = TunedParameter(
 # displacement came out 0.9 px with the usual reach and 1.3 to 1.6 px with 3
 # to 4 px, where an independent fit on 800 bright stars gave about 0.6 px.
 # The fit's own clipping cuts the blends that remain. A design estimate.
+# The reach stands for about 1.3 star widths (4 px at the reference setup's 3
+# px width) and follows the measured star width.
 ALIGNMENT_ANCHOR_REACH_PX = TunedParameter(
     name="photometry.alignment_anchor_reach_px",
-    default=4.0,
-    unit="px",
+    default=factor_for(4.0, RunBasis.STAR_WIDTH_PX),
+    reference_value=4.0,
+    unit="× star width",
     description=(
         "How far an anchor's centroid may sit from where the alignment so far puts it when the "
         "usual reach leaves too few anchors."
     ),
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="PHO-04",
-    pending_conversion=True,
 )
 
 
@@ -665,16 +678,19 @@ ALIGNMENT_ANCHOR_MINIMUM_QUALIFYING = TunedParameter(
 
 # Half-width, in pixels, of the box around a detection searched for a
 # saturated pixel.
+# The half-width stands for one star width (3 px at the reference setup's 3 px
+# width) and follows the measured star width.
 ALIGNMENT_ANCHOR_SATURATION_BOX_HALF_WIDTH_PX = TunedParameter(
     name="photometry.alignment_anchor_saturation_box_half_width_px",
-    default=3,
-    unit="px",
+    default=factor_for(3, RunBasis.STAR_WIDTH_PX),
+    reference_value=3,
+    unit="× star width",
     description="Half-width of the box around a detection that is searched for a saturated pixel.",
     role=ParameterRole.EXCLUSION_CRITERIA,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="PHO-D03",
-    pending_conversion=True,
 )
 
 # The older rule's band of detections, ranked by flux, brightest first.
@@ -867,16 +883,19 @@ def compute_frame_airmass(header: fits.Header) -> float:
 # width at half maximum, the star's apparent size) the default aperture is
 # sized for. A box much narrower than 2 FWHM cuts off the star's wings
 # unevenly, which pulls the centroid toward the box center.
+# The half-width stands for about 1.7 star widths (5 px at the reference
+# setup's 3 px width) and follows the measured star width.
 CENTROID_BOX_HALF_WIDTH_PX = TunedParameter(
     name="photometry.centroid_box_half_width_px",
-    default=5,
-    unit="px",
+    default=factor_for(5, RunBasis.STAR_WIDTH_PX),
+    reference_value=5,
+    unit="× star width",
     description="Half-width of the square box used to re-center one star.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="PHO-D02",
-    pending_conversion=True,
 )
 
 # The largest move, in pixels, a re-centering may make from the shifted
@@ -885,29 +904,35 @@ CENTROID_BOX_HALF_WIDTH_PX = TunedParameter(
 # design estimate: the global shift is good to well under a pixel on a
 # clean frame, so 1.5 px leaves room for an imperfect shift but not for
 # jumping to another star.
+# The move stands for half a star width (1.5 px at the reference setup's 3 px
+# width) and follows the measured star width.
 MAX_CENTROID_SHIFT_PX = TunedParameter(
     name="photometry.max_centroid_shift_px",
-    default=1.5,
-    unit="px",
+    default=factor_for(1.5, RunBasis.STAR_WIDTH_PX),
+    reference_value=1.5,
+    unit="× star width",
     description="Largest move a re-centering may make from the shifted reference position.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="PHO-04",
-    pending_conversion=True,
 )
 
 # Half-width, in pixels, of the square cutout whose median is the local sky.
+# The half-width stands for five star widths (15 px at the reference setup's 3
+# px width) and follows the measured star width.
 CENTROID_SKY_CUTOUT_HALF_WIDTH_PX = TunedParameter(
     name="photometry.centroid_sky_cutout_half_width_px",
-    default=15,
-    unit="px",
+    default=factor_for(15, RunBasis.STAR_WIDTH_PX),
+    reference_value=15,
+    unit="× star width",
     description="Half-width of the square cutout whose median is the local sky.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="PHO-D02",
-    pending_conversion=True,
 )
 
 # How many times the centroid box is re-centered on its own result. One
@@ -919,10 +944,9 @@ CENTROID_REFINEMENT_PASSES = TunedParameter(
     unit="passes",
     description="How many times the centroid box is re-centered on its own result.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="PHO-D02",
-    pending_conversion=True,
 )
 
 
@@ -1256,38 +1280,48 @@ def summarize_centroid_shifts(
 # which keeps it clear of the star's wings. These are the defaults of
 # `measure_aperture_photometry` and the geometry behind the noise budget in
 # `processing/noise_budget.py`, so they are defined once, here.
+# The radius stands for about 1.3 star widths (4 px at the reference setup's 3
+# px width) and follows the measured star width. The two sky ring radii below
+# follow it the same way.
 APERTURE_RADIUS_PX = TunedParameter(
     name="photometry.aperture_radius_px",
-    default=4.0,
-    unit="px",
+    default=factor_for(4.0, RunBasis.STAR_WIDTH_PX),
+    reference_value=4.0,
+    unit="× star width",
     description="Radius of the circle in which photometry measures every star.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="PHO-D01",
-    pending_conversion=True,
 )
+# The inner radius stands for about 2.3 star widths (7 px at the reference
+# setup) and follows the measured star width.
 SKY_ANNULUS_INNER_RADIUS_PX = TunedParameter(
     name="photometry.sky_annulus_inner_radius_px",
-    default=7.0,
-    unit="px",
+    default=factor_for(7.0, RunBasis.STAR_WIDTH_PX),
+    reference_value=7.0,
+    unit="× star width",
     description="Inner radius of the sky ring around a star.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="PHO-D01",
-    pending_conversion=True,
 )
+# The outer radius stands for four star widths (12 px at the reference setup)
+# and follows the measured star width.
 SKY_ANNULUS_OUTER_RADIUS_PX = TunedParameter(
     name="photometry.sky_annulus_outer_radius_px",
-    default=12.0,
-    unit="px",
+    default=factor_for(12.0, RunBasis.STAR_WIDTH_PX),
+    reference_value=12.0,
+    unit="× star width",
     description="Outer radius of the sky ring around a star.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="PHO-D01",
-    pending_conversion=True,
 )
 
 

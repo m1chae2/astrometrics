@@ -129,7 +129,8 @@ def stack_frames(
     -----
     A `ConflictError` is raised when the target has no frames to stack, mixes
     spectral and standard imaging frames, has frames from more than one
-    camera, or has a subset-stack job running (see `target_stack_guard.py`).
+    camera or more than one optic, or has a subset-stack job running (see
+    `target_stack_guard.py`).
     A `ProcessingError` is raised when no usable frames are left after
     filtering out mismatched or bad frames.
     """
@@ -188,7 +189,7 @@ def _stack_frames_guarded(
     -----
     A `ConflictError` is raised, by the steps, when the target has no frames
     to stack, mixes spectral and standard imaging frames, or has frames from
-    more than one camera. A `ProcessingError` is raised, by the frame
+    more than one camera or optic. A `ProcessingError` is raised, by the frame
     screening, when no usable frames are left after filtering out
     mismatched or bad frames.
     """
@@ -249,7 +250,7 @@ def _stack_frames_guarded(
 
 
 def _choose_frames(run: StackRun) -> None:
-    """Pick the frames to stack and check they come from one camera.
+    """Pick the frames to stack and check they come from one camera and optic.
 
     Sets ``run.target_frames``. The target's stacked, starless and star-mask
     pictures are never stacked.
@@ -262,7 +263,8 @@ def _choose_frames(run: StackRun) -> None:
     Raises
     ------
     ConflictError
-        If there are no frames, or they come from more than one camera.
+        If there are no frames, or they come from more than one camera or
+        more than one optic (focal length).
     """
     if run.frames_to_stack is not None:
         run.target_frames = run.frames_to_stack
@@ -278,10 +280,14 @@ def _choose_frames(run: StackRun) -> None:
 
     # Frames from different cameras cannot be stacked together. Without this
     # check the gain filter in the screening step would keep whichever camera
-    # had more frames.
+    # had more frames. One camera through two optics is refused too: its
+    # frames have two image scales, and the exposure grouping would otherwise
+    # stack each optic as a group and combine them.
     from astrometricslib.pipelines.stacking.pre_processing.camera_selection import ensure_single_camera
+    from astrometricslib.pipelines.stacking.pre_processing.optic_selection import ensure_single_optic
 
     ensure_single_camera(run.target_frames)
+    ensure_single_optic(run.target_frames)
 
 
 def _check_frame_types(run: StackRun) -> None:

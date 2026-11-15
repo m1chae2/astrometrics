@@ -29,11 +29,15 @@ from astropy.wcs.utils import proj_plane_pixel_scales
 from photutils.aperture import CircularAnnulus, CircularAperture
 
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data
+from astrometricslib.foundation.parameter_context import record_basis
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 
@@ -56,38 +60,47 @@ __all__ = [
 # The aperture and sky ring are the defaults of `measure_aperture_photometry`
 # (the photometry pipeline's star aperture), so the noise is the noise of a
 # faint star's brightness measured the way the pipeline measures it.
+# On the reference setup this stands for 4.0 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
 APERTURE_RADIUS_PX = TunedParameter(
     name="stacking.aperture_radius_px",
-    default=4.0,
-    unit="pixels",
+    default=factor_for(4.0, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=4.0,
+    unit="× star width",
     description="Radius of the star aperture used to measure the noise.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-36",
-    pending_conversion=True,
 )
+# On the reference setup this stands for 7.0 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
 RING_INNER_PX = TunedParameter(
     name="stacking.ring_inner_px",
-    default=7.0,
-    unit="pixels",
+    default=factor_for(7.0, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=7.0,
+    unit="× star width",
     description="Inner radius of the sky ring.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D23",
-    pending_conversion=True,
 )
+# On the reference setup this stands for 12.0 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
 RING_OUTER_PX = TunedParameter(
     name="stacking.ring_outer_px",
-    default=12.0,
-    unit="pixels",
+    default=factor_for(12.0, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=12.0,
+    unit="× star width",
     description="Outer radius of the sky ring.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D23",
-    pending_conversion=True,
 )
 
 # A ring must be this full of pixels (not off the stack, not empty edge).
@@ -97,25 +110,27 @@ MINIMUM_RING_FILL = TunedParameter(
     unit="fraction",
     description="Least share of a sky ring that must hold usable pixels.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D23",
-    pending_conversion=True,
 )
 
 # A star is called saturated in the registration reference frame when its
 # peak within this many pixels of its position reaches the camera's saturation
 # level.
+# On the reference setup this stands for 3 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
 SATURATION_PEAK_HALF_WINDOW_PX = TunedParameter(
     name="stacking.saturation_peak_half_window_px",
-    default=3,
-    unit="pixels",
+    default=factor_for(3, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=3,
+    unit="× star width",
     description="Half width of the window in which a star's peak is checked for saturation.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D60",
-    pending_conversion=True,
 )
 
 # A robust standard deviation from the median absolute deviation (MAD) of a
@@ -376,7 +391,9 @@ def pixel_scale_arcsec(wcs: WCS) -> float:
     scale : `float`
         Arcseconds per pixel.
     """
-    return float(np.mean(proj_plane_pixel_scales(wcs)) * 3600.0)
+    scale = float(np.mean(proj_plane_pixel_scales(wcs)) * 3600.0)
+    record_basis(RunBasis.PLATE_SCALE_ARCSEC_PER_PX, scale)
+    return scale
 
 
 def pixels_to_sky(wcs: WCS, pixels: np.ndarray) -> np.ndarray:

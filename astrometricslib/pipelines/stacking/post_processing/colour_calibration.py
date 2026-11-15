@@ -42,11 +42,13 @@ from photutils.utils.exceptions import NoDetectionsWarning
 
 from astrometricslib._internal.drivers.fits_access import read_data, read_header, write_image
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
@@ -60,16 +62,19 @@ logger = logging.getLogger(__name__)
 # (405 mm, 3.9 micron pixels, about 2 arcseconds per pixel) are 2.5 to 3.5
 # pixels wide. The finder is not sensitive to a value within 30 percent of the
 # true width.
+# On the reference setup this stands for 3.0 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
 FINDER_FWHM_PIXELS = TunedParameter(
     name="stacking.finder_fwhm_pixels",
-    default=3.0,
-    unit="pixels",
+    default=factor_for(3.0, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=3.0,
+    unit="× star width",
     description="Star width the star finder expects.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D17",
-    pending_conversion=True,
 )
 
 # A star must stand this many sky-noise widths above the sky to be found.
@@ -81,50 +86,58 @@ DETECTION_SIGMA = TunedParameter(
     unit="sigma",
     description="Sky-noise widths above the sky a star must stand to be found.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D17",
-    pending_conversion=True,
 )
 
 # The radius of the circle that sums a star's light, in pixels. About 1.2
 # times the star's full width at half maximum catches most of its light and
 # keeps the noise down.
+# On the reference setup this stands for 3.5 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
 APERTURE_RADIUS_PIXELS = TunedParameter(
     name="stacking.aperture_radius_pixels",
-    default=3.5,
-    unit="pixels",
+    default=factor_for(3.5, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=3.5,
+    unit="× star width",
     description="Radius of the circle that sums a star's light.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D17",
-    pending_conversion=True,
 )
 
 # The ring that measures the sky around a star, in pixels. It lies well
 # outside the star's wings. Sigma clipping drops any neighbouring star.
+# On the reference setup this stands for 7.0 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
 ANNULUS_INNER_RADIUS_PIXELS = TunedParameter(
     name="stacking.annulus_inner_radius_pixels",
-    default=7.0,
-    unit="pixels",
+    default=factor_for(7.0, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=7.0,
+    unit="× star width",
     description="Inner radius of the ring that measures the sky around a star.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D17",
-    pending_conversion=True,
 )
+# On the reference setup this stands for 11.0 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
 ANNULUS_OUTER_RADIUS_PIXELS = TunedParameter(
     name="stacking.annulus_outer_radius_pixels",
-    default=11.0,
-    unit="pixels",
+    default=factor_for(11.0, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=11.0,
+    unit="× star width",
     description="Outer radius of the ring that measures the sky around a star.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D17",
-    pending_conversion=True,
 )
 
 # Only stars between these percentiles of total brightness are used. The
@@ -155,8 +168,17 @@ MINIMUM_STARS = TunedParameter(
     register_entry="STK-27",
 )
 
+
 # Stars closer than this to the image edge are skipped, so the ring is whole.
-_EDGE_MARGIN_PIXELS = int(resolve(ANNULUS_OUTER_RADIUS_PIXELS).value) + 2
+def _edge_margin_pixels() -> int:
+    """Give how close to the edge a star may be before it is skipped.
+
+    Returns
+    -------
+    value : `int`
+        Pixels.
+    """
+    return int(resolve(ANNULUS_OUTER_RADIUS_PIXELS).value) + 2
 
 
 @dataclass(frozen=True)
@@ -236,10 +258,10 @@ def _find_stars(summed: np.ndarray, noise: float) -> np.ndarray:
     prefix = ("x_", "y_") if "x_centroid" in found.colnames else ("x", "y")
     x, y = np.asarray(found[f"{prefix[0]}centroid"]), np.asarray(found[f"{prefix[1]}centroid"])
     inside = (
-        (x > _EDGE_MARGIN_PIXELS)
-        & (x < width - _EDGE_MARGIN_PIXELS)
-        & (y > _EDGE_MARGIN_PIXELS)
-        & (y < height - _EDGE_MARGIN_PIXELS)
+        (x > _edge_margin_pixels())
+        & (x < width - _edge_margin_pixels())
+        & (y > _edge_margin_pixels())
+        & (y < height - _edge_margin_pixels())
     )
     return np.column_stack([x[inside], y[inside]])
 

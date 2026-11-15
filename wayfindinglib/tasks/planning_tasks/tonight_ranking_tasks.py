@@ -54,7 +54,6 @@ from astropy.time import Time
 
 from astrometricslib import Target
 from astrometricslib.parameters import (
-    EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
@@ -169,10 +168,9 @@ THIN_DATASET_SECONDS = TunedParameter(
     unit="s of exposure on a target",
     description='A target with less exposure than this is "thin".',
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE}),
+    source=ParameterSource.PROCESSING_SETTING,
     register_entry="WAY-D71",
-    pending_conversion=True,
+    config_key=("Wayfinding.Planning", "thin_dataset_seconds"),
 )
 """A target with less exposure than this is "thin". One more hour then adds at
 least half as much again as it has, so its gain per hour is large because its

@@ -21,10 +21,13 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 
@@ -40,10 +43,9 @@ PATTERN_STAR_COUNT = TunedParameter(
     unit="stars",
     description="Number of the brightest stars of each list used to build triangles.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D14",
-    pending_conversion=True,
 )
 
 # Each star forms triangles with pairs chosen from its nearest neighbours.
@@ -56,10 +58,9 @@ PATTERN_NEIGHBOUR_COUNT = TunedParameter(
     unit="stars",
     description="Number of nearest neighbours each star forms triangles with.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D14",
-    pending_conversion=True,
 )
 
 # Two triangles match when both side ratios agree to this much. Star centres
@@ -73,24 +74,27 @@ PATTERN_RATIO_TOLERANCE = TunedParameter(
     unit="ratio",
     description="Largest difference in side ratios at which two triangles match.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D14",
-    pending_conversion=True,
 )
 
 # Triangles with a longest side under this many pixels are skipped: their
 # shape is dominated by the error in the star centres.
+#
+# Stands for the side length below which center errors spoil the triangle
+# ratio, so it is a multiple of the star width and follows it.
 PATTERN_MINIMUM_LONGEST_SIDE_PIXELS = TunedParameter(
     name="stacking.pattern_minimum_longest_side_pixels",
-    default=20.0,
-    unit="× FWHM",
+    default=factor_for(20.0, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
     description="Shortest longest side a triangle may have before it is skipped.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D14",
-    pending_conversion=True,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=20.0,
 )
 
 # A guess that changes the scale by more than this fraction is dropped before
@@ -104,10 +108,9 @@ PATTERN_MAXIMUM_SCALE_DEVIATION = TunedParameter(
     unit="fraction",
     description="Largest scale change a star-pattern guess may have before it is dropped.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D14",
-    pending_conversion=True,
 )
 
 

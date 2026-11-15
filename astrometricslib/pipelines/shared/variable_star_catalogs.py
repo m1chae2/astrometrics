@@ -35,6 +35,7 @@ from astropy.table import Table
 
 from astrometricslib.foundation.offline import require_online
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.known_variability import (
     NO_GAIA_MATCH,
     NOT_IN_VSX,
@@ -46,6 +47,7 @@ from astrometricslib.models.tuned_parameter import (
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 
@@ -53,15 +55,19 @@ VSX_CATALOG = "vizier:B/vsx/vsx"
 GAIA_CATALOG = "vizier:I/355/gaiadr3"
 
 # How far a catalog entry may lie from the star, in arcseconds.
+# Stands for the sky distance for the cross-match with the variable-star
+# catalog. It follows the plate scale: the value is a factor times the plate
+# scale the run measured (3.0 on the reference setup).
 MATCH_RADIUS_ARCSEC = TunedParameter(
     name="shared.match_radius_arcsec",
-    default=3.0,
-    unit="arcsec",
+    default=factor_for(3.0, RunBasis.PLATE_SCALE_ARCSEC_PER_PX),
+    unit="× plate scale",
     description="Radius within which a star is matched to a variable star catalog entry.",
     role=ParameterRole.EXCLUSION_CRITERIA,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.PLATE_SCALE_ARCSEC_PER_PX,
+    reference_value=3.0,
     register_entry="AST-12",
-    pending_conversion=True,
 )
 
 # The largest allowed difference between a star's own magnitude and the G

@@ -5,6 +5,7 @@ import { emitToast } from '../../common/utils/emitToast';
 import { useOnValueChange } from './useOnValueChange';
 import { matchesQuery } from '../../common/utils/searchLogic';
 import { FileItem } from '../fileBrowser/FileBrowser';
+import { buildOpticOptions, chooseDefaultOptic, filterFilesByCamera, filterFilesByOptic } from '../utils/opticSelection';
 
 /**
  * Hook to manage file listing, filtering, and deletion for a target.
@@ -38,6 +39,20 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
     const [stackedSpectralTarget, setStackedSpectralTarget] = useState<string | null>(null);
     const [totalExposure, setTotalExposure] = useState<number>(0);
 
+    // The optic the user picked: null means "not picked yet, use the default",
+    // and '' means the user chose "All optics".
+    const [chosenOptic, setChosenOptic] = useState<string | null>(null);
+
+    // The camera picked in the File Browser ('All' shows every camera). It lives
+    // here so the Stack button uses the same frames the File Browser shows.
+    const [selectedCamera, setSelectedCameraState] = useState('All');
+    // A new camera may not have the optic that was picked, so the optic goes
+    // back to its default for that camera.
+    const setSelectedCamera = useCallback((camera: string) => {
+        setSelectedCameraState(camera);
+        setChosenOptic(null);
+    }, []);
+
     // File Deletion State
     const [showFileDeleteConfirm, setShowFileDeleteConfirm] = useState(false);
     const [filesToDelete, setFilesToDelete] = useState<string[]>([]);
@@ -52,6 +67,7 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
                 exposure: f.exposure ?? '',
                 filter: f.filter ?? '',
                 date: f.date ?? '',
+                focalLengthMm: f.focalLengthMm ?? null,
             }));
 
             setAllFiles(mappedFiles);
@@ -86,6 +102,8 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
         setAllFiles([]);
         setExposureCounts({});
         setTotalExposure(0);
+        setChosenOptic(null);
+        setSelectedCameraState('All');
     }
 
     useEffect(() => {
@@ -96,10 +114,19 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
         loadTargetFiles(selectedTarget, `${selectedTarget}:${reloadKey}`);
     }, [selectedTarget, reloadKey, loadTargetFiles, shouldFetch]);
 
+    // Optic choices and their frame counts are for the selected camera only.
+    const opticOptions = useMemo(
+        () => buildOpticOptions(filterFilesByCamera(allFiles, selectedCamera)),
+        [allFiles, selectedCamera],
+    );
+    const defaultOptic = useMemo(() => chooseDefaultOptic(allFiles, selectedCamera), [allFiles, selectedCamera]);
+    const selectedOptic = chosenOptic ?? defaultOptic;
+
     const filteredFiles = useMemo(() => {
-        if (!fileFilterText) return allFiles;
-        return allFiles.filter(f => matchesQuery(f, fileFilterText));
-    }, [allFiles, fileFilterText]);
+        const opticFiles = filterFilesByOptic(filterFilesByCamera(allFiles, selectedCamera), selectedOptic);
+        if (!fileFilterText) return opticFiles;
+        return opticFiles.filter(f => matchesQuery(f, fileFilterText));
+    }, [allFiles, fileFilterText, selectedCamera, selectedOptic]);
 
     const handleRequestDeleteFiles = (paths: string[]) => {
         setFilesToDelete(paths);
@@ -161,6 +188,11 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
         exposureCounts,
         fileFilterText,
         setFileFilterText,
+        selectedCamera,
+        setSelectedCamera,
+        opticOptions,
+        selectedOptic,
+        setSelectedOptic: setChosenOptic,
         selectedFile,
         setSelectedFile,
         showFileDeleteConfirm,

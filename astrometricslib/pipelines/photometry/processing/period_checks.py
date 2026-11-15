@@ -60,9 +60,9 @@ NIGHT_GAP_DAYS = TunedParameter(
     unit="days",
     description="A gap in the measurements longer than this separates one night from the next.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="PHO-D34",
-    pending_conversion=True,
 )
 
 # The fewest nights a hold-out needs: one to leave out and two to find a period
@@ -73,9 +73,9 @@ MINIMUM_NIGHTS = TunedParameter(
     unit="nights",
     description="Fewest nights a hold-out check needs: one to leave out and two to find a period from.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="PHO-D34",
-    pending_conversion=True,
 )
 
 # A night must have at least this many measurements to be left out, and the
@@ -89,9 +89,9 @@ MINIMUM_HELD_OUT_POINTS = TunedParameter(
         "find a period."
     ),
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="PHO-D34",
-    pending_conversion=True,
 )
 MINIMUM_TRAINING_POINTS = TunedParameter(
     name="photometry.minimum_training_points",
@@ -99,9 +99,9 @@ MINIMUM_TRAINING_POINTS = TunedParameter(
     unit="points",
     description="Fewest measurements the training nights need to find a period.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="PHO-D34",
-    pending_conversion=True,
 )
 
 # How much of the period the training search may range around the full-data
@@ -159,9 +159,9 @@ _PERMUTATION_COUNT = TunedParameter(
     unit="permutations",
     description="Number of random phases a held-out night is compared with.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="PHO-D34",
-    pending_conversion=True,
 )
 _AGREEMENT_P_VALUE = TunedParameter(
     name="photometry.agreement_p_value",
@@ -172,9 +172,9 @@ _AGREEMENT_P_VALUE = TunedParameter(
         "night to agree."
     ),
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="PHO-D34",
-    pending_conversion=True,
 )
 
 # The share of testable nights that must agree.
@@ -197,9 +197,9 @@ _DIP_Z_SCORE = TunedParameter(
     unit="sigma",
     description="Depth, in standard errors, at which a dip counts as seen in a held-out night.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="PHO-D34",
-    pending_conversion=True,
 )
 _MINIMUM_POINTS_IN_DIP = TunedParameter(
     name="photometry.minimum_points_in_dip",
@@ -207,9 +207,9 @@ _MINIMUM_POINTS_IN_DIP = TunedParameter(
     unit="points",
     description="Fewest points inside the predicted dips for a night to be tested.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="PHO-D34",
-    pending_conversion=True,
 )
 
 # An alias counts as a rival when its power is at least this share of the best

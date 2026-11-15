@@ -12,7 +12,6 @@ import numpy as np
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.target import StretchParameters
 from astrometricslib.models.tuned_parameter import (
-    EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
@@ -277,10 +276,9 @@ _WHITE_FRACTION_OF_FULL_BRIGHTNESS = TunedParameter(
     unit="fraction",
     description="Display brightness at or above which a stretched pixel counts as white.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D59",
-    pending_conversion=True,
 )
 
 # Every n-th pixel in each direction is used to count white pixels. A share of

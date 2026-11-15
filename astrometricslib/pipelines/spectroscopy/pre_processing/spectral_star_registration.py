@@ -19,11 +19,14 @@ from astropy.coordinates import SkyCoord
 from astropy.wcs.utils import fit_wcs_from_points
 
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.astrometry.processing.wcs_refinement import CLIP_SIGMAS, MAXIMUM_PASSES
@@ -134,31 +137,37 @@ _SOLUTION_MAX_TRANSLATION_OFFSET_PX = TunedParameter(
 # and the detector found a single detection for both, which took B's name and
 # left A unnamed. 8 px is about twice a zero order's width (FWHM about 4 px),
 # a judgement, not tuned.
+# It stands for about two trail widths (8 on the reference setup, 2 × the
+# trail width), so it follows the trail width the run measures.
 _RESOLVED_PAIR_MINIMUM_SEPARATION_PX = TunedParameter(
     name="spectroscopy.resolved_pair_minimum_separation_px",
-    default=8.0,
-    unit="× FWHM",
+    default=factor_for(8.0, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
     description="Two catalog stars at least this far apart are resolved into separate zero orders.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-D51",
-    pending_conversion=True,
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=8.0,
 )
 
 # How far from a named detection a second catalog star may be to be counted
 # as part of the same blob. A little more than a bright star's zero order
 # wings reach; Albireo's pair is 17 px apart.
+# It stands for several trail widths (25 on the reference setup, 6.4 × the
+# trail width), so it follows the trail width the run measures.
 _BLENDED_PAIR_SEARCH_RADIUS_PX = TunedParameter(
     name="spectroscopy.blended_pair_search_radius_px",
-    default=25.0,
-    unit="× FWHM",
+    default=factor_for(25.0, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
     description="How far from a detection a second catalog star may be to count as part of the same blob.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-D51",
-    pending_conversion=True,
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=25.0,
 )
 
 # A companion is only split out if it is at most this many magnitudes
@@ -171,10 +180,9 @@ _BLENDED_PAIR_MAXIMUM_MAGNITUDE_DIFFERENCE = TunedParameter(
     unit="mag",
     description="A companion is split out only if it is at most this many magnitudes fainter.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="SPE-D51",
-    pending_conversion=True,
 )
 
 # The fewest registered stars that may set a sky map fitted in the spectral
@@ -190,24 +198,27 @@ _SKY_MAP_MINIMUM_STARS = TunedParameter(
     unit="count",
     description="The fewest registered stars that may set a sky map.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="SPE-33",
-    pending_conversion=True,
 )
 
 # The most typical error, in pixels, a fitted sky map may have. Measured median
 # errors: M 27 0.10 px and Mirach 0.65 px. A map typically wrong by more than a
 # third of `_SKY_MAP_MATCH_RADIUS_PX` would lose real matches. A design limit.
+# It stands for about a quarter of a trail width (1 on the reference setup,
+# 0.26 × the trail width), so it follows the trail width the run measures.
 _SKY_MAP_MAXIMUM_MEDIAN_ERROR_PX = TunedParameter(
     name="spectroscopy.sky_map_maximum_median_error_px",
-    default=1.0,
-    unit="px",
+    default=factor_for(1.0, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
     description="The largest typical error a fitted sky map may have.",
     role=ParameterRole.EXCLUSION_CRITERIA,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-33",
-    pending_conversion=True,
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=1.0,
 )
 
 # How far from its mapped position a detection may be and still take a star's
@@ -215,31 +226,37 @@ _SKY_MAP_MAXIMUM_MEDIAN_ERROR_PX = TunedParameter(
 # unnamed detections), so nothing real is lost by stopping at 3 px. Shifting
 # the detections by eight known offsets gave 0.9 chance matches on average at
 # 3 px (2 at most), against 2.0 at 4 px and 23.6 at the 15 px geometric limit.
+# It stands for less than one trail width (3 on the reference setup, 0.77 ×
+# the trail width), so it follows the trail width the run measures.
 _SKY_MAP_MATCH_RADIUS_PX = TunedParameter(
     name="spectroscopy.sky_map_match_radius_px",
-    default=3.0,
-    unit="px",
+    default=factor_for(3.0, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
     description="How far from its mapped position a detection may be and still take a star's name.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-33",
-    pending_conversion=True,
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=3.0,
 )
 
 # A star closer than this to the fit is never clipped. Clipping by the spread
 # alone would drop real stars when the fit is very good: the M 27 map has a
 # median error of 0.10 px while its held-out stars reach 0.92 px.
+# It stands for about a quarter of a trail width (1 on the reference setup,
+# 0.26 × the trail width), so it follows the trail width the run measures.
 _SKY_MAP_CLIP_FLOOR_PX = TunedParameter(
     name="spectroscopy.sky_map_clip_floor_px",
-    default=1.0,
-    unit="px",
+    default=factor_for(1.0, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
     description="A star closer than this to the sky-map fit is never clipped.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="SPE-33",
-    pending_conversion=True,
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=1.0,
 )
 
 # Registered names can be chance matches, so at least this share of them must
@@ -252,10 +269,9 @@ _SKY_MAP_MINIMUM_KEPT_FRACTION = TunedParameter(
     unit="fraction",
     description="The least share of registered names that must agree with the sky-map fit.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="SPE-33",
-    pending_conversion=True,
 )
 
 # The fitted stars must span at least this share of the detections' range along
@@ -267,10 +283,9 @@ _SKY_MAP_MINIMUM_SPAN_FRACTION = TunedParameter(
     unit="fraction",
     description="The least share of the detections' range the fitted stars must span on each axis.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="SPE-33",
-    pending_conversion=True,
 )
 
 

@@ -33,7 +33,7 @@ import numpy as np
 
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.tuned_parameter import (
-    EquipmentKind,
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
     TunedParameter,
@@ -70,28 +70,56 @@ SIZE_RADIUS_MULTIPLES = TunedParameter(
     unit="× aperture radius",
     description="Radii of the size-noise test, as multiples of the noise aperture radius.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D32",
-    pending_conversion=True,
 )
+
 
 # The sky ring of each radius starts this far beyond the aperture and is this
 # wide: the gap and width of the noise aperture's own ring (7 - 4 = 3 px and
 # 12 - 7 = 5 px), so the ring keeps its relation to the aperture.
-_RING_GAP_PX = resolve(RING_INNER_PX).value - resolve(APERTURE_RADIUS_PX).value
-_RING_WIDTH_PX = resolve(RING_OUTER_PX).value - resolve(RING_INNER_PX).value
+def _ring_gap_px() -> float:
+    """Give the gap between a noise aperture and its sky ring.
+
+    Returns
+    -------
+    value : `float`
+        Pixels.
+    """
+    return resolve(RING_INNER_PX).value - resolve(APERTURE_RADIUS_PX).value
+
+
+def _ring_width_px() -> float:
+    """Give the width of a noise aperture's sky ring.
+
+    Returns
+    -------
+    value : `float`
+        Pixels.
+    """
+    return resolve(RING_OUTER_PX).value - resolve(RING_INNER_PX).value
+
 
 # An aperture must be at least this far from every pixel of the faint-source
 # mask: the largest ring's outer radius plus 1 px, the same reasoning as
-# `empty_apertures.FAINT_SOURCE_CLEARANCE_PX` (the center is rounded to a
+# `aperture_placement.faint_source_clearance_px` (the center is rounded to a
 # pixel, which moves it by up to 0.71 px).
-_CLEARANCE_PX = (
-    max(resolve(SIZE_RADIUS_MULTIPLES).value) * resolve(APERTURE_RADIUS_PX).value
-    + _RING_GAP_PX
-    + _RING_WIDTH_PX
-    + 1.0
-)
+def _clearance_px() -> float:
+    """Give how far an aperture must be from every faint-source pixel.
+
+    Returns
+    -------
+    value : `float`
+        Pixels.
+    """
+    return (
+        max(resolve(SIZE_RADIUS_MULTIPLES).value) * resolve(APERTURE_RADIUS_PX).value
+        + _ring_gap_px()
+        + _ring_width_px()
+        + 1.0
+    )
+
 
 # The apertures are resampled (with replacement, the same draw for every
 # radius) this many times to get the error of the slope. The error of a
@@ -103,10 +131,9 @@ _BOOTSTRAP_COUNT = TunedParameter(
     unit="resamples",
     description="How many bootstrap resamples give the error of the noise-versus-size slope.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D32",
-    pending_conversion=True,
 )
 _BOOTSTRAP_SEED = 20261026
 
@@ -230,7 +257,7 @@ def measure_aperture_size_noise(
         round_row, round_column = round(row), round(column)
         if not (0 <= round_row < height and 0 <= round_column < width):
             continue
-        if source_distance[round_row, round_column] <= _CLEARANCE_PX:
+        if source_distance[round_row, round_column] <= _clearance_px():
             continue
         values = [
             signed_aperture_sum(
@@ -238,8 +265,8 @@ def measure_aperture_size_noise(
                 float(column),
                 float(row),
                 radius=radius,
-                ring_inner=radius + _RING_GAP_PX,
-                ring_outer=radius + _RING_GAP_PX + _RING_WIDTH_PX,
+                ring_inner=radius + _ring_gap_px(),
+                ring_outer=radius + _ring_gap_px() + _ring_width_px(),
             )
             for radius in radii
         ]

@@ -31,7 +31,6 @@ from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import NotFoundError, StorageError
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.tuned_parameter import (
-    EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
@@ -73,10 +72,9 @@ BRIGHT_PIXEL_FRACTION_OF_PEAK = TunedParameter(
     unit="fraction",
     description="Fraction of the way from sky to peak above which pixels count as the bright object.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D59",
-    pending_conversion=True,
 )
 
 # The white point is this percentile of the bright object's pixels. A
@@ -117,10 +115,9 @@ _MINIMUM_BRIGHT_PIXELS = TunedParameter(
     unit="pixels",
     description="Fewest bright pixels needed to treat them as an extended object.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D59",
-    pending_conversion=True,
 )
 
 # Every n-th pixel in each direction is used to measure the object's

@@ -38,11 +38,13 @@ from scipy import stats
 from scipy.ndimage import gaussian_filter1d
 
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
@@ -112,16 +114,20 @@ VERDICT_NOT_COVERED = "not_covered"
 # about 3 nm (Vega's Balmer dips fit with 0.3 nm RMS after tuning, so 30 A
 # leaves generous room for the untuned case). The best dip inside this
 # window is used, and the control test searches the same size of window.
+# It stands for about two thirds of a resolution element (30 on the reference
+# setup, 0.69 × the spectral resolution), so it follows the spectral
+# resolution the run measures.
 CENTER_SEARCH_TOLERANCE_ANGSTROM = TunedParameter(
     name="spectroscopy.center_search_tolerance_angstrom",
-    default=30.0,
-    unit="× resolution",
+    default=factor_for(30.0, RunBasis.SPECTRAL_RESOLUTION_ANGSTROM),
+    unit="× spectral resolution",
     description="How far from its rest wavelength a feature's dip may be centered and still count.",
     role=ParameterRole.JUDGMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D42",
-    pending_conversion=True,
+    basis=RunBasis.SPECTRAL_RESOLUTION_ANGSTROM,
+    reference_value=30.0,
 )
 
 # Degree of the polynomial fitted as the continuum. 2 (a gentle curve)
@@ -352,10 +358,9 @@ _CONTROL_SPACING_TOLERANCES = TunedParameter(
     unit="× tolerance",
     description="Spacing of the control positions, in multiples of the search tolerance.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="SPE-D42",
-    pending_conversion=True,
 )
 
 # The fitted noise width is never allowed to be narrower than the depth's
@@ -373,10 +378,9 @@ _GUMBEL_WIDTH_FLOOR_FRACTION = TunedParameter(
     unit="× significance unit",
     description="The fitted Gumbel width is never allowed below this fraction of one significance unit.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="SPE-D42",
-    pending_conversion=True,
 )
 
 # How uncertain the reference spectrum's expected depth is, as a fraction

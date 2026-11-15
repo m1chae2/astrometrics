@@ -16,6 +16,7 @@ import { JobHistoryList } from './JobHistoryList';
 import { useImageProcessingContext } from '../context/ImageProcessingContext';
 import { fetchFrameStatsGrouped, refreshTarget, updateTargetById } from '../../common/services/targetService';
 import { GroupedFrameStat } from '../../common/types/backendTypes';
+import { getMultiOpticStatus } from '../utils/opticSelection';
 import { chooseAnalysisSelection, chooseTemporalVariationSelection } from '../utils/analysisSelection';
 
 interface FrameAnalysisPanelProps {
@@ -114,6 +115,14 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
     const cameras = new Set<string>();
     filesToConsider.forEach(f => { if (f.camera) cameras.add(f.camera); });
     return { hasMultiple: cameras.size > 1, cameras: Array.from(cameras) };
+  }, [checkedFiles, allFiles, filteredFiles]);
+
+  // Frames from more than one optic cannot be stacked together.
+  const multiOpticStatus = useMemo(() => {
+    const filesToConsider = checkedFiles.size > 0
+      ? allFiles?.filter(f => checkedFiles.has(f.path)) || []
+      : filteredFiles;
+    return getMultiOpticStatus(filesToConsider);
   }, [checkedFiles, allFiles, filteredFiles]);
 
   const filterStatus = useMemo(() => {
@@ -249,6 +258,8 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
           isProcessing={isProcessing}
           hasMultipleCameras={multiCameraStatus.hasMultiple}
           selectedCameras={multiCameraStatus.cameras}
+          hasMultipleOptics={multiOpticStatus.hasMultiple}
+          selectedOptics={multiOpticStatus.focalLengths}
           hasNoFiles={checkedFiles.size === 0 && filteredFiles.length === 0}
           hasMultipleFilters={filterStatus.hasMultiple}
           selectedFilters={filterStatus.filters}

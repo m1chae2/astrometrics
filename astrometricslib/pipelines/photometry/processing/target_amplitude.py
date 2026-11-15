@@ -32,6 +32,7 @@ import numpy as np
 
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.tuned_parameter import (
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
     TunedParameter,
@@ -57,9 +58,9 @@ PHASE_BIN_COUNT = TunedParameter(
     unit="bins",
     description="How many equal bins of phase the folded curve is cut into.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="PHO-19",
-    pending_conversion=True,
 )
 
 # A bin needs this many points for its median to be steadier than one point.
@@ -70,9 +71,9 @@ MINIMUM_POINTS_PER_BIN = TunedParameter(
     unit="points",
     description="Fewest points a phase bin needs for its median to count.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="PHO-19",
-    pending_conversion=True,
 )
 
 # The share of the phase bins that must hold enough points for the amplitude
@@ -87,9 +88,9 @@ MINIMUM_FILLED_BIN_FRACTION = TunedParameter(
         "Share of the phase bins that must hold enough points for the amplitude to count as covered."
     ),
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="PHO-19",
-    pending_conversion=True,
 )
 
 # The target's own star must lie within this distance of the target's catalog
@@ -105,9 +106,9 @@ MAXIMUM_TARGET_DISTANCE_ARCSEC = TunedParameter(
     unit="arcsec",
     description="Farthest the target's own star may lie from the target's catalog position.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="PHO-19",
-    pending_conversion=True,
 )
 
 

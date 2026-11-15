@@ -23,6 +23,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.quality.gate_result import (
     GateResult,
     GateStatus,
@@ -39,6 +40,7 @@ from astrometricslib.models.tuned_parameter import (
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.photometry.metrics import (
@@ -188,18 +190,21 @@ MAXIMUM_DETECTABLE_AMPLITUDE_MAG = TunedParameter(
 # 0.2 px (scale) over a night, M 81 0.9 px, NGC 2403 1.8 px (a real rotation
 # of 0.05 degrees over the night; 1.9 px in the worst frame).
 # A designed limit, not a measured false-alarm rate.
+# One star width (1 px at the reference setup's 3 px width) of corner
+# movement. The limit follows the measured star width.
 MAXIMUM_CORNER_DISPLACEMENT_PX = TunedParameter(
     name="photometry.maximum_corner_displacement_px",
-    default=1.0,
-    unit="px",
+    default=factor_for(1.0, RunBasis.STAR_WIDTH_PX),
+    reference_value=1.0,
+    unit="× star width",
     description=(
         "Largest 95th-percentile displacement of a frame corner that the registration drift gate accepts."
     ),
     role=ParameterRole.JUDGMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="PHO-04",
-    pending_conversion=True,
 )
 
 # The largest share of star measurements that may keep the shifted reference
@@ -215,10 +220,9 @@ MAXIMUM_CENTROID_FALLBACK_FRACTION = TunedParameter(
         "the star's own centroid was refused."
     ),
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="PHO-04",
-    pending_conversion=True,
 )
 
 # The most per-frame reasons the `capture_timestamps` gate quotes in its

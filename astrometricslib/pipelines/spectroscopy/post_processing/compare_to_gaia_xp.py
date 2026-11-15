@@ -93,6 +93,7 @@ from scipy.ndimage import gaussian_filter1d
 
 from astrometricslib._internal.drivers.interfaces.gaia_xp_driver import GaiaXpDownloadError, GaiaXpDriver
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.quality.gaia_xp_comparison import (
     GaiaXpBandResidual,
     GaiaXpBandSummary,
@@ -106,6 +107,7 @@ from astrometricslib.models.tuned_parameter import (
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_mask import atmospheric_band_mask
@@ -227,16 +229,20 @@ RATIO_ERROR_FLOOR_FRACTION = TunedParameter(
 
 # The wavelength shift is searched for within this many Angstroms either
 # way. Five pixels of dispersion, far more than a bad calibration should give.
+# It stands for about five pixels of dispersion in wavelength (60 on the
+# reference setup, 5.3 × the dispersion), so it follows the dispersion the
+# run measures.
 MAXIMUM_SEARCH_SHIFT_ANGSTROM = TunedParameter(
     name="spectroscopy.maximum_search_shift_angstrom",
-    default=60.0,
-    unit="× resolution",
+    default=factor_for(60.0, RunBasis.DISPERSION_ANGSTROM_PER_PX),
+    unit="× dispersion",
     description="The wavelength shift is searched for within this many Angstroms either way.",
     role=ParameterRole.JUDGMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D30",
-    pending_conversion=True,
+    basis=RunBasis.DISPERSION_ANGSTROM_PER_PX,
+    reference_value=60.0,
 )
 
 # The logarithmic derivatives are high-pass filtered: a Gaussian running mean
@@ -246,13 +252,12 @@ MAXIMUM_SEARCH_SHIFT_ANGSTROM = TunedParameter(
 SHIFT_HIGH_PASS_SIGMA_ANGSTROM = TunedParameter(
     name="spectroscopy.shift_high_pass_sigma_angstrom",
     default=400.0,
-    unit="× resolution",
+    unit="Angstrom",
     description="Sigma of the Gaussian running mean subtracted so a smooth tilt does not bias the shift.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="SPE-D30",
-    pending_conversion=True,
 )
 
 # Both spectra are smoothed by a Gaussian of this sigma, in Angstroms, before
@@ -261,16 +266,20 @@ SHIFT_HIGH_PASS_SIGMA_ANGSTROM = TunedParameter(
 # Smoothing both the same way does not move a feature, so the shift is
 # unchanged; 25 Angstroms (a FWHM of 59) is a little more than the sample
 # spacing and well below the resolution of both spectra.
+# It stands for about half a resolution element (25 on the reference setup,
+# 0.58 × the spectral resolution), so it follows the spectral resolution the
+# run measures.
 SHIFT_SMOOTHING_SIGMA_ANGSTROM = TunedParameter(
     name="spectroscopy.shift_smoothing_sigma_angstrom",
-    default=25.0,
-    unit="× resolution",
+    default=factor_for(25.0, RunBasis.SPECTRAL_RESOLUTION_ANGSTROM),
+    unit="× spectral resolution",
     description="Sigma of the Gaussian that smooths both spectra before the logarithmic derivative is taken.",
     role=ParameterRole.JUDGMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D30",
-    pending_conversion=True,
+    basis=RunBasis.SPECTRAL_RESOLUTION_ANGSTROM,
+    reference_value=25.0,
 )
 
 # A correlation peak below this is too weak to give a shift. Two spectra of
@@ -324,16 +333,20 @@ GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM = TunedParameter(
     # A sample is a star compared with Gaia XP.
     minimum_sample=10,
 )
+# It stands for about one pixel of dispersion in wavelength (11 on the
+# reference setup, 0.97 × the dispersion), so it follows the dispersion the
+# run measures.
 GAIA_XP_WAVELENGTH_SHIFT_LIMIT_ANGSTROM = TunedParameter(
     name="spectroscopy.gaia_xp_wavelength_shift_limit_angstrom",
-    default=11.0,
-    unit="× resolution",
+    default=factor_for(11.0, RunBasis.DISPERSION_ANGSTROM_PER_PX),
+    unit="× dispersion",
     description="The largest wavelength shift against Gaia XP the checkpoint and run gate accept.",
     role=ParameterRole.JUDGMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-D16",
-    pending_conversion=True,
+    basis=RunBasis.DISPERSION_ANGSTROM_PER_PX,
+    reference_value=11.0,
 )
 
 # The run gate needs at least this many compared stars.

@@ -66,6 +66,7 @@ from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, open_primary_hdu
+from astrometricslib.foundation.parameter_context import record_basis
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.camera_profile import CameraProfile, ProvenancedValue, ProvenanceKind
 from astrometricslib.models.quality.measurement import (
@@ -81,6 +82,7 @@ from astrometricslib.models.tuned_parameter import (
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_seconds
@@ -412,6 +414,8 @@ def _emit_star_profile_measurements(
         f"{result.star_count} stars from {result.candidate_count} tried ({result.refusals.describe()}), "
         f"shared Moffat beta {result.median_beta:.2f}{mosaic_note}"
     )
+    # The fitted width of the frame's stars is the run's star width.
+    record_basis(RunBasis.STAR_WIDTH_PX, float(result.width_px))
     context.add(
         FRAME_STAR_WIDTH_MOFFAT_PX,
         value=result.width_px,
@@ -720,6 +724,8 @@ def measure_frame(
         return context.measurements
 
     _emit_synthetic_notice(context, header)
+    # The frame's short side is a basis the run now knows.
+    record_basis(RunBasis.IMAGE_SHORT_SIDE_PX, float(min(collapsed.shape[-2:])))
 
     # The offset fallback needs to know the frame is not cut off at zero.
     clipped_at_zero = (

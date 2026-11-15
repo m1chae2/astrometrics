@@ -60,7 +60,7 @@ A FITS file (the standard file format for astronomy images) starts with a header
 | `OFFSET` (or `BLKLEVEL`) | Recommended | `int` | Camera offset: a constant the camera adds to every pixel so that noise below zero is still recorded. Used to file calibration frames. | Offset 0 is assumed. |
 | `XBINNING` / `YBINNING` | Optional | `int` | Binning (sensor pixels joined into one); calibration frames of another binning are never applied. | 1x1. |
 | `FILTER` | Recommended | `str` | Filter name. Flats (images of an evenly lit surface) are filed and picked by filter; the stack's file name carries it. | Filter type `NONE`. |
-| `INSTRUME` (or `CAMERA`) | Recommended | `str` | Camera name; frames from two cameras are never stacked together. | The camera of the frame record. |
+| `INSTRUME` (or `CAMERA`) | Recommended | `str` | Camera name; frames from two cameras are never stacked together, and neither are frames of one camera at two focal lengths. | The camera of the frame record. |
 
 ## 3. Mathematical and algorithmic formulation
 

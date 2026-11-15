@@ -56,7 +56,7 @@ from astrometricslib.models.quality.measurement import (
     SubjectLevel,
 )
 from astrometricslib.models.tuned_parameter import (
-    EquipmentKind,
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
     TunedParameter,
@@ -118,10 +118,9 @@ BLOCK_RANGE_PIXEL_STEP = TunedParameter(
     unit="pixels",
     description="Step between pixels sampled when measuring the range of block means in a calibration frame.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D44",
-    pending_conversion=True,
 )
 BLOCK_RANGE_GRID_CELLS = TunedParameter(
     name="shared.block_range_grid_cells",
@@ -129,10 +128,9 @@ BLOCK_RANGE_GRID_CELLS = TunedParameter(
     unit="cells",
     description="Number of grid cells per side in the block-range measurement of a calibration frame.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D44",
-    pending_conversion=True,
 )
 
 # The noise estimate compares each pixel with the one two columns away. Two
@@ -150,10 +148,9 @@ VALUE_STEP_CENTRAL_REGION_PX = TunedParameter(
     unit="pixels",
     description="Side of the central region searched for a value step in a calibration frame.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D44",
-    pending_conversion=True,
 )
 VALUE_STEP_BLOCK_PX = TunedParameter(
     name="shared.value_step_block_px",
@@ -161,10 +158,9 @@ VALUE_STEP_BLOCK_PX = TunedParameter(
     unit="pixels",
     description="Side of the block compared when looking for a value step in a calibration frame.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D44",
-    pending_conversion=True,
 )
 
 _DEFINITION_VERSIONS = {

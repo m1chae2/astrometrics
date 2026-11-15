@@ -55,7 +55,7 @@ from astrometricslib.models.tuned_parameter import (
     TunedParameter,
 )
 from astrometricslib.pipelines.stacking.post_processing.aperture_placement import (
-    FAINT_SOURCE_CLEARANCE_PX,
+    faint_source_clearance_px,
     faint_source_distance,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
@@ -420,7 +420,7 @@ def measure_line_pattern(odd_plane: np.ndarray, even_plane: np.ndarray) -> LineP
     """Measure the row and column average scatter of the difference and sum.
 
     The empty sky is every pixel that holds data in both half stacks and lies
-    at least `FAINT_SOURCE_CLEARANCE_PX` from any pixel of the faint-source
+    at least `faint_source_clearance_px` from any pixel of the faint-source
     mask (which flags stars too). The mask is made on the sum image, which has
     the depth of the whole stack. This is one more pass of the mask over the
     stack.
@@ -442,7 +442,7 @@ def measure_line_pattern(odd_plane: np.ndarray, even_plane: np.ndarray) -> LineP
     holds_data = np.isfinite(odd_plane) & np.isfinite(even_plane) & (odd_plane != 0) & (even_plane != 0)
     total = odd_plane + even_plane
     total[~holds_data] = 0.0
-    usable = holds_data & (faint_source_distance(total) > FAINT_SOURCE_CLEARANCE_PX)
+    usable = holds_data & (faint_source_distance(total) > faint_source_clearance_px())
     difference = odd_plane - even_plane
     difference[~holds_data] = 0.0
     found: dict[str, tuple[float, int]] = {}

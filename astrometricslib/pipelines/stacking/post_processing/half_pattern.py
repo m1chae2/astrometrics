@@ -70,11 +70,14 @@ import numpy as np
 from scipy.ndimage import binary_erosion, gaussian_filter, shift
 
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.quality.measurement import QualityMeasurement, QualitySubject
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
@@ -102,13 +105,13 @@ __all__ = [
     "MINIMUM_PIXELS",
     "MINIMUM_TILES",
     "PATTERN_ROW_NAMES",
-    "SOURCE_CLEARANCE_PX",
     "TILE_PX",
     "WALKING_LAG_PX",
     "HalfPatternOutcome",
     "HalfPatternResult",
     "half_pattern_measurements",
     "measure_half_pattern",
+    "source_clearance_px",
 ]
 
 _SPEC_BY_NAME = {spec.name: spec for spec in STACKING_METRICS}
@@ -119,23 +122,36 @@ _SPEC_BY_NAME = {spec.name: spec for spec in STACKING_METRICS}
 # observatory's good nights). 3 px keeps scales up to about 7 px FWHM out
 # of the result, which includes a star's wings and the pattern of a smooth
 # sky.
+# On the reference setup this stands for 3.0 pixels; the code scales it as a
+# multiple of the star width, so it follows the star width the run measures.
 FINE_SCALE_SIGMA_PX = TunedParameter(
     name="stacking.fine_scale_sigma_px",
-    default=3.0,
-    unit="pixels",
+    default=factor_for(3.0, RunBasis.STAR_WIDTH_PX),
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=3.0,
+    unit="× star width",
     description="Width of the Gaussian whose smooth image is taken away in the half-pattern test.",
     role=ParameterRole.RECOMMENDATION,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D50",
-    pending_conversion=True,
 )
+
 
 # Pixels closer than this to a flagged faint source are left out. A Gaussian of
 # sigma 3 px has fallen to 1% of its peak at 3 sigma (9 px); one more pixel
 # covers the flagged pixel's own width, so the clearance is 10 px. The aperture
 # rule uses 13 px for a 12 px ring, which this measurement does not have.
-SOURCE_CLEARANCE_PX = 3.0 * resolve(FINE_SCALE_SIGMA_PX).value + 1.0
+def source_clearance_px() -> float:
+    """Give how far a pixel must be from a flagged faint source.
+
+    Returns
+    -------
+    value : `float`
+        Pixels.
+    """
+    return 3.0 * resolve(FINE_SCALE_SIGMA_PX).value + 1.0
+
 
 # The tiles the bootstrap resamples. 64 px is wider than 20 filter widths of a
 # hot pixel's correlation (3 px) so the tiles are close to independent, and
@@ -147,10 +163,9 @@ TILE_PX = TunedParameter(
     unit="pixels",
     description="Side of the tiles the bootstrap resamples.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D50",
-    pending_conversion=True,
 )
 
 # Fewest tiles holding usable pixels for the errors to mean anything. With
@@ -161,10 +176,9 @@ MINIMUM_TILES = TunedParameter(
     unit="tiles",
     description="Fewest tiles holding usable pixels for the errors to mean anything.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D50",
-    pending_conversion=True,
 )
 
 # Fewest usable pixels. A covariance of fewer than 1e5 pixels has an error of
@@ -175,10 +189,9 @@ MINIMUM_PIXELS = TunedParameter(
     unit="pixels",
     description="Fewest usable pixels for the half-pattern test.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D50",
-    pending_conversion=True,
 )
 
 # The number of bootstrap resamples of the tiles. 400 give the error of a
@@ -189,10 +202,9 @@ BOOTSTRAP_COUNT = TunedParameter(
     unit="resamples",
     description="Number of bootstrap resamples of the tiles.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D50",
-    pending_conversion=True,
 )
 BOOTSTRAP_SEED = 20261024
 
@@ -207,10 +219,9 @@ WALKING_LAG_PX = TunedParameter(
     unit="pixels",
     description="Lag at which the halves' correlation along and across the drift is compared.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D50",
-    pending_conversion=True,
 )
 
 # The pointing range along the drift must be at least this many lags for the
@@ -222,10 +233,9 @@ MINIMUM_EXTENT_IN_LAGS = TunedParameter(
     unit="lags",
     description="Fewest lags the pointing range along the drift must span.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D50",
-    pending_conversion=True,
 )
 
 # A shifted pixel counts only when all four pixels it is interpolated from are
@@ -549,7 +559,7 @@ def measure_half_pattern(
     distance = analyze_faint_sources(detection).distance
     del detection
     margin = math.ceil(3.0 * resolve(FINE_SCALE_SIGMA_PX).value)
-    mask = binary_erosion(usable, iterations=margin) & (distance > SOURCE_CLEARANCE_PX)
+    mask = binary_erosion(usable, iterations=margin) & (distance > source_clearance_px())
     del distance
     pixel_count = int(mask.sum())
     if pixel_count < minimum_pixels:

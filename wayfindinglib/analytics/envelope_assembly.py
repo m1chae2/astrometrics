@@ -57,9 +57,9 @@ SESSION_WINDOW_MARGIN_SECONDS = TunedParameter(
     unit="s beyond the session span",
     description="How far outside a session's own time span a guide sample still counts.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.PROCESSING_SETTING,
     register_entry="WAY-D126",
-    pending_conversion=True,
+    config_key=("Wayfinding.Planning", "session_window_margin_seconds"),
 )
 """How far outside a session's own time span a guide sample still counts."""
 

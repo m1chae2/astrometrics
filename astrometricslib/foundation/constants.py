@@ -6,7 +6,7 @@ module uses stay in that module, next to the code that explains them.
 """
 
 from astrometricslib.models.tuned_parameter import (
-    EquipmentKind,
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
     TunedParameter,
@@ -25,8 +25,7 @@ FULL_SCALE_COUNTS = TunedParameter(
     unit="ADU",
     description="The count a 16-bit sensor reads at full scale.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.PUBLISHED_CONSTANT,
     register_entry="STK-38",
-    pending_conversion=True,
 )

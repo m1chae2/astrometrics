@@ -70,10 +70,9 @@ SATURATION_CEILING_SAMPLE_PIXELS = TunedParameter(
     unit="pixels",
     description="Number of brightest pixels used to find the ceiling of a frame.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D42",
-    pending_conversion=True,
 )
 SATURATION_PLATEAU_MINIMUM_PIXELS = TunedParameter(
     name="shared.saturation_plateau_minimum_pixels",
@@ -81,10 +80,9 @@ SATURATION_PLATEAU_MINIMUM_PIXELS = TunedParameter(
     unit="pixels",
     description="Fewest pixels sharing the ceiling value for it to count as a saturation plateau.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="STK-D42",
-    pending_conversion=True,
 )
 SATURATION_PLATEAU_TOLERANCE = TunedParameter(
     name="shared.saturation_plateau_tolerance",
@@ -92,10 +90,9 @@ SATURATION_PLATEAU_TOLERANCE = TunedParameter(
     unit="fraction",
     description="Relative distance below the ceiling within which a pixel is on the plateau.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D42",
-    pending_conversion=True,
 )
 SATURATION_MASK_FRACTION_OF_CEILING = TunedParameter(
     name="shared.saturation_mask_fraction_of_ceiling",
@@ -103,10 +100,9 @@ SATURATION_MASK_FRACTION_OF_CEILING = TunedParameter(
     unit="fraction",
     description="Fraction of the ceiling above which a pixel is masked as saturated.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D42",
-    pending_conversion=True,
 )
 
 # The pile-up test alone is fooled by a stack with no bright star: the
@@ -123,10 +119,9 @@ SATURATION_CEILING_MINIMUM_OVER_MEDIAN = TunedParameter(
     unit="× median",
     description="Multiple of the frame median the ceiling must exceed to be real.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D42",
-    pending_conversion=True,
 )
 
 
@@ -328,10 +323,9 @@ CLIP_CEILING_TOLERANCE_FRACTION = TunedParameter(
     unit="fraction",
     description="Relative distance below the ceiling at which a pixel counts as clipped.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="STK-D42",
-    pending_conversion=True,
 )
 
 # A star counts as saturated when at least this many connected pixels sit at
@@ -346,10 +340,9 @@ SATURATED_BLOB_MINIMUM_PIXELS = TunedParameter(
     unit="pixels",
     description="Fewest connected pixels that make a saturated blob.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="WAY-D48",
-    pending_conversion=True,
 )
 
 # A frame is described as saturated when a star clips in at least this share of
@@ -361,10 +354,9 @@ SATURATED_FRAME_FRACTION = TunedParameter(
     unit="fraction",
     description="Share of saturated stars above which the whole frame is called saturated.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="WAY-D48",
-    pending_conversion=True,
 )
 
 

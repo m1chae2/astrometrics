@@ -1480,6 +1480,10 @@ class FileItem(BaseModel):
     exposure: str = Field(default="1.0", alias="exposure")
     filter: str = Field(default="None", alias="filter")
     date: str = Field(default="Unknown", alias="date")
+    # The focal length of the optic (lens or telescope) in millimeters, or
+    # None when the frame header has none. The frame list uses it to let the
+    # user pick one optic, because frames from two optics cannot be stacked.
+    focal_length_mm: float | None = Field(default=None, alias="focalLengthMm")
 
 
 class GroupedFrameStat(BaseModel):

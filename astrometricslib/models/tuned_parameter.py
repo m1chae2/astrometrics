@@ -84,6 +84,25 @@ class EquipmentKind(StrEnum):
     SITE = "site"
 
 
+class RunBasis(StrEnum):
+    """The measured quantity a determined-each-run factor multiplies.
+
+    A run records the bases it measures (see `parameter_context`); before
+    that, the setup supplies them.
+    """
+
+    STAR_WIDTH_PX = "star width"
+    TRAIL_WIDTH_PX = "trail width"
+    PLATE_SCALE_ARCSEC_PER_PX = "plate scale"
+    IMAGE_SHORT_SIDE_PX = "image size"
+    FIELD_OF_VIEW_DEG = "field of view"
+    TARGET_SIZE_ARCSEC = "target size"
+    SPECTRAL_RESOLUTION_ANGSTROM = "spectral resolution"
+    DISPERSION_ANGSTROM_PER_PX = "dispersion"
+    GUIDE_CYCLE_SECONDS = "guide cycle"
+    PERIODIC_ERROR_PERIOD_SECONDS = "periodic error period"
+
+
 class WhenMissing(StrEnum):
     """What the resolver does when no value is available."""
 
@@ -129,6 +148,19 @@ class TunedParameter(BaseModel):
     minimum_sample : `int`, optional
         The fewest measurements a tuned value may be derived from. Required
         for the ``tuned parameter`` source.
+    basis : `RunBasis`, optional
+        For a value that is determined each run: the measured quantity its
+        default (the factor) multiplies. The resolver then returns factor
+        times basis. Left out for a value whose code applies the factor
+        itself.
+    basis_inverse : `bool`, optional
+        True when the value is the factor divided by the basis, not times it:
+        a size in pixels that stands for an angle on the sky gets fewer
+        pixels on a coarser plate scale. Only allowed with ``basis``.
+    reference_value : `int`, `float` or `tuple` of numbers, optional
+        Required with ``basis``: the absolute value on the reference setup
+        (ZWO ASI533MM Pro on an Apertura 75Q), which the factor was fitted
+        to. The resolver uses it, with a notice, when no basis is known.
     pending_conversion : `bool`, optional
         True while the code still uses the default although the source says
         the value should come from elsewhere. The resolver then gives the
@@ -153,6 +185,9 @@ class TunedParameter(BaseModel):
     when_missing: WhenMissing = WhenMissing.FALL_BACK
     allowed_range: tuple[float, float] | None = None
     minimum_sample: int | None = None
+    basis: RunBasis | None = None
+    basis_inverse: bool = False
+    reference_value: ParameterValue | None = None
     pending_conversion: bool = False
 
     @model_validator(mode="after")
@@ -197,9 +232,36 @@ class TunedParameter(BaseModel):
         if self.source is ParameterSource.TUNED_PARAMETER and not self.pending_conversion:
             self._check_tuned_fields()
 
+        if self.basis is not None:
+            self._check_basis_fields()
+        elif self.basis_inverse:
+            raise ValueError(f"{self.name}: basis_inverse needs a basis")
+
         if self.role is ParameterRole.HARDWARE_LIMIT and self.when_missing is not WhenMissing.REFUSE:
             raise ValueError(f"{self.name}: a hardware limit must refuse when its value is missing")
         return self
+
+    def _check_basis_fields(self) -> None:
+        """Check the source and reference value of a value that has a basis.
+
+        Raises
+        ------
+        ValueError
+            If the source is not determined each run, the value is pending,
+            or the reference value is missing or has another shape.
+        """
+        if self.source is not ParameterSource.DETERMINED_EACH_RUN:
+            raise ValueError(f"{self.name}: only a value determined each run has a basis")
+        if self.pending_conversion:
+            raise ValueError(f"{self.name}: a value with a basis is converted, so it cannot be pending")
+        if self.reference_value is None:
+            raise ValueError(f"{self.name}: a value with a basis needs its reference_value")
+        if isinstance(self.default, tuple) != isinstance(self.reference_value, tuple) or (
+            isinstance(self.default, tuple)
+            and isinstance(self.reference_value, tuple)
+            and len(self.default) != len(self.reference_value)
+        ):
+            raise ValueError(f"{self.name}: the reference_value must have the shape of the default")
 
     def _check_tuned_fields(self) -> None:
         """Check the range, sample size and default of a tuned parameter.
@@ -227,6 +289,7 @@ __all__ = [
     "ParameterRole",
     "ParameterSource",
     "ParameterValue",
+    "RunBasis",
     "TunedParameter",
     "WhenMissing",
 ]

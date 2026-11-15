@@ -60,10 +60,9 @@ MAXIMUM_FLAT_NOISE_FRACTION = TunedParameter(
     unit="fraction",
     description="Largest relative noise a master flat may have before it is smoothed.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
+    source=ParameterSource.EQUIPMENT_PROFILE,
     equipment=frozenset({EquipmentKind.CAMERA}),
     register_entry="STK-05",
-    pending_conversion=True,
 )
 
 # Flat frames should sit well above the read noise and well below the
@@ -108,24 +107,22 @@ UNREADABLE_FLATS_ISSUE = "no flat frame could be read"
 MINIMUM_SMOOTHING_SIGMA_PIXELS = TunedParameter(
     name="stacking.minimum_smoothing_sigma_pixels",
     default=1.0,
-    unit="× FWHM",
+    unit="px",
     description="Narrowest Gaussian width used when a noisy master flat is smoothed.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D06",
-    pending_conversion=True,
 )
 MAXIMUM_SMOOTHING_SIGMA_PIXELS = TunedParameter(
     name="stacking.maximum_smoothing_sigma_pixels",
     default=8.0,
-    unit="× FWHM",
+    unit="px",
     description="Widest Gaussian width used when a noisy master flat is smoothed.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="STK-D06",
-    pending_conversion=True,
 )
 
 # The expected noise of the master flat divides one frame's noise by the square

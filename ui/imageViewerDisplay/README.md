@@ -22,6 +22,76 @@ Center column: `TargetViewerManager` — displays the processed image. The
   because the Image Processing view uses them too. `FitsViewerManager` picks
   `FitsRenderer` for FITS data and `imageViewer/ImageViewer` for a plain picture.
 
+Pixel readout: the line with the pixel position, value and sky position floats over the
+  bottom-left corner of the picture on a translucent dark background (`--surface-overlay`),
+  so the picture keeps its full height. It takes no pointer events and shows only while the
+  pointer is on the picture. It sits under the star profile panel, so it never hides it.
+
+Star profile: click-to-measure is always on. A click on the picture (not a drag, and not a
+  star label or the circle of a named star) measures the star there. A click that finds no star
+  (`star_found` is false, for example empty sky) is ignored: the panel does not open, no marker
+  is drawn and the pin does not change. If the panel is already open, it keeps the old star while
+  the new click is measured. The panel's X only hides it; the next click on a star opens it
+  again, and while it is hidden a change of image does not follow the old star. The click is turned
+  into a file pixel with the same steps as the pixel readout (`pointerToFileCell` in
+  `ui/common/fitsViewer/utils/pixelQuery.ts`), and the FITS worker names the pixel, so the
+  click and the readout always agree. The viewer then calls `images:measure_star_profile`
+  with that pixel, a search radius of 6 screen pixels (in image pixels at the current zoom, from 3 to 50) so the center snaps to a star near the click, and the path of the file on screen (`resolveProcessedImagePath` in
+  `common/services/imaging/measurementPath.ts`). The answer fills `StarProfilePanel`, a
+  drawer on the right of the picture with no scrollbar: one line with the star width (FWHM from
+  the Moffat fit in pixels and arcseconds, or the Gaussian fit when Moffat failed), a Clipped
+  chip when the star is clipped, one bell-curve plot, and an angle slider. The plot shows the
+  real pixels along a cut through the star as points, the fitted shape mirrored to both sides
+  as a line, and a dashed line at half the peak to mark the width. The answer carries a small piece of the image (the cutout), and the
+  browser rebuilds the cut from it (`utils/starCut.ts`), so the dashed line and the points move
+  with the angle slider at once, with no call to the backend. A followed star that is not found
+  shows the backend's reason in the header in place of the width, with a small neutral marker
+  instead of the FWHM ring. A click that finds a star also pins the star (the image's path and the star's 1-based position). When the viewer
+  shows another image while the panel is open, the panel calls `images:map_position` from the
+  pinned image to the new one and measures the star at the mapped position, with the normal
+  snap radius (at least 10 image pixels when the answer is only a guess). The line under the
+  header says how it was found: "Followed by sky position", "Followed by stack alignment",
+  "Followed by stack alignment and sky position" or "Same pixel (guess)". The tab, cut angle, cut
+  length, ring and log settings stay. When the star cannot be followed the panel says why, and
+  when the new spot is not a star it shows that; the pin stays on the image that was clicked, so
+  switching back finds the star again. A click on another star pins that one instead.
+
+  The panel has two views. "Along the line" is the cut plot. Its Cut length slider
+  (20 to 100 pixels) rebuilds the cut from the cutout when the cutout already covers the length;
+  a longer cut measures the star again once, after the slider rests (`cut_half_length_px`).
+  "Around the star" (`utils/starRing.ts`) averages the cutout's pixels in a ring in 5 degree bins of direction, measured like the cut angle. Its axis
+  names the screen directions (Up, Right, Down, Left, which depend on the picture's row order)
+  and marks the cut angle and the angle plus 180 degrees; the picture shows the two ring circles
+  instead of the cut line. The ring always has the radii chosen for the star (`autoRingLimits`):
+  it starts where the fitted profile falls to 1% of its peak and ends at 1.5 times the radius
+  where it falls to twice the sky noise. The panel shows them as a plain line, such as
+  "Ring 4 to 8 px", with no control to change them. A spike shows as a peak, and a spike with no
+  partner 180 degrees away is one-sided. A caption ("Pixels along the dashed
+  line") ties the plot to the dashed cut line on the picture. A Log scale button switches the
+  brightness axis to a log scale to show the faint wings (a one-sided flare shows as one tail
+  higher than the other); values at or below zero are raised to the sky noise, and the axis
+  title says so. While the panel is open, the picture shows the cut line and a ring at the
+  center that is one FWHM across (a ring under about 4 screen pixels keeps its size and gets
+  a thicker line). A picture that holds no pixel values (Image Processing in Auto Stretch) cannot name a
+  pixel, so the panel says so and sends nothing. This viewer shows the stretched
+  `_processed.fits` file, so the panel notes that its brightness is not in camera counts;
+  the widths are still good.
+
+Detections: the Detections button in the viewer header (here and in the Image Processing FITS
+  Viewer) marks every star the astrometry run's star
+  finder detects on the image shown. The viewer calls `images:measure_detections` with the file
+  path (`useDetections`), so the stars are found now from the pixels, with the same function the
+  run uses (`find_unique_stars`), on any image. For a stack's stretched `_processed` picture the
+  backend searches the linear stack beside it, as the run does. The backend keeps the answer for the file's
+  modified time, so turning the overlay off and on is quick. A single star is a circle and a star
+  reported twice and merged is a diamond (a different shape, not only a different color); the
+  colors are the `--detection-marker-color` and `--detection-merged-color` tokens. Positions are
+  1-based file pixels placed like the star profile marker (`utils/detectionMarkers.ts`), drawn as
+  two SVG paths, and only markers in view are drawn. A note in the corner of the picture says
+  "Finding stars…" and then the count. An image the backend refuses (outside the library) shows
+  nothing, and a picture with no pixel values shows the same Linear hint as the star profile. The
+  overlay is separate from the named-star circles of the astrometry overlay.
+
 Right column: `TargetDetailsManager` — shows metadata and actions (analyze,
   stack, download). Actions here generally call backend endpoints and may
   update the processed image when complete. The Stack action runs the full

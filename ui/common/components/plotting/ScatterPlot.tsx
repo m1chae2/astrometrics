@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { themedHoverLabel } from '../../utils/plotHoverLabel';
 import { loadPlotly, PlotlyStatic, PlotlyTrace, getVar } from '../../utils/plotTools';
 import '../../styles/plotting.css';
 
@@ -62,6 +63,7 @@ export const ScatterPlot: React.FC<Props> = ({
                 font: { color: getVar('--plot-font', '#fff'), size: 10 },
                 margin: { l: 25, r: 25, b: 25, t: 10 },
                 showlegend: false,
+                hoverlabel: themedHoverLabel(),
                 autosize: true,
                 xaxis: {
                     gridcolor: '#444',

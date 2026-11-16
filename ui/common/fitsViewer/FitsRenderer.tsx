@@ -8,6 +8,13 @@ import { useFitsLoader, ParsedFitsData } from './hooks/useFitsLoader';
 import { useCanvasInteraction } from './hooks/useCanvasInteraction';
 import { useCanvasDrawer } from './hooks/useCanvasDrawer';
 import { usePreviewBitmap } from './hooks/usePreviewBitmap';
+import { PixelReadout } from './PixelReadout';
+import { StarProfilePanel, SET_DISPLAY_TO_LINEAR_MESSAGE } from './StarProfilePanel';
+import type { StarProfileView } from './StarProfilePanel';
+import { useStarProfile } from './hooks/useStarProfile';
+import { useDetections } from './hooks/useDetections';
+import { buildDetectionPaths } from './utils/detectionMarkers';
+import { askWorkerForPixel, pointerToFileCell } from './utils/pixelQuery';
 import { AstrometryOverlayStar } from '../services/astronomyService';
 import { formatStarListLabel } from '../utils/starDisplayFormat';
 import { Skeleton, UpdatingBar } from '../components/Skeleton';
@@ -113,6 +120,18 @@ export function estimateBadgeWidth(star: AstrometryOverlayStar): number {
 /** Radius, in screen pixels, of the thin circle drawn on every star. */
 const MARKER_RADIUS_PX = 5;
 
+/** How far from a click, in screen pixels, a measurement may look for the star's center. */
+export const STAR_SEARCH_SCREEN_PX = 6;
+
+/** Smallest search radius sent to the backend, in image pixels. */
+export const STAR_SEARCH_MIN_PX = 3;
+
+/** Largest search radius sent to the backend, in image pixels (the backend caps it at 50 too). */
+export const STAR_SEARCH_MAX_PX = 50;
+
+/** Radius, in screen pixels, of the small marker drawn when the profile does not look like a star. */
+const NOT_A_STAR_MARKER_RADIUS_PX = 4;
+
 /** Most the pointer may move, in screen pixels, between press and release for the gesture to count as a click and not a pan. */
 export const STAR_CLICK_MOVE_THRESHOLD_PX = 4;
 
@@ -142,6 +161,14 @@ export interface FitsRendererProps {
   previewBlob?: Blob | null;
   /** When true, this viewer keeps pictures decoded ahead of time (see `prefetchDecode`). */
   acceptPrefetch?: boolean;
+  /** True while the Detections overlay is on: a marker at every star the astrometry run's star finder detects. */
+  showDetections?: boolean;
+  /** Finds the file path of the image on screen, so the backend can measure that file. Called for each measurement. */
+  resolveMeasurePath?: () => Promise<string | null>;
+  /** Shown in the star profile panel in place of a measurement when the image holds no pixel values (default: ask for Linear). */
+  noPixelDataMessage?: string;
+  /** A sentence about the picture shown in the star profile panel, for example that it is already stretched. */
+  starProfilePictureNote?: string;
 }
 
 export interface FitsRendererHandle {
@@ -171,7 +198,11 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     onStarClick,
     selectedStarId,
     previewBlob = null,
-    acceptPrefetch = false
+    acceptPrefetch = false,
+    showDetections = false,
+    resolveMeasurePath,
+    noPixelDataMessage = SET_DISPLAY_TO_LINEAR_MESSAGE,
+    starProfilePictureNote
   } = props;
 
   // Local State
@@ -245,6 +276,18 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     canvasRef, workerRef, mainReady ? parsedData : null, mainReady ? bitmap : previewBitmap,
     handleSetDrawnSize, effectiveStretch, displayRange, stretchParameters, handleDrawn
   );
+
+  // Click-to-measure: the panel's state, and the measurements behind it.
+  const starProfile = useStarProfile(resolveMeasurePath);
+  // What the panel says the image should draw: the cut line, or the two circles of the ring view.
+  const [profileView, setProfileView] = useState<StarProfileView | null>(null);
+  const closeStarProfile = starProfile.close;
+  // A different image: a pinned star is followed to it once it is drawn (below); with no pinned star there is nothing to show.
+  const hasPinRef = useRef(false);
+  hasPinRef.current = starProfile.pin !== null;
+  useEffect(() => {
+    if (!hasPinRef.current) closeStarProfile();
+  }, [currentKey, closeStarProfile]);
 
   // Expose methods via REF
   useImperativeHandle(ref, () => ({
@@ -336,6 +379,72 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   }, [overlayVisible, overlayStars, scaleX, scaleY, panX, panY, containerW, containerH]);
 
   /**
+   * Measures the star at a point of the viewer. The point becomes a file pixel with the same steps as
+   * the pixel readout, and the worker names the pixel, so a click and the readout agree. An image
+   * without decoded pixel values cannot say which pixel was clicked, so the panel says so and
+   * nothing is sent to the backend.
+   *
+   * @param pointerX Horizontal position inside the viewer, in screen pixels.
+   * @param pointerY Vertical position inside the viewer, in screen pixels.
+   */
+  /** The image the star profile was last measured or followed on, so each image is followed only once. */
+  const followedKeyRef = useRef<unknown>(null);
+
+  /**
+   * Turns 6 screen pixels into image pixels at the current zoom.
+   *
+   * @param imageWidth Width of the decoded image, in pixels.
+   * @returns The search radius, from 3 to 50 image pixels.
+   */
+  const searchRadiusFor = (imageWidth: number): number => {
+    const screenPixelsPerFilePixel = (drawnSize.w / imageWidth) * effectiveZoom;
+    return Math.min(STAR_SEARCH_MAX_PX, Math.max(STAR_SEARCH_MIN_PX, STAR_SEARCH_SCREEN_PX / screenPixelsPerFilePixel));
+  };
+
+  const measureStarAt = async (pointerX: number, pointerY: number) => {
+    const worker = workerRef.current;
+    if (!mainDrawn || !parsedData || !worker) {
+      // While the image is still loading there is nothing to say yet.
+      if (!mainDrawn && (!firstFrameDrawn || previewDrawn)) return;
+      followedKeyRef.current = currentKey;
+      starProfile.showUnavailable(noPixelDataMessage);
+      return;
+    }
+    const cell = pointerToFileCell(pointerX, pointerY, parsedData, drawnSize, effectiveZoom, panX, panY);
+    if (!cell) return;
+    const [reading, topRowReading] = await Promise.all([
+      askWorkerForPixel(worker, parsedData.imageId, cell),
+      askWorkerForPixel(worker, parsedData.imageId, { column: cell.column, rowFromTop: 0 }),
+    ]);
+    if (!reading) return;
+    // The center may snap to a star within about 6 screen pixels of the click, so the search radius follows the zoom.
+    const searchRadiusPx = searchRadiusFor(parsedData.w);
+    followedKeyRef.current = currentKey;
+    starProfile.measureAt({ x: reading.x, y: reading.y, firstRowAtTop: topRowReading?.y === 1, searchRadiusPx });
+  };
+
+  // When another image is drawn while a star is pinned, find the star on it (once per image).
+  const followProfile = starProfile.follow;
+  const profileOpen = starProfile.state.status !== 'closed';
+  useEffect(() => {
+    if (!profileOpen || !hasPinRef.current || !mainDrawn) return;
+    if (followedKeyRef.current === currentKey) return;
+    followedKeyRef.current = currentKey;
+    const worker = workerRef.current;
+    if (!parsedData || !worker) {
+      // The pinned star stays pinned; this picture just cannot be measured.
+      starProfile.showUnavailable(noPixelDataMessage);
+      return;
+    }
+    const firstCell = { column: 0, rowFromTop: 0 };
+    void askWorkerForPixel(worker, parsedData.imageId, firstCell).then((reading) => {
+      void followProfile({ firstRowAtTop: reading?.y === 1, searchRadiusPx: searchRadiusFor(parsedData.w) });
+    });
+    // The search radius reads the zoom once, when the new image is first drawn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileOpen, mainDrawn, currentKey, parsedData, followProfile]);
+
+  /**
    * Opens the star under the pointer when the press was a click and not a pan.
    * The star is a label badge under the pointer, or else the nearest circle.
    *
@@ -344,6 +453,19 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   const handleStarRelease = (event: React.PointerEvent<HTMLDivElement>) => {
     const start = pressStartRef.current;
     pressStartRef.current = null;
+    if (start && !(event.target as Element).closest?.('[data-star-id]')) {
+      const rect = event.currentTarget.getBoundingClientRect();
+      // A named star's circle (with the astrometry overlay on) still opens the star in the Astronomy Manager.
+      const onNamedCircle = Boolean(onStarClick && overlayVisible && overlayStars
+        && findStarNearPointer(overlayStars, screenTransform, event.clientX - rect.left, event.clientY - rect.top));
+      if (!onNamedCircle) {
+        // A press that did not move is a click and measures a star; a drag only panned.
+        if (Math.hypot(event.clientX - start.x, event.clientY - start.y) < STAR_CLICK_MOVE_THRESHOLD_PX) {
+          void measureStarAt(event.clientX - rect.left, event.clientY - rect.top);
+        }
+        return;
+      }
+    }
     if (!start || !onStarClick || !overlayVisible || !overlayStars) return;
     const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y);
     if (moved >= STAR_CLICK_MOVE_THRESHOLD_PX) return;
@@ -357,6 +479,74 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     }
     if (star) onStarClick(star);
   };
+
+  // The marker of the measured star: a ring at the refined center and the line of the cut.
+  const profileMarker = (() => {
+    const profileState = starProfile.state;
+    if (!parsedData || !mainDrawn || drawnSize.w <= 0 || drawnSize.h <= 0) return null;
+    if (profileState.status !== 'ready' && profileState.status !== 'measuring') return null;
+    const measurement = profileState.status === 'ready' ? profileState.measurement : profileState.previous;
+    const firstRowAtTop = profileState.anchor.firstRowAtTop;
+    const centerX = measurement ? measurement.center_x : profileState.anchor.x;
+    const centerY = measurement ? measurement.center_y : profileState.anchor.y;
+    // Screen pixels for one file pixel, along the columns and along the rows.
+    const stepX = (drawnSize.w / parsedData.w) * effectiveZoom;
+    const stepY = (drawnSize.h / parsedData.h) * effectiveZoom;
+    const rowFromTop = firstRowAtTop ? centerY - 0.5 : parsedData.h - centerY + 0.5;
+    const screenX = panX + (centerX - 0.5) * stepX;
+    const screenY = panY + rowFromTop * stepY;
+    // The ring is one FWHM across (radius is half of it), in the size the picture is drawn at.
+    const fittedWidth = measurement?.moffat.fitted ? measurement.moffat.fwhm_px : measurement?.gaussian.fitted ? measurement.gaussian.fwhm_px : null;
+    const starFound = measurement ? measurement.star_found : true;
+    // A profile that is not a star makes no width claim, so it gets a small marker of fixed size.
+    const radius = starFound ? ((fittedWidth ?? 3) / 2) * stepX : NOT_A_STAR_MARKER_RADIUS_PX;
+    let cut: { x1: number; y1: number; x2: number; y2: number } | null = null;
+    let band: { inner: number; outer: number } | null = null;
+    if (measurement && profileView?.mode === 'ring') {
+      band = { inner: profileView.ringInnerPx * stepX, outer: profileView.ringOuterPx * stepX };
+    } else if (measurement) {
+      // The angle runs from +y (up a column) toward +x; screen rows grow downward when the first row is at the top.
+      const angle = (starProfile.cutAngleDegrees * Math.PI) / 180;
+      const alongX = Math.sin(angle) * (profileView?.cutHalfLengthPx ?? measurement.cut_half_length_px) * stepX;
+      const alongRows = Math.cos(angle) * (profileView?.cutHalfLengthPx ?? measurement.cut_half_length_px) * stepY * (firstRowAtTop ? 1 : -1);
+      cut = { x1: screenX - alongX, y1: screenY - alongRows, x2: screenX + alongX, y2: screenY + alongRows };
+    }
+    return { screenX, screenY, radius, cut, band, starFound };
+  })();
+
+  // The Detections overlay: fetched while it is on, drawn with the same placement as the star profile marker.
+  const detections = useDetections(showDetections && mainDrawn && parsedData !== null, currentKey, resolveMeasurePath);
+  const [detectionsFirstRowAtTop, setDetectionsFirstRowAtTop] = useState<boolean | null>(null);
+  useEffect(() => {
+    const worker = workerRef.current;
+    if (!showDetections || !mainDrawn || !parsedData || !worker) return;
+    let cancelled = false;
+    void askWorkerForPixel(worker, parsedData.imageId, { column: 0, rowFromTop: 0 }).then((reading) => {
+      if (!cancelled) setDetectionsFirstRowAtTop(reading ? reading.y === 1 : null);
+    });
+    return () => { cancelled = true; };
+  }, [showDetections, mainDrawn, parsedData, workerRef]);
+  const detectionPaths = (() => {
+    if (detections.status !== 'ready' || detectionsFirstRowAtTop === null || !parsedData || !mainDrawn) return null;
+    if (drawnSize.w <= 0 || drawnSize.h <= 0) return null;
+    return buildDetectionPaths(detections.measurement.detections, {
+      imageWidth: parsedData.w,
+      imageHeight: parsedData.h,
+      stepX: (drawnSize.w / parsedData.w) * effectiveZoom,
+      stepY: (drawnSize.h / parsedData.h) * effectiveZoom,
+      panX,
+      panY,
+      firstRowAtTop: detectionsFirstRowAtTop,
+      viewWidth: containerW,
+      viewHeight: containerH,
+    });
+  })();
+  const detectionsNote: string | null = !showDetections ? null
+    : mainDrawn && !parsedData ? noPixelDataMessage
+    : detections.status === 'loading' ? 'Finding stars…'
+      : detections.status === 'error' ? detections.message
+        : detections.status === 'ready' ? `${detections.measurement.detection_count.toLocaleString('en-US')} detections`
+          : null;
 
   const hoveredStar = hoveredStarId && overlayStars ? overlayStars.find((star) => star.id === hoveredStarId) : undefined;
 
@@ -374,7 +564,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
         onPointerMove={(event) => { onPointerMove(event); handleHoverMove(event); }}
         onPointerUp={(event) => { onPointerUp(event); handleStarRelease(event); }}
         onPointerLeave={(event) => { pressStartRef.current = null; onPointerUp(event); setHoveredStarId(null); setHoverPoint(null); }}
-        style={{ touchAction: 'none', cursor: hoveredStarId ? 'pointer' : undefined }}
+        style={{ touchAction: 'none', cursor: hoveredStarId ? 'pointer' : 'crosshair' }}
       >
         <canvas
           ref={canvasRef}
@@ -500,6 +690,39 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
               })}
           </svg>
         )}
+        {showDetections && detectionPaths && (
+          <svg className="fits-renderer__detections" data-testid="detections-layer" aria-hidden="true">
+            <path className="fits-renderer__detection" data-testid="detections-single" d={detectionPaths.circles} />
+            <path className="fits-renderer__detection fits-renderer__detection--merged" data-testid="detections-merged" d={detectionPaths.diamonds} />
+          </svg>
+        )}
+        {profileMarker && (
+          <svg className="fits-renderer__profile-marker" data-testid="star-profile-marker" aria-hidden="true">
+            {profileMarker.cut && (
+              <line
+                className="fits-renderer__profile-cut"
+                x1={profileMarker.cut.x1}
+                y1={profileMarker.cut.y1}
+                x2={profileMarker.cut.x2}
+                y2={profileMarker.cut.y2}
+              />
+            )}
+            {profileMarker.band && (
+              <>
+                <circle className="fits-renderer__profile-band" data-testid="star-profile-band-inner" cx={profileMarker.screenX} cy={profileMarker.screenY} r={profileMarker.band.inner} />
+                <circle className="fits-renderer__profile-band" data-testid="star-profile-band-outer" cx={profileMarker.screenX} cy={profileMarker.screenY} r={profileMarker.band.outer} />
+              </>
+            )}
+            <circle
+              className={`fits-renderer__profile-ring${!profileMarker.starFound ? ' fits-renderer__profile-ring--neutral' : profileMarker.radius < 4 ? ' fits-renderer__profile-ring--small' : ''}`}
+              cx={profileMarker.screenX}
+              cy={profileMarker.screenY}
+              r={profileMarker.radius}
+            >
+              <title>{profileMarker.starFound ? 'Circle one FWHM across' : 'Center of the measurement'}</title>
+            </circle>
+          </svg>
+        )}
         {hoveredStar && hoverPoint && !labeledIds.has(hoveredStar.id) && (
           <div
             className="fits-renderer__star-tooltip"
@@ -510,6 +733,40 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
           </div>
         )}
       </div>
+
+      {detectionsNote && (
+        <div
+          className={`fits-renderer__detections-note${detections.status === 'error' ? ' fits-renderer__detections-note--error' : ''}`}
+          role="status"
+          data-testid="detections-note"
+          title="Circles are single stars; diamonds are stars reported twice and merged."
+        >
+          {detectionsNote}
+          {detections.status === 'ready' && detections.measurement.merged_count > 0 && ` (${detections.measurement.merged_count} merged, shown as diamonds)`}
+        </div>
+      )}
+
+      <PixelReadout
+        containerRef={containerRef}
+        workerRef={workerRef}
+        parsedData={mainDrawn ? parsedData : null}
+        drawnSize={drawnSize}
+        zoom={effectiveZoom}
+        panX={panX}
+        panY={panY}
+      />
+
+      <StarProfilePanel
+        state={starProfile.state}
+        cutAngleDegrees={starProfile.cutAngleDegrees}
+        onCutAngleChange={starProfile.setCutAngle}
+        cutLengthPx={starProfile.cutLengthPx}
+        onCutLengthChange={starProfile.setCutLength}
+        onViewChange={setProfileView}
+        followNote={starProfile.followNote}
+        onClose={starProfile.close}
+        pictureNote={starProfilePictureNote}
+      />
 
       {effectiveLoading && (
         <div className="fits-renderer__loading-overlay">
@@ -547,6 +804,10 @@ export const FitsRenderer = React.memo(FitsRendererInternal, (prevProps, nextPro
     prevProps.overlayStars === nextProps.overlayStars &&
     prevProps.selectedStarId === nextProps.selectedStarId &&
     prevProps.previewBlob === nextProps.previewBlob &&
-    prevProps.acceptPrefetch === nextProps.acceptPrefetch
+    prevProps.acceptPrefetch === nextProps.acceptPrefetch &&
+    prevProps.showDetections === nextProps.showDetections &&
+    prevProps.resolveMeasurePath === nextProps.resolveMeasurePath &&
+    prevProps.noPixelDataMessage === nextProps.noPixelDataMessage &&
+    prevProps.starProfilePictureNote === nextProps.starProfilePictureNote
   );
 });

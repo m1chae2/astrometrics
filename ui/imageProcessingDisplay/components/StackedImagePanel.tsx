@@ -8,6 +8,10 @@ import { fetchTargetFrameHeader } from '../../common/services/targetService';
 import { DepthGoalRow } from './DepthGoalRow';
 import { StackSummaryPanel } from './StackSummaryPanel';
 import { Button } from '../../common/components/Button';
+import {
+    formatPlateScale, formatRotation, headerEntriesToCards, measurePlateGeometry,
+} from '../../common/fitsViewer/plateGeometry';
+import type { PlateGeometry } from '../../common/fitsViewer/plateGeometry';
 
 interface StackedImagePanelProps {
     path: string;
@@ -23,7 +27,8 @@ interface StackedImagePanelProps {
 
 /**
  * Component to display information about the final stacked image(s).
- * Derives total exposure time from FITS Header EXPTIME keyword.
+ * Derives total exposure time from FITS Header EXPTIME keyword, and the plate scale and
+ * rotation from the stack's plate solution.
  */
 export const StackedImagePanel: React.FC<StackedImagePanelProps> = ({
     path,
@@ -36,6 +41,7 @@ export const StackedImagePanel: React.FC<StackedImagePanelProps> = ({
     depthGoalRefreshKey
 }) => {
     const [headerExptime, setHeaderExptime] = useState<number | null>(null);
+    const [plateGeometry, setPlateGeometry] = useState<PlateGeometry | null>(null);
 
     useEffect(() => {
         const activePath = path || spectralPath;
@@ -46,6 +52,7 @@ export const StackedImagePanel: React.FC<StackedImagePanelProps> = ({
             fetchTargetFrameHeader(targetId, activePath, { silent: true })
                 .then(entries => {
                     if (entries) {
+                        setPlateGeometry(measurePlateGeometry(headerEntriesToCards(entries)));
                         const exptimeEntry = entries.find(e => e.key.toUpperCase() === 'EXPTIME');
                         if (exptimeEntry && exptimeEntry.value != null) {
                             const val = parseFloat(String(exptimeEntry.value));
@@ -57,9 +64,11 @@ export const StackedImagePanel: React.FC<StackedImagePanelProps> = ({
                 })
                 .catch(() => {
                     setHeaderExptime(null);
+                    setPlateGeometry(null);
                 });
         } else {
             setHeaderExptime(null);
+            setPlateGeometry(null);
         }
     }, [path, spectralPath, targetId]);
 
@@ -131,6 +140,28 @@ export const StackedImagePanel: React.FC<StackedImagePanelProps> = ({
                     <span className="stacked-image-panel__label">Total Exposure:</span>
                     <span className="stacked-image-panel__exposure-value">{formatExposure(effectiveExposure)}</span>
                 </div>
+            )}
+            {hasStack && plateGeometry && (
+                <>
+                    <div className="stacked-image-panel__total" data-testid="plate-scale">
+                        <span className="stacked-image-panel__label">Plate Scale:</span>
+                        <span
+                            className="stacked-image-panel__exposure-value"
+                            title="From the stack's plate solution. The focal length follows from the scale and the camera's pixel size."
+                        >
+                            {formatPlateScale(plateGeometry)}
+                        </span>
+                    </div>
+                    <div className="stacked-image-panel__total" data-testid="plate-rotation">
+                        <span className="stacked-image-panel__label">Rotation:</span>
+                        <span
+                            className="stacked-image-panel__exposure-value"
+                            title="The direction the top of the image points on the sky, measured from north toward east."
+                        >
+                            {formatRotation(plateGeometry)}
+                        </span>
+                    </div>
+                </>
             )}
             <DepthGoalRow targetId={targetId} refreshKey={depthGoalRefreshKey} />
             {path && <StackSummaryPanel targetId={targetId} kind="imaging" refreshKey={depthGoalRefreshKey} onShowPicture={onView} />}

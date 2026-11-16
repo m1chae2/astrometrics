@@ -1,10 +1,16 @@
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import { SectionPanel } from '../../common/components/SectionPanel';
 import { SwitchDisplayButton } from '../../common/components/SwitchDisplayButton';
 import { FitsViewerManager, FitsRendererHandle } from '../../common/fitsViewer/FitsViewerManager';
 import { FileBrowser, FileBrowserToolbar } from '../fileBrowser/FileBrowser';
 import { AstrometryOverlayStar } from '../../common/services/astronomyService';
 import { Button } from '../../common/components/Button';
+import { DisplayModeSelect } from '../../common/fitsViewer/DisplayModeSelect';
+import type { DisplayMode } from '../../common/fitsViewer/displayMode';
+import { DetectionsToggle } from '../../common/fitsViewer/DetectionsToggle';
+import { resolveTargetFramePath } from '../../common/services/imaging/measurementPath';
+
+/** Shown under an Auto Stretch picture, which holds no pixel values. */
 
 interface ViewerPanelContainerProps {
   // Viewer Props
@@ -17,8 +23,9 @@ interface ViewerPanelContainerProps {
   selectedTarget: string;
   autoPanTrigger: number;
   disableStretch: boolean;
-  stretch: boolean;
-  toggleStretch: () => void;
+  /** How the viewer draws the image: Linear or Auto Stretch. */
+  displayMode: DisplayMode;
+  onDisplayModeChange: (mode: DisplayMode) => void;
   overlayStars?: AstrometryOverlayStar[];
   showAstrometryOverlay?: boolean;
   onToggleAstrometryOverlay?: () => void;
@@ -52,13 +59,27 @@ interface ViewerPanelContainerProps {
  */
 export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
   fitsRendererRef, imageUrl, imageBlob, imageFrameInfo, loading, error, selectedTarget,
-  autoPanTrigger, disableStretch, stretch, toggleStretch,
+  autoPanTrigger, disableStretch, displayMode, onDisplayModeChange,
   overlayStars, showAstrometryOverlay, onToggleAstrometryOverlay, isLoadingOverlay, overlayReason, onStarClick,
   selectedStarId,
   allFiles, filteredFiles, fileFilterText, setFileFilterText, fileBrowserCamera, setFileBrowserCamera, selectedOptic, setSelectedOptic,
   checkedFiles, handleRequestDeleteFiles, onOpenHeaderModal, onFileClick, selectedFile,
   toggleFile, toggleAllFiles, analysisResults
 }) => {
+  // True while the image shows a marker at every star the astrometry run's star finder detects.
+  const [detectionsEnabled, setDetectionsEnabled] = useState(false);
+
+  /** Finds the FITS file on screen: the file picked in the browser, else the light frame being shown. */
+  const resolveMeasurePath = useCallback(async (): Promise<string | null> => {
+    if (selectedFile) return selectedFile;
+    if (imageFrameInfo && imageFrameInfo.iso !== 'Unknown' && imageFrameInfo.objectId) {
+      return resolveTargetFramePath(
+        imageFrameInfo.objectId, imageFrameInfo.iso, imageFrameInfo.exposure, imageFrameInfo.index ?? 0
+      );
+    }
+    return null;
+  }, [selectedFile, imageFrameInfo]);
+
   return (
     <div className="image-processing-display__center">
       <SectionPanel
@@ -66,14 +87,8 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
         className="image-processing-display__viewer-section"
         headerContent={
           <div className="fits-header-controls">
-            <Button
-              size="small"
-              active={stretch}
-              onClick={toggleStretch}
-              title={stretch ? "Switch to Linear view" : "Switch to Auto-Stretched view (a stack shows its Siril-stretched JPEG when one exists)"}
-            >
-              {stretch ? "Stretch" : "Linear"}
-            </Button>
+            <DisplayModeSelect mode={displayMode} onChange={onDisplayModeChange} />
+            <DetectionsToggle enabled={detectionsEnabled} onChange={setDetectionsEnabled} />
             <Button
               size="small"
               active={showAstrometryOverlay}
@@ -113,11 +128,13 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
           selectedTarget={selectedTarget}
           autoPanTrigger={autoPanTrigger}
           disableStretch={disableStretch}
-          stretch={stretch}
+          stretch={displayMode === 'auto-stretch'}
           overlayStars={overlayStars}
           showOverlay={showAstrometryOverlay}
           onStarClick={onStarClick}
           selectedStarId={selectedStarId}
+          showDetections={detectionsEnabled}
+          resolveMeasurePath={resolveMeasurePath}
         />
       </SectionPanel>
       <SectionPanel

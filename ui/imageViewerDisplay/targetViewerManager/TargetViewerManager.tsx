@@ -1,10 +1,18 @@
-import React, { useRef } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { FitsViewerManager } from '../../common/fitsViewer/FitsViewerManager';
 import type { FitsRendererHandle } from '../../common/fitsViewer/FitsViewerManager';
 import { SectionPanel } from '../../common/components/SectionPanel';
 import { SwitchDisplayButton } from '../../common/components/SwitchDisplayButton';
 import '../../common/styles/panels.css';
 import { Button } from '../../common/components/Button';
+import { DetectionsToggle } from '../../common/fitsViewer/DetectionsToggle';
+import { resolveProcessedImagePath } from '../../common/services/imaging/measurementPath';
+
+/** Said in the star profile panel: the picture is already stretched, so its brightness is not in camera counts. */
+const STRETCHED_PICTURE_NOTE = 'This picture is already stretched, so its brightness values are not raw counts. The widths are still good.';
+
+/** Said in the star profile panel when the target's picture is a plain image with no pixel values. */
+const NO_PIXEL_DATA_MESSAGE = 'This picture is not a FITS file, so its stars cannot be measured here.';
 
 /**
  * The pixel values of a stretched picture run from 0 (black) to 1 (white).
@@ -47,6 +55,14 @@ export const TargetViewerManager: React.FC<Props> = ({
   selectedTarget,
 }) => {
   const rendererRef = useRef<FitsRendererHandle | null>(null);
+  // True while the picture shows a marker at every star the astrometry run's star finder detects.
+  const [detectionsEnabled, setDetectionsEnabled] = useState(false);
+
+  /** Finds the FITS file of the target's picture, so the backend measures the file on screen. */
+  const resolveMeasurePath = useCallback(
+    async (): Promise<string | null> => (selectedTarget ? resolveProcessedImagePath(selectedTarget) : null),
+    [selectedTarget]
+  );
 
   return (
     <div className="panel-group">
@@ -55,6 +71,7 @@ export const TargetViewerManager: React.FC<Props> = ({
         className="flex-fill"
         headerContent={
           <div className="fits-header-controls" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <DetectionsToggle enabled={detectionsEnabled} onChange={setDetectionsEnabled} />
             <Button size="small" onClick={() => rendererRef.current?.zoomIn()} title="Zoom In">+</Button>
             <Button size="small" onClick={() => rendererRef.current?.zoomOut()} title="Zoom Out">-</Button>
             <Button size="small" onClick={() => rendererRef.current?.zoomToFit()} title="Zoom to Fit">Fit</Button>
@@ -75,6 +92,10 @@ export const TargetViewerManager: React.FC<Props> = ({
           disableStretch
           stretch={false}
           displayRange={STRETCHED_PICTURE_RANGE}
+          showDetections={detectionsEnabled}
+          resolveMeasurePath={resolveMeasurePath}
+          noPixelDataMessage={NO_PIXEL_DATA_MESSAGE}
+          starProfilePictureNote={STRETCHED_PICTURE_NOTE}
         />
       </SectionPanel>
     </div>

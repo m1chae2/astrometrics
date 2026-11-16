@@ -1,5 +1,7 @@
 // Lightweight Plot utilities used by multiple viewers
 // Exported to keep Plotly-related plumbing in one place.
+import { themedHoverLabel } from './plotHoverLabel';
+
 export type PlotlyTrace = {
   x: number[];
   y: number[];
@@ -14,6 +16,10 @@ export type PlotlyTrace = {
   line?: { color?: string; width?: number; shape?: string; dash?: string };
   marker?: { color?: string; size?: number; symbol?: string };
   hoverinfo?: string;
+  /** The text of the hover label, in Plotly's template syntax. `<extra></extra>` drops the trace-name box. */
+  hovertemplate?: string;
+  /** Opacity of the whole trace, 0 to 1. */
+  opacity?: number;
   showlegend?: boolean;
   name?: string;
 };
@@ -44,6 +50,7 @@ export type PlotlyLayout = {
   margin?: { l?: number; r?: number; t?: number; b?: number };
   showlegend?: boolean;
   hovermode?: string;
+  hoverlabel?: { bgcolor?: string; bordercolor?: string; font?: { color?: string; family?: string; size?: number } };
   shapes?: any[];
   annotations?: any[];
 };
@@ -175,7 +182,8 @@ export const buildLayout = (overrides?: {
     },
     margin: { l: 60, r: 20, t: 20, b: 50, ...overrides?.margin },
     showlegend: false,
-    hovermode: 'closest'
+    hovermode: 'closest',
+    hoverlabel: themedHoverLabel()
   };
 };
 

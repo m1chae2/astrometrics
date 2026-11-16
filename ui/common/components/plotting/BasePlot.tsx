@@ -1,5 +1,15 @@
 import React, { useEffect, useRef } from 'react';
+import { themedHoverLabel } from '../../utils/plotHoverLabel';
 import { loadPlotly, PlotlyStatic, PlotlyTrace, attachClickHandler, detachClickHandler } from '../../utils/plotTools';
+
+/**
+ * Adds the themed hover label to a layout, unless the layout sets its own.
+ * @param layout The caller's layout.
+ * @returns The layout to give Plotly.
+ */
+function withThemedHover(layout: Record<string, any>): Record<string, any> {
+    return { hoverlabel: themedHoverLabel(), ...layout };
+}
 
 export interface BasePlotProps {
     data: PlotlyTrace[];
@@ -73,7 +83,7 @@ export const BasePlot: React.FC<BasePlotProps> = ({
             const P = await loadPlotly();
             if (!mounted || !node) return;
             const initial = latestPropsRef.current;
-            await P.newPlot(node, initial.data, initial.layout, initial.config);
+            await P.newPlot(node, initial.data, withThemedHover(initial.layout), initial.config);
             created = true;
             // plotlyRef is set only after newPlot() has finished: the update
             // effect treats a non-null value as "safe to call react() here".
@@ -119,7 +129,7 @@ export const BasePlot: React.FC<BasePlotProps> = ({
             // Skip if the graph was torn down while this call waited its turn.
             if (plotlyRef.current !== P) return;
             const latest = latestPropsRef.current;
-            await P.react(node, latest.data, latest.layout, latest.config);
+            await P.react(node, latest.data, withThemedHover(latest.layout), latest.config);
         });
 
         if (onClick) {

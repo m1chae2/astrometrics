@@ -78,7 +78,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
 
   const {
     imageUrl, imageBlob, imageFrameInfo, autoPanTrigger, disableStretch,
-    loading, error, stretch, toggleStretch,
+    loading, error, displayMode, setDisplayMode,
     setSelectedLightRow, selectedLightRow
   } = useViewerState(selectedTarget, lightFrames, selectedFile);
 
@@ -95,7 +95,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
   // is a same-frame formality rather than a multi-second race.
   const hasFrameToAutoLoad = lightFrames.length > 0 && !selectedFile;
   const isViewerSettled = !loading && (
-    !selectedTarget || !hasFrameToAutoLoad || imageUrl !== null || error !== null
+    !selectedTarget || !hasFrameToAutoLoad || imageUrl !== null || imageBlob !== null || error !== null
   );
   useReportModeReady(
     'Image Processing',
@@ -428,8 +428,8 @@ const ImageProcessingDisplayInner: React.FC = () => {
       selectedTarget={selectedTarget}
       autoPanTrigger={autoPanTrigger}
       disableStretch={disableStretch}
-      stretch={stretch}
-      toggleStretch={toggleStretch}
+      displayMode={displayMode}
+      onDisplayModeChange={setDisplayMode}
       overlayStars={overlayStars}
       showAstrometryOverlay={showAstrometryOverlay}
       onToggleAstrometryOverlay={handleToggleAstrometryOverlay}

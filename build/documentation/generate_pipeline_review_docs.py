@@ -1325,7 +1325,7 @@ def build_astrometry_doc() -> str:
         "threshold": float(default_of(detector.__init__, "threshold_sigma")),
         "merge_px": require_symbol(
             "astrometricslib.pipelines.astrometry.pre_processing.source_detection",
-            "SOURCE_DETECTOR_MERGE_SEPARATION_PX",
+            "SOURCE_DETECTOR_MERGE_KERNEL_WIDTHS",
         ),
         "refit_min_stars": require_symbol(refine_module, "MINIMUM_MATCHED_STARS"),
         "refit_sip": require_symbol(refine_module, "SIP_DEGREE"),
@@ -1580,10 +1580,11 @@ about twice the star's fitted FWHM. It is used because it detects better than a 
 from the fitted FWHM: more catalog matches and a smaller residual (partly measured; see
 <<AST-06>>). It is never reported as a FWHM.
 
-**Clean-up.** Detections closer than <<merge_px>> pixels are merged into one, because the finder
-can split one large star into two. Color frames are averaged in 2×2 blocks before detection:
-color interpolation leaves clumps of noise that would otherwise be found as thousands of false
-stars.
+**Clean-up.** Detections closer than <<merge_px>> kernel width are merged into one, at the
+position of the brighter. The finder already keeps its detections 2.5 kernel widths apart, so
+this only removes a star reported twice; merging over a wider distance joined separate stars.
+Color frames are averaged in 2×2 blocks before detection: color interpolation leaves clumps of
+noise that would otherwise be found as thousands of false stars.
 
 ### 3.2 Pixel-scale hint
 

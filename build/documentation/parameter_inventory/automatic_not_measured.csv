@@ -52,7 +52,7 @@ astrometry.sky_ring_inner_factor,AST-D16,exclusion criteria,Design estimate
 astrometry.sky_ring_minimum_pixels,AST-D16,exclusion criteria,Design estimate
 astrometry.sky_ring_outer_factor,AST-D16,exclusion criteria,Design estimate
 astrometry.source_detector_kernel_fwhm_px,AST-D01,measurement,Design estimate
-astrometry.source_detector_merge_separation_px,AST-D02,measurement,Design estimate
+astrometry.source_detector_merge_kernel_widths,AST-D02,measurement,Design estimate
 astrometry.source_detector_roundness_range,AST-D01,exclusion criteria,Design estimate
 astrometry.unresolved_companion_radius_arcsec,AST-10,measurement,Partly measured
 astrometry.wcs_refinement.minimum_matched_stars,AST-03,judgment,Partly measured

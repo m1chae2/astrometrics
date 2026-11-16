@@ -47,41 +47,45 @@ SOURCE_DETECTOR_ROUNDNESS_RANGE = TunedParameter(
     register_entry="AST-D01",
 )
 
-# The star finder's kernel width, in pixels: the star width it expects. It
-# also sets the finder's smallest separation (about 2.5 kernel widths), so
-# with 4 px no two detections lie closer than about 9 px. It ought to follow
-# the measured star width (2.2 to 2.6 px on the ASI 533MM at 405 mm); on the
-# M 31 stack of 2026-11-15 a 2.24 px kernel found 11% more stars and split
-# pairs down to about 5 px. Declared here unchanged; the change is tracked
-# separately (pending conversion).
+# The star finder's kernel width when nothing better is known, in pixels.
+# The astrometry stage sizes the kernel from the measured blob width of the
+# frame (`fwhm.measure_blob_width_from_data`), the spread of all the light
+# around the brightest stars. That reads about twice the star's FWHM and was
+# validated (AST-D01: on the Bubble Nebula stack, 335 catalog matches and a
+# 1.04 arcsec residual, against 181 and 5.0 arcsec with a FWHM-sized kernel).
+# On the M 31 ASI 533MM stack of 2026-11-15 it read 4.04 px. This fallback
+# (color frames, or when the blob width cannot be measured) keeps the old
+# 4 px on the reference setup and follows the star width elsewhere: 4 px is
+# 1.7 times the reference star width of 2.33 px.
 SOURCE_DETECTOR_KERNEL_FWHM_PX = TunedParameter(
     name="astrometry.source_detector_kernel_fwhm_px",
-    default=4.0,
-    unit="px",
-    description="Star width the star finder expects; it also sets the closest two detections can be.",
+    default=factor_for(4.0, RunBasis.STAR_WIDTH_PX),
+    unit="px (× star width)",
+    description="Star-finder kernel width used when the frame's blob width is not measured.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="AST-D01",
-    pending_conversion=True,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=4.0,
 )
 
-# Detections closer than this many pixels are merged into one star (meant to
-# rejoin a star the finder split in two). On the M 31 stack of 2026-11-15 all
-# 1,870 merged groups joined stars more than 1.5 star widths apart, so none
-# repaired a split star, and 158 of 500 named stars were placed between two
-# real stars. Declared here unchanged; the change is tracked separately
-# (pending conversion).
-SOURCE_DETECTOR_MERGE_SEPARATION_PX = TunedParameter(
-    name="astrometry.source_detector_merge_separation_px",
-    default=15.0,
-    unit="px",
-    description="Detections closer than this are merged into one star.",
+# Detections closer than this many kernel widths are one star and are merged.
+# The star finder already keeps its detections at least 2.5 kernel widths
+# apart (photutils 3.0 and later), so on one image nothing merges: the step
+# only removes a detection reported twice. It used to be 15 px, which on the
+# M 31 stack of 2026-11-15 merged 2,038 of 11,134 detections, every one a
+# separate star (the nearest two detections were 9.6 px apart), and placed
+# the merged star at the average position, between two real stars.
+SOURCE_DETECTOR_MERGE_KERNEL_WIDTHS = TunedParameter(
+    name="astrometry.source_detector_merge_kernel_widths",
+    default=1.0,
+    unit="kernel widths",
+    description="Detections closer than this many kernel widths are merged into one star.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="AST-D02",
-    pending_conversion=True,
 )
 
 # Below this pixel count, background stats are computed on the full
@@ -453,9 +457,11 @@ class SourceDetector:
     ) -> list[dict[str, Any]]:
         """Combine overlapping dots into a single star.
 
-        If the math accidentally splits a large star into two dots, this
-        combines them back together. The average position is taken and
-        their brightnesses are added together.
+        Two detections closer than the merge distance are one star reported
+        twice. The merged star keeps the position of its brightest detection,
+        and their brightnesses are added together. The finder already keeps
+        separate stars 2.5 kernel widths apart, so the default distance of
+        one kernel width merges no separate stars.
 
         Parameters
         ----------
@@ -463,8 +469,8 @@ class SourceDetector:
             The list of stars found in the previous step.
         separation_px : `float`, optional
             How close two dots need to be (in pixels) before they are assumed
-            to actually just be one star.
-            `SOURCE_DETECTOR_MERGE_SEPARATION_PX` if omitted.
+            to actually just be one star. `SOURCE_DETECTOR_MERGE_KERNEL_WIDTHS`
+            kernel widths if omitted.
 
         Returns
         -------
@@ -489,7 +495,7 @@ class SourceDetector:
         )
 
         if separation_px is None:
-            separation_px = float(resolve(SOURCE_DETECTOR_MERGE_SEPARATION_PX).value)
+            separation_px = float(resolve(SOURCE_DETECTOR_MERGE_KERNEL_WIDTHS).value) * self.fwhm
         tree = cKDTree(coords)
         visited = np.zeros(len(sources), dtype=bool)
         unique_stars = []
@@ -511,19 +517,11 @@ class SourceDetector:
             if len(group) == 1:
                 unique_stars.append(group[0])
             else:
-                leader = group[0]
-                merged = leader.copy()
-                all_x = [coords[i][0] for i in neighbor_indices]
-                all_y = [coords[i][1] for i in neighbor_indices]
+                # The merged star sits where its brightest detection is, not
+                # at the average: an average of two separate stars is a point
+                # between them where there is no star.
                 all_flux = [s.get("flux", 0.0) for s in group]
-
-                if "x_centroid" in merged:
-                    merged["x_centroid"] = float(np.mean(all_x))
-                    merged["y_centroid"] = float(np.mean(all_y))
-                else:
-                    merged["xcentroid"] = float(np.mean(all_x))
-                    merged["ycentroid"] = float(np.mean(all_y))
-
+                merged = group[int(np.argmax(all_flux))].copy()
                 merged["flux"] = float(np.sum(all_flux))
                 unique_stars.append(merged)
 

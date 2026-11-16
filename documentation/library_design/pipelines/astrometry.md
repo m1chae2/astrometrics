@@ -77,7 +77,7 @@ $$\frac{I(x, y) - B_\text{sky}(x, y)}{\sigma_\text{bkg}} \ge k = 5 \tag{1}$$
 
 **The kernel width.** The finder looks for blobs of a set width, the kernel width. On a single-color (monochrome) frame that width is measured from the image. It is the spread (second moment) of all the light in a 30-pixel box around each of the 15 brightest sources. It is written as the FWHM (full width at half maximum, the width of a star's light profile at half its peak height) of a Gaussian with the same spread, which is 2.355 times its standard deviation. Because the box also holds faint wings and neighbors, this blob width reads about twice the star's fitted FWHM. It is used because it detects better than a kernel sized from the fitted FWHM: more catalog matches and a smaller residual (partly measured; see [AST-06](../validation/astrometry.md#ast-06)). It is never reported as a FWHM.
 
-**Clean-up.** Detections closer than 15 pixels are merged into one, because the finder can split one large star into two. Color frames are averaged in 2×2 blocks before detection: color interpolation leaves clumps of noise that would otherwise be found as thousands of false stars.
+**Clean-up.** Detections closer than 1 kernel width are merged into one, at the position of the brighter. The finder already keeps its detections 2.5 kernel widths apart, so this only removes a star reported twice; merging over a wider distance joined separate stars. Color frames are averaged in 2×2 blocks before detection: color interpolation leaves clumps of noise that would otherwise be found as thousands of false stars.
 
 ### 3.2 Pixel-scale hint
 

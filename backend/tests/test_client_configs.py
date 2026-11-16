@@ -1,10 +1,11 @@
 """Purpose: Tests for the generated MCP client configurations.
 
-Description: The Claude and Gemini configs, and the read-only investigator
-agent, are written by ``build/mcp/generate_client_configs.py`` from the tool
-manifests. These tests check that the committed files match what the script
-would write, and that the read-only companion gets no shell, no file access,
-no developer tools and no withheld tool.
+Description: The Claude and Gemini configs, and the investigator agent, are
+written by ``build/mcp/generate_client_configs.py`` from the tool manifests.
+These tests check that the committed files match what the script would
+write, and that the companion gets no shell, no file access, no UI test
+server and no withheld tool. No server config chooses a profile, because
+there is only one.
 """
 
 import importlib.util
@@ -86,7 +87,6 @@ def test_investigator_agent_has_only_offered_mcp_tools() -> None:
         "observatory_mount_park",
         "observatory_mount_slew",
         "ui_run_tests",
-        "typegen_contract_validator",
         "target_save",
         "star_update",
     ):
@@ -100,8 +100,8 @@ def test_investigator_agent_includes_the_gap_tools() -> None:
     assert "mcp__astrometrics-gaps__list_capability_gaps" in tools
 
 
-def test_companion_config_leaves_out_the_ui_server_and_uses_the_read_only_profile() -> None:
-    """Companion servers are read-only and use the investigator profile."""
+def test_companion_config_leaves_out_the_ui_server() -> None:
+    """The companion leaves out the UI server and chooses no profile."""
     config = json.loads((PROJECT_ROOT / ".claude" / "companion.mcp.json").read_text(encoding="utf-8"))
     servers = config["mcpServers"]
     assert set(servers) == {
@@ -111,16 +111,16 @@ def test_companion_config_leaves_out_the_ui_server_and_uses_the_read_only_profil
         "astrometrics-gaps",
     }
     for name, entry in servers.items():
-        if name != "astrometrics-gaps":
-            assert entry["env"]["ASTROMETRICS_MCP_PROFILE"] == "investigator", name
+        assert "ASTROMETRICS_MCP_PROFILE" not in entry["env"], name
 
 
-def test_developer_config_gives_developer_tools_only_where_they_exist() -> None:
-    """A developer session gets the UI server and developer profile."""
+def test_claude_config_adds_the_ui_server_and_chooses_no_profile() -> None:
+    """A normal session gets the UI server, and no entry chooses a profile."""
     servers = json.loads((PROJECT_ROOT / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
-    assert servers["astrometrics-ui"]["env"]["ASTROMETRICS_MCP_PROFILE"] == "developer"
-    assert servers["astrometricslib-core"]["env"]["ASTROMETRICS_MCP_PROFILE"] == "developer"
+    assert "astrometrics-ui" in servers
     assert "astrometrics-gaps" in servers
+    for name, entry in servers.items():
+        assert "ASTROMETRICS_MCP_PROFILE" not in entry["env"], name
 
 
 def test_python_servers_start_through_the_launcher_not_a_system_specific_path() -> None:

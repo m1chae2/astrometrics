@@ -39,9 +39,9 @@ The project runs five MCP (Model Context Protocol) servers. For an AI client the
 | `wayfindinglib-core` | `.venv/bin/python -m mcp_servers.wayfinding_core` | Observatory status, equipment state, past-night analysis, planning. No device commands |
 | `astrometrics-backend` | `.venv/bin/python -m mcp_servers.backend` | Backend health, documentation, change the view |
 | `astrometrics-gaps` | `.venv/bin/python -m mcp_servers.gaps` | Report what the tools cannot do |
-| `astrometrics-ui` | `node ui/mcp/dist/index.js` | Developer profile only: UI tests, type check, build, accessibility |
+| `astrometrics-ui` | `node ui/mcp/dist/index.js` | UI tests, type check, build, accessibility |
 
-Each server reads a `tool_manifest.json` and offers only the tools it allows for the chosen profile (`ASTROMETRICS_MCP_PROFILE`, default `investigator`). See `mcp_servers/README.md`.
+Each server reads a `tool_manifest.json` and offers only the tools it allows for the one profile (`investigator`). No setting chooses another. See `mcp_servers/README.md`.
 
 - `.venv/bin/python build/mcp/generate_client_configs.py` writes `.mcp.json`, `.claude/companion.mcp.json`, `.claude/agents/investigator.md`, `.gemini/settings.json` and the per-clone `mcp_servers.json` from one list of servers. It also writes `ui/mcp/src/profileRules.ts` from `mcp_servers/common/profile.py`. Run it after a manifest or the profile rules change. Add `--check` to compare without writing. Do not edit those files by hand. The Python servers start through `build/mcp/run_python_server.mjs`, which finds the right Python program on Windows (`.venv-win`) and Linux (`.venv`), so the same config works on both.
 - The Python servers need the optional `mcp` extra (`pip install -e ".[mcp]"`), which `build/linux/setup_venv.sh` installs.

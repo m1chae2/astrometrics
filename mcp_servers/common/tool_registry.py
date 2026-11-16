@@ -33,7 +33,7 @@ from astrometricslib import get_configuration
 from astrometricslib.drivers import is_path_inside, resolve_mounted_path
 from astrometricslib.exceptions import ErrorInfo, to_error_info
 from astrometricslib.jobs import log_context, new_request_id
-from mcp_servers.common.profile import current_profile, find_withheld_tools, load_manifest, refusal_message
+from mcp_servers.common.profile import find_withheld_tools, load_manifest, refusal_message
 from mcp_servers.common.reply_budget import fit_reply_to_budget
 from mcp_servers.common.tool_errors import ToolErrorContent, error_content
 
@@ -134,8 +134,8 @@ class ToolRegistry:
 
         return decorator
 
-    def apply_profile(self, manifest_path: Path, profile: str | None = None) -> dict[str, str]:
-        """Remove the tools a profile may not use.
+    def apply_profile(self, manifest_path: Path) -> dict[str, str]:
+        """Remove the tools the profile may not use.
 
         A removed tool is no longer listed, and a call to it gets the
         "Unknown tool" error. A tool that is missing from the manifest is
@@ -145,24 +145,17 @@ class ToolRegistry:
         ----------
         manifest_path : `pathlib.Path`
             The server's ``tool_manifest.json``.
-        profile : `str`, optional
-            The profile name. Defaults to the one chosen by the
-            ``ASTROMETRICS_MCP_PROFILE`` environment variable, or
-            ``"investigator"``.
 
         Returns
         -------
         withheld : `dict` [`str`, `str`]
             Tool name -> why it was removed.
         """
-        profile = profile or current_profile()
-        reasons = find_withheld_tools(list(self.tools), load_manifest(manifest_path), profile)
+        reasons = find_withheld_tools(list(self.tools), load_manifest(manifest_path))
         for name in reasons:
             self.withheld[name] = self.tools.pop(name)
         self.withheld_reasons.update(reasons)
-        logger.info(
-            "MCP profile %r: serving %d tools, withholding %d.", profile, len(self.tools), len(reasons)
-        )
+        logger.info("MCP profile: serving %d tools, withholding %d.", len(self.tools), len(reasons))
         return reasons
 
     def get_tool_definitions(self) -> list[Tool]:

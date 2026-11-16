@@ -8,7 +8,6 @@
       ],
       "cwd": "$CLAUDE_PROJECT_DIR",
       "env": {
-        "ASTROMETRICS_MCP_PROFILE": "investigator",
         "PYTHONPATH": "$CLAUDE_PROJECT_DIR"
       }
     },
@@ -20,7 +19,6 @@
       ],
       "cwd": "$CLAUDE_PROJECT_DIR",
       "env": {
-        "ASTROMETRICS_MCP_PROFILE": "investigator",
         "PYTHONPATH": "$CLAUDE_PROJECT_DIR"
       }
     },
@@ -33,7 +31,6 @@
       "cwd": "$CLAUDE_PROJECT_DIR",
       "env": {
         "ASTROMETRICS_API_BASE": "http://127.0.0.1:5000",
-        "ASTROMETRICS_MCP_PROFILE": "investigator",
         "PYTHONPATH": "$CLAUDE_PROJECT_DIR"
       }
     },

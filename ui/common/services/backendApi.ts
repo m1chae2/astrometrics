@@ -403,8 +403,9 @@ export interface ActionRegistry {
     "sequencer:modify": { payload: { sequence_id: string; sequence: SequenceItem }; response: boolean };
 
     // Terminal, Console & Documentation
-    "terminal:execute": { payload: { code_str: string; source?: string }; response: { status: string; stdout: string; stderr: string; result: any; plots: string[]; interactive_plots?: Array<{ figure_id: number; plot_path: string; url: string }>; execution_time_ms: number; workspace: any[] } };
+    "terminal:execute": { payload: { code_str: string; source?: string; label?: string }; response: { status: string; stdout: string; stderr: string; result: any; plots: string[]; interactive_plots?: Array<{ figure_id: number; plot_path: string; url: string }>; execution_time_ms: number; workspace: any[] } };
     "terminal:get_workspace": { payload: Record<string, never>; response: any[] };
+    "terminal:get_recent_runs": { payload: { limit?: number }; response: Array<{ ran_at: string; label: string; source: string; source_code: string; status: string; stdout: string; stderr: string; plot_paths: string[]; execution_time_ms: number }> };
     "terminal:completions": { payload: { text: string }; response: string[] };
     "terminal:list_recipes": { payload: Record<string, never>; response: Array<{ id: string; name: string; filename: string; category: string; description: string; size_bytes: number }> };
     "terminal:get_recipe": { payload: { recipe_id: string }; response: { id: string; filename: string; code: string } };

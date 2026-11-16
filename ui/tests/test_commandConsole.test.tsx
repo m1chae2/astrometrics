@@ -198,4 +198,68 @@ describe('CommandConsole Component', () => {
     const second = await screen.findByText('print("second agent line")');
     expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
+
+  /**
+   * A `scripts:changed` event (a script saved by an AI agent or another window)
+   * makes the console load the User Scripts list again.
+   */
+  it('reloads the user scripts list when a scripts:changed event arrives', async () => {
+    let scripts: Array<Record<string, unknown>> = [];
+    const callSpy = vi.spyOn(backendApi, 'callBackend').mockImplementation((async (method: string) => {
+      if (method === 'terminal:list_scripts') return scripts;
+      return [];
+    }) as never);
+    render(<CommandConsole />);
+    await waitFor(() => expect(callSpy).toHaveBeenCalledWith('terminal:list_scripts', {}));
+    expect(screen.queryByText('Fresh Script')).not.toBeInTheDocument();
+
+    scripts = [
+      { id: 'fresh_script', name: 'Fresh Script', filename: 'fresh_script.py', size_bytes: 8, modified_at: 1 },
+    ];
+    act(() => {
+      postHandoff(
+        'Command Console',
+        COMMAND_CONSOLE_EVENT_KIND,
+        { action: 'scripts:changed', payload: { filename: 'fresh_script.py' } },
+        { queue: true }
+      );
+    });
+    expect(await screen.findByText('Fresh Script')).toBeInTheDocument();
+  });
+
+  /**
+   * A run from the editor is named after the open script, so the run history
+   * shows the script's file name. The unsaved scratch buffer sends no label.
+   */
+  it('passes the open script name as the label when the editor runs', async () => {
+    const callSpy = vi.spyOn(backendApi, 'callBackend').mockImplementation((async (method: string) => {
+      if (method === 'terminal:list_scripts') {
+        return [{ id: 'fresh', name: 'Fresh', filename: 'fresh_script.py', size_bytes: 8, modified_at: 1 }];
+      }
+      if (method === 'terminal:read_script') return { filename: 'fresh_script.py', code: 'print(1)' };
+      if (method === 'terminal:execute') {
+        return { status: 'success', stdout: '', stderr: '', plots: [], interactive_plots: [], execution_time_ms: 1, workspace: [] };
+      }
+      return [];
+    }) as never);
+    render(<CommandConsole />);
+
+    fireEvent.click(screen.getByTestId('editor-run-btn'));
+    await waitFor(() =>
+      expect(callSpy).toHaveBeenCalledWith('terminal:execute', expect.objectContaining({ source: 'editor' }))
+    );
+    const scratchCall = callSpy.mock.calls.find(([method]) => method === 'terminal:execute');
+    expect(scratchCall?.[1]).not.toHaveProperty('label');
+
+    fireEvent.click(await screen.findByText('Fresh'));
+    await waitFor(() => expect(screen.getByTestId('editor-filename')).toHaveTextContent('fresh_script.py'));
+    fireEvent.click(screen.getByTestId('editor-run-btn'));
+    await waitFor(() =>
+      expect(callSpy).toHaveBeenCalledWith('terminal:execute', {
+        code_str: 'print(1)',
+        source: 'editor',
+        label: 'fresh_script.py',
+      })
+    );
+  });
 });

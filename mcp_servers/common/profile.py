@@ -3,24 +3,26 @@
 Description: An AI client should only get the tools the project has
 reviewed. Each MCP server has a manifest file, ``tool_manifest.json``, that
 gives every tool a class (what it can do), a category and a disposition
-(what the project plans to do with it). A profile is a rule for which
-classes and dispositions a client may use.
+(what the project plans to do with it). The profile is the one rule for which
+classes and dispositions a client may use. There is only one profile, called
+``investigator``, because writing scripts and running the project's own tests
+are part of an investigation.
 
 The rules fail closed:
 
 * A tool that is not in the manifest is withheld. A new public method
   therefore stays hidden until someone reviews it and adds it.
 * A missing or unreadable manifest withholds every tool.
-* An unknown profile name falls back to the default profile.
 
-The default profile, ``investigator``, offers tools that look things up or
-calculate, and one kind of write: bringing frames from the telescope into the
-library (class ``ingest``), which adds files and records and never deletes.
-It offers nothing that commands a device, changes settings or runs code.
-The ``developer`` profile adds the tools that run the project's own tests
-and builds.
+The profile offers tools that look things up or calculate. It offers two
+kinds of write: bringing frames from the telescope into the library (class
+``ingest``), which adds files and records and never deletes, and saving a
+script for the person to review and run (class ``author``). It offers the
+tools that run the project's own tests and builds (class ``develop``). It
+offers nothing that commands a device, changes settings, changes data in
+place, or runs arbitrary code.
 
-This file is the one definition of the profiles. The TypeScript UI server
+This file is the one definition of the profile. The TypeScript UI server
 reads the same rules from ``ui/mcp/src/profileRules.ts``, which
 ``build/mcp/generate_client_configs.py`` writes from the constants here.
 ``python -m mcp_servers.inventory --write-runtime-manifests`` writes the
@@ -30,23 +32,13 @@ code.
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-PROFILE_ENVIRONMENT_VARIABLE = "ASTROMETRICS_MCP_PROFILE"
-"""Environment variable that chooses the profile when a server starts."""
-
-DEFAULT_PROFILE = "investigator"
-"""The profile used when the variable is unset or not recognized."""
-
-PROFILE_CLASSES = {
-    "investigator": frozenset({"observe", "compute", "ingest", "process", "ui-control"}),
-    "developer": frozenset({"observe", "compute", "ingest", "process", "ui-control", "develop"}),
-}
-"""Profile name -> the tool classes it may use."""
+OFFERED_CLASSES = frozenset({"observe", "compute", "ingest", "process", "ui-control", "develop", "author"})
+"""The tool classes the profile may use. Every other class is withheld."""
 
 SERVED_DISPOSITIONS = frozenset({"keep"})
 """Dispositions a client may use."""
@@ -89,22 +81,6 @@ def refusal_message(tool_name: str, reason: str | None = None) -> str:
     return f"Error: Unknown tool {tool_name}.{detail} {GAP_REPORT_REMINDER}"
 
 
-def current_profile() -> str:
-    """Read the profile name from the environment.
-
-    Returns
-    -------
-    profile : `str`
-        The value of ``ASTROMETRICS_MCP_PROFILE`` if it names a known
-        profile, otherwise ``"investigator"``. An unknown name is logged.
-    """
-    requested = os.environ.get(PROFILE_ENVIRONMENT_VARIABLE, DEFAULT_PROFILE)
-    if requested in PROFILE_CLASSES:
-        return requested
-    logger.warning("Unknown MCP profile %r; using %r instead.", requested, DEFAULT_PROFILE)
-    return DEFAULT_PROFILE
-
-
 def load_manifest(path: Path) -> dict[str, Any] | None:
     """Read a server's tool manifest.
 
@@ -130,15 +106,13 @@ def load_manifest(path: Path) -> dict[str, Any] | None:
     return manifest
 
 
-def withheld_reason(entry: dict[str, Any] | None, profile: str) -> str | None:
-    """Say why a tool is not offered to a profile, or `None` if it is.
+def withheld_reason(entry: dict[str, Any] | None) -> str | None:
+    """Say why a tool is not offered, or `None` if it is.
 
     Parameters
     ----------
     entry : `dict` [`str`, `Any`] or `None`
         The tool's manifest entry, or `None` if the manifest has none.
-    profile : `str`
-        A key of ``PROFILE_CLASSES``.
 
     Returns
     -------
@@ -150,8 +124,8 @@ def withheld_reason(entry: dict[str, Any] | None, profile: str) -> str | None:
     if entry.get("interim_block"):
         return f"blocked for now: {entry['interim_block']}"
     tool_class = entry.get("tool_class")
-    if tool_class not in PROFILE_CLASSES[profile]:
-        return f"class {tool_class!r} is not offered to the {profile} profile"
+    if tool_class not in OFFERED_CLASSES:
+        return f"class {tool_class!r} is not offered"
     disposition = entry.get("disposition")
     if disposition not in SERVED_DISPOSITIONS:
         note = entry.get("note")
@@ -159,10 +133,8 @@ def withheld_reason(entry: dict[str, Any] | None, profile: str) -> str | None:
     return None
 
 
-def find_withheld_tools(
-    tool_names: list[str], manifest: dict[str, Any] | None, profile: str
-) -> dict[str, str]:
-    """Find the tools a profile may not use.
+def find_withheld_tools(tool_names: list[str], manifest: dict[str, Any] | None) -> dict[str, str]:
+    """Find the tools the profile may not use.
 
     Parameters
     ----------
@@ -170,8 +142,6 @@ def find_withheld_tools(
         Every tool the server has registered.
     manifest : `dict` [`str`, `Any`] or `None`
         The manifest from `load_manifest`. `None` withholds every tool.
-    profile : `str`
-        A key of ``PROFILE_CLASSES``.
 
     Returns
     -------
@@ -184,7 +154,7 @@ def find_withheld_tools(
     entries = manifest["tools"]
     withheld = {}
     for name in tool_names:
-        reason = withheld_reason(entries.get(name), profile)
+        reason = withheld_reason(entries.get(name))
         if reason is not None:
             withheld[name] = reason
     return withheld

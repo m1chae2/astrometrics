@@ -8,17 +8,23 @@ calls and code. The server's manifest, ``tool_manifest.json`` in this
 folder, decides which tools a profile may use.
 """
 
+import base64
+import io
 import json
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
+from datetime import date
 from pathlib import Path
 from typing import Any
 
-from mcp.types import Resource
+from mcp.types import ImageContent, Resource, TextContent
 
+from astrometricslib.drivers import scratch_directory
 from astrometricslib.exceptions import (
     AstrometricsError,
+    ConflictError,
     ErrorInfo,
     ExternalServiceError,
     InvalidArgumentError,
@@ -43,6 +49,17 @@ MANIFEST_PATH = Path(__file__).resolve().parent / "tool_manifest.json"
 
 NOTIFICATIONS_URI = "astrometrics://notifications"
 """The address of the resource that lists unread job notifications."""
+
+USER_SCRIPT_NAME_PATTERN = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_-]*\.py")
+"""A plain script file name: letters, digits, ``_`` and ``-``, ending in
+``.py``. It has no folder part and no dots except the extension."""
+
+RECENT_RUN_LIMIT = 20
+"""The most runs `terminal_get_recent_runs` returns. It matches the backend's
+history size."""
+
+MAXIMUM_PLOT_WIDTH_PIXELS = 1200
+"""A figure wider than this is shrunk before it is sent as an image."""
 
 ToolFunction = Callable[..., Awaitable[Any]]
 """An async function that runs one tool."""
@@ -966,3 +983,230 @@ async def tool_app_controls(
     raise InvalidArgumentError(
         f"action must be one of {list(APP_CONTROL_ACTIONS)}. Pausing jobs and notifications are not offered."
     )
+
+
+def build_script_header(description: str) -> str:
+    """Write the comment block that marks a script as written by an AI.
+
+    Parameters
+    ----------
+    description : `str`
+        What the script is for. May be empty. Line breaks become more
+        comment lines, so the description cannot add code.
+
+    Returns
+    -------
+    header : `str`
+        Comment lines that end with a blank line.
+    """
+    lines = [
+        "# Added by an AI client through the astrometrics-backend MCP server.",
+        f"# Date added: {date.today().isoformat()}",
+        "# Not reviewed or run yet. Read it before you press Run.",
+    ]
+    if description.strip():
+        lines += [f"# Description: {line.strip()}" for line in description.strip().splitlines()]
+    return "\n".join(lines) + "\n\n"
+
+
+@tool(
+    "terminal_add_script",
+    (
+        "Add a new Python script to the app's Command Console 'User Scripts' list for the person to "
+        "review and run. You cannot run it. It will not replace an existing script."
+    ),
+    {
+        "type": "object",
+        "properties": {
+            "filename": {
+                "type": "string",
+                "description": "A plain file name ending in .py, such as 'plot_guiding.py'. No folders.",
+            },
+            "content": {"type": "string", "description": "The Python source of the script."},
+            "description": {
+                "type": "string",
+                "description": "What the script does. It goes in a comment at the top of the file.",
+            },
+        },
+        "required": ["filename", "content"],
+    },
+)
+async def tool_terminal_add_script(filename: str, content: str, description: str = "") -> dict[str, Any]:
+    """Save a new user script for the person to review and run.
+
+    Parameters
+    ----------
+    filename : `str`
+        A plain ``.py`` file name with no folder.
+    content : `str`
+        The script's Python source.
+    description : `str`, optional
+        What the script does. It is written into the header comment.
+
+    Returns
+    -------
+    result : `dict` [`str`, `Any`]
+        The saved ``filename``, its ``size_bytes``, ``status`` and a
+        ``next_step`` sentence for the person.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If the file name is not a plain ``.py`` name, or the content is
+        empty.
+    ConflictError
+        If a user script with that name exists. The tool never overwrites.
+
+    Notes
+    -----
+    The tool only saves the file. It never calls a method that runs code,
+    so the person must run the script in the Command Console.
+    """
+    if not USER_SCRIPT_NAME_PATTERN.fullmatch(filename):
+        raise InvalidArgumentError(
+            f"{filename!r} is not allowed. Use a plain file name made of letters, digits, '_' and '-', "
+            "ending in '.py', with no folders."
+        )
+    if not content.strip():
+        raise InvalidArgumentError("The script is empty.")
+    existing = await execute_rpc("terminal:list_scripts", {})
+    taken = {str(entry.get("filename", "")).lower(): str(entry.get("filename", "")) for entry in existing}
+    if filename.lower() in taken:
+        raise ConflictError(
+            f"A user script named {taken[filename.lower()]!r} already exists. Nothing was changed. "
+            "Choose a different file name."
+        )
+    saved = await execute_rpc(
+        "terminal:save_script",
+        {"filename": filename, "content": build_script_header(description) + content},
+    )
+    return {
+        "filename": saved["filename"],
+        "size_bytes": saved["size_bytes"],
+        "status": saved["status"],
+        "next_step": (
+            f"Tell the person to open Command Console > User Scripts, open {saved['filename']}, "
+            "review it, and press Run. You cannot run it. An open Command Console shows the new "
+            "file in its User Scripts list right away."
+        ),
+    }
+
+
+def _plot_image(plot_path: str) -> tuple[ImageContent | None, str | None]:
+    """Read one figure file and make it an image for the client.
+
+    Only a ``.png`` file inside the app's scratch folder is read. A figure
+    wider than `MAXIMUM_PLOT_WIDTH_PIXELS` is shrunk to that width.
+
+    Parameters
+    ----------
+    plot_path : `str`
+        The figure's file path, as the backend reported it.
+
+    Returns
+    -------
+    image : `ImageContent` or `None`
+        The picture, or `None` when it cannot be read.
+    problem : `str` or `None`
+        Why there is no picture, or `None` when there is one.
+    """
+    from PIL import Image
+
+    path = Path(plot_path)
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError:
+        return None, "The figure file is gone."
+    if resolved.suffix.lower() != ".png" or not resolved.is_relative_to(Path(scratch_directory()).resolve()):
+        return None, "The figure file is not in the app's scratch folder."
+    try:
+        with Image.open(resolved) as picture:
+            picture.load()
+            if picture.width > MAXIMUM_PLOT_WIDTH_PIXELS:
+                new_height = max(1, round(picture.height * MAXIMUM_PLOT_WIDTH_PIXELS / picture.width))
+                picture = picture.resize((MAXIMUM_PLOT_WIDTH_PIXELS, new_height), Image.Resampling.LANCZOS)
+            buffer = io.BytesIO()
+            picture.save(buffer, format="PNG")
+    except (OSError, ValueError) as error:
+        return None, f"The figure file could not be read: {error}"
+    return (
+        ImageContent(
+            type="image", data=base64.b64encode(buffer.getvalue()).decode("ascii"), mime_type="image/png"
+        ),
+        None,
+    )
+
+
+@tool(
+    "terminal_get_recent_runs",
+    (
+        "Read what the person's recent Command Console runs printed and drew, newest first. Each run has its "
+        "time, label, code, status, printed text (stdout), error text (stderr) and figure file paths. With "
+        "include_plots, each figure is also returned as an image. Read-only: you cannot run code."
+    ),
+    {
+        "type": "object",
+        "properties": {
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": RECENT_RUN_LIMIT,
+                "description": "How many recent runs to return. Default 1.",
+            },
+            "include_plots": {
+                "type": "boolean",
+                "description": "Return each figure as an image, in run order. Default true.",
+            },
+        },
+    },
+)
+async def tool_terminal_get_recent_runs(
+    limit: int = 1, include_plots: bool = True
+) -> list[TextContent | ImageContent]:
+    """Return the recent Command Console runs, with their figures.
+
+    Parameters
+    ----------
+    limit : `int`, optional
+        How many runs to return, from 1 to `RECENT_RUN_LIMIT`.
+    include_plots : `bool`, optional
+        Whether to attach each figure as an image.
+
+    Returns
+    -------
+    content : `list` [`TextContent` or `ImageContent`]
+        First a JSON text with the runs (newest first). Each run lists its
+        ``plot_paths`` and, with images, ``plot_images`` (how many were
+        attached, and why any are missing). Then the images, in run order.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If ``limit`` is not a whole number from 1 to `RECENT_RUN_LIMIT`.
+
+    Notes
+    -----
+    The backend keeps only the last runs, with printed text cut to a length
+    limit. It keeps no workspace variables.
+    """
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= RECENT_RUN_LIMIT:
+        raise InvalidArgumentError(
+            f"limit must be a whole number from 1 to {RECENT_RUN_LIMIT}. Got {limit!r}."
+        )
+    runs = await execute_rpc("terminal:get_recent_runs", {"limit": limit})
+    images: list[ImageContent] = []
+    for run in runs:
+        if not include_plots:
+            continue
+        attached = 0
+        problems: list[str] = []
+        for plot_path in run.get("plot_paths", []):
+            image, problem = _plot_image(plot_path)
+            if image is not None:
+                images.append(image)
+                attached += 1
+            elif problem:
+                problems.append(f"{Path(plot_path).name}: {problem}")
+        run["plot_images"] = {"attached": attached, "problems": problems}
+    body = {"run_count": len(runs), "runs": runs}
+    return [TextContent(type="text", text=json.dumps(body, indent=2, default=str)), *images]

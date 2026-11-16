@@ -22,6 +22,7 @@ The classes are:
 | `safe-stop` | Stops motion or puts the equipment in a safe state. |
 | `ui-control` | Changes what the person sees in the app, not the saved data. |
 | `develop` | Runs the project's own code, such as tests and builds. |
+| `author` | Saves a new file for the person to review and run. The AI cannot run it. |
 | `unrestricted` | Runs code or any backend call. |
 | `unclassified` | No rule matched. A person must choose. |
 

@@ -10,7 +10,12 @@ from pathlib import Path
 import pytest
 
 from astrometricslib.exceptions import InvalidArgumentError
-from backend.services.infrastructure.scripting_service import ScriptingService, inspect_api
+from backend.services.infrastructure.scripting_service import (
+    RECENT_RUN_LIMIT,
+    RECENT_RUN_TEXT_LIMIT,
+    ScriptingService,
+    inspect_api,
+)
 
 
 def test_scripting_service_workspace_manifest() -> None:
@@ -83,6 +88,28 @@ def test_scripting_service_user_scripts(tmp_path: Path) -> None:
 
     read_data = service.read_user_script("test_custom.py")
     assert read_data["code"] == "print('hello test')"
+
+
+def test_save_user_script_broadcasts_scripts_changed(tmp_path: Path) -> None:
+    """Verify that saving a script sends a ``scripts:changed`` event."""
+    sent: list[tuple[str, dict]] = []
+
+    class FakeSocketManager:
+        """Record the UI events the service broadcasts."""
+
+        def broadcast_ui_event_sync(self, action: str, payload: dict) -> None:
+            """Store one broadcast event."""
+            sent.append((action, payload))
+
+    class FakeContainer:
+        """Offer only the socket manager the service needs."""
+
+        socket_manager = FakeSocketManager()
+
+    service = ScriptingService(container=FakeContainer())
+    service._get_user_scripts_dir = lambda: tmp_path
+    service.save_user_script("fresh_script", "print(1)")
+    assert ("scripts:changed", {"filename": "fresh_script.py"}) in sent
 
 
 def test_scripting_service_docs() -> None:
@@ -209,3 +236,153 @@ def test_inspect_api_rejects_none() -> None:
     """inspect_api raises InvalidArgumentError when given None."""
     with pytest.raises(InvalidArgumentError, match="no object to inspect"):
         inspect_api(None)
+
+
+def test_recent_runs_newest_first_with_label_and_limit() -> None:
+    """The history lists runs newest first and honors the limit."""
+    service = ScriptingService()
+    service.execute_structured("print('first')\nx = 1", source="editor", label="first.py")
+    service.execute_structured("print('second')\ny = 2")
+    runs = service.get_recent_runs(limit=2)
+    assert [run["label"] for run in runs] == ["print('second')", "first.py"]
+    assert runs[1]["stdout"].strip() == "first"
+    assert runs[0]["status"] == "success"
+    assert runs[0]["ran_at"].endswith("+00:00")
+    assert len(service.get_recent_runs()) == 1
+    assert "workspace" not in runs[0]
+
+
+def test_recent_runs_reject_bad_limits() -> None:
+    """A limit outside 1 to 20 is refused."""
+    service = ScriptingService()
+    for bad in (0, 21, -1):
+        with pytest.raises(InvalidArgumentError):
+            service.get_recent_runs(limit=bad)
+
+
+def test_recent_runs_keep_errors_and_cut_long_text() -> None:
+    """An error run keeps its traceback, and long text is cut with a note."""
+    service = ScriptingService()
+    service.execute_structured("raise ValueError('boom')\n# more")
+    service.execute_structured(f"print('a' * {RECENT_RUN_TEXT_LIMIT + 50})")
+    long_run, error_run = service.get_recent_runs(limit=2)
+    assert error_run["status"] == "error"
+    assert "boom" in error_run["stderr"]
+    assert "more characters were cut" in long_run["stdout"]
+    assert len(long_run["stdout"]) < RECENT_RUN_TEXT_LIMIT + 100
+
+
+def test_recent_runs_history_is_bounded_and_files_follow_it() -> None:
+    """Figure files stay while their run is kept and go when it drops out."""
+    service = ScriptingService()
+    code = "plt.close('all')\nplt.figure()\nplt.plot([1, 2, 3])"
+    service.execute_structured(code)
+    first = service.get_recent_runs()[0]
+    assert len(first["plot_paths"]) == 1
+    first_file = Path(first["plot_paths"][0])
+    assert first_file.is_file()
+    for _ in range(RECENT_RUN_LIMIT - 1):
+        service.execute_structured("pass")
+    assert first_file.is_file()
+    service.execute_structured("pass")
+    assert len(service.get_recent_runs(limit=RECENT_RUN_LIMIT)) == RECENT_RUN_LIMIT
+    assert not first_file.exists()
+    service.execute_structured("plt.close('all')")
+
+
+def test_recent_runs_rpc_method_is_declared_and_served() -> None:
+    """The RPC method is declared, handled by the service, and read-only."""
+    from backend.public_interface import RPC_METHODS
+    from backend.routers import rpc_router
+
+    assert "terminal:get_recent_runs" in RPC_METHODS
+    assert rpc_router._HANDLERS["terminal:get_recent_runs"] == ("scripting_service", "get_recent_runs")
+    assert hasattr(ScriptingService, "get_recent_runs")
+
+
+class _RecordingSocketManager:
+    """Stand-in socket manager that records the events it is asked to send."""
+
+    def __init__(self) -> None:
+        """Start with no recorded events."""
+        self.events: list[tuple[str, dict]] = []
+
+    def broadcast_ui_event_sync(self, event: str, payload: dict) -> None:
+        """Record one broadcast event."""
+        self.events.append((event, payload))
+
+
+class _FakeContainer:
+    """Stand-in container that holds only a socket manager."""
+
+    def __init__(self) -> None:
+        """Attach a recording socket manager."""
+        self.socket_manager = _RecordingSocketManager()
+
+
+_ONE_FIGURE_CODE = """
+import matplotlib.pyplot as plt
+fig, ax = plt.subplots()
+ax.plot([1, 2, 3])
+"""
+
+
+def _plot_events(container: _FakeContainer) -> list[dict]:
+    """List the payloads of the recorded plot broadcasts.
+
+    Parameters
+    ----------
+    container : `_FakeContainer`
+        The container whose socket manager recorded the events.
+
+    Returns
+    -------
+    payloads : `list[dict]`
+        One payload per ``terminal:plot_generated`` event.
+    """
+    return [
+        payload for event, payload in container.socket_manager.events if event == "terminal:plot_generated"
+    ]
+
+
+def test_console_runs_do_not_broadcast_plots() -> None:
+    """A console's own Run or REPL returns plots but sends no event."""
+    import matplotlib.pyplot as plt
+
+    plt.close("all")
+    container = _FakeContainer()
+    service = ScriptingService(container=container)
+    for source in ("editor", "repl"):
+        result = service.execute_structured(_ONE_FIGURE_CODE, source=source)
+        assert len(result["interactive_plots"]) == 1
+        plt.close("all")
+    assert _plot_events(container) == []
+
+
+def test_agent_runs_broadcast_plots() -> None:
+    """A run from an agent tells the open windows about its figure."""
+    import matplotlib.pyplot as plt
+
+    plt.close("all")
+    container = _FakeContainer()
+    service = ScriptingService(container=container)
+    result = service.execute_structured(_ONE_FIGURE_CODE, source="agent")
+    plt.close("all")
+    assert len(_plot_events(container)) == len(result["interactive_plots"]) == 1
+
+
+def test_second_run_does_not_capture_the_first_runs_figure() -> None:
+    """A figure left open by one run is not captured by the next run."""
+    import matplotlib.pyplot as plt
+
+    plt.close("all")
+    service = ScriptingService()
+    first = service.execute_structured(_ONE_FIGURE_CODE)
+    second = service.execute_structured("value = 1")
+    assert len(first["interactive_plots"]) == 1
+    assert second["interactive_plots"] == []
+    assert second["plots"] == []
+    assert service.get_recent_runs(limit=1)[0]["plot_paths"] == []
+    redraw = service.execute_structured("plt.figure(1).axes[0].plot([3, 2, 1])")
+    plt.close("all")
+    assert [item["figure_id"] for item in redraw["interactive_plots"]] == [1]

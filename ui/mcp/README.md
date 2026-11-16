@@ -13,7 +13,7 @@ This folder holds a small MCP (Model Context Protocol) server written in TypeScr
 
 ## Which tools the server offers
 
-All four tools run the project's own code, so they belong to the `developer` class. The default profile, `investigator`, offers none of them. The `developer` profile offers all four. Set the `ASTROMETRICS_MCP_PROFILE` environment variable to choose. An unknown name falls back to `investigator`. A tool that is missing from the manifest is not offered, and a missing manifest withholds every tool.
+All four tools run the project's own code, so they belong to the `develop` class. There is one profile, `investigator`, and it offers all four. No setting chooses another profile. A tool that is missing from the manifest is not offered, and a missing manifest withholds every tool.
 
 The rules come from `mcp_servers/common/profile.py`. `build/mcp/generate_client_configs.py` copies its constants into `src/profileRules.ts`. Run that script after you change the Python file. A backend test fails when the copy is out of date.
 

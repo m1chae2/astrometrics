@@ -11,7 +11,7 @@ import {
   type CallToolRequest,
 } from "@modelcontextprotocol/sdk/types.js";
 import { runFrontendTests, diagnoseCode, auditAccessibility, buildCheck } from "./tools.js";
-import { GAP_REPORT_GUIDANCE, currentProfile, findWithheldTools, loadManifest, refusalMessage } from "./profile.js";
+import { GAP_REPORT_GUIDANCE, findWithheldTools, loadManifest, refusalMessage } from "./profile.js";
 import * as path from "path";
 import * as fs from "fs";
 import { fileURLToPath } from "url";
@@ -79,13 +79,12 @@ const TOOL_DEFINITIONS = [
 
 /**
  * ### Description
- * The tools the manifest does not allow for the chosen profile, with the reason for each.
+ * The tools the manifest does not allow for the profile, with the reason for each.
  * The manifest sits next to the compiled `dist` folder.
  */
 const withheldTools = findWithheldTools(
   TOOL_DEFINITIONS.map((tool) => tool.name),
-  loadManifest(path.resolve(__dirname, "../tool_manifest.json")),
-  currentProfile()
+  loadManifest(path.resolve(__dirname, "../tool_manifest.json"))
 );
 
 /**

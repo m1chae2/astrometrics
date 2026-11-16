@@ -108,6 +108,15 @@ DECISIONS = {
         "(plan:edit, plan:tick_checklist_item).",
     ),
     "terminal_inspect_api": ToolDecision("withhold", "Builds Python code from its argument. Console only."),
+    "terminal_get_recent_runs": ToolDecision(
+        "keep",
+        "Built 2026-11-15. Reads what the person's recent Command Console runs printed and drew. Read-only.",
+    ),
+    "terminal_add_script": ToolDecision(
+        "keep",
+        "Built 2026-11-15. Saves a new script to the Command Console's User Scripts for the person to "
+        "review and run. It cannot run it or replace a script.",
+    ),
     "terminal_get_workspace": ToolDecision("withhold", "Console only. Has no use without the code runner."),
     "ui_editor_sync": ToolDecision("withhold", "Console code editor. Has no use without the code runner."),
     "ui_inspect_variable": ToolDecision(

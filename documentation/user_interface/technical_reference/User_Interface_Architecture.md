@@ -44,6 +44,7 @@ The shell is the *main process*: the one Node.js program that owns the app. Its 
 | `preload.js` | Defines the small set of functions a window may call in the shell |
 | `ipc_handlers.js` | Answers those calls in the main process |
 | `figure_target.js` | Decides what a plot window may open |
+| `figure_windows.js` | Keeps one window for each figure |
 | `python_terminal_manager.js` | Runs the Python terminal, and pauses it when the screen locks |
 | `tray_menu.js`, `window_state.js` | The tray icon menu, and saved window size and position |
 | `platforms/` | The differences between Linux, macOS and Windows |
@@ -63,7 +64,7 @@ The backend listens on port 5000 unless `ASTROMETRICS_PORT` names another port.
 - **Splash window.** Shows `electron/splash.html` during start-up.
 - **Main window.** Holds the whole app. Every view is mounted at start-up.
 - **Display windows.** Each view can open in its own window, for a second monitor. The URL carries `?mode=<view>&windowId=<number>`, and the window shows only that view.
-- **Figure windows.** Hold a Matplotlib plot from the Python terminal. `figure_target.js` lets a figure window open only the backend's own `/figure/<number>` page or a PNG file in the backend's scratch folder. The backend sends each figure's size in pixels, and the window opens big enough for the figure and its toolbar, but no bigger than the screen.
+- **Figure windows.** Hold a Matplotlib plot from the Python terminal. `figure_target.js` lets a figure window open only the backend's own `/figure/<number>` page or a PNG file in the backend's scratch folder. The backend sends each figure's size in pixels, and the window opens big enough for the figure and its toolbar, but no bigger than the screen. A figure that is shown again reuses its window: `figure_windows.js` reloads it and brings it to the front.
 - **Tray menu.** The tray icon opens a native menu that the desktop draws under the icon. `tray_menu.js` fills it with the mount status, the workspace list and Park, Open App and Quit, and refreshes the status every five seconds through `backend_client.js`.
 
 ### The bridge between a window and the shell

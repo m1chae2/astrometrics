@@ -15,13 +15,26 @@ The server imports two functions from the backend and nothing else: `destructive
 
 ## Which tools the server offers
 
-When the server starts, it removes every tool that the manifest does not allow for the chosen profile. The `ASTROMETRICS_MCP_PROFILE` environment variable picks the profile. A tool that is missing from the manifest is not offered, and a missing manifest withholds every tool.
+When the server starts, it removes every tool that the manifest does not allow for the profile. There is only one profile. A tool that is missing from the manifest is not offered, and a missing manifest withholds every tool.
 
-The investigator profile offers three backend tools:
+The profile offers four backend tools:
 
 - `app_status` reports health, connections, system resources, the telescope, guiding, INDI devices and properties, and running jobs. The running jobs come from the `processing:active_jobs` RPC method. A section that fails holds an error record, and the other sections still answer.
 - `app_controls` switches the view.
 - `docs_get` reads a documentation topic.
+- `terminal_add_script` lets an AI add a new Python script to the Command Console's User Scripts list.
+- `terminal_get_recent_runs(limit=1, include_plots=True)` lets an AI read the results of scripts the person ran in the Command Console.
+
+`terminal_add_script` only adds a script: the AI cannot run it. The person opens the script in Command Console > User Scripts, reads it, and presses Run. The tool:
+
+- takes a plain file name that ends in `.py` (letters, digits, `_` and `-`, no folders), the script text and an optional description;
+- refuses a name that is already in the list, and says which file it is, so it never replaces a script;
+- puts a comment block at the top that says an AI client added the script, the date, and the description;
+- saves through the `terminal:list_scripts` and `terminal:save_script` RPC methods and calls no method that runs code.
+
+The Command Console reads its script list when it opens. Saving a script also sends the `scripts:changed` event, so an open console reloads its User Scripts list at once. Its class is `author`, which the profile offers.
+
+`terminal_get_recent_runs` is read-only (class `observe`). It calls the `terminal:get_recent_runs` RPC method and returns the newest runs first, from 1 to 20 (default 1). Each run has its time, label, source, code, status, printed text (`stdout`), error text (`stderr`) and figure file paths. The backend keeps no workspace variables. With `include_plots`, each figure also comes back as a real MCP image (PNG), after the text, in run order. A figure wider than 1200 pixels is shrunk. The tool reads only `.png` files inside the app's scratch folder. A figure file that is gone or outside that folder is listed under `plot_images.problems` instead of as an image.
 
 It does not offer `electron_run_python` (which runs AI-written Python) or `backend_call_rpc` (which reaches every backend method). The rules live in `mcp_servers/common/profile.py`. `test/test_profile.py` fails if a tool has no manifest entry.
 

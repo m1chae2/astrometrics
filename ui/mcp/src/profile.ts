@@ -2,27 +2,19 @@
  * Purpose: Decide which tools this MCP server offers to its client.
  *
  * Each MCP server has a manifest, `tool_manifest.json`, that gives every tool a class,
- * a category and a disposition. A profile is a rule for which classes and dispositions
- * a client may use. The rules themselves live in `mcp_servers/common/profile.py`. The
- * constants here come from `profileRules.ts`, which a script writes from that Python file.
+ * a category and a disposition. The one profile, `investigator`, is the rule for which
+ * classes and dispositions a client may use. The rules themselves live in
+ * `mcp_servers/common/profile.py`. The constants here come from `profileRules.ts`, which a
+ * script writes from that Python file.
  *
  * The rules fail closed. A tool missing from the manifest is withheld. A missing or
- * unreadable manifest withholds every tool. An unknown profile name falls back to the
- * default profile, `investigator`, which cannot change anything except by bringing in
- * new frames or stacking them.
+ * unreadable manifest withholds every tool.
  */
 
 import * as fs from "fs";
-import {
-  DEFAULT_PROFILE,
-  GAP_REPORT_GUIDANCE,
-  GAP_REPORT_REMINDER,
-  PROFILE_CLASSES,
-  PROFILE_ENVIRONMENT_VARIABLE,
-  SERVED_DISPOSITIONS,
-} from "./profileRules.js";
+import { GAP_REPORT_GUIDANCE, GAP_REPORT_REMINDER, OFFERED_CLASSES, SERVED_DISPOSITIONS } from "./profileRules.js";
 
-export { DEFAULT_PROFILE, GAP_REPORT_GUIDANCE, PROFILE_ENVIRONMENT_VARIABLE };
+export { GAP_REPORT_GUIDANCE };
 
 /** One tool's entry in the manifest. */
 export interface ManifestEntry {
@@ -36,22 +28,6 @@ export interface ManifestEntry {
 /** The manifest file: tool name -> entry. */
 export interface ToolManifest {
   tools: Record<string, ManifestEntry>;
-}
-
-/**
- * ### Description
- * Reads the profile name from the environment.
- *
- * @param {NodeJS.ProcessEnv} environment The environment to read.
- * @return {string} The named profile if it is known, otherwise the default profile.
- */
-export function currentProfile(environment: NodeJS.ProcessEnv = process.env): string {
-  const requested = environment[PROFILE_ENVIRONMENT_VARIABLE] ?? DEFAULT_PROFILE;
-  if (requested in PROFILE_CLASSES) {
-    return requested;
-  }
-  console.error(`Unknown MCP profile '${requested}'; using '${DEFAULT_PROFILE}' instead.`);
-  return DEFAULT_PROFILE;
 }
 
 /**
@@ -77,21 +53,20 @@ export function loadManifest(manifestPath: string): ToolManifest | null {
 
 /**
  * ### Description
- * Says why a tool is not offered to a profile.
+ * Says why a tool is not offered.
  *
  * @param {ManifestEntry | undefined} entry The tool's manifest entry, if it has one.
- * @param {string} profile A profile name.
  * @return {string | null} A plain reason, or null when the profile may use the tool.
  */
-export function withheldReason(entry: ManifestEntry | undefined, profile: string): string | null {
+export function withheldReason(entry: ManifestEntry | undefined): string | null {
   if (entry === undefined) {
     return "not in the manifest";
   }
   if (entry.interim_block) {
     return `blocked for now: ${entry.interim_block}`;
   }
-  if (!entry.tool_class || !PROFILE_CLASSES[profile].has(entry.tool_class)) {
-    return `class '${entry.tool_class}' is not offered to the ${profile} profile`;
+  if (!entry.tool_class || !OFFERED_CLASSES.has(entry.tool_class)) {
+    return `class '${entry.tool_class}' is not offered`;
   }
   if (!entry.disposition || !SERVED_DISPOSITIONS.has(entry.disposition)) {
     return entry.note ? entry.note.replace(/\.$/, "") : `disposition '${entry.disposition}' is not offered`;
@@ -101,24 +76,19 @@ export function withheldReason(entry: ManifestEntry | undefined, profile: string
 
 /**
  * ### Description
- * Finds the tools a profile may not use.
+ * Finds the tools the profile may not use.
  *
  * @param {string[]} toolNames Every tool the server declares.
  * @param {ToolManifest | null} manifest The manifest. Null withholds every tool.
- * @param {string} profile A profile name.
  * @return {Map<string, string>} Tool name -> why it is withheld.
  */
-export function findWithheldTools(
-  toolNames: string[],
-  manifest: ToolManifest | null,
-  profile: string
-): Map<string, string> {
+export function findWithheldTools(toolNames: string[], manifest: ToolManifest | null): Map<string, string> {
   const withheld = new Map<string, string>();
   for (const name of toolNames) {
     const reason =
       manifest === null
         ? "the manifest is missing or unreadable"
-        : withheldReason(manifest.tools[name], profile);
+        : withheldReason(manifest.tools[name]);
     if (reason !== null) {
       withheld.set(name, reason);
     }

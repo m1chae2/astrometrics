@@ -148,12 +148,13 @@ const MODE_PANELS: { mode: string; id: string; Component: React.ComponentType }[
 
 /**
  * Socket actions the Command Console shows: what an AI agent ran in the
- * terminal, a plot it made, and an editor change.
+ * terminal, a plot it made, an editor change, and a change to the saved scripts.
  */
 const COMMAND_CONSOLE_ACTIONS: ReadonlySet<string> = new Set([
   'terminal:agent_exec',
   'terminal:plot_generated',
   'editor:sync',
+  'scripts:changed',
 ]);
 
 /**

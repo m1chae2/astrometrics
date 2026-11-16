@@ -2,8 +2,8 @@
 
 Description: The backend server must not offer an AI client the code runner
 or the generic RPC call. These tests check that the committed manifest covers
-every tool the server registers, and that the investigator profile offers
-only the three reviewed backend tools.
+every tool the server registers, and that the profile offers
+only the four reviewed backend tools.
 """
 
 from mcp_servers.backend.definition import MANIFEST_PATH, build_registry
@@ -17,11 +17,17 @@ def test_backend_manifest_covers_every_registered_tool() -> None:
     assert set(build_registry().tools) == set(manifest["tools"])
 
 
-def test_investigator_gets_only_the_reviewed_backend_tools() -> None:
+def test_profile_gets_only_the_reviewed_backend_tools() -> None:
     """The code runner and the generic RPC call are withheld."""
     registry = build_registry()
-    registry.apply_profile(MANIFEST_PATH, "investigator")
+    registry.apply_profile(MANIFEST_PATH)
     served = set(registry.tools)
-    assert served == {"app_status", "app_controls", "docs_get"}
+    assert served == {
+        "app_status",
+        "app_controls",
+        "docs_get",
+        "terminal_add_script",
+        "terminal_get_recent_runs",
+    }
     assert "electron_run_python" in registry.withheld
     assert "backend_call_rpc" in registry.withheld

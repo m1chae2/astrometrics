@@ -175,6 +175,7 @@ READ_ONLY_METHODS = frozenset({
     "telescope:status",
     "terminal:completions",
     "terminal:get_recipe",
+    "terminal:get_recent_runs",
     "terminal:get_workspace",
     "terminal:list_recipes",
     "terminal:list_scripts",

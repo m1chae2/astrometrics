@@ -41,12 +41,12 @@ Prefer executing pre-existing lifecycle scripts under `build/linux/` instead of 
 - **Agent checks and real-data runs**: `build/agent_tools/check.sh`, `realrun.sh`, `dbq.sh` (see its README). Targeted tests, lint, docs and golden runs share a limited number of heavy-work slots, and real-data scripts reach only a copy of the library. Leave the full suites to continuous integration.
 
 ## 5. Model Context Protocol (MCP) Tool Integration
-The MCP servers live in `mcp_servers/` (the UI server in `ui/mcp/`). Claude Code has access via the MCP server configuration; each server offers only the tools its `tool_manifest.json` allows for the active profile:
+The MCP servers live in `mcp_servers/` (the UI server in `ui/mcp/`). Claude Code has access via the MCP server configuration. There is one MCP profile, `investigator`, and no setting chooses another. Each server offers only the tools its `tool_manifest.json` allows under it: classes `observe`, `compute`, `ingest`, `process`, `ui-control`, `develop` and `author`, with disposition `keep`. Writing scripts and running the project's tests are part of an investigation.
 
 ### Server Hierarchy
 1. **`astrometricslib-core`**: Pure domain library functions (catalog targets, FITS image processing, stacking, astrometry/plate-solving, photometry, spectroscopy, and star catalogs).
 2. **`wayfindinglib-core`**: Observatory control, telescope status, tracking, slewing, focusing, guiding, and observation planning.
-3. **`astrometrics-backend`**: Live backend status (`app_status`), view switching (`app_controls`), and documentation (`docs_get`). `backend_call_rpc` and `electron_run_python` are withheld from every profile.
+3. **`astrometrics-backend`**: Live backend status (`app_status`), view switching (`app_controls`), and documentation (`docs_get`), saving a new Command Console script for the user to review and run (`terminal_add_script`), and reading the output and plots of the user's recent console runs (`terminal_get_recent_runs`). `backend_call_rpc` and `electron_run_python` are withheld (class `unrestricted`, not offered).
 4. **`astrometrics-ui`**: Frontend TypeScript diagnostics, Vitest runners, build checks, and accessibility audits.
 5. **`astrometrics-gaps`**: Where an agent reports what its tools cannot do.
 

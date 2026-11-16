@@ -55,6 +55,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # Python terminal and its documentation
     "terminal:execute": ("scripting_service", "execute_structured"),
     "terminal:get_workspace": ("scripting_service", "get_workspace_manifest"),
+    # The last few console runs (text and figure files), read-only.
+    "terminal:get_recent_runs": ("scripting_service", "get_recent_runs"),
     "terminal:completions": ("scripting_service", "get_completions"),
     "terminal:list_recipes": ("scripting_service", "list_recipes"),
     "terminal:get_recipe": ("scripting_service", "get_recipe"),

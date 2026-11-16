@@ -2,8 +2,8 @@
 
 Description: Checks that the server reflects the expected `Astrometrics`
 methods with their documented arguments, never offers a delete method, that
-its committed manifest covers every tool, that the investigator profile gets
-only reading and safe processing tools, and that a picture comes back to the
+its committed manifest covers every tool, that the profile gets
+no writer or device command, and that a picture comes back to the
 client as an image.
 """
 
@@ -131,16 +131,16 @@ def test_manifest_covers_every_registered_tool(registry: ToolRegistry) -> None:
     assert set(manifest["tools"]) - registered == set(), "Manifest entries with no tool"
 
 
-def test_investigator_profile_offers_only_reading_tools(registry: ToolRegistry) -> None:
+def test_profile_offers_no_writer_or_device_command(registry: ToolRegistry) -> None:
     """The manifest keeps writers, device commands and code out."""
     copy = ToolRegistry()
     copy.tools = dict(registry.tools)
-    copy.apply_profile(MANIFEST_PATH, "investigator")
+    copy.apply_profile(MANIFEST_PATH)
     manifest = load_manifest(MANIFEST_PATH)
     assert copy.tools
     for name in copy.tools:
         entry = manifest["tools"][name]
-        assert entry["tool_class"] in ("observe", "compute", "ingest", "process"), name
+        assert entry["tool_class"] in ("observe", "compute", "ingest", "process", "develop", "author"), name
         assert entry["disposition"] == "keep", name
 
 

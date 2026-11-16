@@ -5725,6 +5725,7 @@ export const RPC_METHODS = [
   "system:save",
   "terminal:execute",
   "terminal:get_workspace",
+  "terminal:get_recent_runs",
   "terminal:completions",
   "terminal:list_recipes",
   "terminal:get_recipe",
@@ -5944,6 +5945,8 @@ export const UI_EVENTS = {
   "terminal:plot_generated": "terminal:plot_generated",
   /** The script editor's text was replaced by another client. */
   "editor:sync": "editor:sync",
+  /** A user script was saved, so the User Scripts list is out of date. */
+  "scripts:changed": "scripts:changed",
 } as const;
 
 /** The name of one event the backend pushes to the app. */

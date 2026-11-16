@@ -17,6 +17,9 @@ import { useHandoffConsumer } from '../common/utils/displayHandoffStore';
 import { COMMAND_CONSOLE_EVENT_KIND, type CommandConsoleEvent } from '../common/utils/commandConsoleEvents';
 import './commandConsole.css';
 
+/** The name of the editor buffer that has not been saved as a script. */
+const SCRATCH_FILENAME = 'scratch.py';
+
 /** One interactive plot, as the backend reports it after running code. */
 interface InteractivePlot {
   plot_path?: string;
@@ -63,7 +66,7 @@ export const CommandConsole: React.FC = () => {
 
   // Center Column State (Editor)
   const [editorCode, setEditorCode] = useState<string>('# Astrometrics Scripting Workbench\nprint("Welcome to Astrometrics Command Console")\n');
-  const [activeFilename, setActiveFilename] = useState<string>('scratch.py');
+  const [activeFilename, setActiveFilename] = useState<string>(SCRATCH_FILENAME);
   const [isExecutingScript, setIsExecutingScript] = useState<boolean>(false);
 
   // Right Column State (Tabs)
@@ -97,6 +100,16 @@ export const CommandConsole: React.FC = () => {
   }, []);
   useReportModeReady('Command Console', !isLoadingSidebarData);
 
+  // Reloads only the User Scripts list (used when a script is saved elsewhere).
+  const reloadUserScripts = useCallback(async () => {
+    try {
+      const scriptList = await callBackend('terminal:list_scripts', {});
+      setUserScripts(scriptList || []);
+    } catch (err) {
+      console.warn('Failed reloading user scripts:', err);
+    }
+  }, []);
+
   useEffect(() => {
     loadSidebarData();
   }, [loadSidebarData]);
@@ -113,7 +126,7 @@ export const CommandConsole: React.FC = () => {
       .catch((err) => console.warn('Failed loading doc topics:', err));
   }, []);
 
-  // Shows what an AI agent ran, plots it made, and editor syncs. They arrive
+  // Shows what an AI agent ran, plots it made, editor syncs, and script saves. They arrive
   // through the hand-off store, which keeps them in order while this display is
   // hidden or paused, so none is lost.
   useHandoffConsumer<CommandConsoleEvent>('Command Console', COMMAND_CONSOLE_EVENT_KIND, ({ action, payload }) => {
@@ -134,6 +147,9 @@ export const CommandConsole: React.FC = () => {
       }
     } else if (action === 'editor:sync' && payload?.code !== undefined) {
       setEditorCode(payload.code);
+    } else if (action === 'scripts:changed') {
+      // A script was saved by an AI agent or another window: reload the list.
+      reloadUserScripts();
     }
   });
 
@@ -160,6 +176,9 @@ export const CommandConsole: React.FC = () => {
       const response = await callBackend('terminal:execute', {
         code_str: editorCode,
         source: 'editor',
+        // A script with a name gives its name to the run history. The
+        // unsaved scratch buffer has none, so the backend uses its first line.
+        ...(activeFilename !== SCRATCH_FILENAME ? { label: activeFilename } : {}),
       });
 
       // Update terminal with execution record
@@ -261,7 +280,7 @@ export const CommandConsole: React.FC = () => {
   // Save User Script
   const handleSaveUserScript = async () => {
     let filename = activeFilename;
-    if (filename === 'scratch.py' || filename.startsWith('recipe_')) {
+    if (filename === SCRATCH_FILENAME || filename.startsWith('recipe_')) {
       const chosen = prompt('Enter script filename to save (e.g. my_pipeline.py):', 'my_script.py');
       if (!chosen) return;
       filename = chosen;
@@ -326,7 +345,7 @@ export const CommandConsole: React.FC = () => {
                   }}
                   onNewScript={() => {
                     setEditorCode('# New Python Script\n');
-                    setActiveFilename('scratch.py');
+                    setActiveFilename(SCRATCH_FILENAME);
                   }}
                 />
               </Panel>

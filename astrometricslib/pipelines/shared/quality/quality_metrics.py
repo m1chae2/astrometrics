@@ -13,6 +13,7 @@ import numpy as np
 from astropy.stats import sigma_clipped_stats
 
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, read_data
+from astrometricslib.foundation.run_bases import StarWidthEstimator, record_star_width
 from astrometricslib.pipelines.shared.quality.saturation import (
     compute_saturated_pixel_fraction,
     compute_stack_saturated_pixel_fraction,
@@ -88,6 +89,7 @@ def measure_frame_input_quality(
     if measure_fwhm is not None:
         try:
             metrics["fwhm_px"] = measure_fwhm(data)
+            record_star_width(metrics["fwhm_px"], StarWidthEstimator.FRAME_GAUSSIAN)
         except DATA_ERRORS as fwhm_error:
             logger.debug("FWHM measurement failed for %s: %s", path, fwhm_error)
 

@@ -31,7 +31,9 @@ from astrometricslib.parameters import (
     EquipmentKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
+    factor_for,
     resolve_parameter,
 )
 from wayfindinglib.models.session.telemetry import (
@@ -41,13 +43,14 @@ from wayfindinglib.models.session.telemetry import (
 
 SEGMENT_BREAK_SECONDS = TunedParameter(
     name="wayfinding.segment_break_seconds",
-    default=60.0,
-    unit="s (scales with the guide cycle)",
+    default=factor_for(60.0, RunBasis.GUIDE_CYCLE_SECONDS),
+    unit="× guide cycle",
     description="A pause of at least this long between samples ends a continuous stretch.",
     role=ParameterRole.RECOMMENDATION,
     source=ParameterSource.DETERMINED_EACH_RUN,
     register_entry="WAY-D126",
-    pending_conversion=True,
+    basis=RunBasis.GUIDE_CYCLE_SECONDS,
+    reference_value=60.0,
 )
 """A pause of at least this long between samples ends a continuous stretch.
 

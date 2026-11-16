@@ -24,12 +24,19 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from astrometricslib.parameters import ParameterRole, ParameterSource, TunedParameter, resolve_parameter
+from astrometricslib.parameters import (
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+    factor_for,
+    resolve_parameter,
+)
 
 _EDGE_MARGIN_SECONDS = TunedParameter(
     name="wayfinding.edge_margin_seconds",
-    default=5.0,
-    unit="s around a frame window",
+    default=factor_for(5.0, RunBasis.GUIDE_CYCLE_SECONDS),
+    unit="× guide cycle",
     description=(
         "How far before the first frame and after the last frame the caller should read guiding samples,"
         " in seconds."
@@ -37,7 +44,8 @@ _EDGE_MARGIN_SECONDS = TunedParameter(
     role=ParameterRole.RECOMMENDATION,
     source=ParameterSource.DETERMINED_EACH_RUN,
     register_entry="WAY-D126",
-    pending_conversion=True,
+    basis=RunBasis.GUIDE_CYCLE_SECONDS,
+    reference_value=5.0,
 )
 """How far before the first frame and after the last frame the caller should
 read

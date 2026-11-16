@@ -23,9 +23,8 @@ from astropy.wcs import WCS
 from scipy.ndimage import distance_transform_edt, gaussian_filter
 from scipy.spatial import cKDTree
 
-from astrometricslib.foundation.parameter_context import record_basis
 from astrometricslib.foundation.parameters import resolve
-from astrometricslib.foundation.run_bases import factor_for
+from astrometricslib.foundation.run_bases import StarWidthEstimator, factor_for, record_star_width
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
@@ -404,7 +403,7 @@ def choose_apertures_with_reason(
     fwhm = measure_fwhm_from_data(plane)
     if fwhm is None or not math.isfinite(fwhm) or fwhm <= 0:
         return None, "the stack's star width could not be measured, so the reference aperture has no size"
-    record_basis(RunBasis.STAR_WIDTH_PX, fwhm)
+    record_star_width(fwhm, StarWidthEstimator.STACK_GAUSSIAN)
     radius = max(
         resolve(REFERENCE_APERTURE_FWHM_MULTIPLE).value * fwhm,
         resolve(REFERENCE_APERTURE_MINIMUM_RADIUS_PX).value,

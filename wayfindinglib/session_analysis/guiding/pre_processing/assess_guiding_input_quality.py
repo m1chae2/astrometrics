@@ -17,7 +17,14 @@ from collections.abc import Sequence
 from itertools import pairwise
 from typing import Any
 
-from astrometricslib.parameters import ParameterRole, ParameterSource, TunedParameter, resolve_parameter
+from astrometricslib.parameters import (
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+    factor_for,
+    resolve_parameter,
+)
 from wayfindinglib.analytics.performance_envelope import (
     MINIMUM_SAMPLES_PER_SESSION,
     SIDEREAL_RATE_ARCSEC_PER_SECOND,
@@ -28,13 +35,14 @@ from wayfindinglib.models.session.session_quality import GuidingInputQuality
 
 _MAXIMUM_CADENCE_GAP_SECONDS = TunedParameter(
     name="wayfinding.assess_guiding_input_quality.maximum_cadence_gap_seconds",
-    default=60.0,
-    unit="s (scales with the guide cycle)",
+    default=factor_for(60.0, RunBasis.GUIDE_CYCLE_SECONDS),
+    unit="× guide cycle",
     description="A gap between samples longer than this is a pause, not the guide cadence.",
     role=ParameterRole.RECOMMENDATION,
     source=ParameterSource.DETERMINED_EACH_RUN,
     register_entry="WAY-D126",
-    pending_conversion=True,
+    basis=RunBasis.GUIDE_CYCLE_SECONDS,
+    reference_value=60.0,
 )
 """A gap between samples longer than this is a pause, not the guide cadence."""
 

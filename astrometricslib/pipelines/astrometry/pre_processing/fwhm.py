@@ -420,9 +420,9 @@ def measure_fwhm_from_data(
 
     if not fwhms:
         return None
-    median_fwhm = float(np.median(fwhms))
-    record_basis(RunBasis.STAR_WIDTH_PX, median_fwhm)
-    return median_fwhm
+    # The caller records the width, because only it knows whether this is a
+    # raw frame or a stack (`run_bases.record_star_width`).
+    return float(np.median(fwhms))
 
 
 def _touches_mask(mask: np.ndarray, x: int, y: int, radius: int) -> bool:

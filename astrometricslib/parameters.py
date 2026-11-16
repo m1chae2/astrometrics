@@ -35,6 +35,11 @@ from astrometricslib.foundation.parameters import (
     collect_parameters,
 )
 from astrometricslib.foundation.parameters import resolve as resolve_parameter
+from astrometricslib.foundation.run_bases import (
+    MOUNT_PERIODIC_ERROR_PERIOD_SECONDS,
+    TYPICAL_GUIDE_CYCLE_SECONDS,
+    factor_for,
+)
 from astrometricslib.foundation.tuning import (
     ChangeNotice,
     ConfigTunedValues,
@@ -59,6 +64,8 @@ from astrometricslib.models.tuned_parameter import (
 )
 
 __all__ = [
+    "MOUNT_PERIODIC_ERROR_PERIOD_SECONDS",
+    "TYPICAL_GUIDE_CYCLE_SECONDS",
     "ChangeNotice",
     "ConfigTunedValues",
     "ConfigurationValues",
@@ -85,6 +92,7 @@ __all__ = [
     "collect_tuners",
     "current_parameter_context",
     "equipment_values_to_write",
+    "factor_for",
     "frames_parameter_context",
     "parameter_context",
     "read_tuned_record",

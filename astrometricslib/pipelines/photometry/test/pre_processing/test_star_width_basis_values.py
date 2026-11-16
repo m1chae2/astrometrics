@@ -46,7 +46,11 @@ def test_with_no_star_width_measured_the_old_value_is_kept(
 def test_a_measured_star_width_scales_the_value(parameter: TunedParameter, old_value: float | int) -> None:
     """A recorded 6 px star width (twice the reference) doubles it."""
     with parameter_context():
-        record_basis(RunBasis.STAR_WIDTH_PX, 6.0)
+        # Twice the reference star width; the reference is what the factor
+        # was fitted to (reference value ÷ factor).
+        record_basis(
+            RunBasis.STAR_WIDTH_PX, 2.0 * float(parameter.reference_value) / float(parameter.default)
+        )
         assert resolve(parameter).value == pytest.approx(2.0 * old_value)
 
 

@@ -24,7 +24,14 @@ from typing import Any, NamedTuple
 import numpy as np
 
 from astrometricslib.exceptions import FITS_READ_ERRORS, AstrometricsError, ConfigurationError
-from astrometricslib.parameters import ParameterRole, ParameterSource, TunedParameter, resolve_parameter
+from astrometricslib.parameters import (
+    ParameterRole,
+    ParameterSource,
+    RunBasis,
+    TunedParameter,
+    factor_for,
+    resolve_parameter,
+)
 from wayfindinglib.analytics.capture_history import (
     collect_capture_baseline_values,
     collect_capture_frames,
@@ -65,13 +72,14 @@ SESSION_WINDOW_MARGIN_SECONDS = TunedParameter(
 
 _MAXIMUM_CADENCE_GAP_SECONDS = TunedParameter(
     name="wayfinding.maximum_cadence_gap_seconds",
-    default=60.0,
-    unit="s (scales with the guide cycle)",
+    default=factor_for(60.0, RunBasis.GUIDE_CYCLE_SECONDS),
+    unit="× guide cycle",
     description="A gap between samples longer than this is a pause, not the guide cadence.",
     role=ParameterRole.RECOMMENDATION,
     source=ParameterSource.DETERMINED_EACH_RUN,
     register_entry="WAY-D126",
-    pending_conversion=True,
+    basis=RunBasis.GUIDE_CYCLE_SECONDS,
+    reference_value=60.0,
 )
 """A gap between samples longer than this is a pause, not the guide cadence."""
 

@@ -48,7 +48,11 @@ def test_with_no_basis_measured_the_old_value_stands(parameter: TunedParameter, 
 def test_a_recorded_star_width_scales_the_value(parameter: TunedParameter, old_value: float) -> None:
     """A star width twice the reference width doubles each star-width value."""
     with parameter_context():
-        record_basis(RunBasis.STAR_WIDTH_PX, 6.0)
+        # Twice the reference star width; the reference is what the factor
+        # was fitted to (reference value ÷ factor).
+        record_basis(
+            RunBasis.STAR_WIDTH_PX, 2.0 * float(parameter.reference_value) / float(parameter.default)
+        )
         resolved = resolve(parameter).value
     assert resolved == pytest.approx(2.0 * old_value, abs=0.5 if isinstance(old_value, int) else 1e-9)
 

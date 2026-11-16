@@ -41,7 +41,9 @@ from astrometricslib.parameters import (
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
+    factor_for,
     resolve_parameter,
 )
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
@@ -106,13 +108,14 @@ worth of night."""
 
 _MAXIMUM_CADENCE_GAP_SECONDS = TunedParameter(
     name="wayfinding.measure_exposure_feasibility.maximum_cadence_gap_seconds",
-    default=60.0,
-    unit="s (scales with the guide cycle)",
+    default=factor_for(60.0, RunBasis.GUIDE_CYCLE_SECONDS),
+    unit="× guide cycle",
     description="A gap longer than this between samples is a stop in guiding.",
     role=ParameterRole.RECOMMENDATION,
     source=ParameterSource.DETERMINED_EACH_RUN,
     register_entry="WAY-D126",
-    pending_conversion=True,
+    basis=RunBasis.GUIDE_CYCLE_SECONDS,
+    reference_value=60.0,
 )
 """A gap longer than this between samples is a stop in guiding.
 

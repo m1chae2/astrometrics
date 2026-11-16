@@ -68,6 +68,7 @@ from astropy.stats import sigma_clipped_stats
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, open_primary_hdu
 from astrometricslib.foundation.parameter_context import record_basis
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import StarWidthEstimator, record_star_width
 from astrometricslib.models.camera_profile import CameraProfile, ProvenancedValue, ProvenanceKind
 from astrometricslib.models.quality.measurement import (
     MeasurementOrigin,
@@ -414,8 +415,9 @@ def _emit_star_profile_measurements(
         f"{result.star_count} stars from {result.candidate_count} tried ({result.refusals.describe()}), "
         f"shared Moffat beta {result.median_beta:.2f}{mosaic_note}"
     )
-    # The fitted width of the frame's stars is the run's star width.
-    record_basis(RunBasis.STAR_WIDTH_PX, float(result.width_px))
+    # The fitted width of the frame's stars is the run's star width, put on
+    # the one star-width scale.
+    record_star_width(float(result.width_px), StarWidthEstimator.FRAME_MOFFAT)
     context.add(
         FRAME_STAR_WIDTH_MOFFAT_PX,
         value=result.width_px,

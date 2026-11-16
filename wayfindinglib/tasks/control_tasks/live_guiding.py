@@ -36,8 +36,10 @@ from astrometricslib.parameters import (
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
     WhenMissing,
+    factor_for,
     resolve_parameter,
 )
 from wayfindinglib.analytics.guide_pulses import rms_arcsec
@@ -57,15 +59,16 @@ HISTORY_LIMIT = 100
 
 ACTIVE_WINDOW_SECONDS = TunedParameter(
     name="wayfinding.active_window_seconds",
-    default=5.0,
-    unit="seconds",
+    default=factor_for(5.0, RunBasis.GUIDE_CYCLE_SECONDS),
+    unit="× guide cycle",
     description="A guide sample newer than this means another guider is guiding now.",
     role=ParameterRole.HARDWARE_LIMIT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D140",
     when_missing=WhenMissing.REFUSE,
-    pending_conversion=True,
+    basis=RunBasis.GUIDE_CYCLE_SECONDS,
+    reference_value=5.0,
 )
 """A sample newer than this means another guider is guiding now."""
 

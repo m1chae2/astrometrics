@@ -14,8 +14,8 @@ from astrometricslib.foundation.observatory_setups import SetupConfig
 from astrometricslib.foundation.tuning import TuningInputs, TuningSkippedError
 from astrometricslib.pipelines.shared.basis_tuning import (
     median_trail_width_fwhm,
-    stack_widths_of_optic,
     tune_typical_trail_width,
+    widths_of_optic,
 )
 
 
@@ -40,7 +40,7 @@ def test_one_newest_width_per_stack_of_the_setup_optic() -> None:
         _row("b", 3.0, None, 406.0),
         _row("c", 9.0, "Lens", 300.0),
     ]
-    widths = stack_widths_of_optic(rows, "Refractor", 405.0, 0.02)
+    widths = widths_of_optic(rows, "Refractor", 405.0, 0.02)
     assert sorted(widths) == [2.5, 3.0]
 
 

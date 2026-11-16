@@ -40,6 +40,7 @@ from astrometricslib._internal.drivers.interfaces.stacking_driver import (
     StackSettings,
 )
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import StarWidthEstimator, record_star_width
 from astrometricslib.models.tuned_parameter import (
     HardcodedKind,
     ParameterRole,
@@ -1489,6 +1490,7 @@ def _measure_combined_fwhm(
     except DATA_ERRORS as measurement_error:
         logger.warning("Could not measure the star width of the combined stack: %s", measurement_error)
         return None
+    record_star_width(fwhm, StarWidthEstimator.STACK_GAUSSIAN)
     return None if fwhm is None else float(fwhm)
 
 

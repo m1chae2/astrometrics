@@ -7,8 +7,9 @@ that follow the star width use the setup's typical width,
 spectrum's streak, `run_bases.TYPICAL_TRAIL_WIDTH_PX`. These tuners derive
 both from this observatory's stored data:
 
-- the typical star width is the median star width (FWHM) of the setup's
-  stored stacks, read from the stacking quality rows;
+- the typical star width is the median, over the setup's stored raw frames,
+  of each frame's Gaussian width of its brightest stars, which is the one
+  star-width scale (`run_bases.StarWidthEstimator`);
 - the typical trail width is the median, over the stored star spectra, of
   each spectrum's median streak width, turned from a Gaussian sigma into a
   FWHM. The stored spectra do not say which camera took them, so every
@@ -28,12 +29,12 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
+from astrometricslib.pipelines.shared.quality.metrics import FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import FWHM_PER_SIGMA
 from astrometricslib.pipelines.spectroscopy.spectrum_tuning_data import (
     load_stored_star_spectra,
     require_spectral_filter,
 )
-from astrometricslib.pipelines.stacking.metrics import STACKING_STACKED_FWHM_PX
 
 # A stack's optic matches the setup's when its stored focal length is within
 # this share of the optic's: the same 2% tolerance a frame's optic is chosen
@@ -50,10 +51,10 @@ OPTIC_FOCAL_LENGTH_TOLERANCE = TunedParameter(
 )
 
 
-def stack_widths_of_optic(
+def widths_of_optic(
     rows: Iterable[tuple[Any, Any]], optic_name: str, focal_length_mm: float | None, tolerance: float
 ) -> list[float]:
-    """Keep the newest stack width of each stack taken through one optic.
+    """Keep the newest width of each frame or stack taken through one optic.
 
     Parameters
     ----------
@@ -69,7 +70,7 @@ def stack_widths_of_optic(
     Returns
     -------
     widths : `list` [`float`]
-        One width per stack (its newest row), in pixels.
+        One width per subject (its newest row), in pixels.
     """
     newest: dict[str, float] = {}
     for measurement, setting in rows:
@@ -107,7 +108,7 @@ def median_trail_width_fwhm(trail_widths_sigma: Sequence[Sequence[float]]) -> fl
 
 
 def tune_typical_star_width(inputs: TuningInputs) -> TuningResult:
-    """Derive the setup's typical star width from its stored stacks.
+    """Derive the setup's typical star width from its stored raw frames.
 
     Parameters
     ----------
@@ -117,7 +118,7 @@ def tune_typical_star_width(inputs: TuningInputs) -> TuningResult:
     Returns
     -------
     result : `TuningResult`
-        The median stack FWHM, resting on the number of stacks.
+        The median frame width, resting on the number of frames.
 
     Raises
     ------
@@ -127,19 +128,22 @@ def tune_typical_star_width(inputs: TuningInputs) -> TuningResult:
     from astrometricslib.parameters import resolve_parameter
 
     optic = inputs.configuration.get_observatory_setups().optic_named(inputs.setup.optic_name)
-    rows = camera_rows(inputs.configuration, inputs.setup.camera_name, STACKING_STACKED_FWHM_PX)
-    widths = stack_widths_of_optic(
+    rows = camera_rows(inputs.configuration, inputs.setup.camera_name, FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX)
+    widths = widths_of_optic(
         rows,
         inputs.setup.optic_name,
         optic.focal_length_mm if optic is not None else None,
         float(resolve_parameter(OPTIC_FOCAL_LENGTH_TOLERANCE).value),
     )
     if not widths:
-        raise TuningSkippedError("no stored stack star widths for this camera and optic")
+        raise TuningSkippedError("no stored frame star widths for this camera and optic")
     return TuningResult(
         values={TYPICAL_STAR_WIDTH_PX.name: statistics.median(widths)},
         sample=len(widths),
-        source=f"Median star width (FWHM) of {len(widths)} stored stacks of this camera and optic",
+        source=(
+            f"Median Gaussian width of the brightest stars of {len(widths)} stored frames "
+            "of this camera and optic"
+        ),
     )
 
 
@@ -180,7 +184,7 @@ def tune_typical_trail_width(inputs: TuningInputs) -> TuningResult:
 TYPICAL_STAR_WIDTH_TUNER = Tuner(
     name="foundation.typical_star_width",
     parameters=(TYPICAL_STAR_WIDTH_PX,),
-    method="The median star width (FWHM) of the setup's stored stacks.",
+    method="The median Gaussian width of the brightest stars over the setup's stored raw frames.",
     tune=tune_typical_star_width,
 )
 
@@ -196,5 +200,5 @@ __all__ = [
     "TYPICAL_STAR_WIDTH_TUNER",
     "TYPICAL_TRAIL_WIDTH_TUNER",
     "median_trail_width_fwhm",
-    "stack_widths_of_optic",
+    "widths_of_optic",
 ]

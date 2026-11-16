@@ -26,7 +26,6 @@ each other. They are not comparable with numbers from another tool.
 
 import json
 import logging
-import math
 import os
 import warnings
 
@@ -38,7 +37,7 @@ from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_d
 from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.foundation.parameter_context import record_basis
 from astrometricslib.foundation.parameters import resolve
-from astrometricslib.foundation.run_bases import factor_for
+from astrometricslib.foundation.run_bases import StarWidthEstimator, factor_for, record_star_width
 from astrometricslib.models.quality.stack_comparison import StackComparison, StackMeasurements
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
@@ -296,8 +295,7 @@ def measure_stack_fwhm(path: str) -> float | None:
     """
     image = np.asarray(collapse_to_2d(np.asarray(read_data(path), dtype=np.float64)))
     fwhm = measure_fwhm_from_data(image, excluded_mask=combined_stack_excluded_mask(path, image.shape))
-    if fwhm is not None and math.isfinite(fwhm):
-        record_basis(RunBasis.STAR_WIDTH_PX, fwhm)
+    record_star_width(fwhm, StarWidthEstimator.STACK_GAUSSIAN)
     return fwhm
 
 
@@ -410,8 +408,8 @@ def measure_stack_array(data: np.ndarray, path: str = "") -> StackMeasurements:
     )
     if measurements.fwhm_px is None:
         measurements.not_measured["fwhm_px"] = "too few stars could be fitted"
-    elif math.isfinite(measurements.fwhm_px):
-        record_basis(RunBasis.STAR_WIDTH_PX, measurements.fwhm_px)
+    else:
+        record_star_width(measurements.fwhm_px, StarWidthEstimator.STACK_GAUSSIAN)
     return measurements
 
 

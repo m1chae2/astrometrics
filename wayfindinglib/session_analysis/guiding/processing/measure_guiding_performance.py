@@ -29,7 +29,9 @@ from astrometricslib.parameters import (
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
+    factor_for,
     resolve_parameter,
 )
 from wayfindinglib.analytics.performance_envelope import (
@@ -46,14 +48,15 @@ from wayfindinglib.session_analysis.guiding.processing.measure_exposure_feasibil
 
 MINIMUM_RUN_SECONDS_FOR_CORRECTION_RATE = TunedParameter(
     name="wayfinding.minimum_run_seconds_for_correction_rate",
-    default=600.0,
-    unit="s (scales with the periodic error period)",
+    default=factor_for(600.0, RunBasis.PERIODIC_ERROR_PERIOD_SECONDS),
+    unit="× periodic-error period",
     description="Shortest guiding run whose net declination correction is used.",
     role=ParameterRole.RECOMMENDATION,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D135",
-    pending_conversion=True,
+    basis=RunBasis.PERIODIC_ERROR_PERIOD_SECONDS,
+    reference_value=600.0,
 )
 """Shortest guiding run whose net declination correction is used.
 

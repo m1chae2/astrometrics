@@ -231,6 +231,8 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.MINIMUM_LIGHT_FRAMES -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.SKY_READ_NOISE_FACTOR -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.TARGET_MASK_RADIUS_CELLS -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.TARGET_MASK_SIZE_MARGIN -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.TARGET_MASK_MAXIMUM_FIELD_FRACTION -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.SHADOW_MINIMUM_SIGMAS -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.SHADOW_MINIMUM_DEPTH_FRACTION -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.SHADOW_MINIMUM_AREA_CELLS -->

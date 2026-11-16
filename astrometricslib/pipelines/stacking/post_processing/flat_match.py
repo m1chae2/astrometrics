@@ -140,13 +140,16 @@ from scipy import ndimage
 
 from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, open_primary_hdu
+from astrometricslib.foundation.parameter_context import run_basis_value
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import REFERENCE_SETUP_BASES, factor_for
 from astrometricslib.models.quality.measurement import QualityMeasurement, QualitySubject
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.quality.frame_measurement import measure_clipped_mean_adu
@@ -188,6 +191,7 @@ __all__ = [
     "match_dust_maps",
     "measure_flat_match",
     "sky_requirement_for_frame",
+    "target_mask_radius_cells",
 ]
 
 _SPEC_BY_NAME = {spec.name: spec for spec in STACKING_METRICS}
@@ -311,20 +315,99 @@ BIAS_FRAMES_FOR_LEVEL = TunedParameter(
 )
 
 # The target is at the frame centre (the mount is pointed at it), so a disc
-# of this radius around the centre is set aside in every frame. 25 cells is
-# 200 pixels: 6.4 arcminutes on the ASI 533MM at 1.9 arcsec/px. A target that
-# is larger, or framed off the centre, is not covered.
+# around the centre is set aside in every frame. Its radius is the larger of
+# two sizes, so a small target keeps the disc that was checked and a large one
+# is covered too:
+#
+# - TARGET_MASK_RADIUS_CELLS, the smallest disc: 25 cells, 200 pixels, which
+#   is 6.4 arcminutes on the ASI 533MM at 1.9 arcsec/px (chosen on M 57). It
+#   is an angle on the sky, so it takes fewer cells on a coarser plate scale.
+# - The target's catalog size (the run's target-size basis, SIMBAD's major
+#   axis) times TARGET_MASK_SIZE_MARGIN, as a radius. Catalog sizes are
+#   measured to a faint brightness level and a galaxy or nebula glows past
+#   it, so the disc reaches a quarter beyond it.
+#
+# The target-sized disc is held to TARGET_MASK_MAXIMUM_FIELD_FRACTION of half
+# the image's short side, so a target that fills the frame (M 31, M 44) still
+# leaves the edges and corners for the dust maps. A target framed off the
+# centre is not covered.
 TARGET_MASK_RADIUS_CELLS = TunedParameter(
     name="stacking.target_mask_radius_cells",
-    default=25.0,
-    unit="cells",
-    description="Radius of the disc around the frame center set aside for the target.",
+    default=factor_for(25.0, RunBasis.PLATE_SCALE_ARCSEC_PER_PX, inverse=True),
+    unit="cells (an angle on the sky ÷ plate scale)",
+    description="Smallest radius of the disc around the frame center set aside for the target.",
     role=ParameterRole.RECOMMENDATION,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-D47",
-    pending_conversion=True,
+    basis=RunBasis.PLATE_SCALE_ARCSEC_PER_PX,
+    basis_inverse=True,
+    reference_value=25.0,
 )
+TARGET_MASK_SIZE_MARGIN = TunedParameter(
+    name="stacking.target_mask_size_margin",
+    default=1.25,
+    unit="× the catalog radius",
+    description="How far past the target's catalog radius the set-aside disc reaches.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D47",
+)
+TARGET_MASK_MAXIMUM_FIELD_FRACTION = TunedParameter(
+    name="stacking.target_mask_maximum_field_fraction",
+    default=0.5,
+    unit="fraction of half the image's short side",
+    description="Largest radius a target-sized disc may take, as a share of half the image's short side.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D47",
+)
+
+
+def _setup_basis(basis: RunBasis) -> float:
+    """Return a basis of the run, or the reference setup's when it is unknown.
+
+    Parameters
+    ----------
+    basis : `RunBasis`
+        The basis.
+
+    Returns
+    -------
+    value : `float`
+        The value.
+    """
+    return run_basis_value(basis) or REFERENCE_SETUP_BASES[basis]
+
+
+def target_mask_radius_cells() -> float:
+    """Work out the radius of the disc set aside for the target.
+
+    The radius is the larger of `TARGET_MASK_RADIUS_CELLS` and the target's
+    catalog radius times `TARGET_MASK_SIZE_MARGIN`. The second is held to
+    `TARGET_MASK_MAXIMUM_FIELD_FRACTION` of half the image's short side. With
+    no target size known, the smallest disc is used. A plate scale or image
+    size the run does not know is the reference setup's.
+
+    Returns
+    -------
+    radius_cells : `float`
+        The disc's radius in map cells.
+    """
+    smallest = float(resolve(TARGET_MASK_RADIUS_CELLS).value)
+    size_arcsec = run_basis_value(RunBasis.TARGET_SIZE_ARCSEC)
+    if size_arcsec is None:
+        return smallest
+    scale = _setup_basis(RunBasis.PLATE_SCALE_ARCSEC_PER_PX)
+    cell_px = float(resolve(MAP_CELL_PX).value)
+    sized = float(resolve(TARGET_MASK_SIZE_MARGIN).value) * size_arcsec / 2.0 / scale / cell_px
+    short_side = _setup_basis(RunBasis.IMAGE_SHORT_SIDE_PX)
+    largest = float(resolve(TARGET_MASK_MAXIMUM_FIELD_FRACTION).value) * short_side / 2.0 / cell_px
+    sized = min(sized, largest)
+    return max(smallest, sized)
+
 
 # A cell this many robust standard deviations above the local sky is a star or
 # a hot pixel; the connected cells above the lower limit around it are its
@@ -2007,7 +2090,7 @@ def measure_flat_match(
         Gives the time in seconds. Tests pass a fake.
     target_radius_cells : `float`, optional
         The radius of the disc set aside around the frame centre.
-        ``TARGET_MASK_RADIUS_CELLS`` if omitted.
+        `target_mask_radius_cells` if omitted.
 
     Returns
     -------
@@ -2029,7 +2112,7 @@ def measure_flat_match(
             bias_paths,
             sky_requirement.minimum_adu,
             reader,
-            resolve(TARGET_MASK_RADIUS_CELLS).value if target_radius_cells is None else target_radius_cells,
+            target_mask_radius_cells() if target_radius_cells is None else target_radius_cells,
         )
     except _TimeLimitReachedError as stop:
         return _all_metrics_missing(str(stop))

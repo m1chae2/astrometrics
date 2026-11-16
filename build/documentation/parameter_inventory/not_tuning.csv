@@ -140,6 +140,8 @@ astrometricslib/pipelines/shared/quality/star_profile_fitting.py,MOFFAT_BETA_STA
 astrometricslib/pipelines/shared/quality/time_budget.py,FRAME_MEASUREMENT_TIME_BUDGET_SECONDS,Plumbing: time budget
 astrometricslib/pipelines/shared/registration_record.py,HOMOGRAPHY_LENGTH,Homography has nine entries
 astrometricslib/pipelines/shared/registration_record.py,REGISTRATION_RECORD_VERSION,software plumbing
+astrometricslib/pipelines/shared/simbad_object_types.py,CONSECUTIVE_FAILURE_LIMIT,Network retry limit of the SIMBAD backfills; affects only failure handling
+astrometricslib/pipelines/shared/simbad_object_types.py,TARGETS_PER_REQUEST,Batch size of a SIMBAD request; affects only how many requests are made
 astrometricslib/pipelines/shared/star_analysis.py,MAXIMUM_ROWS_PER_LIST,List length for display
 astrometricslib/pipelines/shared/star_analysis.py,TOP_CANDIDATES,List length for display
 astrometricslib/pipelines/shared/star_catalog_queries.py,MAXIMUM_MATCH_RANKING,Read cap for ranking

@@ -43,7 +43,9 @@ from astrometricslib.parameters import (
     EquipmentKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
+    factor_for,
     resolve_parameter,
 )
 from astrometricslib.reports import observing_night_id
@@ -162,20 +164,24 @@ _INSERT_GUIDING_SAMPLE_SQL = """
 
 SPURIOUS_ALIGNMENT_ERROR_ARCSEC = TunedParameter(
     name="wayfinding.spurious_alignment_error_arcsec",
-    default=0.5,
-    unit="arcseconds",
+    default=factor_for(0.5, RunBasis.PLATE_SCALE_ARCSEC_PER_PX),
+    unit="arcseconds (× plate scale)",
     description="A sync with a smaller pointing error is treated as a tracking-loop echo and is not stored.",
     role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.MOUNT}),
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="WAY-D124",
-    pending_conversion=True,
+    basis=RunBasis.PLATE_SCALE_ARCSEC_PER_PX,
+    reference_value=0.5,
 )
 """A sync with a smaller pointing error is a tracking-loop echo, not a solve.
 
 Some mount drivers report each tracking update as a sync. Those updates
 move the mount by a tiny amount and are not plate solves, so they are not
-stored unless the caller forces it.
+stored unless the caller forces it. A plate solve cannot measure a pointing
+error much finer than about a quarter of a pixel, so the limit is a quarter
+of a pixel in arcseconds: 0.5 arcseconds at the reference plate scale of
+1.915 arcseconds per pixel, and more on a coarser one.
 """
 
 

@@ -20,7 +20,15 @@ def test_both_registries_collect() -> None:
 
 
 def test_no_parameter_name_is_in_both_registries() -> None:
-    """No parameter name is declared in both libraries."""
-    wayfinding = set(collect_parameters("wayfindinglib").names())
-    astrometrics = set(collect_parameters("astrometricslib").names())
-    assert not wayfinding & astrometrics
+    """No parameter name is declared twice, once in each library.
+
+    A declaration wayfindinglib imports from astrometricslib's public module
+    (the spectrum match limits, the guide cycle) shows up in both registries,
+    but it is one object, declared once; two different declarations with one
+    name would be a clash.
+    """
+    wayfinding = collect_parameters("wayfindinglib")
+    astrometrics = collect_parameters("astrometricslib")
+    shared = set(wayfinding.names()) & set(astrometrics.names())
+    clashes = sorted(name for name in shared if wayfinding.get(name) is not astrometrics.get(name))
+    assert not clashes

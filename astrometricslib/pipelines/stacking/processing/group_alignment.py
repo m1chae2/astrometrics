@@ -31,9 +31,9 @@ from scipy.spatial import cKDTree
 from skimage.registration import phase_cross_correlation
 
 from astrometricslib.foundation.errors import InvalidArgumentError
-from astrometricslib.foundation.parameter_context import record_basis
+from astrometricslib.foundation.parameter_context import record_basis, run_basis_value
 from astrometricslib.foundation.parameters import resolve
-from astrometricslib.foundation.run_bases import factor_for
+from astrometricslib.foundation.run_bases import REFERENCE_SETUP_BASES, factor_for
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     HardcodedKind,
@@ -287,8 +287,20 @@ ZERO_ORDER_MAX_RIVAL_FRACTION = TunedParameter(
 # limit, so it is the rival test, not the peak test, that rejects the cluster.
 # The extended path instead averages the frame in blocks of
 # EXTENDED_TARGET_BLOCK_PIXELS (cheap, and it suppresses noise), then smooths
-# with a Gaussian of EXTENDED_TARGET_SMOOTHING_SIGMA_PIXELS, a width comparable
-# to the target. At that scale the cluster is one smooth hill.
+# with a Gaussian about as wide as the target's bright part. At that scale the
+# target is one smooth hill. The width is the larger of two:
+#
+# - EXTENDED_TARGET_SMOOTHING_SIZE_FRACTION of the target's catalog size (the
+#   run's target-size basis, SIMBAD's major axis) in pixels. 25 px worked on
+#   M 13, whose catalog size is 33 arcminutes, 1034 px at 1.915 arcsec/px, so
+#   the share is 25 / 1034.
+# - EXTENDED_TARGET_SMOOTHING_FLOOR_PIXELS, 4 star widths, so a small target
+#   (M 57 is 1.2 arcminutes, which would give under 1 px) is still smoothed
+#   well past single stars.
+#
+# A target with no catalog size (most stars) keeps
+# EXTENDED_TARGET_SMOOTHING_SIGMA_PIXELS, the 25 px chosen on M 13, which is
+# an angle on the sky and so takes fewer pixels on a coarser plate scale.
 EXTENDED_TARGET_BLOCK_PIXELS = TunedParameter(
     name="stacking.extended_target_block_pixels",
     default=4,
@@ -301,15 +313,63 @@ EXTENDED_TARGET_BLOCK_PIXELS = TunedParameter(
 )
 EXTENDED_TARGET_SMOOTHING_SIGMA_PIXELS = TunedParameter(
     name="stacking.extended_target_smoothing_sigma_pixels",
-    default=25.0,
-    unit="× FWHM",
-    description="Width of the smoothing applied before the centre of an extended target is searched for.",
+    default=factor_for(25.0, RunBasis.PLATE_SCALE_ARCSEC_PER_PX, inverse=True),
+    unit="px (an angle on the sky ÷ plate scale)",
+    description="Smoothing width for an extended target whose catalog size is not known.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="STK-18",
-    pending_conversion=True,
+    basis=RunBasis.PLATE_SCALE_ARCSEC_PER_PX,
+    basis_inverse=True,
+    reference_value=25.0,
 )
+EXTENDED_TARGET_SMOOTHING_SIZE_FRACTION = TunedParameter(
+    name="stacking.extended_target_smoothing_size_fraction",
+    default=25.0 / 1034.0,
+    unit="× the catalog size in pixels",
+    description="Smoothing width for an extended target, as a share of its catalog size.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-18",
+)
+EXTENDED_TARGET_SMOOTHING_FLOOR_PIXELS = TunedParameter(
+    name="stacking.extended_target_smoothing_floor_pixels",
+    default=factor_for(4.0 * REFERENCE_SETUP_BASES[RunBasis.STAR_WIDTH_PX], RunBasis.STAR_WIDTH_PX),
+    unit="px (× star width)",
+    description="Narrowest smoothing width for an extended target with a catalog size.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D66",
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=4.0 * REFERENCE_SETUP_BASES[RunBasis.STAR_WIDTH_PX],
+)
+
+
+def extended_target_smoothing_sigma_pixels() -> float:
+    """Work out the smoothing width used to find an extended target.
+
+    Returns
+    -------
+    sigma_pixels : `float`
+        The larger of `EXTENDED_TARGET_SMOOTHING_SIZE_FRACTION` of the
+        target's catalog size in pixels and
+        `EXTENDED_TARGET_SMOOTHING_FLOOR_PIXELS`; with no catalog size known,
+        `EXTENDED_TARGET_SMOOTHING_SIGMA_PIXELS`. A plate scale the run does
+        not know is the reference setup's.
+    """
+    size_arcsec = run_basis_value(RunBasis.TARGET_SIZE_ARCSEC)
+    if size_arcsec is None:
+        return float(resolve(EXTENDED_TARGET_SMOOTHING_SIGMA_PIXELS).value)
+    scale = (
+        run_basis_value(RunBasis.PLATE_SCALE_ARCSEC_PER_PX)
+        or REFERENCE_SETUP_BASES[RunBasis.PLATE_SCALE_ARCSEC_PER_PX]
+    )
+    sized = float(resolve(EXTENDED_TARGET_SMOOTHING_SIZE_FRACTION).value) * size_arcsec / scale
+    return max(float(resolve(EXTENDED_TARGET_SMOOTHING_FLOOR_PIXELS).value), sized)
+
 
 # Two smoothed peaks count as independent when no brighter pixel lies within
 # this many smoothing sigmas of either one (two sigmas is 50 px at the width
@@ -876,7 +936,7 @@ def find_extended_zero_order_position(plane: np.ndarray) -> tuple[float, float] 
 
     1. Average the image in blocks of `EXTENDED_TARGET_BLOCK_PIXELS`.
     2. Subtract the median of the blocks (the sky) and smooth with a Gaussian
-       of `EXTENDED_TARGET_SMOOTHING_SIGMA_PIXELS`.
+       of `extended_target_smoothing_sigma_pixels`.
     3. List the local maxima: smoothed pixels no lower than any pixel within
        `EXTENDED_TARGET_INDEPENDENT_PEAK_SIGMAS` smoothing widths.
     4. Take the brightest local maximum inside the central search window
@@ -903,7 +963,7 @@ def find_extended_zero_order_position(plane: np.ndarray) -> tuple[float, float] 
         a rival is too bright for the peak to be trusted.
     """
     zero_order_search_half_width_pixels = resolve(ZERO_ORDER_SEARCH_HALF_WIDTH_PIXELS).value
-    extended_target_smoothing_sigma_pixels = resolve(EXTENDED_TARGET_SMOOTHING_SIGMA_PIXELS).value
+    smoothing_sigma_pixels = extended_target_smoothing_sigma_pixels()
     block = resolve(EXTENDED_TARGET_BLOCK_PIXELS).value
     image = np.nan_to_num(np.asarray(plane, dtype=np.float32))
     block_rows, block_columns = image.shape[0] // block, image.shape[1] // block
@@ -914,13 +974,9 @@ def find_extended_zero_order_position(plane: np.ndarray) -> tuple[float, float] 
         .reshape(block_rows, block, block_columns, block)
         .mean(axis=(1, 3))
     )
-    smooth = gaussian_filter(blocks, extended_target_smoothing_sigma_pixels / block) - float(
-        np.median(blocks)
-    )
+    smooth = gaussian_filter(blocks, smoothing_sigma_pixels / block) - float(np.median(blocks))
     reach_blocks = round(
-        resolve(EXTENDED_TARGET_INDEPENDENT_PEAK_SIGMAS).value
-        * extended_target_smoothing_sigma_pixels
-        / block
+        resolve(EXTENDED_TARGET_INDEPENDENT_PEAK_SIGMAS).value * smoothing_sigma_pixels / block
     )
     is_peak = (maximum_filter(smooth, size=2 * reach_blocks + 1) == smooth) & (smooth > 0)
     peak_rows, peak_columns = np.nonzero(is_peak)

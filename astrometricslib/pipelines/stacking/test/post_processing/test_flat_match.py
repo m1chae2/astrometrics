@@ -591,7 +591,7 @@ def test_the_target_disc_is_set_aside_in_every_frame(tmp_path: Path, donuts: lis
     margin = flat_match.EDGE_MARGIN_CELLS.default
     outside = maps.full_map[margin:-margin, margin:-margin][~disc[margin:-margin, margin:-margin]]
     assert np.isfinite(outside).mean() > 0.8
-    assert flat_match.TARGET_MASK_RADIUS_CELLS.default == pytest.approx(25.0)
+    assert flat_match.TARGET_MASK_RADIUS_CELLS.reference_value == pytest.approx(25.0)
 
 
 def test_the_time_limit_is_checked_before_each_frame(
@@ -696,11 +696,7 @@ def easy_sky(monkeypatch: pytest.MonkeyPatch) -> None:
         Used to replace the camera profile lookup.
     """
     monkeypatch.setattr(flat_match, "sky_requirement_for_frame", lambda _frame: EASY_SKY)
-    monkeypatch.setattr(
-        flat_match,
-        "TARGET_MASK_RADIUS_CELLS",
-        flat_match.TARGET_MASK_RADIUS_CELLS.model_copy(update={"default": TEST_DISC_CELLS}),
-    )
+    monkeypatch.setattr(flat_match, "target_mask_radius_cells", lambda: TEST_DISC_CELLS)
 
 
 def test_rows_cover_every_metric_and_are_accepted_by_the_registry(

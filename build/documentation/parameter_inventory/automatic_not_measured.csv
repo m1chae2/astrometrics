@@ -479,7 +479,9 @@ stacking.extended_target_block_pixels,STK-D66,measurement,Design estimate
 stacking.extended_target_centroid_fraction_of_peak,STK-D66,measurement,Design estimate
 stacking.extended_target_independent_peak_sigmas,STK-D66,measurement,Design estimate
 stacking.extended_target_max_rival_fraction,STK-18,judgment,Partly measured
+stacking.extended_target_smoothing_floor_pixels,STK-D66,measurement,Design estimate
 stacking.extended_target_smoothing_sigma_pixels,STK-18,measurement,Partly measured
+stacking.extended_target_smoothing_size_fraction,STK-18,measurement,Partly measured
 stacking.faint_source_high_pass_sigma_px,STK-36,measurement,Partly measured
 stacking.faint_source_smoothing_sigmas_px,STK-36,measurement,Partly measured
 stacking.faint_source_threshold_sigmas,STK-36,measurement,Partly measured

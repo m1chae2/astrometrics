@@ -262,6 +262,9 @@ RPC_METHODS: tuple[str, ...] = (
     "images:get_light_frame_data",
     "images:convert_fits",
     "images:get_fits_header",
+    "images:measure_star_profile",
+    "images:map_position",
+    "images:measure_detections",
     "images:delete",
     "images:last",
     # Calibration frames

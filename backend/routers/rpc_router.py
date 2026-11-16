@@ -238,6 +238,9 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "images:get_light_frame_data": ("image_service", "get_light_frame_data_by_id"),
     "images:convert_fits": ("image_service", "convert_fits"),
     "images:get_fits_header": ("image_service", "get_fits_header_data"),
+    "images:measure_star_profile": ("image_service", "measure_star_profile"),
+    "images:map_position": ("image_service", "map_position"),
+    "images:measure_detections": ("image_service", "measure_detections"),
     "images:delete": ("image_service", "delete_images"),
     "images:last": ("image_service", "get_last_image"),
     # Calibration frames

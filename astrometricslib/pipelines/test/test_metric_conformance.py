@@ -116,7 +116,7 @@ def _asteroid_detection_emitted_measurements() -> list[QualityMeasurement]:
     context = PipelineRunContext(
         "M 99", "asteroid_detection", "1.1.0", "job-1", "job-1", datetime(2026, 10, 22, tzinfo=UTC)
     )
-    return asteroid_run_measurements(counts, asteroid_run_gates(counts, 3, 0), context)
+    return asteroid_run_measurements(counts, asteroid_run_gates(counts, 3, 0, 2.0), context)
 
 
 def _astrometry_emitted_measurements() -> list[QualityMeasurement]:

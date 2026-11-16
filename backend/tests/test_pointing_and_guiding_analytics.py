@@ -15,7 +15,7 @@ def test_fit_pointing_model_insufficient_points() -> None:
         {"ra": 180.0, "dec": 45.0, "delta_ra_arcsec": 5.0, "delta_dec_arcsec": -3.0},
         {"ra": 190.0, "dec": 50.0, "delta_ra_arcsec": 6.0, "delta_dec_arcsec": -2.0},
     ]
-    model = fit_pointing_model(attempts)
+    model = fit_pointing_model(attempts, latitude_deg=45.0)
     assert model.confidence == "insufficient_data"
     assert model.sample_count == 2
     assert model.improvement_percent == pytest.approx(0.0)

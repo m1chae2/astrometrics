@@ -80,7 +80,11 @@ def test_the_traced_extraction_reads_the_bump_at_its_true_distance(start_row: fl
     extractor = SpectrumExtractor(radius=6, subtract_sky_background=False)
 
     profile, _, _ = extractor.extract_line_traced(
-        _Image(_trail_with_a_bump()), (float(TRAIL_COLUMN), start_row), np.array([0.0, 1.0]), 50
+        _Image(_trail_with_a_bump()),
+        (float(TRAIL_COLUMN), start_row),
+        np.array([0.0, 1.0]),
+        50,
+        centerline_polynomial_degree=2,
     )
 
     assert _bump_position(profile) == pytest.approx(BUMP_ROW - start_row, abs=0.12)

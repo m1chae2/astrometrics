@@ -4,6 +4,56 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from astrometricslib.models.tuned_parameter import ParameterRole, ParameterSource, TunedParameter
+
+# The width a star or asteroid is expected to have when the moving-object
+# search finds dots, in pixels. A processing setting, so a person can change
+# it in ``[Processing.MovingObject]``. 4 px is 1.7 times the reference star
+# width (2.33 px); the grid of MOV-01 used it and did not vary it (a sanity
+# check, partly measured).
+DETECTION_FWHM_PX = TunedParameter(
+    name="asteroid_detection.detection_fwhm_px",
+    default=4.0,
+    unit="pixels",
+    description="Width of a star or asteroid the moving-object search expects.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    register_entry="MOV-01",
+    config_key=("Processing.MovingObject", "detection_fwhm_px"),
+)
+
+# How far above the background noise a dot must be to be noticed, in
+# standard deviations. The MOV-01 completeness grid ran it at 5 and showed
+# the fainter limit it gives; lowering it finds fainter movers and more false
+# dots, which the MOV-03 mover-free fields check.
+DETECTION_THRESHOLD_SIGMA = TunedParameter(
+    name="asteroid_detection.detection_threshold_sigma",
+    default=5.0,
+    unit="sigma",
+    description="Detection threshold above the background noise for the moving-object search.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.PROCESSING_SETTING,
+    register_entry="MOV-01",
+    config_key=("Processing.MovingObject", "detection_threshold_sigma"),
+)
+
+# A track is a straight line when the RMS distance of its dots from the fitted
+# line, on each sky axis, is below this many times the error of one position.
+# Twice the error keeps a real straight mover (its residuals scatter by about
+# one error) and rejects a star whose measured center jumps between two
+# points. Confirmed by MOV-03: 0 false tracks in 40 mover-free synthetic
+# fields (partly measured; the limit is not validated on real fields).
+RESIDUAL_RMS_MAX_MULTIPLE = TunedParameter(
+    name="asteroid_detection.residual_rms_max_multiple",
+    default=2.0,
+    unit="× position error",
+    description="Largest RMS distance from the fitted line, in position errors, of a straight track.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.PROCESSING_SETTING,
+    register_entry="MOV-03",
+    config_key=("Processing.MovingObject", "residual_rms_max_multiple"),
+)
+
 
 class MovingObjectConfig(BaseModel):
     """Settings used when searching for asteroids.
@@ -67,15 +117,19 @@ class MovingObjectConfig(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    detection_fwhm_px: float = Field(default=4.0, alias="detectionFwhmPx")
-    detection_threshold_sigma: float = Field(default=5.0, alias="detectionThresholdSigma")
+    detection_fwhm_px: float = Field(default=float(DETECTION_FWHM_PX.default), alias="detectionFwhmPx")
+    detection_threshold_sigma: float = Field(
+        default=float(DETECTION_THRESHOLD_SIGMA.default), alias="detectionThresholdSigma"
+    )
     min_frames_for_persistence: int = Field(default=3, alias="minFramesForPersistence")
     pixel_match_tolerance_px: float = Field(default=1.5, alias="pixelMatchTolerancePx")
     sky_match_tolerance_arcsec: float = Field(default=3.0, alias="skyMatchToleranceArcsec")
     rate_min_arcsec_per_hour: float = Field(default=1.0, alias="rateMinArcsecPerHour")
     rate_max_arcsec_per_hour: float = Field(default=300.0, alias="rateMaxArcsecPerHour")
     chain_match_radius_max_arcsec: float = Field(default=300.0, alias="chainMatchRadiusMaxArcsec")
-    residual_rms_max_multiple: float = Field(default=2.0, alias="residualRmsMaxMultiple")
+    residual_rms_max_multiple: float = Field(
+        default=float(RESIDUAL_RMS_MAX_MULTIPLE.default), alias="residualRmsMaxMultiple"
+    )
     min_displacement_error_multiple: float = Field(default=3.0, alias="minDisplacementErrorMultiple")
     astrometric_error_default_arcsec: float = Field(default=10.0, alias="astrometricErrorDefaultArcsec")
     centroid_error_px: float = Field(default=0.5, alias="centroidErrorPx")

@@ -134,6 +134,15 @@ def test_find_or_create_by_position_is_handed_to_the_library() -> None:
     ]
 
 
+def test_find_or_create_by_position_leaves_the_distance_to_the_library_by_default() -> None:
+    """With no tolerance the service passes none, so the library decides."""
+    stars = _Stars()
+
+    _make_service(stars).find_or_create_by_position(279.2, 38.8, name="Vega")
+
+    assert stars.calls[0][3]["tolerance_arcsec"] is None
+
+
 def test_the_list_of_stars_with_spectra_comes_from_the_library() -> None:
     """The spectra list is answered from the library's index."""
     stars = _Stars()

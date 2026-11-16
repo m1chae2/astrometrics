@@ -33,6 +33,7 @@ import re
 from collections.abc import Mapping
 
 from astrometricslib import Target
+from astrometricslib.parameters import HardcodedKind, ParameterRole, ParameterSource, TunedParameter
 from wayfindinglib.analytics.result_quality.forecast import (
     POINT_SOURCE_DEPTH_METRIC,
     SURFACE_BRIGHTNESS_LIMIT_METRIC,
@@ -55,33 +56,58 @@ LEVEL_LABELS: Mapping[DepthLevel, str] = {
 }
 """The words shown for each level."""
 
+POINT_SOURCE_LEVEL_DEPTHS = TunedParameter(
+    name="wayfinding.point_source_level_depths",
+    default=(18.6, 19.3, 20.1),
+    unit="mag (Gaia G, 5 sigma)",
+    description="Point-source depth that reaches Quick look, Standard and Deep.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D94",
+)
+"""The 5 sigma point-source depth, in Gaia G magnitudes, for each level.
+
+The values are in `LEVEL_ORDER` order: Quick look, Standard, Deep. Larger is
+deeper. Derivation, shared with `SURFACE_BRIGHTNESS_LEVEL_DEPTHS` (user
+decision 2026-10-27, option C, time-based): NGC 7331 on the copy, with this
+setup, reached 19.7 mag in 4.1 h. Each level is the depth reached in a set
+time at that rate: Quick look 30 min, Standard 2 h, Deep 8 h. The depth
+changes by 1.25 times log10 of the time ratio. (Random noise alone would give
+1.25 = 2.5 / 2, since noise falls as the square root of the time.) For example,
+2 h: 19.7 + 1.25 * log10(2 / 4.1) = 19.3. The values are a method choice, not
+a fit, so they are declared hardcoded. Status: Design estimate, register row
+WAY-D94; one target and one setup, no uncertainty recorded, not held out.
+"""
+
+SURFACE_BRIGHTNESS_LEVEL_DEPTHS = TunedParameter(
+    name="wayfinding.surface_brightness_level_depths",
+    default=(24.0, 24.7, 25.5),
+    unit="mag/arcsec2 (3 sigma, 10 by 10 arcsec)",
+    description="Surface-brightness limit that reaches Quick look, Standard and Deep.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D94",
+)
+"""The 3 sigma limit over 10 by 10 arcseconds, in mag per square arcsecond.
+
+The values are in `LEVEL_ORDER` order: Quick look, Standard, Deep. Larger is
+deeper. Same derivation as `POINT_SOURCE_LEVEL_DEPTHS`: NGC 7331 reached
+25.1 mag/arcsec2 in 4.1 h, and each level is the depth reached in 30 min, 2 h
+or 8 h at that rate (2 h: 25.1 + 1.25 * log10(2 / 4.1) = 24.7). Status: Design
+estimate, register row WAY-D94.
+"""
+
 LEVEL_DEPTHS: Mapping[DepthKind, Mapping[DepthLevel, float]] = {
-    DepthKind.POINT_SOURCE: {
-        DepthLevel.QUICK_LOOK: 18.6,
-        DepthLevel.GOOD: 19.3,
-        DepthLevel.DEEP: 20.1,
-    },
-    DepthKind.SURFACE_BRIGHTNESS: {
-        DepthLevel.QUICK_LOOK: 24.0,
-        DepthLevel.GOOD: 24.7,
-        DepthLevel.DEEP: 25.5,
-    },
+    DepthKind.POINT_SOURCE: dict(zip(LEVEL_ORDER, POINT_SOURCE_LEVEL_DEPTHS.default, strict=True)),
+    DepthKind.SURFACE_BRIGHTNESS: dict(
+        zip(LEVEL_ORDER, SURFACE_BRIGHTNESS_LEVEL_DEPTHS.default, strict=True)
+    ),
 }
 """The depth that reaches each level, for each depth kind.
 
-Point source is the 5 sigma depth in Gaia G magnitudes. Surface brightness is
-the 3 sigma limit over 10 by 10 arcseconds in magnitudes per square
-arcsecond. Larger is deeper for both.
-
-Derivation (user decision 2026-10-27, option C, time-based): NGC 7331 on the
-copy, with this setup, reached 19.7 mag (5 sigma point source) and 25.1
-mag/arcsec2 (3 sigma, 10 by 10 arcseconds) in 4.1 h. Each level is the depth
-reached in a set time at that rate: Quick look 30 min, Standard 2 h, Deep 8 h.
-The depth changes by 1.25 times log10 of the time ratio. (Random noise
-alone would give 1.25 = 2.5 / 2, since noise falls as the square root of the
-time; the same factor is used for both kinds.) For example, 2 h: 19.7 + 1.25 *
-log10(2 / 4.1) = 19.3. Status: Design estimate, register row WAY-D94; one
-target and one setup, no uncertainty recorded, not held out.
+Built from the two declarations above.
 """
 
 DEPTH_METRICS: Mapping[DepthKind, str] = {

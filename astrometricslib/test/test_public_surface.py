@@ -310,6 +310,7 @@ SUB_API_MEMBERS = {
         "measure_folder",
         "measure_frames",
         "measure_stack",
+        "measure_tuned_parameters",
         "metrics",
         "query",
         "record_frame_measurements",

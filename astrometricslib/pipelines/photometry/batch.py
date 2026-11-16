@@ -25,9 +25,11 @@ from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import RunBasis, factor_for
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import Target
 from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
@@ -40,6 +42,26 @@ from astrometricslib.pipelines.shared.target_center_hint import resolve_target_c
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
+
+# How close two stars from different sessions must be on the sky to count as
+# the same star. It is an angle on the sky, so it follows the plate scale: the
+# value is a factor times the plate scale the run measured. The 5 arcsec
+# limit was chosen as a sanity check (PHO-14, partly measured: the radius was
+# not varied) and is 2.6 pixels of the reference camera, wide enough for the
+# plate-solution error between nights and far below the spacing of the
+# brightest field stars.
+CROSS_SESSION_MATCH_RADIUS_ARCSEC = TunedParameter(
+    name="photometry.cross_session_match_radius_arcsec",
+    default=factor_for(5.0, RunBasis.PLATE_SCALE_ARCSEC_PER_PX),
+    reference_value=5.0,
+    unit="× plate scale",
+    description="Sky distance within which two sessions' stars count as the same star.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.PLATE_SCALE_ARCSEC_PER_PX,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="PHO-14",
+)
 
 # How many of a target's brightest stars get a period search automatically,
 # on top of the target's own star. The two searches take about 8 seconds per
@@ -481,7 +503,7 @@ def _match_and_merge_across_sessions(
     photometry_sessions: list[Any],
     per_session_results: list[tuple[Any, list[Any]]],
     target: Target,
-    tolerance_arcsec: float = 5.0,
+    tolerance_arcsec: float | None = None,
     session_wcs_map: dict[str, Any] | None = None,
     drivers: Drivers | None = None,
 ) -> tuple[list[Any], list[str], int]:
@@ -504,7 +526,8 @@ def _match_and_merge_across_sessions(
         figure out coordinates if they are missing.
     tolerance_arcsec : float, optional
         How close two stars must be in arcseconds to be considered the
-        same physical star (default is 5.0").
+        same physical star. By default `CROSS_SESSION_MATCH_RADIUS_ARCSEC`,
+        which follows the plate scale (5.0" on the reference setup).
     session_wcs_map : dict, optional
         A map of session IDs to their known coordinate systems (WCS).
         This stops us from having to run the plate solver twice for the
@@ -526,6 +549,8 @@ def _match_and_merge_across_sessions(
 
     from astrometricslib.models.stellar_source import StellarSessionMatch
 
+    if tolerance_arcsec is None:
+        tolerance_arcsec = float(resolve(CROSS_SESSION_MATCH_RADIUS_ARCSEC).value)
     sessions_missing_wcs: list[str] = []
     match_count = 0
     # One (star, ra_deg, dec_deg) entry per distinct physical star found

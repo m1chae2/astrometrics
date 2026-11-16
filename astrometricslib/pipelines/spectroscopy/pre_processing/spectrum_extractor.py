@@ -529,6 +529,48 @@ CONTAMINANT_DILATION_PX = TunedParameter(
     reference_value=2,
 )
 
+# The box cut around the zero-order star when its position is refined is
+# 21 pixels wide (10 on each side of the middle). It must hold the whole star
+# image and its faint wings but stay small enough that the trail of the
+# spectrum and neighbors fill little of it. 10 px is 4.3 star widths on the
+# reference setup. It was chosen by judgment, and no sweep was run on it.
+# It stands for about four star widths (10 on the reference setup, 4.29 × the
+# star width), so it follows the star width the run measures.
+CENTROID_BOX_HALF_WIDTH_PX = TunedParameter(
+    name="spectroscopy.centroid_box_half_width_px",
+    default=factor_for(10, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
+    description="Half the width of the box cut around the zero-order star to refine its position.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D57",
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=10,
+)
+
+# The window that is moved onto the star inside the box above. It must stay
+# smaller than the box, so the window never reaches the box edge, and wide
+# enough to hold the star's wings. 8 px is 80% of the box half-width, and on
+# the reference setup 3.4 star widths. It was chosen by judgment, not tuned.
+# Because the box above scales with the same basis, the window stays inside
+# the box on any setup.
+# It stands for about three and a half star widths (8 on the reference
+# setup, 3.43 × the star width), so it follows the star width the run
+# measures.
+CENTROID_WINDOW_HALF_WIDTH_PX = TunedParameter(
+    name="spectroscopy.centroid_window_half_width_px",
+    default=factor_for(8.0, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
+    description="Half the width of the window that is moved onto the zero-order star to refine its position.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-D57",
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=8.0,
+)
+
 
 def replace_narrow_spikes(cross_section: np.ndarray) -> np.ndarray:
     """Swap narrow bright spikes in one line of pixels for the smooth level.
@@ -1164,7 +1206,7 @@ class SpectrumExtractor:
 
     def __init__(
         self,
-        radius: int = 10,
+        radius: int,
         subtract_sky_background: bool = True,
         reject_narrow_contaminants: bool = False,
         noise_model: PixelNoiseModel | None = None,
@@ -1173,8 +1215,10 @@ class SpectrumExtractor:
 
         Parameters
         ----------
-        radius : `int`, optional
-            How wide of a box to use (default is 10 pixels).
+        radius : `int`
+            How wide of a box to use, in pixels. The pipeline passes
+            `SpectroscopyConfig.extraction_radius`, which is declared as
+            `EXTRACTION_RADIUS_PX` and follows the trail width.
         subtract_sky_background : `bool`, optional
             Take the night-sky glow out of every reading (default is
             `True`). Turn this off only to compare against the raw,
@@ -1523,7 +1567,7 @@ class SpectrumExtractor:
         start_pos: tuple[float, float],
         vector: np.ndarray,
         length: float,
-        centerline_polynomial_degree: int = 2,
+        centerline_polynomial_degree: int,
     ) -> tuple[np.ndarray, list[float], list[float]]:
         """Advanced version of extract_line that follows curves.
 
@@ -1545,8 +1589,9 @@ class SpectrumExtractor:
             Which direction to go.
         length : `float`
             How long the spectrum is.
-        centerline_polynomial_degree : `int`, optional
-            How flexible the curve should be (default 2 means a simple curve).
+        centerline_polynomial_degree : `int`
+            How flexible the curve should be (2 means a simple curve). The
+            pipeline passes `SpectroscopyConfig.centerline_polynomial_degree`.
 
         Returns
         -------
@@ -1768,10 +1813,11 @@ class SpectrumExtractor:
         h, w = data.shape
         x0, y0 = start_pos
         ix0, iy0 = round(x0), round(y0)
-        y_start = max(0, iy0 - 10)
-        y_end = min(h, iy0 + 11)
-        x_start = max(0, ix0 - 10)
-        x_end = min(w, ix0 + 11)
+        box_half_width = round(resolve(CENTROID_BOX_HALF_WIDTH_PX).value)
+        y_start = max(0, iy0 - box_half_width)
+        y_end = min(h, iy0 + box_half_width + 1)
+        x_start = max(0, ix0 - box_half_width)
+        x_end = min(w, ix0 + box_half_width + 1)
 
         subgrid = data[y_start:y_end, x_start:x_end]
         total_mass = np.sum(subgrid)
@@ -1800,7 +1846,11 @@ class SpectrumExtractor:
 
     @staticmethod
     def _recentre_centroid_window(
-        box: np.ndarray, centre_x: float, centre_y: float, half_width: float = 8.0, iterations: int = 100
+        box: np.ndarray,
+        centre_x: float,
+        centre_y: float,
+        half_width: float | None = None,
+        iterations: int = 100,
     ) -> tuple[float, float]:
         """Refine a centroid with a window that stays centred on the star.
 
@@ -1822,7 +1872,8 @@ class SpectrumExtractor:
         half_width : `float`, optional
             How far the window reaches each side of its middle, in pixels.
             It must be smaller than half the box, so the window stays
-            inside the box.
+            inside the box. The default `None` takes the value of
+            `CENTROID_WINDOW_HALF_WIDTH_PX`.
         iterations : `int`, optional
             The most times to recentre the window. The loop stops early
             once the centre moves by less than 0.0001 pixel. Each step
@@ -1833,6 +1884,8 @@ class SpectrumExtractor:
         centre_x, centre_y : `float`
             The refined centroid, in the box's own pixel indices.
         """
+        if half_width is None:
+            half_width = float(resolve(CENTROID_WINDOW_HALF_WIDTH_PX).value)
         n_rows, n_cols = box.shape
         for _ in range(iterations):
             weights_x = _window_weights(n_cols, centre_x, half_width)
@@ -1943,7 +1996,8 @@ class SpectrumExtractor:
         radius: int,
         orientation: str = "vertical",
         angle_degrees: float = 0.0,
-        centerline_polynomial_degree: int = 2,
+        *,
+        centerline_polynomial_degree: int,
     ) -> tuple[np.ndarray, float, float, list[float], list[float]]:
         """Smart version of extract_with_flare_mask that follows curves.
 
@@ -1967,8 +2021,9 @@ class SpectrumExtractor:
             "horizontal" or "vertical".
         angle_degrees : `float`, optional
             Any overall tilt to the picture.
-        centerline_polynomial_degree : `int`, optional
-            How flexible the curve tracking should be.
+        centerline_polynomial_degree : `int`
+            How flexible the curve tracking should be. Keyword only; the
+            pipeline passes `SpectroscopyConfig.centerline_polynomial_degree`.
 
         Returns
         -------

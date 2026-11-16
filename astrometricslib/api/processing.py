@@ -1376,7 +1376,7 @@ class ProcessingPipelines:
         target: str | Target,
         kind: Literal["growth", "night_contributions", "odd_even_difference"] = "growth",
         *,
-        maximum_steps: int = 4,
+        maximum_steps: int | None = None,
         include: list[str] | None = None,
         keep_halves: bool = False,
         register_job: bool = True,
@@ -1472,7 +1472,7 @@ class ProcessingPipelines:
             reason, and the result says why.
         maximum_steps : `int`, optional
             Applies to ``"growth"`` only. The most subsets to stack. Defaults
-            to 4.
+            to the registered ``stacking.default_growth_steps`` (4).
         include : `list` [`str`], optional
             Applies to ``"growth"`` only. Sections to run in the same job,
             under the same lock, after the series: ``"night_contributions"``
@@ -1517,12 +1517,12 @@ class ProcessingPipelines:
             kind,
             _NOISE_ARGUMENTS,
             {
-                "maximum_steps": maximum_steps != 4,
+                "maximum_steps": maximum_steps is not None,
                 "include": bool(sections),
                 "keep_halves": keep_halves,
             },
         )
-        if maximum_steps < 1:
+        if maximum_steps is not None and maximum_steps < 1:
             raise InvalidArgumentError("maximum_steps must be at least 1.")
         if kind == "growth" and include is None:
             sections = frozenset(("odd_even_difference",))

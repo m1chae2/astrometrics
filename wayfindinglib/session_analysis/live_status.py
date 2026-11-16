@@ -252,6 +252,25 @@ EXCURSION_DRIFT_SIGNIFICANCE_SIGMAS = TunedParameter(
 )
 """A piece's drift counts only when this many standard errors from zero."""
 
+LIVE_STATUS_WINDOW_SECONDS = TunedParameter(
+    name="wayfinding.live_status_window_seconds",
+    default=600.0,
+    unit="s",
+    description="Length of the recent-guiding window the live status reports on.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D136",
+)
+"""Length of the recent-guiding window the live status reports on.
+
+A method choice, not a fitted value. At a 3 s guide cycle, ten minutes
+holds about 200 guide samples, enough for a steady root-mean-square (RMS)
+error, and it is short enough to follow a change in guiding within a few
+minutes. A caller may ask for another length. Design estimate, register
+entry WAY-D136.
+"""
+
 RECENT_EXPOSURE_COUNT = 10
 """How many of the latest exposures the status lists."""
 
@@ -896,7 +915,7 @@ def summarize_live_session(
     dithers: Sequence[DitherEvent],
     analyze_file: str,
     kstars_log_file: str | None = None,
-    window_seconds: float = 600.0,
+    window_seconds: float | None = None,
     wall_clock_now: float | None = None,
 ) -> LiveSessionStatus:
     """Build the status of the current session from its Ekos records.
@@ -912,7 +931,8 @@ def summarize_live_session(
     analyze_file, kstars_log_file : `str`
         The files the records came from, for the report.
     window_seconds : `float`, optional
-        Length of the recent-guiding window. Default is ten minutes.
+        Length of the recent-guiding window. `None` uses
+        `LIVE_STATUS_WINDOW_SECONDS` (ten minutes).
     wall_clock_now : `float`, optional
         Current time, to measure how stale the file is. Defaults to the
         system clock; tests pass a fixed value.
@@ -922,6 +942,8 @@ def summarize_live_session(
     status : `LiveSessionStatus`
         The session's current state and any problems found.
     """
+    if window_seconds is None:
+        window_seconds = resolve_parameter(LIVE_STATUS_WINDOW_SECONDS).value
     timestamps = [context.ended_at]
     if guide_stats:
         timestamps.append(guide_stats[-1].timestamp)

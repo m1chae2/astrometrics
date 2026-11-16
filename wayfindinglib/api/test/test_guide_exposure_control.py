@@ -12,6 +12,7 @@ import pytest
 
 from astrometricslib.exceptions import ExternalServiceError
 from wayfindinglib import ObservatoryControl
+from wayfindinglib.analytics.guide_exposure_ladder import FRAMES_PER_EXPOSURE_TEST
 from wayfindinglib.analytics.performance_envelope import SensorLimits
 from wayfindinglib.api.test.capture_night_helpers import Library, add_frames
 from wayfindinglib.api.test.guiding_night_helpers import record_guiding_night
@@ -104,6 +105,19 @@ def test_a_bright_star_recommends_the_shortest_exposure(
     assert test.guiding_rms_limit_arcsec is not None
     assert test.recommended_exposure_seconds == pytest.approx(0.5)
     assert len(camera.exposures) == 12
+
+
+def test_the_declared_number_of_frames_is_taken_when_none_is_named(
+    control: ObservatoryControl, camera: _SimulatedCamera, library: Library
+) -> None:
+    """Verify leaving the frame count out takes the declared count."""
+    for day in range(6):
+        record_guiding_night(control, day)
+        add_frames(library, day)
+
+    control.guiding._run_exposure_test((0.5, 1.0))
+
+    assert len(camera.exposures) == 2 * FRAMES_PER_EXPOSURE_TEST.default
 
 
 def test_an_unreachable_telescope_is_refused_before_any_exposure(

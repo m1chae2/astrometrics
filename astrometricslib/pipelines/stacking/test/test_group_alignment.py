@@ -18,6 +18,7 @@ import pytest
 
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.pipelines.stacking.processing.group_alignment import (
+    GROUP_RESAMPLE_SPLINE_ORDER,
     MINIMUM_ALIGNMENT_CORRELATION,
     NEGLIGIBLE_SHIFT_PIXELS,
     REFINEMENT_MAX_ROTATION_DEGREES,
@@ -50,6 +51,19 @@ def make_star_field(seed: int, size: int = 256, stars: int = 60, noise: float = 
         amplitude = rng.uniform(0.2, 1.0)
         image = image + amplitude * np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * 1.3**2))
     return (image + rng.normal(0, noise, image.shape)).astype(np.float32)
+
+
+def test_the_default_resample_order_is_the_registered_cubic_order() -> None:
+    """The default order is the registered cubic order; order 1 differs."""
+    field = make_star_field(2)
+
+    default, _ = apply_shift(field, 1.5, 2.25)
+    cubic, _ = apply_shift(field, 1.5, 2.25, order=3)
+    linear, _ = apply_shift(field, 1.5, 2.25, order=1)
+
+    assert GROUP_RESAMPLE_SPLINE_ORDER.default == 3
+    assert np.array_equal(default, cubic)
+    assert not np.array_equal(default, linear)
 
 
 def test_a_known_shift_is_recovered_to_a_fraction_of_a_pixel() -> None:

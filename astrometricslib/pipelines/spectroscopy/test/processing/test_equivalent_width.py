@@ -16,12 +16,14 @@ import math
 import numpy as np
 import pytest
 
+from astrometricslib.foundation.parameters import resolve
 from astrometricslib.pipelines.spectroscopy.processing.equivalent_width import (
     EQUIVALENT_WIDTH_WINDOW_LINE_SPREADS,
     EquivalentWidthMeasurement,
     measure_equivalent_width,
 )
 from astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector import (
+    CONTINUUM_POLYNOMIAL_DEGREE,
     SHOULDER_BAND_HALF_WINDOWS,
     detect_named_features,
 )
@@ -127,6 +129,7 @@ def _measure(values: np.ndarray, errors: np.ndarray, **overrides: float) -> Equi
         arguments["line_spread_angstrom"],
         INNER_BAND_EDGE,
         BAND_WIDTH,
+        resolve(CONTINUUM_POLYNOMIAL_DEGREE).value,
     )
 
 
@@ -364,3 +367,12 @@ def test_the_detector_uses_the_line_spread_profile_at_the_feature() -> None:
     assert entry["equivalent_width_window_half_width_angstrom"] == pytest.approx(
         EQUIVALENT_WIDTH_WINDOW_LINE_SPREADS.default * local_spread, rel=0.01
     )
+
+
+def test_the_continuum_degree_has_no_default() -> None:
+    """Verify the continuum polynomial degree must be given by the caller."""
+    arguments = (WAVELENGTH, np.ones_like(WAVELENGTH), np.full_like(WAVELENGTH, 0.01))
+    with pytest.raises(TypeError):
+        measure_equivalent_width(  # type: ignore[call-arg]
+            *arguments, LINE_CENTER, LINE_SPREAD, INNER_BAND_EDGE, BAND_WIDTH
+        )

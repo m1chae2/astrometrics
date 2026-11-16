@@ -166,15 +166,41 @@ COMPARISON_BANDS_ANGSTROM = (
     (7000.0, 8000.0),
 )
 
-# XP's resolution, as a Gaussian FWHM in Angstroms at a few wavelengths;
-# values between them are linear, and beyond them constant. Measured on
-# 2026-10-10 on 12 A0V stars against the Pickles A0V template; see the module
-# description.
-XP_RESOLUTION_FWHM_NODES_ANGSTROM = (
-    (4340.0, 95.0),
-    (4861.0, 130.0),
-    (6563.0, 70.0),
-    (8800.0, 185.0),
+# XP's resolution, as a Gaussian FWHM in Angstroms at a few wavelengths
+# (the H-gamma, H-beta and H-alpha lines and the Paschen lines); values
+# between them are linear, and beyond them constant. It is a property of the
+# Gaia XP spectra, not of our setup. Measured on 2026-10-10 on 12 A0V stars
+# against the Pickles A0V template (medians; the spread between stars is 20
+# to 40%, see SPE-28); see the module description.
+XP_RESOLUTION_WAVELENGTHS_ANGSTROM = TunedParameter(
+    name="spectroscopy.xp_resolution_wavelengths_angstrom",
+    default=(4340.0, 4861.0, 6563.0, 8800.0),
+    unit="Å",
+    description="The wavelengths at which the Gaia XP blur was measured.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.PUBLISHED_CONSTANT,
+    register_entry="SPE-28",
+)
+XP_RESOLUTION_FWHM_ANGSTROM = TunedParameter(
+    name="spectroscopy.xp_resolution_fwhm_angstrom",
+    default=(95.0, 130.0, 70.0, 185.0),
+    unit="Å",
+    description="The Gaussian FWHM of the Gaia XP blur at those wavelengths.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.PUBLISHED_CONSTANT,
+    register_entry="SPE-28",
+)
+
+# The two tuples above as (wavelength, FWHM) nodes, the form the blur code
+# reads.
+XP_RESOLUTION_FWHM_NODES_ANGSTROM = tuple(
+    zip(
+        resolve(XP_RESOLUTION_WAVELENGTHS_ANGSTROM).value,
+        resolve(XP_RESOLUTION_FWHM_ANGSTROM).value,
+        strict=True,
+    )
 )
 
 # Spacing of the grid the spectra are blurred on, in Angstroms. It is finer

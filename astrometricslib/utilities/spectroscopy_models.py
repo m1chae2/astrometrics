@@ -9,10 +9,12 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
 )
 
@@ -124,6 +126,47 @@ DEFAULT_EXTRACTION_START_WAVELENGTH_NM = TunedParameter(
 )
 
 
+# The half-width of the reading box for a star's spectrum, and the most the
+# box may ever grow to (the traced extraction shrinks the box to follow the
+# trail's own width, 2.5 sigma, so this is the upper bound, see
+# `APERTURE_SIGMA_MULTIPLIER` and SPE-04). 10 px held the whole trail and its
+# wings on the reference setup, whose trail is 6.81 px wide (FWHM). It was
+# chosen by judgment when the extractor was first written, not swept.
+# It stands for about one and a half trail widths (10 on the reference setup,
+# 1.47 × the trail width), so it follows the trail width the run measures.
+# A value set in the camera's config section still overrides it.
+EXTRACTION_RADIUS_PX = TunedParameter(
+    name="spectroscopy.extraction_radius_px",
+    default=factor_for(10, RunBasis.TRAIL_WIDTH_PX),
+    unit="× trail width",
+    description="The half-width of the box that reads a star's spectrum, and the most it may grow to.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="SPE-04",
+    basis=RunBasis.TRAIL_WIDTH_PX,
+    reference_value=10,
+)
+
+# The degree of the polynomial that smooths the traced trail's centers. 2 (a
+# gentle curve) lets the smooth trail bend a little, as a tilted grating or
+# lens distortion makes it, without following step-to-step noise (a
+# straight line would be degree 1; a higher degree follows the noise). It is
+# a judgment from when the traced extraction was written, and no sweep of the
+# degree was run. A value set in the camera's config section overrides it.
+CENTERLINE_POLYNOMIAL_DEGREE = TunedParameter(
+    name="utilities.centerline_polynomial_degree",
+    default=2,
+    unit="degree",
+    description="Degree of the polynomial fitted to the traced trail's centers.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    register_entry="SPE-D58",
+    config_key=("Processing.Spectroscopy", "centerline_polynomial_degree"),
+)
+
+
 class CameraConfig(BaseModel):
     """Configuration for a specific camera sensor.
 
@@ -202,7 +245,9 @@ class SpectroscopyConfig(BaseModel):
     expected_fwhm : `float`
         Expected FWHM of stars in pixels, by default 8.0.
     extraction_radius : `int`
-        Radius for spectrum extraction box, by default 10.
+        Radius for spectrum extraction box. By default it is the value of
+        `EXTRACTION_RADIUS_PX` (10 on the reference setup), which follows
+        the trail width the run measures.
     extraction_method : {"fixed", "traced"}
         "traced" (default) fits a per-position Gaussian cross-section,
         smoothed into a trail-centerline polynomial, with an aperture
@@ -295,12 +340,16 @@ class SpectroscopyConfig(BaseModel):
 
     # Processing hints
     expected_fwhm: float = Field(8.0, description="Expected FWHM of stars in pixels")
-    extraction_radius: int = Field(10, description="Radius for spectrum extraction box")
+    extraction_radius: int = Field(
+        default_factory=lambda: round(resolve(EXTRACTION_RADIUS_PX).value),
+        description="Radius for spectrum extraction box (follows the trail width unless set)",
+    )
     extraction_method: Literal["fixed", "traced"] = Field(
         "traced", description="Traced (rung 3, adaptive) or fixed (rung 1, original) extraction"
     )
     centerline_polynomial_degree: int = Field(
-        2, description="Polynomial degree for the traced-extraction trail centerline fit"
+        resolve(CENTERLINE_POLYNOMIAL_DEGREE).value,
+        description="Polynomial degree for the traced-extraction trail centerline fit",
     )
     subtract_sky_background: bool = Field(
         True,
@@ -529,9 +578,11 @@ class ConfigLoader:
                 "extraction_start_wavelength_nm", resolve(DEFAULT_EXTRACTION_START_WAVELENGTH_NM).value
             ),
             expected_fwhm=get_f("expected_fwhm", 8.0),
-            extraction_radius=int(get_f("extraction_radius", 10)),
+            extraction_radius=int(get_f("extraction_radius", resolve(EXTRACTION_RADIUS_PX).value)),
             extraction_method=get_s("extraction_method", "traced"),
-            centerline_polynomial_degree=int(get_f("centerline_polynomial_degree", 2)),
+            centerline_polynomial_degree=int(
+                get_f("centerline_polynomial_degree", resolve(CENTERLINE_POLYNOMIAL_DEGREE).value)
+            ),
             subtract_sky_background=get_bool("subtract_sky_background", True),
             reject_narrow_contaminants=get_bool("reject_narrow_contaminants", False),
             use_flare_mask_extraction=get_bool("use_flare_mask_extraction", False),

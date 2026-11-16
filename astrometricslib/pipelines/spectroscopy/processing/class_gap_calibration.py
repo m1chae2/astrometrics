@@ -151,6 +151,38 @@ REACHED_SHARE = TunedParameter(
     register_entry="SPE-30",
 )
 
+# Each spectrum is degraded this many times at every grid value, with
+# independent noise. The draws of one spectrum are not independent samples of
+# the sky, so the percentile range is built from the field resamples below,
+# not from these draws. Five gives each spectrum a few noise realizations
+# without making the table slow to build (6 grid values × spectra × 5
+# classifier runs). It was chosen by judgment, not tuned (SPE-D25).
+DRAWS_PER_SPECTRUM = TunedParameter(
+    name="spectroscopy.class_gap_draws_per_spectrum",
+    default=5,
+    unit="draws",
+    description="How many independent noise draws each spectrum gets at each signal-to-noise value.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D25",
+)
+
+# The number of field resamples (a bootstrap) that give the 16 to 84 percent
+# range of each share. 400 is a usual size for a percentile range; it was
+# not tuned, and no check was made of how much the range moves between runs
+# (SPE-D25).
+BOOTSTRAP_COUNT = TunedParameter(
+    name="spectroscopy.class_gap_bootstrap_count",
+    default=400,
+    unit="resamples",
+    description="How many field resamples give the percentile range of each share in the class-gap table.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="SPE-D25",
+)
+
 CONFIDENCE_LIMITED = "confidence-limited at this resolution"
 
 # How close the injected noise must put the estimate to the target, as a
@@ -611,8 +643,8 @@ def _row(
 def class_gap_table(
     samples: Sequence[SpectrumSample],
     snr_grid: Sequence[float] | None = None,
-    draws_per_spectrum: int = 5,
-    bootstrap_count: int = 400,
+    draws_per_spectrum: int | None = None,
+    bootstrap_count: int | None = None,
     seed: int = 20261024,
     classifier: Callable[..., dict] = classify_spectral_type,
 ) -> ClassGapTable:
@@ -626,8 +658,10 @@ def class_gap_table(
         The signal-to-noise values to degrade to.
     draws_per_spectrum : `int`, optional
         How many independent noise draws each spectrum gets at each value.
+        The default `None` takes `DRAWS_PER_SPECTRUM`.
     bootstrap_count : `int`, optional
-        How many field resamples give the percentile range.
+        How many field resamples give the percentile range. The default
+        `None` takes `BOOTSTRAP_COUNT`.
     seed : `int`, optional
         The random seed, so the table can be rebuilt exactly.
     classifier : `Callable`, optional
@@ -641,6 +675,10 @@ def class_gap_table(
     """
     if snr_grid is None:
         snr_grid = resolve(DEFAULT_SNR_GRID).value
+    if draws_per_spectrum is None:
+        draws_per_spectrum = resolve(DRAWS_PER_SPECTRUM).value
+    if bootstrap_count is None:
+        bootstrap_count = resolve(BOOTSTRAP_COUNT).value
     rng = np.random.default_rng(seed)
     native: dict[str, list[SampleOutcome]] = {}
     undegraded_class: dict[int, str | None] = {}

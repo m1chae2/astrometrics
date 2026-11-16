@@ -17,7 +17,7 @@ import pytest
 
 from astrometricslib.exceptions import ExternalServiceError
 from wayfindinglib.drivers import PHD2Client as PublicPHD2Client
-from wayfindinglib.drivers.phd2.phd2_client import PHD2Client
+from wayfindinglib.drivers.phd2.phd2_client import PHD2_SETTLE_PIXELS, PHD2_SETTLE_SECONDS, PHD2Client
 
 
 def _start_test_server(
@@ -311,6 +311,29 @@ def test_a_session_waits_for_an_event_that_arrives_after_a_command() -> None:
             assert session.wait_for_event("SettleDone", mark, 5, Status=0) == settled
             assert session.wait_for_event("SettleDone", session.event_count, 0.2) is None
         assert requests[0]["params"] == [{"pixels": 2.0, "time": 5, "timeout": 90}, True]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_guide_and_dither_use_the_declared_settle_limits_by_default() -> None:
+    """Leaving the limits out sends the declared values; naming them wins."""
+    server, port, requests = _fake_phd2(lambda request: {"result": 0})
+    try:
+        with PHD2Client(host="localhost", port=port).open_session() as session:
+            session.guide()
+            session.dither(3.0, settle_pixels=0.8)
+        expected_pixels = PHD2_SETTLE_PIXELS.default
+        expected_seconds = PHD2_SETTLE_SECONDS.default
+        assert requests[0]["params"] == [
+            {"pixels": expected_pixels, "time": expected_seconds, "timeout": 120.0},
+            False,
+        ]
+        assert requests[1]["params"] == [
+            3.0,
+            False,
+            {"pixels": 0.8, "time": expected_seconds, "timeout": 60.0},
+        ]
     finally:
         server.shutdown()
         server.server_close()

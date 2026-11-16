@@ -29,10 +29,49 @@ from typing import Any
 
 from astrometricslib.drivers import require_local_host
 from astrometricslib.exceptions import ExternalServiceError
+from astrometricslib.parameters import ParameterRole, ParameterSource, TunedParameter, resolve_parameter
 
-__all__ = ["DEFAULT_PHD2_PORT", "PHD2Client", "PHD2Session"]
+__all__ = ["DEFAULT_PHD2_PORT", "PHD2_SETTLE_PIXELS", "PHD2_SETTLE_SECONDS", "PHD2Client", "PHD2Session"]
 
 logger = logging.getLogger(__name__)
+
+# The two limits PHD2 uses to call guiding settled after a start or a dither.
+# The user sets them, as in PHD2's own settle box and in Ekos, because a good
+# value depends on the guide scale and the seeing of the night. The defaults
+# are the ones PHD2 and Ekos suggest: the star within 1.5 guide pixels of the
+# lock position for 6 s. Design estimate, register row WAY-D147. Check them by
+# counting how often a settled guide star is outside 1.5 px a moment later.
+PHD2_SETTLE_PIXELS = TunedParameter(
+    name="wayfinding.phd2_settle_pixels",
+    default=1.5,
+    unit="px",
+    description="How close to the lock position the guide star must stay for guiding to count as settled.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    register_entry="WAY-D147",
+    config_key=("Wayfinding.Control", "phd2_settle_pixels"),
+)
+"""How close to the lock position the guide star must stay, in pixels.
+
+Design estimate. It is the value PHD2 and Ekos suggest. The user can set
+another value in the configuration; a call that names a number uses that
+number."""
+
+PHD2_SETTLE_SECONDS = TunedParameter(
+    name="wayfinding.phd2_settle_seconds",
+    default=6.0,
+    unit="s",
+    description="How long the guide star must stay inside the settle distance to count as settled.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.PROCESSING_SETTING,
+    register_entry="WAY-D147",
+    config_key=("Wayfinding.Control", "phd2_settle_seconds"),
+)
+"""How long the guide star must stay inside the settle distance, in seconds.
+
+Design estimate. It is the value PHD2 and Ekos suggest, a few guide cycles.
+The user can set another value in the configuration; a call that names a
+number uses that number."""
 
 DEFAULT_PHD2_PORT = 4400
 
@@ -56,6 +95,30 @@ _DEFAULT_COMMAND_TIMEOUT_SECONDS = 30.0
 # Longest the session keeps of the events it has received. A guiding run sends
 # about one event a second, so this holds a few hours.
 _SESSION_EVENT_LIMIT = 20000
+
+
+def _settle_limits(
+    settle_pixels: float | None, settle_seconds: float | None, settle_timeout_seconds: float
+) -> dict[str, float]:
+    """Build PHD2's settle limits, filling a missing one from the setting.
+
+    Parameters
+    ----------
+    settle_pixels, settle_seconds : `float` or `None`
+        The caller's limits. `None` takes the configured value.
+    settle_timeout_seconds : `float`
+        PHD2 gives up settling after this long.
+
+    Returns
+    -------
+    settle : `dict` [`str`, `float`]
+        The ``pixels``, ``time`` and ``timeout`` entries PHD2 expects.
+    """
+    if settle_pixels is None:
+        settle_pixels = resolve_parameter(PHD2_SETTLE_PIXELS).value
+    if settle_seconds is None:
+        settle_seconds = resolve_parameter(PHD2_SETTLE_SECONDS).value
+    return {"pixels": settle_pixels, "time": settle_seconds, "timeout": settle_timeout_seconds}
 
 
 class PHD2Client:
@@ -620,8 +683,8 @@ class PHD2Session:
 
     def guide(
         self,
-        settle_pixels: float = 1.5,
-        settle_seconds: float = 6.0,
+        settle_pixels: float | None = None,
+        settle_seconds: float | None = None,
         settle_timeout_seconds: float = 120.0,
         recalibrate: bool = False,
     ) -> None:
@@ -636,22 +699,24 @@ class PHD2Session:
         ----------
         settle_pixels : `float`, optional
             The star must stay within this many pixels of the lock position.
+            `None` uses the configured limit (`PHD2_SETTLE_PIXELS`).
         settle_seconds : `float`, optional
-            It must stay there this long to count as settled.
+            It must stay there this long to count as settled. `None` uses
+            the configured limit (`PHD2_SETTLE_SECONDS`).
         settle_timeout_seconds : `float`, optional
             PHD2 gives up settling after this long.
         recalibrate : `bool`, optional
             `True` forces a new calibration.
         """
-        settle = {"pixels": settle_pixels, "time": settle_seconds, "timeout": settle_timeout_seconds}
+        settle = _settle_limits(settle_pixels, settle_seconds, settle_timeout_seconds)
         self.call("guide", [settle, bool(recalibrate)])
 
     def dither(
         self,
         amount_pixels: float,
         right_ascension_only: bool = False,
-        settle_pixels: float = 1.5,
-        settle_seconds: float = 6.0,
+        settle_pixels: float | None = None,
+        settle_seconds: float | None = None,
         settle_timeout_seconds: float = 60.0,
     ) -> None:
         """Move the lock position at random and settle again.
@@ -663,11 +728,12 @@ class PHD2Session:
         right_ascension_only : `bool`, optional
             `True` dithers along right ascension only.
         settle_pixels, settle_seconds : `float`, optional
-            The settle limits, as for `guide`.
+            The settle limits, as for `guide`. `None` uses the configured
+            limits.
         settle_timeout_seconds : `float`, optional
             PHD2 gives up settling after this long.
         """
-        settle = {"pixels": settle_pixels, "time": settle_seconds, "timeout": settle_timeout_seconds}
+        settle = _settle_limits(settle_pixels, settle_seconds, settle_timeout_seconds)
         self.call("dither", [amount_pixels, bool(right_ascension_only), settle])
 
     def stop_capture(self, timeout_seconds: float = 30.0) -> None:

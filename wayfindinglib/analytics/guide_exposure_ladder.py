@@ -85,6 +85,25 @@ MINIMUM_FRAMES = TunedParameter(
 The second difference needs three positions, and five give three of them.
 """
 
+FRAMES_PER_EXPOSURE_TEST = TunedParameter(
+    name="wayfinding.frames_per_exposure_test",
+    default=8,
+    unit="frames",
+    description="Guide frames taken at each exposure length of the guide exposure test.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D129",
+)
+"""Guide frames taken at each exposure length of the guide exposure test.
+
+`MINIMUM_FRAMES` (5) frames must have the star found for the position noise to
+be worked out. Taking 8 leaves a margin of 3 frames for a frame that loses
+the star, such as one hit by a cloud or a satellite trail. Design estimate,
+register row WAY-D129; not yet checked against the fraction of real frames that
+lose the star.
+"""
+
 SATURATION_FRACTION = TunedParameter(
     name="wayfinding.saturation_fraction",
     default=0.8,

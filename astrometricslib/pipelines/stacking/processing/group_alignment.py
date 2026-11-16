@@ -108,6 +108,25 @@ NEGLIGIBLE_SHIFT_PIXELS = TunedParameter(
     register_entry="STK-D64",
 )
 
+# The spline order used when a group stack is moved or turned onto the
+# reference: 3 (cubic), the sharpest order that keeps the star shape. A group
+# stack is resampled once to line it up, and the single-pass measurement of
+# 2026-11-15 on M 27 showed what a second cubic resample costs: 0.4 to 2
+# percent of the flux on faint stars but 19 to 27 percent more ringing on
+# saturated stars, so the library keeps to one resample (STK-13). A map of
+# counts that must not overshoot passes order 1 by itself. A method choice,
+# not tied to the equipment.
+GROUP_RESAMPLE_SPLINE_ORDER = TunedParameter(
+    name="stacking.group_resample_spline_order",
+    default=3,
+    unit="spline order",
+    description="Spline order used to resample a group stack when it is moved or turned.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-13",
+)
+
 # The offset is trusted when, after moving one stack onto the other, the two
 # filtered images correlate at least this well. Measured on real pairs of
 # stacks of the same field (NGC 2244, NGC 2903, NGC 2403, NGC 1893 and the
@@ -1485,7 +1504,7 @@ def measure_alignment(
 
 
 def apply_shift(
-    image: np.ndarray, shift_rows_pixels: float, shift_columns_pixels: float, order: int = 3
+    image: np.ndarray, shift_rows_pixels: float, shift_columns_pixels: float, order: int | None = None
 ) -> tuple[np.ndarray, np.ndarray]:
     """Move an image by a shift, and say which pixels the move filled in.
 
@@ -1498,7 +1517,8 @@ def apply_shift(
     shift_columns_pixels : `float`
         The shift along the columns.
     order : `int`, optional
-        The spline order of the resampling: 3 (cubic) for an image, 1 for a
+        The spline order of the resampling. By default
+        `GROUP_RESAMPLE_SPLINE_ORDER` (3, cubic) for an image; pass 1 for a
         map of counts that must not overshoot.
 
     Returns
@@ -1509,6 +1529,8 @@ def apply_shift(
         A 2-D boolean mask, `True` where `shifted` holds real data.
     """
     negligible_shift_pixels = resolve(NEGLIGIBLE_SHIFT_PIXELS).value
+    if order is None:
+        order = int(resolve(GROUP_RESAMPLE_SPLINE_ORDER).value)
     array = np.asarray(image, dtype=np.float32)
     plane_shape = array.shape[-2:]
     covered = (
@@ -1532,7 +1554,7 @@ def apply_shift(
 
 
 def apply_alignment(
-    image: np.ndarray, result: AlignmentResult, order: int = 3
+    image: np.ndarray, result: AlignmentResult, order: int | None = None
 ) -> tuple[np.ndarray, np.ndarray]:
     """Move an image onto the reference by the shift, rotation and scale found.
 
@@ -1546,7 +1568,8 @@ def apply_alignment(
     result : `AlignmentResult`
         The move to apply.
     order : `int`, optional
-        The spline order of the resampling: 3 (cubic) for an image, 1 for a
+        The spline order of the resampling. By default
+        `GROUP_RESAMPLE_SPLINE_ORDER` (3, cubic) for an image; pass 1 for a
         map of counts that must not overshoot.
 
     Returns
@@ -1558,6 +1581,8 @@ def apply_alignment(
     """
     if not result.has_rotation_or_scale:
         return apply_shift(image, result.shift_rows_pixels, result.shift_columns_pixels, order=order)
+    if order is None:
+        order = int(resolve(GROUP_RESAMPLE_SPLINE_ORDER).value)
     array = np.asarray(image, dtype=np.float32)
     plane_shape = array.shape[-2:]
     # The move maps a position z in the image to a * (z - c) + c + t in the

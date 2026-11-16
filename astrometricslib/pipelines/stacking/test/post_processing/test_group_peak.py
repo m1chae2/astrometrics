@@ -9,11 +9,14 @@ from types import SimpleNamespace
 
 import pytest
 
+from astrometricslib.foundation.parameter_context import parameter_context
+from astrometricslib.models.tuned_parameter import TunedParameter
 from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import (
     group_peak_fields,
     summarize_group_peak,
 )
 from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
+    CHECKED_ESTIMATE_RANGE_ROOM_MULTIPLES,
     FrameSaturation,
     checked_estimate_range,
 )
@@ -135,12 +138,43 @@ def test_a_profile_error_gives_no_limit_and_does_not_stop_the_stack(
     assert "could not be read" in caplog.text
 
 
+class _CameraRange:
+    """Stand in for the equipment values that state a camera's range."""
+
+    def __init__(self, room_multiples: str | None) -> None:
+        """Keep the text the camera's config section would hold.
+
+        Parameters
+        ----------
+        room_multiples : `str` or `None`
+            The configured range, or `None` for a camera with no value.
+        """
+        self._room_multiples = room_multiples
+
+    def equipment_value(self, parameter: TunedParameter) -> str | None:
+        """Give the configured range for the one parameter this stands in for.
+
+        Parameters
+        ----------
+        parameter : `TunedParameter`
+            The declaration being resolved.
+
+        Returns
+        -------
+        value : `str` or `None`
+            The configured text, or `None` for any other parameter.
+        """
+        return self._room_multiples if parameter is CHECKED_ESTIMATE_RANGE_ROOM_MULTIPLES else None
+
+
 def test_only_the_camera_with_checked_evidence_has_a_range() -> None:
-    """Only the ASI533MM Pro has a range; the D5300 and others have none."""
-    asi = group_peak_fields([SimpleNamespace(camera="ZWO ASI 533MM Pro")], [_frame(20000.0)])
-    nikon = group_peak_fields([SimpleNamespace(camera="Nikon DSLR DSC D5300")], [_frame(20000.0)])
-    unlisted = group_peak_fields([SimpleNamespace(camera="Mystery camera")], [_frame(20000.0)])
-    assert asi["peak_checked_range_room_multiples"] == pytest.approx(80.0)
-    assert nikon["peak_checked_range_room_multiples"] == pytest.approx(0.0)
-    assert unlisted["peak_checked_range_room_multiples"] == pytest.approx(0.0)
-    assert checked_estimate_range(None) == pytest.approx(0.0)
+    """A camera whose section states a range has it; one with none has 0."""
+    frames = [SimpleNamespace(camera="ZWO ASI 533MM Pro")]
+    with parameter_context(equipment=_CameraRange("80.0")):
+        checked = group_peak_fields(frames, [_frame(20000.0)])
+        assert checked_estimate_range() == pytest.approx(80.0)
+    with parameter_context(equipment=_CameraRange(None)):
+        unchecked = group_peak_fields(frames, [_frame(20000.0)])
+        assert checked_estimate_range() == pytest.approx(0.0)
+    assert checked["peak_checked_range_room_multiples"] == pytest.approx(80.0)
+    assert unchecked["peak_checked_range_room_multiples"] == pytest.approx(0.0)

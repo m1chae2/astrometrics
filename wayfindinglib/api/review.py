@@ -22,11 +22,13 @@ is answered here. The advice that looks ahead is in `planning`
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
 from astrometricslib import Target
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from astrometricslib.jobs import background_job, get_current_job, registered_job
+from astrometricslib.parameters import TuningReport
 from wayfindinglib.analytics.alignment_sessions import group_alignment_attempts
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.equipment_and_site.focus_temperature_fit import FocusSource, FocusTemperatureFit
@@ -158,9 +160,80 @@ class ObservationReview(ControlChild):
         (configuration, storage and records) and holds no other state.
     """
 
-    def __init__(self, control: ObservatoryControl) -> None:
-        """Share the context of `control`."""
+    def __init__(self, control: ObservatoryControl, owner: Callable[[], Any] | None = None) -> None:
+        """Share the context of `control`.
+
+        Parameters
+        ----------
+        control : `ObservatoryControl`
+            The hardware sub-API whose context is shared.
+        owner : `Callable`, optional
+            Gives the `Wayfinder` this belongs to, which the tuners of
+            `measure_tuned_parameters` read the observatory's records through.
+        """
         super().__init__(control._context)
+        self._owner_provider = owner
+
+    def measure_tuned_parameters(
+        self,
+        setup: str | None = None,
+        only: list[str] | None = None,
+        save: bool = False,
+    ) -> TuningReport:
+        """Work out this library's tuned values from the observatory's records.
+
+        The wayfinding tuners (see `astrometricslib.parameters.collect_tuners`)
+        read the stored guiding, alignment and session records of one setup
+        and derive one family of values each. Each value is checked against
+        its allowed range and smallest sample. Nothing is saved unless
+        ``save`` is set; then the config is backed up and each value is
+        written with where it came from. The image-processing values are
+        tuned by `Astrometrics.quality.measure_tuned_parameters`.
+
+        Parameters
+        ----------
+        setup : `str`, optional
+            The setup to tune. The active setup when left out.
+        only : `list` [`str`], optional
+            Run only the tuners with these names.
+        save : `bool`, optional
+            Write the values to the config.
+
+        Returns
+        -------
+        report : `TuningReport`
+            The values that would be set or moved, and those skipped,
+            refused or unchanged.
+
+        Raises
+        ------
+        NotFoundError
+            If the setup is not in the config, or there is no active setup.
+        InvalidArgumentError
+            If ``only`` names a tuner that does not exist.
+        """
+        import datetime
+
+        from astrometricslib.parameters import collect_tuners, run_tuning
+
+        tuners = collect_tuners(("wayfindinglib",))
+        if only:
+            unknown = sorted(set(only) - {tuner.name for tuner in tuners})
+            if unknown:
+                raise InvalidArgumentError(f"No tuner named {', '.join(unknown)}.")
+            tuners = [tuner for tuner in tuners if tuner.name in set(only)]
+        configuration = self._context.config
+        setups = configuration.get_observatory_setups()
+        chosen = setups.setup_named(setup) if setup else setups.active_setup()
+        if chosen is None:
+            raise NotFoundError(f"No setup named {setup!r} in the config." if setup else "No active setup.")
+        services: dict[str, Any] = {}
+        if self._owner_provider is not None:
+            wayfinder = self._owner_provider()
+            services = {"wayfinder": wayfinder, "astrometrics": wayfinder.astrometrics}
+        return run_tuning(
+            tuners, chosen, configuration, services=services, today=datetime.date.today(), write=save
+        )
 
     @background_job("diagnostics", grace_period_seconds=20.0)
     def query(
@@ -298,7 +371,7 @@ class ObservationReview(ControlChild):
 
     def get_live_session_status(
         self,
-        window_minutes: float = 10.0,
+        window_minutes: float | None = None,
         refresh: bool = True,
         destination_dir: str | None = None,
         include: list[str] | None = None,
@@ -317,7 +390,8 @@ class ObservationReview(ControlChild):
         Parameters
         ----------
         window_minutes : `float`, optional
-            Length of the recent-guiding window, in minutes.
+            Length of the recent-guiding window, in minutes. `None` uses
+            the live status's own window (ten minutes).
         refresh : `bool`, optional
             Whether to download the latest logs first. `False` reads what
             is already in `destination_dir`.

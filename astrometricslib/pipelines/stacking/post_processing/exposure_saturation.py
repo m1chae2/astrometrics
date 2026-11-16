@@ -20,7 +20,6 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.ndimage import binary_dilation, label, minimum_filter
 
-from astrometricslib.foundation.camera_names import normalize_camera_name
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
@@ -157,30 +156,35 @@ CHECKED_ESTIMATE_AGAINST_MEASURED_RATIOS = TunedParameter(
     register_entry="STK-40",
 )
 
-# The largest peak-to-room ratio of an estimate that was checked, for each
-# camera, by the camera profile's name with case, spaces and punctuation
-# ignored (so "ZWO ASI 533MM Pro" and "ZWO ASI533MM Pro" are one camera). The
-# rule: every bin of estimate size
+# The largest peak-to-room ratio of an estimate that was checked, for the
+# camera in use. The rule: every bin of estimate size
 # up to the range has at least 90% of its cases (and a 90th percentile of the
 # error) within `CHECKED_ESTIMATE_ERROR_FRACTION`, with at least 4 targets in
 # the top bin. ASI533MM Pro: bins up to 63 times the room hold 90% to 100%
 # (50 to 263 cases each), 63 to 80 times holds 96% (23 cases, 4 targets), and
-# 80 to 100 times holds 83% with a 90th percentile error of 1.5. The D5300
+# 80 to 100 times holds 83% with a 90th percentile error of 1.5, so its range
+# is 80 (set in that camera's config section). The D5300
 # fails at its first populated bin (57% at 2 to 5 times) and stays at 62% to
 # 80% in every bin from 5 to 1,000 times, so no range is stated for it, and an
-# estimate for any camera not listed is beyond the checked range.
-CHECKED_ESTIMATE_RANGE_ROOM_MULTIPLES_BY_CAMERA: dict[str, float] = {
-    normalize_camera_name("ZWO ASI 533MM Pro"): 80.0
-}
+# estimate for any camera with no value is beyond the checked range. The
+# default 0 means "no range was checked".
+CHECKED_ESTIMATE_RANGE_ROOM_MULTIPLES = TunedParameter(
+    name="stacking.checked_estimate_range_room_multiples",
+    default=0.0,
+    unit="× room",
+    description="Largest estimate, in multiples of the room below saturation, whose growth was checked.",
+    role=ParameterRole.JUDGMENT,
+    source=ParameterSource.EQUIPMENT_PROFILE,
+    equipment=frozenset({EquipmentKind.CAMERA}),
+    register_entry="STK-40",
+)
 
 
-def checked_estimate_range(camera_name: str | None) -> float:
-    """Give the largest checked size of a peak estimate for a camera.
+def checked_estimate_range() -> float:
+    """Give the largest checked size of a peak estimate for the camera in use.
 
-    Parameters
-    ----------
-    camera_name : `str` or `None`
-        The camera profile's name, in any spelling.
+    The value belongs to the camera of the run's setup (the camera's section
+    of the config). A run sets that setup before it builds the group report.
 
     Returns
     -------
@@ -189,9 +193,7 @@ def checked_estimate_range(camera_name: str | None) -> float:
         ceiling, whose growth with the exposure was checked. 0 when the camera
         has no checked range (so any estimate is beyond it).
     """
-    if not camera_name:
-        return 0.0
-    return CHECKED_ESTIMATE_RANGE_ROOM_MULTIPLES_BY_CAMERA.get(normalize_camera_name(camera_name), 0.0)
+    return float(resolve(CHECKED_ESTIMATE_RANGE_ROOM_MULTIPLES).value)
 
 
 # How far outside the clipped core (in pixels) the pixels used for the

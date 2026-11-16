@@ -39,10 +39,108 @@ from dataclasses import dataclass
 from typing import Any
 
 from astrometricslib.exceptions import HardwareError
+from astrometricslib.parameters import (
+    HardcodedKind,
+    ParameterRole,
+    ParameterSource,
+    TunedParameter,
+    resolve_parameter,
+)
+from wayfindinglib.analytics.guide_pulses import GUIDE_RATE_ARCSEC_PER_S
 from wayfindinglib.analytics.pointing_model import fit_pointing_model
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
 from wayfindinglib.models.session.telemetry import MountPointingModel
 from wayfindinglib.tasks.control_tasks.guider_calibration_tasks import compute_guider_calibration
+
+CALIBRATION_MOVE_GUIDE_PX = TunedParameter(
+    name="wayfinding.calibration_move_guide_px",
+    default=3.53,
+    unit="px",
+    description="How far the guide star should move on the guide camera during one calibration pulse.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D145",
+)
+"""How far the guide star should move on the guide camera during one pulse.
+
+The move must be large against the noise in the star's measured position, so
+that the camera angle and the rate of each axis are measured well. The pulse
+length follows from it (`calibration_pulse_seconds`): the move, times the guide
+plate scale, over the mount's guide rate. The value was fitted so that the
+reference setup keeps the 3.0 s pulse the library used before. That setup is
+the Apertura 32 mm guide scope (focal length 121.05 mm) with the ZWO ASI120MC-S
+guide camera (3.75 micrometer pixels), which has a plate scale of 6.39
+arcsec/px, on a mount that guides at 7.52 arcsec/s: 3.0 s * 7.52 arcsec/s /
+6.39 arcsec/px = 3.53 px. Design estimate, register row WAY-D145; the move has
+not been checked against the position noise of the guide camera.
+"""
+
+BACKLASH_SETTLE_PULSE_SECONDS = TunedParameter(
+    name="wayfinding.backlash_settle_pulse_seconds",
+    default=1.0,
+    unit="s",
+    description="Length of the first Dec pulse that sets a direction of travel before the backlash probe.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D146",
+)
+"""Length of the pulse that sets a known direction of travel before the probe.
+
+A method choice: one second is long enough to take up the slack in the gears in
+one direction. Design estimate, register row WAY-D146.
+"""
+
+BACKLASH_REVERSAL_TEST_PULSE_SECONDS = TunedParameter(
+    name="wayfinding.backlash_reversal_test_pulse_seconds",
+    default=0.05,
+    unit="s",
+    description="Length of each small reversed Dec pulse of the backlash probe.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D146",
+)
+"""Length of each small reversed Dec pulse of the backlash probe.
+
+A method choice. It sets the resolution of the measured delay: 50 ms, so the
+delay is found to the nearest 50 ms. Design estimate, register row WAY-D146.
+"""
+
+BACKLASH_MAX_TEST_PULSES = TunedParameter(
+    name="wayfinding.backlash_max_test_pulses",
+    default=40,
+    unit="pulses",
+    description="Most small reversed pulses the backlash probe sends before it gives up.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D146",
+)
+"""Most small reversed pulses the backlash probe sends before it gives up.
+
+A method choice: 40 pulses of 50 ms make a 2 s probing budget, which bounds a
+stuck axis to a fixed run time. Design estimate, register row WAY-D146.
+"""
+
+BACKLASH_MOTION_THRESHOLD_PX = TunedParameter(
+    name="wayfinding.backlash_motion_threshold_px",
+    default=0.5,
+    unit="px",
+    description="Star movement between two guide frames that counts as the Dec axis moving again.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D146",
+)
+"""Star movement between two guide frames that counts as the axis moving.
+
+It must be several times the noise in the guide star's measured position, or
+noise alone would end the probe early. Half a pixel is that for a guide star of
+normal brightness. Design estimate, register row WAY-D146; not yet checked
+against the measured position noise of the guide camera.
+"""
 
 
 @dataclass
@@ -80,14 +178,38 @@ class BacklashCalibrationSteps:
     """Capture a guide frame and return the guide star's centroid."""
 
 
+def calibration_pulse_seconds(arcsec_per_pixel: float, guide_rate_arcsec_per_s: float | None = None) -> float:
+    """Work out the calibration pulse that moves the guide star far enough.
+
+    Parameters
+    ----------
+    arcsec_per_pixel : `float`
+        The guide camera's plate scale.
+    guide_rate_arcsec_per_s : `float`, optional
+        How fast the mount moves the sky during a guide pulse, in
+        arcseconds per second. `None` uses the equipment profile's value
+        (`GUIDE_RATE_ARCSEC_PER_S`).
+
+    Returns
+    -------
+    pulse_seconds : `float`
+        The pulse length, in seconds, that moves the star by
+        `CALIBRATION_MOVE_GUIDE_PX` pixels.
+    """
+    if guide_rate_arcsec_per_s is None:
+        guide_rate_arcsec_per_s = resolve_parameter(GUIDE_RATE_ARCSEC_PER_S).value
+    move_px = resolve_parameter(CALIBRATION_MOVE_GUIDE_PX).value
+    return move_px * arcsec_per_pixel / guide_rate_arcsec_per_s
+
+
 def run_guider_calibration(
     steps: GuiderCalibrationSteps,
     calibration_id: str,
     camera_id: str,
     telescope_id: str,
     arcsec_per_pixel: float,
-    ra_pulse_duration_sec: float = 3.0,
-    dec_pulse_duration_sec: float = 3.0,
+    ra_pulse_duration_sec: float | None = None,
+    dec_pulse_duration_sec: float | None = None,
 ) -> GuiderCalibration:
     """Command a known RA pulse, then a Dec pulse, deriving a calibration.
 
@@ -102,7 +224,9 @@ def run_guider_calibration(
     arcsec_per_pixel : `float`
         The pairing's known plate scale.
     ra_pulse_duration_sec, dec_pulse_duration_sec : `float`, optional
-        Duration of each axis's calibration pulse, default 3.0 sec.
+        Duration of each axis's calibration pulse. `None` works it out
+        from the plate scale and the mount's guide rate
+        (`calibration_pulse_seconds`).
 
     Returns
     -------
@@ -118,6 +242,10 @@ def run_guider_calibration(
     HardwareError
         If either pulse command reports failure.
     """
+    if ra_pulse_duration_sec is None:
+        ra_pulse_duration_sec = calibration_pulse_seconds(arcsec_per_pixel)
+    if dec_pulse_duration_sec is None:
+        dec_pulse_duration_sec = calibration_pulse_seconds(arcsec_per_pixel)
     ra_start_xy = steps.measure_guide_star_centroid()
     if not steps.pulse_ra(ra_pulse_duration_sec):
         raise HardwareError("RA calibration pulse command failed")
@@ -146,10 +274,10 @@ def run_backlash_calibration(
     steps: BacklashCalibrationSteps,
     settle_direction: str = "north",
     reversed_direction: str = "south",
-    settle_pulse_sec: float = 1.0,
-    reversal_test_pulse_sec: float = 0.05,
-    max_test_pulses: int = 40,
-    motion_detection_threshold_px: float = 0.5,
+    settle_pulse_sec: float | None = None,
+    reversal_test_pulse_sec: float | None = None,
+    max_test_pulses: int | None = None,
+    motion_detection_threshold_px: float | None = None,
 ) -> float:
     """Measure Dec backlash by reversing direction and probing in small steps.
 
@@ -169,20 +297,22 @@ def run_backlash_calibration(
         The initial and reversed Dec directions, defaults ``"north"``/
         ``"south"`` -- passed straight through to `steps.pulse_dec`.
     settle_pulse_sec : `float`, optional
-        Duration of the initial settling pulse, default 1.0 sec.
+        Duration of the initial settling pulse. `None` uses
+        `BACKLASH_SETTLE_PULSE_SECONDS` (1.0 s).
     reversal_test_pulse_sec : `float`, optional
-        Duration of each small reversed-direction test pulse, default
-        0.05 sec (50 ms) -- kept short so the measured delay resolves
-        finely rather than overshooting past when motion actually
-        resumed.
+        Duration of each small reversed-direction test pulse. `None` uses
+        `BACKLASH_REVERSAL_TEST_PULSE_SECONDS` (0.05 s) -- kept short so
+        the measured delay resolves finely rather than overshooting past
+        when motion actually resumed.
     max_test_pulses : `int`, optional
-        Upper bound on test pulses before giving up, default 40 (2
-        seconds of probing at the default pulse size) -- bounds a
+        Upper bound on test pulses before giving up. `None` uses
+        `BACKLASH_MAX_TEST_PULSES` (40, or 2 seconds of probing at the
+        default pulse size) -- bounds a
         stuck/miscalibrated axis to a fixed run time rather than
         probing indefinitely.
     motion_detection_threshold_px : `float`, optional
-        Minimum centroid displacement counted as "motion resumed",
-        default 0.5 px.
+        Minimum centroid displacement counted as "motion resumed". `None`
+        uses `BACKLASH_MOTION_THRESHOLD_PX` (0.5 px).
 
     Returns
     -------
@@ -193,6 +323,14 @@ def run_backlash_calibration(
         probing budget) if motion was never detected -- a real, if
         possibly incomplete, measurement, not a sentinel.
     """
+    if settle_pulse_sec is None:
+        settle_pulse_sec = resolve_parameter(BACKLASH_SETTLE_PULSE_SECONDS).value
+    if reversal_test_pulse_sec is None:
+        reversal_test_pulse_sec = resolve_parameter(BACKLASH_REVERSAL_TEST_PULSE_SECONDS).value
+    if max_test_pulses is None:
+        max_test_pulses = int(resolve_parameter(BACKLASH_MAX_TEST_PULSES).value)
+    if motion_detection_threshold_px is None:
+        motion_detection_threshold_px = resolve_parameter(BACKLASH_MOTION_THRESHOLD_PX).value
     steps.pulse_dec(settle_direction, settle_pulse_sec)
     previous_xy = steps.measure_guide_star_centroid()
 
@@ -212,7 +350,7 @@ def run_backlash_calibration(
 
 def run_polar_alignment_assist(
     attempts: list[dict[str, Any]],
-    latitude_deg: float = 45.0,
+    latitude_deg: float,
 ) -> MountPointingModel:
     """Fit ME/MA from this session's plate solves for real-time adjustment.
 
@@ -241,8 +379,9 @@ def run_polar_alignment_assist(
     attempts : `list` [`dict` [`str`, `Any`]]
         This session's plate-solve records so far -- see
         `fit_pointing_model` for the expected shape.
-    latitude_deg : `float`, optional
-        Observer latitude in decimal degrees, defaults to 45.0.
+    latitude_deg : `float`
+        Observer latitude in decimal degrees. Required, so no stand-in
+        site is assumed.
 
     Returns
     -------

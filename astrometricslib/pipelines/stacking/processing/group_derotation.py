@@ -38,7 +38,10 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
-from astrometricslib.pipelines.stacking.processing.group_alignment import find_zero_order_position
+from astrometricslib.pipelines.stacking.processing.group_alignment import (
+    GROUP_RESAMPLE_SPLINE_ORDER,
+    find_zero_order_position,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +79,7 @@ NEGLIGIBLE_ROTATION_DEGREES = TunedParameter(
 
 
 def rotate_about_point(
-    image: np.ndarray, center_row: float, center_column: float, angle_degrees: float, order: int = 3
+    image: np.ndarray, center_row: float, center_column: float, angle_degrees: float, order: int | None = None
 ) -> np.ndarray:
     """Rotate a 2-D image about a chosen point, not the array's own centre.
 
@@ -99,7 +102,8 @@ def rotate_about_point(
         tilt: rotating an image by its own measured angle brings that trail
         to 0 degrees.
     order : `int`, optional
-        The spline order used to resample the image. Defaults to 3 (cubic).
+        The spline order used to resample the image. By default
+        `GROUP_RESAMPLE_SPLINE_ORDER` (3, cubic).
 
     Returns
     -------
@@ -109,6 +113,8 @@ def rotate_about_point(
     """
     if abs(angle_degrees) < resolve(NEGLIGIBLE_ROTATION_DEGREES).value:
         return np.asarray(image, dtype=np.float32).copy()
+    if order is None:
+        order = int(resolve(GROUP_RESAMPLE_SPLINE_ORDER).value)
     array = np.asarray(image, dtype=np.float64)
     height, width = array.shape
     array_center_row, array_center_column = (height - 1) / 2.0, (width - 1) / 2.0

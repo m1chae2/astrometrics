@@ -227,6 +227,25 @@ def test_status_collects_the_session_problems_most_recent_first() -> None:
     assert status.recent_guiding.sample_count == 149
 
 
+def test_the_recent_guiding_window_defaults_to_the_declared_length() -> None:
+    """Leaving the window out gives the declared ten minutes; a number wins."""
+    arguments = {
+        "context": _context(_captures()),
+        "guide_stats": _guide_stats(),
+        "dithers": [],
+        "analyze_file": "ekos-2026-10-02T20-00-00.analyze",
+        "wall_clock_now": _START + 1210.0,
+    }
+
+    default_status = live_status.summarize_live_session(**arguments)
+    short_status = live_status.summarize_live_session(**arguments, window_seconds=120.0)
+
+    declared = live_status.LIVE_STATUS_WINDOW_SECONDS.default
+    assert default_status.recent_guiding.window_seconds == pytest.approx(declared)
+    assert default_status.recent_guiding.window_seconds == pytest.approx(600.0)
+    assert short_status.recent_guiding.window_seconds == pytest.approx(120.0)
+
+
 def test_status_reports_a_stale_file_and_a_guider_that_is_not_guiding() -> None:
     """Ten minutes of silence and a lost star are both reported."""
     status = live_status.summarize_live_session(

@@ -72,7 +72,7 @@ def _newest_kstars_log(directory: str) -> str | None:
 def get_live_session_status(
     context: ControlContext,
     destination_dir: str,
-    window_minutes: float = 10.0,
+    window_minutes: float | None = None,
     refresh: bool = True,
     include: list[str] | None = None,
     limit: int = 10,
@@ -86,7 +86,8 @@ def get_live_session_status(
     destination_dir : `str`
         Local folder the logs are downloaded into and read from.
     window_minutes : `float`, optional
-        Length of the recent-guiding window. Default is ten minutes.
+        Length of the recent-guiding window, in minutes. `None` uses the
+        live status's own window (ten minutes).
     refresh : `bool`, optional
         Whether to download the latest logs first. `False` reads what is
         already in `destination_dir`.
@@ -134,7 +135,7 @@ def get_live_session_status(
         dithers,
         analyze_file=os.path.basename(analyze_path),
         kstars_log_file=os.path.basename(kstars_path) if kstars_path else None,
-        window_seconds=window_minutes * 60.0,
+        window_seconds=None if window_minutes is None else window_minutes * 60.0,
     )
     if include:
         sections = ekos_sections(context, include, max(1, min(int(limit), MAXIMUM_LIMIT)))

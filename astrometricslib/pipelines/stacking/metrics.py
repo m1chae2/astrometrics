@@ -30,7 +30,6 @@ from astrometricslib.models.quality.metric_spec import (
 from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_spec, notice_spec
 from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
     CHECKED_ESTIMATE_ERROR_FRACTION,
-    CHECKED_ESTIMATE_RANGE_ROOM_MULTIPLES_BY_CAMERA,
 )
 
 STACKING_REJECTED_PIXEL_FRACTION = "stacking.rejected_pixel_fraction"
@@ -1926,12 +1925,9 @@ _SCIENCE_METRICS: tuple[MetricSpec, ...] = (
             "core with a Moffat profile (beta 3). An estimate is checked, for the camera, against two "
             "exposure lengths of the same field: it is stored as assumed, with the error of that check "
             "in the reason, when the largest estimate of the group is within the largest size checked for "
-            "the camera ("
-            + ", ".join(
-                f"the ZWO ASI 533MM Pro: {size:.0f} times the room"
-                for size in CHECKED_ESTIMATE_RANGE_ROOM_MULTIPLES_BY_CAMERA.values()
-            )
-            + "; no other camera has a checked range), where the estimated peak grew within "
+            "the camera (set in the camera's config section as "
+            "`stacking.checked_estimate_range_room_multiples`: 80 times the room for the ZWO ASI 533MM Pro, "
+            "and no checked range, 0, for any camera with no value), where the estimated peak grew within "
             f"{resolve(CHECKED_ESTIMATE_ERROR_FRACTION).value:.0%} "
             "of the exposure ratio in at least 90% of the cases; "
             "beyond it the row is not measured, with the size of the estimate. The group's "

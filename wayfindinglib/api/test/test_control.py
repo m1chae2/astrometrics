@@ -603,7 +603,7 @@ def test_run_backlash_calibration_delegates_to_the_task_module(
 
     assert result == pytest.approx(150.0)
     calibration_routines.run_backlash_calibration.assert_called_once_with(
-        steps, "north", "south", 1.0, 0.05, 40, 0.5
+        steps, "north", "south", None, None, None, None
     )
 
 

@@ -17,6 +17,7 @@ from datetime import datetime
 from typing import Any
 
 from astrometricslib.exceptions import ConfigurationError, ExternalServiceError
+from astrometricslib.parameters import resolve_parameter
 from wayfindinglib.api.control.context import ControlChild, require_text
 from wayfindinglib.models.control_status import GuidingStatus
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
@@ -278,8 +279,8 @@ class GuidingControl(ControlChild):
         camera_id: str,
         telescope_id: str,
         arcsec_per_pixel: float,
-        ra_pulse_duration_sec: float = 3.0,
-        dec_pulse_duration_sec: float = 3.0,
+        ra_pulse_duration_sec: float | None = None,
+        dec_pulse_duration_sec: float | None = None,
     ) -> GuiderCalibration:
         """Send a known pulse on each axis, measure the move, and save it.
 
@@ -294,7 +295,8 @@ class GuidingControl(ControlChild):
         arcsec_per_pixel : `float`
             Guide camera plate scale (see `status(include=["plate_scale"])`).
         ra_pulse_duration_sec, dec_pulse_duration_sec : `float`, optional
-            Length of the test pulse on each axis.
+            Length of the test pulse on each axis. `None` works it out from
+            the plate scale and the mount's guide rate.
 
         Returns
         -------
@@ -320,10 +322,10 @@ class GuidingControl(ControlChild):
         steps: BacklashCalibrationSteps,
         settle_direction: str = "north",
         reversed_direction: str = "south",
-        settle_pulse_sec: float = 1.0,
-        reversal_test_pulse_sec: float = 0.05,
-        max_test_pulses: int = 40,
-        motion_detection_threshold_px: float = 0.5,
+        settle_pulse_sec: float | None = None,
+        reversal_test_pulse_sec: float | None = None,
+        max_test_pulses: int | None = None,
+        motion_detection_threshold_px: float | None = None,
     ) -> float:
         """Measure declination backlash by reversing direction gently.
 
@@ -337,13 +339,16 @@ class GuidingControl(ControlChild):
         settle_direction, reversed_direction : `str`, optional
             The direction to settle in, then the opposite direction.
         settle_pulse_sec : `float`, optional
-            Length of the settling pulses.
+            Length of the settling pulse. `None` uses the declared value.
         reversal_test_pulse_sec : `float`, optional
-            Length of each small probing pulse.
+            Length of each small probing pulse. `None` uses the declared
+            value.
         max_test_pulses : `int`, optional
-            Most probing pulses before giving up.
+            Most probing pulses before giving up. `None` uses the declared
+            value.
         motion_detection_threshold_px : `float`, optional
-            Star movement that counts as the mount responding.
+            Star movement that counts as the mount responding. `None` uses
+            the declared value.
 
         Returns
         -------
@@ -365,7 +370,7 @@ class GuidingControl(ControlChild):
     def _run_exposure_test(
         self,
         exposure_seconds: tuple[float, ...] = (0.5, 1.0, 2.0, 4.0),
-        frames_per_exposure: int = 8,
+        frames_per_exposure: int | None = None,
         gain: float | None = None,
     ) -> GuideExposureLadder:
         """Find the shortest guide exposure this guide camera needs.
@@ -383,7 +388,8 @@ class GuidingControl(ControlChild):
         exposure_seconds : `tuple` [`float`, ...], optional
             The exposure lengths to try.
         frames_per_exposure : `int`, optional
-            Frames at each length. At least 5 are needed.
+            Frames at each length. At least 5 are needed. `None` uses
+            `FRAMES_PER_EXPOSURE_TEST` (8).
         gain : `float`, optional
             Guide camera gain for the test. `None` leaves it alone.
 
@@ -400,7 +406,10 @@ class GuidingControl(ControlChild):
             If no guide camera and guide optics are configured.
         """
         from wayfindinglib.analytics import envelope_assembly
-        from wayfindinglib.analytics.guide_exposure_ladder import analyze_guide_exposure_ladder
+        from wayfindinglib.analytics.guide_exposure_ladder import (
+            FRAMES_PER_EXPOSURE_TEST,
+            analyze_guide_exposure_ladder,
+        )
         from wayfindinglib.tasks.control_tasks import (
             guide_exposure_ladder_tasks,
             hardware_operations,
@@ -408,6 +417,8 @@ class GuidingControl(ControlChild):
             remote_transfer_tasks,
         )
 
+        if frames_per_exposure is None:
+            frames_per_exposure = int(resolve_parameter(FRAMES_PER_EXPOSURE_TEST).value)
         context = self._context
         if not remote_transfer_tasks.check_remote_connection(context):
             raise ExternalServiceError(

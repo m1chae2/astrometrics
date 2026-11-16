@@ -27,6 +27,7 @@ from astrometricslib.models.tuned_parameter import (
     RunBasis,
     TunedParameter,
 )
+from astrometricslib.pipelines.shared.quality.star_profile_fitting import STAR_FINDER_THRESHOLD_SIGMA
 from astrometricslib.pipelines.shared.star_finding import find_sources_above_background
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
@@ -328,7 +329,7 @@ def background_map_from_mesh(mesh: np.ndarray, box_size: int, shape: tuple[int, 
 class SourceDetector:
     """Finds bright dots (stars) in an image using the DAOStarFinder math."""
 
-    def __init__(self, fwhm: float | None = None, threshold_sigma: float = 5.0) -> None:
+    def __init__(self, fwhm: float | None = None, threshold_sigma: float | None = None) -> None:
         """Set up the star finder.
 
         Parameters
@@ -338,11 +339,15 @@ class SourceDetector:
             measured in pixels. `SOURCE_DETECTOR_KERNEL_FWHM_PX` if omitted.
         threshold_sigma : `float`, optional
             How bright a dot needs to be before it is believed to be a star.
-            This is measured as a multiple of the background noise
-            (default is 5.0x the noise).
+            This is measured as a multiple of the background noise.
+            `STAR_FINDER_THRESHOLD_SIGMA` (5 times the noise) if omitted. The
+            declaration lives with the star-profile fit, which uses the same
+            finder setting.
         """
         self.fwhm = float(resolve(SOURCE_DETECTOR_KERNEL_FWHM_PX).value) if fwhm is None else fwhm
-        self.threshold_sigma = threshold_sigma
+        self.threshold_sigma = (
+            float(resolve(STAR_FINDER_THRESHOLD_SIGMA).value) if threshold_sigma is None else threshold_sigma
+        )
         # The background noise (standard deviation of the sky pixels) of the
         # picture the last `detect` call searched, in the picture's units, or
         # `None` before any call. The expected position error of a star needs

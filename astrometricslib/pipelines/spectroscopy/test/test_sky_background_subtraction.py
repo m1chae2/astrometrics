@@ -115,6 +115,7 @@ def _extract_traced(data: np.ndarray, subtract_sky_background: bool = True) -> n
         (float(FIRST_TRAIL_COLUMN), float(TRAIL_CENTER_Y_PX)),
         np.array([1.0, 0.0]),
         LAST_TRAIL_COLUMN - FIRST_TRAIL_COLUMN,
+        centerline_polynomial_degree=2,
     )
     return profile
 
@@ -313,10 +314,12 @@ def test_flare_mask_extraction_removes_the_sky(orientation: str) -> None:
         star_only, star_plus_sky = star_only.T.copy(), star_plus_sky.T.copy()
         start_position = start_position[::-1]
 
-    star_alone_profile, _, _ = SpectrumExtractor(subtract_sky_background=False).extract_with_flare_mask(
+    star_alone_profile, _, _ = SpectrumExtractor(
+        radius=10, subtract_sky_background=False
+    ).extract_with_flare_mask(
         MockAstrometricsImage(star_only), start_position, 15.0, 150.0, EXTRACTION_RADIUS_PX, orientation
     )
-    subtracted_profile, _, _ = SpectrumExtractor().extract_with_flare_mask(
+    subtracted_profile, _, _ = SpectrumExtractor(radius=10).extract_with_flare_mask(
         MockAstrometricsImage(star_plus_sky), start_position, 15.0, 150.0, EXTRACTION_RADIUS_PX, orientation
     )
 
@@ -329,11 +332,25 @@ def test_traced_flare_mask_extraction_removes_the_sky() -> None:
     star_plus_sky = star_only + SKY_PEDESTAL
     start_position = (float(ZERO_ORDER_X_PX), float(TRAIL_CENTER_Y_PX))
 
-    star_alone_profile, *_ = SpectrumExtractor(subtract_sky_background=False).extract_with_flare_mask_traced(
-        MockAstrometricsImage(star_only), start_position, 15.0, 150.0, 10, "horizontal"
+    star_alone_profile, *_ = SpectrumExtractor(
+        radius=10, subtract_sky_background=False
+    ).extract_with_flare_mask_traced(
+        MockAstrometricsImage(star_only),
+        start_position,
+        15.0,
+        150.0,
+        10,
+        "horizontal",
+        centerline_polynomial_degree=2,
     )
-    subtracted_profile, *_ = SpectrumExtractor().extract_with_flare_mask_traced(
-        MockAstrometricsImage(star_plus_sky), start_position, 15.0, 150.0, 10, "horizontal"
+    subtracted_profile, *_ = SpectrumExtractor(radius=10).extract_with_flare_mask_traced(
+        MockAstrometricsImage(star_plus_sky),
+        start_position,
+        15.0,
+        150.0,
+        10,
+        "horizontal",
+        centerline_polynomial_degree=2,
     )
 
     np.testing.assert_allclose(subtracted_profile, star_alone_profile, rtol=1e-4)

@@ -1304,9 +1304,7 @@ def build_astrometry_doc() -> str:
     refine_module = "astrometricslib.pipelines.astrometry.processing.wcs_refinement"
     driver_module = "astrometricslib._internal.drivers.astrometry_net_driver"
     fwhm_module = "astrometricslib.pipelines.astrometry.pre_processing.fwhm"
-    detector = require_symbol(
-        "astrometricslib.pipelines.astrometry.pre_processing.source_detection", "SourceDetector"
-    )
+    require_symbol("astrometricslib.pipelines.astrometry.pre_processing.source_detection", "SourceDetector")
     values = {
         "version_line": VERSION_LINE,
         "max_res": require_symbol(record_quality_module, "MAXIMUM_RESIDUAL_FRACTION_OF_FWHM"),
@@ -1322,7 +1320,12 @@ def build_astrometry_doc() -> str:
         "blind_cutoff": f"{require_symbol(driver_module, 'HINTED_SOLVE_NEAR_TIMEOUT_FRACTION'):.0%}",
         "blob_stars": require_symbol(fwhm_module, "FWHM_MEASUREMENT_STAR_COUNT"),
         "blob_box": 2 * require_symbol(fwhm_module, "BLOB_WIDTH_BOX_RADIUS_PX"),
-        "threshold": float(default_of(detector.__init__, "threshold_sigma")),
+        "threshold": float(
+            require_symbol(
+                "astrometricslib.pipelines.astrometry.pre_processing.source_detection",
+                "STAR_FINDER_THRESHOLD_SIGMA",
+            )
+        ),
         "merge_px": require_symbol(
             "astrometricslib.pipelines.astrometry.pre_processing.source_detection",
             "SOURCE_DETECTOR_MERGE_KERNEL_WIDTHS",

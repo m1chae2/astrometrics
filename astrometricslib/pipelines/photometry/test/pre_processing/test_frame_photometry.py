@@ -39,6 +39,7 @@ from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import
     _process_single_frame_worker,
     calculate_frame_alignment,
     locate_star_centroid,
+    measure_aperture_photometry,
     parse_observation_time,
     read_observation_time,
     refine_star_centroid,
@@ -230,6 +231,27 @@ def test_measure_aperture_flux_empty_annulus_honors_explicit_fallback() -> None:
     )
     assert flux == pytest.approx(32606.192982974677)
     assert is_saturated is False
+
+
+def test_default_edge_margin_is_one_pixel_beyond_the_sky_ring() -> None:
+    """Verifies the default edge margin follows the sky ring's outer radius.
+
+    On the reference setup the ring's outer radius is 12 px, so a star 13 px
+    from the edge is measured and a star 12 px from the edge is not. An
+    explicit ``cutout_radius`` still wins.
+    """
+    data = np.full((80, 80), 500.0)
+    data[39:42, 12:15] += 2000.0
+
+    inside = measure_aperture_photometry(data, 13.0, 40.0, saturation_threshold_adu=65000.0)
+    outside = measure_aperture_photometry(data, 12.0, 40.0, saturation_threshold_adu=65000.0)
+    explicit = measure_aperture_photometry(
+        data, 13.0, 40.0, cutout_radius=15, saturation_threshold_adu=65000.0
+    )
+
+    assert inside.net_flux_adu > 0.0
+    assert (outside.net_flux_adu, outside.flux_error_adu) == (0.0, 0.0)
+    assert (explicit.net_flux_adu, explicit.flux_error_adu) == (0.0, 0.0)
 
 
 def test_locate_star_centroid_finds_shifted_star() -> None:

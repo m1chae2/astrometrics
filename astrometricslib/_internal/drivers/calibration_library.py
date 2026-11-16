@@ -46,21 +46,6 @@ from astrometricslib.utilities.camera_setting_text import UNBINNED_TEXT, canonic
 logger = logging.getLogger(__name__)
 
 
-# Standard-system transformation coefficients derived for ZWO
-# ASI533MM Pro with Baader UBVR Bessel filter set (Antonov 2026,
-# JAAVSO Vol. 54).
-BAADER_BESSEL_ASI533_TRANSFORM_COEFFICIENTS = {
-    "T_bv": {"value": 1.095, "error": 0.009},
-    "T_b_bv": {"value": 0.080, "error": 0.012},
-    "T_br": {"value": 1.144, "error": 0.013},
-    "T_b_br": {"value": 0.050, "error": 0.006},
-    "T_v_bv": {"value": -0.008, "error": 0.015},
-    "T_vr": {"value": 1.255, "error": 0.033},
-    "T_v_vr": {"value": -0.012, "error": 0.025},
-    "T_r_vr": {"value": -0.221, "error": 0.030},
-}
-
-
 # How many degrees C a dark's capture temperature may differ from the light
 # frames it calibrates. The library files darks in temperature slots this wide
 # (see `temperature_slot_c`), and a dark master farther than this from the

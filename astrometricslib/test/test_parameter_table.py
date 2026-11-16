@@ -91,8 +91,14 @@ def test_writes_the_csv_and_every_markdown_page(generator: ModuleType, output_fo
 def test_has_declared_and_backlog_rows_from_every_register_file(
     generator: ModuleType, rows: list[dict[str, str]]
 ) -> None:
-    """Declared parameters fill every register page; backlog rows follow."""
-    assert {row["row_type"] for row in rows} == {"declared", "backlog"}
+    """Declared parameters fill every register page; backlog rows may follow.
+
+    The backlog (tuning values not declared yet) is empty once every value
+    is declared, so only the declared rows are required.
+    """
+    row_types = {row["row_type"] for row in rows}
+    assert "declared" in row_types
+    assert row_types <= {"declared", "backlog"}
     declared = {row["register"] for row in rows if row["row_type"] == "declared"}
     assert set(generator.REGISTER_FILES) <= declared
     assert all(row["status"] for row in rows if row["row_type"] == "declared")

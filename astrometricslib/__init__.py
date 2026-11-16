@@ -252,6 +252,7 @@ class Astrometrics:
             targets=self.targets,
             calibration_library=lambda: self.processing.calibration._calibration_library,
             drivers=drivers,
+            owner=lambda: self,
         )
         self.jobs = Jobs(self.config, self._catalog_access)
 

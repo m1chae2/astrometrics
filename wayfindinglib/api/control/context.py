@@ -26,13 +26,6 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
 from astrometricslib.drivers import VersionedCache
-from astrometricslib.parameters import (
-    EquipmentKind,
-    ParameterRole,
-    ParameterSource,
-    TunedParameter,
-    resolve_parameter,
-)
 from wayfindinglib.analytics.night_index import TargetFrameMemo
 from wayfindinglib.data_access.delegation_policy_reader import get_delegation_policy
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
@@ -71,18 +64,6 @@ if TYPE_CHECKING:
 __all__ = ["ControlChild", "ControlContext", "require_text"]
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_LATITUDE_DEG = TunedParameter(
-    name="wayfinding.default_latitude_deg",
-    default=45.0,
-    unit="degrees",
-    description="Latitude the pointing fits use when no observer location is known.",
-    role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.EQUIPMENT_PROFILE,
-    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
-    register_entry="WAY-D131",
-)
-"""Latitude used by the pointing fits when no observer location is known."""
 
 
 class ControlContext:
@@ -870,7 +851,11 @@ class ControlContext:
         return hardware_operations.observer_location(self)
 
     def observer_latitude_deg(self) -> float:
-        """Return the observer latitude, or 45 degrees when it is unknown.
+        """Return the observer latitude, or the fallback site's if unknown.
+
+        The fallback is `site_profile_reader.FALLBACK_SITE`, the same stand-in
+        site that visibility and rise and set times use, so a pointing fit and
+        a plan never assume two different places.
 
         Returns
         -------
@@ -878,7 +863,9 @@ class ControlContext:
             Latitude in degrees.
         """
         location = self.observer_location()
-        return location["latitude"] if location else resolve_parameter(DEFAULT_LATITUDE_DEG).value
+        from wayfindinglib.data_access.site_profile_reader import FALLBACK_SITE
+
+        return location["latitude"] if location else FALLBACK_SITE["latitude"]
 
     def ekos_log_directory(self) -> str:
         """Return the local folder that holds downloaded Ekos logs.

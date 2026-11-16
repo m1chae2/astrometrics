@@ -32,10 +32,12 @@ MODULES = (
     "astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_wing_correction",
     "astrometricslib.pipelines.spectroscopy.pre_processing.spectral_frame_check",
     "astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration",
+    "astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_calibrator",
     "astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor",
     "astrometricslib.pipelines.spectroscopy.pre_processing.wavelength_zero_point",
     "astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector",
     "astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner",
+    "astrometricslib.utilities.spectroscopy_models",
 )
 
 
@@ -60,8 +62,8 @@ PARAMETERS = _scaled_parameters()
 
 
 def test_the_conversion_covers_every_decided_value() -> None:
-    """Twenty-eight values of these areas scale with a basis."""
-    assert len(PARAMETERS) == 28
+    """Thirty-two values of these areas scale with a basis."""
+    assert len(PARAMETERS) == 32
 
 
 @pytest.mark.parametrize("parameter", PARAMETERS, ids=lambda parameter: parameter.name)

@@ -60,7 +60,7 @@ def gates_for(awaiting: int = 0, minimum_frames: int = 3, **changes: int) -> dic
         The gates keyed by name.
     """
     metrics = {**HEALTHY_METRICS, **changes}
-    return {gate.name: gate for gate in rg.asteroid_run_gates(metrics, minimum_frames, awaiting)}
+    return {gate.name: gate for gate in rg.asteroid_run_gates(metrics, minimum_frames, awaiting, 2.0)}
 
 
 def test_a_healthy_run_passes_every_gate() -> None:
@@ -357,14 +357,14 @@ def test_the_ephemeris_gate_always_stores_the_failed_query_count() -> None:
     healthy = {
         m.metric: m
         for m in rg.asteroid_run_measurements(
-            HEALTHY_METRICS, rg.asteroid_run_gates(HEALTHY_METRICS, 3, 0), _context()
+            HEALTHY_METRICS, rg.asteroid_run_gates(HEALTHY_METRICS, 3, 0, 2.0), _context()
         )
     }
     down_metrics = {**HEALTHY_METRICS, "ephemeris_queries_failed": 1, "candidates_ephemeris_matched": 0}
     down = {
         m.metric: m
         for m in rg.asteroid_run_measurements(
-            down_metrics, rg.asteroid_run_gates(down_metrics, 3, 0), _context()
+            down_metrics, rg.asteroid_run_gates(down_metrics, 3, 0, 2.0), _context()
         )
     }
 
@@ -464,14 +464,14 @@ def test_a_reached_question_limit_is_a_failed_gate_a_notice_row_and_not_an_unmat
         "candidates_detected": 3,
         "candidates_persistence_confirmed": 3,
     }
-    gates = {gate.name: gate for gate in rg.asteroid_run_gates(metrics, 3, 2)}
+    gates = {gate.name: gate for gate in rg.asteroid_run_gates(metrics, 3, 2, 2.0)}
 
     assert gates[rg.EPHEMERIS_GATE_NAME].status is GateStatus.FAILED
     assert "not checked against known asteroids" in gates[rg.EPHEMERIS_GATE_NAME].detail
     assert gates[rg.UNMATCHED_MOVERS_GATE_NAME].status is GateStatus.NOT_CHECKED
     assert "none is known to be new" in gates[rg.UNMATCHED_MOVERS_GATE_NAME].detail
 
-    with_unmatched = {gate.name: gate for gate in rg.asteroid_run_gates(metrics, 3, 3)}
+    with_unmatched = {gate.name: gate for gate in rg.asteroid_run_gates(metrics, 3, 3, 2.0)}
     assert with_unmatched[rg.UNMATCHED_MOVERS_GATE_NAME].status is GateStatus.FAILED
     assert with_unmatched[rg.UNMATCHED_MOVERS_GATE_NAME].measured_value == pytest.approx(1.0)
 
@@ -485,7 +485,7 @@ def test_a_reached_question_limit_is_a_failed_gate_a_notice_row_and_not_an_unmat
 
 def test_a_run_under_the_question_limit_stores_no_notice_row() -> None:
     """The notice row exists only when the limit was reached."""
-    gates = rg.asteroid_run_gates(HEALTHY_METRICS, 3, 0)
+    gates = rg.asteroid_run_gates(HEALTHY_METRICS, 3, 0, 2.0)
     measurements = rg.asteroid_run_measurements(HEALTHY_METRICS, gates, _context())
 
     assert all("notice_ephemeris_query_cap_reached" not in m.metric for m in measurements)

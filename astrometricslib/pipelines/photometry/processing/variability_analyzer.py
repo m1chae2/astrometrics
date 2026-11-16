@@ -45,6 +45,7 @@ from astrometricslib._internal.drivers.camera_profile_store import resolve_camer
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_header_and_data
 from astrometricslib.foundation.observatory_site import ObservatorySite
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import RunBasis, factor_for
 from astrometricslib.models.quality.photometry_quality import InputQualityAssessment
 from astrometricslib.models.quality.quality_summary import ExcludedFrame, FrameEnsembleComposition
 from astrometricslib.models.stellar_source import (
@@ -54,6 +55,7 @@ from astrometricslib.models.stellar_source import (
     StellarObject,
 )
 from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
@@ -75,7 +77,6 @@ from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import
     FrameAlignment,
     FrameRejection,
     ObservationTimeError,
-    _measure_aperture_flux,
     _process_single_frame_worker,
     _read_exposure_seconds,
     centroid_offsets_px,
@@ -113,6 +114,40 @@ from astrometricslib.pipelines.photometry.processing.variability_indices import 
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
+
+# --- Finding Stars in the Reference Frame ----------------------------------
+#
+# The reference frame is searched with a ladder of star-finder settings, tried
+# in order until one finds more than 10 stars: a standard setting, a sharper
+# and fainter one, a softer and larger one, a very out-of-focus one and a
+# desperate one. The kernel widths follow the star width of the setup (the
+# reference setup's 2.33 px gives back 4, 3, 5, 6 and 3 px). The thresholds
+# are in noise standard deviations and do not depend on the equipment. The
+# rungs were chosen by hand, one rung per kind of bad frame, and are not tied
+# to a data set (PHO-D03, a design estimate).
+REFERENCE_DETECTION_KERNEL_WIDTHS_PX = TunedParameter(
+    name="photometry.reference_detection_kernel_widths_px",
+    default=factor_for((4.0, 3.0, 5.0, 6.0, 3.0), RunBasis.STAR_WIDTH_PX),
+    reference_value=(4.0, 3.0, 5.0, 6.0, 3.0),
+    unit="px (× star width)",
+    description="Kernel widths of the star-finder ladder tried on the reference frame, in order.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    basis=RunBasis.STAR_WIDTH_PX,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="PHO-D03",
+)
+
+REFERENCE_DETECTION_THRESHOLDS_SIGMA = TunedParameter(
+    name="photometry.reference_detection_thresholds_sigma",
+    default=(3.0, 2.0, 3.0, 4.0, 1.5),
+    unit="sigma",
+    description="Detection thresholds of the star-finder ladder tried on the reference frame, in order.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="PHO-D03",
+)
 
 # --- Choosing Reference Stars for Comparison --------------------------------
 #
@@ -969,17 +1004,13 @@ class VariabilityAnalyzer:
 
         # Retry with different parameters if detection fails
         detector = None
-        detection_configs = [
-            {"fwhm": 4.0, "sigma": 3.0},  # Standard
-            {"fwhm": 3.0, "sigma": 2.0},  # Sharp/Faint
-            {"fwhm": 5.0, "sigma": 3.0},  # Soft/Large
-            {"fwhm": 6.0, "sigma": 4.0},  # Very Out of focus
-            {"fwhm": 3.0, "sigma": 1.5},  # Very desperate
-        ]
-
-        for config in detection_configs:
-            logger.info("  Attempting detection with FWHM=%s, Sigma=%s...", config["fwhm"], config["sigma"])
-            detector = SourceDetector(threshold_sigma=config["sigma"], fwhm=config["fwhm"])
+        kernel_widths_px = resolve(REFERENCE_DETECTION_KERNEL_WIDTHS_PX).value
+        thresholds_sigma = resolve(REFERENCE_DETECTION_THRESHOLDS_SIGMA).value
+        for kernel_width_px, threshold_sigma in zip(kernel_widths_px, thresholds_sigma, strict=True):
+            logger.info(
+                "  Attempting detection with FWHM=%.2f, Sigma=%s...", kernel_width_px, threshold_sigma
+            )
+            detector = SourceDetector(threshold_sigma=threshold_sigma, fwhm=kernel_width_px)
             reference_stars_detected = detector.detect(reference_data)
             if reference_stars_detected and len(reference_stars_detected) > 10:
                 logger.info("  Success! Found %s stars.", len(reference_stars_detected))
@@ -1016,7 +1047,7 @@ class VariabilityAnalyzer:
             # per-star cutout loop for every frame in the session. A
             # seed star with no detectable signal above local background
             # on the reference frame (net_flux clamped to 0.0 by
-            # _measure_flux_numpy) will never contribute a usable
+            # `_measure_aperture_flux`) will never contribute a usable
             # measurement in any frame either, so tracking it is pure
             # cost with no photometric benefit. Excluding it here only
             # decides whether this call gives it a light curve -- it
@@ -1293,38 +1324,6 @@ class VariabilityAnalyzer:
                 continue
             light_curve.time_bjd_tdb = [bjd_by_start[stamp] for stamp in light_curve.timestamps]
             light_curve.time_basis = basis
-
-    def _measure_flux_numpy(
-        self, data: np.ndarray, x: float, y: float, radius: float = 4.0, *, saturation_threshold_adu: float
-    ) -> tuple[float, bool]:
-        """Measure the brightness of a star inside a small circle.
-
-        We add up all the light inside the circle, then subtract the background
-        glow to get the star's true brightness. This is a thin wrapper around
-        `_measure_aperture_flux`, which is the module-level function every flux
-        measurement in this file actually goes through.
-
-        Parameters
-        ----------
-        data : `np.ndarray`
-            The picture, as a 2-D array.
-        x, y : `float`
-            The star's position in pixels.
-        radius : `float`, optional
-            The radius of the circle, in pixels.
-        saturation_threshold_adu : `float`
-            A pixel at or above this value counts as saturated. Take it from
-            the camera's profile.
-
-        Returns
-        -------
-        result : `tuple[float, bool]`
-            The total brightness, and a True/False flag if the star was
-            too bright (saturated).
-        """
-        return _measure_aperture_flux(
-            data, x, y, radius=radius, saturation_threshold_adu=saturation_threshold_adu
-        )
 
     def normalize_light_curves(self) -> None:
         """Perform differential photometry against a fixed comparison set.

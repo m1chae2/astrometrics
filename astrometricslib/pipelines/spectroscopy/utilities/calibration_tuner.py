@@ -501,7 +501,8 @@ class SpectroscopyCalibrationTuner:
         detected_angle : `float`
             The spectrum's detected rotation angle, in degrees.
         smoothed : `numpy.ndarray`
-            The intensity profile, smoothed with a window of 5.
+            The intensity profile, smoothed with the spectrum smoothing window
+            (5 samples on the reference setup).
         sample_distances_px : `numpy.ndarray`
             The distance of each sample from the zero order, in pixels,
             measured along the dispersion direction. It has one value per
@@ -514,9 +515,10 @@ class SpectroscopyCalibrationTuner:
         intensities = np.array(result["intensities"])
         sample_distances_px = np.asarray(result["sample_distances_px"], dtype=float)
 
-        # Apply smoothing window of size 5 to suppress pixel noise and
+        # Smooth with the window of `SPECTRUM_SMOOTHING_WINDOW_ANGSTROM` (5
+        # samples on the reference setup) to suppress pixel noise and
         # highlight broad absorption bands
-        smoothed = spec_pipeline.calibrator.apply_smoothing(intensities, window=5)
+        smoothed = spec_pipeline.calibrator.apply_smoothing(intensities)
         return detected_angle, smoothed, sample_distances_px
 
     @staticmethod

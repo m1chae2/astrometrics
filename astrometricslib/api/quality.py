@@ -27,6 +27,7 @@ from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
+from astrometricslib.foundation.tuning import TuningReport
 from astrometricslib.models.quality.aperture_record import OddEvenApertureRecord
 from astrometricslib.models.quality.calibration_identities import CalibrationIdentities
 from astrometricslib.models.quality.capture_setting import CaptureSetting
@@ -130,6 +131,9 @@ class QualityRecords:
     drivers : `Drivers`, optional
         The outside services the caller chose, for the checks that plate-solve
         or measure spectra. Any left out is the built-in one.
+    owner : `Callable`, optional
+        Gives the `Astrometrics` this belongs to, which the tuners of
+        `measure_tuned_parameters` read stored spectra through.
     """
 
     def __init__(
@@ -140,12 +144,70 @@ class QualityRecords:
         targets: TargetLookup | None = None,
         calibration_library: Callable[[], Any] | None = None,
         drivers: Drivers | None = None,
+        owner: Callable[[], Any] | None = None,
     ) -> None:
         self._drivers = drivers
         self._config = config
         self._storage = storage
         self._targets = targets
         self._calibration_library_provider = calibration_library
+        self._owner_provider = owner
+
+    def measure_tuned_parameters(
+        self,
+        setup: str | None = None,
+        only: list[str] | None = None,
+        save: bool = False,
+    ) -> TuningReport:
+        """Work out this library's tuned values from the observatory's data.
+
+        Each tuner (see `astrometricslib.parameters.collect_tuners`) reads
+        the stored data of one setup and derives one family of values. Each
+        value is checked against its allowed range and smallest sample.
+        Nothing is saved unless ``save`` is set; then the config is backed up
+        and each value is written with where it came from.
+
+        Parameters
+        ----------
+        setup : `str`, optional
+            The setup to tune. The active setup when left out.
+        only : `list` [`str`], optional
+            Run only the tuners with these names.
+        save : `bool`, optional
+            Write the values to the config.
+
+        Returns
+        -------
+        report : `TuningReport`
+            The values that would be set or moved, and those skipped,
+            refused or unchanged.
+
+        Raises
+        ------
+        NotFoundError
+            If the setup is not in the config, or there is no active setup.
+        InvalidArgumentError
+            If ``only`` names a tuner that does not exist.
+        """
+        import datetime
+
+        from astrometricslib.foundation.errors import NotFoundError
+        from astrometricslib.foundation.tuning import collect_tuners, run_tuning
+
+        tuners = collect_tuners(("astrometricslib",))
+        if only:
+            unknown = sorted(set(only) - {tuner.name for tuner in tuners})
+            if unknown:
+                raise InvalidArgumentError(f"No tuner named {', '.join(unknown)}.")
+            tuners = [tuner for tuner in tuners if tuner.name in set(only)]
+        setups = self._config.get_observatory_setups()
+        chosen = setups.setup_named(setup) if setup else setups.active_setup()
+        if chosen is None:
+            raise NotFoundError(f"No setup named {setup!r} in the config." if setup else "No active setup.")
+        services = {"astrometrics": self._owner_provider()} if self._owner_provider else {}
+        return run_tuning(
+            tuners, chosen, self._config, services=services, today=datetime.date.today(), write=save
+        )
 
     def query(
         self,
@@ -541,8 +603,8 @@ class QualityRecords:
         last_file: str | None = None,
         since: TimeInput = None,
         until: TimeInput = None,
-        trend_frames: int = 10,
-        trend_threshold_percent: float = 15.0,
+        trend_frames: int | None = None,
+        trend_threshold_percent: float | None = None,
         exposure_seconds: float | None = None,
         predict_exposure_seconds: float | None = None,
         register_job: bool = True,
@@ -625,10 +687,11 @@ class QualityRecords:
             Only frames taken at or before this time.
         trend_frames : `int`, optional
             How many of the newest measured frames to check for a slow
-            drift. Defaults to 10.
+            drift. Defaults to `TREND_WINDOW_FRAMES` (10).
         trend_threshold_percent : `float`, optional
             How far, as a percentage of its starting level, a number must
-            move across those frames to count as a drift. Defaults to 15.
+            move across those frames to count as a drift. Defaults to the
+            tuned `TREND_THRESHOLD_PERCENT` (15 until tuned).
         exposure_seconds : `float`, optional
             Applies to ``"spectral"`` only. Only frames with this exposure
             length.
@@ -671,8 +734,8 @@ class QualityRecords:
                 "last_file": last_file is not None,
                 "since": since is not None,
                 "until": until is not None,
-                "trend_frames": trend_frames != 10,
-                "trend_threshold_percent": abs(trend_threshold_percent - 15.0) > 1e-9,
+                "trend_frames": trend_frames is not None,
+                "trend_threshold_percent": trend_threshold_percent is not None,
                 "exposure_seconds": exposure_seconds is not None,
                 "predict_exposure_seconds": predict_exposure_seconds is not None,
             },
@@ -684,6 +747,17 @@ class QualityRecords:
                 f"kind={kind!r} needs a target" + (" or a folder_path." if kind == "raw_check" else ".")
             )
         limit = _clamp(limit, 1, 100 if kind == "spectral" else 300)
+        if trend_frames is None or trend_threshold_percent is None:
+            from astrometricslib.foundation.parameters import resolve
+            from astrometricslib.pipelines.shared.quality.frame_trends import (
+                TREND_THRESHOLD_PERCENT,
+                TREND_WINDOW_FRAMES,
+            )
+
+            if trend_frames is None:
+                trend_frames = int(resolve(TREND_WINDOW_FRAMES).value)
+            if trend_threshold_percent is None:
+                trend_threshold_percent = float(resolve(TREND_THRESHOLD_PERCENT).value)
         selection = make_frame_selection(
             filter_name, first_file, last_file, since, until, kind == "spectral" or "spectra" in sections
         )

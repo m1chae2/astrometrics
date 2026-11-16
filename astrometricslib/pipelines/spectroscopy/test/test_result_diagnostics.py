@@ -160,7 +160,7 @@ def test_the_extractor_summary_is_plain_python_values() -> None:
 
 def test_an_untraced_extractor_has_no_half_width_summary() -> None:
     """With no recorded half-widths the median and spread are `None`."""
-    summary = SpectrumExtractor().last_diagnostics.as_dict()
+    summary = SpectrumExtractor(radius=10).last_diagnostics.as_dict()
 
     assert summary["sky_mode_counts"] == {}
     assert summary["dominant_sky_mode"] is None

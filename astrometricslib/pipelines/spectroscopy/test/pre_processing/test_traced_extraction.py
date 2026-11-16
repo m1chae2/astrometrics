@@ -73,7 +73,9 @@ def test_traced_extraction_centerline_tracks_known_tilt() -> None:
     image = MockAstrometricsImage(data=data)
     extractor = SpectrumExtractor(radius=15)
 
-    _, centerline, _ = extractor.extract_line_traced(image, (20.0, 50.0), np.array([1.0, 0.0]), 160)
+    _, centerline, _ = extractor.extract_line_traced(
+        image, (20.0, 50.0), np.array([1.0, 0.0]), 160, centerline_polynomial_degree=2
+    )
 
     measured_slope = (centerline[150] - centerline[10]) / 140
     assert abs(measured_slope - tilt_slope) < 0.01
@@ -85,7 +87,9 @@ def test_traced_extraction_width_matches_known_sigma() -> None:
     image = MockAstrometricsImage(data=data)
     extractor = SpectrumExtractor(radius=15)
 
-    _, _, widths = extractor.extract_line_traced(image, (20.0, 50.0), np.array([1.0, 0.0]), 160)
+    _, _, widths = extractor.extract_line_traced(
+        image, (20.0, 50.0), np.array([1.0, 0.0]), 160, centerline_polynomial_degree=2
+    )
 
     for step in (20, 60, 100, 140):
         expected_sigma = true_sigmas[20 + step]
@@ -99,7 +103,7 @@ def test_traced_extraction_falls_back_on_unfittable_cross_section() -> None:
     extractor = SpectrumExtractor(radius=10)
 
     profile, _centerline, widths = extractor.extract_line_traced(
-        image, (20.0, 50.0), np.array([1.0, 0.0]), 50
+        image, (20.0, 50.0), np.array([1.0, 0.0]), 50, centerline_polynomial_degree=2
     )
 
     assert len(profile) == 50
@@ -122,7 +126,9 @@ def test_calibration_shape_unaffected_by_extraction_method() -> None:
     calibrator = SpectrumCalibrator(instrument)
 
     fixed_profile = extractor.extract_line(image, (20.0, 50.0), np.array([1.0, 0.0]), 160)
-    traced_profile, _, _ = extractor.extract_line_traced(image, (20.0, 50.0), np.array([1.0, 0.0]), 160)
+    traced_profile, _, _ = extractor.extract_line_traced(
+        image, (20.0, 50.0), np.array([1.0, 0.0]), 160, centerline_polynomial_degree=2
+    )
 
     fixed_wavelengths, fixed_intensities = calibrator.calibrate(fixed_profile, 0.0)
     traced_wavelengths, traced_intensities = calibrator.calibrate(traced_profile, 0.0)

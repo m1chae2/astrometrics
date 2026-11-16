@@ -282,7 +282,7 @@ def group_peak_fields(frames: list[Any], saturation: list[FrameSaturation]) -> d
         try:
             profile = resolve_camera_profile(_attribute(frames[0], "camera"))
             ceiling_provenance = profile.clip_ceiling_adu.provenance.kind.value
-            checked_range = checked_estimate_range(profile.camera_name)
+            checked_range = checked_estimate_range()
             if profile.photometric_linearity_limit_adu is not None:
                 limit = float(profile.photometric_linearity_limit_adu.value)
                 limit_provenance = profile.photometric_linearity_limit_adu.provenance.kind.value

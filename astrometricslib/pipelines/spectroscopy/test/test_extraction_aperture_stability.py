@@ -84,7 +84,7 @@ def _extract_flat_continuum(
     frame = make_spectral_frame(
         trace_sigma_px=TRACE_SIGMA_PX, continuum_adu=CONTINUUM_ADU, lines=(), seed=seed
     )
-    extractor = SpectrumExtractor()
+    extractor = SpectrumExtractor(radius=10)
     x0, y0 = frame.zero_order_xy
     profile, _, _, _, trail_width_px = extractor.extract_with_flare_mask_traced(
         _ArrayImage(frame.image),
@@ -94,6 +94,7 @@ def _extract_flat_continuum(
         SEARCH_RADIUS_PX,
         "horizontal",
         frame.angle_deg,
+        centerline_polynomial_degree=2,
     )
     return extractor, profile, trail_width_px
 

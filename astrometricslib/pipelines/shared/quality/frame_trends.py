@@ -20,6 +20,7 @@ from typing import Any
 
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.tuned_parameter import (
+    EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
@@ -52,6 +53,36 @@ STEADY_STEP_FRACTION = TunedParameter(
 fitted change. Random scatter goes up and down about equally, so about half
 the steps agree; a steady drift has most steps agreeing. Chosen so a clean
 60-frame run with no drift is not flagged while a ramp with scatter is."""
+
+TREND_WINDOW_FRAMES = TunedParameter(
+    name="shared.trend_window_frames",
+    default=10,
+    unit="frames",
+    description="How many of the newest frames a trend check looks at.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D21",
+)
+"""The newest frames a trend check looks at. Ten frames give the
+pairwise-slope fit 45 slopes, enough that one bad frame cannot fake a trend,
+while still covering only the last stretch of a night."""
+
+TREND_THRESHOLD_PERCENT = TunedParameter(
+    name="shared.trend_threshold_percent",
+    default=15.0,
+    unit="percent",
+    description="Change across the window, as a percentage of its starting level, that counts as a trend.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.TUNED_PARAMETER,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="STK-D21",
+    allowed_range=(2.0, 100.0),
+    minimum_sample=100,
+)
+"""The change that counts as a trend. 15% is the starting value; the tuner
+`trend_tuning.TREND_THRESHOLD_TUNER` sets it to the change that ordinary
+windows of this setup's star width reach (see that module)."""
 
 DIRECTIONS = {"rising": "risen", "falling": "fallen"}
 """Words for the two directions of change."""

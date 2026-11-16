@@ -177,7 +177,7 @@ def measure_equivalent_width(
     line_spread_angstrom: float,
     inner_band_edge_angstrom: float,
     band_width_angstrom: float,
-    polynomial_degree: int = 2,
+    polynomial_degree: int,
 ) -> EquivalentWidthMeasurement | None:
     """Measure the equivalent width of one feature and its error.
 
@@ -201,8 +201,10 @@ def measure_equivalent_width(
         edge.
     band_width_angstrom : `float`
         How wide each continuum band is, in Angstroms.
-    polynomial_degree : `int`, optional
-        The degree of the continuum polynomial (default 2).
+    polynomial_degree : `int`
+        The degree of the continuum polynomial. The feature detector passes
+        `CONTINUUM_POLYNOMIAL_DEGREE`, so the continuum is fitted the same
+        way for the window and for the detector's own dip search.
 
     Returns
     -------

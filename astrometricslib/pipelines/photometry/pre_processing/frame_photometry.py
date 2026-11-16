@@ -1429,7 +1429,7 @@ def measure_aperture_photometry(
     radius: float | None = None,
     annulus_inner: float | None = None,
     annulus_outer: float | None = None,
-    cutout_radius: int = 15,
+    cutout_radius: int | None = None,
     fallback_background: float | None = None,
     *,
     saturation_threshold_adu: float,
@@ -1467,6 +1467,9 @@ def measure_aperture_photometry(
         The inner and outer radius of the sky ring, in pixels.
     cutout_radius : `int`, optional
         The star must be at least this far from the frame edge, in pixels.
+        By default one pixel more than the outer radius of the sky ring
+        (rounded up), so the whole ring fits in the frame. That is 13 px on
+        the reference setup (the ring's outer radius is 12 px).
     fallback_background : `float`, optional
         The sky level, in ADU per pixel, to use if the ring holds no pixels.
     saturation_threshold_adu : `float`
@@ -1488,6 +1491,8 @@ def measure_aperture_photometry(
         annulus_inner = resolve(SKY_ANNULUS_INNER_RADIUS_PX).value
     if annulus_outer is None:
         annulus_outer = resolve(SKY_ANNULUS_OUTER_RADIUS_PX).value
+    if cutout_radius is None:
+        cutout_radius = math.ceil(annulus_outer) + 1
     height, width = data.shape
     noise = noise if noise is not None else DetectorNoise()
     # The whole-pixel position is used only for the bounds check and the
@@ -1563,7 +1568,7 @@ def _measure_aperture_flux(
     radius: float | None = None,
     annulus_inner: float | None = None,
     annulus_outer: float | None = None,
-    cutout_radius: int = 15,
+    cutout_radius: int | None = None,
     fallback_background: float | None = None,
     *,
     saturation_threshold_adu: float,

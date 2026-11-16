@@ -358,8 +358,11 @@ DISPERSION_ANGLE_MINIMUM_TRAIL_CONTRAST_SIGMA = TunedParameter(
 # neighbour's trail runs alongside. Below this the aperture (2 * radius + 1
 # wide) is too narrow to hold a trail whose own width is a few pixels.
 # Not tuned beyond that geometric reasoning.
-# It stands for a little under one trail width (3 on the reference setup,
-# 0.77 × the trail width), so it follows the trail width the run measures.
+# It stands for under half a trail width (3 on the reference setup, 0.44 × the
+# trail width of 6.81 px), so it follows the trail width the run measures.
+# The aperture it gives (7 px wide) is about one trail width, the full width
+# at half maximum. An earlier note said 0.77 × the trail width; that did not
+# follow from 3 and 6.81 and its source is not recorded, so it was corrected.
 EXTRACTION_RADIUS_MINIMUM_PX = TunedParameter(
     name="spectroscopy.extraction_radius_minimum_px",
     default=factor_for(3, RunBasis.TRAIL_WIDTH_PX),

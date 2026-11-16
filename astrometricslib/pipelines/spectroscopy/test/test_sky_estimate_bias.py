@@ -175,11 +175,11 @@ def test_a_faint_trail_is_not_read_bright_by_an_under_subtracted_sky() -> None:
     x0, y0 = noisy.zero_order_xy
     arguments = (1990.0, 10, "horizontal", TRAIL_ANGLE_DEG)
 
-    noisy_profile, *_ = SpectrumExtractor().extract_with_flare_mask_traced(
-        _ArrayImage(noisy.image), (x0, y0), 100.0, *arguments
+    noisy_profile, *_ = SpectrumExtractor(radius=10).extract_with_flare_mask_traced(
+        _ArrayImage(noisy.image), (x0, y0), 100.0, *arguments, centerline_polynomial_degree=2
     )
-    clean_profile, *_ = SpectrumExtractor().extract_with_flare_mask_traced(
-        _ArrayImage(clean.image), (x0, y0), 100.0, *arguments
+    clean_profile, *_ = SpectrumExtractor(radius=10).extract_with_flare_mask_traced(
+        _ArrayImage(clean.image), (x0, y0), 100.0, *arguments, centerline_polynomial_degree=2
     )
 
     assert noisy_profile.mean() / clean_profile.mean() - 1.0 == pytest.approx(0.0, abs=FAINT_TRAIL_TOLERANCE)
@@ -201,9 +201,16 @@ def test_the_extractor_records_that_it_used_the_lower_band() -> None:
     contaminated = _add_neighbour(frame, frame.image)
     x0, y0 = frame.zero_order_xy
 
-    extractor = SpectrumExtractor()
+    extractor = SpectrumExtractor(radius=10)
     extractor.extract_with_flare_mask_traced(
-        _ArrayImage(contaminated), (x0, y0), 100.0, 600.0, 10, "horizontal", TRAIL_ANGLE_DEG
+        _ArrayImage(contaminated),
+        (x0, y0),
+        100.0,
+        600.0,
+        10,
+        "horizontal",
+        TRAIL_ANGLE_DEG,
+        centerline_polynomial_degree=2,
     )
     diagnostics = extractor.last_diagnostics
 
@@ -217,9 +224,16 @@ def test_a_clean_frame_uses_both_bands_for_most_readings() -> None:
     frame = _frame()
     x0, y0 = frame.zero_order_xy
 
-    extractor = SpectrumExtractor()
+    extractor = SpectrumExtractor(radius=10)
     extractor.extract_with_flare_mask_traced(
-        _ArrayImage(frame.image), (x0, y0), 100.0, 600.0, 10, "horizontal", TRAIL_ANGLE_DEG
+        _ArrayImage(frame.image),
+        (x0, y0),
+        100.0,
+        600.0,
+        10,
+        "horizontal",
+        TRAIL_ANGLE_DEG,
+        centerline_polynomial_degree=2,
     )
 
     assert extractor.last_diagnostics.dominant_sky_mode == "both_bands"

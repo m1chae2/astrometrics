@@ -74,7 +74,7 @@ def chauvenet_sigma(n_frames: int) -> float:
     return math.sqrt(2) * float(erfcinv(1.0 / (2 * n_frames)))
 
 
-def rejection_bounds(n_frames: int, floor: float = 2.5, low_extra: float = 0.5) -> RejectionBounds:
+def rejection_bounds(n_frames: int, floor: float, low_extra: float) -> RejectionBounds:
     """Calculate the low and high rejection limits for a stack size.
 
     The high limit is the Chauvenet limit, raised to the floor when the
@@ -91,10 +91,11 @@ def rejection_bounds(n_frames: int, floor: float = 2.5, low_extra: float = 0.5) 
     ----------
     n_frames : `int`
         The number of images being stacked.
-    floor : `float`, optional
+    floor : `float`
         The smallest high limit allowed, in standard deviations. Must be above
-        zero.
-    low_extra : `float`, optional
+        zero. The stacker passes the registered
+        ``STACK_REJECTION_SIGMA_FLOOR``.
+    low_extra : `float`
         How many standard deviations to add to the high limit to get the low
         limit. Must not be negative.
 

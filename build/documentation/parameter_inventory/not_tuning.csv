@@ -82,6 +82,7 @@ astrometricslib/foundation/jobs/store.py,JobStore._connect.timeout,Timeout or wa
 astrometricslib/foundation/jobs/store.py,JobStore.get_jobs_by_target.limit,Row or item cap that callers pass; plumbing
 astrometricslib/foundation/jobs/store.py,JobStore.get_recent_jobs.limit,Row or item cap that callers pass; plumbing
 astrometricslib/foundation/jobs/store.py,JobStore.get_recent_log_entries_for_job.limit,Row or item cap that callers pass; plumbing
+astrometricslib/foundation/jobs/store.py,JobStore.interrupt_orphaned_jobs.stale_after_minutes,"Housekeeping for old jobs that have no owner"
 astrometricslib/foundation/jobs/store.py,JobStore.query_jobs.limit,Row or item cap that callers pass; plumbing
 astrometricslib/foundation/jobs/store.py,JobStore.query_jobs.offset,Pagination start; 0 means from the first row
 astrometricslib/foundation/logging.py,_LOG_FILES_KEPT,software plumbing
@@ -161,6 +162,7 @@ astrometricslib/pipelines/photometry/processing/family_wise_correction.py,MAXIMU
 astrometricslib/pipelines/photometry/processing/noise_budget.py,scintillation_relative_noise.site_elevation_m,0 means sea level; the caller passes the site value
 astrometricslib/pipelines/photometry/processing/observing_window.py,MINIMUM_NIGHTS_FOR_ALIASES,A single night cannot have a daily echo
 astrometricslib/pipelines/photometry/processing/period_checks.py,holdout_cycle.seed,Random seed; reproducibility only
+astrometricslib/pipelines/photometry/processing/period_checks.py,holdout_transit.shuffle_count,"Speed only; box_search treats 0 as its default, so 1 is the smallest real value"
 astrometricslib/pipelines/photometry/processing/periodicity_search.py,_CANDIDATE_PEAK_COUNT,Sampling numerics
 astrometricslib/pipelines/photometry/processing/periodicity_search.py,_MAXIMUM_SEARCH_GRID_POINTS,Compute budget
 astrometricslib/pipelines/photometry/processing/periodicity_search.py,_REDUCED_SHUFFLE_COUNT,Compute budget
@@ -442,6 +444,7 @@ wayfindinglib/api/review.py,ObservationReview.frame_guiding.limit,Row or item ca
 wayfindinglib/api/review.py,ObservationReview.get_live_session_status.limit,Row or item cap that callers pass; plumbing
 wayfindinglib/api/review.py,ObservationReview.query.limit,Row or item cap that callers pass; plumbing
 wayfindinglib/api/review.py,ObservationReview.query_alignment_records.limit,Row or item cap that callers pass; plumbing
+wayfindinglib/data_access/site_profile_reader.py,FALLBACK_SITE,"Stand-in site used only when Observatory.Location is missing, with a warning; a placeholder, not tuned (WAY-D131)"
 wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,DEFAULT_HEALPIX_LEVEL,Download chunking choice; no result change
 wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,DEFAULT_MAX_ATTEMPTS,Network retry count
 wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,DEFAULT_QUERY_TIMEOUT_SECONDS,Network query timeout

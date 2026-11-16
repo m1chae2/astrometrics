@@ -31,6 +31,7 @@ from pydantic.alias_generators import to_camel
 
 from astrometricslib.parameters import (
     EquipmentKind,
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
     TunedParameter,
@@ -61,16 +62,16 @@ DEW_SPREAD_LIMIT_C = TunedParameter(
         "dew point."
     ),
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.TELESCOPE}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.PUBLISHED_CONSTANT,
     register_entry="WAY-D27",
-    pending_conversion=True,
 )
 """The dew risk is raised when the ambient temperature is within this many
-degrees
-Celsius of the dew point. Optics cool below the air by a few degrees on a clear
-night, so dew can form before the air reaches its dew point. A common rule of
-thumb for dew heaters; design estimate, register row WAY-D27."""
+degrees Celsius of the dew point. Optics cool below the air by a few degrees
+on a clear night, so dew can form before the air reaches its dew point. A
+common rule of thumb for dew heaters; design estimate, register row WAY-D27.
+Hardcoded: no session records a dew point or when dew formed, so it cannot
+be tuned."""
 
 MINIMUM_HOUR_ANGLE_SPAN_DEG = TunedParameter(
     name="wayfinding.minimum_hour_angle_span_deg",

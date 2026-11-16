@@ -20,7 +20,16 @@ list, when a row names a value that is gone, and when a value is on both lists o
   shrinks.
 
 A row is keyed by `file` and `name`. A class constant is `Class.NAME`; a config key is
-`[Section] key`.
+`[Section] key`; a number default of a function argument is `Class.method.argument` (or
+`function.argument`; a nested function is named after its enclosing functions).
+
+The scanner finds three kinds of candidate: module-level and class-level UPPER_CASE number
+constants, config reads with a number fallback, and argument defaults that are an int or float
+literal (a leading minus is allowed; `True`, `False` and `None` are skipped). An argument default
+hides a tuned value in a signature, so it is listed too. Put it on `not_tuning.csv` when it means
+"first", "all" or "none", is a page size or timeout, or is a value the caller always passes. Put it
+on `tuning_not_registered.csv` when it decides a result, even when it repeats a declared value,
+because the copy can drift.
 
 A third list holds the rule that automatic values are measured
 (`.claude/skills/documentation-style/CONVENTIONS.md`, Section 2):

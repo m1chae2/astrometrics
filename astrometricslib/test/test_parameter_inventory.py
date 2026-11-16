@@ -182,6 +182,49 @@ def test_find_parameters_on_a_small_tree(tmp_path: Path) -> None:
     assert names["[Processing] port"].bare_name == "port"
 
 
+def test_find_parameters_reads_argument_defaults(tmp_path: Path) -> None:
+    """Find number defaults of arguments; skip bool, None and the rest."""
+    library = tmp_path / "wayfindinglib"
+    library.mkdir()
+    (library / "example.py").write_text(
+        textwrap.dedent(
+            '''
+            """Example module."""
+
+            LIMIT_SCALE = 2
+
+
+            class Finder:
+                """A finder."""
+
+                def detect(self, fwhm: float = 4.0, flag: bool = True, name="a", size=None, *, bias=-1.5):
+                    """Detect."""
+
+                    def inner(count=3):
+                        """Count."""
+
+
+            async def run(limit=LIMIT_SCALE, timeout=10):
+                """Run."""
+            '''
+        )
+    )
+    found = {
+        candidate.name: candidate
+        for candidate in inventory.find_parameters(tmp_path)
+        if candidate.kind == "argument default"
+    }
+    assert set(found) == {
+        "Finder.detect.fwhm",
+        "Finder.detect.bias",
+        "Finder.detect.inner.count",
+        "run.timeout",
+    }
+    assert found["Finder.detect.fwhm"].value == "4.0"
+    assert found["Finder.detect.bias"].value == "-1.5"
+    assert found["run.timeout"].bare_name == "timeout"
+
+
 def _load_generator() -> ModuleType:
     """Load the parameter table generator from its file.
 

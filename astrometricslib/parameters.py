@@ -66,9 +66,11 @@ from astrometricslib.models.tuned_parameter import (
     TunedParameter,
     WhenMissing,
 )
+from astrometricslib.pipelines.shared.quality.raw_frame_check import LOW_STAR_FRACTION
 
 __all__ = [
     "AMBIGUOUS_RMS_GAP",
+    "LOW_STAR_FRACTION",
     "MOUNT_PERIODIC_ERROR_PERIOD_SECONDS",
     "NO_GOOD_MATCH_RMS",
     "TYPICAL_GUIDE_CYCLE_SECONDS",

@@ -1323,7 +1323,10 @@ def build_astrometry_doc() -> str:
         "blob_stars": require_symbol(fwhm_module, "FWHM_MEASUREMENT_STAR_COUNT"),
         "blob_box": 2 * require_symbol(fwhm_module, "BLOB_WIDTH_BOX_RADIUS_PX"),
         "threshold": float(default_of(detector.__init__, "threshold_sigma")),
-        "merge_px": float(default_of(detector.deduplicate, "separation_px")),
+        "merge_px": require_symbol(
+            "astrometricslib.pipelines.astrometry.pre_processing.source_detection",
+            "SOURCE_DETECTOR_MERGE_SEPARATION_PX",
+        ),
         "refit_min_stars": require_symbol(refine_module, "MINIMUM_MATCHED_STARS"),
         "refit_sip": require_symbol(refine_module, "SIP_DEGREE"),
         "refit_clip": require_symbol(refine_module, "CLIP_SIGMAS"),

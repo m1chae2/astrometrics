@@ -3,10 +3,12 @@
 Description: Every tuned value is a ``TunedParameter`` declaration, which is
 not a number literal. This module lists the plain numeric constants
 (module-level and class-level UPPER_CASE names built only from number
-literals) and the numeric config defaults (calls such as
-``config.get("Section", "key", fallback="3")``) in ``astrometricslib/`` and
-``wayfindinglib/``. ``astrometricslib/test/test_parameter_inventory.py``
-requires each one to be on exactly one of the two lists in
+literals), the numeric config defaults (calls such as
+``config.get("Section", "key", fallback="3")``) and the numeric argument
+defaults (``def detect(threshold_sigma: float = 5.0)``, which hide a tuned
+value in a signature) in ``astrometricslib/`` and ``wayfindinglib/``.
+``astrometricslib/test/test_parameter_inventory.py`` requires each one to be
+on exactly one of the two lists in
 ``build/documentation/parameter_inventory/``: ``not_tuning.csv`` (decided not
 tuning, with a reason) or ``tuning_not_registered.csv`` (tuning values that
 are not declared yet, such as dict or nested-tuple values).
@@ -40,13 +42,14 @@ class ParameterCandidate:
     Parameters
     ----------
     kind : `str`
-        ``constant`` or ``config``.
+        ``constant``, ``config`` or ``argument default``.
     file : `str`
         Path of the source file, relative to the repository root.
     line : `int`
         Line number of the definition.
     name : `str`
-        ``NAME``, ``Class.NAME`` or ``[Section] key``.
+        ``NAME``, ``Class.NAME``, ``[Section] key`` or
+        ``Class.method.argument`` (``function.argument`` outside a class).
     value : `str`
         The value as written in the source.
     comment : `str`
@@ -289,8 +292,101 @@ def _config_reads_in(
     return found
 
 
+def _argument_defaults_in(
+    tree: ast.Module, text: str, lines: list[str], relative: str
+) -> list[ParameterCandidate]:
+    """Collect the number-literal defaults of function arguments.
+
+    Parameters
+    ----------
+    tree : `ast.Module`
+        The parsed file.
+    text : `str`
+        Its source.
+    lines : `list` [`str`]
+        Source lines.
+    relative : `str`
+        Repository-relative path.
+
+    Returns
+    -------
+    found : `list` [`ParameterCandidate`]
+        One candidate per positional or keyword-only default that is an int or
+        float literal (a leading minus is allowed). Booleans and None are
+        skipped. Nested functions are named after their enclosing functions.
+    """
+    found: list[ParameterCandidate] = []
+
+    def visit(parent: ast.AST, prefix: str) -> None:
+        """Walk the children of a node, tracking the qualified name.
+
+        Parameters
+        ----------
+        parent : `ast.AST`
+            The node whose children are visited.
+        prefix : `str`
+            Dotted names of the enclosing classes and functions, with a
+            trailing dot, or empty.
+        """
+        for node in ast.iter_child_nodes(parent):
+            if isinstance(node, ast.ClassDef):
+                visit(node, prefix + node.name + ".")
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                arguments = node.args
+                positional = [*arguments.posonlyargs, *arguments.args]
+                first_default = len(positional) - len(arguments.defaults)
+                pairs = list(zip(positional[first_default:], arguments.defaults, strict=True))
+                pairs += [
+                    (argument, default)
+                    for argument, default in zip(arguments.kwonlyargs, arguments.kw_defaults, strict=True)
+                    if default is not None
+                ]
+                for argument, default in pairs:
+                    if not _is_number_literal(default):
+                        continue
+                    found.append(
+                        ParameterCandidate(
+                            kind="argument default",
+                            file=relative,
+                            line=default.lineno,
+                            name=f"{prefix}{node.name}.{argument.arg}",
+                            value=(ast.get_source_segment(text, default) or "")[:120],
+                            comment=_nearby_comment(lines, node.lineno, default.end_lineno or default.lineno),
+                        )
+                    )
+                visit(node, prefix + node.name + ".")
+            else:
+                visit(node, prefix)
+
+    visit(tree, "")
+    return found
+
+
+def _is_number_literal(node: ast.AST) -> bool:
+    """Say whether an expression is one int or float literal.
+
+    Parameters
+    ----------
+    node : `ast.AST`
+        The expression.
+
+    Returns
+    -------
+    literal : `bool`
+        True for ``5``, ``5.0`` and ``-5.0``; False for booleans, None and
+        any other expression.
+    """
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        return _is_number_literal(node.operand)
+    return (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, (int, float))
+        and not isinstance(node.value, bool)
+    )
+
+
 def find_parameters(repo_root: Path) -> list[ParameterCandidate]:
-    """Find the numeric constants and config defaults of the two libraries.
+    """Find the numeric constants, config defaults and argument defaults.
 
     Test folders, ``scripts`` folders and ``__pycache__`` are skipped.
 
@@ -318,6 +414,7 @@ def find_parameters(repo_root: Path) -> list[ParameterCandidate]:
             lines = text.splitlines()
             found += _constants_in(tree, text, lines, relative)
             found += _config_reads_in(tree, text, lines, relative)
+            found += _argument_defaults_in(tree, text, lines, relative)
     return sorted(found, key=lambda candidate: (candidate.file, candidate.line, candidate.name))
 
 

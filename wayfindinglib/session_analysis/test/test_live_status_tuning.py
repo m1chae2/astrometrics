@@ -98,3 +98,116 @@ def test_the_tuners_skip_when_the_recorded_nights_cannot_be_read() -> None:
     inputs = TuningInputs(_SETUP, None, None, {"wayfinder": _wayfinder(None)})  # type: ignore[arg-type]
     with pytest.raises(TuningSkippedError, match="cannot be read"):
         tuning.tune_guide_limit(inputs)
+
+
+def test_dither_recovery_is_the_time_to_two_normal_samples() -> None:
+    """The error is normal at the first sample whose next one is normal."""
+    sample_times = [0.0, 4.0, 8.0, 12.0, 16.0, 20.0]
+    sample_errors = [5.0, 1.0, 4.0, 1.0, 1.0, 1.0]
+    # The sample at 4 s is low but the next is not, so recovery is at 12 s.
+    assert tuning.dither_recovery_seconds([0.0], sample_times, sample_errors, 1.5) == [12.0]
+
+
+def test_dither_recovery_leaves_out_a_dither_that_never_recovers() -> None:
+    """A dither whose window holds no normal sample is left out."""
+    assert tuning.dither_recovery_seconds([0.0], [0.0, 4.0], [5.0, 6.0], 1.5) == []
+
+
+def test_dither_recovery_stops_at_the_next_dither() -> None:
+    """A normal sample after the next dither belongs to that dither."""
+    times = [0.0, 4.0, 100.0, 104.0]
+    errors = [5.0, 5.0, 1.0, 1.0]
+    assert tuning.dither_recovery_seconds([0.0, 100.0], times, errors, 1.5) == [0.0]
+
+
+def test_sample_gaps_stay_inside_a_night() -> None:
+    """The gap between one night and the next is not counted."""
+    assert tuning.sample_gaps([[0.0, 2.0, 5.0], [1000.0, 1003.0]]) == [2.0, 3.0, 3.0]
+
+
+def _recording_wayfinder(contexts: list, rows_by_night: dict[str, list[dict[str, float]]]) -> SimpleNamespace:
+    """Build a fake wayfinder with Ekos contexts and guide samples.
+
+    Parameters
+    ----------
+    contexts : `list`
+        Fake Ekos session contexts.
+    rows_by_night : `dict` [`str`, `list` [`dict`]]
+        The guiding sample rows of each night.
+
+    Returns
+    -------
+    wayfinder : `types.SimpleNamespace`
+        The fake.
+    """
+    nights = frozenset(rows_by_night)
+    records = SimpleNamespace(
+        recorded_session_nights=lambda: (nights, frozenset()),
+        get_guiding_samples=lambda session_id, **_keywords: rows_by_night.get(session_id, []),
+    )
+    butler = SimpleNamespace(get_all=lambda _dataset: contexts)
+    return SimpleNamespace(control=SimpleNamespace(_context=SimpleNamespace(records=records, butler=butler)))
+
+
+def _rows(times: list[float], errors: list[float]) -> list[dict[str, float]]:
+    """Build guiding rows with the given total errors, all along RA.
+
+    Parameters
+    ----------
+    times, errors : `list` [`float`]
+        The time and total error of each sample.
+
+    Returns
+    -------
+    rows : `list` [`dict`]
+        Rows with the keys the tuners read.
+    """
+    return [{"timestamp": time, "dra": error, "ddec": 0.0} for time, error in zip(times, errors, strict=True)]
+
+
+def test_the_early_exposure_tuner_takes_the_median_recovery_time() -> None:
+    """Three dithers that recover after 8, 12 and 12 s give 12 s."""
+    # A night of quiet guiding (error 1.0) with three 4 s-spaced dither bursts.
+    times = [float(4 * step) for step in range(300)]
+    errors = [1.0] * 300
+    dither_times = [100.0, 400.0, 800.0]
+    for dither_time, quiet_after in zip(dither_times, (8.0, 12.0, 12.0), strict=True):
+        for step, time in enumerate(times):
+            if dither_time <= time < dither_time + quiet_after:
+                errors[step] = 9.0
+    events = [SimpleNamespace(timestamp=time, state="Dithering successful") for time in dither_times]
+    context = SimpleNamespace(session_id="2026-10-02", guide_state_events=events)
+    wayfinder = _recording_wayfinder([context], {"2026-10-02": _rows(times, errors)})
+
+    result = tuning.tune_early_exposure(TuningInputs(_SETUP, None, None, {"wayfinder": wayfinder}))
+
+    assert result.values == {"wayfinding.early_exposure_seconds": pytest.approx(12.0)}
+    assert result.sample == 3
+
+
+def test_the_early_exposure_tuner_skips_without_dithers() -> None:
+    """A night with no successful dither gives nothing to measure."""
+    context = SimpleNamespace(session_id="2026-10-02", guide_state_events=[])
+    wayfinder = _recording_wayfinder([context], {"2026-10-02": _rows([0.0, 4.0], [1.0, 1.0])})
+    with pytest.raises(TuningSkippedError):
+        tuning.tune_early_exposure(TuningInputs(_SETUP, None, None, {"wayfinder": wayfinder}))
+
+
+def test_the_stale_record_tuner_is_three_times_the_longest_ordinary_gap() -> None:
+    """Gaps of 4 s with a few 100 s pauses give 3 times the 99.9th."""
+    times = [0.0]
+    for index in range(2000):
+        times.append(times[-1] + (100.0 if index % 500 == 499 else 4.0))
+    wayfinder = _recording_wayfinder([], {"2026-10-02": _rows(times, [1.0] * len(times))})
+
+    result = tuning.tune_stale_record(TuningInputs(_SETUP, None, None, {"wayfinder": wayfinder}))
+
+    assert result.values == {"wayfinding.stale_record_seconds": pytest.approx(300.0)}
+    assert result.sample == 2000
+
+
+def test_the_stale_record_tuner_skips_with_too_few_gaps() -> None:
+    """Fewer than a thousand gaps cannot give a 99.9th percentile."""
+    wayfinder = _recording_wayfinder([], {"2026-10-02": _rows([0.0, 4.0, 8.0], [1.0] * 3)})
+    with pytest.raises(TuningSkippedError, match="gaps"):
+        tuning.tune_stale_record(TuningInputs(_SETUP, None, None, {"wayfinder": wayfinder}))

@@ -58,6 +58,9 @@ logger = logging.getLogger(__name__)
 # If more than this fraction of the pixels at the theoretical dispersion
 # start are still saturated, the star's own flare/astigmatism is judged to
 # be bleeding into the spectrum, and flare-masked extraction is turned on.
+# A share of the cutout, so it does not depend on the camera. Hardcoded: no
+# stored data records this share (about ten spectral targets so far), so it
+# cannot be tuned; design estimate, register row SPE-D54.
 _FLARE_CONTAMINATION_FRACTION_THRESHOLD = TunedParameter(
     name="spectroscopy.flare_contamination_fraction_threshold",
     default=0.1,
@@ -67,10 +70,9 @@ _FLARE_CONTAMINATION_FRACTION_THRESHOLD = TunedParameter(
         "saturated, the star's flare is judged to bleed into the spectrum."
     ),
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="SPE-D54",
-    pending_conversion=True,
 )
 
 # Width, in samples, of the running median that estimates the continuum. It

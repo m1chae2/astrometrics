@@ -65,7 +65,8 @@ def _guide_stats(with_jump: bool = True, with_drift: bool = True) -> list[EkosGu
             dec = 700.0
         if with_drift and 600 <= offset < 660:
             segment_start = 600.0 if offset < 620 else 620.0
-            ra = 7.0 * (offset - segment_start) + 1.0
+            # Some scatter, as in real data, gives the fit an error.
+            ra = 7.0 * (offset - segment_start) + 1.0 + 2.0 * sign
         samples.append(_sample(offset, ra, dec))
     return samples
 
@@ -393,3 +394,81 @@ def test_a_clean_session_has_a_calm_plain_verdict() -> None:
 
     assert status.plain_flags == []
     assert status.plain_verdict == "No problems found so far in what Ekos has recorded."
+
+
+def test_matches_stopped_mount_uses_the_standard_error() -> None:
+    """A rate within three standard errors of the stopped rate matches."""
+    stopped_rate = live_status.SIDEREAL_RATE_ARCSEC_PER_SECOND  # at declination 0
+    assert live_status.matches_stopped_mount([(stopped_rate + 0.5, 0.2)], 0.0) is True
+    assert live_status.matches_stopped_mount([(stopped_rate + 1.5, 0.2)], 0.0) is False
+
+
+def test_matches_stopped_mount_with_no_scatter_needs_an_exact_rate() -> None:
+    """A fit with a zero standard error matches only the stopped rate."""
+    stopped_rate = live_status.SIDEREAL_RATE_ARCSEC_PER_SECOND
+    assert live_status.matches_stopped_mount([(stopped_rate, 0.0)], 0.0) is True
+    assert live_status.matches_stopped_mount([(stopped_rate + 0.1, 0.0)], 0.0) is False
+
+
+def test_matches_stopped_mount_is_unknown_without_a_fit() -> None:
+    """No fitted piece gives no answer."""
+    assert live_status.matches_stopped_mount([], 30.0) is None
+
+
+def test_matches_stopped_mount_takes_the_sign_out_of_the_rate() -> None:
+    """A drift of the opposite sign matches the same stopped rate."""
+    stopped_rate = live_status.SIDEREAL_RATE_ARCSEC_PER_SECOND
+    assert live_status.matches_stopped_mount([(-stopped_rate, 0.1)], 0.0) is True
+
+
+def test_dither_settle_is_measured_from_the_guider_events() -> None:
+    """Settling to Dithering successful gives each dither's own settle."""
+    events = [
+        EkosStateEvent(timestamp=_START + 10.0, state="Settling"),
+        EkosStateEvent(timestamp=_START + 18.0, state="Dithering successful"),
+        EkosStateEvent(timestamp=_START + 210.0, state="Settling"),
+        EkosStateEvent(timestamp=_START + 240.0, state="Dithering successful"),
+    ]
+    dithers = [
+        DitherEvent(timestamp=_START + 5.0, amplitude_px=2.5, succeeded=True),
+        DitherEvent(timestamp=_START + 205.0, amplitude_px=2.5, succeeded=True),
+        DitherEvent(timestamp=_START + 405.0, amplitude_px=2.5, succeeded=True),
+    ]
+    settles = live_status.dither_settle_seconds(dithers, events)
+
+    assert settles[0] == pytest.approx(8.0)
+    assert settles[1] == pytest.approx(30.0)
+    # The third dither has no settle of its own: it gets the 95th percentile.
+    assert settles[2] == pytest.approx(0.05 * 8.0 + 0.95 * 30.0)
+
+
+def test_dither_settle_is_unknown_without_events() -> None:
+    """With no guider events there is no measured settle."""
+    dither = DitherEvent(timestamp=_START, amplitude_px=2.5, succeeded=True)
+    assert live_status.dither_settle_seconds([dither], []) == [None]
+
+
+def test_dither_follow_window_is_the_exposure_plus_the_settle() -> None:
+    """The window is the exposure plus the settle, else the fallback."""
+    assert live_status.dither_follow_seconds(120.0, 8.0) == pytest.approx(128.0)
+    assert live_status.dither_follow_seconds(120.0, None) == pytest.approx(130.0)
+    assert live_status.dither_follow_seconds(None, 8.0) == pytest.approx(130.0)
+
+
+def test_a_short_settle_shortens_the_window_that_links_a_dither_to_a_frame() -> None:
+    """A dither 300 s before an exposure did not lead into it."""
+    dither = DitherEvent(timestamp=_START + 20.0, amplitude_px=2.5, succeeded=True)
+    events = [
+        EkosStateEvent(timestamp=_START + 21.0, state="Settling"),
+        EkosStateEvent(timestamp=_START + 31.0, state="Dithering successful"),
+    ]
+    exposures = live_status.summarize_exposures(
+        [_capture(350.0)], [], [], [dither], guide_state_events=events
+    )
+    assert exposures[0].follows_dither is False
+
+    exposures = live_status.summarize_exposures([_capture(350.0)], [], [], [dither])
+    assert exposures[0].follows_dither is False
+    close = DitherEvent(timestamp=_START + 120.0, amplitude_px=2.5, succeeded=True)
+    exposures = live_status.summarize_exposures([_capture(350.0)], [], [], [close], guide_state_events=events)
+    assert exposures[0].follows_dither is True

@@ -134,6 +134,7 @@ EXPECTED_MODULE_NAMES = {
         "AMBIGUOUS_RMS_GAP",
         "ChangeNotice",
         "ConfigTunedValues",
+        "LOW_STAR_FRACTION",
         "MOUNT_PERIODIC_ERROR_PERIOD_SECONDS",
         "NO_GOOD_MATCH_RMS",
         "ParameterContext",

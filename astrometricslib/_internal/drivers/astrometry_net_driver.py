@@ -47,7 +47,6 @@ from astrometricslib.foundation.paths import scratch_directory
 from astrometricslib.foundation.run_abandonment import run_registered
 from astrometricslib.foundation.run_tally import RunTally, add_to_bound_tally, bind_tally
 from astrometricslib.models.tuned_parameter import (
-    EquipmentKind,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
@@ -116,16 +115,20 @@ MINIMUM_SOURCES_FOR_LOCAL_SOLVE = TunedParameter(
 # failure; a hinted attempt that instead fails quickly (a real
 # hint-mismatch, not an exhaustive search) still gets the blind retry,
 # since that is the case it exists to rescue.
+#
+# 0.9 stands for "it ran until its time limit": solve-field stops itself at
+# its CPU limit a little before the wall-clock timeout, so the exact limit is
+# never reached. It is a method choice, not tuned: only skipped retries log
+# their elapsed time, so there is nothing to tune from.
 HINTED_SOLVE_NEAR_TIMEOUT_FRACTION = TunedParameter(
     name="internal.hinted_solve_near_timeout_fraction",
     default=0.9,
     unit="fraction",
     description="Share of its time budget a hinted solve may use before the blind retry is skipped.",
     role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="AST-D06",
-    pending_conversion=True,
 )
 
 # The maximum number of times to retry if the internet connection fails.

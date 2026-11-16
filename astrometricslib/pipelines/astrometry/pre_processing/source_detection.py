@@ -47,6 +47,43 @@ SOURCE_DETECTOR_ROUNDNESS_RANGE = TunedParameter(
     register_entry="AST-D01",
 )
 
+# The star finder's kernel width, in pixels: the star width it expects. It
+# also sets the finder's smallest separation (about 2.5 kernel widths), so
+# with 4 px no two detections lie closer than about 9 px. It ought to follow
+# the measured star width (2.2 to 2.6 px on the ASI 533MM at 405 mm); on the
+# M 31 stack of 2026-11-15 a 2.24 px kernel found 11% more stars and split
+# pairs down to about 5 px. Declared here unchanged; the change is tracked
+# separately (pending conversion).
+SOURCE_DETECTOR_KERNEL_FWHM_PX = TunedParameter(
+    name="astrometry.source_detector_kernel_fwhm_px",
+    default=4.0,
+    unit="px",
+    description="Star width the star finder expects; it also sets the closest two detections can be.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-D01",
+    pending_conversion=True,
+)
+
+# Detections closer than this many pixels are merged into one star (meant to
+# rejoin a star the finder split in two). On the M 31 stack of 2026-11-15 all
+# 1,870 merged groups joined stars more than 1.5 star widths apart, so none
+# repaired a split star, and 158 of 500 named stars were placed between two
+# real stars. Declared here unchanged; the change is tracked separately
+# (pending conversion).
+SOURCE_DETECTOR_MERGE_SEPARATION_PX = TunedParameter(
+    name="astrometry.source_detector_merge_separation_px",
+    default=15.0,
+    unit="px",
+    description="Detections closer than this are merged into one star.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="AST-D02",
+    pending_conversion=True,
+)
+
 # Below this pixel count, background stats are computed on the full
 # array -- subsampling only pays off once the full-array cost is
 # large enough to matter, and small arrays don't have enough pixels
@@ -287,20 +324,20 @@ def background_map_from_mesh(mesh: np.ndarray, box_size: int, shape: tuple[int, 
 class SourceDetector:
     """Finds bright dots (stars) in an image using the DAOStarFinder math."""
 
-    def __init__(self, fwhm: float = 4.0, threshold_sigma: float = 5.0) -> None:
+    def __init__(self, fwhm: float | None = None, threshold_sigma: float = 5.0) -> None:
         """Set up the star finder.
 
         Parameters
         ----------
         fwhm : `float`, optional
             How wide a typical star is expected to be across the middle,
-            measured in pixels (default is 4.0).
+            measured in pixels. `SOURCE_DETECTOR_KERNEL_FWHM_PX` if omitted.
         threshold_sigma : `float`, optional
             How bright a dot needs to be before it is believed to be a star.
             This is measured as a multiple of the background noise
             (default is 5.0x the noise).
         """
-        self.fwhm = fwhm
+        self.fwhm = float(resolve(SOURCE_DETECTOR_KERNEL_FWHM_PX).value) if fwhm is None else fwhm
         self.threshold_sigma = threshold_sigma
         # The background noise (standard deviation of the sky pixels) of the
         # picture the last `detect` call searched, in the picture's units, or
@@ -411,7 +448,9 @@ class SourceDetector:
             )
         return detected
 
-    def deduplicate(self, sources: list[dict[str, Any]], separation_px: float = 15.0) -> list[dict[str, Any]]:
+    def deduplicate(
+        self, sources: list[dict[str, Any]], separation_px: float | None = None
+    ) -> list[dict[str, Any]]:
         """Combine overlapping dots into a single star.
 
         If the math accidentally splits a large star into two dots, this
@@ -424,7 +463,8 @@ class SourceDetector:
             The list of stars found in the previous step.
         separation_px : `float`, optional
             How close two dots need to be (in pixels) before they are assumed
-            to actually just be one star. Default is 15.0 pixels.
+            to actually just be one star.
+            `SOURCE_DETECTOR_MERGE_SEPARATION_PX` if omitted.
 
         Returns
         -------
@@ -448,6 +488,8 @@ class SourceDetector:
             dtype=float,
         )
 
+        if separation_px is None:
+            separation_px = float(resolve(SOURCE_DETECTOR_MERGE_SEPARATION_PX).value)
         tree = cKDTree(coords)
         visited = np.zeros(len(sources), dtype=bool)
         unique_stars = []

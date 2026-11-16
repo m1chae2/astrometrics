@@ -18,6 +18,7 @@ import time
 from collections.abc import Sequence
 
 from astrometricslib.parameters import (
+    LOW_STAR_FRACTION,
     EquipmentKind,
     HardcodedKind,
     ParameterRole,
@@ -25,8 +26,14 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from wayfindinglib.analytics.line_fit import significant_slope
-from wayfindinglib.models.session.ekos_session import EkosCapture, EkosGuideStat, EkosSessionContext
+from wayfindinglib.analytics.line_fit import fit_slope, significant_slope
+from wayfindinglib.analytics.tuning_support import percentile
+from wayfindinglib.models.session.ekos_session import (
+    EkosCapture,
+    EkosGuideStat,
+    EkosSessionContext,
+    EkosStateEvent,
+)
 from wayfindinglib.models.session.live_session_status import (
     DitherEvent,
     DitherSettings,
@@ -45,33 +52,54 @@ EARLY_EXPOSURE_SECONDS = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D136",
-    pending_conversion=True,
+    allowed_range=(5.0, 300.0),
+    minimum_sample=10,  # a sample is one successful dither with guide samples after it
 )
 """Length of the opening stretch of an exposure compared with the rest.
 
 A dither's after-effects show in the first moments of the next exposure.
-Checked on the 2026-10-02 M 27 session: the 30 s after a dither averaged
-2.3 to 6.0 arcsec of guide error, against 1.3 to 1.7 arcsec for the rest.
+The tuner (`live_status_tuning.EARLY_EXPOSURE_TUNER`) takes the median time
+after a successful dither at which the guide error is back within 1.5 times
+the night's median error, over the stored dithers. The default of 30 s comes
+from the 2026-10-02 M 27 session: the 30 s after a dither averaged 2.3 to
+6.0 arcsec of guide error, against 1.3 to 1.7 arcsec for the rest.
 """
 
 DITHER_FOLLOW_SECONDS = TunedParameter(
     name="wayfinding.dither_follow_seconds",
     default=130.0,
     unit="s",
-    description='How long before an exposure a dither counts as "just before" it.',
+    description='Fallback for how long before an exposure a dither counts as "just before" it.',
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.MOUNT}),
+    source=ParameterSource.DETERMINED_EACH_RUN,
     register_entry="WAY-D136",
-    pending_conversion=True,
 )
-"""How long before an exposure a dither counts as "just before" it.
+"""Fallback for how long before an exposure a dither counts as before it.
 
-One exposure plus its settle time on that session: 120 s exposure plus a
-settle of up to 30 s would be 150 s, but the dither ends before the
-settle begins, and the exposure starts at the end of the settle, so a
-dither that began within this time of the exposure's start led into it.
+The window is worked out on each run by `dither_follow_seconds`: the
+capture's own exposure length plus the measured settle time of the dither
+(or the session's 95th-percentile settle when the dither has none of its
+own). This value is used only when neither a settle time nor an exposure
+length is known. It is the 2026-10-02 session's case: a 120 s exposure plus
+a settle of about 10 s. The code applies the value itself, so no run
+basis multiplies it.
 """
+
+SETTLE_PERCENTILE = TunedParameter(
+    name="wayfinding.settle_percentile",
+    default=95.0,
+    unit="percent",
+    description="Settle time used for a dither with no settle of its own: this percentile of the session's.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D136",
+)
+"""Settle time used for a dither with no settle of its own.
+
+The 95th percentile of the session's measured settles covers all but the
+slowest one dither in twenty, so a dither that settled slowly is still
+linked to the exposure that followed it. Register entry WAY-D136."""
 
 EXCURSION_MEDIAN_MULTIPLE = TunedParameter(
     name="wayfinding.excursion_median_multiple",
@@ -133,45 +161,16 @@ between three runs of one drift, so a join time of 20 s merges them while
 keeping the 21:15 and 22:17 events apart.
 """
 
-STOPPED_AXIS_TOLERANCE = TunedParameter(
-    name="wayfinding.stopped_axis_tolerance",
-    default=0.25,
-    unit="fraction",
-    description="Fraction a drift rate may differ from a stopped mount's and still match.",
-    role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.MOUNT}),
-    register_entry="WAY-D136",
-    pending_conversion=True,
-)
-"""Fraction a drift rate may differ from a stopped mount's and still match.
-
-The drift measured on 2026-10-02 was 7 arcsec per second against a
-stopped-mount value of 7.1 at declination +61.7 degrees. A quarter allows
-for the fit's error without matching ordinary tracking errors.
-"""
-
 SIDEREAL_RATE_ARCSEC_PER_SECOND = 15.0411
 """How fast the sky turns: arcseconds of right ascension per second."""
 
-LOW_STAR_FRACTION = TunedParameter(
-    name="wayfinding.low_star_fraction",
-    default=0.5,
-    unit="fraction",
-    description="A frame with fewer stars than this fraction of the usual one is flagged.",
-    role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.MOUNT}),
-    register_entry="WAY-D136",
-    pending_conversion=True,
-)
-"""A frame with fewer stars than this fraction of the usual one is flagged.
-
-The usual count is the median of the frames before it. Trailed or clouded
-frames lose their stars quickly. On 2026-10-02 a normal frame held about
-240 stars, and the frame exposed during the two-minute drift held a small
-fraction of that.
-"""
+# LOW_STAR_FRACTION is imported above, not declared here. It is the same
+# declaration the stacking frame check uses (``shared.low_star_fraction``), so
+# both registries hold one object. A frame with fewer stars than this fraction
+# of the usual count (the median of the frames before it) is flagged. Trailed
+# or clouded frames lose their stars quickly: on 2026-10-02 a normal frame
+# held about 240 stars, and the frame exposed during the two-minute drift held
+# a small fraction of that.
 
 MINIMUM_FRAMES_FOR_STAR_BASELINE = TunedParameter(
     name="wayfinding.minimum_frames_for_star_baseline",
@@ -265,12 +264,17 @@ STALE_RECORD_SECONDS = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="WAY-D136",
-    pending_conversion=True,
+    allowed_range=(30.0, 3600.0),
+    minimum_sample=1000,  # a sample is one gap between consecutive guide samples in a night
 )
 """A file with no new record for this long is reported as stale.
 
-Ekos writes a guide measurement every few seconds while guiding, so five
-minutes of silence means guiding or Ekos itself has stopped.
+Ekos writes a guide measurement every few seconds while guiding, so a long
+silence means guiding or Ekos itself has stopped. The tuner
+(`live_status_tuning.STALE_RECORD_TUNER`) sets it to 3 times the 99.9th
+percentile of the gaps between consecutive guide samples in a night (that
+percentile was about 105 s over 17 sessions, so about 315 s). The default of
+300 s is that result rounded.
 """
 
 
@@ -355,15 +359,70 @@ def _axis_error(sample: EkosGuideStat, axis: str) -> float:
     return sample.ra_error_arcsec if axis == "RA" else sample.dec_error_arcsec
 
 
+def _drift_pieces(
+    run: Sequence[EkosGuideStat], reacquire_times: Sequence[float]
+) -> list[list[EkosGuideStat]]:
+    """Cut an excursion into pieces at every guider re-lock.
+
+    Each re-lock resets the error, so one straight-line fit across a whole
+    excursion would underestimate the drift.
+
+    Parameters
+    ----------
+    run : `Sequence` [`EkosGuideStat`]
+        The measurements inside one excursion, in time order.
+    reacquire_times : `Sequence` [`float`]
+        When the guider re-locked on its star.
+
+    Returns
+    -------
+    pieces : `list` [`list` [`EkosGuideStat`]]
+        The measurements between re-locks, long enough to fit a line.
+    """
+    cuts = sorted(t for t in reacquire_times if run[0].timestamp < t < run[-1].timestamp)
+    pieces: list[list[EkosGuideStat]] = [[]]
+    cut_index = 0
+    for sample in run:
+        while cut_index < len(cuts) and sample.timestamp > cuts[cut_index]:
+            pieces.append([])
+            cut_index += 1
+        pieces[-1].append(sample)
+    minimum = resolve_parameter(MINIMUM_SAMPLES_FOR_DRIFT_FIT).value
+    return [piece for piece in pieces if len(piece) >= minimum]
+
+
+def _piece_fits(pieces: Sequence[Sequence[EkosGuideStat]], axis: str) -> list[tuple[float, float]]:
+    """Fit a line to the error along one axis in each piece.
+
+    Parameters
+    ----------
+    pieces : `Sequence` [`Sequence` [`EkosGuideStat`]]
+        Pieces of an excursion, as from `_drift_pieces`.
+    axis : `str`
+        ``"RA"`` or ``"Dec"``.
+
+    Returns
+    -------
+    fits : `list` [`tuple` [`float`, `float`]]
+        The slope and its standard error for each piece that could be fitted.
+    """
+    fits = []
+    for piece in pieces:
+        times = [sample.timestamp - piece[0].timestamp for sample in piece]
+        errors = [sample.ra_error_arcsec if axis == "RA" else sample.dec_error_arcsec for sample in piece]
+        fit = fit_slope(times, errors)
+        if fit is not None:
+            fits.append(fit)
+    return fits
+
+
 def _median_drift_rate(
     run: Sequence[EkosGuideStat], axis: str, reacquire_times: Sequence[float]
 ) -> float | None:
     """Estimate how fast the guide error grew during an excursion.
 
-    Each guider re-lock resets the error, so one straight-line fit across
-    a whole excursion would underestimate the drift. The excursion is cut
-    at every re-lock, each piece is fitted on its own, and the median
-    slope is returned.
+    The excursion is cut at every re-lock (see `_drift_pieces`), each piece
+    is fitted on its own, and the median slope is returned.
 
     Parameters
     ----------
@@ -380,24 +439,55 @@ def _median_drift_rate(
         The drift in arcseconds per second, or `None` if no piece has at
         least three measurements.
     """
-    cuts = sorted(t for t in reacquire_times if run[0].timestamp < t < run[-1].timestamp)
-    pieces: list[list[EkosGuideStat]] = [[]]
-    cut_index = 0
-    for sample in run:
-        while cut_index < len(cuts) and sample.timestamp > cuts[cut_index]:
-            pieces.append([])
-            cut_index += 1
-        pieces[-1].append(sample)
-    slopes = []
     sigmas = float(resolve_parameter(EXCURSION_DRIFT_SIGNIFICANCE_SIGMAS).value)
-    for piece in pieces:
-        if len(piece) < resolve_parameter(MINIMUM_SAMPLES_FOR_DRIFT_FIT).value:
-            continue
+    slopes = []
+    for piece in _drift_pieces(run, reacquire_times):
         times = [sample.timestamp - piece[0].timestamp for sample in piece]
         errors = [sample.ra_error_arcsec if axis == "RA" else sample.dec_error_arcsec for sample in piece]
         # A slope within the noise counts as no drift.
         slopes.append(abs(significant_slope(times, errors, sigmas)))
     return statistics.median(slopes) if slopes else None
+
+
+def matches_stopped_mount(fits: Sequence[tuple[float, float]], declination_degrees: float) -> bool | None:
+    """Say whether a drift is statistically the drift of a stopped RA axis.
+
+    A mount that stopped tracking lets the sky turn past at the sidereal
+    rate times the cosine of the declination. The measured rate is the
+    median over the pieces of an excursion of the fitted slope's size. It
+    matches when it lies within `EXCURSION_DRIFT_SIGNIFICANCE_SIGMAS`
+    standard errors of the stopped rate. The standard error of the median is
+    taken as that of the middle piece (for an even count, of the average of
+    the two middle pieces). A fit with no scatter has no standard error, so
+    it matches only when its rate equals the stopped rate to rounding.
+
+    Parameters
+    ----------
+    fits : `Sequence` [`tuple` [`float`, `float`]]
+        The slope and its standard error of each piece of the excursion.
+    declination_degrees : `float`
+        The mount's declination.
+
+    Returns
+    -------
+    matches : `bool` or `None`
+        Whether the drift matches a stopped axis, or `None` when no piece
+        could be fitted.
+    """
+    if not fits:
+        return None
+    ranked = sorted(fits, key=lambda fit: abs(fit[0]))
+    middle = len(ranked) // 2
+    if len(ranked) % 2:
+        rate = abs(ranked[middle][0])
+        standard_error = ranked[middle][1]
+    else:
+        low, high = ranked[middle - 1], ranked[middle]
+        rate = (abs(low[0]) + abs(high[0])) / 2.0
+        standard_error = math.hypot(low[1], high[1]) / 2.0
+    stopped_rate = SIDEREAL_RATE_ARCSEC_PER_SECOND * math.cos(math.radians(declination_degrees))
+    sigmas = float(resolve_parameter(EXCURSION_DRIFT_SIGNIFICANCE_SIGMAS).value)
+    return abs(rate - stopped_rate) <= sigmas * standard_error + 1e-9 * stopped_rate
 
 
 def find_guiding_excursions(
@@ -450,10 +540,8 @@ def find_guiding_excursions(
         rate = _median_drift_rate(run, axis, reacquire_times)
         matches_stopped = None
         if axis == "RA" and rate is not None and declination_degrees is not None:
-            stopped_rate = SIDEREAL_RATE_ARCSEC_PER_SECOND * math.cos(math.radians(declination_degrees))
-            matches_stopped = (
-                abs(rate - stopped_rate) <= resolve_parameter(STOPPED_AXIS_TOLERANCE).value * stopped_rate
-            )
+            fits = _piece_fits(_drift_pieces(run, reacquire_times), "RA")
+            matches_stopped = matches_stopped_mount(fits, declination_degrees)
         started_at, ended_at = run[0].timestamp, run[-1].timestamp
         peak_error = max(_total_error(s) for s in run)
         kind = (
@@ -556,12 +644,102 @@ def star_count_baseline(captures: Sequence[EkosCapture], index: int) -> list[int
     return [capture.star_count for capture in captures[start:index]]
 
 
+def measured_settle_seconds(guide_state_events: Sequence[EkosStateEvent]) -> list[tuple[float, float]]:
+    """Measure each dither's settle time from the guider's state changes.
+
+    Ekos logs ``Settling`` when the guider starts waiting for the star to
+    steady after a move, and ``Dithering successful`` when it is done.
+
+    Parameters
+    ----------
+    guide_state_events : `Sequence` [`EkosStateEvent`]
+        The guider's state changes, in time order.
+
+    Returns
+    -------
+    settles : `list` [`tuple` [`float`, `float`]]
+        For each settle that finished, when it began and how long it took.
+    """
+    settles = []
+    began_at: float | None = None
+    for event in guide_state_events:
+        if event.state == "Settling":
+            began_at = event.timestamp
+        elif event.state == "Dithering successful" and began_at is not None:
+            settles.append((began_at, event.timestamp - began_at))
+            began_at = None
+        elif event.state == "Dithering":
+            began_at = None
+    return settles
+
+
+def dither_settle_seconds(
+    dithers: Sequence[DitherEvent], guide_state_events: Sequence[EkosStateEvent]
+) -> list[float | None]:
+    """Give each dither's settle time, with a session value for the gaps.
+
+    A dither's own settle is the first measured settle that begins after the
+    dither starts and before the next dither starts. A dither with none of
+    its own gets the `SETTLE_PERCENTILE` percentile of the session's settles.
+
+    Parameters
+    ----------
+    dithers : `Sequence` [`DitherEvent`]
+        Dithers read from the KStars log, in time order.
+    guide_state_events : `Sequence` [`EkosStateEvent`]
+        The guider's state changes.
+
+    Returns
+    -------
+    settles : `list` [`float` or `None`]
+        One settle time in seconds per dither, or `None` where the session
+        has no measured settle at all.
+    """
+    measured = measured_settle_seconds(guide_state_events)
+    if not measured:
+        return [None] * len(dithers)
+    session_settle = percentile([duration for _began, duration in measured], SETTLE_PERCENTILE.default)
+    settles: list[float | None] = []
+    for index, dither in enumerate(dithers):
+        end = dithers[index + 1].timestamp if index + 1 < len(dithers) else math.inf
+        own = [duration for began, duration in measured if dither.timestamp <= began < end]
+        settles.append(own[0] if own else session_settle)
+    return settles
+
+
+def dither_follow_seconds(exposure_seconds: float | None, settle_seconds: float | None) -> float:
+    """Give how long before an exposure's start a dither still led into it.
+
+    The exposure that follows a dither starts when the settle ends, and the
+    settle starts when the dither does, so a dither led into an exposure if
+    it began within the settle plus one exposure length of the exposure's
+    start.
+
+    Parameters
+    ----------
+    exposure_seconds : `float` or `None`
+        The capture's own exposure length.
+    settle_seconds : `float` or `None`
+        The dither's settle time, or the session's when it has none.
+
+    Returns
+    -------
+    seconds : `float`
+        Exposure plus settle, or the fallback `DITHER_FOLLOW_SECONDS` when
+        either is unknown.
+    """
+    if exposure_seconds is None or settle_seconds is None or exposure_seconds <= 0.0:
+        return float(resolve_parameter(DITHER_FOLLOW_SECONDS).value)
+    return exposure_seconds + settle_seconds
+
+
 def summarize_exposures(
     captures: Sequence[EkosCapture],
     guide_stats: Sequence[EkosGuideStat],
     excursions: Sequence[GuidingExcursion],
     dithers: Sequence[DitherEvent],
     count: int = RECENT_EXPOSURE_COUNT,
+    guide_state_events: Sequence[EkosStateEvent] = (),
 ) -> list[ExposureSummary]:
     """Summarize the latest exposures and flag the ones that look ruined.
 
@@ -577,12 +755,17 @@ def summarize_exposures(
         Dithers read from the KStars log.
     count : `int`, optional
         How many of the latest exposures to return.
+    guide_state_events : `Sequence` [`EkosStateEvent`], optional
+        The guider's state changes, from which each dither's own settle time
+        is measured. Without them a dither follows an exposure within the
+        fallback `DITHER_FOLLOW_SECONDS`.
 
     Returns
     -------
     exposures : `list` [`ExposureSummary`]
         The latest `count` exposures, oldest first.
     """
+    settles = dither_settle_seconds(dithers, guide_state_events)
     summaries = []
     for index in range(max(0, len(captures) - count), len(captures)):
         capture = captures[index]
@@ -633,8 +816,8 @@ def summarize_exposures(
                 guide_rms_first_seconds_arcsec=_rms(early),
                 guide_rms_rest_arcsec=_rms(rest),
                 follows_dither=any(
-                    0.0 <= started_at - d.timestamp <= resolve_parameter(DITHER_FOLLOW_SECONDS).value
-                    for d in dithers
+                    0.0 <= started_at - d.timestamp <= dither_follow_seconds(capture.exposure_seconds, settle)
+                    for d, settle in zip(dithers, settles, strict=True)
                 ),
                 flags=flags,
                 plain_flags=plain_flags,
@@ -748,7 +931,9 @@ def summarize_live_session(
     declination = context.mount_positions[-1].declination_degrees if context.mount_positions else None
     reacquire_times = [e.timestamp for e in context.guide_state_events if e.state == "Reacquiring"]
     excursions = find_guiding_excursions(guide_stats, reacquire_times, declination)
-    exposures = summarize_exposures(context.captures, guide_stats, excursions, dithers)
+    exposures = summarize_exposures(
+        context.captures, guide_stats, excursions, dithers, guide_state_events=context.guide_state_events
+    )
 
     successful_focus = [run for run in context.autofocus_runs if run.succeeded]
     last_focus = successful_focus[-1] if successful_focus else None

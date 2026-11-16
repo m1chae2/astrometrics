@@ -22,13 +22,19 @@ values:
   over is the count that predicts the next frame's star count best. The fewest
   is the smallest count whose prediction is nearly as good.
 
-Values with no honest source in the stored data are not derived: how soon
-after a dither the guide error settles and how long before an exposure a
-dither counts (dither times are in the KStars log, which is not stored), how
-close a drift must be to a stopped mount's (no stored stopped-mount event),
-the star fraction that means a ruined frame (no stored label of ruined
-frames), how many samples a line needs (a statistical minimum), and when a
-file is stale (the stored samples cannot tell a pause from a stop).
+- **Early exposure length** (`wayfinding.early_exposure_seconds`). The Ekos
+  session records hold each successful dither. For each one, the time until
+  the guide error is back within 1.5 times the night's median error. The
+  length is the median of those times.
+- **Stale record time** (`wayfinding.stale_record_seconds`). The 99.9th
+  percentile of the gaps between consecutive guide samples in a night,
+  times 3. A longer silence than any pause of normal guiding is a stop.
+
+Values with no honest source in the stored data are not derived: how many
+samples a line needs (a statistical minimum). How long before an exposure a
+dither counts is worked out on each run from the exposure and the measured
+settle (`live_status.dither_follow_seconds`). Whether a drift matches a
+stopped mount is a statistics test (`live_status.matches_stopped_mount`).
 
 The statistics are pure functions of plain numbers, so a test needs no
 library.
@@ -61,23 +67,29 @@ from wayfindinglib.analytics.tuning_support import (
 )
 from wayfindinglib.models.session.telemetry import MEASURED_GUIDING_SAMPLE_SOURCES
 from wayfindinglib.session_analysis.live_status import (
+    EARLY_EXPOSURE_SECONDS,
     EXCURSION_FLOOR_ARCSEC,
     EXCURSION_JOIN_SECONDS,
     EXCURSION_MEDIAN_MULTIPLE,
     JUMP_FIRST_SAMPLE_FRACTION,
     MAXIMUM_FRAMES_IN_STAR_BASELINE,
     MINIMUM_FRAMES_FOR_STAR_BASELINE,
+    STALE_RECORD_SECONDS,
     _baseline_key,
 )
 
 __all__ = [
+    "EARLY_EXPOSURE_TUNER",
     "EXCURSIONS_TUNER",
     "GUIDE_LIMIT_TUNER",
+    "STALE_RECORD_TUNER",
     "STAR_BASELINE_TUNER",
+    "dither_recovery_seconds",
     "excursion_runs",
     "first_sample_ratios",
     "join_threshold",
     "night_quiet_levels",
+    "sample_gaps",
     "star_baseline_errors",
 ]
 
@@ -143,6 +155,41 @@ TOLERANCE_ON_BEST_BASELINE_ERROR = TunedParameter(
 of the best. A quarter more error than the best window is a baseline that is
 still usable for a flag that fires at half the usual stars. Register entry
 WAY-D136."""
+
+GUIDE_ERROR_NORMAL_MULTIPLE = TunedParameter(
+    name="wayfinding.guide_error_normal_multiple",
+    default=1.5,
+    unit="multiple",
+    description="After a dither the guide error is back to normal within this multiple of the median.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D136",
+)
+"""Guide error is normal within this multiple of the median after a dither.
+
+Ordinary guiding scatters about its median, with single samples well above it,
+so a level of exactly the median would never be reached for good. One and a
+half times the median is above that scatter and far below the 2 to 5 times
+seen right after a dither (the 2026-10-02 M 27 session). Register entry
+WAY-D136."""
+
+STALE_RECORD_GAP_MULTIPLE = TunedParameter(
+    name="wayfinding.stale_record_gap_multiple",
+    default=3.0,
+    unit="multiple",
+    description="A file is stale after this multiple of the longest ordinary gap between guide samples.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="WAY-D136",
+)
+"""A file is stale after this multiple of the longest ordinary gap.
+
+The 99.9th percentile of the gaps is the longest pause that normal guiding
+makes (a re-lock, a dither, a lost star found again). Three times that is a
+silence that is clearly not one of them, so the warning does not fire during
+normal pauses. Register entry WAY-D136."""
 
 
 def night_quiet_levels(
@@ -269,6 +316,66 @@ def star_baseline_errors(
         if relative_errors:
             errors[window] = (statistics.median(relative_errors), len(relative_errors))
     return errors
+
+
+def dither_recovery_seconds(
+    dither_times: Sequence[float],
+    sample_times: Sequence[float],
+    sample_errors: Sequence[float],
+    normal_error: float,
+) -> list[float]:
+    """Measure how long the guide error takes to recover after dithers.
+
+    For each dither, the guide samples after it (up to the next dither) are
+    read in order. The error is back to normal at the first sample that is
+    within `normal_error`, together with the sample after it (a lone low
+    sample among noisy ones does not count). A dither with no such sample
+    before the next dither is left out.
+
+    Parameters
+    ----------
+    dither_times : `~collections.abc.Sequence` [`float`]
+        When each dither succeeded, in time order.
+    sample_times, sample_errors : `~collections.abc.Sequence` [`float`]
+        The time and total error of each guide sample, in time order.
+    normal_error : `float`
+        The error at or below which guiding is normal, in arcseconds.
+
+    Returns
+    -------
+    seconds : `list` [`float`]
+        The time from each dither to its return to normal.
+    """
+    recoveries = []
+    for index, dither_time in enumerate(dither_times):
+        end = dither_times[index + 1] if index + 1 < len(dither_times) else math.inf
+        window = [
+            (time, error)
+            for time, error in zip(sample_times, sample_errors, strict=True)
+            if dither_time <= time < end
+        ]
+        for position, (time, error) in enumerate(window):
+            next_is_normal = position + 1 >= len(window) or window[position + 1][1] <= normal_error
+            if error <= normal_error and next_is_normal:
+                recoveries.append(time - dither_time)
+                break
+    return recoveries
+
+
+def sample_gaps(night_times: Sequence[Sequence[float]]) -> list[float]:
+    """List the gaps between consecutive guide samples, night by night.
+
+    Parameters
+    ----------
+    night_times : `list` [`list` [`float`]]
+        The time of each guide sample, one list per night, in time order.
+
+    Returns
+    -------
+    gaps : `list` [`float`]
+        The seconds from each sample to the next within a night.
+    """
+    return [later - earlier for times in night_times for earlier, later in itertools.pairwise(times)]
 
 
 def _guide_nights(records: Any) -> list[str]:
@@ -474,6 +581,115 @@ def tune_star_baseline(inputs: TuningInputs) -> TuningResult:
         ),
     )
 
+
+def tune_early_exposure(inputs: TuningInputs) -> TuningResult:
+    """Derive the early-exposure length from the recovery after a dither.
+
+    Parameters
+    ----------
+    inputs : `TuningInputs`
+        The tuning run's inputs. Reads the ``"wayfinder"`` service.
+
+    Returns
+    -------
+    result : `TuningResult`
+        The median recovery time in seconds.
+
+    Raises
+    ------
+    TuningSkippedError
+        If the stored sessions hold no successful dither with guide samples
+        that return to normal after it.
+    """
+    wayfinder = inputs.service("wayfinder")
+    records = records_of(wayfinder)
+    contexts = butler_of(wayfinder).get_all("ekos_session_context")
+    multiple = resolve_parameter(GUIDE_ERROR_NORMAL_MULTIPLE).value
+    series: dict[str, tuple[list[float], list[float]]] = {}
+    recoveries: list[float] = []
+    for context in contexts:
+        dither_times = sorted(
+            event.timestamp for event in context.guide_state_events if event.state == "Dithering successful"
+        )
+        if not dither_times:
+            continue
+        if context.session_id not in series:
+            series[context.session_id] = _night_series(records, context.session_id)
+        times, errors = series[context.session_id]
+        if not errors:
+            continue
+        normal_error = multiple * statistics.median(errors)
+        recoveries.extend(dither_recovery_seconds(dither_times, times, errors, normal_error))
+    if not recoveries:
+        raise TuningSkippedError("no stored dither has guide samples that return to normal after it")
+    return TuningResult(
+        values={EARLY_EXPOSURE_SECONDS.name: statistics.median(recoveries)},
+        sample=len(recoveries),
+        source=(
+            f"The median time after {len(recoveries)} successful dithers until the guide error was back "
+            f"within {multiple:g} times the night's median."
+        ),
+    )
+
+
+def tune_stale_record(inputs: TuningInputs) -> TuningResult:
+    """Derive the stale-record time from the gaps between guide samples.
+
+    Parameters
+    ----------
+    inputs : `TuningInputs`
+        The tuning run's inputs. Reads the ``"wayfinder"`` service.
+
+    Returns
+    -------
+    result : `TuningResult`
+        The multiple of the 99.9th percentile of the gaps, in seconds.
+
+    Raises
+    ------
+    TuningSkippedError
+        If there are too few gaps for a 99.9th percentile.
+    """
+    records = records_of(inputs.service("wayfinder"))
+    gaps = sample_gaps([_night_series(records, night)[0] for night in _guide_nights(records)])
+    minimum_gaps = resolve_parameter(MINIMUM_SAMPLES_FOR_QUIET_LEVEL).value
+    if len(gaps) < minimum_gaps:
+        raise TuningSkippedError(
+            f"only {len(gaps)} gaps between guide samples, fewer than the {minimum_gaps} "
+            "a 99.9th percentile needs"
+        )
+    quiet_percent = resolve_parameter(EXCURSION_QUIET_PERCENT).value
+    multiple = resolve_parameter(STALE_RECORD_GAP_MULTIPLE).value
+    longest_ordinary_gap = percentile(gaps, quiet_percent)
+    return TuningResult(
+        values={STALE_RECORD_SECONDS.name: multiple * longest_ordinary_gap},
+        sample=len(gaps),
+        source=(
+            f"{multiple:g} times the {quiet_percent:g}th percentile ({longest_ordinary_gap:.0f} s) of "
+            f"{len(gaps)} gaps between consecutive guide samples."
+        ),
+    )
+
+
+EARLY_EXPOSURE_TUNER = Tuner(
+    name="wayfinding.live_status_early_exposure",
+    parameters=(EARLY_EXPOSURE_SECONDS,),
+    method=(
+        "For each successful dither in the stored Ekos sessions, the time until the guide error is back "
+        "within 1.5 times the night's median error. The length is the median over dithers."
+    ),
+    tune=tune_early_exposure,
+)
+
+STALE_RECORD_TUNER = Tuner(
+    name="wayfinding.live_status_stale_record",
+    parameters=(STALE_RECORD_SECONDS,),
+    method=(
+        "Three times the 99.9th percentile of the gaps between consecutive measured guide samples within "
+        "a night."
+    ),
+    tune=tune_stale_record,
+)
 
 GUIDE_LIMIT_TUNER = Tuner(
     name="wayfinding.live_status_guide_limit",

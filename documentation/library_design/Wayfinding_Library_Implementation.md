@@ -500,7 +500,7 @@ Without `SiteProfile.typical_seeing_fwhm_arcsec`, the physical reference is the 
 | Provisional count in the ranking: gains tied to | 2 decimals (whole percent) | `GAIN_TIE_DIGITS` | WAY-D70 |
 | Clock hour of the ranking | dither every 3 frames; 1 autofocus run; thin under 2 h | `DITHER_EVERY_FRAMES`, `AUTOFOCUS_RUNS_PER_HOUR`, `THIN_DATASET_SECONDS` | WAY-D71 |
 | Stack rules: rejected share of pixel values; star width over predicted width | 15%; 1.2 (copies of the stacker's limits) | `REJECTED_PIXEL_FRACTION_LIMIT`, `STACK_SHARPNESS_RATIO_LIMIT` | [STK-24](validation/stacking.md#stk-24), [STK-25](validation/stacking.md#stk-25) |
-| Spectrum rules: poor match RMS; ambiguity gap | 0.15; 0.02 (copies) | `POOR_MATCH_RMS_LIMIT`, `AMBIGUOUS_RMS_GAP_LIMIT` | [SPE-16, SPE-18](validation/spectroscopy.md#spe-18) |
+| Spectrum rules: poor match RMS; ambiguity gap | 0.15; 0.02 (the pipeline's own) | `POOR_MATCH_RMS_LIMIT`, `AMBIGUOUS_RMS_GAP_LIMIT` | [SPE-16, SPE-18](validation/spectroscopy.md#spe-18) |
 | Frames lost warning | 5% of a setting's frames | `FRAME_LOSS_WARNING_FRACTION` | WAY-D60 |
 | Report "take N more" | 10 frames at least; exposure rounded up to 10 s | `MINIMUM_FRAMES_FOR_FORECAST`, `EXPOSURE_ROUNDING_SECONDS` | WAY-D61 |
 | Sky cost; altitude cost | 10% of at least 300 s of captured time; cuts 30°, 40°, 50°, 15% | `SKY_COST_MINIMUM_SHARE`, `SKY_COST_MINIMUM_CAPTURED_SECONDS`, `ALTITUDE_CUTS_DEG`, `ALTITUDE_MINIMUM_RELATIVE_LOSS` | WAY-D64, WAY-D65 |

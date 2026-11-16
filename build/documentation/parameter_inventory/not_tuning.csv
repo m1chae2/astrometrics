@@ -291,6 +291,7 @@ wayfindinglib/analytics/envelope_assembly.py,_SAMPLE_READ_LIMIT,Read limit never
 wayfindinglib/analytics/guiding_spectrum.py,_FREQUENCY_POINTS,Frequency grid resolution; algorithm structure
 wayfindinglib/analytics/guiding_spectrum.py,_MAXIMUM_FREQUENCY_HZ,Nyquist-type upper frequency tied to 2 s guide cycle
 wayfindinglib/analytics/guiding_spectrum.py,_MAXIMUM_PEAKS,Count of peaks reported; display size
+wayfindinglib/analytics/line_fit.py,MINIMUM_POINTS_FOR_SLOPE_ERROR,"Mathematical minimum: a line has two parameters, so three points are the fewest that leave scatter to estimate the slope's error"
 wayfindinglib/analytics/package_suggestions.py,RANKING_FINGERPRINT_VERSION,software plumbing
 wayfindinglib/analytics/performance_envelope.py,MAD_TO_SIGMA,unit or physical constant
 wayfindinglib/analytics/performance_envelope.py,SIDEREAL_RATE_ARCSEC_PER_SECOND,Physical sidereal rate

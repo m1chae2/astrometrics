@@ -17,15 +17,15 @@ import statistics
 import time
 from collections.abc import Sequence
 
-import numpy as np
-
 from astrometricslib.parameters import (
     EquipmentKind,
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
     TunedParameter,
     resolve_parameter,
 )
+from wayfindinglib.analytics.line_fit import significant_slope
 from wayfindinglib.models.session.ekos_session import EkosCapture, EkosGuideStat, EkosSessionContext
 from wayfindinglib.models.session.live_session_status import (
     DitherEvent,
@@ -231,12 +231,27 @@ MINIMUM_SAMPLES_FOR_DRIFT_FIT = TunedParameter(
     unit="samples",
     description="Measurements needed to fit a straight line to part of an excursion.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.MOUNT}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="WAY-D136",
-    pending_conversion=True,
 )
-"""Measurements needed to fit a straight line to part of an excursion."""
+"""Measurements needed to fit a straight line to part of an excursion.
+
+Three is the fewest that leave scatter to judge the slope by
+(`line_fit.significant_slope`).
+"""
+
+EXCURSION_DRIFT_SIGNIFICANCE_SIGMAS = TunedParameter(
+    name="wayfinding.excursion_drift_significance_sigmas",
+    default=3.0,
+    unit="standard errors",
+    description="A piece's drift counts only when it stands this many standard errors from zero.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="WAY-D136",
+)
+"""A piece's drift counts only when this many standard errors from zero."""
 
 RECENT_EXPOSURE_COUNT = 10
 """How many of the latest exposures the status lists."""
@@ -374,14 +389,14 @@ def _median_drift_rate(
             cut_index += 1
         pieces[-1].append(sample)
     slopes = []
+    sigmas = float(resolve_parameter(EXCURSION_DRIFT_SIGNIFICANCE_SIGMAS).value)
     for piece in pieces:
         if len(piece) < resolve_parameter(MINIMUM_SAMPLES_FOR_DRIFT_FIT).value:
             continue
-        times = np.array([sample.timestamp for sample in piece])
-        errors = np.array([
-            sample.ra_error_arcsec if axis == "RA" else sample.dec_error_arcsec for sample in piece
-        ])
-        slopes.append(abs(float(np.polyfit(times - times[0], errors, 1)[0])))
+        times = [sample.timestamp - piece[0].timestamp for sample in piece]
+        errors = [sample.ra_error_arcsec if axis == "RA" else sample.dec_error_arcsec for sample in piece]
+        # A slope within the noise counts as no drift.
+        slopes.append(abs(significant_slope(times, errors, sigmas)))
     return statistics.median(slopes) if slopes else None
 
 

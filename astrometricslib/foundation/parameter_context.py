@@ -204,6 +204,24 @@ class ParameterContext:
             self.notices.append(notice)
 
 
+def run_basis_value(basis: RunBasis) -> float | None:
+    """Return a basis as the running code sees it.
+
+    Parameters
+    ----------
+    basis : `RunBasis`
+        The basis.
+
+    Returns
+    -------
+    value : `float` or `None`
+        What the run recorded, else the setup's value (in or outside a run),
+        else `None`.
+    """
+    context = _CURRENT_CONTEXT.get() or default_parameter_context()
+    return context.basis_value(basis)
+
+
 def record_basis(basis: RunBasis, value: float) -> None:
     """Record a basis the running code has measured, for the rest of the run.
 
@@ -491,5 +509,6 @@ __all__ = [
     "frames_parameter_context",
     "parameter_context",
     "record_basis",
+    "run_basis_value",
     "setup_parameter_context",
 ]

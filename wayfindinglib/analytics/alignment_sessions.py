@@ -35,11 +35,13 @@ import math
 
 from astrometricslib.parameters import (
     EquipmentKind,
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
     TunedParameter,
     resolve_parameter,
 )
+from wayfindinglib.analytics.line_fit import significant_slope
 from wayfindinglib.models.session.telemetry import (
     AlignmentAttempt,
     AlignmentTargetSession,
@@ -104,18 +106,23 @@ ASSUMED_CADENCE_SECONDS = TunedParameter(
 )
 """Spacing assumed between solves that carry no time."""
 
-MINIMUM_DRIFT_SPAN_SECONDS = TunedParameter(
-    name="wayfinding.minimum_drift_span_seconds",
-    default=10.0,
-    unit="s",
-    description="A drift rate is fitted only over more time than this.",
+DRIFT_SIGNIFICANCE_SIGMAS = TunedParameter(
+    name="wayfinding.drift_significance_sigmas",
+    default=3.0,
+    unit="standard errors",
+    description="A fitted drift counts only when it stands this many standard errors from zero.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.MOUNT}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="WAY-D123",
-    pending_conversion=True,
 )
-"""A drift rate is fitted only over more time than this."""
+"""A fitted drift counts only when this many standard errors from zero.
+
+It replaces a fixed shortest span (10 s): whether a drift shows depends on the
+scatter of the solves and how many there are, which the standard error
+measures. 3 standard errors is the significance used for drift elsewhere
+(`stacking.drift_significance`).
+"""
 
 
 def mean_position_deg(positions: list[tuple[float, float]]) -> tuple[float | None, float | None]:
@@ -303,36 +310,28 @@ def _jitter(runs: list[list[AlignmentAttempt]]) -> tuple[float, float, float]:
 
 
 def _drift(points: list[AlignmentTrackPoint], elapsed_seconds: float) -> tuple[float, float]:
-    """Fit straight lines to the offsets against time.
+    """Fit lines to the offsets against time, keeping real drifts only.
 
     Parameters
     ----------
     points : `list` [`AlignmentTrackPoint`]
         The target's solves.
     elapsed_seconds : `float`
-        Time spent tracking. No drift is fitted for ten seconds or less.
+        Time spent tracking; not used for the decision, which rests on the
+        slope's standard error (`DRIFT_SIGNIFICANCE_SIGMAS`).
 
     Returns
     -------
     drift_ra, drift_dec : `float`
-        The slopes in arcseconds per minute, or 0 when they cannot be fitted.
+        The slopes in arcseconds per minute, each 0 when it is within
+        `DRIFT_SIGNIFICANCE_SIGMAS` standard errors of zero or cannot be
+        fitted (fewer than three solves).
     """
-    if len(points) < 2 or elapsed_seconds <= resolve_parameter(MINIMUM_DRIFT_SPAN_SECONDS).value:
-        return 0.0, 0.0
-    count = len(points)
+    sigmas = float(resolve_parameter(DRIFT_SIGNIFICANCE_SIGMAS).value)
     minutes = [p.elapsed_seconds / 60.0 for p in points]
-    sum_t = sum(minutes)
-    sum_tt = sum(t * t for t in minutes)
-    denominator = count * sum_tt - sum_t * sum_t
-    if abs(denominator) <= 1e-6:
-        return 0.0, 0.0
-    sum_ra = sum(p.delta_ra_arcsec for p in points)
-    sum_dec = sum(p.delta_dec_arcsec for p in points)
-    sum_t_ra = sum(t * p.delta_ra_arcsec for t, p in zip(minutes, points, strict=True))
-    sum_t_dec = sum(t * p.delta_dec_arcsec for t, p in zip(minutes, points, strict=True))
     return (
-        (count * sum_t_ra - sum_t * sum_ra) / denominator,
-        (count * sum_t_dec - sum_t * sum_dec) / denominator,
+        significant_slope(minutes, [p.delta_ra_arcsec for p in points], sigmas),
+        significant_slope(minutes, [p.delta_dec_arcsec for p in points], sigmas),
     )
 
 

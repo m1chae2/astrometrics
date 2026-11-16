@@ -1,27 +1,21 @@
-"""Tuners for the typical star and trail widths of a setup (#175, Phase E3).
+"""Tuner for the typical star width of a setup (#175, Phase E3).
 
 Before a run measures its own star width (for example inside the star-width
 estimator, which cannot use the width it is about to measure), the values
 that follow the star width use the setup's typical width,
-`run_bases.TYPICAL_STAR_WIDTH_PX`. The same holds for the width of a
-spectrum's streak, `run_bases.TYPICAL_TRAIL_WIDTH_PX`. These tuners derive
-both from this observatory's stored data:
-
-- the typical star width is the median, over the setup's stored raw frames,
-  of each frame's Gaussian width of its brightest stars, which is the one
-  star-width scale (`run_bases.StarWidthEstimator`);
-- the typical trail width is the median, over the stored star spectra, of
-  each spectrum's median streak width, turned from a Gaussian sigma into a
-  FWHM. The stored spectra do not say which camera took them, so every
-  stored spectrum counts; today they all come from one spectroscopy setup.
+`run_bases.TYPICAL_STAR_WIDTH_PX`. This tuner derives it from this
+observatory's stored data: the median, over the setup's stored raw frames, of
+each frame's Gaussian width of its brightest stars, which is the one
+star-width scale (`run_bases.StarWidthEstimator`). The typical trail width of
+a spectrum is tuned in `pipelines.spectroscopy.trail_width_tuning`.
 """
 
 import statistics
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from typing import Any
 
 from astrometricslib._internal.drivers.tuning_support import camera_rows, finite_values
-from astrometricslib.foundation.run_bases import TYPICAL_STAR_WIDTH_PX, TYPICAL_TRAIL_WIDTH_PX
+from astrometricslib.foundation.run_bases import TYPICAL_STAR_WIDTH_PX
 from astrometricslib.foundation.tuning import Tuner, TuningInputs, TuningResult, TuningSkippedError
 from astrometricslib.models.tuned_parameter import (
     HardcodedKind,
@@ -30,11 +24,6 @@ from astrometricslib.models.tuned_parameter import (
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.quality.metrics import FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX
-from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import FWHM_PER_SIGMA
-from astrometricslib.pipelines.spectroscopy.spectrum_tuning_data import (
-    load_stored_star_spectra,
-    require_spectral_filter,
-)
 
 # A stack's optic matches the setup's when its stored focal length is within
 # this share of the optic's: the same 2% tolerance a frame's optic is chosen
@@ -85,28 +74,6 @@ def widths_of_optic(
     return finite_values(newest.values())
 
 
-def median_trail_width_fwhm(trail_widths_sigma: Sequence[Sequence[float]]) -> float | None:
-    """Turn stored streak sigmas into one typical streak FWHM.
-
-    Parameters
-    ----------
-    trail_widths_sigma : `Sequence` [`Sequence` [`float`]]
-        For each spectrum, its streak widths as Gaussian sigmas, in pixels.
-
-    Returns
-    -------
-    width : `float` or `None`
-        The median over spectra of each spectrum's median sigma, times
-        `FWHM_PER_SIGMA`; `None` when no spectrum has a positive width.
-    """
-    per_spectrum = [
-        statistics.median(positive)
-        for widths in trail_widths_sigma
-        if (positive := [width for width in finite_values(widths) if width > 0.0])
-    ]
-    return FWHM_PER_SIGMA * statistics.median(per_spectrum) if per_spectrum else None
-
-
 def tune_typical_star_width(inputs: TuningInputs) -> TuningResult:
     """Derive the setup's typical star width from its stored raw frames.
 
@@ -147,40 +114,6 @@ def tune_typical_star_width(inputs: TuningInputs) -> TuningResult:
     )
 
 
-def tune_typical_trail_width(inputs: TuningInputs) -> TuningResult:
-    """Derive the typical streak width of the setup's spectra.
-
-    Parameters
-    ----------
-    inputs : `TuningInputs`
-        The setup, the filter and the ``"astrometrics"`` service.
-
-    Returns
-    -------
-    result : `TuningResult`
-        The typical streak FWHM, resting on the number of spectra.
-
-    Raises
-    ------
-    TuningSkippedError
-        If the filter is not the grating or no spectrum has a streak width.
-    """
-    require_spectral_filter(inputs)
-    spectra = load_stored_star_spectra(inputs.service("astrometrics"))
-    widths = [list(spectrum.trail_width_px) for spectrum in spectra if spectrum.trail_width_px is not None]
-    width = median_trail_width_fwhm(widths)
-    if width is None:
-        raise TuningSkippedError("no stored spectrum has a streak width")
-    count = sum(1 for spectrum in widths if any(value > 0.0 for value in spectrum))
-    return TuningResult(
-        values={TYPICAL_TRAIL_WIDTH_PX.name: width},
-        sample=count,
-        source=(
-            f"Median streak FWHM of {count} stored star spectra (all stored spectra; none records its camera)"
-        ),
-    )
-
-
 TYPICAL_STAR_WIDTH_TUNER = Tuner(
     name="foundation.typical_star_width",
     parameters=(TYPICAL_STAR_WIDTH_PX,),
@@ -188,17 +121,8 @@ TYPICAL_STAR_WIDTH_TUNER = Tuner(
     tune=tune_typical_star_width,
 )
 
-TYPICAL_TRAIL_WIDTH_TUNER = Tuner(
-    name="foundation.typical_trail_width",
-    parameters=(TYPICAL_TRAIL_WIDTH_PX,),
-    method="The median, over stored star spectra, of each spectrum's median streak FWHM.",
-    tune=tune_typical_trail_width,
-    per_filter=True,
-)
 
 __all__ = [
     "TYPICAL_STAR_WIDTH_TUNER",
-    "TYPICAL_TRAIL_WIDTH_TUNER",
-    "median_trail_width_fwhm",
     "widths_of_optic",
 ]

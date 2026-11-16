@@ -43,12 +43,13 @@ from typing import TYPE_CHECKING, Any
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import ConflictError, InvalidArgumentError, ProcessingError
 from astrometricslib.foundation.jobs.runner import current_job_id, registered_job, report_started_jobs
-from astrometricslib.foundation.parameter_context import frames_parameter_context
+from astrometricslib.foundation.parameter_context import frames_parameter_context, record_basis
 from astrometricslib.foundation.run_abandonment import RunAbandonedError, RunAbandonment, bind_abandonment
 from astrometricslib.foundation.run_tally import RunTally
 from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
 from astrometricslib.models.processing_results import ProcessTargetResult
 from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.models.tuned_parameter import RunBasis
 from astrometricslib.pipelines.asteroid_detection.runner import run_asteroid_detection_analysis
 from astrometricslib.pipelines.astrometry.runner import run_astrometry_analysis
 from astrometricslib.pipelines.photometry.runner import run_photometry_analysis
@@ -227,6 +228,23 @@ def _record_abandoned_stack(
     )
 
 
+def _record_target_size(target: Target) -> None:
+    """Record the target's catalog size as the run's target-size basis.
+
+    The values sized to the target (issue #175) follow it. A target with no
+    stored size (a point source, or one SIMBAD gives no size for) records
+    nothing, and those values keep their reference-setup sizes.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target being stacked or analyzed.
+    """
+    major_axis_arcmin = getattr(target, "major_axis_arcmin", None)
+    if major_axis_arcmin:
+        record_basis(RunBasis.TARGET_SIZE_ARCSEC, float(major_axis_arcmin) * 60.0)
+
+
 def stack_frames_with_timeout(
     target: Target,
     frames_to_stack: list[FrameRecord],
@@ -297,6 +315,7 @@ def stack_frames_with_timeout(
                 report_started_jobs(lambda handle: stacking_job_ids.append(handle.job_id)),
                 frames_parameter_context(frames_to_stack),
             ):
+                _record_target_size(target)
                 outcome["path"] = _stack_with_job_tracking(
                     target, frames_to_stack, measured_at, quality_recording
                 )
@@ -456,6 +475,7 @@ def analyze_target(
         # Parameters are read for the setup and filter of the frames analyzed
         # (the target's own frames when none are given).
         with frames_parameter_context(frames or target.frames or []):
+            _record_target_size(target)
             return _run_analysis_pipeline_match(
                 target, frames, pipeline_type, filter_type, catalog_access, path, **kwargs
             )

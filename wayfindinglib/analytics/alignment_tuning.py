@@ -17,9 +17,8 @@ every stored solve and sets each limit from the solves' own spread:
 - The same-target radius is the 99th percentile of how far a named solve lies
   from the first solve of its target on its night.
 
-The drift-span limit (`MINIMUM_DRIFT_SPAN_SECONDS`) is not derived here: it is
-the shortest time over which a line is worth fitting, a convention that no
-record of this mount can show.
+A drift is kept only when it is significant (`DRIFT_SIGNIFICANCE_SIGMAS`), a
+statistical rule rather than a tuned value, so it is not derived here.
 
 The statistics are pure functions of plain rows, so a test needs no library.
 """

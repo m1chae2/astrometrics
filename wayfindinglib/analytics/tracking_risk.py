@@ -35,10 +35,14 @@ from dataclasses import dataclass
 
 from astrometricslib.parameters import (
     EquipmentKind,
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
+    RunBasis,
     TunedParameter,
+    factor_for,
     resolve_parameter,
+    run_basis_value,
 )
 from wayfindinglib.models.equipment_and_site.performance_envelope import TrackingRiskMap
 
@@ -59,12 +63,15 @@ CAUTION_SCORE = TunedParameter(
     unit="fraction",
     description="Scores from here up are a caution (amber).",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="WAY-D130",
-    pending_conversion=True,
 )
-"""Scores from here up are a caution (amber)."""
+"""Scores from here up are a caution (amber).
+
+It is the score of a jitter at the safe limit (`SAFE_JITTER_PX`): a label of
+that limit on the score scale, not a separate threshold, so it stays fixed.
+"""
 
 HIGH_SCORE = TunedParameter(
     name="wayfinding.high_score",
@@ -72,12 +79,14 @@ HIGH_SCORE = TunedParameter(
     unit="fraction",
     description="Scores from here up are a high risk (red).",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="WAY-D130",
-    pending_conversion=True,
 )
-"""Scores from here up are a high risk (red)."""
+"""Scores from here up are a high risk (red).
+
+It is the score of a jitter at the trailing limit (`TRAILING_JITTER_PX`).
+"""
 
 HA_STEP_DEG = 10.0
 """Spacing of the grid in hour angle."""
@@ -133,12 +142,15 @@ FALLBACK_IDEAL_RMS_ARCSEC = TunedParameter(
     unit="arcsec",
     description="Safe jitter when the plate scale is unknown.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="WAY-D130",
-    pending_conversion=True,
 )
-"""Safe jitter when the plate scale is unknown."""
+"""Safe jitter when no plate scale is known at all, not even the setup's.
+
+A last resort for a config with no setup: the setup's optic and camera
+normally give the plate scale.
+"""
 
 FALLBACK_TRAILING_RMS_ARCSEC = TunedParameter(
     name="wayfinding.fallback_trailing_rms_arcsec",
@@ -146,12 +158,45 @@ FALLBACK_TRAILING_RMS_ARCSEC = TunedParameter(
     unit="arcsec",
     description="Trailing jitter when the plate scale is unknown.",
     role=ParameterRole.RECOMMENDATION,
-    source=ParameterSource.TUNED_PARAMETER,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="WAY-D130",
+)
+"""Trailing jitter when no plate scale is known, not even the setup's."""
+
+
+# Guide jitter blurs a star in quadrature: its width grows to
+# sqrt(FWHM^2 + (2.355 x RMS)^2). The safe and trailing jitter limits are
+# set by how much widening they allow, so they follow the star width. On the
+# reference setup (2.33 px stars) the safe limit of 0.75 px RMS widens the
+# stars by about 25% and the trailing limit of 1.25 px by about 63%.
+SAFE_JITTER_PX = TunedParameter(
+    name="wayfinding.safe_jitter_px",
+    default=factor_for(0.75, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
+    description="Guide jitter (RMS) up to which tracking is safe: it widens the stars by about 25%.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
     register_entry="WAY-D130",
-    pending_conversion=True,
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=0.75,
 )
-"""Trailing jitter when the plate scale is unknown."""
+"""Guide jitter up to which tracking is safe, in pixels."""
+
+TRAILING_JITTER_PX = TunedParameter(
+    name="wayfinding.trailing_jitter_px",
+    default=factor_for(1.25, RunBasis.STAR_WIDTH_PX),
+    unit="× star width",
+    description="Guide jitter (RMS) beyond which stars trail: it widens them by about 63%.",
+    role=ParameterRole.RECOMMENDATION,
+    source=ParameterSource.DETERMINED_EACH_RUN,
+    equipment=frozenset({EquipmentKind.MOUNT, EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
+    register_entry="WAY-D130",
+    basis=RunBasis.STAR_WIDTH_PX,
+    reference_value=1.25,
+)
+"""Guide jitter beyond which stars trail, in pixels."""
 
 
 @dataclass(frozen=True)
@@ -216,16 +261,23 @@ def _rms_limits(plate_scale_arcsec_per_px: float | None) -> tuple[float, float]:
     Parameters
     ----------
     plate_scale_arcsec_per_px : `float` or `None`
-        Arcseconds of sky per camera pixel, if known.
+        Arcseconds of sky per camera pixel. When it is missing, the run's or
+        the setup's plate scale (from the optic and camera) is used.
 
     Returns
     -------
     ideal_rms, trailing_rms : `float`
-        0.75 and 1.25 pixels in arcseconds, or 1.2 and 2.0 arcseconds when
-        the plate scale is unknown.
+        `SAFE_JITTER_PX` and `TRAILING_JITTER_PX` in arcseconds; the fixed
+        fallbacks only when no plate scale is known at all.
     """
-    if plate_scale_arcsec_per_px and plate_scale_arcsec_per_px > 0:
-        return 0.75 * plate_scale_arcsec_per_px, 1.25 * plate_scale_arcsec_per_px
+    scale = plate_scale_arcsec_per_px
+    if not scale or scale <= 0:
+        scale = run_basis_value(RunBasis.PLATE_SCALE_ARCSEC_PER_PX)
+    if scale and scale > 0:
+        return (
+            float(resolve_parameter(SAFE_JITTER_PX).value) * scale,
+            float(resolve_parameter(TRAILING_JITTER_PX).value) * scale,
+        )
     return resolve_parameter(FALLBACK_IDEAL_RMS_ARCSEC).value, resolve_parameter(
         FALLBACK_TRAILING_RMS_ARCSEC
     ).value
@@ -268,8 +320,8 @@ def rms_risk_score(rms_arcsec: float, plate_scale_arcsec_per_px: float | None = 
     rms_arcsec : `float`
         Measured jitter in arcseconds.
     plate_scale_arcsec_per_px : `float`, optional
-        Arcseconds of sky per camera pixel. Without it, 1.2 and 2.0
-        arcseconds are the safe and trailing limits.
+        Arcseconds of sky per camera pixel. Without it, the run's or the
+        setup's plate scale is used (see `_rms_limits`).
 
     Returns
     -------
@@ -280,12 +332,14 @@ def rms_risk_score(rms_arcsec: float, plate_scale_arcsec_per_px: float | None = 
     if rms_arcsec <= 0.0:
         return 0.05
     ideal, trailing = _rms_limits(plate_scale_arcsec_per_px)
+    caution = float(resolve_parameter(CAUTION_SCORE).value)
+    high = float(resolve_parameter(HIGH_SCORE).value)
     if rms_arcsec <= ideal:
-        return 0.05 + 0.22 * (rms_arcsec / ideal)
+        return 0.05 + (caution - 0.06) * (rms_arcsec / ideal)
     if rms_arcsec <= trailing:
-        return 0.28 + 0.29 * (rms_arcsec - ideal) / (trailing - ideal)
+        return caution + (high - caution - 0.01) * (rms_arcsec - ideal) / (trailing - ideal)
     excess = (rms_arcsec - trailing) / trailing
-    return min(0.95, 0.58 + 0.37 * min(1.0, math.sqrt(excess)))
+    return min(0.95, high + (0.95 - high) * min(1.0, math.sqrt(excess)))
 
 
 def _altitude_deg(ha_deg: float, dec_deg: float, latitude_deg: float) -> float:

@@ -5,12 +5,14 @@ and by the script that fills in the types of stars saved before they were
 recorded, so both read a result the same way.
 """
 
+import re
 from typing import Any
 
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 
 from astrometricslib.models.known_variability import KnownVariability, classify_simbad_object_types
+from astrometricslib.models.target import Target
 
 # The column the all-types field arrives in, under the names it has had.
 ALL_TYPES_COLUMNS = ("alltypes.otypes", "ALLTYPES.OTYPES", "otypes")
@@ -104,3 +106,96 @@ def separation_arcsec(first: tuple[float, float], second: tuple[float, float]) -
         .separation(SkyCoord(second[0] * u.deg, second[1] * u.deg))
         .arcsec
     )
+
+
+# Stop after this many requests in a row fail, so a run does not keep asking a
+# service that is down (the same limit as the star backfill).
+CONSECUTIVE_FAILURE_LIMIT = 3
+
+# Targets per SIMBAD request. Each target is asked about by up to three names,
+# each in up to three spellings, so 20 targets keep a request near the
+# 200-identifier size the star backfill uses.
+TARGETS_PER_REQUEST = 20
+
+
+def normalize_name(name: str) -> str:
+    """Write a name so spelling differences do not matter.
+
+    Parameters
+    ----------
+    name : `str`
+        A target id, common name or SIMBAD identifier.
+
+    Returns
+    -------
+    key : `str`
+        Upper case, with underscores and runs of spaces turned into one space
+        and SIMBAD's leading "NAME " (which marks a common name) removed.
+    """
+    key = re.sub(r"\s+", " ", name.replace("_", " ").replace("\u00a0", " ")).strip().upper()
+    return key.removeprefix("NAME ")
+
+
+def names_to_try(target: Target) -> list[str]:
+    """List the names to look a target up by, best first.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+
+    Returns
+    -------
+    names : `list` [`str`]
+        The id, the common name, and the first designation of an id that names
+        two objects ("M 52" for "M 52 - Bubble Nebula"). SIMBAD resolves that
+        first designation.
+    """
+    names = [target.id, target.common_name, target.id.split(" - ")[0]]
+    return list(dict.fromkeys(name.strip() for name in names if name and name.strip()))
+
+
+def name_variants(name: str) -> list[str]:
+    """List the spellings of a name SIMBAD might store it under.
+
+    Parameters
+    ----------
+    name : `str`
+        A target id or common name.
+
+    Returns
+    -------
+    variants : `list` [`str`]
+        The name with single spaces; the same name with two spaces after a
+        catalog letter prefix such as "NGC" (SIMBAD pads some identifiers); and
+        the name with SIMBAD's "NAME " prefix, which common names such as
+        "Aldebaran" carry.
+    """
+    clean = re.sub(r"\s+", " ", name.replace("_", " ")).strip()
+    variants = [clean, f"NAME {clean}"]
+    padded = re.sub(r"^([A-Za-z]+) (\d)", r"\1  \2", clean)
+    if padded != clean:
+        variants.append(padded)
+    return variants
+
+
+def index_rows_by_name(table: Any) -> dict[str, list[Any]]:
+    """Index a SIMBAD answer by the normalized name that was asked about.
+
+    Parameters
+    ----------
+    table : `astropy.table.Table` or `None`
+        SIMBAD's answer.
+
+    Returns
+    -------
+    rows : `dict` [`str`, `list` [`astropy.table.Row`]]
+        Each row under ``normalize_name(queried_id)``. A name that more than
+        one object carries has several rows. Empty for no answer.
+    """
+    rows: dict[str, list[Any]] = {}
+    if table is None:
+        return rows
+    for row in table:
+        rows.setdefault(normalize_name(str(row["queried_id"])), []).append(row)
+    return rows

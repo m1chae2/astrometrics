@@ -627,7 +627,6 @@ utilities.fallback_sensor_max_wavelength_nm,SPE-D56,measurement,Design estimate
 utilities.fallback_sensor_min_wavelength_nm,SPE-D56,measurement,Design estimate
 utilities.fallback_sensor_width_px,SPE-D56,measurement,Design estimate
 wayfinding.active_window_seconds,WAY-D140,hardware limit,Design estimate
-wayfinding.ambiguous_rms_gap_limit,WAY-73,judgment,Design estimate
 wayfinding.centering_exposure.exposure_ladder_seconds,WAY-D122,measurement,Design estimate
 wayfinding.default_focal_length_mm,WAY-D131,measurement,Design estimate
 wayfinding.default_latitude_deg,WAY-D131,measurement,Design estimate
@@ -644,7 +643,6 @@ wayfinding.match_window_seconds,WAY-D47,exclusion criteria,Design estimate
 wayfinding.max_consecutive_probe_failures,WAY-D134,judgment,Design estimate
 wayfinding.maximum_frames_used,WAY-D122,measurement,Design estimate
 wayfinding.minimum_frames_used,WAY-D122,measurement,Design estimate
-wayfinding.poor_match_rms_limit,WAY-73,judgment,Design estimate
 wayfinding.pulse_merge_window_seconds,WAY-D128,measurement,Design estimate
 wayfinding.session_time_margin_seconds,WAY-D141,exclusion criteria,Design estimate
 wayfinding.spurious_alignment_error_arcsec,WAY-D124,exclusion criteria,Design estimate

@@ -285,13 +285,21 @@ def declared_rows(repo: Path, registries: list[ParameterRegistry]) -> list[dict[
     Returns
     -------
     rows : `list` [`dict` [`str`, `str`]]
-        One row per parameter, in registry order.
+        One row per parameter, in registry order; a declaration that two
+        registries hold is listed once.
     """
     index = read_register_index(repo)
     declarations = find_declarations(repo)
     rows = []
+    seen: set[str] = set()
     for registry in registries:
         for parameter in registry.all():
+            # A library that imports another's declaration (wayfindinglib uses
+            # astrometricslib's spectrum match limits) holds the same object;
+            # it is listed once, under the first registry, which declares it.
+            if parameter.name in seen:
+                continue
+            seen.add(parameter.name)
             file, line, constant = declarations.get(parameter.name, ("", 0, ""))
             entry = index.get(parameter.register_entry or "", {})
             rows.append(

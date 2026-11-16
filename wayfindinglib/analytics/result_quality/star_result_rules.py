@@ -42,7 +42,8 @@ from collections.abc import Mapping
 from typing import Any
 
 from astrometricslib.parameters import (
-    EquipmentKind,
+    AMBIGUOUS_RMS_GAP,
+    NO_GOOD_MATCH_RMS,
     HardcodedKind,
     ParameterRole,
     ParameterSource,
@@ -100,37 +101,14 @@ PERIOD_NOT_TESTABLE = "period_not_testable"
 NO_STAR_RESULT = "no_star_result"
 
 
-POOR_MATCH_RMS_LIMIT = TunedParameter(
-    name="wayfinding.poor_match_rms_limit",
-    default=0.15,
-    unit="fraction",
-    description="Copy of the pipeline's poor-match limit (relative RMS), for the rule table.",
-    role=ParameterRole.JUDGMENT,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.FILTER_OR_GRATING}),
-    register_entry="WAY-73",
-    pending_conversion=True,
-)
-"""Copy of the pipeline's poor-match limit (relative RMS), for the rule table.
+# The spectrum rules judge the pipeline's own results, so they use the
+# pipeline's limits themselves (one declaration each, with one tuned value),
+# not copies.
+POOR_MATCH_RMS_LIMIT = NO_GOOD_MATCH_RMS
+"""The pipeline's poor-match limit (relative RMS), `NO_GOOD_MATCH_RMS`."""
 
-A test checks it against `NO_GOOD_MATCH_RMS` in the spectroscopy pipeline.
-"""
-
-AMBIGUOUS_RMS_GAP_LIMIT = TunedParameter(
-    name="wayfinding.ambiguous_rms_gap_limit",
-    default=0.02,
-    unit="fraction",
-    description="Copy of the pipeline's ambiguity limit (relative RMS), for the rule table.",
-    role=ParameterRole.JUDGMENT,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.FILTER_OR_GRATING}),
-    register_entry="WAY-73",
-    pending_conversion=True,
-)
-"""Copy of the pipeline's ambiguity limit (relative RMS), for the rule table.
-
-A test checks it against `AMBIGUOUS_RMS_GAP` in the spectroscopy pipeline.
-"""
+AMBIGUOUS_RMS_GAP_LIMIT = AMBIGUOUS_RMS_GAP
+"""The pipeline's ambiguity limit (relative RMS), `AMBIGUOUS_RMS_GAP`."""
 
 _POOR_MATCH_LIMIT = build_limit(
     resolve_parameter(POOR_MATCH_RMS_LIMIT).value,

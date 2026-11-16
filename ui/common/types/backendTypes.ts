@@ -231,6 +231,7 @@ export interface TargetObject {
   dec?: string;
   positionUnverified?: boolean;
   simbadObjectType?: string | null;
+  majorAxisArcmin?: number | null;
   fieldOfView?: string;
   mainCamera?: string;
   mainScope?: string;

@@ -298,9 +298,9 @@ def resolve_catalog_position(
     simbad : `SimbadDriver`
         The SIMBAD driver to ask.
     votable_fields : `tuple` [`str`], optional
-        Extra SIMBAD columns, such as ``("galdim_majaxis",)``. The default
-        columns already hold the position. The main object type (``otype``)
-        is always requested as well.
+        Extra SIMBAD columns. The default columns already hold the position.
+        The main object type (``otype``) and the major axis
+        (``galdim_majaxis``) are always requested as well.
 
     Returns
     -------
@@ -312,7 +312,9 @@ def resolve_catalog_position(
     if not name:
         return None
     try:
-        fields = votable_fields if "otype" in votable_fields else ("otype", *votable_fields)
+        # The object type and the size are always asked for: the target
+        # record keeps both.
+        fields = tuple(dict.fromkeys(("otype", "galdim_majaxis", *votable_fields)))
         result = simbad.query_object(name, votable_fields=fields)
         if result is None or len(result) == 0:
             return None
@@ -475,6 +477,8 @@ def fill_target_position(
         target.position_unverified = False
         if catalog.object_type:
             target.simbad_object_type = catalog.object_type
+        if catalog.major_axis_arcmin:
+            target.major_axis_arcmin = catalog.major_axis_arcmin
         if had_position:
             logger.warning(
                 "Replaced the unverified position of target %s (%s, %s) with its catalog position (%s, %s).",

@@ -1052,6 +1052,61 @@ def estimate_gaia_magnitude_limit(stellar_objects: list[StellarObject]) -> float
     )
 
 
+def find_unique_stars(
+    detector: SourceDetector, data: np.ndarray, is_color_frame: bool = False
+) -> tuple[list[dict], list[dict]]:
+    """Find the stars of an image the way the astrometry run does.
+
+    The run (`StarIdentifier.detect_stars`) and the viewer's detection
+    overlay both call this one function, so the markers the viewer draws are
+    the stars the run finds. A color frame is averaged in blocks first. A
+    black-and-white frame sizes the finder's kernel from the star width
+    measured in the image. Then the finder runs, and two reports of one star
+    are merged into one.
+
+    Parameters
+    ----------
+    detector : `SourceDetector`
+        The star finder. Its ``fwhm`` is set from the image when the width
+        can be measured, so the caller may read the width actually used.
+    data : `numpy.ndarray`
+        The image to search, two-dimensional.
+    is_color_frame : `bool`, optional
+        True if the image started as a color image.
+
+    Returns
+    -------
+    sources : `list` [`dict`]
+        Everything the finder reported.
+    unique_sources : `list` [`dict`]
+        The same list with each star reported twice merged into one.
+    """
+    if is_color_frame and data is not None:
+        bin_factor = resolve(_COLOR_DETECTION_BIN_FACTOR).value
+        binned = _block_average(data, bin_factor)
+        sources = detector.detect(binned)
+        unique_sources = detector.deduplicate(sources)
+        _rescale_source_centroids(sources, bin_factor)
+        _rescale_source_centroids(unique_sources, bin_factor)
+        return sources, unique_sources
+
+    try:
+        blob_width = measure_blob_width_from_data(data) if data is not None else None
+    except DATA_ERRORS as width_error:
+        logger.debug(
+            "Could not measure the detection kernel width, keeping the configured default: %s",
+            width_error,
+        )
+        blob_width = None
+    if blob_width is not None:
+        logger.debug("Sizing the detection kernel from the measured blob width: %.2fpx", blob_width)
+        detector.fwhm = blob_width
+
+    sources = detector.detect(data)
+    unique_sources = detector.deduplicate(sources)
+    return sources, unique_sources
+
+
 class StarIdentifier:
     """The main tool for finding stars, mapping the image, and naming them."""
 
@@ -1207,30 +1262,7 @@ class StarIdentifier:
         unique_sources : `list` [`dict`]
             The same list, but with duplicates removed.
         """
-        if is_color_frame and data is not None:
-            bin_factor = resolve(_COLOR_DETECTION_BIN_FACTOR).value
-            binned = _block_average(data, bin_factor)
-            sources = self.detector.detect(binned)
-            unique_sources = self.detector.deduplicate(sources)
-            _rescale_source_centroids(sources, bin_factor)
-            _rescale_source_centroids(unique_sources, bin_factor)
-            return sources, unique_sources
-
-        try:
-            blob_width = measure_blob_width_from_data(data) if data is not None else None
-        except DATA_ERRORS as width_error:
-            logger.debug(
-                "Could not measure the detection kernel width, keeping the configured default: %s",
-                width_error,
-            )
-            blob_width = None
-        if blob_width is not None:
-            logger.debug("Sizing the detection kernel from the measured blob width: %.2fpx", blob_width)
-            self.detector.fwhm = blob_width
-
-        sources = self.detector.detect(data)
-        unique_sources = self.detector.deduplicate(sources)
-        return sources, unique_sources
+        return find_unique_stars(self.detector, data, is_color_frame=is_color_frame)
 
     def _read_axis_mean(self, header: Any, x_keyword: str, y_keyword: str) -> float | None:
         """Read a per-axis header value, averaging the X and Y cards.

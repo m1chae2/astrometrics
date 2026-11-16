@@ -528,6 +528,9 @@ class SourceDetector:
                 all_flux = [s.get("flux", 0.0) for s in group]
                 merged = group[int(np.argmax(all_flux))].copy()
                 merged["flux"] = float(np.sum(all_flux))
+                # Says how many reports became this star, for a caller that
+                # shows merged stars (the viewer's detection overlay).
+                merged["merged_detection_count"] = len(group)
                 unique_stars.append(merged)
 
         return unique_stars

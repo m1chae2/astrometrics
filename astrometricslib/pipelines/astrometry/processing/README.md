@@ -57,4 +57,8 @@ Plate solving has to happen before catalog lookup, because a catalog can only be
 - `star_identifier.py`: plate solving, catalog lookup, the center-star rule and the flags.
 - `wcs_refinement.py`: the Gaia refit of the solved sky map.
 
+## Detections for the viewer
+
+`detections.py` has `measure_detections_in_file(path)`, the code behind `QualityRecords.measure_detections`. It reads one image and calls `find_unique_stars` in `star_identifier.py`, the same function `StarIdentifier.detect_stars` calls, so the stars the viewer marks are the stars the run finds. It stores nothing.
+
 For exact behavior, read the code.

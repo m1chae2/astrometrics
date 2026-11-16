@@ -172,7 +172,9 @@ def test_the_limits_come_from_the_modules_that_define_them() -> None:
     """The metric limits equal the named constants, not copies."""
     metrics = _checkpoint_metrics(_computed_record())
 
-    assert metrics["dar_along_dispersion_angstrom"].limit == DAR_ALONG_DISPERSION_LIMIT_ANGSTROM.default
+    assert (
+        metrics["dar_along_dispersion_angstrom"].limit == DAR_ALONG_DISPERSION_LIMIT_ANGSTROM.reference_value
+    )
     assert metrics["target_altitude_degrees"].limit == MINIMUM_ALTITUDE_DEGREES.default
 
 
@@ -369,7 +371,9 @@ def test_a_low_cold_target_exceeds_the_limit_and_the_flag_is_raised() -> None:
 
     metrics = _raw_frame_metrics(result)
 
-    assert metrics["dar_along_dispersion_angstrom"].value > DAR_ALONG_DISPERSION_LIMIT_ANGSTROM.default
+    assert (
+        metrics["dar_along_dispersion_angstrom"].value > DAR_ALONG_DISPERSION_LIMIT_ANGSTROM.reference_value
+    )
     assert metrics["dar_along_dispersion_angstrom"].passed is False
     assert "dar_large" in result.stage_quality[0].flags
     assert result.stage_quality[0].has_failed_metric is True

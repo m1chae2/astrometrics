@@ -389,7 +389,7 @@ def test_a_faint_trail_under_the_region_cut_off_is_found_and_flagged(tmp_path: P
     measurement = raw_frame_check.measure_raw_frame(str(tmp_path / "Target_Light_Luminance_000.fits"))
     raw_frame_check.flag_frames([measurement])
 
-    assert measurement["longest_trail_px"] < raw_frame_check.TRAIL_FLOOR_PIXELS.default
+    assert measurement["longest_trail_px"] < raw_frame_check.TRAIL_FLOOR_PIXELS.reference_value
     assert measurement["line_trail_px"] == pytest.approx(expected_length, rel=0.1)
     assert measurement["line_trail_angle_deg"] == pytest.approx(expected_angle, abs=1.5)
     assert any("straight trail" in flag and "degrees" in flag for flag in measurement["flags"])

@@ -360,7 +360,7 @@ def test_drift_gate_goes_red_when_the_field_rotated_too_much() -> None:
 
     assert gate.status is GateStatus.FAILED
     assert gate.measured_value == pytest.approx(1.8)
-    assert gate.limit == pytest.approx(rg.MAXIMUM_CORNER_DISPLACEMENT_PX.default)
+    assert gate.limit == pytest.approx(rg.MAXIMUM_CORNER_DISPLACEMENT_PX.reference_value)
     assert "a corner moves 1.80 px" in gate.detail
     assert "rotation and scale change move a corner 1.80 px (95th percentile over 35 frames)" in gate.detail
 
@@ -427,7 +427,7 @@ def test_drift_gate_can_run_on_the_per_star_summary_alone() -> None:
 
     assert gate.status is GateStatus.PASSED
     assert gate.measured_value == pytest.approx(0.1)
-    assert gate.limit == pytest.approx(rg.MAXIMUM_CORNER_DISPLACEMENT_PX.default)
+    assert gate.limit == pytest.approx(rg.MAXIMUM_CORNER_DISPLACEMENT_PX.reference_value)
 
 
 def test_scatter_population_gate_is_not_checked_with_few_stars() -> None:

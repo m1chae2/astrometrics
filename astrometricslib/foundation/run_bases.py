@@ -41,7 +41,7 @@ ANGSTROM_PER_MILLIMETER = 1.0e7
 # run has measured its own (for example inside the star-width estimator,
 # which cannot use the width it is about to measure). The default is the
 # median FWHM of the reference setup's frames; a tuner (Phase E3) derives it
-# from the stored frame measurements of each setup.
+# from the stored stacks of each setup.
 TYPICAL_STAR_WIDTH_PX = TunedParameter(
     name="foundation.typical_star_width_px",
     default=3.0,
@@ -51,7 +51,9 @@ TYPICAL_STAR_WIDTH_PX = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.TELESCOPE}),
     register_entry="AST-17",
-    pending_conversion=True,
+    allowed_range=(0.5, 30.0),
+    # A sample is one stored stack (tuner `foundation.typical_star_width`).
+    minimum_sample=5,
 )
 
 # The typical width of a spectrum's streak across the dispersion, used as the
@@ -66,7 +68,9 @@ TYPICAL_TRAIL_WIDTH_PX = TunedParameter(
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="SPE-01",
-    pending_conversion=True,
+    allowed_range=(1.0, 30.0),
+    # A sample is one stored star spectrum (its tuner reads them all).
+    minimum_sample=10,
 )
 
 

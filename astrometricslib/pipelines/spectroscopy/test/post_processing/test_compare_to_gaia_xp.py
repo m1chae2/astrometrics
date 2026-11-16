@@ -256,7 +256,7 @@ def test_the_checkpoint_metrics_carry_the_designed_limits() -> None:
     assert GAIA_XP_RESIDUAL_RMS_LIMIT.default == pytest.approx(0.05)
     assert metrics["gaia_xp_slope_percent_per_1000_angstrom"].limit == pytest.approx(3.0)
     assert metrics["gaia_xp_wavelength_shift_angstrom"].limit == pytest.approx(11.0)
-    assert GAIA_XP_WAVELENGTH_SHIFT_LIMIT_ANGSTROM.default == pytest.approx(11.0)
+    assert GAIA_XP_WAVELENGTH_SHIFT_LIMIT_ANGSTROM.reference_value == pytest.approx(11.0)
     assert metrics["gaia_xp_available"].value == pytest.approx(1.0)
     assert metrics["gaia_xp_available"].limit is None
     assert all(entry.passed for entry in metrics.values() if entry.limit is not None), (

@@ -55,6 +55,9 @@ astrometry.source_detector_roundness_range,AST-D01,exclusion criteria,Design est
 astrometry.unresolved_companion_radius_arcsec,AST-10,measurement,Partly measured
 astrometry.wcs_refinement.minimum_matched_stars,AST-03,judgment,Partly measured
 foundation.full_scale_counts,STK-38,measurement,Partly measured
+foundation.tuning_optic_focal_length_tolerance,AST-17,measurement,Design estimate
+foundation.typical_star_width_px,AST-17,measurement,Design estimate
+foundation.typical_trail_width_px,SPE-01,measurement,Partly measured
 internal.default_dark_temperature_tolerance_c,STK-06,exclusion criteria,Partly measured
 internal.hinted_solve_near_timeout_fraction,AST-D06,measurement,Design estimate
 internal.minimum_sample_count,SPE-D29,exclusion criteria,Design estimate

@@ -124,7 +124,10 @@ def test_measure_sky_level_ignores_the_reading_box_and_the_gap() -> None:
     cross_section = np.full(80, SKY_PEDESTAL)
     box_half_width = 5
     cross_section[
-        40 - box_half_width - SKY_BAND_GAP_PX.default : 40 + box_half_width + SKY_BAND_GAP_PX.default + 1
+        40 - box_half_width - SKY_BAND_GAP_PX.reference_value : 40
+        + box_half_width
+        + SKY_BAND_GAP_PX.reference_value
+        + 1
     ] = 9.0e5
 
     sky_level = measure_sky_level_per_pixel(cross_section, 40, box_half_width)
@@ -136,7 +139,7 @@ def test_measure_sky_level_is_not_pulled_up_by_a_few_bright_pixels() -> None:
     """A hot pixel or a neighbour's streak must not raise the sky level."""
     cross_section = np.full(80, SKY_PEDESTAL)
     box_half_width = 5
-    first_upper_band_index = 40 + box_half_width + SKY_BAND_GAP_PX.default + 1
+    first_upper_band_index = 40 + box_half_width + SKY_BAND_GAP_PX.reference_value + 1
     cross_section[first_upper_band_index + 2] = 1.0e7
 
     sky_level = measure_sky_level_per_pixel(cross_section, 40, box_half_width)
@@ -153,7 +156,7 @@ def test_measure_sky_level_uses_the_cleaner_band_when_one_side_is_crowded() -> N
     """
     cross_section = np.full(120, SKY_PEDESTAL)
     box_half_width = 5
-    first_upper_band_index = 60 + box_half_width + SKY_BAND_GAP_PX.default + 1
+    first_upper_band_index = 60 + box_half_width + SKY_BAND_GAP_PX.reference_value + 1
     cross_section[first_upper_band_index : first_upper_band_index + SKY_BAND_WIDTH_PX.default] = (
         50.0 * SKY_PEDESTAL
     )
@@ -175,7 +178,7 @@ def test_measure_sky_level_uses_the_only_band_left_at_the_image_edge() -> None:
 def test_measure_sky_level_returns_zero_when_too_few_sky_pixels_are_on_the_image() -> None:
     """Near the image edge we subtract nothing rather than guess."""
     box_half_width = 2
-    first_upper_band_index = 5 + box_half_width + SKY_BAND_GAP_PX.default + 1
+    first_upper_band_index = 5 + box_half_width + SKY_BAND_GAP_PX.reference_value + 1
     cross_section = np.full(first_upper_band_index + SKY_BAND_MINIMUM_SAMPLE_COUNT.default - 1, SKY_PEDESTAL)
 
     assert measure_sky_level_per_pixel(cross_section, 5, box_half_width) == pytest.approx(0.0)
@@ -184,7 +187,7 @@ def test_measure_sky_level_returns_zero_when_too_few_sky_pixels_are_on_the_image
 def test_measure_sky_level_skips_non_finite_pixels() -> None:
     """A NaN pixel (a masked bad pixel) must not make the sky level NaN."""
     cross_section = np.full(80, SKY_PEDESTAL)
-    cross_section[40 + 5 + SKY_BAND_GAP_PX.default + 1] = np.nan
+    cross_section[40 + 5 + SKY_BAND_GAP_PX.reference_value + 1] = np.nan
 
     sky_level = measure_sky_level_per_pixel(cross_section, 40, 5)
 
@@ -237,7 +240,7 @@ def test_neighbouring_streak_in_the_sky_band_does_not_change_the_result() -> Non
     """One bright row inside a sky band is an outlier, not sky."""
     star_only = _build_star_only_image()
     star_plus_sky = star_only + SKY_PEDESTAL
-    neighbour_row = TRAIL_CENTER_Y_PX + EXTRACTION_RADIUS_PX + 5 + SKY_BAND_GAP_PX.default + 3
+    neighbour_row = TRAIL_CENTER_Y_PX + EXTRACTION_RADIUS_PX + 5 + SKY_BAND_GAP_PX.reference_value + 3
     star_plus_sky[neighbour_row, :] += 5000.0
 
     star_alone_profile = _extract_traced(star_only, subtract_sky_background=False)
@@ -361,5 +364,5 @@ def test_pipeline_passes_the_config_switch_to_its_extractor() -> None:
 
 def test_sky_band_settings_are_sensible() -> None:
     """The bands must have room for the minimum sample count on one side."""
-    assert SKY_BAND_GAP_PX.default >= 1
+    assert SKY_BAND_GAP_PX.reference_value >= 1
     assert SKY_BAND_WIDTH_PX.default >= SKY_BAND_MINIMUM_SAMPLE_COUNT.default

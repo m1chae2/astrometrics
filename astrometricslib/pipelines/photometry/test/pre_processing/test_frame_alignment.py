@@ -343,5 +343,5 @@ def test_the_session_summary_reports_the_corner_displacement_and_the_gate_judges
     expected_worst = math.radians(0.7) * math.hypot(*SEQUENCE_CENTRE)
     assert summary.worst_corner_displacement_px == pytest.approx(expected_worst, abs=0.1)
     assert gate.status is GateStatus.FAILED
-    assert gate.limit == pytest.approx(rg.MAXIMUM_CORNER_DISPLACEMENT_PX.default)
+    assert gate.limit == pytest.approx(rg.MAXIMUM_CORNER_DISPLACEMENT_PX.reference_value)
     assert "a corner moves" in gate.detail

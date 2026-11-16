@@ -345,7 +345,7 @@ def test_the_offset_metric_has_a_designed_limit_and_fails_above_it() -> None:
         "wavelength_zero_point_offset_angstrom"
     ]
 
-    assert ZERO_POINT_OFFSET_LIMIT_ANGSTROM.default == pytest.approx(20.0)
+    assert ZERO_POINT_OFFSET_LIMIT_ANGSTROM.reference_value == pytest.approx(20.0)
     assert offset_metric.limit == pytest.approx(20.0)
     assert "designed" in offset_metric.note
     assert offset_metric.passed is False

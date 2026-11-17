@@ -4,7 +4,9 @@
  * star the user clicked: the width (FWHM) from the fit, a Clipped chip when the star is clipped, and one
  * plot shaped like a bell curve. The points are the real pixels along a straight cut through the star
  * (the angle is set with a slider). The curve is the fitted star shape, mirrored to both sides, with a
- * dashed line at half its height to show the width.
+ * dashed line at half its height to show the width. The "Around the star" tab plots the library's ring (the
+ * brightness by direction with the neighbor stars left out), the smooth curve of its significant Fourier terms,
+ * and a small bar chart of the size of each term, with a one-line summary.
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from '../components/Button';
@@ -15,10 +17,10 @@ import { Tabs, tabElementId, tabPanelElementId } from '../components/Tabs';
 import { BasePlot } from '../components/plotting/BasePlot';
 import { buildLayout, getVar, getVarAsNum } from '../utils/plotTools';
 import type { PlotlyTrace } from '../utils/plotTools';
-import type { ProfileFit, StarProfileMeasurement } from '../types/backendTypes';
+import type { ProfileFit, RingHarmonic, StarProfileMeasurement } from '../types/backendTypes';
 import type { StarProfileState } from './hooks/useStarProfile';
 import { rebuildCut } from './utils/starCut';
-import { FEW_PIXELS_PER_BIN, autoRingLimits, azimuthalProfile, cutoutReach, screenDirection } from './utils/starRing';
+import { describeRing, harmonicCurve, hasFewPixels, screenDirection } from './utils/starRing';
 import './starProfilePanel.css';
 
 /** The words of the angle's info button. */
@@ -32,6 +34,20 @@ export const PLOT_CAPTION = 'Pixels along the dashed line';
 
 /** The note shown when some direction bins hold few pixels. */
 export const FEW_PIXELS_NOTE = 'Few pixels per direction this close in';
+
+/** The tooltip of the ring summary: how the percentages are made. */
+export const RING_SUMMARY_TOOLTIP = 'Size of each pattern as a percent of the ring\'s mean brightness, with the bias that noise adds removed, and its 1 sigma uncertainty. Only patterns above the significance threshold are listed.';
+
+/**
+ * Says how many neighbor stars were left out of the ring.
+ *
+ * @param count The number of neighbors masked.
+ * @returns For example "2 neighbors left out", "1 neighbor left out" or "No neighbors left out".
+ */
+export function describeNeighbors(count: number): string {
+  if (count === 0) return 'No neighbors left out';
+  return `${count} ${count === 1 ? 'neighbor' : 'neighbors'} left out`;
+}
 
 /** Shortest and longest cut half-length the slider offers, in pixels. */
 export const CUT_LENGTH_RANGE = { min: 20, max: 100 } as const;
@@ -243,27 +259,36 @@ function ProfilePlot({ measurement, logScale, angleDegrees, halfLengthPx }: { me
 }
 
 /**
- * Draws the plot of the "Around the star" view: the mean brightness in a ring, by direction.
+ * Draws the plot of the "Around the star" view: the mean brightness in the ring by direction (from the library,
+ * with the neighbor stars left out), and the smooth curve of the constant plus every significant Fourier term.
  *
- * @param props The measurement, the ring, the axis kind, the cut angle and the picture's row order.
+ * @param props The measurement, the axis kind, the cut angle and the picture's row order.
  * @returns The plot.
  */
-function RingPlot({ measurement, limits, logScale, angleDegrees, firstRowAtTop }: {
-  measurement: StarProfileMeasurement; limits: { innerPx: number; outerPx: number }; logScale: boolean; angleDegrees: number; firstRowAtTop: boolean;
+function RingPlot({ measurement, logScale, angleDegrees, firstRowAtTop }: {
+  measurement: StarProfileMeasurement; logScale: boolean; angleDegrees: number; firstRowAtTop: boolean;
 }): React.ReactElement {
   const { traces, floorValue, highestValue, fewPixels } = useMemo(() => {
     const floor = measurement.sky_noise > 0 ? measurement.sky_noise : Math.abs(measurement.peak) * 1e-4;
-    const profile = azimuthalProfile(measurement, limits);
-    const values = logScale ? profile.values.map((value) => Math.max(value, floor)) : profile.values;
+    const lift = (values: number[]): number[] => (logScale ? values.map((value) => Math.max(value, floor)) : values);
+    const values = lift(measurement.ring_bin_values);
     const list: PlotlyTrace[] = [{
-      x: profile.angles, y: values, type: 'scatter', mode: 'lines+markers',
+      x: measurement.ring_bin_angle_degrees, y: values, type: 'scatter', mode: 'lines+markers',
       line: { color: getVar('--plot-accent', '#3584e4'), width: 1.5 }, marker: { color: getVar('--text-dim', '#aaaaaa'), size: 4 },
       hovertemplate: '%{x:.0f}°: %{y:.3g}<extra></extra>', name: 'around the star',
     }];
-    // A direction with no pixel at all is a gap, which is the same problem.
-    const fewPixels = profile.counts.some((count) => count < FEW_PIXELS_PER_BIN) || profile.counts.length < 360 / 5;
-    return { traces: list, floorValue: floor, highestValue: Math.max(floor, ...values), fewPixels };
-  }, [measurement, limits, logScale]);
+    const curve = harmonicCurve(measurement);
+    const curveValues = curve ? lift(curve.values) : [];
+    if (curve) {
+      list.push({
+        x: curve.angles, y: curveValues, type: 'scatter', mode: 'lines',
+        line: { color: getVar('--plot-orange', '#e5a50a'), width: 2 }, name: 'significant terms',
+        hovertemplate: 'fitted: %{y:.3g} at %{x:.0f}°<extra></extra>',
+      });
+    }
+    const fewPixels = hasFewPixels(measurement.ring_bin_counts, measurement.ring_bin_angle_degrees);
+    return { traces: list, floorValue: floor, highestValue: Math.max(floor, ...values, ...curveValues), fewPixels };
+  }, [measurement, logScale]);
   const layout = useMemo(() => {
     const base = buildLayout({
       xTitle: 'direction around the star (degrees)',
@@ -300,6 +325,50 @@ function RingPlot({ measurement, limits, logScale, angleDegrees, firstRowAtTop }
 }
 
 /**
+ * Draws the small bar chart of the Fourier terms of the ring: the size of each order as a percent of the ring's
+ * mean brightness (with the noise bias removed), with a 1 sigma error bar. Terms that reach the significance
+ * threshold are drawn in the accent color, the others dim.
+ *
+ * @param props The library's Fourier terms.
+ * @returns The plot, or null when the ring was not analyzed.
+ */
+function HarmonicBars({ harmonics }: { harmonics: RingHarmonic[] }): React.ReactElement | null {
+  const traces = useMemo(() => {
+    const accent = getVar('--plot-accent', '#3584e4');
+    const dim = getVar('--text-dim', '#aaaaaa');
+    const trace: PlotlyTrace = {
+      x: harmonics.map((term) => term.order),
+      y: harmonics.map((term) => term.amplitude_debiased * 100),
+      type: 'bar',
+      marker: { color: harmonics.map((term) => (term.significant ? accent : dim)) },
+      error_y: {
+        type: 'data', array: harmonics.map((term) => term.amplitude_error * 100), visible: true,
+        color: getVar('--plot-reference-line', '#aaaaaa'), thickness: 1.5, width: 3,
+      },
+      hovertemplate: 'order %{x}: %{y:.1f}%<extra></extra>',
+      name: 'size of each term',
+    };
+    return [trace];
+  }, [harmonics]);
+  const layout = useMemo(() => {
+    const base = buildLayout({ xTitle: 'Fourier order (lobes around the ring)', yTitle: 'size (%)', margin: { l: 56, r: 10, t: 4, b: 40 } });
+    return {
+      ...base,
+      xaxis: { ...base.xaxis, tickvals: harmonics.map((term) => term.order), range: [0.4, harmonics.length + 0.6] },
+      yaxis: { ...base.yaxis, rangemode: 'tozero' },
+      showlegend: false,
+      bargap: 0.3,
+    };
+  }, [harmonics]);
+  if (harmonics.length === 0) return null;
+  return (
+    <div className="star-profile__plot-area star-profile__plot-area--bars">
+      <BasePlot data={traces} layout={layout} config={{ responsive: true, displayModeBar: false }} data-testid="star-profile-harmonics-plot" />
+    </div>
+  );
+}
+
+/**
  * Shows the star profile panel.
  *
  * @param props See {@link StarProfilePanelProps}.
@@ -315,17 +384,11 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
   const anchor = state.status === 'ready' || state.status === 'measuring' ? state.anchor : null;
   // The cutout reaches only as far as the length the star was measured with; a longer cut waits for a new measurement.
   const cutHalfLengthPx = measurement ? Math.min(cutLengthPx ?? measurement.cut_half_length_px, measurement.cut_half_length_px) : 0;
-  const reachPx = measurement ? cutoutReach(measurement) : 1;
-  // The ring is always sized to the star: its radii come from the star's own measurement.
-  const automaticRing = useMemo(
-    () => (measurement ? autoRingLimits(measurement, cutHalfLengthPx, reachPx) : { innerPx: 8, outerPx: 20 }),
-    [measurement, cutHalfLengthPx, reachPx],
+  // The ring's radii come from the library, which sized them from the measured pixels.
+  const ringLimits = useMemo(
+    () => ({ innerPx: measurement?.ring_inner_px ?? 8, outerPx: measurement?.ring_outer_px ?? 20 }),
+    [measurement],
   );
-  const ringLimits = useMemo(() => {
-    const outerPx = Math.min(automaticRing.outerPx, reachPx);
-    const innerPx = Math.min(automaticRing.innerPx, Math.max(0, outerPx - 1));
-    return { innerPx, outerPx };
-  }, [automaticRing, reachPx]);
 
   // Tell the image what to draw.
   useEffect(() => {
@@ -394,11 +457,20 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
             ) : (
               <RingPlot
                 measurement={measurement}
-                limits={ringLimits}
                 logScale={logScale}
                 angleDegrees={cutAngleDegrees}
                 firstRowAtTop={anchor?.firstRowAtTop ?? false}
               />
+            )}
+            {tabId === 'ring' && (
+              <>
+                <HarmonicBars harmonics={measurement.ring_harmonics} />
+                <p className="star-profile__note star-profile__summary" data-testid="star-profile-ring-summary" title={RING_SUMMARY_TOOLTIP}>
+                  {measurement.ring_harmonics.length > 0
+                    ? describeRing(measurement.ring_harmonics, anchor?.firstRowAtTop ?? false)
+                    : (measurement.ring_note ?? '')}
+                </p>
+              </>
             )}
           </div>
           <div className="star-profile__angle">
@@ -428,6 +500,7 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
           ) : (
             <div className="star-profile__angle">
               <span>{`Ring ${Math.round(ringLimits.innerPx)} to ${Math.round(ringLimits.outerPx)} px`}</span>
+              <span data-testid="star-profile-ring-neighbors">{describeNeighbors(measurement.ring_masked_neighbor_count)}</span>
             </div>
           )}
         </div>

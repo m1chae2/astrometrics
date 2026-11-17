@@ -60,3 +60,20 @@ def test_measures_a_star_in_the_library(tmp_path: Path) -> None:
     assert result["gaussian"]["fwhm_px"] == pytest.approx(2.3548 * 1.8, rel=0.05)
     assert isinstance(result["cut_values"], list)
     assert type(result["center_x"]) is float
+
+
+def test_ring_fields_are_sent_as_plain_data(tmp_path: Path) -> None:
+    """The ring analysis comes back with the profile as plain data."""
+    library = tmp_path / "library"
+    library.mkdir()
+    rows, columns = np.mgrid[0:121, 0:121]
+    image = 100.0 + 2000.0 * np.exp(-((columns - 60) ** 2 + (rows - 60) ** 2) / (2 * 1.8**2))
+    image += np.random.default_rng(2).normal(0.0, 2.0, image.shape)
+    path = library / "ring.fits"
+    fits.PrimaryHDU(image.astype(np.float32)).writeto(path)
+    result = _service(library, Astrometrics()).measure_star_profile(str(path), 61.0, 61.0)
+    assert 0.0 < result["ring_inner_px"] < result["ring_outer_px"]
+    assert [term["order"] for term in result["ring_harmonics"]] == list(range(1, 9))
+    assert len(result["ring_bin_angle_degrees"]) == len(result["ring_bin_values"])
+    assert type(result["ring_masked_fraction"]) is float
+    assert isinstance(result["ring_neighbors"], list)

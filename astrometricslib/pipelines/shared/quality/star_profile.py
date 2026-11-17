@@ -21,6 +21,7 @@ reads a file but changes nothing.
 """
 
 import math
+from collections.abc import Callable
 
 import numpy as np
 from astropy.stats import sigma_clipped_stats
@@ -39,6 +40,7 @@ from astrometricslib.models.tuned_parameter import (
     RunBasis,
     TunedParameter,
 )
+from astrometricslib.pipelines.shared.quality.star_ring import analyze_star_ring
 
 __all__ = ["measure_star_profile_in_file"]
 
@@ -477,8 +479,9 @@ def measure_star_profile_in_file(
     cut_angle_degrees: float = 0.0,
     cut_half_length_px: float | None = None,
     search_radius_px: float | None = None,
+    find_neighbors: Callable[[np.ndarray], list[tuple[float, float]]] | None = None,
 ) -> StarProfileMeasurement:
-    """Measure a star's radial profile and a straight cut through it.
+    """Measure a star's radial profile, a straight cut and the ring around it.
 
     Parameters
     ----------
@@ -497,11 +500,15 @@ def measure_star_profile_in_file(
         When given, the click is first moved to the brightest smoothed peak
         within this many pixels (at most the declared limit). `None` keeps
         the click and refines it only in the small centroid box.
+    find_neighbors : callable, optional
+        A star finder for the ring's neighbor mask: it takes a piece of the
+        image and returns the 0-based ``(column, row)`` of each star in it.
+        `None` leaves neighbors in the ring.
 
     Returns
     -------
     measurement : `StarProfileMeasurement`
-        The profile, the fits and the cut.
+        The profile, the fits, the cut and the ring analysis.
 
     Raises
     ------
@@ -635,6 +642,18 @@ def measure_star_profile_in_file(
         source_columns.start - cutout_column0 : source_columns.stop - cutout_column0,
     ] = data[source_rows, source_columns] - float(sky)
 
+    ring = analyze_star_ring(
+        data,
+        center_column,
+        center_row,
+        float(sky),
+        float(sky_noise),
+        peak,
+        star_found,
+        cut_half,
+        find_neighbors,
+    )
+
     return StarProfileMeasurement(
         path=path,
         color_note=color_note,
@@ -669,4 +688,17 @@ def measure_star_profile_in_file(
         snap_distance_px=float(snap_distance),
         star_found=star_found,
         not_a_star_reason=not_a_star_reason,
+        ring_inner_px=ring.inner_px,
+        ring_outer_px=ring.outer_px,
+        ring_sky=ring.sky,
+        ring_bin_angle_degrees=ring.bin_angles,
+        ring_bin_values=ring.bin_values,
+        ring_bin_counts=ring.bin_counts,
+        ring_harmonics=ring.harmonics,
+        ring_constant=ring.constant,
+        ring_scale_value=ring.scale_value,
+        ring_neighbors=ring.neighbors,
+        ring_masked_neighbor_count=len(ring.neighbors),
+        ring_masked_fraction=ring.masked_fraction,
+        ring_note=ring.note,
     )

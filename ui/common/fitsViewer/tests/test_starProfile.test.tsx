@@ -7,9 +7,9 @@
  * shows its reason and no fitted curve. Also the Detections toggle and overlay.
  */
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { StarProfileMeasurement } from '../../types/backendTypes';
+import type { RingHarmonic, StarProfileMeasurement } from '../../types/backendTypes';
 
 /** A stand-in for the FITS worker: answers each pixel question the way the real one does for a bottom-up file. */
 class FakeWorker extends EventTarget {
@@ -74,7 +74,10 @@ interface StandInTrace {
   name?: string;
   hovertemplate?: string;
   hoverinfo?: string;
-  marker?: { color?: string };
+  marker?: { color?: string | string[] };
+  type?: string;
+  mode?: string;
+  error_y?: { array: number[] };
   line?: { color?: string; dash?: string };
 }
 const plotData: Record<string, StandInTrace[]> = {};
@@ -180,8 +183,37 @@ function makeMeasurement(overrides: Partial<StarProfileMeasurement> = {}): StarP
     snap_distance_px: 0,
     star_found: true,
     not_a_star_reason: null,
+    // The ring: 6 to 10 px, four direction bins, one significant one-sided term toward 180 degrees, no neighbors.
+    ring_inner_px: 6,
+    ring_outer_px: 10,
+    ring_sky: 100,
+    ring_bin_angle_degrees: [2.5, 92.5, 182.5, 272.5],
+    ring_bin_values: [10, 12, 20, 12],
+    ring_bin_counts: [30, 30, 30, 30],
+    ring_harmonics: ringTerms(),
+    ring_constant: 1,
+    ring_scale_value: 14,
+    ring_neighbors: [],
+    ring_masked_neighbor_count: 0,
+    ring_masked_fraction: 0,
+    ring_note: null,
     ...overrides,
   };
+}
+
+/**
+ * Makes the eight Fourier terms of a ring: a significant one-sided term toward 180 degrees, a significant
+ * oval term, and six terms that are only noise.
+ *
+ * @returns The terms, orders 1 to 8.
+ */
+function ringTerms(): RingHarmonic[] {
+  return Array.from({ length: 8 }, (_unused, index) => {
+    const order = index + 1;
+    if (order === 1) return { order, amplitude: 0.13, amplitude_error: 0.02, amplitude_debiased: 0.124, significance: 6.5, significant: true, direction_degrees: 180 };
+    if (order === 2) return { order, amplitude: 0.035, amplitude_error: 0.01, amplitude_debiased: 0.033, significance: 3.5, significant: true, direction_degrees: 10 };
+    return { order, amplitude: 0.01, amplitude_error: 0.01, amplitude_debiased: 0, significance: 1, significant: false, direction_degrees: 20 };
+  });
 }
 
 /**
@@ -670,19 +702,146 @@ describe('the ring is always automatic', () => {
     expect(screen.getByLabelText('Cut angle in degrees')).toBeTruthy();
   });
 
-  it('sizes the ring to each new star', () => {
+  it('takes the ring radii from each new measurement', () => {
     const { rerender } = renderRing(longMeasurement(30));
     const wider = longMeasurement(30);
-    wider.moffat = { ...wider.moffat, fwhm_px: 6.4 };
+    wider.ring_inner_px = 12.4;
+    wider.ring_outer_px = 31.6;
     rerender(
       <StarProfilePanel state={{ status: 'ready', anchor: { ...anchor }, measurement: wider }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} />
     );
-    expect(screen.getByText(/^Ring 12 to \d+ px$/)).toBeTruthy();
+    expect(screen.getByText('Ring 12 to 32 px')).toBeTruthy();
   });
 
   it('notes that few pixels fall in each direction when the ring is close in', () => {
-    renderRing(longMeasurement(8));
+    renderRing(makeMeasurement({ ring_bin_counts: [30, 2, 30, 30] }));
     expect(screen.getByTestId('star-profile-ring-note').textContent).toBe('Few pixels per direction this close in');
+  });
+});
+
+describe('the ring analysis from the library', () => {
+  const anchor = { x: 51, y: 120, firstRowAtTop: false, searchRadiusPx: 6 };
+  const noop = () => undefined;
+
+  /**
+   * Renders the panel on the ring tab.
+   *
+   * @param measurement The star.
+   * @param firstRowAtTop True for a picture with the file's first row at the top.
+   */
+  function renderRing(measurement: StarProfileMeasurement, firstRowAtTop = false): void {
+    render(
+      <StarProfilePanel state={{ status: 'ready', anchor: { ...anchor, firstRowAtTop }, measurement }} cutAngleDegrees={0} onCutAngleChange={noop} onClose={noop} />
+    );
+    fireEvent.click(screen.getByRole('tab', { name: 'Around the star' }));
+  }
+
+  it('plots the library bins and a smooth curve of the constant plus the significant terms', () => {
+    renderRing(makeMeasurement());
+    const traces = plotData['star-profile-ring-plot'];
+    expect(traces.map((trace) => trace.name)).toEqual(['around the star', 'significant terms']);
+    expect(traces[0].x).toEqual([2.5, 92.5, 182.5, 272.5]);
+    expect(traces[0].y).toEqual([10, 12, 20, 12]);
+    const curve = traces[1];
+    expect(curve.mode).toBe('lines');
+    // At 180 degrees the one-sided term is at its peak: 14 * 1 * (1 + 0.13 + 0.035 cos(2 (180 - 10))).
+    const at180 = curve.y[curve.x.indexOf(180)];
+    expect(at180).toBeCloseTo(14 * (1 + 0.13 + 0.035 * Math.cos((2 * 170 * Math.PI) / 180)), 6);
+    // At 0 degrees it is at its trough: the one-sided term subtracts.
+    expect(curve.y[0]).toBeLessThan(14);
+  });
+
+  it('draws a flat line when no term is significant', () => {
+    const quiet = ringTerms().map((term) => ({ ...term, significant: false }));
+    renderRing(makeMeasurement({ ring_harmonics: quiet }));
+    const curve = plotData['star-profile-ring-plot'][1];
+    expect(new Set(curve.y).size).toBe(1);
+    expect(curve.y[0]).toBeCloseTo(14, 6);
+    expect(screen.getByTestId('star-profile-ring-summary').textContent).toBe('Round within the noise');
+  });
+
+  it('draws no curve when the ring was not analyzed, and says why', () => {
+    renderRing(makeMeasurement({
+      ring_harmonics: [], ring_constant: null, ring_scale_value: null, ring_note: 'The ring is not analyzed because no star was found.',
+    }));
+    expect(plotData['star-profile-ring-plot'].map((trace) => trace.name)).toEqual(['around the star']);
+    expect(screen.queryByTestId('star-profile-harmonics-plot')).toBeNull();
+    expect(screen.getByTestId('star-profile-ring-summary').textContent).toBe('The ring is not analyzed because no star was found.');
+  });
+
+  it('shows a bar for each order with a 1 sigma error bar, significant bars in the accent color', () => {
+    renderRing(makeMeasurement());
+    const bars = plotData['star-profile-harmonics-plot'][0];
+    expect(bars.type).toBe('bar');
+    expect(bars.x).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(bars.y[0]).toBeCloseTo(12.4, 6);
+    expect(bars.error_y?.array[0]).toBeCloseTo(2, 6);
+    const colors = bars.marker?.color as string[];
+    expect(colors[0]).toBe(colors[1]);
+    expect(colors[0]).not.toBe(colors[2]);
+    expect(colors.slice(2)).toEqual(new Array(6).fill(colors[2]));
+  });
+
+  it('summarizes the strongest significant terms, naming the screen direction of the one-sided term', () => {
+    // 180 degrees points down the screen for a picture with the first row at the top, up otherwise.
+    renderRing(makeMeasurement(), true);
+    expect(screen.getByTestId('star-profile-ring-summary').textContent).toBe('One-sided 12% ± 2.0% toward Up; oval 3.3% ± 1.0%');
+  });
+
+  it('says Down for the same star in a bottom-up picture', () => {
+    renderRing(makeMeasurement(), false);
+    expect(screen.getByTestId('star-profile-ring-summary').textContent).toContain('toward Down');
+  });
+
+  it('shows the ring radii and the number of neighbors left out as plain text', () => {
+    renderRing(makeMeasurement({
+      ring_inner_px: 4.2, ring_outer_px: 24.4, ring_masked_neighbor_count: 2,
+      ring_neighbors: [{ x: 60, y: 130, mask_radius_px: 4, pixels_masked: 20 }, { x: 40, y: 110, mask_radius_px: 3, pixels_masked: 12 }],
+    }));
+    expect(screen.getByText('Ring 4 to 24 px')).toBeTruthy();
+    expect(screen.getByText('2 neighbors left out')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /neighbor/i })).toBeNull();
+  });
+
+  it('uses the singular for one neighbor and says so when there are none', () => {
+    renderRing(makeMeasurement({ ring_masked_neighbor_count: 1 }));
+    expect(screen.getByText('1 neighbor left out')).toBeTruthy();
+    cleanup();
+    renderRing(makeMeasurement());
+    expect(screen.getByText('No neighbors left out')).toBeTruthy();
+  });
+
+  it('draws the masked neighbors as dashed circles in the marker layer on the ring tab only', async () => {
+    callBackendMock.mockResolvedValue(makeMeasurement({
+      center_x: 51, center_y: 120, ring_masked_neighbor_count: 1,
+      ring_neighbors: [{ x: 61, y: 120, mask_radius_px: 4, pixels_masked: 20 }],
+    }));
+    loaderState.parsedData = { imageId: 7, w: 200, h: 160, channels: 1, min: 0, max: 65535 };
+    loaderState.bitmap = null;
+    loaderState.loadedKey = '/static/M31.fits';
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    HTMLElement.prototype.releasePointerCapture = vi.fn();
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 1; });
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
+      setTransform: vi.fn(), clearRect: vi.fn(), beginPath: vi.fn(), moveTo: vi.fn(), stroke: vi.fn(), arc: vi.fn(),
+    })) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+    const element = renderViewer();
+    click(element, 50, 40);
+    await screen.findByTestId('star-profile-width');
+    const marker = screen.getByTestId('star-profile-marker');
+    expect(screen.queryByTestId('star-profile-neighbor')).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: 'Around the star' }));
+    const circle = await screen.findByTestId('star-profile-neighbor');
+    expect(marker.contains(circle)).toBe(true);
+    expect(circle.getAttribute('class')).toContain('fits-renderer__profile-neighbor');
+    // The mask radius is 4 file pixels, in the scale of the ring's outer circle (10 file pixels).
+    const outer = Number(screen.getByTestId('star-profile-band-outer').getAttribute('r'));
+    expect(Number(circle.getAttribute('r'))).toBeCloseTo(outer * 0.4, 5);
+    // Ten file pixels to the right of the star's center, in the same scale.
+    const center = marker.querySelector('.fits-renderer__profile-ring') as SVGCircleElement;
+    expect(Number(circle.getAttribute('cx')) - Number(center.getAttribute('cx'))).toBeCloseTo(outer, 5);
+    expect(circle.getAttribute('cy')).toBe(center.getAttribute('cy'));
+    vi.unstubAllGlobals();
   });
 });
 

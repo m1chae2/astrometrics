@@ -502,8 +502,15 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     const radius = starFound ? ((fittedWidth ?? 3) / 2) * stepX : NOT_A_STAR_MARKER_RADIUS_PX;
     let cut: { x1: number; y1: number; x2: number; y2: number } | null = null;
     let band: { inner: number; outer: number } | null = null;
+    let neighbors: Array<{ x: number; y: number; radius: number }> = [];
     if (measurement && profileView?.mode === 'ring') {
       band = { inner: profileView.ringInnerPx * stepX, outer: profileView.ringOuterPx * stepX };
+      // The neighbor stars the library left out of the ring, as circles of their mask radius.
+      neighbors = measurement.ring_neighbors.map((neighbor) => ({
+        x: panX + (neighbor.x - 0.5) * stepX,
+        y: panY + (firstRowAtTop ? neighbor.y - 0.5 : parsedData.h - neighbor.y + 0.5) * stepY,
+        radius: neighbor.mask_radius_px * stepX,
+      }));
     } else if (measurement) {
       // The angle runs from +y (up a column) toward +x; screen rows grow downward when the first row is at the top.
       const angle = (starProfile.cutAngleDegrees * Math.PI) / 180;
@@ -511,7 +518,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
       const alongRows = Math.cos(angle) * (profileView?.cutHalfLengthPx ?? measurement.cut_half_length_px) * stepY * (firstRowAtTop ? 1 : -1);
       cut = { x1: screenX - alongX, y1: screenY - alongRows, x2: screenX + alongX, y2: screenY + alongRows };
     }
-    return { screenX, screenY, radius, cut, band, starFound };
+    return { screenX, screenY, radius, cut, band, neighbors, starFound };
   })();
 
   // The Detections overlay: fetched while it is on, drawn with the same placement as the star profile marker.
@@ -707,6 +714,17 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
                 y2={profileMarker.cut.y2}
               />
             )}
+            {profileMarker.neighbors.map((neighbor, index) => (
+              <circle
+                // The neighbors of one measurement are listed in a fixed order, so the index is a stable key.
+                key={index}
+                className="fits-renderer__profile-neighbor"
+                data-testid="star-profile-neighbor"
+                cx={neighbor.x}
+                cy={neighbor.y}
+                r={neighbor.radius}
+              />
+            ))}
             {profileMarker.band && (
               <>
                 <circle className="fits-renderer__profile-band" data-testid="star-profile-band-inner" cx={profileMarker.screenX} cy={profileMarker.screenY} r={profileMarker.band.inner} />

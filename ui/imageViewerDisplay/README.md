@@ -59,13 +59,25 @@ Star profile: click-to-measure is always on. A click on the picture (not a drag,
   The panel has two views. "Along the line" is the cut plot. Its Cut length slider
   (20 to 100 pixels) rebuilds the cut from the cutout when the cutout already covers the length;
   a longer cut measures the star again once, after the slider rests (`cut_half_length_px`).
-  "Around the star" (`utils/starRing.ts`) averages the cutout's pixels in a ring in 5 degree bins of direction, measured like the cut angle. Its axis
-  names the screen directions (Up, Right, Down, Left, which depend on the picture's row order)
-  and marks the cut angle and the angle plus 180 degrees; the picture shows the two ring circles
-  instead of the cut line. The ring always has the radii chosen for the star (`autoRingLimits`):
-  it starts where the fitted profile falls to 1% of its peak and ends at 1.5 times the radius
-  where it falls to twice the sky noise. The panel shows them as a plain line, such as
-  "Ring 4 to 8 px", with no control to change them. A spike shows as a peak, and a spike with no
+  "Around the star" shows the ring the backend measured (the `ring_*` fields of the answer; the
+  measurement is in `astrometricslib/pipelines/shared/quality/star_ring.py`). The browser draws
+  it and does no ring analysis of its own; `utils/starRing.ts` only builds the smooth curve, the
+  one-line summary and the direction names. The plot shows the mean brightness in 5 degree bins
+  of direction, measured like the cut angle, using only the pixels the backend kept (neighbor stars
+  are left out). Its axis names the screen directions (Up, Right, Down, Left, which depend on the
+  picture's row order) and marks the cut angle and the angle plus 180 degrees. An orange line over
+  the points is the constant plus every Fourier term that reached the backend's significance
+  threshold. Under the plot, a short bar chart shows the size of each order from 1 to 8 as a percent of
+  the ring's mean brightness (noise bias removed), with a 1 sigma error bar; significant bars use
+  the accent color. A line under the chart names the strongest significant patterns, for example
+  "One-sided 12% ± 2% toward Up; oval 3% ± 1%" (order 1 is one-sided, 2 oval, 3 three-fold, 4
+  four-fold, higher "m-fold"; only the one-sided pattern names a direction), or "Round within the
+  noise". The picture shows the two ring circles instead of the cut line, and a faint dashed
+  circle around each neighbor star that was left out. The ring radii come from the backend: it
+  starts where the mean brightness measured in the pixels falls to 1% of the peak and ends at 1.5
+  times the radius where it falls to twice the sky noise. The panel shows them as a plain line,
+  such as "Ring 4 to 24 px", next to the count of neighbors left out, with no control to change
+  them. A spike shows as a peak, and a spike with no
   partner 180 degrees away is one-sided. A caption ("Pixels along the dashed
   line") ties the plot to the dashed cut line on the picture. A Log scale button switches the
   brightness axis to a log scale to show the faint wings (a one-sided flare shows as one tail

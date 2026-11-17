@@ -9,7 +9,7 @@ app as it is.
 
 from pydantic import BaseModel
 
-__all__ = ["ProfileFit", "StarProfileMeasurement"]
+__all__ = ["ProfileFit", "RingHarmonic", "RingNeighbor", "StarProfileMeasurement"]
 
 
 class ProfileFit(BaseModel):
@@ -52,6 +52,66 @@ class ProfileFit(BaseModel):
     curve_radius_px: list[float] = []
     curve_values: list[float] = []
     r_squared: float | None = None
+
+
+class RingNeighbor(BaseModel):
+    """A neighbor star whose light was left out of the ring.
+
+    Parameters
+    ----------
+    x, y : `float`
+        The neighbor's position, in 1-based pixels.
+    mask_radius_px : `float`
+        Pixels within this distance of the neighbor were left out.
+    pixels_masked : `int`
+        How many ring pixels this neighbor's mask removed (pixels already
+        removed by an earlier neighbor are not counted again).
+    """
+
+    x: float
+    y: float
+    mask_radius_px: float
+    pixels_masked: int
+
+
+class RingHarmonic(BaseModel):
+    """One term of the Fourier fit to the brightness around the ring.
+
+    The fit is to the ring pixels divided by the mean at their radius, as a
+    constant plus ``a cos(m t) + b sin(m t)`` for each order ``m``, where
+    ``t`` is the direction angle (from +y toward +x).
+
+    Parameters
+    ----------
+    order : `int`
+        The number of lobes: 1 is one-sided, 2 is oval, 3 is three-fold.
+    amplitude : `float`
+        The size of the term as a fraction of the constant term. It is
+        biased upward when the signal is weak: noise alone gives a positive
+        amplitude.
+    amplitude_error : `float`
+        The 1 sigma uncertainty of ``amplitude``, from the scatter of the
+        fit residuals and the covariance of the fit.
+    amplitude_debiased : `float`
+        ``amplitude`` with the expected noise contribution removed (zero
+        when the amplitude is below the noise).
+    significance : `float`
+        ``amplitude`` divided by ``amplitude_error``.
+    significant : `bool`
+        `True` when ``significance`` reaches the declared threshold.
+    direction_degrees : `float`
+        The direction of the pattern's brightest lobe, from +y toward +x,
+        from 0 up to ``360 / order``. The other lobes follow at steps of
+        ``360 / order``.
+    """
+
+    order: int
+    amplitude: float
+    amplitude_error: float
+    amplitude_debiased: float
+    significance: float
+    significant: bool
+    direction_degrees: float
 
 
 class StarProfileMeasurement(BaseModel):
@@ -140,6 +200,40 @@ class StarProfileMeasurement(BaseModel):
         still returned.
     not_a_star_reason : `str` or `None`
         The sentence to show when ``star_found`` is `False`.
+    ring_inner_px, ring_outer_px : `float`
+        The radii of the "around the star" ring, in pixels. The inner one is
+        where the mean brightness falls below a small fraction of the peak;
+        the outer one is a margin beyond where it falls to twice the sky
+        noise.
+    ring_sky : `float`
+        The sky level at the star's center that the ring's values are
+        measured above. It comes from a tilted plane fitted far outside the
+        star's glow, so it can be lower than ``sky``, and a smooth gradient
+        of the sky is removed from the ring.
+    ring_bin_angle_degrees, ring_bin_values, ring_bin_counts : `list`
+        The ring's brightness by direction: for each 5 degree bin that holds
+        a pixel, the middle angle (from +y toward +x), the mean value above
+        the sky of its unmasked pixels, and how many pixels that is.
+    ring_harmonics : `list` [`RingHarmonic`]
+        The Fourier terms, orders 1 to 8. Empty when the ring could not be
+        analyzed (see ``ring_note``).
+    ring_constant : `float` or `None`
+        The fitted constant term, in units of the divisor (the radial mean,
+        held at a floor of a few sky noise). It is 1 where the divisor is
+        the radial mean, and lower where the floor applies.
+    ring_scale_value : `float` or `None`
+        The mean, over the fitted pixels, of the radial mean brightness. The
+        brightness drawn for a direction ``t`` is ``ring_scale_value *
+        ring_constant * (1 + sum of amplitude * cos(order * (t -
+        direction)))`` over the orders that are significant.
+    ring_neighbors : `list` [`RingNeighbor`]
+        The neighbor stars left out of the ring.
+    ring_masked_neighbor_count : `int`
+        How many neighbors removed at least one ring pixel.
+    ring_masked_fraction : `float`
+        The fraction of the ring's pixels that the neighbor masks removed.
+    ring_note : `str` or `None`
+        A sentence that says why the ring could not be analyzed, or `None`.
     """
 
     path: str
@@ -175,3 +269,16 @@ class StarProfileMeasurement(BaseModel):
     snap_distance_px: float
     star_found: bool
     not_a_star_reason: str | None = None
+    ring_inner_px: float
+    ring_outer_px: float
+    ring_sky: float
+    ring_bin_angle_degrees: list[float]
+    ring_bin_values: list[float]
+    ring_bin_counts: list[int]
+    ring_harmonics: list[RingHarmonic]
+    ring_constant: float | None = None
+    ring_scale_value: float | None = None
+    ring_neighbors: list[RingNeighbor]
+    ring_masked_neighbor_count: int
+    ring_masked_fraction: float
+    ring_note: str | None = None

@@ -109,6 +109,16 @@
   position: relative;
 }
 
+/* The bar chart of the Fourier terms is short and fixed in height, so the ring plot keeps the room. */
+.star-profile__plot-area--bars {
+  flex: 0 0 110px;
+  min-height: 110px;
+}
+
+.star-profile__summary {
+  color: var(--text-primary);
+}
+
 .star-profile__ring-note {
   position: absolute;
   top: 2px;
@@ -157,6 +167,15 @@
   stroke: var(--accent-blue);
   stroke-width: 1.5;
   stroke-dasharray: 5 4;
+}
+
+/* A neighbor star that the ring analysis left out: a faint dashed circle of its mask radius. */
+.fits-renderer__profile-neighbor {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+  opacity: 0.7;
 }
 
 .fits-renderer__profile-cut {

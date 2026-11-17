@@ -11,10 +11,13 @@ export type PlotlyTrace = {
   // (script-src with no 'unsafe-eval', see electron/main.js) blocks outright
   // -- the trace silently falls back to Plotly's "WebGL is not supported"
   // placeholder instead of rendering. Use 'scatter' (SVG) for everything.
-  type?: 'scatter' | 'scattergl';
+  type?: 'scatter' | 'scattergl' | 'bar';
   mode?: 'lines' | 'markers' | 'lines+markers';
   line?: { color?: string; width?: number; shape?: string; dash?: string };
-  marker?: { color?: string; size?: number; symbol?: string };
+  /** One color for the trace, or one per point. */
+  marker?: { color?: string | string[]; size?: number; symbol?: string };
+  /** Error bars along y, from a list of half-lengths. */
+  error_y?: { type: 'data'; array: number[]; visible?: boolean; color?: string; thickness?: number; width?: number };
   hoverinfo?: string;
   /** The text of the hover label, in Plotly's template syntax. `<extra></extra>` drops the trace-name box. */
   hovertemplate?: string;

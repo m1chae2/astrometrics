@@ -94,7 +94,12 @@ from astrometricslib.models.quality.spectroscopy_quality import (
     StageQualityMetric,
     StageQualityRollup,
 )
-from astrometricslib.models.quality.star_profile import ProfileFit, StarProfileMeasurement
+from astrometricslib.models.quality.star_profile import (
+    ProfileFit,
+    RingHarmonic,
+    RingNeighbor,
+    StarProfileMeasurement,
+)
 from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasurement
 from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
 from astrometricslib.models.stellar_source import (
@@ -662,6 +667,8 @@ def render_types() -> str:
         generate_interface(MetricSummary, "MetricSummary"),
         generate_interface(SensorNoiseMeasurement, "SensorNoiseMeasurement"),
         generate_interface(ProfileFit, "ProfileFit"),
+        generate_interface(RingHarmonic, "RingHarmonic"),
+        generate_interface(RingNeighbor, "RingNeighbor"),
         generate_interface(StarDetection, "StarDetection"),
         generate_interface(DetectionsMeasurement, "DetectionsMeasurement"),
         generate_interface(StarProfileMeasurement, "StarProfileMeasurement"),

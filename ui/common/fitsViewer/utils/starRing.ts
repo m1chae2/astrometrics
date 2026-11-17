@@ -1,161 +1,61 @@
 /**
  * @file starRing.ts
- * @description The "around the star" view: how bright the pixels are in a ring around the star's center, by
- * direction. A spike or a flare shows as a peak at its direction. The ring is cut from the cutout that comes
- * with each measurement, so no call to the backend is needed.
+ * @description Helpers for the "around the star" view. The library measures the ring (its radii, the brightness
+ * by direction, the neighbors left out and the Fourier terms); this file only turns those numbers into what the
+ * panel draws and says: the smooth curve of the significant terms, the one-line summary, and the screen
+ * direction of an angle.
  *
- * The direction uses the same convention as the cut: degrees from +y (up a column of the image) toward +x,
- * from 0 up to 360.
+ * The direction uses the same convention as the cut: degrees from +y (up a column of the image) toward +x, from
+ * 0 up to 360.
  */
-import type { CutSource } from './starCut';
-
-/** Width of one direction bin, in degrees. */
-export const RING_BIN_DEGREES = 5;
-
-/** The pieces of a measurement that the ring needs. */
-export type RingSource = Pick<CutSource, 'center_x' | 'center_y' | 'cutout' | 'cutout_origin_x' | 'cutout_origin_y'>;
-
-/** The ring's brightness by direction. Only bins that hold at least one pixel appear. */
-export interface RingProfile {
-  /** Middle of each bin, in degrees from 0 to 360. */
-  angles: number[];
-  /** Mean value above the sky of the pixels in each bin. */
-  values: number[];
-  /** How many pixels went into each bin. */
-  counts: number[];
-}
-
-/** The ring's two radii, in pixels. */
-export interface RingLimits {
-  /** Inner radius. */
-  innerPx: number;
-  /** Outer radius. */
-  outerPx: number;
-}
-
-/**
- * Finds how far the cutout reaches from its middle, so a ring cannot ask for pixels the cutout lacks.
- *
- * @param source The measurement.
- * @returns The reach, in pixels.
- */
-export function cutoutReach(source: Pick<CutSource, 'cutout'>): number {
-  return Math.max(1, (source.cutout.length - 1) / 2);
-}
+import type { RingHarmonic, StarProfileMeasurement } from '../../types/backendTypes';
 
 /** Fewest pixels a direction bin should hold for its mean to be steady. */
 export const FEW_PIXELS_PER_BIN = 4;
 
-/** The fit's numbers that the automatic ring needs. */
-export interface RingFit {
-  /** "moffat" or "gaussian". */
-  model: string;
-  /** Whether the fit worked. */
-  fitted: boolean;
-  /** Width at half the peak, in pixels. */
-  fwhm_px?: number | null;
-  /** Height of the fitted profile at the center. */
-  peak?: number | null;
-  /** Shape of the Moffat wings. */
-  beta?: number | null;
-}
+/** The most terms the one-line summary names. */
+export const SUMMARY_TERM_COUNT = 3;
 
-/** The star's fits and sky noise, for the automatic ring. */
-export interface AutoRingSource {
-  /** The Moffat fit. */
-  moffat: RingFit;
-  /** The Gaussian fit. */
-  gaussian: RingFit;
-  /** Scatter of the sky, in the same units as the profile. */
-  sky_noise: number;
-  /** Whether the profile looks like a star. */
-  star_found: boolean;
+/** The summary when no term reaches the library's significance threshold. */
+export const ROUND_WITHIN_NOISE = 'Round within the noise';
+
+/** The pieces of a measurement that the ring plot needs. */
+export type RingSource = Pick<
+  StarProfileMeasurement,
+  'ring_bin_angle_degrees' | 'ring_bin_counts' | 'ring_harmonics' | 'ring_constant' | 'ring_scale_value'
+>;
+
+/** A smooth curve of brightness against direction. */
+export interface RingCurve {
+  /** Directions, in degrees from 0 to 360. */
+  angles: number[];
+  /** Brightness above the sky at each direction. */
+  values: number[];
 }
 
 /**
- * Finds the radius at which the fitted profile has fallen to a level.
+ * Names the pattern that a Fourier order describes.
  *
- * @param fit A fit that worked.
- * @param level The level, in the profile's units.
- * @returns The radius in pixels, or null when the fit cannot say (no width, no peak, or a level at or above the peak).
+ * @param order The number of lobes.
+ * @returns "One-sided", "Oval", "Three-fold", "Four-fold", or "m-fold" for a higher order.
  */
-function radiusAtLevel(fit: RingFit, level: number): number | null {
-  const { fwhm_px: width, peak } = fit;
-  if (!fit.fitted || !width || !peak || peak <= 0 || level <= 0 || level >= peak) return null;
-  const ratio = level / peak;
-  if (fit.model === 'moffat' && fit.beta && fit.beta > 0) {
-    // I(r) = peak (1 + (r / alpha)^2)^-beta, with FWHM = 2 alpha sqrt(2^(1/beta) - 1).
-    const alpha = width / (2 * Math.sqrt(2 ** (1 / fit.beta) - 1));
-    return alpha * Math.sqrt(ratio ** (-1 / fit.beta) - 1);
-  }
-  if (fit.model === 'gaussian') {
-    const sigma = width / (2 * Math.sqrt(2 * Math.LN2));
-    return sigma * Math.sqrt(-2 * Math.log(ratio));
-  }
-  return null;
+export function orderName(order: number): string {
+  if (order === 1) return 'One-sided';
+  if (order === 2) return 'Oval';
+  if (order === 3) return 'Three-fold';
+  if (order === 4) return 'Four-fold';
+  return `${order}-fold`;
 }
 
 /**
- * Sizes the ring to the star: the inner radius is where the fitted profile has fallen to 1% of its peak (so the
- * noisy core is left out), and the outer radius is where it has fallen to twice the sky noise, plus 50%. Whole
- * pixels, the inner at least 2, the outer at least 4 more, and never past the cutout. A profile with no usable fit
- * gets 8 pixels and the cut length.
+ * Writes a fraction as a percent, with a decimal when it is under 10%.
  *
- * @param source The star's fits and sky noise.
- * @param cutLengthPx The cut length, for the fallback.
- * @param reachPx How far the cutout reaches.
- * @returns The two radii.
+ * @param fraction The fraction, for example 0.124.
+ * @returns The text, for example "12%" or "3.4%".
  */
-export function autoRingLimits(source: AutoRingSource, cutLengthPx: number, reachPx: number): RingLimits {
-  const fit = source.star_found ? [source.moffat, source.gaussian].find((candidate) => radiusAtLevel(candidate, 0.01 * (candidate.peak ?? 0)) !== null) : undefined;
-  let innerPx = 8;
-  let outerPx = cutLengthPx;
-  if (fit && fit.peak) {
-    innerPx = radiusAtLevel(fit, 0.01 * fit.peak) ?? innerPx;
-    const noiseRadius = radiusAtLevel(fit, 2 * source.sky_noise);
-    // When the fit never falls to twice the noise (or the noise is not known), the cut length is the far limit.
-    outerPx = noiseRadius !== null ? 1.5 * noiseRadius : cutLengthPx;
-  }
-  const reach = Math.floor(reachPx);
-  const inner = Math.min(Math.max(Math.round(innerPx), 2), Math.max(2, reach - 4));
-  // The outer radius is pushed out to keep a band 4 pixels wide, and held at the edge of the cutout.
-  const outer = Math.min(Math.max(Math.round(outerPx), inner + 4), Math.max(reach, inner + 4));
-  return { innerPx: inner, outerPx: outer };
-}
-
-/**
- * Averages the cutout's pixels by direction around the center, for pixels in the ring.
- *
- * @param source The measurement, with its cutout.
- * @param limits The ring's radii. A pixel at exactly a radius counts.
- * @returns The mean value in each 5 degree bin that holds a pixel.
- */
-export function azimuthalProfile(source: RingSource, limits: RingLimits): RingProfile {
-  const binCount = 360 / RING_BIN_DEGREES;
-  const sums = new Array<number>(binCount).fill(0);
-  const counts = new Array<number>(binCount).fill(0);
-  source.cutout.forEach((row, rowIndex) => {
-    row.forEach((value, columnIndex) => {
-      if (value === null || !Number.isFinite(value)) return;
-      const dx = source.cutout_origin_x + columnIndex - source.center_x;
-      const dy = source.cutout_origin_y + rowIndex - source.center_y;
-      const radius = Math.hypot(dx, dy);
-      if (radius < limits.innerPx || radius > limits.outerPx) return;
-      // The same angle as the cut: sin(angle) along x and cos(angle) along y.
-      const degrees = ((Math.atan2(dx, dy) * 180) / Math.PI + 360) % 360;
-      const bin = Math.min(binCount - 1, Math.floor(degrees / RING_BIN_DEGREES));
-      sums[bin] += value;
-      counts[bin] += 1;
-    });
-  });
-  const profile: RingProfile = { angles: [], values: [], counts: [] };
-  counts.forEach((count, bin) => {
-    if (count === 0) return;
-    profile.angles.push((bin + 0.5) * RING_BIN_DEGREES);
-    profile.values.push(sums[bin] / count);
-    profile.counts.push(count);
-  });
-  return profile;
+export function formatPercent(fraction: number): string {
+  const percent = fraction * 100;
+  return `${Math.abs(percent) < 9.95 ? percent.toFixed(1) : percent.toFixed(0)}%`;
 }
 
 /**
@@ -164,7 +64,7 @@ export function azimuthalProfile(source: RingSource, limits: RingLimits): RingPr
  * Image x always runs to the right. Image y runs down the screen when the file's first row is at the top,
  * and up the screen otherwise. So 0 degrees points down or up, and 90 degrees points right.
  *
- * @param angleDegrees One of 0, 90, 180 or 270.
+ * @param angleDegrees One of 0, 90, 180 or 270 (any other angle is rounded to the nearest of them).
  * @param firstRowAtTop True when the picture shows the file's first row at the top.
  * @returns "Up", "Right", "Down" or "Left".
  */
@@ -174,4 +74,72 @@ export function screenDirection(angleDegrees: number, firstRowAtTop: boolean): '
   if (quarter === 3) return 'Left';
   const alongY = quarter === 0;
   return alongY === firstRowAtTop ? 'Down' : 'Up';
+}
+
+/**
+ * Writes the one-line summary of the ring: the strongest significant terms, biggest first.
+ *
+ * The amplitudes are the ones with the noise bias removed, as a percent of the ring's mean brightness, with their
+ * 1 sigma uncertainty. Only the one-sided term names a direction, taken from the nearest screen axis.
+ *
+ * @param harmonics The library's Fourier terms.
+ * @param firstRowAtTop True when the picture shows the file's first row at the top.
+ * @returns For example "One-sided 12% ± 2% toward Up; oval 3% ± 1%", or "Round within the noise".
+ */
+export function describeRing(harmonics: RingHarmonic[], firstRowAtTop: boolean): string {
+  const strongest = harmonics
+    .filter((term) => term.significant)
+    .sort((first, second) => second.amplitude_debiased - first.amplitude_debiased)
+    .slice(0, SUMMARY_TERM_COUNT);
+  if (strongest.length === 0) return ROUND_WITHIN_NOISE;
+  return strongest
+    .map((term, index) => {
+      const name = index === 0 ? orderName(term.order) : orderName(term.order).toLowerCase();
+      const size = `${name} ${formatPercent(term.amplitude_debiased)} ± ${formatPercent(term.amplitude_error)}`;
+      return term.order === 1 ? `${size} toward ${screenDirection(term.direction_degrees, firstRowAtTop)}` : size;
+    })
+    .join('; ');
+}
+
+/**
+ * Builds the smooth curve of the constant term plus every significant Fourier term, in brightness units.
+ *
+ * Each term adds `amplitude * cos(order * (angle - direction))` to a constant of 1; the sum is scaled by the
+ * constant term and the mean brightness the library fitted at the ring's radii.
+ *
+ * @param source The measurement's ring fields.
+ * @param stepDegrees The spacing of the curve's points, in degrees.
+ * @returns The curve, or null when the ring was not analyzed.
+ */
+export function harmonicCurve(source: RingSource, stepDegrees = 2): RingCurve | null {
+  const { ring_constant: constant, ring_scale_value: scale } = source;
+  if (constant === null || constant === undefined || scale === null || scale === undefined) return null;
+  if (source.ring_harmonics.length === 0) return null;
+  const terms = source.ring_harmonics.filter((term) => term.significant);
+  const angles: number[] = [];
+  const values: number[] = [];
+  for (let angle = 0; angle <= 360; angle += stepDegrees) {
+    let relative = 1;
+    for (const term of terms) {
+      relative += term.amplitude * Math.cos((term.order * (angle - term.direction_degrees) * Math.PI) / 180);
+    }
+    angles.push(angle);
+    values.push(scale * constant * relative);
+  }
+  return { angles, values };
+}
+
+/**
+ * Says whether some directions of the ring hold too few pixels, or none at all.
+ *
+ * @param counts The pixel count of each bin the library returned (empty bins are not returned).
+ * @param angles The middle angle of each of those bins.
+ * @returns True when a bin has fewer than the steady count, or a bin is missing.
+ */
+export function hasFewPixels(counts: number[], angles: number[]): boolean {
+  if (counts.length === 0) return true;
+  let width = 360;
+  for (let index = 1; index < angles.length; index += 1) width = Math.min(width, angles[index] - angles[index - 1]);
+  const expectedBins = Math.round(360 / Math.max(width, 1));
+  return counts.some((count) => count < FEW_PIXELS_PER_BIN) || counts.length < expectedBins;
 }

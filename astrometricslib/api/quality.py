@@ -1057,13 +1057,32 @@ class QualityRecords:
             ``r_squared``), ``cut_distance_px`` and ``cut_values``, then
             ``cutout`` (with ``cutout_origin_x`` and ``cutout_origin_y``, so
             any cut can be rebuilt), ``snapped``, ``snap_distance_px``,
-            ``star_found`` and ``not_a_star_reason``.
+            ``star_found`` and ``not_a_star_reason``. The ring around the star
+            ("around the star" view) is in the ``ring_*`` fields:
+            ``ring_inner_px`` and ``ring_outer_px`` (sized from the measured
+            pixels, not from the fit), the 5 degree direction bins
+            (``ring_bin_angle_degrees``, ``ring_bin_values``,
+            ``ring_bin_counts``), the Fourier terms ``ring_harmonics`` (orders
+            1 to 8: ``amplitude`` as a fraction, ``amplitude_error``,
+            ``amplitude_debiased``, ``significance`` and
+            ``direction_degrees``), the neighbor stars left out
+            (``ring_neighbors``, ``ring_masked_neighbor_count``,
+            ``ring_masked_fraction``) and ``ring_note``. Angles run from +y
+            toward +x, like the cut.
 
         """
+        from astrometricslib.pipelines.astrometry.processing.detections import find_star_centers
         from astrometricslib.pipelines.shared.quality.star_profile import measure_star_profile_in_file
 
         return measure_star_profile_in_file(
-            path, x, y, radius_px, cut_angle_degrees, cut_half_length_px, search_radius_px
+            path,
+            x,
+            y,
+            radius_px,
+            cut_angle_degrees,
+            cut_half_length_px,
+            search_radius_px,
+            find_neighbors=find_star_centers,
         )
 
     def measure_detections(self, path: str) -> DetectionsMeasurement:

@@ -19,7 +19,34 @@ from astrometricslib.models.quality.detections import DetectionsMeasurement, Sta
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
 from astrometricslib.pipelines.astrometry.processing.star_identifier import find_unique_stars
 
-__all__ = ["measure_detections_in_file"]
+__all__ = ["find_star_centers", "measure_detections_in_file"]
+
+
+def find_star_centers(data: np.ndarray) -> list[tuple[float, float]]:
+    """List the stars the astrometry star finder finds in an image piece.
+
+    The viewer's ring analysis uses this to find the neighbors of one star,
+    on a small box around it. It is the same finder and the same merging of
+    double reports as the Detections overlay.
+
+    Parameters
+    ----------
+    data : `numpy.ndarray`
+        A two-dimensional piece of an image.
+
+    Returns
+    -------
+    centers : `list` [`tuple` [`float`, `float`]]
+        The 0-based ``(column, row)`` of each star, as the finder gives it.
+    """
+    _, unique_sources = find_unique_stars(SourceDetector(), np.asarray(data, dtype=float))
+    return [
+        (
+            float(source.get("x_centroid", source.get("xcentroid"))),
+            float(source.get("y_centroid", source.get("ycentroid"))),
+        )
+        for source in unique_sources
+    ]
 
 
 def measure_detections_in_file(path: str) -> DetectionsMeasurement:

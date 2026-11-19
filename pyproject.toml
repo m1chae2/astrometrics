@@ -103,7 +103,7 @@ dev = [
     "pre-commit>=4.0.0",
     # Prose linter run by build/documentation/lint_docs.sh and the
     # documentation-lint pre-commit hook. Same pin as .github/workflows/docs.yml.
-    "vale==3.26.0.1",
+    "vale==3.27.0.0",
 ]
 docs = [
     "sphinx>=7.0.0",

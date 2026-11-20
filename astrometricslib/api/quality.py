@@ -13,8 +13,6 @@
   through it.
 * Detections: `measure_detections` lists the stars the astrometry run's star
   finder detects in one image, so a viewer can draw them.
-* Star shapes: `measure_star_shapes` measures the width, stretch and stretch
-  direction of the stars across one image, for the viewer's Shapes overlay.
 * Recorded: `record_frame_measurements` measures a target's light frames and
   stores the numbers that `query` reads.
 
@@ -53,7 +51,6 @@ from astrometricslib.models.quality.quality_reports import (
 from astrometricslib.models.quality.query_result import QualityQueryResult
 from astrometricslib.models.quality.row_frames import QualityRowFile, QualityRowResolution
 from astrometricslib.models.quality.star_profile import StarProfileMeasurement
-from astrometricslib.models.quality.star_shapes import StarShapesMeasurement
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.api_arguments import (
     STACK_KINDS,
@@ -1118,41 +1115,6 @@ class QualityRecords:
         from astrometricslib.pipelines.astrometry.processing.detections import measure_detections_in_file
 
         return measure_detections_in_file(path)
-
-    def measure_star_shapes(self, path: str) -> StarShapesMeasurement:
-        """Measure how stretched each star of an image is, and which way.
-
-        Nothing is stored. The stars are the ones the frame measurement fits
-        (bright enough, not saturated, away from their neighbors, at most one
-        for each cell of a 14 x 14 grid over the image), so their widths and
-        stretch agree with the stored ``frame.*`` star metrics. A missing file
-        raises `NotFoundError`; an image with no pixels raises
-        `InvalidArgumentError`. An image with too few usable stars is not an
-        error: the list is empty and ``reason`` says why.
-
-        Parameters
-        ----------
-        path : `str`
-            A FITS image.
-
-        Returns
-        -------
-        shapes : `StarShapesMeasurement`
-            Fields: ``path``, ``width`` and ``height``, ``shapes`` (each with
-            ``x`` and ``y`` in 1-based pixels as in `measure_detections`,
-            ``width_px``, ``elongation`` and ``angle_degrees``), ``star_count``
-            and the frame summary: ``median_width_px``, ``median_elongation``,
-            ``direction_degrees`` with ``direction_coherence``,
-            ``center_width_px``, ``corner_width_px`` and ``reason``.
-            ``elongation`` is ``1 - b / a`` for a long axis ``a`` and a short
-            axis ``b``: 0 for a round star, 0.5 for a star twice as long as it
-            is wide. ``angle_degrees`` is the direction of the long axis, from
-            0 up to but not including 180, measured from +y toward +x like the
-            cut angle of `measure_star_profile`.
-        """
-        from astrometricslib.pipelines.shared.quality.star_shapes import measure_star_shapes_in_file
-
-        return measure_star_shapes_in_file(path)
 
     @background_job("diagnostics", grace_period_seconds=20.0)
     def measure_stack(

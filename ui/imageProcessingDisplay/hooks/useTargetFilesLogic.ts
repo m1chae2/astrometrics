@@ -5,6 +5,7 @@ import { emitToast } from '../../common/utils/emitToast';
 import { useOnValueChange } from './useOnValueChange';
 import { matchesQuery } from '../../common/utils/searchLogic';
 import { FileItem } from '../fileBrowser/FileBrowser';
+import { useStarShapeReview } from './useStarShapeReview';
 import { buildOpticOptions, chooseDefaultOptic, filterFilesByCamera, filterFilesByOptic } from '../utils/opticSelection';
 
 /**
@@ -30,6 +31,9 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
     const pendingFilesKey = selectedTarget && shouldFetch ? `${selectedTarget}:${reloadKey}` : null;
     const [settledFilesKey, setSettledFilesKey] = useState<string | null>(null);
     const isLoadingFiles = pendingFilesKey !== null && settledFilesKey !== pendingFilesKey;
+
+    // The stored star-shape verdicts of this target.
+    const starShapeReview = useStarShapeReview(selectedTarget, reloadKey, shouldFetch);
 
     const [allFiles, setAllFiles] = useState<FileItem[]>([]);
     const [exposureCounts, setExposureCounts] = useState<Record<string, number>>({});
@@ -206,6 +210,7 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
         toggleAllFiles,
         stackedImage,
         stackedSpectralTarget,
-        totalExposure
+        totalExposure,
+        starShapeReview,
     };
 };

@@ -241,7 +241,6 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "images:measure_star_profile": ("image_service", "measure_star_profile"),
     "images:map_position": ("image_service", "map_position"),
     "images:measure_detections": ("image_service", "measure_detections"),
-    "images:measure_star_shapes": ("image_service", "measure_star_shapes"),
     "images:delete": ("image_service", "delete_images"),
     "images:last": ("image_service", "get_last_image"),
     # Calibration frames

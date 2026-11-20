@@ -102,9 +102,6 @@ class ImageService:
         # time and size when it was measured, newest last.
         self._detection_cache: OrderedDict[str, tuple[float, int, dict[str, Any]]] = OrderedDict()
         self._detection_cache_lock = threading.Lock()
-        # The star shape lists, kept the same way (see `measure_star_shapes`).
-        self._shape_cache: OrderedDict[str, tuple[float, int, dict[str, Any]]] = OrderedDict()
-        self._shape_cache_lock = threading.Lock()
 
     @property
     def _astrometrics(self) -> Any:
@@ -336,48 +333,6 @@ class ImageService:
             self._detection_cache,
             self._detection_cache_lock,
             lambda: self._astrometrics.quality.measure_detections(resolved).model_dump(),
-        )
-
-    def measure_star_shapes(self, path: str) -> dict[str, Any]:
-        """Measure how stretched each star of an image is, and which way.
-
-        The viewer's Shapes overlay draws one short line for each star. The
-        result is kept for the file's modified time and size, as for
-        `measure_detections`, so turning the overlay off and on again does not
-        measure the image twice. The stars are measured on the file that is
-        shown, or on the linear stack beside a stack's ``_processed`` picture
-        (see `_detection_source`), because a stretch changes the shapes. An
-        image with too few stars is not an error: the list comes back empty
-        with a ``reason``.
-
-        Parameters
-        ----------
-        path : `str`
-            The FITS image. It must be inside the library folders or the
-            scratch folder.
-
-        Returns
-        -------
-        shapes : `dict`
-            The measurement: the image size, the stars (each with ``x``, ``y``
-            in 1-based pixels, ``width_px``, ``elongation`` as ``1 - b / a``
-            and ``angle_degrees`` from +y toward +x), the star count, the
-            frame summary and a ``reason`` when nothing was measured.
-
-        Raises
-        ------
-        InvalidArgumentError
-            If the image is outside the allowed folders.
-        """
-        resolved = os.path.realpath(resolve_mounted_path(path))
-        if not any(is_path_inside(root, resolved) for root in self._allowed_image_roots()):
-            raise InvalidArgumentError("The image must be inside the library folders.")
-        resolved = _detection_source(resolved)
-        return self._measure_with_cache(
-            resolved,
-            self._shape_cache,
-            self._shape_cache_lock,
-            lambda: self._astrometrics.quality.measure_star_shapes(resolved).model_dump(),
         )
 
     @staticmethod

@@ -93,7 +93,8 @@ const ImageProcessingDisplayInner: React.FC = () => {
     selectedFile, setSelectedFile, filesToDelete, handleRequestDeleteFiles, confirmDeleteFiles,
     showFileDeleteConfirm, setShowFileDeleteConfirm,
     checkedFiles, setCheckedFiles, toggleFile, toggleAllFiles,
-    stackedImage, stackedSpectralTarget, totalExposure
+    stackedImage, stackedSpectralTarget, totalExposure,
+    starShapeReview
   } = files;
 
   const {
@@ -522,6 +523,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
       setIsAddModalOpen={setIsAddModalOpen}
       selectedFile={selectedFile}
       onShowHeader={handleOpenHeaderModal}
+      starShapeReview={starShapeReview}
       analysisCollapsed={analysisCollapsed}
       setAnalysisCollapsed={setAnalysisCollapsed}
       controlsCollapsed={controlsCollapsed}

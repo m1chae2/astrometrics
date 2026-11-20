@@ -112,7 +112,6 @@ READ_ONLY_METHODS = frozenset({
     "images:map_position",
     "images:measure_detections",
     "images:measure_star_profile",
-    "images:measure_star_shapes",
     "imaging:get_active_jobs",
     "ingestion:list_files",
     "ingestion:scan",

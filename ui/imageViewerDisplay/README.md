@@ -108,23 +108,6 @@ Detections: the Detections button in the viewer header (here and in the Image Pr
   nothing, and a picture with no pixel values shows the same Linear hint as the star profile. The
   overlay is separate from the named-star circles of the astrometry overlay.
 
-Shapes: the Shapes button beside Detections (here and in the Image Processing FITS Viewer) draws a short
-  line through each measured star along its long axis, as long as the star is stretched, so a person
-  can tell tracking (all lines point the same way), tilt or spacing (lines point toward the center or
-  one corner) and field curvature (worse in the corners). The viewer calls `images:measure_star_shapes`
-  with the file path (`useStarShapes`); the backend measures the stars the frame measurement fits (at most
-  one for each cell of a 14 by 14 grid) and keeps the answer for the file's modified time. For a
-  stack's `_processed` picture it measures the linear stack beside it, since a stretch changes shapes. A
-  line is 80 screen pixels long for a stretch of 1 (capped at 60), and a star under 2 pixels of line, a
-  round one, shows nothing. Directions run from straight up and down (0°) to left and right (90°), like
-  the star profile cut. The lines are one SVG path in a `data-overlay-layer` layer, so they pan with the
-  picture, in the `--star-shape-line-color` token (`utils/starShapes.ts`). A note in the corner says the
-  median elongation (1 minus short axis over long axis), its direction, and the median star width in the
-  center and in the corners, for example "Median elongation 8% toward 40°; width 2.3 px center, 2.6 px
-  corners". The star profile panel shows the same line under its header, and how the clicked star compares
-  ("This star: oval 29%; frame median 8%", or the nearest measured star). An image with too few stars
-  shows a plain note, not an error.
-
 Right column: `TargetDetailsManager` — shows metadata and actions (analyze,
   stack, download). Actions here generally call backend endpoints and may
   update the processed image when complete. The Stack action runs the full

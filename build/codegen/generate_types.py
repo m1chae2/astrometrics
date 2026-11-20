@@ -100,7 +100,6 @@ from astrometricslib.models.quality.star_profile import (
     RingNeighbor,
     StarProfileMeasurement,
 )
-from astrometricslib.models.quality.star_shapes import StarShape, StarShapesMeasurement
 from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasurement
 from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
 from astrometricslib.models.stellar_source import (
@@ -674,8 +673,6 @@ def render_types() -> str:
         generate_interface(StarDetection, "StarDetection"),
         generate_interface(DetectionsMeasurement, "DetectionsMeasurement"),
         generate_interface(StarProfileMeasurement, "StarProfileMeasurement"),
-        generate_interface(StarShape, "StarShape"),
-        generate_interface(StarShapesMeasurement, "StarShapesMeasurement"),
     ]
 
     # The night plan, its change record, the sequence summary and the target

@@ -9,7 +9,6 @@ import { Button } from '../../common/components/Button';
 import { DisplayModeSelect } from '../../common/fitsViewer/DisplayModeSelect';
 import type { DisplayMode } from '../../common/fitsViewer/displayMode';
 import { DetectionsToggle } from '../../common/fitsViewer/DetectionsToggle';
-import { StarShapesToggle } from '../../common/fitsViewer/StarShapesToggle';
 import { resolveTargetFramePath } from '../../common/services/imaging/measurementPath';
 
 /** Shown under an Auto Stretch picture, which holds no pixel values. */
@@ -73,8 +72,6 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
 }) => {
   // True while the image shows a marker at every star the astrometry run's star finder detects.
   const [detectionsEnabled, setDetectionsEnabled] = useState(false);
-  // True while the image shows a line along the long axis of each measured star.
-  const [shapesEnabled, setShapesEnabled] = useState(false);
   // True while the File Browser is folded down to a tab bar, which gives the viewer the full height.
   const [browserCollapsed, setBrowserCollapsed] = usePersistentFlag('astrometrics:imageProcessing:browserCollapsed', false);
 
@@ -98,7 +95,6 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
           <div className="fits-header-controls">
             <DisplayModeSelect mode={displayMode} onChange={onDisplayModeChange} />
             <DetectionsToggle enabled={detectionsEnabled} onChange={setDetectionsEnabled} />
-            <StarShapesToggle enabled={shapesEnabled} onChange={setShapesEnabled} />
             <Button
               size="small"
               active={showAstrometryOverlay}
@@ -144,7 +140,6 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
           onStarClick={onStarClick}
           selectedStarId={selectedStarId}
           showDetections={detectionsEnabled}
-          showShapes={shapesEnabled}
           resolveMeasurePath={resolveMeasurePath}
         />
       </SectionPanel>

@@ -319,7 +319,6 @@ SUB_API_MEMBERS = {
         "measure_frames",
         "measure_stack",
         "measure_star_profile",
-        "measure_star_shapes",
         "measure_tuned_parameters",
         "metrics",
         "query",

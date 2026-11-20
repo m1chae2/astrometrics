@@ -93,7 +93,10 @@ const ImageProcessingDisplayInner: React.FC = () => {
   // list and the selected target's frame summary have both genuinely
   // resolved, by which point `loading`'s own true/false transition (if any)
   // is a same-frame formality rather than a multi-second race.
-  const hasFrameToAutoLoad = lightFrames.length > 0 && !selectedFile;
+  // A stack that is waiting to be shown counts as something to load, so a target with a stack
+  // but no raw frames settles once the stack is on screen.
+  const preferredStack = stackedImage ?? stackedSpectralTarget;
+  const hasFrameToAutoLoad = (lightFrames.length > 0 || preferredStack !== null) && !selectedFile;
   const isViewerSettled = !loading && (
     !selectedTarget || !hasFrameToAutoLoad || imageUrl !== null || imageBlob !== null || error !== null
   );
@@ -306,24 +309,51 @@ const ImageProcessingDisplayInner: React.FC = () => {
     return [...(items || []), ...ghosts];
   }, [items, remoteTargets]);
 
+  // Remember, for this visit to the target, whether the person chose a file and whether the
+  // stack has already been shown. Both start over when the target changes.
+  const pickedByUserRef = React.useRef(false);
+  const stackShownRef = React.useRef(false);
+  // Declared before the effect that picks the default file, so it runs first on a target change.
+  React.useEffect(() => {
+    pickedByUserRef.current = false;
+    stackShownRef.current = false;
+  }, [selectedTarget]);
+
+  // A file chosen by hand (File Browser or stack panel) is never replaced by the default.
+  const pickFile = React.useCallback((path: string | null) => {
+    pickedByUserRef.current = true;
+    setSelectedFile(path);
+  }, [setSelectedFile]);
+
   // --- Action Handlers ---
 
   // Wrapper for file selection to ensure both UI highlight and Viewer state update
   // Wrapper for file selection to ensure both UI highlight and Viewer state update
   const onFileClick = (path: string | null) => {
     if (!path) return;
+    pickedByUserRef.current = true;
     setSelectedFile(path);
     setSelectedLightRow(null);
     // useViewerState now listens to selectedFile from context
   };
 
-  // Auto-select highest exposure file when list loads
-  // When I select a radio button (Target/Filter), the fits viewer should show the first item in the list with the highest exposure time
+  // Choose the file the viewer opens with. The stack is the default: the imaging stack first,
+  // then the spectral stack. It is applied once per visit, even if its path arrives after the
+  // frame list, and never over a file the person picked. With no stack, the raw frame with
+  // the highest exposure is shown.
   React.useEffect(() => {
+    if (isLoadingFiles) return;
+
+    if (preferredStack && !pickedByUserRef.current && !stackShownRef.current) {
+      stackShownRef.current = true;
+      if (selectedFile !== preferredStack) setSelectedFile(preferredStack);
+      return;
+    }
+
     // If no files, nothing to do
     if (filteredFiles.length === 0) return;
 
-    // If we already have a valid selection that exists in the current filtered list or is a stacked image, keep it
+    // Keep a selection that is in the current list or is a stack
     if (
       selectedFile &&
       (filteredFiles.some(f => f.path === selectedFile) ||
@@ -351,7 +381,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
     if (bestFile) {
       setSelectedFile(bestFile.path);
     }
-  }, [filteredFiles, selectedFile, setSelectedFile, stackedImage, stackedSpectralTarget]);
+  }, [isLoadingFiles, filteredFiles, selectedFile, setSelectedFile, preferredStack, stackedImage, stackedSpectralTarget]);
 
 
 
@@ -468,7 +498,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
       stackedImage={stackedImage}
       stackedSpectralTarget={stackedSpectralTarget}
       totalExposure={totalExposure}
-      handleSelectFile={setSelectedFile}
+      handleSelectFile={pickFile}
       handleAddImages={handleAddImages}
       setIsAddModalOpen={setIsAddModalOpen}
       selectedFile={selectedFile}

@@ -97,6 +97,27 @@ def file_size(path: Path) -> int | None:
     return path.stat().st_size if path.exists() else None
 
 
+def count_gaia_cache_stars(catalog_db: Path | None) -> int | None:
+    """Count the cached Gaia stars, in the current table or the old one.
+
+    Parameters
+    ----------
+    catalog_db : `pathlib.Path` or `None`
+        The Gaia star cache, if present.
+
+    Returns
+    -------
+    count : `int` or `None`
+        The number of stars, `None` if there is no cache.
+    """
+    if catalog_db is None:
+        return None
+    count = count_rows(catalog_db, "SELECT count(*) FROM gaia_stars")
+    if count is None:
+        count = count_rows(catalog_db, "SELECT count(*) FROM gaia_sources")
+    return count
+
+
 def collect(library_dir: Path, wayfinding_db: Path, frames_root: Path, catalog_db: Path | None) -> dict:
     """Collect the data-size numbers.
 
@@ -122,9 +143,7 @@ def collect(library_dir: Path, wayfinding_db: Path, frames_root: Path, catalog_d
         "targets": count_rows(main_db, "SELECT count(*) FROM targets"),
         "light_frames": light_frames,
         "stars": count_rows(main_db, "SELECT count(*) FROM stellar_objects"),
-        "gaia_cache_stars": count_rows(catalog_db, "SELECT count(*) FROM gaia_sources")
-        if catalog_db
-        else None,
+        "gaia_cache_stars": count_gaia_cache_stars(catalog_db),
         "observing_nights": count_rows(
             wayfinding_db, "SELECT count(DISTINCT session_id) FROM guiding_samples"
         ),

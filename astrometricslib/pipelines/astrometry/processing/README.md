@@ -56,6 +56,7 @@ Plate solving has to happen before catalog lookup, because a catalog can only be
 
 - `star_identifier.py`: plate solving, catalog lookup, the center-star rule and the flags.
 - `wcs_refinement.py`: the Gaia refit of the solved sky map.
+- `gaia_depth.py`: predicts how faint a Gaia query must go, from the equipment (aperture, camera sensitivity and read noise, pixel scale, sky rate and exposure). It finds the Gaia magnitude where a star's light in a circle one star width in radius is 5 times the noise in that circle, adds 1 magnitude and stops at G 21. When an input is missing, it returns the offline default depth and says why. Nothing calls it yet (design estimate; see [astrometry design estimates](../../../../documentation/library_design/validation/astrometry.md#design-estimates)).
 
 ## Detections for the viewer
 

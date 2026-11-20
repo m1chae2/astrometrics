@@ -42,6 +42,7 @@ import sys
 import time
 
 from astrometricslib import Astrometrics, configure_logging
+from astrometricslib.drivers import pixels_near_circles
 from astrometricslib.exceptions import ConflictError, ExternalServiceError, InvalidArgumentError
 from astrometricslib.parameters import resolve_parameter
 from wayfindinglib import Wayfinder
@@ -52,7 +53,6 @@ from wayfindinglib.drivers.catalog.deep_star_catalog_builder import (
     DEFAULT_MAX_ATTEMPTS,
     DEFAULT_QUERY_TIMEOUT_SECONDS,
     DEFAULT_REQUEST_DELAY_SECONDS,
-    pixels_near_circles,
 )
 
 # Radius, in degrees, of the circle drawn around each imaged field by

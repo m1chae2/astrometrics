@@ -103,14 +103,14 @@ def test_proper_motion_round_trips_through_the_cache(tmp_path: Path) -> None:
     catalog_store.insert_gaia_sources(
         config,
         [
-            ("a", 10.0, 20.0, 11.0, "Gaia DR3 a", 1000.0, -250.5),
-            ("b", 10.1, 20.1, 12.0, "Gaia DR3 b"),
+            ("101", 10.0, 20.0, 11.0, "Gaia DR3 101", 1000.0, -250.5),
+            ("102", 10.1, 20.1, 12.0, "Gaia DR3 102"),
         ],
     )
 
     assert _fetch(config, include_proper_motion=True) == [
-        ("a", 10.0, 20.0, 11.0, "Gaia DR3 a", 1000.0, -250.5),
-        ("b", 10.1, 20.1, 12.0, "Gaia DR3 b", None, None),
+        ("101", 10.0, 20.0, 11.0, "Gaia DR3 101", 1000.0, -250.5),
+        ("102", 10.1, 20.1, 12.0, "Gaia DR3 102", None, None),
     ]
 
 

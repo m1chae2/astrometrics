@@ -3,7 +3,7 @@
  * @description Renders FITS format and standard bitmap images onto an interactive HTML5 canvas.
  * Manages rendering worker delegation, zoom/pan transforms, and auto-stretch display.
  */
-import React, { useState, useRef, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { useFitsLoader, ParsedFitsData } from './hooks/useFitsLoader';
 import { useCanvasInteraction } from './hooks/useCanvasInteraction';
 import { useCanvasDrawer } from './hooks/useCanvasDrawer';
@@ -329,7 +329,9 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   );
 
   // Draw one thin circle for every star on a canvas, which stays smooth with thousands of stars.
-  useEffect(() => {
+  // A layout effect runs before the browser paints, so the redrawn canvas lands in the same frame
+  // in which the pan hook resets the layer's temporary drag transform.
+  useLayoutEffect(() => {
     const canvas = markerCanvasRef.current;
     if (!canvas) return;
     const ratio = window.devicePixelRatio || 1;
@@ -533,7 +535,8 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     });
     return () => { cancelled = true; };
   }, [showDetections, mainDrawn, parsedData, workerRef]);
-  const detectionPaths = (() => {
+  // Rebuilt only when the view or the detections change, not on every other re-render (hover, panel changes).
+  const detectionPaths = React.useMemo(() => {
     if (detections.status !== 'ready' || detectionsFirstRowAtTop === null || !parsedData || !mainDrawn) return null;
     if (drawnSize.w <= 0 || drawnSize.h <= 0) return null;
     return buildDetectionPaths(detections.measurement.detections, {
@@ -548,7 +551,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
       viewHeight: containerH,
       apertureRadiusPx: detections.measurement.aperture_radius_px,
     });
-  })();
+  }, [detections, detectionsFirstRowAtTop, parsedData, mainDrawn, drawnSize.w, drawnSize.h, effectiveZoom, panX, panY, containerW, containerH]);
   const detectionsNote: string | null = !showDetections ? null
     : mainDrawn && !parsedData ? noPixelDataMessage
     : detections.status === 'loading' ? 'Finding stars…'
@@ -589,6 +592,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
         {overlayVisible && overlayStars && (
           <svg
             className="fits-renderer__overlay"
+            data-overlay-layer="true"
             style={{
               position: 'absolute',
               top: 0,
@@ -699,13 +703,13 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
           </svg>
         )}
         {showDetections && detectionPaths && (
-          <svg className="fits-renderer__detections" data-testid="detections-layer" aria-hidden="true">
+          <svg className="fits-renderer__detections" data-overlay-layer="true" data-testid="detections-layer" aria-hidden="true">
             <path className="fits-renderer__detection" data-testid="detections-single" d={detectionPaths.circles} />
             <path className="fits-renderer__detection fits-renderer__detection--merged" data-testid="detections-merged" d={detectionPaths.diamonds} />
           </svg>
         )}
         {profileMarker && (
-          <svg className="fits-renderer__profile-marker" data-testid="star-profile-marker" aria-hidden="true">
+          <svg className="fits-renderer__profile-marker" data-overlay-layer="true" data-testid="star-profile-marker" aria-hidden="true">
             {profileMarker.cut && (
               <line
                 className="fits-renderer__profile-cut"

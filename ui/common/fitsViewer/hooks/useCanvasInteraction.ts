@@ -1,10 +1,12 @@
 /**
  * @file useCanvasInteraction.ts
  * @description Hook providing pan, zoom, wheel, and touch interactions for FITS and bitmap canvases.
- * Maintains transform coordinates and viewport scaling.
+ * Maintains transform coordinates and viewport scaling. While the user drags or zooms, the image
+ * and the overlay layers (marked `data-overlay-layer`) move together by CSS in the same frame, and
+ * React state is updated at most once per animation frame.
  */
-import { useState, useRef, useEffect, useCallback, RefObject } from 'react';
-import { clamp } from '../utils/transformUtils';
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, RefObject } from 'react';
+import { clamp, overlayTransformBetween } from '../utils/transformUtils';
 
 interface InteractionState {
     zoom: number;
@@ -49,17 +51,81 @@ export const useCanvasInteraction = (
     // fitted to the container as the container changes size.
     const userAdjustedViewRef = useRef(false);
 
+    // The view the overlays were last drawn for (the last rendered React state).
+    const drawnViewRef = useRef({ panX: 0, panY: 0, zoom: 1 });
+    // Pending animation frame that will copy the live pan and zoom into React state.
+    const stateFrameRef = useRef<number | null>(null);
+
     /**
-     * Applies the current pan and zoom values to the canvas and overlay transform styles.
+     * Moves the overlay layers so they match the live view. Each overlay was drawn for the last
+     * rendered view, so it gets the transform from that view to the live one. Once React renders
+     * the live view the transform comes out as identity, so there is no jump.
+     */
+    const writeOverlayTransforms = useCallback(() => {
+        const layers = containerRef.current?.querySelectorAll<HTMLElement | SVGElement>('[data-overlay-layer]');
+        if (!layers || layers.length === 0) return;
+        const transform = overlayTransformBetween(
+            { panX: panRef.current.x, panY: panRef.current.y, zoom: zoomRef.current },
+            drawnViewRef.current
+        );
+        layers.forEach((layer) => {
+            layer.style.transformOrigin = '0 0';
+            layer.style.transform = transform;
+        });
+    }, [containerRef]);
+
+    /**
+     * Applies the current pan and zoom values to the image canvas and the overlay layers.
      */
     const scheduleTransformWrite = useCallback(() => {
         const elements = containerRef.current?.querySelectorAll<HTMLElement | SVGElement>('canvas:not([data-overlay-layer])');
-        if (!elements || elements.length === 0) return;
-        const transform = `translate(${panRef.current.x}px, ${panRef.current.y}px) scale(${zoomRef.current})`;
-        elements.forEach((el) => {
-            el.style.transform = transform;
+        if (elements && elements.length > 0) {
+            const transform = `translate(${panRef.current.x}px, ${panRef.current.y}px) scale(${zoomRef.current})`;
+            elements.forEach((el) => {
+                el.style.transform = transform;
+            });
+        }
+        writeOverlayTransforms();
+    }, [containerRef, writeOverlayTransforms]);
+
+    /**
+     * Copies the live pan and zoom into React state right away and cancels any waiting frame.
+     */
+    const flushState = useCallback(() => {
+        if (stateFrameRef.current !== null) {
+            cancelAnimationFrame(stateFrameRef.current);
+            stateFrameRef.current = null;
+        }
+        setZoom(zoomRef.current);
+        setPanX(panRef.current.x);
+        setPanY(panRef.current.y);
+    }, []);
+
+    /**
+     * Asks for the React state to catch up with the live view, at most once per animation frame.
+     * Drags and wheel turns can fire many times per frame; only the last position matters.
+     */
+    const scheduleStateSync = useCallback(() => {
+        if (stateFrameRef.current !== null) return;
+        stateFrameRef.current = requestAnimationFrame(() => {
+            stateFrameRef.current = null;
+            setZoom(zoomRef.current);
+            setPanX(panRef.current.x);
+            setPanY(panRef.current.y);
         });
-    }, [containerRef]);
+    }, []);
+
+    // After each render the overlays are drawn for the rendered state. Reset their transform before
+    // the browser paints (layout effect), so the redrawn layer replaces the moved one with no jump.
+    useLayoutEffect(() => {
+        drawnViewRef.current = { panX, panY, zoom };
+        writeOverlayTransforms();
+    });
+
+    // Drop a waiting frame when the viewer goes away.
+    useEffect(() => () => {
+        if (stateFrameRef.current !== null) cancelAnimationFrame(stateFrameRef.current);
+    }, []);
 
     const clampPan = useCallback(() => {
         const container = containerRef.current;
@@ -132,13 +198,10 @@ export const useCanvasInteraction = (
         clampPan();
         scheduleTransformWrite();
 
-        // Sync react state debounced or just for UI indicators?
-        // We'll sync it
-        setZoom(newZoom);
-        setPanX(panRef.current.x);
-        setPanY(panRef.current.y);
+        // The image and overlays already moved by CSS; React state catches up once per frame.
+        scheduleStateSync();
 
-    }, [containerRef, clampPan, scheduleTransformWrite]);
+    }, [containerRef, clampPan, scheduleTransformWrite, scheduleStateSync]);
 
 
     // Setup event listeners on container
@@ -176,11 +239,12 @@ export const useCanvasInteraction = (
 
         clampPan();
         scheduleTransformWrite();
-        setPanX(panRef.current.x);
-        setPanY(panRef.current.y);
+        scheduleStateSync();
     };
 
     const onPointerUp = (e: React.PointerEvent) => {
+        // Land the final position in React state now, so the overlays redraw exactly where the drag ended.
+        if (isDraggingRef.current) flushState();
         isDraggingRef.current = false;
         (e.target as HTMLElement).releasePointerCapture(e.pointerId);
     };

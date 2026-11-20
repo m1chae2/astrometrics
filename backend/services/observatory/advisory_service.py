@@ -6,7 +6,8 @@ RPC reply has one fixed type.
 
 * Review advice, from `Wayfinder.review.get_advisory` (the target
   dataset report and the statements about one star's result, chosen by a
-  ``kind``) and `get_tonight_advice` (the ranking of targets for tonight).
+  ``kind``), `get_star_shape_review` (how round a target's stars are) and
+  `get_tonight_advice` (the ranking of targets for tonight).
   The RPC route cannot fix an argument, so each read has its own method
   here.
 * The depth goal of a target, from `Wayfinder.planning.get_depth_goal` and
@@ -55,6 +56,29 @@ class AdvisoryService:
             The report for the target, with its warnings and recommendations.
         """
         return self.wayfinder.review.get_advisory(kind="quality", target=target)
+
+    def get_star_shape_review(
+        self, target: str, night: str | None = None, frame_paths: list[str] | None = None
+    ) -> Any:
+        """Read the plain verdicts on how round a target's stars are.
+
+        Parameters
+        ----------
+        target : `str`
+            The target's id or name.
+        night : `str`, optional
+            Judge only this observing night, such as ``"2026-09-24"``.
+        frame_paths : `list` [`str`], optional
+            Judge only these frames.
+
+        Returns
+        -------
+        review : `StarShapeReview`
+            The verdicts (roundness, direction, standout frames, corners),
+            each with a sentence and its numbers, and the per-frame series
+            for a chart.
+        """
+        return self.wayfinder.review.get_star_shape_review(target, night=night, frame_paths=frame_paths)
 
     def get_tonight_ranking(self, at: str | datetime | None = None) -> Any:
         """Read the ranking of targets for one moment.

@@ -3780,6 +3780,47 @@ export interface NightQuality {
 }
 
 /**
+ * What the stored star shapes say about one target.
+ *
+ * Parameters
+ * ----------
+ * target_id : `str`
+ * The target.
+ * scope : `str`
+ * What was judged: ``"stack"`` (the stack's own numbers, when it has
+ * them), ``"frames"`` (the median of the frames), ``"night"`` or
+ * ``"frame_list"``.
+ * frame_count : `int`
+ * Frames with a stored elongation.
+ * roundness : `ShapeVerdict`
+ * Round or elongated, against the equipment's own history.
+ * direction : `ShapeVerdict`
+ * Whether the stretch points one way, and what that suggests.
+ * standout : `ShapeVerdict`
+ * Whether some frames stand out, with ``standout_frames`` listing them.
+ * corners : `ShapeVerdict`
+ * The corner and center widths. Always reported as not validated.
+ * standout_frames : `list` [`StandoutFrame`]
+ * Frames that are candidates to set aside, most extreme first.
+ * series : `list` [`FrameStarShape`]
+ * Every frame with a stored elongation, oldest first, for a chart.
+ * notes : `list` [`str`]
+ * Anything that limited the review, such as a missing history.
+ */
+export interface StarShapeReview {
+  targetId: string;
+  scope: string;
+  frameCount: number;
+  roundness: ShapeVerdict;
+  direction: ShapeVerdict;
+  standout: ShapeVerdict;
+  corners: ShapeVerdict;
+  standoutFrames?: StandoutFrame[];
+  series?: FrameStarShape[];
+  notes?: string[];
+}
+
+/**
  * One recorded observing night and what data it has.
  *
  * Attributes
@@ -5233,6 +5274,84 @@ export interface NightPolarAlignment {
 }
 
 /**
+ * One plain verdict with the numbers behind it.
+ *
+ * Parameters
+ * ----------
+ * state : `str`
+ * The verdict's state, one of `VERDICT_STATES`.
+ * sentence : `str`
+ * One short sentence in plain English, for the screen.
+ * numbers : `dict` [`str`, `float` or `None`]
+ * The numbers the sentence rests on, by name.
+ */
+export interface ShapeVerdict {
+  state: string;
+  sentence: string;
+  numbers?: Record<string, number | null>;
+}
+
+/**
+ * A frame whose elongation is far from the usual one.
+ *
+ * Parameters
+ * ----------
+ * path : `str`
+ * The frame's path.
+ * timestamp : `float` or `None`
+ * When the frame was taken, in seconds since the Unix epoch.
+ * elongation : `float`
+ * The frame's elongation.
+ * spreads_above_typical : `float`
+ * How many robust spreads the frame lies above the typical value.
+ */
+export interface StandoutFrame {
+  path: string;
+  timestamp?: number | null;
+  elongation: number;
+  spreadsAboveTypical: number;
+}
+
+/**
+ * The stored star-shape numbers of one frame (or of one stack).
+ *
+ * Parameters
+ * ----------
+ * path : `str`
+ * The frame's path, or the stack's subject id.
+ * timestamp : `float` or `None`
+ * When the frame was taken, in seconds since the Unix epoch. `None`
+ * for a stack.
+ * elongation : `float` or `None`
+ * Long axis divided by short axis (1 is round).
+ * angle_degrees : `float` or `None`
+ * Direction of the long axis, from 0 up to but not including 180
+ * degrees.
+ * direction_coherence : `float` or `None`
+ * From 0 (the stars point every which way) to 1 (they all point the
+ * same way), read from the angle measurement's reason text.
+ * center_width_px : `float` or `None`
+ * Median star width at the center of the field, in pixels.
+ * corner_widths_px : `dict` [`str`, `float`]
+ * Median star width in each corner, in pixels, by corner name.
+ * elongation_row_id : `int` or `None`
+ * The id of the stored elongation row, so a statement can cite it.
+ * standout : `bool`
+ * Whether this frame's elongation stands out from the others.
+ */
+export interface FrameStarShape {
+  path: string;
+  timestamp?: number | null;
+  elongation?: number | null;
+  angleDegrees?: number | null;
+  directionCoherence?: number | null;
+  centerWidthPx?: number | null;
+  cornerWidthsPx?: Record<string, number>;
+  elongationRowId?: number | null;
+  standout?: boolean;
+}
+
+/**
  * How a session has been dithering, as seen in the KStars log.
  *
  * Attributes
@@ -6314,6 +6433,7 @@ export const RPC_METHODS = [
   "advisory:target_report",
   "advisory:tonight",
   "advisory:result",
+  "advisory:star_shapes",
   "advisory:depth_goal",
   "advisory:set_depth_goal",
   "history:nights",

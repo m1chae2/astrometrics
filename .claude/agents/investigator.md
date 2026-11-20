@@ -58,6 +58,7 @@ tools:
   - mcp__wayfindinglib-core__review_get_live_session_status
   - mcp__wayfindinglib-core__review_get_performance_envelope
   - mcp__wayfindinglib-core__review_get_sky_rate_prediction
+  - mcp__wayfindinglib-core__review_get_star_shape_review
   - mcp__wayfindinglib-core__review_measure_focus_temperature_coefficient
   - mcp__wayfindinglib-core__review_measure_guiding_spectrum
   - mcp__wayfindinglib-core__review_measure_unguided_mount_error

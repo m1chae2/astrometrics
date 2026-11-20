@@ -504,6 +504,13 @@ DECISIONS = {
         "own frames. Reads only; nothing is stored. The first call fits the model and is slow.",
         "observe",
     ),
+    "review_get_star_shape_review": ToolDecision(
+        "keep",
+        "Built 2026-11-20 (#199). Says in plain words how round a target's stars are, whether the stretch "
+        "points one way, and which frames stand out, from the stored star-shape measurements. Reads only; "
+        "nothing is measured or stored. Corner widths are reported as not validated (AST-18).",
+        "observe",
+    ),
     "observatory_mount_get_centering_exposure": ToolDecision(
         "keep",
         "Built 2026-11-08. Works out the plate-solve centering exposure from the library's zero point and "

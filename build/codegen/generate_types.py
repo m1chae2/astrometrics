@@ -193,6 +193,7 @@ from wayfindinglib.models.session.observation_session import (
     WeatherSample,
 )
 from wayfindinglib.models.session.session_progress import ObservationSessionWithProgress
+from wayfindinglib.models.session.star_shape_review import StarShapeReview
 from wayfindinglib.models.session.telemetry import (
     AlignmentAttempt,
     AlignmentSessionSummary,
@@ -704,6 +705,7 @@ def render_types() -> str:
                 DepthGoalStatus,
                 DepthLevelOption,
                 NightQuality,
+                StarShapeReview,
                 NightListEntry,
                 TargetChange,
                 LiveSessionStatus,

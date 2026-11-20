@@ -583,6 +583,13 @@
       "interim_block": "",
       "note": "Built 2026-11-07. Predicts the sky background rate from the sky model fitted to the library's own frames. Reads only; nothing is stored. The first call fits the model and is slow."
     },
+    "review_get_star_shape_review": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-20 (#199). Says in plain words how round a target's stars are, whether the stretch points one way, and which frames stand out, from the stored star-shape measurements. Reads only; nothing is measured or stored. Corner widths are reported as not validated (AST-18)."
+    },
     "review_measure_focus_temperature_coefficient": {
       "tool_class": "observe",
       "category": "observatory-status",

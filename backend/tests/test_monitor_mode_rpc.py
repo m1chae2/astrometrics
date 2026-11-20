@@ -75,6 +75,7 @@ own test below, because the queue needs a stored session first."""
 READ_ONLY_METHODS = frozenset({
     "advisory:depth_goal",
     "advisory:result",
+    "advisory:star_shapes",
     "advisory:target_report",
     "advisory:tonight",
     "analysis:get_results",

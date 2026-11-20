@@ -4,9 +4,10 @@
  * the history still shows that job's log.
  */
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { emitToast } from '../../common/utils/emitToast';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useStackingJob } from '../hooks/useStackingJob';
-import { fetchJobs } from '../../common/services/imaging/processingService';
+import { cancelProcessing, fetchJobs } from '../../common/services/imaging/processingService';
 
 type LineHandler = (line: string) => void;
 const streams: { jobId: string; push: LineHandler; cancel: ReturnType<typeof vi.fn> }[] = [];
@@ -31,6 +32,7 @@ vi.mock('../../common/services/imaging/processingService', () => ({
     openSiril: vi.fn(),
 }));
 vi.mock('../../common/services/targetService', () => ({ fetchFrameStatsGrouped: vi.fn(async () => []) }));
+vi.mock('../../common/utils/emitToast', () => ({ emitToast: vi.fn() }));
 vi.mock('../../common/utils/reportError', () => ({ reportError: vi.fn() }));
 // One shared function, as in the app: a new one per render would rerun the hook's effects.
 const invalidateStable = vi.fn();
@@ -102,5 +104,17 @@ describe('useStackingJob log', () => {
         rerender();
         await waitFor(() => expect(vi.mocked(fetchJobs).mock.calls.length).toBeGreaterThan(callsBefore));
         expect(result.current.targetActiveJobs.map((job) => job.id)).toEqual(['fresh']);
+    });
+});
+
+describe('useStackingJob cancel', () => {
+    /** A job that runs in another program stays on screen and the user is told why. */
+    it('shows the reason when the job runs in another process', async () => {
+        const reason = 'This job runs in another process (process 42). Stop it there.';
+        vi.mocked(cancelProcessing).mockResolvedValueOnce({ status: 'other_process', message: reason });
+        const { result } = renderHook(() => useStackingJob('M 81'));
+        await waitFor(() => expect(result.current.activeJobId).toBe('old'));
+        await act(async () => { await result.current.cancelProcessingJob(); });
+        expect(emitToast).toHaveBeenCalledWith(reason, 'warning', 'cancelProcessingJob');
     });
 });

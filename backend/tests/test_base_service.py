@@ -68,3 +68,42 @@ def test_task_that_returns_nothing_is_failed() -> None:
     service._jobs[job_id]["future"].result(timeout=5)
 
     job_service.update_job.assert_called_with("job1", status="failed", progress=100.0)
+
+
+def test_cancel_of_a_job_in_another_process_gives_a_reason() -> None:
+    """A job only in the shared store is not stopped; the reason says why."""
+    service, job_service = _service_with_job_table()
+    job_service.get_job.return_value = MagicMock(status="started", owner_pid=4242)
+
+    result = service.cancel_processing("elsewhere")
+
+    assert result["cancelled"] is False
+    assert result["own_process"] is False
+    assert "another process" in result["reason"]
+    assert "4242" in result["reason"]
+
+
+def test_cancel_of_an_unknown_job_gives_a_reason() -> None:
+    """A job id that no store has returns a reason and does not raise."""
+    service, job_service = _service_with_job_table()
+    job_service.get_job.return_value = None
+
+    result = service.cancel_processing("nothing")
+
+    assert result["cancelled"] is False
+    assert "No job" in result["reason"]
+
+
+def test_cancel_of_a_queued_job_of_this_process_succeeds() -> None:
+    """A job of this process that has not started is cancelled."""
+    import threading
+
+    service, _ = _service_with_job_table()
+    gate = threading.Event()
+    service._submit_job("T1", "analysis", lambda jid, tid: gate.wait(5) or True)
+    queued = service._submit_job("T2", "analysis", lambda jid, tid: True)
+
+    result = service.cancel_processing(queued)
+    gate.set()
+
+    assert result == {"cancelled": True, "own_process": True, "reason": None}

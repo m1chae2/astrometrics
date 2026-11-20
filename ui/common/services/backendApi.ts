@@ -45,6 +45,22 @@ import {
 
 
 /** Summary of one persisted observation session, from execution:list_sessions. */
+/** Answer to a request to stop a stacking job. */
+export interface CancelProcessingResult {
+    /** `cancelled`, `other_process` (the job runs in another program) or `none`. */
+    status: string;
+    /** Why the job was not stopped; null when it was. */
+    message?: string | null;
+}
+
+/** Answer to a request to stop an analysis job. */
+export interface CancelAnalysisResult {
+    /** True if the job was stopped. */
+    cancelled: boolean;
+    /** Why the job was not stopped; null when it was. */
+    reason?: string | null;
+}
+
 export interface ObservationSessionSummary {
     id: string;
     status: string;
@@ -330,7 +346,7 @@ export interface ActionRegistry {
     // Processing
     "processing:stack": { payload: { target_id: string; image_files?: string[]; log_file?: string }; response: ProcessStatus };
     "processing:siril_open": { payload: { target_id: string }; response: boolean };
-    "processing:cancel": { payload: { target_id: string }; response: ProcessStatus | null };
+    "processing:cancel": { payload: { target_id: string }; response: CancelProcessingResult };
     "processing:status": { payload: { target_id: string }; response: { processing: boolean } };
     "processing:list_jobs": { payload: { target_id?: string; job_type?: string; limit?: number; before?: string }; response: ProcessingJob[] };
     "processing:get_job": { payload: { job_id: string }; response: ProcessingJob | null };
@@ -363,7 +379,7 @@ export interface ActionRegistry {
     // Analysis
     "analysis:analyze_image": { payload: { target_id: string; filter_name?: string; image_files?: string[]; type?: string }; response: AnalysisResult };
     "analysis:get_results": { payload: { target_id: string }; response: AnalysisResult | null };
-    "analysis:cancel": { payload: { target_id: string }; response: boolean };
+    "analysis:cancel": { payload: { target_id: string }; response: CancelAnalysisResult };
 
     // Imaging
     // Matches ImagingService.capture_sequence. An earlier declaration listed

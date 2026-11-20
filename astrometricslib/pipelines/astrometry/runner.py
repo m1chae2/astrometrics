@@ -320,12 +320,11 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         target = request.target
         path = request.path
 
-        # The Gaia tally is process-global and a worker handles many targets
-        # in sequence, so it is reset before this target's own query work
-        # starts and the counts read back below describe this target alone.
-        # reset_gaia_query_statistics leaves the circuit breaker itself
-        # untouched; see its docstring. The plate-solve tries are counted in
-        # a tally that belongs to this run.
+        # The Gaia state (tallies and safety switch) belongs to this run: the
+        # reset installs a fresh one for this thread's context, so the counts
+        # read back below describe this target alone and a run in another
+        # thread is not affected. The plate-solve tries are counted in a
+        # tally that belongs to this run.
         reset_gaia_query_statistics()
         plate_solve_attempt_tally = RunTally()
 

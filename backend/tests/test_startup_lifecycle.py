@@ -295,3 +295,18 @@ def test_the_lifespan_cancels_the_warm_up_task_and_runs_it_in_the_heavy_lane(
 
     assert task.cancelled()
     assert lane_calls == ["warm_start_up_caches", "warm_depth_goals", "warm_night_reviews"]
+
+
+def test_binding_helper_programs_does_nothing_off_windows() -> None:
+    """Off Windows the job-object step is skipped and reports `False`."""
+    if sys.platform == "win32":
+        pytest.skip("this is the non-Windows case")
+    assert startup.bind_helper_programs_to_backend_lifetime() is False
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="job objects exist on Windows only")
+def test_binding_helper_programs_joins_a_job_on_windows() -> None:
+    """On Windows the backend joins a kill-on-close job once."""
+    # A launcher's job may forbid nesting; then this logs and returns False.
+    first = startup.bind_helper_programs_to_backend_lifetime()
+    assert startup.bind_helper_programs_to_backend_lifetime() is first

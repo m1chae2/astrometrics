@@ -200,20 +200,53 @@ class BaseBackgroundService:
                 })
         return job_list
 
-    def cancel_processing(self, job_id: str) -> bool:
-        """Cancel a running job.
+    def cancel_processing(self, job_id: str) -> dict[str, Any]:
+        """Cancel a running job, or say why it cannot be cancelled here.
+
+        Only jobs started by this process can be stopped. The job list is
+        shared, so it can also hold a job that runs in another program (an
+        MCP server, a console script or a second backend). The store keeps
+        no stop flag for those jobs, so this reports where the job runs
+        instead of failing without a word.
 
         Returns
         -------
-        cancelled : `bool`
-            `True` if the job was found and successfully cancelled.
+        result : `dict`
+            `"cancelled"` is `True` if this process stopped the job. If
+            not, `"reason"` is a short sentence for the user. `"own_process"`
+            is `True` if this process started the job.
         """
         with self._lock:
-            if job_id in self._jobs:
-                future = self._jobs[job_id]["future"]
-                if not future.done():
-                    return future.cancel()
-        return False
+            own_job = self._jobs.get(job_id)
+            if own_job is not None:
+                future = own_job["future"]
+                if future.done():
+                    return {
+                        "cancelled": False,
+                        "own_process": True,
+                        "reason": "This job has already finished.",
+                    }
+                if future.cancel():
+                    return {"cancelled": True, "own_process": True, "reason": None}
+                return {
+                    "cancelled": False,
+                    "own_process": True,
+                    "reason": "This job is already running and cannot be interrupted.",
+                }
+        record = self._job_service.get_job(job_id) if self._job_service else None
+        if record is None:
+            return {"cancelled": False, "own_process": False, "reason": "No job with this id was found."}
+        if record.status in ("completed", "failed", "cancelled"):
+            return {"cancelled": False, "own_process": False, "reason": "This job has already finished."}
+        owner = f" (process {record.owner_pid})" if record.owner_pid is not None else ""
+        return {
+            "cancelled": False,
+            "own_process": False,
+            "reason": (
+                f"This job runs in another process{owner}, such as an MCP server or a "
+                "console script. Stop it there."
+            ),
+        }
 
     def stream_log(self, job_id: str, log_file: str) -> Iterator[str]:
         """Yield log lines from `log_file` as they are written.

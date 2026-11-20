@@ -12,6 +12,7 @@ This makes sure every star gets a stable, consistent name before it is saved to
 the database, replacing temporary labels so duplicates are not saved.
 """
 
+import contextvars
 import logging
 import math
 import queue
@@ -20,6 +21,7 @@ import sqlite3
 import threading
 import warnings
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -363,29 +365,67 @@ GAIA_DEPTH_STEPS_DOWN = TunedParameter(
     register_entry="AST-08",
 )
 
-_gaia_failure_state_lock = threading.Lock()
-_gaia_consecutive_failures = 0
-_gaia_circuit_open = False
 
-# The services (`"VizieR"`, `"ESA Gaia archive"`) that could not be reached
-# during the current run: the name did not resolve, the connection was
-# refused, or the connection attempt timed out. Such a service stays dead for
-# the rest of the run, because asking it again at a brighter limit only
-# repeats the wait. A service that was reached but answered too slowly (a
-# read timeout, or no answer within the deadline) is NOT added: the brighter
-# limits ask for fewer stars and may finish in time. The set is cleared when
-# a new run starts (`reset_gaia_query_statistics`), so the next target tries
-# each service again. This is a design choice, not a measured limit.
-_gaia_unreachable_services: set[str] = set()
+@dataclass
+class _GaiaRunState:
+    """The Gaia connection health of one run.
 
-# Cumulative per-process tallies, distinct from the consecutive-failure
-# counter above (which resets on any success). These record what the run
-# as a whole experienced, so a quality summary can say whether the
-# catalog service was healthy -- without them, a run where every query
-# failed looks identical to one where the fields genuinely held no
-# catalog stars.
-_gaia_queries_attempted = 0
-_gaia_queries_failed = 0
+    Each run keeps its own copy, so two runs in one process (the backend runs
+    jobs on threads) do not trip or reopen each other's safety switch or mix
+    their query counts.
+
+    Attributes
+    ----------
+    lock : `threading.Lock`
+        Guards every other field, because a run's worker threads share it.
+    consecutive_failures : `int`
+        Failed queries in a row. Any success sets it back to zero.
+    circuit_open : `bool`
+        True once `GAIA_CONSECUTIVE_FAILURE_LIMIT` queries failed in a row.
+    queries_attempted, queries_failed : `int`
+        Tallies for the whole run (not reset by a success). They let a
+        quality summary say whether the catalog service was healthy: without
+        them, a run where every query failed looks the same as one where the
+        fields held no catalog stars.
+    unreachable_services : `set` [`str`]
+        The services (`"VizieR"`, `"ESA Gaia archive"`) that could not be
+        reached during the run: the name did not resolve, the connection was
+        refused, or the connection attempt timed out. Such a service stays
+        dead for the rest of the run, because asking it again at a brighter
+        limit only repeats the wait. A service that was reached but answered
+        too slowly is NOT added: the brighter limits ask for fewer stars and
+        may finish in time. This is a design choice, not a measured limit.
+    """
+
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    consecutive_failures: int = 0
+    circuit_open: bool = False
+    queries_attempted: int = 0
+    queries_failed: int = 0
+    unreachable_services: set[str] = field(default_factory=set)
+
+
+# The state used outside any run (scripts, tests), so existing callers work.
+_process_default_gaia_state = _GaiaRunState()
+
+# The current run's state. `reset_gaia_query_statistics` installs a fresh one.
+# A new thread does not inherit a context variable, so a thread that works
+# for a run must start inside `contextvars.copy_context()`.
+_current_gaia_state: contextvars.ContextVar[_GaiaRunState | None] = contextvars.ContextVar(
+    "current_gaia_state", default=None
+)
+
+
+def _gaia_state() -> _GaiaRunState:
+    """Get the Gaia state of the current run.
+
+    Returns
+    -------
+    state : `_GaiaRunState`
+        The state installed for this run, or the process default when no run
+        has installed one.
+    """
+    return _current_gaia_state.get() or _process_default_gaia_state
 
 
 def _record_gaia_failure(context: str) -> None:
@@ -396,28 +436,28 @@ def _record_gaia_failure(context: str) -> None:
     context : `str`
         What was being attempted when it failed.
     """
-    global _gaia_consecutive_failures, _gaia_circuit_open, _gaia_queries_attempted, _gaia_queries_failed
-    with _gaia_failure_state_lock:
-        _gaia_queries_attempted += 1
-        _gaia_queries_failed += 1
-        _gaia_consecutive_failures += 1
-        if not _gaia_circuit_open and _gaia_consecutive_failures >= GAIA_CONSECUTIVE_FAILURE_LIMIT:
-            _gaia_circuit_open = True
+    state = _gaia_state()
+    with state.lock:
+        state.queries_attempted += 1
+        state.queries_failed += 1
+        state.consecutive_failures += 1
+        if not state.circuit_open and state.consecutive_failures >= GAIA_CONSECUTIVE_FAILURE_LIMIT:
+            state.circuit_open = True
             logger.warning(
-                "Gaia remote queries disabled for the rest of this process after %s consecutive "
+                "Gaia remote queries disabled for the rest of this run after %s consecutive "
                 "failures (last: %s). Locally cached Gaia data is still used; SIMBAD "
                 "identification is unaffected.",
-                _gaia_consecutive_failures,
+                state.consecutive_failures,
                 context,
             )
 
 
 def _record_gaia_success() -> None:
     """Reset the failure counter back to zero after a successful connection."""
-    global _gaia_consecutive_failures, _gaia_queries_attempted
-    with _gaia_failure_state_lock:
-        _gaia_queries_attempted += 1
-        _gaia_consecutive_failures = 0
+    state = _gaia_state()
+    with state.lock:
+        state.queries_attempted += 1
+        state.consecutive_failures = 0
 
 
 def _is_connection_failure(error: BaseException) -> bool:
@@ -459,8 +499,9 @@ def _mark_gaia_service_unreachable(service: str) -> None:
     service : `str`
         The service's name, as used in `_fetch_gaia_cone`.
     """
-    with _gaia_failure_state_lock:
-        _gaia_unreachable_services.add(service)
+    state = _gaia_state()
+    with state.lock:
+        state.unreachable_services.add(service)
 
 
 def _is_gaia_service_unreachable(service: str) -> bool:
@@ -477,8 +518,9 @@ def _is_gaia_service_unreachable(service: str) -> bool:
         True if the service timed out or refused a connection since the run
         started.
     """
-    with _gaia_failure_state_lock:
-        return service in _gaia_unreachable_services
+    state = _gaia_state()
+    with state.lock:
+        return service in state.unreachable_services
 
 
 def _fetch_gaia_cone(
@@ -495,8 +537,8 @@ def _fetch_gaia_cone(
     then VizieR again at up to `GAIA_DEPTH_STEPS_DOWN` brighter limits. The
     first answer wins. A service that cannot be reached (a connection
     failure) is skipped for the rest of the run (see
-    `_gaia_unreachable_services`), so its later, brighter attempts are not
-    made. A service that was reached but was slow keeps its brighter
+    `_GaiaRunState.unreachable_services`), so its later, brighter attempts
+    are not made. A service that was reached but was slow keeps its brighter
     attempts. The whole attempt counts as one success or one failure for
     the circuit breaker.
 
@@ -612,11 +654,12 @@ def get_gaia_query_statistics() -> dict[str, int | bool]:
         How many times the connection was attempted, how many times it failed,
         and whether the safety switch has flipped.
     """
-    with _gaia_failure_state_lock:
+    state = _gaia_state()
+    with state.lock:
         return {
-            "attempted": _gaia_queries_attempted,
-            "failed": _gaia_queries_failed,
-            "circuit_breaker_tripped": _gaia_circuit_open,
+            "attempted": state.queries_attempted,
+            "failed": state.queries_failed,
+            "circuit_breaker_tripped": state.circuit_open,
         }
 
 
@@ -628,34 +671,34 @@ def _gaia_remote_queries_disabled() -> bool:
     disabled : `bool`
         True if the connection failed too many times in a row.
     """
-    with _gaia_failure_state_lock:
-        return _gaia_circuit_open
+    state = _gaia_state()
+    with state.lock:
+        return state.circuit_open
 
 
 def reset_gaia_circuit_breaker() -> None:
-    """Reset the safety switch to allow trying to connect to Gaia again."""
-    global _gaia_consecutive_failures, _gaia_circuit_open, _gaia_queries_attempted, _gaia_queries_failed
-    with _gaia_failure_state_lock:
-        _gaia_consecutive_failures = 0
-        _gaia_circuit_open = False
-        _gaia_queries_attempted = 0
-        _gaia_queries_failed = 0
-        _gaia_unreachable_services.clear()
+    """Reset the safety switch to allow trying to connect to Gaia again.
+
+    Only the current run's state is cleared (the process default outside a
+    run), so another run's breaker is not touched.
+    """
+    state = _gaia_state()
+    with state.lock:
+        state.consecutive_failures = 0
+        state.circuit_open = False
+        state.queries_attempted = 0
+        state.queries_failed = 0
+        state.unreachable_services.clear()
 
 
 def reset_gaia_query_statistics() -> None:
-    """Reset the tracking stats back to zero for a new run.
+    """Start a new run's Gaia state: fresh tallies and a closed safety switch.
 
-    This does NOT reset the safety switch. If Gaia was offline for the
-    last image, we assume it's still offline and don't bother trying again.
-    It does forget which services failed during the last run, so the new run
-    tries each service once more.
+    Installs a new state for the current run (the current thread's context),
+    so it never changes another run's switch or counts. A run therefore
+    begins with each service tried once more.
     """
-    global _gaia_queries_attempted, _gaia_queries_failed
-    with _gaia_failure_state_lock:
-        _gaia_unreachable_services.clear()
-        _gaia_queries_attempted = 0
-        _gaia_queries_failed = 0
+    _current_gaia_state.set(_GaiaRunState())
 
 
 def _run_with_daemon_thread_timeout(query_function: Callable[[], Any], timeout_seconds: float) -> Any:
@@ -695,7 +738,10 @@ def _run_with_daemon_thread_timeout(query_function: Callable[[], Any], timeout_s
             logger.debug("The background query raised an error.", exc_info=True)
             result_queue.put((False, query_error))
 
-    threading.Thread(target=_run_and_report, daemon=True).start()
+    # A new thread does not inherit context variables, so the query runs
+    # inside a copy of this run's context to see the run's Gaia state.
+    run_context = contextvars.copy_context()
+    threading.Thread(target=run_context.run, args=(_run_and_report,), daemon=True).start()
 
     try:
         succeeded, payload = result_queue.get(timeout=timeout_seconds)

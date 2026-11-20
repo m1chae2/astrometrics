@@ -33,7 +33,7 @@ import threading
 from collections.abc import Callable, Generator, Sequence
 
 from astrometricslib.foundation.errors import ProcessingError
-from astrometricslib.foundation.system import stop_process_tree
+from astrometricslib.foundation.system import child_process_options, stop_process_tree
 
 __all__ = [
     "RunAbandonedError",
@@ -256,7 +256,7 @@ def run_registered(arguments: Sequence[str], timeout_seconds: float) -> subproce
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            start_new_session=True,
+            **child_process_options(),
         )
     )
     try:

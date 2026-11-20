@@ -52,6 +52,9 @@ interface ViewerPanelContainerProps {
   toggleFile: (path: string | null) => void;
   toggleAllFiles: () => void;
   analysisResults: any;
+
+  /** Set while Image Controls is folded and the right column too: its tab joins the bottom bar here. */
+  onOpenImageControls?: () => void;
 }
 
 /**
@@ -64,10 +67,12 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
   selectedStarId,
   allFiles, filteredFiles, fileFilterText, setFileFilterText, fileBrowserCamera, setFileBrowserCamera, selectedOptic, setSelectedOptic,
   checkedFiles, handleRequestDeleteFiles, onOpenHeaderModal, onFileClick, selectedFile,
-  toggleFile, toggleAllFiles, analysisResults
+  toggleFile, toggleAllFiles, analysisResults, onOpenImageControls
 }) => {
   // True while the image shows a marker at every star the astrometry run's star finder detects.
   const [detectionsEnabled, setDetectionsEnabled] = useState(false);
+  // True while the File Browser is folded down to a tab bar, which gives the viewer the full height.
+  const [browserCollapsed, setBrowserCollapsed] = useState(false);
 
   /** Finds the FITS file on screen: the file picked in the browser, else the light frame being shown. */
   const resolveMeasurePath = useCallback(async (): Promise<string | null> => {
@@ -137,23 +142,28 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
           resolveMeasurePath={resolveMeasurePath}
         />
       </SectionPanel>
+      {browserCollapsed ? null : (
       <SectionPanel
         title="File Browser"
         className="image-processing-display__browser-section"
+        onTitleClick={() => setBrowserCollapsed(true)}
+        titleButtonLabel="Collapse the File Browser to a tab bar"
         headerContent={
-          <FileBrowserToolbar
-            className="file-browser__toolbar--header"
-            files={allFiles}
-            searchTerm={fileFilterText}
-            onSearchChange={setFileFilterText}
-            selectedCamera={fileBrowserCamera}
-            onCameraChange={setFileBrowserCamera}
-            selectedOptic={selectedOptic}
-            onOpticChange={setSelectedOptic}
-            checkedFiles={checkedFiles}
-            onDeleteFiles={handleRequestDeleteFiles}
-            onShowHeader={() => onOpenHeaderModal(selectedFile || undefined)}
-          />
+          <div className="image-processing-display__browser-header">
+            <FileBrowserToolbar
+              className="file-browser__toolbar--header"
+              files={allFiles}
+              searchTerm={fileFilterText}
+              onSearchChange={setFileFilterText}
+              selectedCamera={fileBrowserCamera}
+              onCameraChange={setFileBrowserCamera}
+              selectedOptic={selectedOptic}
+              onOpticChange={setSelectedOptic}
+              checkedFiles={checkedFiles}
+              onDeleteFiles={handleRequestDeleteFiles}
+              onShowHeader={() => onOpenHeaderModal(selectedFile || undefined)}
+            />
+          </div>
         }
       >
         <FileBrowser
@@ -170,6 +180,34 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
           selectedCamera={fileBrowserCamera}
         />
       </SectionPanel>
+      )}
+      {(browserCollapsed || onOpenImageControls) && (
+        <div className="image-processing-display__collapsed-row">
+          {browserCollapsed && (
+            <SectionPanel
+              title="File Browser"
+              collapsed="down"
+              collapsedNote={`${filteredFiles.length} frames`}
+              className="image-processing-display__collapsed-row-fill"
+              onTitleClick={() => setBrowserCollapsed(false)}
+              titleButtonLabel="Expand the File Browser"
+            >
+              {null}
+            </SectionPanel>
+          )}
+          {onOpenImageControls && (
+            <SectionPanel
+              title="Image Controls"
+              collapsed="down"
+              className="image-processing-display__collapsed-row-end"
+              onTitleClick={onOpenImageControls}
+              titleButtonLabel="Expand Image Controls"
+            >
+              {null}
+            </SectionPanel>
+          )}
+        </div>
+      )}
     </div>
   );
 };

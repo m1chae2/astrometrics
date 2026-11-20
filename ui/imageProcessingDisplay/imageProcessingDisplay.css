@@ -53,6 +53,62 @@
   overflow: hidden;
 }
 
+/* The File Browser header holds its toolbar and the Collapse button side by side. */
+.image-processing-display__browser-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+/* Folded panels under the viewer: the File Browser row stretches; Image Controls keeps to the right. */
+.image-processing-display__collapsed-row {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.image-processing-display__collapsed-row-fill {
+  flex: 1 1 auto;
+}
+
+.image-processing-display__collapsed-row-end {
+  width: auto;
+  margin-left: auto;
+}
+
+/* Both right panels folded: the column narrows to the Frame Analysis rail, so the viewer widens. */
+.layout:has(.image-processing-display__right--collapsed) {
+  --layout-right-col-width: 36px;
+}
+
+.image-processing-display__right--collapsed {
+  display: flex;
+  height: 100%;
+}
+
+/* Frame Analysis folded, Image Controls open: the column narrows so the viewer widens. The controls
+   keep their own height at the bottom, beside the full-height Frame Analysis rail. */
+.layout:has(.image-processing-display__right--split) {
+  --layout-right-col-width: 260px;
+}
+
+.image-processing-display__right--split {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+}
+
+.image-processing-display__right--split > .panel:not(.panel--collapsed) {
+  align-self: flex-end;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
 /* Right Panel structure */
 .image-processing-display__right {
   height: 100%;

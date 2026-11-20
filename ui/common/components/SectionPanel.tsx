@@ -1,5 +1,6 @@
 import React from 'react';
 import '../styles/panels.css';
+import { Button } from './Button';
 import { Skeleton, UpdatingBar, SkeletonProps } from './Skeleton';
 
 export interface SectionPanelProps {
@@ -16,6 +17,17 @@ export interface SectionPanelProps {
     refreshing?: boolean;
     /** The placeholder to show while `loading`. Required when `loading` can be true. */
     skeleton?: SkeletonProps;
+    /** When set, the title becomes a button that calls this to fold the panel away. */
+    onTitleClick?: () => void;
+    /** Hover text for the title button. */
+    titleButtonLabel?: string;
+    /**
+     * Folds the panel away. `down` leaves only the title row; `right` leaves a thin rail with the
+     * title running down it. Clicking the title (`onTitleClick`) opens the panel again.
+     */
+    collapsed?: 'down' | 'right';
+    /** A short muted note beside the title while the panel is folded down, such as a count. */
+    collapsedNote?: string;
 }
 
 /**
@@ -34,14 +46,36 @@ export const SectionPanel: React.FC<SectionPanelProps> = ({
     fullHeight = false,
     loading = false,
     refreshing = false,
-    skeleton
+    skeleton,
+    onTitleClick,
+    titleButtonLabel,
+    collapsed,
+    collapsedNote
 }) => {
     const fullHeightClass = fullHeight ? 'panel--full-height' : '';
+    if (collapsed) {
+        return (
+            <div id={id} className={`panel panel--collapsed panel--collapsed-${collapsed} ${className}`} style={style}>
+                <div className="panel__header">
+                    <Button variant="ghost" size="small" onClick={onTitleClick} title={titleButtonLabel} aria-expanded={false}>
+                        {title}
+                    </Button>
+                    {collapsed === 'down' && collapsedNote && <span className="panel__collapsed-note">{collapsedNote}</span>}
+                </div>
+            </div>
+        );
+    }
     return (
         <div id={id} className={`panel ${fullHeightClass} ${className}`} style={style}>
             {(title || headerContent) && (
                 <div className="panel__header">
-                    <span>{title}</span>
+                    {onTitleClick ? (
+                        <Button variant="ghost" size="small" onClick={onTitleClick} title={titleButtonLabel} aria-expanded={true}>
+                            {title}
+                        </Button>
+                    ) : (
+                        <span>{title}</span>
+                    )}
                     {headerContent}
                 </div>
             )}

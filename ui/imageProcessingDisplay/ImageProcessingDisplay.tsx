@@ -115,6 +115,9 @@ const ImageProcessingDisplayInner: React.FC = () => {
 
   const fitsRendererRef = React.useRef<FitsRendererHandle>(null);
 
+  // Frame Analysis folds to the right; Image Controls folds down into a tab bar.
+  const [analysisCollapsed, setAnalysisCollapsed] = useState(false);
+  const [controlsCollapsed, setControlsCollapsed] = useState(false);
   const [showAstrometryOverlay, setShowAstrometryOverlay] = useState<boolean>(() => {
     try {
       return localStorage.getItem('astrometrics:enableAstrometryOverlay') === 'true';
@@ -453,6 +456,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
       toggleFile={toggleFile}
       toggleAllFiles={toggleAllFiles}
       analysisResults={analysisResults}
+      onOpenImageControls={analysisCollapsed && controlsCollapsed ? () => setControlsCollapsed(false) : undefined}
     />
   );
 
@@ -469,6 +473,10 @@ const ImageProcessingDisplayInner: React.FC = () => {
       setIsAddModalOpen={setIsAddModalOpen}
       selectedFile={selectedFile}
       onShowHeader={handleOpenHeaderModal}
+      analysisCollapsed={analysisCollapsed}
+      setAnalysisCollapsed={setAnalysisCollapsed}
+      controlsCollapsed={controlsCollapsed}
+      setControlsCollapsed={setControlsCollapsed}
     />
   );
 

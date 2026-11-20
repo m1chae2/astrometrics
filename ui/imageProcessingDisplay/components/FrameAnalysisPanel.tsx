@@ -34,6 +34,12 @@ interface FrameAnalysisPanelProps {
   setIsAddModalOpen: (open: boolean) => void;
   selectedFile: string | null;
   onShowHeader?: (path: string) => void;
+
+  // Fold state, held by the screen because the Image Controls tab can sit in the viewer's bottom bar.
+  analysisCollapsed: boolean;
+  setAnalysisCollapsed: (collapsed: boolean) => void;
+  controlsCollapsed: boolean;
+  setControlsCollapsed: (collapsed: boolean) => void;
 }
 
 /**
@@ -44,7 +50,8 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
   allFiles, filteredFiles, checkedFiles, stackedImage, stackedSpectralTarget, totalExposure,
   handleSelectFile,
   handleAddImages, setIsAddModalOpen,
-  selectedFile, onShowHeader
+  selectedFile, onShowHeader,
+  analysisCollapsed, setAnalysisCollapsed, controlsCollapsed, setControlsCollapsed
 }) => {
   const {
     selectedTarget, commonName, catalogId,
@@ -151,10 +158,33 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
   const analysisSelection = chooseAnalysisSelection(selectionInput);
   const temporalVariationSelection = chooseTemporalVariationSelection(selectionInput);
 
+  // Frame Analysis folded: a thin rail on the right edge.
+  const analysisRail = (
+    <SectionPanel
+      title="Frame Analysis"
+      collapsed="right"
+      onTitleClick={() => setAnalysisCollapsed(false)}
+      titleButtonLabel="Expand Frame Analysis"
+    >
+      {null}
+    </SectionPanel>
+  );
+
+  // Both folded: the column is just the rail. The Image Controls row sits under the viewer
+  // (see ViewerPanelContainer).
+  if (analysisCollapsed && controlsCollapsed) {
+    return <div className="image-processing-display__right image-processing-display__right--collapsed">{analysisRail}</div>;
+  }
+
   return (
-    <div className="image-processing-display__right panel-group">
+    <div
+      className={`image-processing-display__right ${analysisCollapsed ? 'image-processing-display__right--split' : 'panel-group'}`}
+    >
+      {!analysisCollapsed && (
       <SectionPanel
         title="Frame Analysis"
+        onTitleClick={() => setAnalysisCollapsed(true)}
+        titleButtonLabel="Collapse to the right"
         className="image-processing-display__analysis-section frame-analysis-panel flex-fill"
         headerContent={
           <Tabs
@@ -239,7 +269,23 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
           ]}
         />
       </SectionPanel>
-      <SectionPanel title="Image Controls" className="flex-auto">
+      )}
+      {controlsCollapsed ? (
+        <SectionPanel
+          title="Image Controls"
+          collapsed="down"
+          onTitleClick={() => setControlsCollapsed(false)}
+          titleButtonLabel="Expand Image Controls"
+        >
+          {null}
+        </SectionPanel>
+      ) : (
+      <SectionPanel
+        title="Image Controls"
+        className="flex-auto"
+        onTitleClick={() => setControlsCollapsed(true)}
+        titleButtonLabel="Collapse down"
+      >
         <ImageDetailsManager
           selectedTarget={selectedTarget}
           commonName={commonName}
@@ -287,6 +333,8 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
           }}
         />
       </SectionPanel>
+      )}
+      {analysisCollapsed && analysisRail}
     </div>
   );
 };

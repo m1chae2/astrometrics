@@ -106,6 +106,20 @@ describe('detection marker placement', () => {
     // The third star is at x = 10 + 189.5 * 2 = 389: outside the 300 px view.
     expect(paths.visibleCount).toBe(2);
   });
+
+  it('draws the photometry circle at its size in image pixels, scaled by the zoom', () => {
+    const paths = buildDetectionPaths([{ x: 20, y: 20, flux: 1, merged: false }], { ...geometry, apertureRadiusPx: 4 });
+    // 4 image pixels at 2 screen pixels each: an 8 px radius.
+    expect(paths.circles).toContain('a8.0 8.0');
+  });
+
+  it('keeps the photometry circle visible when zoomed far out', () => {
+    const paths = buildDetectionPaths(
+      [{ x: 20, y: 20, flux: 1, merged: false }],
+      { ...geometry, stepX: 0.1, stepY: 0.1, apertureRadiusPx: 4 },
+    );
+    expect(paths.circles).toContain('a3.0 3.0');
+  });
 });
 
 describe('Detections overlay', () => {

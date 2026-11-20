@@ -546,6 +546,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
       firstRowAtTop: detectionsFirstRowAtTop,
       viewWidth: containerW,
       viewHeight: containerH,
+      apertureRadiusPx: detections.measurement.aperture_radius_px,
     });
   })();
   const detectionsNote: string | null = !showDetections ? null

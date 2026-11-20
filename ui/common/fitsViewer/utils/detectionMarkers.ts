@@ -4,15 +4,23 @@
  * detection sits at a 1-based file pixel; the picture is shown with a zoom, a pan and a row order, so each
  * position is turned into a screen position the same way the star profile marker is. Thousands of markers
  * are drawn as two SVG paths (one for single stars, one for merged ones), and markers outside the view
- * are left out.
+ * are left out. When the measurement gives the photometry circle radius, each circle is drawn at that size
+ * in image pixels, so it grows and shrinks with the zoom like the stars do and shows the light photometry
+ * would count.
  */
 import type { StarDetection } from '../../types/backendTypes';
 
-/** Radius, in screen pixels, of the circle drawn for a single detection. */
+/** Radius, in screen pixels, of the circle drawn for a single detection when no photometry radius is known. */
 export const DETECTION_MARKER_RADIUS_PX = 5;
 
-/** Half the width, in screen pixels, of the diamond drawn for a merged detection. */
+/** Half the width, in screen pixels, of the diamond drawn for a merged detection when no photometry radius is known. */
 export const MERGED_MARKER_RADIUS_PX = 6;
+
+/** The smallest circle, in screen pixels, so markers stay visible when the image is zoomed far out. */
+export const MINIMUM_MARKER_RADIUS_PX = 3;
+
+/** How much wider a merged star's diamond is than a single star's circle, so the two shapes read apart. */
+const MERGED_TO_SINGLE_SIZE = MERGED_MARKER_RADIUS_PX / DETECTION_MARKER_RADIUS_PX;
 
 /** How the picture sits in the viewer. */
 export interface DetectionGeometry {
@@ -34,6 +42,11 @@ export interface DetectionGeometry {
   viewWidth: number;
   /** Height of the viewer, in screen pixels. */
   viewHeight: number;
+  /**
+   * Radius, in image pixels, of the circle photometry measures each star in. When it is set, markers are
+   * drawn at this size (never below {@link MINIMUM_MARKER_RADIUS_PX}); otherwise at the fixed screen size.
+   */
+  apertureRadiusPx?: number | null;
 }
 
 /** The two paths to draw, and how many markers are inside the view. */
@@ -74,18 +87,32 @@ export function detectionScreenPosition(
 export function buildDetectionPaths(detections: StarDetection[], geometry: DetectionGeometry): DetectionPaths {
   const circles: string[] = [];
   const diamonds: string[] = [];
-  const margin = MERGED_MARKER_RADIUS_PX;
+  const hasAperture = geometry.apertureRadiusPx != null && geometry.apertureRadiusPx > 0;
+  // The circle's radius on screen along each axis: the photometry circle scaled by the zoom, or the fixed size.
+  const rx = hasAperture
+    ? Math.max(geometry.apertureRadiusPx! * geometry.stepX, MINIMUM_MARKER_RADIUS_PX)
+    : DETECTION_MARKER_RADIUS_PX;
+  const ry = hasAperture
+    ? Math.max(geometry.apertureRadiusPx! * geometry.stepY, MINIMUM_MARKER_RADIUS_PX)
+    : DETECTION_MARKER_RADIUS_PX;
+  const diamondX = rx * MERGED_TO_SINGLE_SIZE;
+  const diamondY = ry * MERGED_TO_SINGLE_SIZE;
+  const margin = Math.max(diamondX, diamondY);
   for (const detection of detections) {
     const { x, y } = detectionScreenPosition(detection, geometry);
     if (x < -margin || y < -margin || x > geometry.viewWidth + margin || y > geometry.viewHeight + margin) continue;
     const px = x.toFixed(1);
     const py = y.toFixed(1);
     if (detection.merged) {
-      const r = MERGED_MARKER_RADIUS_PX;
-      diamonds.push(`M${px} ${(y - r).toFixed(1)}L${(x + r).toFixed(1)} ${py}L${px} ${(y + r).toFixed(1)}L${(x - r).toFixed(1)} ${py}Z`);
+      diamonds.push(
+        `M${px} ${(y - diamondY).toFixed(1)}L${(x + diamondX).toFixed(1)} ${py}`
+        + `L${px} ${(y + diamondY).toFixed(1)}L${(x - diamondX).toFixed(1)} ${py}Z`,
+      );
     } else {
-      const r = DETECTION_MARKER_RADIUS_PX;
-      circles.push(`M${(x - r).toFixed(1)} ${py}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0`);
+      const sx = rx.toFixed(1);
+      const sy = ry.toFixed(1);
+      const width = (2 * rx).toFixed(1);
+      circles.push(`M${(x - rx).toFixed(1)} ${py}a${sx} ${sy} 0 1 0 ${width} 0a${sx} ${sy} 0 1 0 -${width} 0`);
     }
   }
   return { circles: circles.join(''), diamonds: diamonds.join(''), visibleCount: circles.length + diamonds.length };

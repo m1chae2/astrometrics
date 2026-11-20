@@ -96,7 +96,11 @@ Detections: the Detections button in the viewer header (here and in the Image Pr
   run uses (`find_unique_stars`), on any image. For a stack's stretched `_processed` picture the
   backend searches the linear stack beside it, as the run does. The backend keeps the answer for the file's
   modified time, so turning the overlay off and on is quick. A single star is a circle and a star
-  reported twice and merged is a diamond (a different shape, not only a different color); the
+  reported twice and merged is a diamond (a different shape, not only a different color). Each
+  circle is the circle photometry measures every star in (`aperture_radius_px`, in image pixels),
+  sized from the star width measured on this image (`star_width_px`), so it grows and shrinks with the zoom and shows the light photometry would count. It is the same
+  size for every star, because all stars in one image share one shape. Zoomed far out, a circle
+  never draws smaller than 3 screen pixels, so it stays visible. The
   colors are the `--detection-marker-color` and `--detection-merged-color` tokens. Positions are
   1-based file pixels placed like the star profile marker (`utils/detectionMarkers.ts`), drawn as
   two SVG paths, and only markers in view are drawn. A note in the corner of the picture says

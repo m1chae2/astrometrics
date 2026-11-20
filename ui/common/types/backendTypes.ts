@@ -2926,6 +2926,16 @@ export interface StarDetection {
  * `True` when the image has color channels and the finder searched an
  * averaged, smaller copy, as the run does. Positions are given back
  * in full image pixels.
+ * star_width_px : `float` or `None`
+ * The star width measured on this image, in pixels, on the library's
+ * one star-width scale. It sizes the photometry circle. `None` when no
+ * star could be measured; the active setup's typical width was used
+ * instead.
+ * aperture_radius_px : `float` or `None`
+ * The radius, in image pixels, of the circle that photometry measures
+ * every star in, sized from ``star_width_px``. It is the same for every
+ * star, because all stars in one image share one shape. `None` when it
+ * was not set.
  */
 export interface DetectionsMeasurement {
   path: string;
@@ -2936,6 +2946,8 @@ export interface DetectionsMeasurement {
   merged_count: number;
   kernel_fwhm_px: number;
   binned_on_color?: boolean;
+  star_width_px?: number | null;
+  aperture_radius_px?: number | null;
 }
 
 /**

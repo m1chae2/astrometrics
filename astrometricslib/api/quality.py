@@ -1107,7 +1107,10 @@ class QualityRecords:
             with ``x`` and ``y`` in 1-based pixels as in
             `measure_star_profile`, ``flux`` and ``merged``, `True` when two
             reports of one star were merged), ``detection_count``,
-            ``merged_count``, ``kernel_fwhm_px`` and ``binned_on_color``.
+            ``merged_count``, ``kernel_fwhm_px``, ``binned_on_color``,
+            ``star_width_px`` (this image's star width, which sizes the
+            circle) and ``aperture_radius_px``, the radius of
+            the circle photometry measures each star in.
         """
         from astrometricslib.pipelines.astrometry.processing.detections import measure_detections_in_file
 

@@ -2,8 +2,9 @@
 
 They check that `measure_detections_in_file` reports the stars of a synthetic
 image in 1-based pixels, that it gives the same list as the function the
-astrometry run calls (`find_unique_stars`), and that a star reported twice is
-marked as merged.
+astrometry run calls (`find_unique_stars`), that a star reported twice is
+marked as merged, and that the photometry circle is sized from the image's
+own star width.
 """
 
 from pathlib import Path
@@ -91,3 +92,16 @@ def test_public_call_matches_and_missing_file_is_refused(tmp_path: Path) -> None
     assert through_api.detection_count == measure_detections_in_file(str(path)).detection_count
     with pytest.raises(NotFoundError):
         measure_detections_in_file(str(tmp_path / "missing.fits"))
+
+
+def test_circle_is_sized_from_the_image_star_width(tmp_path: Path) -> None:
+    """The circle follows the star width measured on this image."""
+    from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import APERTURE_RADIUS_PX
+
+    path = tmp_path / "stars.fits"
+    _write_image(path, STAR_POSITIONS)
+    through_api = Astrometrics().quality.measure_detections(str(path))
+    # The stars are Gaussians of sigma 1.7 px: a 4.0 px FWHM.
+    assert through_api.star_width_px == pytest.approx(4.0, rel=0.15)
+    factor = float(APERTURE_RADIUS_PX.default)  # the radius per star width
+    assert through_api.aperture_radius_px == pytest.approx(factor * through_api.star_width_px)

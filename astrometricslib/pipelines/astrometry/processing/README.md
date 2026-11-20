@@ -59,6 +59,6 @@ Plate solving has to happen before catalog lookup, because a catalog can only be
 
 ## Detections for the viewer
 
-`detections.py` has `measure_detections_in_file(path)`, the code behind `QualityRecords.measure_detections`. It reads one image and calls `find_unique_stars` in `star_identifier.py`, the same function `StarIdentifier.detect_stars` calls, so the stars the viewer marks are the stars the run finds. It stores nothing.
+`detections.py` has `measure_detections_in_file(path)`, the code behind `QualityRecords.measure_detections`. It reads one image and calls `find_unique_stars` in `star_identifier.py`, the same function `StarIdentifier.detect_stars` calls, so the stars the viewer marks are the stars the run finds. It then measures the image's own star width (`measure_fwhm_from_data`, put on the one star-width scale) in a parameter context of its own, and gives the photometry circle radius (`APERTURE_RADIUS_PX`) for that width, so the circle fits this image whichever setup is active. It stores nothing.
 
 For exact behavior, read the code.

@@ -6,8 +6,12 @@ running the analysis again. This module reads one file and calls
 `find_unique_stars`, the same function `StarIdentifier.detect_stars` calls,
 so the two cannot drift apart. It changes nothing on disk.
 
-Positions inside the finder are 0-based array indices. They are converted to
-1-based pixels (FITS and DS9) at the end.
+The photometry circle is sized from this image's own star width, measured
+first the way a run measures it, so it fits the stars on screen whichever
+setup is active. Only when no star can be measured does it fall back to the
+active setup's typical width. The finder itself is built exactly as the run
+builds it: for a mono image it sizes its kernel from the image's measured
+blob width, and for a color image it uses the setup's width.
 """
 
 import numpy as np
@@ -15,7 +19,11 @@ import numpy as np
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d
 from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.foundation.parameter_context import setup_parameter_context
+from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_bases import StarWidthEstimator, record_star_width, star_width_on_scale
 from astrometricslib.models.quality.detections import DetectionsMeasurement, StarDetection
+from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
 from astrometricslib.pipelines.astrometry.processing.star_identifier import find_unique_stars
 
@@ -47,6 +55,27 @@ def find_star_centers(data: np.ndarray) -> list[tuple[float, float]]:
         )
         for source in unique_sources
     ]
+
+
+def _star_width_estimator(stack_frame_count: int) -> StarWidthEstimator:
+    """Choose how the measured width converts to the one star-width scale.
+
+    Parameters
+    ----------
+    stack_frame_count : `int`
+        The ``STACKCNT`` card of the image, 0 when it has none.
+
+    Returns
+    -------
+    estimator : `StarWidthEstimator`
+        The stack estimator for a stack of two or more frames, else the frame
+        estimator of the brightest stars, which is the scale itself.
+    """
+    return (
+        StarWidthEstimator.STACK_GAUSSIAN
+        if stack_frame_count > 1
+        else StarWidthEstimator.FRAME_GAUSSIAN_BRIGHTEST
+    )
 
 
 def measure_detections_in_file(path: str) -> DetectionsMeasurement:
@@ -81,8 +110,29 @@ def measure_detections_in_file(path: str) -> DetectionsMeasurement:
         raise InvalidArgumentError("The image has no pixel data.")
     height, width = data.shape
 
+    try:
+        stack_frame_count = int(image.header.get("STACKCNT", 0) or 0)
+    except TypeError, ValueError:
+        stack_frame_count = 0
+    estimator = _star_width_estimator(stack_frame_count)
+
+    # A context of its own, so the width measured here sizes everything below
+    # and nothing leaks into a run that may be going on.
+    # The finder first, as the run builds it, so the markers are the stars a
+    # run finds. Then this image's star width is recorded in a context of its
+    # own, so it sizes the circle and nothing leaks into a run going on.
     detector = SourceDetector()
     _, unique_sources = find_unique_stars(detector, data, is_color_frame=is_color_frame)
+    with setup_parameter_context():
+        measured_width_px = measure_fwhm_from_data(data)
+        record_star_width(measured_width_px, estimator)
+        aperture_radius_px = _photometry_aperture_radius_px()
+
+    star_width_px = (
+        star_width_on_scale(float(measured_width_px), estimator)
+        if measured_width_px is not None and np.isfinite(measured_width_px) and measured_width_px > 0
+        else None
+    )
 
     detections = []
     for source in unique_sources:
@@ -105,4 +155,24 @@ def measure_detections_in_file(path: str) -> DetectionsMeasurement:
         merged_count=sum(1 for detection in detections if detection.merged),
         kernel_fwhm_px=float(detector.fwhm),
         binned_on_color=is_color_frame,
+        star_width_px=star_width_px,
+        aperture_radius_px=aperture_radius_px,
     )
+
+
+def _photometry_aperture_radius_px() -> float:
+    """Give the radius of the circle photometry measures each star in.
+
+    It is read in the caller's parameter context, so it follows the star
+    width recorded there. The import is local because photometry is another
+    pipeline: only this viewer helper needs its circle.
+
+    Returns
+    -------
+    radius : `float`
+        The radius in image pixels, the default of
+        `measure_aperture_photometry`.
+    """
+    from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import APERTURE_RADIUS_PX
+
+    return float(resolve(APERTURE_RADIUS_PX).value)

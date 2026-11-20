@@ -8,6 +8,7 @@ import { useFitsLoader, ParsedFitsData } from './hooks/useFitsLoader';
 import { useCanvasInteraction } from './hooks/useCanvasInteraction';
 import { useCanvasDrawer } from './hooks/useCanvasDrawer';
 import { usePreviewBitmap } from './hooks/usePreviewBitmap';
+import { useBitmapTurn } from './hooks/useBitmapTurn';
 import { PixelReadout } from './PixelReadout';
 import { StarProfilePanel, SET_DISPLAY_TO_LINEAR_MESSAGE } from './StarProfilePanel';
 import type { StarProfileView } from './StarProfilePanel';
@@ -265,10 +266,17 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   // A raw frame is shown turned to match the stack; the file itself is never changed.
   const stackOrientationRef = useRef(stackOrientation);
   stackOrientationRef.current = stackOrientation;
-  const turn: QuarterTurn = React.useMemo(
-    () => (mainReady && parsedData ? turnToMatchStack(parsedData.header, stackOrientation) : 0),
-    [mainReady, parsedData, stackOrientation]
+  // A decoded FITS image knows its own header. A picture the backend drew (Auto Stretch, or the
+  // preview) gets the same turn from the header of the file behind it, and waits for it.
+  const bitmapTurn = useBitmapTurn(
+    currentKey, stackOrientation, selectedTarget, resolveMeasurePath, !(mainReady && parsedData)
   );
+  const turn: QuarterTurn = React.useMemo(
+    () => (mainReady && parsedData ? turnToMatchStack(parsedData.header, stackOrientation) : bitmapTurn.turn),
+    [mainReady, parsedData, stackOrientation, bitmapTurn.turn]
+  );
+  const bitmapTurnRef = useRef<QuarterTurn>(0);
+  bitmapTurnRef.current = turn;
   // The size of the picture as shown: the file's width and height, swapped for a quarter turn.
   const shownSize = parsedData ? turnedSize(parsedData.w, parsedData.h, turn) : { w: 0, h: 0 };
 
@@ -308,7 +316,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     }
     const geometry: ImageGeometry = 'imageId' in drawn
       ? { width: drawn.w, height: drawn.h, header: drawn.header, turn: turnToMatchStack(drawn.header, stackOrientationRef.current) }
-      : { width: drawn.width, height: drawn.height };
+      : { width: drawn.width, height: drawn.height, turn: bitmapTurnRef.current };
     lastImageRef.current = { object: drawn, target, isMain: !isPreview, geometry };
     setDrawnObject(drawn);
   }, []);
@@ -347,7 +355,8 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
 
   // Automatically draw with AutoStretch (handled in worker for FITS)
   useCanvasDrawer(
-    canvasRef, workerRef, mainReady ? parsedData : null, mainReady ? bitmap : previewBitmap,
+    canvasRef, workerRef, mainReady ? parsedData : null,
+    bitmapTurn.ready || (mainReady && parsedData) ? (mainReady ? bitmap : previewBitmap) : null,
     handleSetDrawnSize, effectiveStretch, displayRange, stretchParameters, handleDrawn, turn
   );
 
@@ -380,13 +389,14 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   const overlayStars = React.useMemo(() => {
     if (!overlayStarsAsSent || turn === 0) return overlayStarsAsSent;
     return overlayStarsAsSent.map((star) => {
-      const width = star.referenceWidth ?? parsedData?.w ?? 1;
-      const height = star.referenceHeight ?? parsedData?.h ?? 1;
+      const ratio = window.devicePixelRatio || 1;
+      const width = star.referenceWidth ?? parsedData?.w ?? (bitmap ? Math.round(bitmap.width / ratio) : 1);
+      const height = star.referenceHeight ?? parsedData?.h ?? (bitmap ? Math.round(bitmap.height / ratio) : 1);
       const place = baseToTurned({ x: star.x, y: star.y }, width, height, turn);
       const shown = turnedSize(width, height, turn);
       return { ...star, x: place.x, y: place.y, referenceWidth: shown.w, referenceHeight: shown.h };
     });
-  }, [overlayStarsAsSent, turn, parsedData]);
+  }, [overlayStarsAsSent, turn, parsedData, bitmap]);
 
   const refWidth = overlayStars && overlayStars[0]?.referenceWidth ? overlayStars[0].referenceWidth : (drawnSize.w || 1);
   const refHeight = overlayStars && overlayStars[0]?.referenceHeight ? overlayStars[0].referenceHeight : (drawnSize.h || 1);

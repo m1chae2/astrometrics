@@ -433,12 +433,10 @@
   overflow-y: auto;
 }
 
-/* Star shapes block in Frame Analysis: it reuses the stack summary look; only the corners row and chart are its own. */
-.star-shapes-summary__corners {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
+/* Star stretch block in Frame Analysis: it reuses the stack summary look; only the chart and its count line are its own. */
+.star-shape-chart__count {
+  margin: 0 0 var(--space-1);
+  font-size: var(--compact-font-size);
 }
 
 .star-shape-chart {

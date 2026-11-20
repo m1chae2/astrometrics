@@ -1,15 +1,16 @@
 /**
  * @file test_starShapesSummary.test.tsx
- * @description Tests of the Star shapes block in Frame Analysis: the one-line verdict, the corner note
- * marked "not yet validated", the chart's points (flagged frames drawn as a different shape, a dashed
- * line at the session median, the picked frame ringed) and that clicking a point picks that frame.
+ * @description Tests of the frame status timeline in Frame Analysis: lanes only for statuses that are
+ * present, one mark per frame, the count line, night breaks, the status line when there are no frames,
+ * and that clicking a mark picks that frame.
  */
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { StarShapesSummary, describeCorners, describeStarShapeVerdict, NOT_MEASURED_NOTE } from '../components/StarShapesSummary';
-import { buildStarShapeChart } from '../components/StarShapeChart';
-import type { StarShapeReview } from '../../common/types/backendTypes';
+import { StarShapesSummary, NOT_MEASURED_NOTE } from '../components/StarShapesSummary';
+import { buildStarShapeChart, describeFrameCounts } from '../components/StarShapeChart';
+import type { FrameStatus, FrameStatusReport, StarShapeReview } from '../../common/types/backendTypes';
+import { describeFrameStatus } from '../utils/frameStatus';
 
 // Plotly cannot draw in the test environment, so the base plot is a stand-in that shows what it was given.
 const plotProps: { current: { data: any[]; layout: any; onClick?: (event: any) => void } | null } = { current: null };
@@ -20,67 +21,46 @@ vi.mock('../../common/components/plotting/BasePlot', () => ({
     },
 }));
 
-const review = (overrides: Partial<StarShapeReview> = {}): StarShapeReview => ({
+const DAY = 86400;
+
+const review = (): StarShapeReview => ({
     targetId: 'NGC 7331', scope: 'all', frameCount: 3,
-    roundness: { state: 'elongated', sentence: 'Stars are stretched more than usual for your equipment (stretch 1.30).' },
-    direction: { state: 'shared', sentence: 'The stars are stretched the same way (about 40 degrees).' },
-    standout: { state: 'found', sentence: '1 frame has stars stretched far more than the others.' },
-    corners: { state: 'not_validated', sentence: 'Corner stars are 1.08 times as wide as center stars. This is not yet validated.', numbers: { corner_over_center: 1.08 } },
+    roundness: { state: 'elongated', sentence: 's' }, direction: { state: 'shared', sentence: 's' },
+    standout: { state: 'found', sentence: 's' }, corners: { state: 'not_validated', sentence: 's' },
     series: [
         { path: '/lib/a.fits', timestamp: 1000, elongation: 1.1 },
         { path: '/lib/b.fits', timestamp: 2000, elongation: 1.2 },
         { path: '/lib/c.fits', timestamp: 3000, elongation: 1.9 },
-        { path: '/lib/d.fits', timestamp: null, elongation: 1.2 },
     ],
     standoutFrames: [{ path: '/lib/c.fits', elongation: 1.9, spreadsAboveTypical: 7 }],
-    ...overrides,
 });
 
-describe('verdict line', () => {
-    it('joins the roundness and direction sentences for stretched stars', () => {
-        expect(describeStarShapeVerdict(review())).toBe(
-            'Stars are stretched more than usual for your equipment (stretch 1.30). The stars are stretched the same way (about 40 degrees).',
-        );
-    });
-
-    it('leaves the direction out when the stars are round', () => {
-        const round = review({
-            roundness: { state: 'round', sentence: 'Stars are round enough (stretch 1.02), as usual for your equipment.' },
-            direction: { state: 'not_needed', sentence: 'The stars are round, so their direction does not matter.' },
-        });
-        expect(describeStarShapeVerdict(round)).toBe('Stars are round enough (stretch 1.02), as usual for your equipment.');
-    });
-
-    it('has no line when nothing is measured', () => {
-        expect(describeStarShapeVerdict(review({ roundness: { state: 'not_measured', sentence: 'none' } }))).toBeNull();
-        expect(describeStarShapeVerdict(null)).toBeNull();
-    });
+const frame = (name: string, state: string, kind: string | null, date: string): FrameStatus => ({
+    path: `/lib/${name}`, name, state, kind, date, reason: kind ? `${kind} reason` : '',
 });
-
-describe('corner note', () => {
-    it('writes the ratio from the numbers', () => {
-        expect(describeCorners(review().corners)).toBe('1.08 × center width');
-        expect(describeCorners({ state: 'not_measured', sentence: '' })).toBeNull();
-    });
+const report = (): FrameStatusReport => ({
+    stackedAt: 5000,
+    frames: [
+        frame('a.fits', 'stacked', null, ''), frame('b.fits', 'stacked', null, ''), frame('c.fits', 'stacked', null, ''),
+        frame('d.fits', 'set_aside', 'clouded', '1970-01-01T00:00:05Z'), frame('e.fits', 'set_aside', 'trailed', '1970-01-01T00:00:06Z'),
+    ],
 });
+const statusesOf = (frames: FrameStatus[]) => new Map(frames.map((item) => [
+    item.path, describeFrameStatus(item, item.path === '/lib/c.fits' ? 1.9 : null, 1.2, 5000),
+]));
 
 describe('StarShapesSummary', () => {
-    it('shows the verdict, the corner note with its not-validated chip, and the chart', () => {
-        render(<StarShapesSummary review={review()} selectedPath={null} onSelectFrame={() => {}} />);
-        expect(screen.getByTestId('star-shape-verdict').textContent).toMatch(/stretched more than usual/);
-        expect(screen.getByTestId('star-shape-corners').textContent).toMatch(/1\.08 × center width/);
-        expect(screen.getByText('Not yet validated')).toBeTruthy();
+    it('shows the count line and the chart', () => {
+        const frames = report().frames!;
+        render(<StarShapesSummary review={review()} frameReport={report()} frameStatuses={statusesOf(frames)} selectedPath={null} onSelectFrame={() => {}} />);
+        expect(screen.getByTestId('star-shape-count').textContent).toBe('5 frames: 2 included, 2 set aside (1 cloud, 1 trailed), 1 flagged');
         expect(screen.getByTestId('star-shape-chart')).toBeTruthy();
     });
 
-    it('says plainly when nothing is measured, and draws no chart', () => {
-        render(<StarShapesSummary
-            review={review({ roundness: { state: 'not_measured', sentence: 's' }, series: [], corners: { state: 'not_measured', sentence: '' } })}
-            selectedPath={null} onSelectFrame={() => {}}
-        />);
-        expect(screen.getByTestId('star-shape-verdict').textContent).toBe(NOT_MEASURED_NOTE);
+    it('says plainly when there are no frames, and draws no chart', () => {
+        render(<StarShapesSummary review={{ ...review(), series: [] }} selectedPath={null} onSelectFrame={() => {}} />);
+        expect(screen.getByTestId('star-shape-status').textContent).toBe(NOT_MEASURED_NOTE);
         expect(screen.queryByTestId('star-shape-chart')).toBeNull();
-        expect(screen.queryByTestId('star-shape-corners')).toBeNull();
     });
 
     it('shows nothing without a review', () => {
@@ -88,47 +68,62 @@ describe('StarShapesSummary', () => {
         expect(container.firstChild).toBeNull();
     });
 
-    it('picks the frame whose point is clicked', () => {
+    it('picks the frame whose mark is clicked, set-aside frames included', () => {
         const onSelectFrame = vi.fn();
-        render(<StarShapesSummary review={review()} selectedPath={null} onSelectFrame={onSelectFrame} />);
-        plotProps.current!.onClick!({ points: [{ customdata: '/lib/c.fits' }] });
-        expect(onSelectFrame).toHaveBeenCalledWith('/lib/c.fits');
-        fireEvent.click(screen.getByTestId('star-shape-chart'));
-        expect(onSelectFrame).toHaveBeenCalledTimes(1);
+        const frames = report().frames!;
+        render(<StarShapesSummary review={review()} frameReport={report()} frameStatuses={statusesOf(frames)} selectedPath={null} onSelectFrame={onSelectFrame} />);
+        plotProps.current!.onClick!({ points: [{ customdata: '/lib/d.fits' }] });
+        expect(onSelectFrame).toHaveBeenCalledWith('/lib/d.fits');
     });
 });
 
-/** Reads the paths each point of a trace carries. */
-const customOf = (trace: unknown): string[] => (trace as { customdata: string[] }).customdata;
-
 describe('buildStarShapeChart', () => {
-    const series = review().series!;
+    const frames = report().frames!;
+    const build = (selected: string | null = null) => buildStarShapeChart(review().series!, new Set(['/lib/c.fits']), selected, frames, statusesOf(frames));
+    type Points = { x: number[]; y: number[]; customdata: string[]; text: string[] };
 
-    it('draws only frames with a time and an elongation, flagged ones as diamonds', () => {
-        const chart = buildStarShapeChart(series, new Set(['/lib/c.fits']), null);
-        const [normal, flagged] = chart.traces;
-        expect(chart.drawnCount).toBe(3);
-        expect(customOf(normal)).toEqual(['/lib/a.fits', '/lib/b.fits']);
-        expect(normal.x).toEqual([1000000, 2000000]);
-        expect(customOf(flagged)).toEqual(['/lib/c.fits']);
-        expect(flagged.marker?.symbol).toBe('diamond');
-        expect(normal.marker?.symbol).toBe('circle');
-        expect(chart.traces).toHaveLength(2);
+    it('makes lanes only for the statuses present, in order', () => {
+        const chart = build();
+        expect(chart.lanes).toEqual(['Set aside: cloud', 'Set aside: trailed', 'Flagged', 'Included']);
+        expect(chart.traces.map((trace) => trace.name)).toEqual(chart.lanes);
     });
 
-    it('rings the picked frame and finds the session median', () => {
-        const chart = buildStarShapeChart(series, new Set(['/lib/c.fits']), '/lib/b.fits');
-        expect(chart.traces).toHaveLength(3);
-        expect(customOf(chart.traces[2])).toEqual(['/lib/b.fits']);
-        expect(chart.traces[2].marker?.symbol).toBe('circle-open');
-        expect(chart.typical).toBe(1.2);
+    it('draws one mark per frame in its lane at its time', () => {
+        const chart = build();
+        const flagged = chart.traces[2] as unknown as Points;
+        expect(flagged.customdata).toEqual(['/lib/c.fits']);
+        expect(flagged.x).toEqual([3000000]);
+        expect(flagged.y).toEqual([1]);
+        expect((chart.traces[3] as unknown as Points).customdata).toEqual(['/lib/a.fits', '/lib/b.fits']);
+        expect(chart.drawnCount).toBe(5);
     });
 
-    it('draws the dashed median line and its label on the plot', () => {
-        render(<StarShapesSummary review={review()} selectedPath={null} onSelectFrame={() => {}} />);
-        const { layout } = plotProps.current!;
-        expect(layout.shapes[0].line.dash).toBe('dash');
-        expect(layout.shapes[0].y0).toBe(1.2);
-        expect(layout.annotations[0].text).toBe('session median 1.20');
+    it('puts the file name, status and reason in the hover text', () => {
+        const cloud = build().traces[0] as unknown as Points;
+        expect(cloud.text[0]).toMatch(/d\.fits/);
+        expect(cloud.text[0]).toMatch(/Set aside: cloud/);
+        expect(cloud.text[0]).toMatch(/clouded reason/);
+    });
+
+    it('rings the picked frame', () => {
+        const chart = build('/lib/d.fits');
+        const ring = chart.traces[chart.traces.length - 1];
+        expect(ring.name).toBe('Selected');
+        expect((ring as unknown as Points).customdata).toEqual(['/lib/d.fits']);
+    });
+
+    it('separates nights with a break halfway across a long gap', () => {
+        const nights = [
+            { path: '/lib/a.fits', timestamp: 1000, elongation: 1 },
+            { path: '/lib/b.fits', timestamp: 1000 + DAY, elongation: 1 },
+        ];
+        expect(buildStarShapeChart(nights, new Set(), null).nightBreaks).toEqual([((1000 + 1000 + DAY) / 2) * 1000]);
+    });
+});
+
+describe('describeFrameCounts', () => {
+    it('writes the count line', () => {
+        expect(describeFrameCounts({ Included: 117, 'Set aside: trailed': 5, Flagged: 10 }))
+            .toBe('132 frames: 117 included, 5 set aside (5 trailed), 10 flagged');
     });
 });

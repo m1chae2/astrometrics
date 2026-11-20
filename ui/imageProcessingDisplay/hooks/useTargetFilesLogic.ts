@@ -250,6 +250,7 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
         totalExposure,
         starShapeReview,
         frameStatuses: frameReview.statuses,
+        frameReport: frameReview.report,
         setAsideFiles,
         putBackFrame,
     };

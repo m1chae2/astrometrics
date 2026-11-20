@@ -1,72 +1,148 @@
 /**
  * @file StarShapeChart.tsx
- * @description The chart of how stretched the stars are in each frame, in the order the frames were
- * taken. Each dot is one frame (x = time taken, y = elongation, where 1 is round). A frame the star-shape
- * review flags is drawn as a diamond in a second color, so it does not depend on color alone. A dashed
- * line marks the session's typical (median) elongation. The frame picked in the File Browser has a ring
- * around it. Clicking a dot picks that frame, the same as clicking its row in the File Browser.
+ * @description The frame status timeline of a target: when each frame was taken (x) and what happened to
+ * it (y). Each status that has frames is a lane, listed top to bottom as set aside (cloud, trailed, off
+ * field, other), flagged, then included. Each frame is one small square in its lane at its time, so a
+ * cloud passage shows as a run of marks in the cloud lane. Hovering a mark gives the file name, time,
+ * status and the reason. The frame picked in the File Browser has a ring around it, and clicking a mark
+ * picks that frame. A dotted line separates nights. A one-line count of the frames sits above the chart.
  */
 import React, { useMemo } from 'react';
 import { BasePlot } from '../../common/components/plotting/BasePlot';
 import { buildLayout, getVar, getVarAsNum } from '../../common/utils/plotTools';
 import type { PlotlyTrace } from '../../common/utils/plotTools';
-import type { FrameStarShape } from '../../common/types/backendTypes';
-import { sessionTypicalElongation } from '../utils/starShapeStats';
+import type { FrameStarShape, FrameStatus } from '../../common/types/backendTypes';
+import { setAsideCategory, type FrameStatusInfo } from '../utils/frameStatus';
+
+/** The lanes, top to bottom. */
+export const LANES = [
+    'Set aside: cloud', 'Set aside: trailed', 'Set aside: off field', 'Set aside: other', 'Flagged', 'Included',
+] as const;
+
+/** One lane name. */
+export type Lane = typeof LANES[number];
+
+/** A gap between two frames longer than this starts a new night (milliseconds). */
+const NIGHT_GAP_MS = 6 * 3600 * 1000;
 
 /** What {@link buildStarShapeChart} gives back. */
 export interface StarShapeChartData {
-    /** The Plotly traces: normal frames, flagged frames, then the picked frame. */
+    /** The Plotly traces: one per lane that has frames, then the picked frame. */
     traces: PlotlyTrace[];
-    /** The session's typical elongation (the dashed line), or `null` when no frame is measured. */
-    typical: number | null;
-    /** How many frames have a time and an elongation, and so are drawn. */
+    /** The lanes that have frames, top to bottom. */
+    lanes: Lane[];
+    /** The number of frames in each lane that has frames. */
+    counts: Partial<Record<Lane, number>>;
+    /** How many frames are drawn (they have a time). */
     drawnCount: number;
+    /** Times (milliseconds since 1970) halfway across each gap between nights. */
+    nightBreaks: number[];
 }
 
-/** Writes a time the way Plotly reads it on a date axis: milliseconds since 1970. */
-const toPlotTime = (seconds: number): number => seconds * 1000;
+/** One frame of the chart before it is sorted into a lane. */
+interface ChartFrame {
+    path: string;
+    /** Milliseconds since 1970. */
+    time: number;
+    lane: Lane;
+    statusLabel: string;
+    reason: string;
+}
 
 /**
- * Builds the chart's traces from the review's per-frame numbers.
- * @param series The review's per-frame numbers.
+ * Reads a status date such as "2026-10-03 08:15:30" as a time.
+ * @param date The date text, or nothing.
+ * @return Milliseconds since 1970, or `null` when it cannot be read.
+ */
+function parseStatusDate(date: string | undefined): number | null {
+    if (!date) return null;
+    const parsed = Date.parse(date.replace(' ', 'T'));
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Writes the one-line count above the chart.
+ * @param counts The number of frames in each lane.
+ * @return For example "123 frames: 117 included, 5 set aside (5 trailed), 10 flagged".
+ */
+export function describeFrameCounts(counts: Partial<Record<Lane, number>>): string {
+    const total = Object.values(counts).reduce((sum, count) => sum + (count ?? 0), 0);
+    const parts: string[] = [];
+    if (counts.Included) parts.push(`${counts.Included} included`);
+    const kinds = LANES.filter((lane) => lane.startsWith('Set aside') && counts[lane]);
+    if (kinds.length > 0) {
+        const setAside = kinds.reduce((sum, lane) => sum + (counts[lane] ?? 0), 0);
+        parts.push(`${setAside} set aside (${kinds.map((lane) => `${counts[lane]} ${lane.slice('Set aside: '.length)}`).join(', ')})`);
+    }
+    if (counts.Flagged) parts.push(`${counts.Flagged} flagged`);
+    return `${total} ${total === 1 ? 'frame' : 'frames'}: ${parts.join(', ')}`;
+}
+
+/**
+ * Builds the timeline's traces from the frames' statuses and times.
+ * @param series The review's per-frame numbers, whose times are used first.
  * @param flaggedPaths The paths of the frames the review flags.
  * @param selectedPath The frame picked in the File Browser, or `null`.
- * @return The traces, the typical elongation and the number of frames drawn.
+ * @param frames The backend's per-frame statuses (including set-aside frames), or `null`.
+ * @param statuses The File Browser's status of each frame by path.
+ * @return The traces, the lanes, the counts and the night breaks.
  */
 export function buildStarShapeChart(
     series: FrameStarShape[],
     flaggedPaths: ReadonlySet<string>,
     selectedPath: string | null,
+    frames: readonly FrameStatus[] | null = null,
+    statuses: ReadonlyMap<string, FrameStatusInfo> = new Map(),
 ): StarShapeChartData {
-    const drawn = series.filter(
-        (frame) => typeof frame.timestamp === 'number' && typeof frame.elongation === 'number' && Number.isFinite(frame.elongation),
-    );
-    const pointsOf = (frames: FrameStarShape[]) => ({
-        x: frames.map((frame) => toPlotTime(frame.timestamp as number)),
-        y: frames.map((frame) => frame.elongation as number),
-        customdata: frames.map((frame) => frame.path),
-        text: frames.map((frame) => `${frame.path.split('/').pop()}: elongation ${(frame.elongation as number).toFixed(2)}`),
+    const byPath = new Map<string, FrameStatus>((frames ?? []).map((frame) => [frame.path, frame]));
+    const seriesByPath = new Map(series.map((frame) => [frame.path, frame]));
+    const all: ChartFrame[] = [];
+    for (const path of new Set<string>([...seriesByPath.keys(), ...byPath.keys()])) {
+        const measured = seriesByPath.get(path);
+        const status = byPath.get(path);
+        const info = statuses.get(path);
+        const time = typeof measured?.timestamp === 'number' ? measured.timestamp * 1000 : parseStatusDate(status?.date);
+        if (time === null) continue;
+        const kind = info?.kind ?? (flaggedPaths.has(path) ? 'flagged' : 'included');
+        let lane: Lane = kind === 'flagged' ? 'Flagged' : 'Included';
+        if (kind === 'set-aside') lane = `Set aside: ${setAsideCategory(status?.kind)}` as Lane;
+        all.push({ path, time, lane, statusLabel: info?.label ?? lane, reason: info?.tooltip ?? status?.reason ?? '' });
+    }
+    all.sort((first, second) => first.time - second.time);
+    const lanes = LANES.filter((lane) => all.some((frame) => frame.lane === lane));
+    const counts: Partial<Record<Lane, number>> = {};
+    for (const lane of lanes) counts[lane] = all.filter((frame) => frame.lane === lane).length;
+    const yOf = (frame: ChartFrame): number => lanes.length - 1 - lanes.indexOf(frame.lane);
+    const pointsOf = (group: ChartFrame[]) => ({
+        x: group.map((frame) => frame.time),
+        y: group.map(yOf),
+        customdata: group.map((frame) => frame.path),
+        text: group.map((frame) => {
+            const reason = frame.reason ? `<br>${frame.reason}` : '';
+            return `${frame.path.split('/').pop()}<br>${new Date(frame.time).toLocaleString()}<br>${frame.statusLabel}${reason}`;
+        }),
     });
-    const normal = drawn.filter((frame) => !flaggedPaths.has(frame.path));
-    const flagged = drawn.filter((frame) => flaggedPaths.has(frame.path));
-    const traces: PlotlyTrace[] = [
-        {
-            ...pointsOf(normal), type: 'scatter', mode: 'markers', name: 'Frames', hoverinfo: 'text',
-            marker: { symbol: 'circle', size: 6, color: getVar('--plot-blue', '#3584e4') },
-        },
-        {
-            ...pointsOf(flagged), type: 'scatter', mode: 'markers', name: 'Flagged', hoverinfo: 'text',
-            marker: { symbol: 'diamond', size: 9, color: getVar('--plot-orange', '#e95420') },
-        },
-    ];
-    const picked = drawn.filter((frame) => frame.path === selectedPath);
+    const colorOf = (lane: Lane): string => {
+        if (lane === 'Flagged') return getVar('--plot-orange', '#e95420');
+        if (lane === 'Included') return getVar('--plot-green', '#26a269');
+        return getVar('--plot-red', '#e01b24');
+    };
+    const traces: PlotlyTrace[] = lanes.map((lane) => ({
+        ...pointsOf(all.filter((frame) => frame.lane === lane)), type: 'scatter', mode: 'markers', name: lane,
+        hoverinfo: 'text', showlegend: false, marker: { symbol: 'square', size: 7, color: colorOf(lane) },
+    }));
+    const picked = all.filter((frame) => frame.path === selectedPath);
     if (picked.length > 0) {
         traces.push({
-            ...pointsOf(picked), type: 'scatter', mode: 'markers', name: 'Selected', hoverinfo: 'text',
-            marker: { symbol: 'circle-open', size: 15, color: getVar('--plot-selection', '#e01b24') },
+            ...pointsOf(picked), type: 'scatter', mode: 'markers', name: 'Selected', hoverinfo: 'text', showlegend: false,
+            marker: { symbol: 'square-open', size: 14, color: getVar('--plot-selection', '#e01b24') },
         });
     }
-    return { traces, typical: sessionTypicalElongation(drawn), drawnCount: drawn.length };
+    const nightBreaks: number[] = [];
+    for (let index = 1; index < all.length; index += 1) {
+        if (all[index].time - all[index - 1].time > NIGHT_GAP_MS) nightBreaks.push((all[index].time + all[index - 1].time) / 2);
+    }
+    return { traces, lanes, counts, drawnCount: all.length, nightBreaks };
 }
 
 interface StarShapeChartProps {
@@ -76,42 +152,49 @@ interface StarShapeChartProps {
     flaggedPaths: ReadonlySet<string>;
     /** The frame picked in the File Browser, or `null`. */
     selectedPath: string | null;
-    /** Called with a frame's path when its dot is clicked. */
+    /** The backend's per-frame statuses (including set-aside frames), or `null` until read. */
+    frames?: readonly FrameStatus[] | null;
+    /** The File Browser's status of each frame by path. */
+    statuses?: ReadonlyMap<string, FrameStatusInfo>;
+    /** Called with a frame's path when its mark is clicked. */
     onSelectFrame: (path: string) => void;
 }
 
 /**
- * Draws the elongation-by-frame chart.
+ * Draws the frame status timeline.
  * @param props See {@link StarShapeChartProps}.
- * @return The chart, or `null` when no frame has both a time and an elongation.
+ * @return The chart, or `null` when no frame has a time.
  */
-export const StarShapeChart: React.FC<StarShapeChartProps> = ({ series, flaggedPaths, selectedPath, onSelectFrame }) => {
-    const chart = useMemo(() => buildStarShapeChart(series, flaggedPaths, selectedPath), [series, flaggedPaths, selectedPath]);
+export const StarShapeChart: React.FC<StarShapeChartProps> = ({ series, flaggedPaths, selectedPath, frames = null, statuses, onSelectFrame }) => {
+    const chart = useMemo(() => buildStarShapeChart(series, flaggedPaths, selectedPath, frames, statuses), [series, flaggedPaths, selectedPath, frames, statuses]);
     const layout = useMemo(() => {
         const fontSize = getVarAsNum('--compact-font-size', 13) - 1;
         const base = buildLayout({
-            xTitle: 'time taken', yTitle: 'stretch', xTitleFont: { size: fontSize }, yTitleFont: { size: fontSize },
-            margin: { l: 52, r: 10, t: 8, b: 40 },
+            xTitle: 'time taken', yTitle: '', xTitleFont: { size: fontSize },
+            margin: { l: 8, r: 8, t: 8, b: 40 },
         });
-        const typical = chart.typical;
+        const top = chart.lanes.length - 1;
         return {
             ...base,
             font: { ...base.font, size: fontSize },
             xaxis: { ...base.xaxis, type: 'date', tickfont: { size: fontSize } },
-            yaxis: { ...base.yaxis, tickfont: { size: fontSize } },
-            shapes: typical === null ? [] : [{
-                type: 'line', xref: 'paper', yref: 'y', x0: 0, x1: 1, y0: typical, y1: typical,
-                line: { color: getVar('--plot-reference-line', '#aaaaaa'), width: 1, dash: 'dash' },
-            }],
-            annotations: typical === null ? [] : [{
-                x: 1, xref: 'paper', xanchor: 'right', y: typical, yref: 'y', yanchor: 'bottom',
-                text: `session median ${typical.toFixed(2)}`, showarrow: false, font: { size: fontSize },
-            }],
+            yaxis: {
+                ...base.yaxis, tickfont: { size: fontSize }, range: [-0.6, top + 0.6], fixedrange: true, zeroline: false,
+                tickmode: 'array', tickvals: chart.lanes.map((_, index) => top - index), ticktext: [...chart.lanes], automargin: true, ticklabelposition: 'outside',
+            },
+            autosize: true,
+            showlegend: false,
+            shapes: chart.nightBreaks.map((time) => ({
+                type: 'line', xref: 'x', yref: 'paper', x0: time, x1: time, y0: 0, y1: 1,
+                line: { color: getVar('--plot-reference-line', '#aaaaaa'), width: 1, dash: 'dot' },
+            })),
         };
-    }, [chart.typical]);
+    }, [chart.lanes, chart.nightBreaks]);
 
     if (chart.drawnCount === 0) return null;
     return (
+        <>
+        <p className="star-shape-chart__count" data-testid="star-shape-count">{describeFrameCounts(chart.counts)}</p>
         <div className="star-shape-chart" data-testid="star-shape-chart">
             <BasePlot
                 data={chart.traces}
@@ -124,5 +207,6 @@ export const StarShapeChart: React.FC<StarShapeChartProps> = ({ series, flaggedP
                 style={{ width: '100%', height: '100%' }}
             />
         </div>
+        </>
     );
 };

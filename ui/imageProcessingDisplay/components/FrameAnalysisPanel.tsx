@@ -16,7 +16,8 @@ import { StarShapesSummary } from './StarShapesSummary';
 
 import { useImageProcessingContext } from '../context/ImageProcessingContext';
 import { fetchFrameStatsGrouped, refreshTarget, updateTargetById } from '../../common/services/targetService';
-import { GroupedFrameStat, StarShapeReview } from '../../common/types/backendTypes';
+import { FrameStatusReport, GroupedFrameStat, StarShapeReview } from '../../common/types/backendTypes';
+import type { FrameStatusInfo } from '../utils/frameStatus';
 import { getMultiOpticStatus } from '../utils/opticSelection';
 import { chooseAnalysisSelection, chooseTemporalVariationSelection } from '../utils/analysisSelection';
 
@@ -37,6 +38,10 @@ interface FrameAnalysisPanelProps {
   onShowHeader?: (path: string) => void;
   /** The stored star-shape verdicts of the target, or `null` when not available. */
   starShapeReview?: StarShapeReview | null;
+  /** The backend's per-frame statuses, including set-aside frames, or `null` until read. */
+  frameReport?: FrameStatusReport | null;
+  /** The File Browser's status of each frame by path. */
+  frameStatuses?: ReadonlyMap<string, FrameStatusInfo>;
 
   // Fold state, held by the screen because the Image Controls tab can sit in the viewer's bottom bar.
   analysisCollapsed: boolean;
@@ -53,7 +58,7 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
   allFiles, filteredFiles, checkedFiles, stackedImage, stackedSpectralTarget, totalExposure,
   handleSelectFile,
   handleAddImages, setIsAddModalOpen,
-  selectedFile, onShowHeader, starShapeReview = null,
+  selectedFile, onShowHeader, starShapeReview = null, frameReport = null, frameStatuses,
   analysisCollapsed, setAnalysisCollapsed, controlsCollapsed, setControlsCollapsed
 }) => {
   const {
@@ -248,6 +253,8 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
                   <AnalysisResults results={analysisResults} />
                   <StarShapesSummary
                     review={starShapeReview}
+                    frameReport={frameReport}
+                    frameStatuses={frameStatuses}
                     selectedPath={selectedFile}
                     onSelectFrame={handleSelectFile}
                   />

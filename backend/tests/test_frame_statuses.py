@@ -36,6 +36,9 @@ def _set_aside(file_name: str, kind: str | None = "clouded") -> SimpleNamespace:
         exposure_seconds=120.0,
         original_path=f"/frames/lights/M 1/{file_name}",
         restorable=True,
+        camera="ASI533MM",
+        filter="Luminance",
+        date="",
         restore_note="",
     )
 
@@ -78,6 +81,7 @@ def test_set_aside_frames_are_listed_with_their_reason_kind_and_date() -> None:
     assert status.kind == "clouded"
     assert status.reason == "203 stars against a typical 3348"
     assert status.date == "2026-10-03 08:15:30"
+    assert (status.camera, status.filter) == ("ASI533MM", "Luminance")
     assert status.exposure == "120"
     assert status.restorable is True
 

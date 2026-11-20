@@ -143,10 +143,10 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
             .map(frame => ({
                 path: frame.path,
                 name: frame.name,
-                camera: '',
+                camera: frame.camera ?? '',
                 iso: '',
                 exposure: frame.exposure ?? '',
-                filter: '',
+                filter: frame.filter ?? '',
                 date: frame.date ?? '',
             })),
         [frameReview.report],

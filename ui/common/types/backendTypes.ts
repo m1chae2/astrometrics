@@ -1006,6 +1006,10 @@ export interface FrameCopyPulse {
  * date : `str`
  * When the frame was taken, as ``YYYY-MM-DD HH:MM:SS``. Empty when the
  * file name has no date (set-aside frames only).
+ * camera : `str`
+ * The camera name from the frame's header (set-aside frames only).
+ * filter : `str`
+ * The filter name from the frame's header (set-aside frames only).
  * exposure : `str`
  * The exposure in seconds, for a set-aside frame; empty otherwise.
  * original_path : `str` or `None`
@@ -1022,6 +1026,8 @@ export interface FrameStatus {
   kind?: string | null;
   reason?: string;
   date?: string;
+  camera?: string;
+  filter?: string;
   exposure?: string;
   originalPath?: string | null;
   restorable?: boolean;
@@ -4400,6 +4406,9 @@ export interface SetAsideFrameRecord {
   exposureSeconds?: number | null;
   captureSettingId?: number | null;
   movedAt?: string | null;
+  camera?: string;
+  filter?: string;
+  date?: string;
   restorable?: boolean;
   restoreNote?: string;
 }

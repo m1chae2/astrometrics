@@ -130,6 +130,12 @@ class SetAsideFrameRecord(BaseModel):
     # When the frame was moved (UTC, ISO 8601), from the manifest; else the
     # time of the stored row.
     moved_at: str | None = Field(default=None, alias="movedAt")
+    # The camera, filter name and capture time ("YYYY-MM-DD HH:MM:SS") read
+    # from the frame's file header, the way the target's own frames get them.
+    # Empty when the header cannot be read.
+    camera: str = ""
+    filter: str = ""
+    date: str = ""
     # Whether the internal `restore_excluded_frames` function can move the
     # frame back. Only a frame with an `excluded_frames.json` entry can:
     # that entry holds where it came from, and restore never guesses a

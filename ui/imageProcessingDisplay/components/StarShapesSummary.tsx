@@ -35,12 +35,12 @@ export function describeStarShapeVerdict(review: StarShapeReview | null): string
 /**
  * Writes the corner note from the corner verdict's numbers.
  * @param corners The review's corner verdict.
- * @return A sentence such as "Corner stars are 1.08 times as wide as center stars.", or `null`.
+ * @return A short value such as "1.08 × center width", or `null`.
  */
 export function describeCorners(corners: ShapeVerdict): string | null {
     const ratio = corners.numbers?.corner_over_center;
     if (corners.state === 'not_measured' || typeof ratio !== 'number') return null;
-    return `Corner stars are ${ratio.toFixed(2)} times as wide as center stars.`;
+    return `${ratio.toFixed(2)} × center width`;
 }
 
 interface StarShapesSummaryProps {
@@ -63,21 +63,29 @@ export const StarShapesSummary: React.FC<StarShapesSummaryProps> = ({ review, se
     const verdict = describeStarShapeVerdict(review);
     const corners = describeCorners(review.corners);
     return (
-        <div className="star-shapes-summary" data-testid="star-shapes-summary">
-            <h4 className="star-shapes-summary__title">Star shapes</h4>
-            <div data-testid="star-shape-verdict">{verdict ?? NOT_MEASURED_NOTE}</div>
-            {corners && (
-                <div className="star-shapes-summary__corners" data-testid="star-shape-corners">
-                    <span>{corners}</span>
-                    <StatusChip status="neutral" label={CORNERS_NOT_VALIDATED_LABEL} title={review.corners.sentence} />
-                </div>
-            )}
-            <StarShapeChart
-                series={review.series ?? []}
-                flaggedPaths={flaggedPaths}
-                selectedPath={selectedPath}
-                onSelectFrame={onSelectFrame}
-            />
+        <div className="stacked-image-panel-container" data-testid="star-shapes-summary">
+            <div className="stack-summary">
+                <span className="stacked-image-panel__label">Star shapes</span>
+                <dl className="stack-summary__list">
+                    <dt>Stars</dt>
+                    <dd data-testid="star-shape-verdict">{verdict ?? NOT_MEASURED_NOTE}</dd>
+                    {corners && (
+                        <>
+                            <dt>Corners</dt>
+                            <dd className="star-shapes-summary__corners" data-testid="star-shape-corners">
+                                <span>{corners}</span>
+                                <StatusChip status="neutral" label={CORNERS_NOT_VALIDATED_LABEL} title={review.corners.sentence} />
+                            </dd>
+                        </>
+                    )}
+                </dl>
+                <StarShapeChart
+                    series={review.series ?? []}
+                    flaggedPaths={flaggedPaths}
+                    selectedPath={selectedPath}
+                    onSelectFrame={onSelectFrame}
+                />
+            </div>
         </div>
     );
 };

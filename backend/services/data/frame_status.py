@@ -52,6 +52,10 @@ class FrameStatus(BaseModel):
     date : `str`
         When the frame was taken, as ``YYYY-MM-DD HH:MM:SS``. Empty when the
         file name has no date (set-aside frames only).
+    camera : `str`
+        The camera name from the frame's header (set-aside frames only).
+    filter : `str`
+        The filter name from the frame's header (set-aside frames only).
     exposure : `str`
         The exposure in seconds, for a set-aside frame; empty otherwise.
     original_path : `str` or `None`
@@ -70,6 +74,8 @@ class FrameStatus(BaseModel):
     kind: str | None = None
     reason: str = ""
     date: str = ""
+    camera: str = ""
+    filter: str = ""
     exposure: str = ""
     original_path: str | None = Field(default=None, alias="originalPath")
     restorable: bool = False
@@ -156,7 +162,9 @@ def build_frame_statuses(
                 state="set_aside",
                 kind=record.kind,
                 reason=record.reason or "",
-                date=_date_from_file_name(record.file),
+                camera=record.camera,
+                filter=record.filter,
+                date=record.date or _date_from_file_name(record.file),
                 exposure="" if exposure is None else f"{float(exposure):g}",
                 original_path=record.original_path,
                 restorable=bool(record.restorable),

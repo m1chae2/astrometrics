@@ -59,7 +59,7 @@ describe('verdict line', () => {
 
 describe('corner note', () => {
     it('writes the ratio from the numbers', () => {
-        expect(describeCorners(review().corners)).toBe('Corner stars are 1.08 times as wide as center stars.');
+        expect(describeCorners(review().corners)).toBe('1.08 × center width');
         expect(describeCorners({ state: 'not_measured', sentence: '' })).toBeNull();
     });
 });
@@ -68,7 +68,7 @@ describe('StarShapesSummary', () => {
     it('shows the verdict, the corner note with its not-validated chip, and the chart', () => {
         render(<StarShapesSummary review={review()} selectedPath={null} onSelectFrame={() => {}} />);
         expect(screen.getByTestId('star-shape-verdict').textContent).toMatch(/stretched more than usual/);
-        expect(screen.getByTestId('star-shape-corners').textContent).toMatch(/1\.08 times as wide/);
+        expect(screen.getByTestId('star-shape-corners').textContent).toMatch(/1\.08 × center width/);
         expect(screen.getByText('Not yet validated')).toBeTruthy();
         expect(screen.getByTestId('star-shape-chart')).toBeTruthy();
     });

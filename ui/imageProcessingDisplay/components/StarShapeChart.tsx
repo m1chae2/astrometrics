@@ -8,7 +8,7 @@
  */
 import React, { useMemo } from 'react';
 import { BasePlot } from '../../common/components/plotting/BasePlot';
-import { buildLayout, getVar } from '../../common/utils/plotTools';
+import { buildLayout, getVar, getVarAsNum } from '../../common/utils/plotTools';
 import type { PlotlyTrace } from '../../common/utils/plotTools';
 import type { FrameStarShape } from '../../common/types/backendTypes';
 import { sessionTypicalElongation } from '../utils/starShapeStats';
@@ -88,18 +88,24 @@ interface StarShapeChartProps {
 export const StarShapeChart: React.FC<StarShapeChartProps> = ({ series, flaggedPaths, selectedPath, onSelectFrame }) => {
     const chart = useMemo(() => buildStarShapeChart(series, flaggedPaths, selectedPath), [series, flaggedPaths, selectedPath]);
     const layout = useMemo(() => {
-        const base = buildLayout({ xTitle: 'time taken', yTitle: 'star stretch (1 = round)', margin: { l: 52, r: 10, t: 8, b: 40 } });
+        const fontSize = getVarAsNum('--compact-font-size', 13) - 1;
+        const base = buildLayout({
+            xTitle: 'time taken', yTitle: 'stretch', xTitleFont: { size: fontSize }, yTitleFont: { size: fontSize },
+            margin: { l: 52, r: 10, t: 8, b: 40 },
+        });
         const typical = chart.typical;
         return {
             ...base,
-            xaxis: { ...base.xaxis, type: 'date' },
+            font: { ...base.font, size: fontSize },
+            xaxis: { ...base.xaxis, type: 'date', tickfont: { size: fontSize } },
+            yaxis: { ...base.yaxis, tickfont: { size: fontSize } },
             shapes: typical === null ? [] : [{
                 type: 'line', xref: 'paper', yref: 'y', x0: 0, x1: 1, y0: typical, y1: typical,
                 line: { color: getVar('--plot-reference-line', '#aaaaaa'), width: 1, dash: 'dash' },
             }],
             annotations: typical === null ? [] : [{
                 x: 1, xref: 'paper', xanchor: 'right', y: typical, yref: 'y', yanchor: 'bottom',
-                text: `session median ${typical.toFixed(2)}`, showarrow: false, font: { size: 9 },
+                text: `session median ${typical.toFixed(2)}`, showarrow: false, font: { size: fontSize },
             }],
         };
     }, [chart.typical]);

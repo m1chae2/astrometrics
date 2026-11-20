@@ -157,6 +157,7 @@
   --accent-sky: #4fc1ff;          /* light blue for sky-map overlays, links and selections */
   --detection-marker-color: #ffd54a;         /* circle on a star the star finder detected */
   --detection-merged-color: #ff6ec7;         /* diamond on a star reported twice and merged */
+  --star-shape-line-color: #5ee6c8;          /* line along the long axis of a stretched star (Shapes overlay) */
   --danger-red: #e01b24;
 
   /* ------------------------------------------------------------------

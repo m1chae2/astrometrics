@@ -422,11 +422,21 @@ class StarWidthSample:
     width_px : `float`
         The star's Moffat FWHM (the geometric mean of the two axes) in original
         pixels, as it enters the frame's median.
+    elongation_ratio : `float`
+        The star's long axis divided by its short axis, from second moments
+        (at least 1). 1 when not recorded.
+    ellipticity_first, ellipticity_second : `float`
+        The star's ellipticity components ``(Ixx - Iyy) / (Ixx + Iyy)`` and
+        ``2 Ixy / (Ixx + Iyy)`` (see `_measure_second_moments`). Half the angle
+        of this vector is the long axis direction. Both 0 when not recorded.
     """
 
     x_px: float
     y_px: float
     width_px: float
+    elongation_ratio: float = 1.0
+    ellipticity_first: float = 0.0
+    ellipticity_second: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -1231,7 +1241,16 @@ def measure_star_profiles(
         # A super-pixel's center is at its first pixel plus (factor - 1) / 2
         # original pixels, so (x + 0.5) * factor - 0.5 puts the star back on
         # the original pixel grid (it is x itself when the factor is 1).
-        samples.append(StarWidthSample((x + 0.5) * factor - 0.5, (y + 0.5) * factor - 0.5, widths[-1]))
+        samples.append(
+            StarWidthSample(
+                (x + 0.5) * factor - 0.5,
+                (y + 0.5) * factor - 0.5,
+                widths[-1],
+                shape[0],
+                shape[1],
+                shape[2],
+            )
+        )
         elongations.append(shape[0])
         first_components.append(shape[1])
         second_components.append(shape[2])
@@ -1339,6 +1358,31 @@ def _field_region_of(column_cell: int, row_cell: int) -> str | None:
     return corner_by_bands.get((column_band, row_band))
 
 
+def field_region_of_sample(result: StarProfileResult, sample: StarWidthSample) -> str | None:
+    """Name the field region a fitted star lies in.
+
+    Parameters
+    ----------
+    result : `StarProfileResult`
+        The frame's star profile result (its field shape sets the grid).
+    sample : `StarWidthSample`
+        One of the result's stars.
+
+    Returns
+    -------
+    region : `str` or `None`
+        One of `FIELD_REGION_NAMES`, or `None` when the star lies between the
+        regions or the result has no field shape.
+    """
+    if result.field_shape_px is None:
+        return None
+    rows, columns = result.field_shape_px
+    side = resolve(FIELD_GRID_CELLS_PER_SIDE).value
+    column_cell = min(side - 1, max(0, int(sample.x_px / columns * side)))
+    row_cell = min(side - 1, max(0, int(sample.y_px / rows * side)))
+    return _field_region_of(column_cell, row_cell)
+
+
 def measure_field_region_widths(result: StarProfileResult) -> list[RegionWidth]:
     """Give the median star width of the center and of each corner.
 
@@ -1359,15 +1403,10 @@ def measure_field_region_widths(result: StarProfileResult) -> list[RegionWidth]:
         `MOFFAT_MINIMUM_STAR_COUNT` stars; the count is always given.
     """
     members: dict[str, list[float]] = {name: [] for name in FIELD_REGION_NAMES}
-    if result.field_shape_px is not None:
-        rows, columns = result.field_shape_px
-        side = resolve(FIELD_GRID_CELLS_PER_SIDE).value
-        for sample in result.samples:
-            column_cell = min(side - 1, max(0, int(sample.x_px / columns * side)))
-            row_cell = min(side - 1, max(0, int(sample.y_px / rows * side)))
-            region = _field_region_of(column_cell, row_cell)
-            if region is not None:
-                members[region].append(sample.width_px)
+    for sample in result.samples:
+        region = field_region_of_sample(result, sample)
+        if region is not None:
+            members[region].append(sample.width_px)
     regions = []
     minimum_star_count = resolve(MOFFAT_MINIMUM_STAR_COUNT).value
     for name in FIELD_REGION_NAMES:

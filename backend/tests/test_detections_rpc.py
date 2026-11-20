@@ -108,3 +108,20 @@ def test_processed_picture_of_another_size_is_searched_itself(tmp_path: Path) ->
     _write_stars(picture)
     result = _service(library, Astrometrics()).measure_detections(str(picture))
     assert os.path.realpath(result["path"]) == os.path.realpath(picture)
+
+
+def test_star_shapes_call_is_declared_wired_and_cached(tmp_path: Path) -> None:
+    """The shapes call is declared, wired, guarded and cached."""
+    assert "images:measure_star_shapes" in RPC_METHODS
+    assert rpc_registry._handlers["images:measure_star_shapes"] == ("image_service", "measure_star_shapes")
+    library = tmp_path / "library"
+    library.mkdir()
+    with pytest.raises(InvalidArgumentError):
+        _service(library, MagicMock()).measure_star_shapes("/etc/hostname")
+    path = library / "stars.fits"
+    _write_stars(path)
+    service = _service(library, Astrometrics())
+    first = service.measure_star_shapes(str(path))
+    assert isinstance(first["shapes"], list)
+    assert first["star_count"] == len(first["shapes"])
+    assert service.measure_star_shapes(str(path)) is first

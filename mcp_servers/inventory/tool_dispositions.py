@@ -336,6 +336,11 @@ DECISIONS = {
         "Built 2026-11-16. Lists the star finder's detections in a FITS file. Reads the file only; "
         "nothing is stored.",
     ),
+    "quality_measure_star_shapes": ToolDecision(
+        "keep",
+        "Built 2026-11-20 (#199). Gives each fitted star's width, stretch and stretch direction in a FITS "
+        "file, with a frame summary. Reads the file only; nothing is stored.",
+    ),
     "quality_measure_tuned_parameters": ToolDecision(
         "withhold",
         "Built 2026-11-16 (#175). Works out the image-processing tuned values; with save=True it backs "

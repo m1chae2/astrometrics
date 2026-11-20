@@ -6,6 +6,7 @@ import { SwitchDisplayButton } from '../../common/components/SwitchDisplayButton
 import '../../common/styles/panels.css';
 import { Button } from '../../common/components/Button';
 import { DetectionsToggle } from '../../common/fitsViewer/DetectionsToggle';
+import { StarShapesToggle } from '../../common/fitsViewer/StarShapesToggle';
 import { resolveProcessedImagePath } from '../../common/services/imaging/measurementPath';
 
 /** Said in the star profile panel: the picture is already stretched, so its brightness is not in camera counts. */
@@ -57,6 +58,8 @@ export const TargetViewerManager: React.FC<Props> = ({
   const rendererRef = useRef<FitsRendererHandle | null>(null);
   // True while the picture shows a marker at every star the astrometry run's star finder detects.
   const [detectionsEnabled, setDetectionsEnabled] = useState(false);
+  // True while the picture shows a line along the long axis of each measured star.
+  const [shapesEnabled, setShapesEnabled] = useState(false);
 
   /** Finds the FITS file of the target's picture, so the backend measures the file on screen. */
   const resolveMeasurePath = useCallback(
@@ -72,6 +75,7 @@ export const TargetViewerManager: React.FC<Props> = ({
         headerContent={
           <div className="fits-header-controls" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <DetectionsToggle enabled={detectionsEnabled} onChange={setDetectionsEnabled} />
+            <StarShapesToggle enabled={shapesEnabled} onChange={setShapesEnabled} />
             <Button size="small" onClick={() => rendererRef.current?.zoomIn()} title="Zoom In">+</Button>
             <Button size="small" onClick={() => rendererRef.current?.zoomOut()} title="Zoom Out">-</Button>
             <Button size="small" onClick={() => rendererRef.current?.zoomToFit()} title="Zoom to Fit">Fit</Button>
@@ -93,6 +97,7 @@ export const TargetViewerManager: React.FC<Props> = ({
           stretch={false}
           displayRange={STRETCHED_PICTURE_RANGE}
           showDetections={detectionsEnabled}
+          showShapes={shapesEnabled}
           resolveMeasurePath={resolveMeasurePath}
           noPixelDataMessage={NO_PIXEL_DATA_MESSAGE}
           starProfilePictureNote={STRETCHED_PICTURE_NOTE}

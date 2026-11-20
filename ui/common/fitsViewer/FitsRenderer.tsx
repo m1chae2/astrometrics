@@ -13,7 +13,9 @@ import { StarProfilePanel, SET_DISPLAY_TO_LINEAR_MESSAGE } from './StarProfilePa
 import type { StarProfileView } from './StarProfilePanel';
 import { useStarProfile } from './hooks/useStarProfile';
 import { useDetections } from './hooks/useDetections';
+import { useStarShapes } from './hooks/useStarShapes';
 import { buildDetectionPaths } from './utils/detectionMarkers';
+import { buildShapeLinePaths, describeFrameShapes } from './utils/starShapes';
 import { askWorkerForPixel, pointerToFileCell } from './utils/pixelQuery';
 import { AstrometryOverlayStar } from '../services/astronomyService';
 import { formatStarListLabel } from '../utils/starDisplayFormat';
@@ -163,6 +165,8 @@ export interface FitsRendererProps {
   acceptPrefetch?: boolean;
   /** True while the Detections overlay is on: a marker at every star the astrometry run's star finder detects. */
   showDetections?: boolean;
+  /** True while the Shapes overlay is on: a line along the long axis of each measured star, as long as its stretch. */
+  showShapes?: boolean;
   /** Finds the file path of the image on screen, so the backend can measure that file. Called for each measurement. */
   resolveMeasurePath?: () => Promise<string | null>;
   /** Shown in the star profile panel in place of a measurement when the image holds no pixel values (default: ask for Linear). */
@@ -200,6 +204,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     previewBlob = null,
     acceptPrefetch = false,
     showDetections = false,
+    showShapes = false,
     resolveMeasurePath,
     noPixelDataMessage = SET_DISPLAY_TO_LINEAR_MESSAGE,
     starProfilePictureNote
@@ -525,16 +530,18 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
 
   // The Detections overlay: fetched while it is on, drawn with the same placement as the star profile marker.
   const detections = useDetections(showDetections && mainDrawn && parsedData !== null, currentKey, resolveMeasurePath);
+  // The Shapes overlay is fetched the same way, and placed with the same row order.
+  const shapes = useStarShapes(showShapes && mainDrawn && parsedData !== null, currentKey, resolveMeasurePath);
   const [detectionsFirstRowAtTop, setDetectionsFirstRowAtTop] = useState<boolean | null>(null);
   useEffect(() => {
     const worker = workerRef.current;
-    if (!showDetections || !mainDrawn || !parsedData || !worker) return;
+    if (!(showDetections || showShapes) || !mainDrawn || !parsedData || !worker) return;
     let cancelled = false;
     void askWorkerForPixel(worker, parsedData.imageId, { column: 0, rowFromTop: 0 }).then((reading) => {
       if (!cancelled) setDetectionsFirstRowAtTop(reading ? reading.y === 1 : null);
     });
     return () => { cancelled = true; };
-  }, [showDetections, mainDrawn, parsedData, workerRef]);
+  }, [showDetections, showShapes, mainDrawn, parsedData, workerRef]);
   // Rebuilt only when the view or the detections change, not on every other re-render (hover, panel changes).
   const detectionPaths = React.useMemo(() => {
     if (detections.status !== 'ready' || detectionsFirstRowAtTop === null || !parsedData || !mainDrawn) return null;
@@ -558,6 +565,31 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
       : detections.status === 'error' ? detections.message
         : detections.status === 'ready' ? `${detections.measurement.detection_count.toLocaleString('en-US')} detections`
           : null;
+
+  const shapePaths = React.useMemo(() => {
+    if (shapes.status !== 'ready' || detectionsFirstRowAtTop === null || !parsedData || !mainDrawn) return null;
+    if (drawnSize.w <= 0 || drawnSize.h <= 0) return null;
+    return buildShapeLinePaths(shapes.measurement.shapes, {
+      imageWidth: parsedData.w,
+      imageHeight: parsedData.h,
+      stepX: (drawnSize.w / parsedData.w) * effectiveZoom,
+      stepY: (drawnSize.h / parsedData.h) * effectiveZoom,
+      panX,
+      panY,
+      firstRowAtTop: detectionsFirstRowAtTop,
+      viewWidth: containerW,
+      viewHeight: containerH,
+    });
+  }, [shapes, detectionsFirstRowAtTop, parsedData, mainDrawn, drawnSize.w, drawnSize.h, effectiveZoom, panX, panY, containerW, containerH]);
+  const shapesNote: string | null = !showShapes ? null
+    : mainDrawn && !parsedData ? noPixelDataMessage
+    : shapes.status === 'loading' ? 'Measuring star shapes…'
+      : shapes.status === 'error' ? shapes.message
+        : shapes.status === 'ready'
+          ? (describeFrameShapes(shapes.measurement) ?? 'Too few usable stars to show their shapes.')
+          : null;
+  // The summary and the shapes go to the star profile panel only when the overlay has measured them.
+  const shapesForPanel = showShapes && shapes.status === 'ready' ? shapes.measurement : null;
 
   const hoveredStar = hoveredStarId && overlayStars ? overlayStars.find((star) => star.id === hoveredStarId) : undefined;
 
@@ -708,6 +740,11 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
             <path className="fits-renderer__detection fits-renderer__detection--merged" data-testid="detections-merged" d={detectionPaths.diamonds} />
           </svg>
         )}
+        {showShapes && shapePaths && (
+          <svg className="fits-renderer__shapes" data-overlay-layer="true" data-testid="shapes-layer" aria-hidden="true">
+            <path className="fits-renderer__shape-line" data-testid="shapes-lines" d={shapePaths.lines} />
+          </svg>
+        )}
         {profileMarker && (
           <svg className="fits-renderer__profile-marker" data-overlay-layer="true" data-testid="star-profile-marker" aria-hidden="true">
             {profileMarker.cut && (
@@ -769,6 +806,17 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
         </div>
       )}
 
+      {shapesNote && (
+        <div
+          className={`fits-renderer__detections-note fits-renderer__shapes-note${showDetections ? ' fits-renderer__shapes-note--second' : ''}${shapes.status === 'error' ? ' fits-renderer__detections-note--error' : ''}`}
+          role="status"
+          data-testid="shapes-note"
+          title="Elongation is 1 minus the short axis over the long axis: 0% is round. The direction is the way the lines point, from straight up and down (0°) to left and right (90°)."
+        >
+          {shapesNote}
+        </div>
+      )}
+
       <PixelReadout
         containerRef={containerRef}
         workerRef={workerRef}
@@ -789,6 +837,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
         followNote={starProfile.followNote}
         onClose={starProfile.close}
         pictureNote={starProfilePictureNote}
+        shapes={shapesForPanel}
       />
 
       {effectiveLoading && (
@@ -829,6 +878,7 @@ export const FitsRenderer = React.memo(FitsRendererInternal, (prevProps, nextPro
     prevProps.previewBlob === nextProps.previewBlob &&
     prevProps.acceptPrefetch === nextProps.acceptPrefetch &&
     prevProps.showDetections === nextProps.showDetections &&
+    prevProps.showShapes === nextProps.showShapes &&
     prevProps.resolveMeasurePath === nextProps.resolveMeasurePath &&
     prevProps.noPixelDataMessage === nextProps.noPixelDataMessage &&
     prevProps.starProfilePictureNote === nextProps.starProfilePictureNote

@@ -222,3 +222,26 @@
 .fits-renderer__detections-note--error {
   color: var(--danger-red);
 }
+
+/* The Shapes overlay: one path of short lines, one for each measured star. */
+.fits-renderer__shapes {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.fits-renderer__shape-line {
+  fill: none;
+  stroke: var(--star-shape-line-color);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+/* The shapes note sits under the detections note when both overlays are on. */
+.fits-renderer__shapes-note--second {
+  top: 34px;
+}

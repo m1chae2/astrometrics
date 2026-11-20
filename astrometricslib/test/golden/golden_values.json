@@ -14,12 +14,6 @@
         "tolerance_type": "relative",
         "why": "baseline 2026-10-10 before tier 1 fixes"
       },
-      "roundness": {
-        "value": 0.970975937,
-        "tolerance": 0.01,
-        "tolerance_type": "relative",
-        "why": "baseline 2026-10-10 before tier 1 fixes"
-      },
       "longest_trail_px": {
         "value": 77,
         "tolerance": 0.0,
@@ -72,12 +66,6 @@
       },
       "fwhm_px": {
         "value": 3.73167003,
-        "tolerance": 0.01,
-        "tolerance_type": "relative",
-        "why": "baseline 2026-10-10 before tier 1 fixes"
-      },
-      "roundness": {
-        "value": 0.909658737,
         "tolerance": 0.01,
         "tolerance_type": "relative",
         "why": "baseline 2026-10-10 before tier 1 fixes"
@@ -156,12 +144,6 @@
         "tolerance_type": "relative",
         "why": "baseline 2026-10-10 before tier 1 fixes"
       },
-      "roundness": {
-        "value": 0.976100017,
-        "tolerance": 0.01,
-        "tolerance_type": "relative",
-        "why": "baseline 2026-10-10 before tier 1 fixes"
-      },
       "longest_trail_px": {
         "value": 78,
         "tolerance": 0.0,
@@ -236,12 +218,6 @@
         "tolerance_type": "relative",
         "why": "baseline 2026-10-10 before tier 1 fixes"
       },
-      "roundness": {
-        "value": 0.948256461,
-        "tolerance": 0.01,
-        "tolerance_type": "relative",
-        "why": "baseline 2026-10-10 before tier 1 fixes"
-      },
       "longest_trail_px": {
         "value": 78,
         "tolerance": 0.0,
@@ -312,12 +288,6 @@
       },
       "fwhm_px": {
         "value": 3.52056518,
-        "tolerance": 0.01,
-        "tolerance_type": "relative",
-        "why": "baseline 2026-10-10 before tier 1 fixes"
-      },
-      "roundness": {
-        "value": 0.972590043,
         "tolerance": 0.01,
         "tolerance_type": "relative",
         "why": "baseline 2026-10-10 before tier 1 fixes"

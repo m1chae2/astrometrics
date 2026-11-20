@@ -251,7 +251,7 @@ def _saturation_threshold_adu(header: fits.Header) -> float:
 def measure_raw_frame_quality() -> dict[str, dict[str, float]]:
     """Measure the five luminance lights with the public quality API.
 
-    The star count, FWHM, roundness, longest streak, sky level, saturated
+    The star count, FWHM, longest streak, sky level, saturated
     pixels, shift from the previous frame and flags come from
     ``QualityRecords.measure_frames(kind="raw_check")``. The background
     level and saturated fraction come from `measure_frame_input_quality`. The
@@ -280,7 +280,6 @@ def measure_raw_frame_quality() -> dict[str, dict[str, float]]:
         values: dict[str, float] = {
             "star_count": row["star_count"],
             "fwhm_px": row["fwhm_px"],
-            "roundness": row["roundness"],
             "longest_trail_px": row["longest_trail_px"],
             "sky_median_adu": row["sky_median_adu"],
             "saturated_pixels": row["saturated_pixels"],

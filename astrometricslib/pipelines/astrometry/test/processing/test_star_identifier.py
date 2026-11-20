@@ -411,8 +411,6 @@ class TestGaiaCircuitBreaker:
         same pass that saw 67 remote failures. Gating those behind the
         breaker would throw away working data.
         """
-        import sqlite3
-
         import astrometricslib.foundation.config as config_loader_module
         from astrometricslib._internal.drivers import catalog_store
         from astrometricslib.foundation.config import AppConfiguration
@@ -421,28 +419,19 @@ class TestGaiaCircuitBreaker:
         config.update_config({"Image Library": {"path": str(tmp_path)}})
         monkeypatch.setattr(config_loader_module, "get_configuration", lambda: config)
 
-        from astrometricslib.foundation.paths import catalog_cache_directory
-
-        cache_dir = Path(catalog_cache_directory())
-        connection = sqlite3.connect(cache_dir / "catalog_cache.db")
-        cursor = connection.cursor()
-        cursor.execute(
-            "CREATE TABLE IF NOT EXISTS gaia_sources "
-            "(source_id TEXT PRIMARY KEY, ra REAL, dec REAL, phot_g_mean_mag REAL, designation TEXT)"
-        )
-        for index in range(8):
-            cursor.execute(
-                "INSERT OR REPLACE INTO gaia_sources VALUES (?, ?, ?, ?, ?)",
+        catalog_store.insert_gaia_sources(
+            config,
+            [
                 (
                     f"{index}",
                     VEGA_RA_DEG + index * 0.0001,
                     VEGA_DEC_DEG + index * 0.0001,
                     12.0,
                     f"Gaia DR3 {index}",
-                ),
-            )
-        connection.commit()
-        connection.close()
+                )
+                for index in range(8)
+            ],
+        )
         # The cache is trusted only for a region recorded as completely
         # downloaded, so record one that covers the query below.
         catalog_store.record_gaia_region(config, VEGA_RA_DEG, VEGA_DEC_DEG, 0.1, 18.0, row_limit_hit=False)

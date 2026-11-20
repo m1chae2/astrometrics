@@ -983,6 +983,63 @@ export interface FrameCopyPulse {
 }
 
 /**
+ * The status of one frame, with the reason when there is one.
+ *
+ * Attributes
+ * ----------
+ * path : `str`
+ * The frame's file. For a set-aside frame, its place in `_excluded`.
+ * name : `str`
+ * The file name.
+ * state : `str`
+ * ``included``, ``not_stacked`` or ``set_aside``.
+ * kind : `str` or `None`
+ * The kind the stacker recorded for a set-aside frame, such as
+ * ``clouded`` or ``trailed``. `None` when none is recorded.
+ * reason : `str`
+ * The stacker's own words for a set-aside frame; empty otherwise.
+ * date : `str`
+ * When the frame was taken, as ``YYYY-MM-DD HH:MM:SS``. Empty when the
+ * file name has no date (set-aside frames only).
+ * exposure : `str`
+ * The exposure in seconds, for a set-aside frame; empty otherwise.
+ * original_path : `str` or `None`
+ * Where a set-aside frame was before it was moved.
+ * restorable : `bool`
+ * Whether the app can put a set-aside frame back.
+ * restore_note : `str`
+ * Why a set-aside frame cannot be put back, when it cannot.
+ */
+export interface FrameStatus {
+  path: string;
+  name: string;
+  state: string;
+  kind?: string | null;
+  reason?: string;
+  date?: string;
+  exposure?: string;
+  originalPath?: string | null;
+  restorable?: boolean;
+  restoreNote?: string;
+}
+
+/**
+ * The statuses of every frame of a target.
+ *
+ * Attributes
+ * ----------
+ * frames : `list` [`FrameStatus`]
+ * One entry per frame in the target, then one per set-aside frame.
+ * stacked_at : `float` or `None`
+ * When the latest stack file was written, in seconds since the Unix
+ * epoch. `None` when the target has no stack.
+ */
+export interface FrameStatusReport {
+  frames?: FrameStatus[];
+  stackedAt?: number | null;
+}
+
+/**
  * Lightweight snapshot of current telescope state for polling.
  */
 export interface TelescopePulse {
@@ -6290,6 +6347,8 @@ export const RPC_METHODS = [
   "target:send_to_phone",
   "target:refresh",
   "target:get_files",
+  "target:get_frame_statuses",
+  "target:put_back_frames",
   "target:get_camera_index",
   "target:get_frames",
   "target:get_frames_grouped",

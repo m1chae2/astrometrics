@@ -202,6 +202,10 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "target:send_to_phone": ("target_service", "send_to_phone"),
     "target:refresh": ("target_service", "refresh_target_images_by_id"),
     "target:get_files": ("target_service", "get_file_list"),
+    # Each frame's state (included, not stacked yet, set aside), with reasons.
+    "target:get_frame_statuses": ("target_service", "get_frame_statuses"),
+    # Moves chosen set-aside frames back into the target (a user action).
+    "target:put_back_frames": ("target_service", "put_back_frames"),
     "target:get_camera_index": ("target_service", "get_camera_index"),
     "target:get_frames": ("target_service", "get_frame_stats"),
     "target:get_frames_grouped": ("target_service", "get_frame_stats_grouped"),

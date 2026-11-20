@@ -8,6 +8,12 @@ import { FileItem } from '../types/backendTypes';
  * Supports boolean operators (&&, ||), grouping with parentheses, and property-based filtering.
  */
 
+/**
+ * A file the search can look at. `status` is the File Browser's Status text for the frame, such as
+ * "set-aside cloud" or "flagged", so a search can say `status:set-aside`.
+ */
+export type SearchableFile = FileItem & { status?: string };
+
 // Token types
 type TokenType = 'AND' | 'OR' | 'LPAREN' | 'RPAREN' | 'CONDITION';
 
@@ -98,9 +104,9 @@ function tokenize(query: string): Token[] {
 class Parser {
     private tokens: Token[];
     private position: number = 0;
-    private file: FileItem;
+    private file: SearchableFile;
 
-    constructor(tokens: Token[], file: FileItem) {
+    constructor(tokens: Token[], file: SearchableFile) {
         this.tokens = tokens;
         this.file = file;
     }
@@ -184,6 +190,16 @@ class Parser {
             else if (propertyKey.startsWith('cam')) fileValueString = String(this.file.camera || '');
             else if (propertyKey === 'name' || propertyKey === 'file') fileValueString = String(this.file.name || '');
             else if (propertyKey.startsWith('filt')) fileValueString = String(this.file.filter || '');
+            else if (propertyKey.startsWith('stat')) {
+                // Spaces and hyphens mean the same here, so `status:set aside` finds "set-aside".
+                const statusText = String(this.file.status || '').toLowerCase();
+                const wanted = valueString.trim().replace(/\s+/g, '-');
+                if (operator === ':' || operator === 'includes') return statusText.includes(wanted);
+                if (operator === 'excludes') return !statusText.includes(wanted);
+                if (operator === '=' || operator === '==') return statusText.split(' ').includes(wanted);
+                if (operator === '!=') return !statusText.split(' ').includes(wanted);
+                return false;
+            }
             else return false; // Unknown property usually results in no match
 
             const fileNumericValue = parseFloat(fileValueString);
@@ -224,11 +240,11 @@ class Parser {
 /**
  * Evaluates a search query against a specific file item.
  *
- * @param file The file item to check.
+ * @param file The file item to check (with its Status text, when it has one).
  * @param query The search query string.
  * @returns True if the file matches the query.
  */
-export function matchesQuery(file: FileItem, query: string): boolean {
+export function matchesQuery(file: SearchableFile, query: string): boolean {
     if (!query || !query.trim()) return true;
     try {
         const tokens = tokenize(query);

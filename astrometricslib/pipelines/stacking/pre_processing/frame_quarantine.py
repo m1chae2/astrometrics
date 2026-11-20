@@ -31,7 +31,7 @@ import os
 import shutil
 import statistics
 from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -902,7 +902,7 @@ def find_frames_already_set_aside(target_id: str, frames: Sequence[Any], frames_
     ]
 
 
-def restore_quarantined_frames(directory: str) -> list[str]:
+def restore_quarantined_frames(directory: str, only_files: Collection[str] | None = None) -> list[str]:
     """Move quarantined frames back to where they came from.
 
     Parameters
@@ -910,6 +910,10 @@ def restore_quarantined_frames(directory: str) -> list[str]:
     directory : `str`
         A folder holding an `_excluded` folder, or the `_excluded` folder
         itself.
+    only_files : `Collection` [`str`], optional
+        The file names (as in the manifest's ``file`` field) to move back.
+        The other frames stay in `_excluded`. Every frame is moved back when
+        this is left out.
 
     Returns
     -------
@@ -930,6 +934,9 @@ def restore_quarantined_frames(directory: str) -> list[str]:
     for entry in entries:
         current_path = os.path.join(quarantine_directory, entry["file"])
         original_path = entry["original_path"]
+        if only_files is not None and entry["file"] not in only_files:
+            remaining.append(entry)
+            continue
         if not os.path.exists(current_path) or os.path.exists(original_path):
             remaining.append(entry)
             continue

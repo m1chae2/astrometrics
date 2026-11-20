@@ -364,3 +364,35 @@ def test_preview_says_nothing_would_move_when_quarantine_is_off(tmp_path: Path) 
     assert preview.would_move_total == 0
     assert preview.frames_checked == 0
     assert "turned off" in preview.notes[0]
+
+
+def test_put_back_moves_only_the_chosen_frame_and_rescans(quality: QualityRecords, tmp_path: Path) -> None:
+    """Only the chosen frame returns, and the target is rescanned."""
+    folder = camera_folder(tmp_path)
+    quarantine = write_manifest(
+        folder, [manifest_entry(folder, "frame_003.fits"), manifest_entry(folder, "frame_004.fits")]
+    )
+    target = Target(id="M 1")
+
+    restored = quality.put_back_set_aside_frames(target, [str(quarantine / "frame_003.fits")])
+
+    assert restored == [str(folder / "frame_003.fits")]
+    assert (folder / "frame_003.fits").exists()
+    assert (quarantine / "frame_004.fits").exists()
+    assert [
+        entry["file"]
+        for entry in frame_quarantine.read_quarantine_manifest(str(quarantine / MANIFEST_FILE_NAME))
+    ] == ["frame_004.fits"]
+    quality._targets.reindex_frames.assert_called_once_with(target)
+
+
+def test_put_back_refuses_a_path_outside_the_excluded_folders(
+    quality: QualityRecords, tmp_path: Path
+) -> None:
+    """A frame that is not set aside cannot be moved by this call."""
+    folder = camera_folder(tmp_path)
+    (folder / "frame_001.fits").write_bytes(b"x")
+
+    with pytest.raises(InvalidArgumentError):
+        quality.put_back_set_aside_frames(Target(id="M 1"), [str(folder / "frame_001.fits")])
+    quality._targets.reindex_frames.assert_not_called()

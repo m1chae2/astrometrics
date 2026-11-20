@@ -651,6 +651,13 @@ DECISIONS = {
         "trust the record, and the AI is read-only. Read the saved one with observatory_imaging_status.",
         "change-data",
     ),
+    "quality_put_back_set_aside_frames": ToolDecision(
+        "withhold",
+        "Moves chosen set-aside frames out of a target's _excluded folder back into the target and "
+        "rescans it. It moves files, and the AI is read-only, so a person puts frames back in the File "
+        "Browser. The AI lists them with quality_set_aside_frames.",
+        "change-data",
+    ),
     "quality_forget": ToolDecision(
         "withhold",
         "Deletes the stored quality measurements of the given frames from the quality database. The AI is "

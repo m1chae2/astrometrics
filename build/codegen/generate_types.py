@@ -141,6 +141,7 @@ from astrometricslib.models.wavelength_scale import (
     WavelengthZeroPointRecord,
 )
 from backend.public_interface import ROUTES, RPC_METHODS, UI_EVENTS
+from backend.services.data.frame_status import FrameStatus, FrameStatusReport
 from backend.services.infrastructure.system_status_service import (
     FrameCopyPulse,
     IndiStatus,
@@ -581,6 +582,8 @@ def render_types() -> str:
         generate_interface(SessionPhotometrySummary, "SessionPhotometrySummary"),
         generate_interface(PhotometryResult, "PhotometryResult"),
         generate_interface(FrameCopyPulse, "FrameCopyPulse"),
+        generate_interface(FrameStatus, "FrameStatus"),
+        generate_interface(FrameStatusReport, "FrameStatusReport"),
         generate_interface(TelescopePulse, "TelescopePulse"),
         generate_interface(ProcessingJobPulse, "ProcessingJobPulse"),
         generate_interface(SystemPulse, "SystemPulse"),

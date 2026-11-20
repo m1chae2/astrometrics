@@ -4,6 +4,8 @@ import { SectionPanel } from '../../common/components/SectionPanel';
 import { SwitchDisplayButton } from '../../common/components/SwitchDisplayButton';
 import { FitsViewerManager, FitsRendererHandle } from '../../common/fitsViewer/FitsViewerManager';
 import { FileBrowser, FileBrowserToolbar } from '../fileBrowser/FileBrowser';
+import type { FileItem } from '../fileBrowser/FileBrowser';
+import type { FrameStatusInfo } from '../utils/frameStatus';
 import { AstrometryOverlayStar } from '../../common/services/astronomyService';
 import { Button } from '../../common/components/Button';
 import { DisplayModeSelect } from '../../common/fitsViewer/DisplayModeSelect';
@@ -53,6 +55,12 @@ interface ViewerPanelContainerProps {
   toggleFile: (path: string | null) => void;
   toggleAllFiles: () => void;
   analysisResults: any;
+  /** Each frame's status by file path, for the File Browser's Status column. */
+  frameStatuses?: ReadonlyMap<string, FrameStatusInfo>;
+  /** The frames the stacker set aside, listed in the File Browser. */
+  setAsideFiles?: FileItem[];
+  /** Puts one set-aside frame back into the target. */
+  onPutBackFrame?: (path: string) => void;
 
   /** Set while Image Controls is folded and the right column too: its tab joins the bottom bar here. */
   onOpenImageControls?: () => void;
@@ -68,7 +76,7 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
   selectedStarId,
   allFiles, filteredFiles, fileFilterText, setFileFilterText, fileBrowserCamera, setFileBrowserCamera, selectedOptic, setSelectedOptic,
   checkedFiles, handleRequestDeleteFiles, onOpenHeaderModal, onFileClick, selectedFile,
-  toggleFile, toggleAllFiles, analysisResults, onOpenImageControls
+  toggleFile, toggleAllFiles, analysisResults, frameStatuses, setAsideFiles, onPutBackFrame, onOpenImageControls
 }) => {
   // True while the image shows a marker at every star the astrometry run's star finder detects.
   const [detectionsEnabled, setDetectionsEnabled] = useState(false);
@@ -179,6 +187,9 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
           onToggleFile={toggleFile}
           onToggleAll={toggleAllFiles}
           selectedCamera={fileBrowserCamera}
+          frameStatuses={frameStatuses}
+          setAsideFiles={setAsideFiles}
+          onPutBackFrame={onPutBackFrame}
         />
       </SectionPanel>
       )}

@@ -321,6 +321,7 @@ SUB_API_MEMBERS = {
         "measure_star_profile",
         "measure_tuned_parameters",
         "metrics",
+        "put_back_set_aside_frames",
         "query",
         "record_frame_measurements",
         "resolve_rows",

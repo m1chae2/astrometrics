@@ -458,6 +458,14 @@
   width: 100%;
 }
 
+/* The Status cell holds one or two chips and, for a set-aside frame, the Put back button. */
+.file-browser__status-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
 /* -------------------------------------------------------------------------- */
 /* Image Details Manager                                                      */
 /* -------------------------------------------------------------------------- */

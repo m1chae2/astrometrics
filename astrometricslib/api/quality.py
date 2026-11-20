@@ -13,6 +13,8 @@
   through it.
 * Detections: `measure_detections` lists the stars the astrometry run's star
   finder detects in one image, so a viewer can draw them.
+* Put back: `put_back_set_aside_frames` moves chosen set-aside frames back into
+  their target.
 * Recorded: `record_frame_measurements` measures a target's light frames and
   stores the numbers that `query` reads.
 
@@ -998,6 +1000,60 @@ class QualityRecords:
         return build_set_aside_records(
             resolved.id, folders, rows, {key: value.exposure_seconds for key, value in settings.items()}
         )
+
+    def put_back_set_aside_frames(self, target: str | Target, paths: list[str]) -> list[str]:
+        """Move chosen set-aside frames back into their target.
+
+        This is the one-frame form of putting frames back. Each path must be
+        a frame that `set_aside_frames` lists. A frame whose original place is
+        taken, or that has no `excluded_frames.json` entry saying where it
+        came from, stays where it is. The target is re-scanned afterwards, so
+        it lists the moved frames again, and the next stack may set them
+        aside again.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target, or its id or name.
+        paths : `list` [`str`]
+            The set-aside frames to move back, as listed in the ``path`` of
+            `set_aside_frames`.
+
+        Returns
+        -------
+        restored : `list` [`str`]
+            The original paths of the frames that were moved back.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If a path is not in one of the target's `_excluded` folders.
+        """
+        from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+            restore_quarantined_frames,
+            target_folder_names,
+        )
+        from astrometricslib.pipelines.stacking.pre_processing.set_aside_listing import find_excluded_folders
+
+        resolved = resolve_target(self._targets, target)
+        folders = {
+            os.path.realpath(folder): folder
+            for folder in find_excluded_folders(
+                str(self._config.get_frames_path()), target_folder_names(resolved.id)
+            )
+        }
+        files_by_folder: dict[str, set[str]] = {}
+        for path in paths:
+            folder = os.path.realpath(os.path.dirname(path))
+            if folder not in folders:
+                raise InvalidArgumentError(f"'{path}' is not in an _excluded folder of {resolved.id}.")
+            files_by_folder.setdefault(folders[folder], set()).add(os.path.basename(path))
+        restored: list[str] = []
+        for folder, file_names in files_by_folder.items():
+            restored.extend(restore_quarantined_frames(folder, file_names))
+        if restored:
+            self._targets.reindex_frames(resolved)
+        return restored
 
     def measure_star_profile(
         self,

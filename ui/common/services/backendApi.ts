@@ -175,6 +175,8 @@ export interface ActionRegistry {
     "target:update": { payload: { target_id: string; updates: Partial<TargetObject> }; response: TargetObject | null };
     "target:delete": { payload: { target_id: string }; response: boolean };
     "target:get_files": { payload: { target_id: string }; response: TargetFilesResponse };
+    "target:get_frame_statuses": { payload: { target_id: string }; response: import('../types/backendTypes').FrameStatusReport };
+    "target:put_back_frames": { payload: { target_id: string; paths: string[] }; response: { restored: string[] } };
     "target:get_camera_index": { payload: Record<string, never>; response: TargetCameraIndex };
     "target:get_frames": { payload: { target_id: string }; response: FrameRecord[] };
     "target:get_frames_grouped": { payload: { target_id: string; camera?: string }; response: GroupedFrameStat[] };
@@ -621,6 +623,7 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'advisory:tonight',
     'advisory:result',
     'advisory:star_shapes',
+    'target:get_frame_statuses',
     'advisory:depth_goal',
     'processing:stack_summary',
     'quality:set_aside_frames',

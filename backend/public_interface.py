@@ -226,6 +226,8 @@ RPC_METHODS: tuple[str, ...] = (
     "target:send_to_phone",
     "target:refresh",
     "target:get_files",
+    "target:get_frame_statuses",
+    "target:put_back_frames",
     "target:get_camera_index",
     "target:get_frames",
     "target:get_frames_grouped",

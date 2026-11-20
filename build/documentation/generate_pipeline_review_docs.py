@@ -3576,10 +3576,11 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
    stacking. Spectral registration that loses too many frames is retried with relaxed detection,
    then with phase correlation (aligning whole images by their overall pattern rather than by
    single stars).
-5. **After the stack.** Noisy edges are trimmed (`stack_crop.py`). Frames never line up exactly,
-   so the edges of a stack are covered by fewer frames than the middle and are noisier. The trim
-   measures the noise and cuts each side back to where it matches the interior; a stack with
-   clean edges is left alone. The quality summary and its gates are built (<<gate_count>>).
+5. **After the stack.** Thinly covered edges are trimmed (`stack_crop.py`). Frames never line up exactly,
+   so the edges of a stack are covered by fewer frames than the middle and are noisier. The linear
+   stack is cut only where fewer than half the frames cover it; the processed picture is cropped
+   further, to the area at least 85% of the frames cover, before GraXpert and Cosmic Clarity run.
+   A stack with full coverage is left alone. The quality summary and its gates are built (<<gate_count>>).
    The stage then stores the summary's numbers, the gates, the stack's noise, the effective frame
    count and time, and one weight per member frame as quality measurements
    (`record_stacking_quality`). The noise is the scatter of the summed sky in fixed empty

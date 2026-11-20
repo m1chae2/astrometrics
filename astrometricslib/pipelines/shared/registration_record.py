@@ -87,6 +87,12 @@ class RegistrationRecord:
         trim and the stack's pixels in this record are all on the grid before
         the turn; use `to_registration_grid` to move a pixel of the saved
         stack there.
+    processed_crop : `tuple` of `int` or `None`
+        The part of the stack that the processed picture keeps: the first
+        column, one past the last, the first row and one past the last, on
+        the trimmed stack as registered (before the turn). `None` when the
+        picture keeps the whole stack, or the stack was made before the box
+        was recorded.
     """
 
     light_paths: tuple[str, ...]
@@ -96,6 +102,7 @@ class RegistrationRecord:
     reference_frame: str | None
     is_spectral: bool = False
     quarter_turn_degrees: int = 0
+    processed_crop: tuple[int, int, int, int] | None = None
 
 
 def _is_identity(homography: Sequence[float]) -> bool:
@@ -200,7 +207,30 @@ def build_registration_record(
         crop_offset=(int(crop_offset[0]), int(crop_offset[1])),
         reference_frame=reference_frame,
         is_spectral=is_spectral,
+        processed_crop=_read_crop_box(diagnostics.get("processed_crop")),
     )
+
+
+def _read_crop_box(values: Any) -> tuple[int, int, int, int] | None:
+    """Read a crop box of four numbers.
+
+    Parameters
+    ----------
+    values : `Any`
+        A list of the first column, one past the last, the first row and one
+        past the last, or `None`.
+
+    Returns
+    -------
+    box : `tuple` of `int` or `None`
+        The four numbers, or `None` when `values` is missing or not four
+        numbers.
+    """
+    try:
+        x0, x1, y0, y1 = (int(value) for value in values)
+    except TypeError, ValueError:
+        return None
+    return (x0, x1, y0, y1)
 
 
 def write_registration_record(stack_path: str, record: RegistrationRecord) -> None:
@@ -225,6 +255,7 @@ def write_registration_record(stack_path: str, record: RegistrationRecord) -> No
         "reference_frame": record.reference_frame,
         "is_spectral": record.is_spectral,
         "quarter_turn_degrees": record.quarter_turn_degrees,
+        "processed_crop": None if record.processed_crop is None else list(record.processed_crop),
     }
     path = registration_record_path(stack_path)
     try:
@@ -262,6 +293,7 @@ def read_registration_record(stack_path: str) -> RegistrationRecord | None:
         is_spectral = bool(document["is_spectral"])
         # Older records have no turn: the stack was saved as registered.
         quarter_turn_degrees = int(document.get("quarter_turn_degrees", 0))
+        processed_crop = _read_crop_box(document.get("processed_crop"))
     except (OSError, ValueError, KeyError, IndexError, TypeError) as error:
         logger.debug("No usable registration record at %s: %s", path, error)
         return None
@@ -277,6 +309,7 @@ def read_registration_record(stack_path: str) -> RegistrationRecord | None:
         None if reference is None else str(reference),
         is_spectral,
         quarter_turn_degrees,
+        processed_crop,
     )
 
 

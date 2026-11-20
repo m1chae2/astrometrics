@@ -525,7 +525,6 @@ stacking.member_frame_attempts,STK-D28,measurement,Design estimate
 stacking.minimum_bias_pairs,STK-35,judgment,Partly measured
 stacking.minimum_bright_pixels,STK-D59,judgment,Design estimate
 stacking.minimum_calibration_frames,STK-D01,judgment,Design estimate
-stacking.minimum_coverage_fraction,STK-23,measurement,Partly measured
 stacking.minimum_finite_fraction,STK-D56,measurement,Design estimate
 stacking.minimum_flat_level_fraction,STK-D05,judgment,Design estimate
 stacking.minimum_flat_pairs,STK-35,judgment,Partly measured
@@ -569,6 +568,7 @@ stacking.plausible_gain_range,STK-21,judgment,Partly measured
 stacking.point_source_sigma,STK-D34,judgment,Design estimate
 stacking.poor_alignment_rms_px,STK-D30,judgment,Design estimate
 stacking.position_misfit_radius_factor,STK-D34,judgment,Design estimate
+stacking.processed_minimum_coverage_fraction,STK-23,measurement,Partly measured
 stacking.reference_aperture_fwhm_multiple,STK-36,measurement,Partly measured
 stacking.reference_aperture_minimum_radius_px,STK-D23,measurement,Design estimate
 stacking.reference_star_count,STK-36,measurement,Partly measured
@@ -603,6 +603,7 @@ stacking.sky_clip_passes,STK-D10,measurement,Design estimate
 stacking.sky_clip_sigmas,STK-D10,measurement,Design estimate
 stacking.sky_ratio_limit,STK-21,judgment,Partly measured
 stacking.spectral_alignment_center_crop_fraction,STK-D67,measurement,Design estimate
+stacking.stack_minimum_coverage_fraction,STK-23,measurement,Partly measured
 stacking.stack_rejection_low_extra_sigma,STK-08,measurement,Partly measured
 stacking.stack_rejection_sigma_floor,STK-08,measurement,Partly measured
 stacking.star_dimming_full_at,STK-32,measurement,Partly measured

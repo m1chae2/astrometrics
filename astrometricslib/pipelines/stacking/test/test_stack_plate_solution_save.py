@@ -232,3 +232,34 @@ def test_no_stack_path_does_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     """A run with no stack (Siril made none) tries no solve."""
     monkeypatch.setattr(stack_noise, "_plate_solve_stack_wcs", _never_solve)
     stage._save_stack_plate_solution(_run(), None)
+
+
+def test_cropped_viewer_copy_gets_the_solution_moved_by_its_crop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cropped picture gives a star the same sky as the stack does."""
+    header = _solved_wcs().to_header()
+    header["PLTSOLVD"] = True
+    path = _write_stack(tmp_path / "stack.fits", header)
+    crop_cards = fits.Header()
+    crop_cards["CROPX0"], crop_cards["CROPY0"], crop_cards["CROPW"], crop_cards["CROPH"] = 8, 6, 40, 36
+    processed = tmp_path / "stack_processed.fits"
+    fits.writeto(processed, np.zeros((36, 40), dtype=np.float32), crop_cards)
+    monkeypatch.setattr(stack_noise, "_plate_solve_stack_wcs", _never_solve)
+
+    stage._save_stack_plate_solution(_run(), path)
+
+    picture_header = fits.getheader(processed, memmap=False)
+    assert header_is_plate_solved(picture_header)
+    on_stack = _solved_wcs().all_pix2world([[20.0, 25.0]], 0)
+    on_picture = WCS(picture_header).celestial.all_pix2world([[20.0 - 8, 25.0 - 6]], 0)
+    assert np.allclose(on_stack, on_picture, atol=1e-9)
+    # The star overlay reads the picture's own size and sky map, so a star
+    # lands on the picture pixel that is its stack pixel minus the crop.
+    from astrometricslib.pipelines.shared.star_overlay import _project, _read_reference_geometry
+
+    width, height, picture_wcs, _ = _read_reference_geometry(str(processed))
+    assert (width, height) == (40, 36)
+    ra, dec = on_stack[0]
+    column, row = _project(picture_wcs, ra, dec)
+    assert (column, row) == pytest.approx((20.0 - 8, 25.0 - 6), abs=1e-6)

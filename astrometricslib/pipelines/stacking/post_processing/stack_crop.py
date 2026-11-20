@@ -12,12 +12,23 @@ point 710 pixels away, and the right side is covered by only 111 of 123
 frames.
 
 The rule is a count of coverage. From each frame's registration transform, the
-module counts how many included frames cover each pixel. It removes every
-region covered by fewer than a set fraction of the frames. The kept area is
-the largest box of the original shape inside what is left, placed as near the
-centre of the original image as the covered area allows (the telescope points
-the target at the centre, so this keeps it there). The stack keeps the
-proportions of the original, so a square stack stays square.
+module counts how many included frames cover each pixel. It makes two crops
+from that count, each the largest box of the original shape inside the region
+covered by at least a set fraction of the frames, placed as near the centre of
+the original image as the covered area allows (the telescope points the target
+at the centre, so this keeps it there). Both keep the proportions of the
+original, so a square stack stays square.
+
+* The linear stack is trimmed only where fewer than half the frames cover it
+  (`STACK_MINIMUM_COVERAGE_FRACTION`). Registration leaves part-empty borders
+  there. Above it the stack keeps all its real data, so photometry,
+  astrometry and star-shape measurements can use the stars near the edges.
+* The processed picture, the one people look at, is cropped further, to the
+  area covered by at least 85% of the frames
+  (`PROCESSED_MINIMUM_COVERAGE_FRACTION`). Its box lies inside the stack's.
+  The crop is made before GraXpert and Cosmic Clarity run, so their models
+  never see the noisy edge. `find_processed_crop_box` finds the box and
+  `crop_file` applies it.
 
 Every crop gives its reason: which sides were cut, by how many pixels, how few
 frames covered them, and the numbers of the rule. The reason is logged and
@@ -55,11 +66,19 @@ from astrometricslib.pipelines.stacking.post_processing.stack_image import MAD_T
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "CROP_HEIGHT_KEYWORD",
+    "CROP_WIDTH_KEYWORD",
+    "CROP_X0_KEYWORD",
+    "CROP_Y0_KEYWORD",
     "CropBox",
+    "StackCrops",
+    "crop_file",
     "crop_stack_edges",
     "find_coverage_crop_box",
     "find_edge_crop_box",
     "frame_coverage_counts",
+    "shift_header_for_crop",
+    "turn_box",
 ]
 
 # The rejection map is written beside the stack under this suffix.
@@ -96,19 +115,37 @@ MAXIMUM_EDGE_NOISE_RATIO = TunedParameter(
     register_entry="STK-23",
 )
 
-# Regions covered by fewer than this fraction of the included frames are cut.
-# Noise goes as one over the square root of the number of frames averaged, so
-# an edge covered by 95% of the frames is at most 1/sqrt(0.95) = 1.026 times
-# as noisy as the interior. Measured coverage: NGC 7331 has an edge covered by
-# 111 of 123 frames (0.90) after a meridian flip, which this cuts, and M 31
-# has shifts of at most 25 pixels with a thin edge covered by 114 of 121
-# frames (0.94), which this cuts at a cost of about 25 pixels. The earlier
-# noise rule (1.15, about three quarters of the frames) kept both.
-MINIMUM_COVERAGE_FRACTION = TunedParameter(
-    name="stacking.minimum_coverage_fraction",
-    default=0.95,
+# The linear stack is trimmed where fewer than this fraction of the included
+# frames cover it. Below it the registration leaves part-empty borders, where
+# a pixel has only a few samples. Above it the stack keeps all its real data,
+# so photometry, astrometry and the star-shape measurements can use stars near
+# the edges. Validation STK-23 showed the noise of an edge follows one over
+# the square root of its coverage, so an edge kept at 50% is at most 1.41
+# times as noisy as the interior, and the picture people look at is cropped
+# more tightly (`PROCESSED_MINIMUM_COVERAGE_FRACTION`).
+STACK_MINIMUM_COVERAGE_FRACTION = TunedParameter(
+    name="stacking.stack_minimum_coverage_fraction",
+    default=0.5,
     unit="fraction",
-    description="Smallest share of the included frames that must cover a pixel for it to be kept.",
+    description="Smallest share of the frames that must cover a pixel for the linear stack to keep it.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-23",
+)
+
+# The processed picture is cropped to the area covered by at least this
+# fraction of the included frames. Measured on 15 stacks (validation STK-23),
+# the mean edge noise was 1.001, 1.014, 1.036 and 1.070 times the interior's
+# for coverage of at least 0.99, 0.95 to 0.99, 0.90 to 0.95 and 0.80 to 0.90.
+# At 0.85 the edge noise is at most 1/sqrt(0.85) = 1.085 times the interior's,
+# and at most 5% of the area is lost on 11 of the 15 stacks. A stricter 0.95
+# cut lost 42% of the area on NGC 7331 and M 13 and 33% on NGC 2244.
+PROCESSED_MINIMUM_COVERAGE_FRACTION = TunedParameter(
+    name="stacking.processed_minimum_coverage_fraction",
+    default=0.85,
+    unit="fraction",
+    description="Smallest share of the frames that must cover a pixel for the processed picture to keep it.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.HARDCODED,
     kind=HardcodedKind.RELATIVE,
@@ -488,8 +525,17 @@ def _largest_box_in_mask(good: np.ndarray, ratio: float) -> tuple[int, int, int,
     return left, left + box_width, top, top + low
 
 
-def find_coverage_crop_box(counts: np.ndarray, step: int, width: int, height: int) -> CropBox:
-    """Find the part of a stack that nearly all frames cover.
+def find_coverage_crop_box(
+    counts: np.ndarray,
+    step: int,
+    width: int,
+    height: int,
+    fraction: float | None = None,
+    within: CropBox | None = None,
+    *,
+    limit_trim: bool = True,
+) -> CropBox:
+    """Find the part of a stack that enough frames cover.
 
     Parameters
     ----------
@@ -499,24 +545,41 @@ def find_coverage_crop_box(counts: np.ndarray, step: int, width: int, height: in
         The spacing of the counted pixels.
     width, height : `int`
         The uncropped stack's size in pixels.
+    fraction : `float`, optional
+        The smallest share of the frames that must cover a kept pixel.
+        Defaults to `STACK_MINIMUM_COVERAGE_FRACTION`.
+    within : `CropBox`, optional
+        A box the result must lie inside, in the same pixels as the counts
+        (the stack's own crop, for the processed picture's box).
+    limit_trim : `bool`, optional
+        Whether to leave the image whole when a side would lose more than
+        `MAXIMUM_TRIM_FRACTION` of its length. The processed picture's box
+        sets this to `False`: its rule is the coverage alone.
 
     Returns
     -------
     box : `CropBox`
         The largest box of the original shape inside the region covered by at
-        least `MINIMUM_COVERAGE_FRACTION` of the most-covered pixel's frame
-        count, as near the centre as that region allows, with its reason. The
-        whole image, with an empty reason, when the whole image qualifies, no
-        pixel does, or a side would lose more than `MAXIMUM_TRIM_FRACTION` of
-        its length.
+        least `fraction` of the most-covered pixel's frame count, as near the
+        centre as that region allows, with its reason. The whole image, with
+        an empty reason, when the whole image qualifies, no pixel does, or
+        (with `limit_trim`) a side would lose more than
+        `MAXIMUM_TRIM_FRACTION` of its length.
     """
     whole = CropBox(0, width, 0, height)
     total = int(counts.max())
     if total == 0:
         return whole
-    fraction = float(resolve(MINIMUM_COVERAGE_FRACTION).value)
+    fraction = float(resolve(STACK_MINIMUM_COVERAGE_FRACTION).value) if fraction is None else fraction
     required = math.ceil(fraction * total - 1e-9)
     good = counts >= required
+    if within is not None:
+        cell_columns = np.arange(counts.shape[1]) * step
+        cell_rows = np.arange(counts.shape[0]) * step
+        inside = ((cell_rows >= within.y0) & (cell_rows < within.y1))[:, None] & (
+            (cell_columns >= within.x0) & (cell_columns < within.x1)
+        )[None, :]
+        good = good & inside
     if good.all():
         return whole
     found = _largest_box_in_mask(good, width / height)
@@ -532,8 +595,9 @@ def find_coverage_crop_box(counts: np.ndarray, step: int, width: int, height: in
     box = _same_shape_box(clean, width, height)
     maximum_trim_fraction = float(resolve(MAXIMUM_TRIM_FRACTION).value)
     sides = {"left": box.x0, "right": width - box.x1, "top": box.y0, "bottom": height - box.y1}
-    if max(sides["left"], sides["right"]) > maximum_trim_fraction * width or (
-        max(sides["top"], sides["bottom"]) > maximum_trim_fraction * height
+    if limit_trim and (
+        max(sides["left"], sides["right"]) > maximum_trim_fraction * width
+        or max(sides["top"], sides["bottom"]) > maximum_trim_fraction * height
     ):
         logger.warning(
             "The stack is covered by fewer than %.0f%% of its frames over more than %.0f%% of a side; "
@@ -634,32 +698,126 @@ def _coverage_from_diagnostics(
     return frame_coverage_counts(homographies, included, width, height)
 
 
-def _crop_file(path: str, box: CropBox) -> None:
+# Header cards that record where a processed picture sits on its stack. The
+# stack is the saved file, after any quarter turn.
+CROP_X0_KEYWORD = "CROPX0"
+CROP_Y0_KEYWORD = "CROPY0"
+CROP_WIDTH_KEYWORD = "CROPW"
+CROP_HEIGHT_KEYWORD = "CROPH"
+
+
+@dataclass(frozen=True)
+class StackCrops:
+    """The two crops made from one stack's coverage.
+
+    Attributes
+    ----------
+    stack : `CropBox` or `None`
+        The part of the registered stack kept, in the uncropped stack's
+        pixels. `None` when the stack was left whole.
+    processed : `CropBox` or `None`
+        The part of the (trimmed) stack the processed picture keeps, in the
+        trimmed stack's pixels as registered (before any quarter turn).
+        `None` when the picture keeps the whole stack.
+    """
+
+    stack: CropBox | None
+    processed: CropBox | None
+
+
+def turn_box(box: CropBox, degrees: int, width: int, height: int) -> CropBox:
+    """Move a box to where its pixels are after an image is turned.
+
+    The turn is the one `quarter_turn.turn_image` makes: counterclockwise by
+    quarter turns, with the first row at the top.
+
+    Parameters
+    ----------
+    box : `CropBox`
+        A box on the image before the turn.
+    degrees : `int`
+        0, 90, 180 or 270.
+    width, height : `int`
+        The image's size before the turn.
+
+    Returns
+    -------
+    turned : `CropBox`
+        The same pixels as a box on the turned image. Its reason and lost
+        area are kept.
+    """
+    x0, x1, y0, y1 = box.x0, box.x1, box.y0, box.y1
+    for _ in range((degrees // 90) % 4):
+        # One counterclockwise turn sends (row, column) to
+        # (width - 1 - column, row).
+        x0, x1, y0, y1 = y0, y1, width - x1, width - x0
+        width, height = height, width
+    return replace(box, x0=x0, x1=x1, y0=y0, y1=y1)
+
+
+def shift_header_for_crop(header: Any, box: CropBox) -> None:
+    """Move a header's reference pixel for a crop and note the crop.
+
+    The distortion terms (SIP) are measured from the reference pixel, so
+    moving the reference pixel by the crop's offset keeps the plate solution
+    exact: a star is at the same sky position before and after.
+
+    Parameters
+    ----------
+    header : `astropy.io.fits.Header`
+        The header to change in place.
+    box : `CropBox`
+        The part of the image kept.
+    """
+    if "CRPIX1" in header:
+        header["CRPIX1"] = float(header["CRPIX1"]) - box.x0
+    if "CRPIX2" in header:
+        header["CRPIX2"] = float(header["CRPIX2"]) - box.y0
+
+
+def crop_file(path: str, box: CropBox, *, note_crop: bool = False) -> None:
     """Crop one FITS file in place and move its coordinate reference.
 
     Parameters
     ----------
     path : `str`
-        The stack or rejection-map file.
+        The stack, rejection-map or picture file.
     box : `CropBox`
         The part to keep.
+    note_crop : `bool`, optional
+        Whether to write the crop's place on the file's grid into the header
+        (``CROPX0``, ``CROPY0``, ``CROPW`` and ``CROPH``). If the file already
+        has them, the new offset adds to the old, so the cards always say
+        where the file sits on the saved stack.
     """
     data = np.asarray(read_data(path))
     header = read_header(path)
     cropped = data[..., box.y0 : box.y1, box.x0 : box.x1]
-    if "CRPIX1" in header:
-        header["CRPIX1"] = float(header["CRPIX1"]) - box.x0
-    if "CRPIX2" in header:
-        header["CRPIX2"] = float(header["CRPIX2"]) - box.y0
+    shift_header_for_crop(header, box)
+    if note_crop:
+        header[CROP_X0_KEYWORD] = (
+            int(header.get(CROP_X0_KEYWORD, 0)) + box.x0,
+            "columns cut from the stack's left",
+        )
+        header[CROP_Y0_KEYWORD] = (
+            int(header.get(CROP_Y0_KEYWORD, 0)) + box.y0,
+            "rows cut from the stack's top",
+        )
+        header[CROP_WIDTH_KEYWORD] = (box.x1 - box.x0, "width kept")
+        header[CROP_HEIGHT_KEYWORD] = (box.y1 - box.y0, "height kept")
     temporary = path + ".crop.fits"
     write_image(temporary, np.ascontiguousarray(cropped), header)
     os.replace(temporary, path)
 
 
-def crop_stack_edges(stack_path: str, diagnostics: Mapping[str, Any] | None = None) -> CropBox | None:
+def crop_stack_edges(stack_path: str, diagnostics: Mapping[str, Any] | None = None) -> StackCrops | None:
     """Trim the thinly covered edges off a stack and its rejection map.
 
-    A failure is logged and leaves the files as they were.
+    The stack is cut to the area covered by at least
+    `STACK_MINIMUM_COVERAGE_FRACTION` of the frames. The processed picture's
+    box (`PROCESSED_MINIMUM_COVERAGE_FRACTION`) is found at the same time and
+    given back, but nothing is cut for it here: the picture is cropped when it
+    is made. A failure is logged and leaves the files as they were.
 
     Parameters
     ----------
@@ -667,19 +825,25 @@ def crop_stack_edges(stack_path: str, diagnostics: Mapping[str, Any] | None = No
         Path of the stack's FITS file.
     diagnostics : `Mapping`, optional
         What the stacking run reported about registration. With the frames'
-        transforms in it, the crop is by coverage. Without them, it is by
-        measured noise.
+        transforms in it, the crops are by coverage. Without them, the stack
+        is trimmed by measured noise and the picture keeps all of it.
 
     Returns
     -------
-    box : `CropBox` or `None`
-        The part kept, with the reason for the crop, or `None` if nothing was
-        trimmed.
+    crops : `StackCrops` or `None`
+        What was found. `StackCrops.stack` is the part kept (with the reason
+        for the crop), or `None` if the stack was not trimmed.
+        `StackCrops.processed` is the picture's box on the trimmed stack, or
+        `None` if the picture keeps all of it. `None` when neither applies.
     """
+    processed: CropBox | None = None
+    stack_box: CropBox | None = None
     try:
         data = np.asarray(read_data(stack_path))
         height, width = data.shape[-2:]
         counts = _coverage_from_diagnostics(diagnostics, width, height)
+        step = int(resolve(_COVERAGE_GRID_STEP).value)
+        minimum_px = resolve(_MINIMUM_WORTH_TRIMMING_PX).value
         if counts is None:
             box = find_edge_crop_box(data)
             box = CropBox(
@@ -692,27 +856,49 @@ def crop_stack_edges(stack_path: str, diagnostics: Mapping[str, Any] | None = No
                 else "",
             )
         else:
-            box = find_coverage_crop_box(counts, int(resolve(_COVERAGE_GRID_STEP).value), width, height)
+            box = find_coverage_crop_box(counts, step, width, height)
+            wide = find_coverage_crop_box(
+                counts,
+                step,
+                width,
+                height,
+                float(resolve(PROCESSED_MINIMUM_COVERAGE_FRACTION).value),
+                within=box,
+                limit_trim=False,
+            )
+            relative = CropBox(
+                wide.x0 - box.x0, wide.x1 - box.x0, wide.y0 - box.y0, wide.y1 - box.y0, wide.reason
+            )
+            kept_width, kept_height = box.x1 - box.x0, box.y1 - box.y0
+            if (
+                max(relative.x0, kept_width - relative.x1, relative.y0, kept_height - relative.y1)
+                >= minimum_px
+            ):
+                processed = replace(
+                    relative, lost_area_fraction=relative.lost_fraction(kept_width, kept_height)
+                )
         trimmed = (box.x0, width - box.x1, box.y0, height - box.y1)
-        if max(trimmed) < resolve(_MINIMUM_WORTH_TRIMMING_PX).value:
-            return None
-        box = replace(box, lost_area_fraction=box.lost_fraction(width, height))
-        _crop_file(stack_path, box)
-        stem, _ = os.path.splitext(stack_path)
-        rejection_map = stem + _REJECTION_MAP_SUFFIX
-        if os.path.isfile(rejection_map):
-            _crop_file(rejection_map, box)
+        if max(trimmed) >= minimum_px:
+            stack_box = replace(box, lost_area_fraction=box.lost_fraction(width, height))
+            crop_file(stack_path, stack_box)
+            stem, _ = os.path.splitext(stack_path)
+            rejection_map = stem + _REJECTION_MAP_SUFFIX
+            if os.path.isfile(rejection_map):
+                crop_file(rejection_map, stack_box)
     except (OSError, ValueError) as error:
         logger.warning("Could not trim the edges of '%s': %s. It is left whole.", stack_path, error)
         return None
-    logger.info(
-        "Trimmed '%s' to columns %d-%d and rows %d-%d (%.1f%% of the area). %s",
-        stack_path,
-        box.x0,
-        box.x1,
-        box.y0,
-        box.y1,
-        100 * box.lost_fraction(width, height),
-        box.reason,
-    )
-    return box
+    if stack_box is not None:
+        logger.info(
+            "Trimmed '%s' to columns %d-%d and rows %d-%d (%.1f%% of the area). %s",
+            stack_path,
+            stack_box.x0,
+            stack_box.x1,
+            stack_box.y0,
+            stack_box.y1,
+            100 * stack_box.lost_area_fraction,
+            stack_box.reason,
+        )
+    if processed is not None:
+        logger.info("The processed picture of '%s' will keep %s", stack_path, processed.reason)
+    return StackCrops(stack_box, processed) if stack_box is not None or processed is not None else None

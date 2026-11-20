@@ -219,15 +219,18 @@ When a stack has more than one exposure group, `stack_runner.py` lines up the gr
 
 ### Trimming noisy edges
 
-**Why it matters.** Frames shift between nights, so fewer frames cover the edges of a stack of several nights, and the edges are noisier.
+**Why it matters.** Frames shift between nights, so fewer frames cover the edges of a stack of several nights, and the edges are noisier. Noise goes as one over the square root of the number of frames covering a pixel.
 
-**What it does.** After the stack is complete, `stack_crop.py` trims the stack and its rejection map back to where the pixel noise falls to within 15% of the interior's (partly measured; see [STK-23](../../../documentation/library_design/validation/stacking.md#stk-23)). The rejection map is an image of how many values the stacker threw out at each pixel. The trim measures the noise in 25-pixel strips and finds the noisy run on each side.
+**What it does.** After the stack is complete, `stack_crop.py` counts, for every pixel, how many included frames cover it (from each frame's registration transform). It then makes two crops, each the largest box with the original proportions (a square stack stays square) inside the covered area, as near the image center as that area allows (partly measured; see [STK-23](../../../documentation/library_design/validation/stacking.md#stk-23)).
 
-**Why these numbers.** The 15% limit sits between the noisy and the clean edges of the stacks measured. For frames of equal weight, 15% more noise means an edge covered by about three quarters of the frames, because noise goes as one over the square root of the number of frames. A 25-pixel strip holds thousands of sky pixels for a steady noise estimate and still places the edge within a few dozen pixels.
+- **The linear stack and its rejection map** are trimmed only where fewer than half the frames cover them (`STACK_MINIMUM_COVERAGE_FRACTION`, 0.5). The registration leaves part-empty borders there. Above half, the stack keeps all its real data, so photometry, astrometry and star-shape measurements can use stars near the edges. A trim of more than a quarter of a side is refused. The sky-coordinate reference moves with the crop, and a trim is recorded as a `stacking.notice_stack_cropped` row.
+- **The processed picture** (`*_processed.fits` and its JPEG) is cropped to the area covered by at least 85% of the frames (`PROCESSED_MINIMUM_COVERAGE_FRACTION`). The crop is made on the preview's scratch copy before GraXpert and Cosmic Clarity run, so their models never see the noisy edge. The stack file is never cut for it. The box is saved in the registration record (`processed_crop`, on the trimmed stack as registered) and is turned with the stack if the stack was turned by a quarter turn. The picture's header records where it sits on the saved stack (`CROPX0`, `CROPY0`, `CROPW` and `CROPH`), and its reference pixel is moved by the same offset, so its plate solution stays exact. The viewer's star labels read the picture's own sky map, and a frame pixel is mapped onto the picture through the crop.
 
-It then cuts out the largest box with the original proportions (a square stack stays square) that fits in what is left, as near the image center as the clean area allows. It changes nothing on a stack with clean edges. It refuses a trim of more than a quarter of a side. It moves the sky-coordinate reference with the crop.
+With no registration transforms (an older stack), the stack is trimmed by measured noise instead (a strip's noise above 1.15 times the interior's) and the picture keeps the whole stack. A stack made before the box was recorded has a picture with no crop until it is stacked again.
 
-**Setting.** `trim_noisy_stack_edges_enabled` (default `true`) turns it off.
+**Why these numbers.** Edge noise follows the coverage: measured on 15 stacks, the mean edge noise was 1.001, 1.014, 1.036 and 1.070 times the interior's for coverage of at least 0.99, 0.95 to 0.99, 0.90 to 0.95 and 0.80 to 0.90 (see STK-23). At 0.85 the edge noise is at most 1/sqrt(0.85) = 1.085 times the interior's, and at most 5% of the area is lost on 11 of the 15 stacks. A stricter 95% cut lost 42% of the area on NGC 7331 and M 13 and 33% on NGC 2244.
+
+**Setting.** `trim_noisy_stack_edges_enabled` (default `true`) turns both crops off.
 
 ## Judging the result (step 6)
 

@@ -674,9 +674,11 @@ def _save_stack_plate_solution(run: StackRun, stacked_path: str | None) -> None:
     which marks it as plate-solved. A stack that already carries a plate
     solution is not solved again.
 
-    The viewer shows the stack's stretched FITS (`processed_fits_path_for`),
-    which has the same pixel grid, so the solution is written there too when
-    that file exists, has the same size and has no solution yet.
+    The viewer shows the stack's stretched FITS (`processed_fits_path_for`).
+    The solution is written there too when that file exists and has none yet.
+    The file has the stack's pixel grid, or a crop of it whose place on the
+    stack its header gives (``CROPX0`` and the other crop cards), and then the
+    solution is moved by the crop's offset.
 
     This runs for a stack that was just made and for one that was up to date
     and skipped, so an older stack gets its solution on the next run. A
@@ -698,6 +700,14 @@ def _save_stack_plate_solution(run: StackRun, stacked_path: str | None) -> None:
     from astrometricslib.pipelines.shared.session_identification import (
         header_is_plate_solved,
         write_wcs_to_fits_header,
+    )
+    from astrometricslib.pipelines.stacking.post_processing.stack_crop import (
+        CROP_HEIGHT_KEYWORD,
+        CROP_WIDTH_KEYWORD,
+        CROP_X0_KEYWORD,
+        CROP_Y0_KEYWORD,
+        CropBox,
+        shift_header_for_crop,
     )
     from astrometricslib.pipelines.stacking.post_processing.stack_noise import _plate_solve_stack_wcs
     from astrometricslib.utilities.stack_preview_path import processed_fits_path_for
@@ -731,9 +741,24 @@ def _save_stack_plate_solution(run: StackRun, stacked_path: str | None) -> None:
         stack_header.get("NAXIS1"),
         stack_header.get("NAXIS2"),
     )
-    if same_grid and not header_is_plate_solved(processed_header):
+    if header_is_plate_solved(processed_header):
+        return
+    if same_grid:
         write_wcs_to_fits_header(processed_path, wcs)
         logger.info("Saved the plate solution in the viewer's copy %s.", os.path.basename(processed_path))
+        return
+    # A cropped picture: its header says where it sits on the stack, so the
+    # stack's solution is moved by that offset.
+    crop = [
+        processed_header.get(key)
+        for key in (CROP_X0_KEYWORD, CROP_Y0_KEYWORD, CROP_WIDTH_KEYWORD, CROP_HEIGHT_KEYWORD)
+    ]
+    if None in crop or (crop[2], crop[3]) != (processed_header.get("NAXIS1"), processed_header.get("NAXIS2")):
+        return
+    shifted_header = stack_header.copy()
+    shift_header_for_crop(shifted_header, CropBox(crop[0], crop[0] + crop[2], crop[1], crop[1] + crop[3]))
+    write_wcs_to_fits_header(processed_path, WCS(shifted_header).celestial)
+    logger.info("Saved the shifted plate solution in the cropped copy %s.", os.path.basename(processed_path))
 
 
 def _turn_stack_north_up(run: StackRun, stacked_path: str | None) -> bool:

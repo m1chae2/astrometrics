@@ -184,6 +184,25 @@ def test_registration_record_links_frame_stack_and_frame(tmp_path: Path) -> None
     assert (across["x"], across["y"]) == pytest.approx((15.0, 17.0))
 
 
+def test_a_cropped_processed_picture_is_linked_to_frames_through_its_crop(tmp_path: Path) -> None:
+    """A frame pixel lands on the picture at its stack pixel minus the crop."""
+    library = tmp_path / "library"
+    frames = [library / "lights" / f"frame_{index}.fits" for index in range(2)]
+    for frame in frames:
+        _write_image(frame, shape=(40, 60))
+    stack = library / "stacks" / "target" / "T_Stacked.fits"
+    _write_image(stack, shape=(38, 56))
+    picture = stack.with_name("T_Stacked_processed.fits")
+    _write_image(picture, shape=(30, 44), header={"CROPX0": 6, "CROPY0": 4, "CROPW": 44, "CROPH": 30})
+    _write_record(stack, frames, [(0.0, 0.0), (5.0, 3.0)], (2, 1))
+    service = _service(library)
+    to_picture = service.map_position(str(frames[1]), 10.0, 20.0, str(picture))
+    assert to_picture["method"] == "stack alignment"
+    assert (to_picture["x"], to_picture["y"]) == pytest.approx((13.0 - 6.0, 16.0 - 4.0))
+    back = service.map_position(str(picture), to_picture["x"], to_picture["y"], str(frames[1]))
+    assert (back["x"], back["y"]) == pytest.approx((10.0, 20.0))
+
+
 def test_frames_of_different_stacks_are_chained_through_the_sky(tmp_path: Path) -> None:
     """Frames of two stacks are linked through the stacks and the sky."""
     library = tmp_path / "library"

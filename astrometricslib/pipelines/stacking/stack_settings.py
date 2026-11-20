@@ -65,8 +65,11 @@ def trim_noisy_stack_edges(
     """Trim the thinly covered edges of a stack when the setting asks for it.
 
     Frames shift between nights, so the edges of a stack of several nights are
-    covered by fewer frames and are noisier. A stack whose frames all cover it
-    is left as it is. A spectral stack is never trimmed.
+    covered by fewer frames and are noisier. The stack is trimmed only where
+    fewer than half the frames cover it. The box the processed picture will
+    keep (where at least 85% do) is put in ``diagnostics["processed_crop"]``.
+    A stack whose frames all cover it is left as it is. A spectral stack is
+    never trimmed.
 
     Parameters
     ----------
@@ -90,11 +93,22 @@ def trim_noisy_stack_edges(
         return (0, 0)
     from astrometricslib.pipelines.stacking.post_processing.stack_crop import crop_stack_edges
 
-    crop_box = crop_stack_edges(stacked_path, diagnostics)
-    if crop_box is None:
+    crops = crop_stack_edges(stacked_path, diagnostics)
+    if crops is None:
+        return (0, 0)
+    if diagnostics is not None and crops.processed is not None:
+        # The registration record keeps this box. The preview crops its copy
+        # of the stack to it before GraXpert and Cosmic Clarity run.
+        processed = crops.processed
+        diagnostics["processed_crop"] = [processed.x0, processed.x1, processed.y0, processed.y1]
+    if crops.stack is None:
         return (0, 0)
     if diagnostics is not None:
         # The stage copies this into the stack's quality summary, where it
-        # becomes the `stacking.notice_stack_cropped` row.
-        diagnostics["stack_crop"] = {"reason": crop_box.reason, "area_fraction": crop_box.lost_area_fraction}
-    return (crop_box.x0, crop_box.y0)
+        # becomes the `stacking.notice_stack_cropped` row (only when the
+        # stack itself was trimmed).
+        diagnostics["stack_crop"] = {
+            "reason": crops.stack.reason,
+            "area_fraction": crops.stack.lost_area_fraction,
+        }
+    return (crops.stack.x0, crops.stack.y0)

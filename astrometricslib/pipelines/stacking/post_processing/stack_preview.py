@@ -42,6 +42,11 @@ route. The normal stretch would push the whole object to white (see
 `bright_object`), so one Siril script applies a stretch scaled to the
 object's own brightness, and GraXpert and Cosmic Clarity are skipped.
 
+The picture is also cropped, to the area covered by at least 85% of the
+frames, before the first step (see `stack_crop`). The crop's place on the
+stack is written in the picture's header (``CROPX0``, ``CROPY0``, ``CROPW``
+and ``CROPH``), and its plate solution is moved with it.
+
 All steps run on a scratch copy of the stack and the result is saved as a
 JPEG beside the stack. The JPEG is only a picture for people to look at. The
 stack itself is never changed, so photometry, spectroscopy and plate solving
@@ -85,6 +90,7 @@ from astrometricslib.pipelines.shared.image_scaling import (
     measure_sky_background,
     midtones_balance_for,
 )
+from astrometricslib.pipelines.shared.registration_record import read_registration_record
 from astrometricslib.pipelines.shared.stack_preview_path import (
     PREVIEW_JPEG_QUALITY,
     is_preview_path,
@@ -98,7 +104,9 @@ from astrometricslib.pipelines.stacking.post_processing.bright_object import (
     choose_bright_object_stretch_for_file,
 )
 from astrometricslib.pipelines.stacking.post_processing.colour_calibration import calibrate_colours_in_file
+from astrometricslib.pipelines.stacking.post_processing.quarter_turn import read_quarter_turn
 from astrometricslib.pipelines.stacking.post_processing.sky_level import choose_sky_level_for_file
+from astrometricslib.pipelines.stacking.post_processing.stack_crop import CropBox, crop_file, turn_box
 from astrometricslib.pipelines.stacking.post_processing.star_tone import tone_stars_in_file
 from astrometricslib.pipelines.stacking.post_processing.starnet_stretch import (
     DEFAULT_STAR_STRENGTH,
@@ -1198,6 +1206,45 @@ _LAYOUT_KEYWORDS = frozenset({
 })
 
 
+def picture_crop_box(stacked_path: str) -> CropBox | None:
+    """Find the part of a stack its processed picture keeps.
+
+    The stacking run saves the box in the stack's registration record, on the
+    stack as registered. The saved stack may have been turned by a quarter
+    turn since (see `quarter_turn`), so the box is turned the same way.
+
+    Parameters
+    ----------
+    stacked_path : `str`
+        Path of the stack, as saved.
+
+    Returns
+    -------
+    box : `CropBox` or `None`
+        The box on the saved stack's pixels, or `None` when the picture keeps
+        the whole stack: no record, no box, a spectral stack, or a box that
+        does not fit the file.
+    """
+    record = read_registration_record(stacked_path)
+    if record is None or record.processed_crop is None or record.is_spectral:
+        return None
+    try:
+        header = read_header(stacked_path)
+        width, height = int(header["NAXIS1"]), int(header["NAXIS2"])
+    except OSError, KeyError, ValueError:
+        return None
+    degrees = read_quarter_turn(header) or 0
+    registered_width, registered_height = (height, width) if degrees % 180 else (width, height)
+    x0, x1, y0, y1 = record.processed_crop
+    box = turn_box(CropBox(x0, x1, y0, y1), degrees, registered_width, registered_height)
+    if not (0 <= box.x0 < box.x1 <= width and 0 <= box.y0 < box.y1 <= height):
+        logger.warning(
+            "The saved picture crop of '%s' does not fit the stack; the picture keeps it whole.", stacked_path
+        )
+        return None
+    return box
+
+
 def _copy_observation_header(stacked_path: str, processed_path: str) -> None:
     """Copy the observation keywords from a stack to its stretched FITS.
 
@@ -1211,7 +1258,8 @@ def _copy_observation_header(stacked_path: str, processed_path: str) -> None:
     Parameters
     ----------
     stacked_path : `str`
-        Path of the stack.
+        Path of the stack, or of the copy of it the picture was made from
+        (which holds the crop's reference pixel and cards).
     processed_path : `str`
         Path of the stretched FITS, which is rewritten.
     """
@@ -1397,7 +1445,18 @@ def write_stack_preview(
         os.makedirs(_SCRATCH_ROOT, exist_ok=True)
         _remove_stale_scratch_folders()
         scratch = tempfile.mkdtemp(prefix="stack_preview_", dir=_SCRATCH_ROOT)
-        shutil.copyfile(stacked_path, os.path.join(scratch, "stack.fits"))
+        scratch_stack = os.path.join(scratch, "stack.fits")
+        shutil.copyfile(stacked_path, scratch_stack)
+        # Only the picture is cropped, and before GraXpert and Cosmic Clarity
+        # run, so their models never see the noisy edge. The stack is not.
+        crop_box = picture_crop_box(stacked_path)
+        if crop_box is not None:
+            try:
+                crop_file(scratch_stack, crop_box, note_crop=True)
+            except (OSError, ValueError) as error:
+                logger.warning(
+                    "Could not crop the picture of '%s': %s. It keeps the whole stack.", stacked_path, error
+                )
         settings_used: dict[str, Any] = {}
         steps_taken: list[str] = []
         commands = _picture_script(
@@ -1416,7 +1475,9 @@ def write_stack_preview(
         stretched_fits = os.path.join(scratch, f"{_PROCESSED_STEM}.fits")
         if os.path.isfile(stretched_fits):
             shutil.move(stretched_fits, processed_path)
-            _copy_observation_header(stacked_path, processed_path)
+            # The scratch copy holds the stack's header with the crop applied
+            # (the shifted reference pixel and the crop cards).
+            _copy_observation_header(scratch_stack, processed_path)
         write_preview_settings(stacked_path, settings or PreviewSettings(), settings_used, steps_taken)
     except (OSError, subprocess.SubprocessError) as error:
         logger.warning("No preview made for '%s': %s.", stacked_path, error)

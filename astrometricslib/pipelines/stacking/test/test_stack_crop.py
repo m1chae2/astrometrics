@@ -118,9 +118,12 @@ def test_cropping_a_file_trims_the_stack_and_its_rejection_map_and_moves_the_ref
     fits.writeto(stack, data, header)
     fits.writeto(rejection, np.ones((SIZE, SIZE), dtype=np.float32), header)
 
-    box = sc.crop_stack_edges(str(stack))
+    crops = sc.crop_stack_edges(str(stack))
 
+    assert crops is not None
+    box = crops.stack
     assert box is not None
+    assert crops.processed is None
     with fits.open(stack, memmap=False) as hdul:
         assert hdul[0].data.shape == (box.y1 - box.y0, box.x1 - box.x0)
         assert hdul[0].data.shape[0] == hdul[0].data.shape[1]
@@ -187,7 +190,7 @@ def test_a_thin_edge_covered_by_few_frames_is_cut_and_the_shape_is_kept() -> Non
     counts = sc._coverage_from_diagnostics(diagnostics, SIZE, SIZE)
     assert counts is not None
 
-    box = sc.find_coverage_crop_box(counts, 4, SIZE, SIZE)
+    box = sc.find_coverage_crop_box(counts, 4, SIZE, SIZE, 0.95)
 
     assert box.x1 - box.x0 == box.y1 - box.y0
     assert box.x0 >= 100 - 4
@@ -197,12 +200,12 @@ def test_a_thin_edge_covered_by_few_frames_is_cut_and_the_shape_is_kept() -> Non
 
 
 def test_the_coverage_crop_leaves_only_pixels_that_enough_frames_cover() -> None:
-    """Every kept pixel is covered by at least 95% of the frames."""
+    """Every kept pixel is covered by enough of the frames."""
     diagnostics = shifted_group_diagnostics(120, 12, 100.0, 40.0)
     counts = sc._coverage_from_diagnostics(diagnostics, SIZE, SIZE)
     assert counts is not None
 
-    box = sc.find_coverage_crop_box(counts, 4, SIZE, SIZE)
+    box = sc.find_coverage_crop_box(counts, 4, SIZE, SIZE, 0.95)
 
     kept = counts[box.y0 // 4 : (box.y1 - 1) // 4 + 1, box.x0 // 4 : (box.x1 - 1) // 4 + 1]
     assert kept.min() >= 114
@@ -214,7 +217,7 @@ def test_a_few_frames_shifted_a_little_cost_only_a_thin_margin() -> None:
     counts = sc._coverage_from_diagnostics(diagnostics, SIZE, SIZE)
     assert counts is not None
 
-    box = sc.find_coverage_crop_box(counts, 4, SIZE, SIZE)
+    box = sc.find_coverage_crop_box(counts, 4, SIZE, SIZE, 0.95)
 
     assert SIZE - 30 <= box.x1 - box.x0 < SIZE
 
@@ -237,7 +240,7 @@ def test_the_reason_names_the_cut_sides_the_frame_counts_and_the_rule() -> None:
     counts = sc._coverage_from_diagnostics(diagnostics, SIZE, SIZE)
     assert counts is not None
 
-    box = sc.find_coverage_crop_box(counts, 4, SIZE, SIZE)
+    box = sc.find_coverage_crop_box(counts, 4, SIZE, SIZE, 0.95)
 
     assert "left" in box.reason
     assert "108 of 120 frames" in box.reason
@@ -251,7 +254,7 @@ def test_frames_that_are_not_included_are_not_counted() -> None:
     counts = sc._coverage_from_diagnostics(diagnostics, SIZE, SIZE)
     assert counts is not None
 
-    box = sc.find_coverage_crop_box(counts, 4, SIZE, SIZE)
+    box = sc.find_coverage_crop_box(counts, 4, SIZE, SIZE, 0.95)
 
     assert (box.x0, box.x1) == (0, SIZE)
 
@@ -262,7 +265,7 @@ def test_a_group_shifted_over_a_quarter_of_the_side_leaves_the_stack_whole() -> 
     counts = sc._coverage_from_diagnostics(diagnostics, SIZE, SIZE)
     assert counts is not None
 
-    assert sc.find_coverage_crop_box(counts, 4, SIZE, SIZE).x0 == 0
+    assert sc.find_coverage_crop_box(counts, 4, SIZE, SIZE, 0.95).x0 == 0
 
 
 def test_cropping_a_file_by_coverage_records_the_reason(tmp_path: Path) -> None:
@@ -270,8 +273,10 @@ def test_cropping_a_file_by_coverage_records_the_reason(tmp_path: Path) -> None:
     stack = tmp_path / "NGC_7331_L_Stacked.fits"
     fits.writeto(stack, make_stack().astype(np.float32))
 
-    box = sc.crop_stack_edges(str(stack), shifted_group_diagnostics(120, 12, 100.0, 40.0))
+    crops = sc.crop_stack_edges(str(stack), shifted_group_diagnostics(120, 70, 100.0, 40.0))
 
+    assert crops is not None
+    box = crops.stack
     assert box is not None
     assert "covered by as few as" in box.reason
     with fits.open(stack, memmap=False) as hdul:
@@ -317,7 +322,7 @@ def test_trimming_a_stack_puts_the_reason_in_the_run_diagnostics(tmp_path: Path)
 
     stack = tmp_path / "NGC_7331_L_Stacked.fits"
     fits.writeto(stack, make_stack().astype(np.float32))
-    diagnostics = shifted_group_diagnostics(120, 12, 100.0, 40.0)
+    diagnostics = shifted_group_diagnostics(120, 70, 100.0, 40.0)
 
     class Configuration:
         """A configuration with the trim switched on."""
@@ -336,3 +341,183 @@ def test_trimming_a_stack_puts_the_reason_in_the_run_diagnostics(tmp_path: Path)
 
     assert "covered by as few as" in diagnostics["stack_crop"]["reason"]
     assert 0.0 < diagnostics["stack_crop"]["area_fraction"] < 0.5
+
+
+def test_the_stack_keeps_edges_that_more_than_half_the_frames_cover(tmp_path: Path) -> None:
+    """25 of 120 frames shifted 100 px leave the stack whole."""
+    stack = tmp_path / "NGC_7331_L_Stacked.fits"
+    fits.writeto(stack, make_stack().astype(np.float32))
+    diagnostics = shifted_group_diagnostics(120, 25, 100.0, 40.0)
+
+    crops = sc.crop_stack_edges(str(stack), diagnostics)
+
+    assert crops is not None
+    assert crops.stack is None
+    with fits.open(stack, memmap=False) as hdul:
+        assert hdul[0].data.shape == (SIZE, SIZE)
+
+
+def test_a_stack_that_is_trimmed_only_below_half_coverage(tmp_path: Path) -> None:
+    """With 70 of 120 frames shifted, the strip only 50 cover is cut."""
+    diagnostics = shifted_group_diagnostics(120, 70, 100.0, 0.0)
+    counts = sc._coverage_from_diagnostics(diagnostics, SIZE, SIZE)
+    assert counts is not None
+
+    box = sc.find_coverage_crop_box(counts, 4, SIZE, SIZE)
+
+    assert 100 - 4 <= box.x0 <= 100 + 4
+    assert "at least 60 of 120 frames (50%)" in box.reason
+
+
+def test_the_processed_picture_is_cropped_to_85_percent_coverage_in_the_stack_shape() -> None:
+    """The picture box holds pixels 85% of frames cover, in shape."""
+    diagnostics = shifted_group_diagnostics(120, 25, 100.0, 40.0)
+    counts = sc._coverage_from_diagnostics(diagnostics, SIZE, SIZE)
+    assert counts is not None
+    stack_box = sc.find_coverage_crop_box(counts, 4, SIZE, SIZE)
+
+    box = sc.find_coverage_crop_box(
+        counts,
+        4,
+        SIZE,
+        SIZE,
+        sc.PROCESSED_MINIMUM_COVERAGE_FRACTION.default,
+        within=stack_box,
+        limit_trim=False,
+    )
+
+    assert box.x1 - box.x0 == box.y1 - box.y0
+    assert box.x0 >= 100 - 4
+    kept = counts[box.y0 // 4 : (box.y1 - 1) // 4 + 1, box.x0 // 4 : (box.x1 - 1) // 4 + 1]
+    assert kept.min() >= 102
+    assert box.x0 >= stack_box.x0 and box.x1 <= stack_box.x1
+
+
+def test_the_processed_box_is_given_on_the_trimmed_stack(tmp_path: Path) -> None:
+    """The picture box counts from the trimmed stack's corner."""
+    stack = tmp_path / "NGC_7331_L_Stacked.fits"
+    fits.writeto(stack, make_stack().astype(np.float32))
+    # 50 frames sit still, 30 are shifted 100 px and 40 are shifted 130 px, so
+    # the first 100 columns are covered by 50 frames (42%), the next 30 by 80
+    # (67%) and the rest by all.
+    shifts = [0.0] * 50 + [100.0] * 30 + [130.0] * 40
+    diagnostics = {
+        "registration_frames": [{"homography": shift_matrix(dx, 0.0)} for dx in shifts],
+        "registration_included": [True] * 120,
+    }
+
+    crops = sc.crop_stack_edges(str(stack), diagnostics)
+
+    assert crops is not None and crops.stack is not None and crops.processed is not None
+    trimmed_width = crops.stack.x1 - crops.stack.x0
+    assert 0 <= crops.processed.x0 < crops.processed.x1 <= trimmed_width
+    assert crops.processed.x1 - crops.processed.x0 == crops.processed.y1 - crops.processed.y0
+
+
+def test_trimming_records_the_processed_box_in_the_diagnostics(tmp_path: Path) -> None:
+    """The diagnostics carry the picture box; the stack is left alone."""
+    from astrometricslib.pipelines.stacking.stack_settings import trim_noisy_stack_edges
+
+    stack = tmp_path / "NGC_7331_L_Stacked.fits"
+    fits.writeto(stack, make_stack().astype(np.float32))
+    diagnostics = shifted_group_diagnostics(120, 25, 100.0, 40.0)
+
+    class Configuration:
+        """A configuration with the trim switched on."""
+
+        def get_trim_noisy_stack_edges_enabled(self) -> bool:
+            """Say that trimming is on.
+
+            Returns
+            -------
+            enabled : `bool`
+                Always `True`.
+            """
+            return True
+
+    offset = trim_noisy_stack_edges(str(stack), Configuration(), is_spectral=False, diagnostics=diagnostics)
+
+    assert offset == (0, 0)
+    assert "stack_crop" not in diagnostics
+    x0, x1, y0, y1 = diagnostics["processed_crop"]
+    assert x0 >= 96 and x1 - x0 == y1 - y0
+
+
+def test_a_crop_keeps_a_stars_sky_position_exact(tmp_path: Path) -> None:
+    """A star keeps its sky position on the cropped file (with SIP)."""
+    from astropy.wcs import WCS
+
+    from astrometricslib.pipelines.stacking.post_processing.stack_preview import picture_crop_box
+
+    wcs = WCS(naxis=2)
+    wcs.wcs.crpix = [500.0, 480.0]
+    wcs.wcs.crval = [250.0, 36.0]
+    wcs.wcs.cdelt = [-0.0003, 0.0003]
+    wcs.wcs.ctype = ["RA---TAN-SIP", "DEC--TAN-SIP"]
+    wcs.sip = __import__("astropy.wcs", fromlist=["Sip"]).Sip(
+        np.array([[0, 0, 1e-7], [0, 2e-7, 0], [1e-7, 0, 0]]),
+        np.array([[0, 0, 0], [0, 1e-7, 0], [2e-7, 0, 0]]),
+        None,
+        None,
+        wcs.wcs.crpix,
+    )
+    header = wcs.to_header(relax=True)
+    stack = tmp_path / "M_1_Stacked.fits"
+    fits.writeto(stack, make_stack().astype(np.float32), header)
+    box = sc.CropBox(120, 920, 130, 930)
+
+    sc.crop_file(str(stack), box, note_crop=True)
+
+    with fits.open(stack, memmap=False) as hdul:
+        cropped_header = hdul[0].header
+        assert (cropped_header["CROPX0"], cropped_header["CROPY0"]) == (120, 130)
+        assert (cropped_header["CROPW"], cropped_header["CROPH"]) == (800, 800)
+        cropped_wcs = WCS(cropped_header)
+    for column, row in [(300.0, 400.0), (700.5, 250.25), (130.0, 900.0)]:
+        before = wcs.all_pix2world([[column, row]], 0)
+        after = cropped_wcs.all_pix2world([[column - 120, row - 130]], 0)
+        assert np.allclose(before, after, atol=1e-9)
+    assert picture_crop_box(str(tmp_path / "missing.fits")) is None
+
+
+def test_turning_a_box_matches_turning_the_image() -> None:
+    """The turned box holds exactly the pixels the original box held."""
+    from astrometricslib.pipelines.stacking.post_processing.quarter_turn import turn_image
+
+    image = np.arange(60 * 100).reshape(60, 100)
+    box = sc.CropBox(10, 70, 5, 45)
+    for degrees in (0, 90, 180, 270):
+        turned_box = sc.turn_box(box, degrees, 100, 60)
+        expected = turn_image(image[box.y0 : box.y1, box.x0 : box.x1], degrees)
+        turned = turn_image(image, degrees)[turned_box.y0 : turned_box.y1, turned_box.x0 : turned_box.x1]
+        assert np.array_equal(turned, expected)
+
+
+@pytest.mark.parametrize("degrees", [0, 90, 180, 270])
+def test_the_picture_crop_composes_with_a_quarter_turn(tmp_path: Path, degrees: int) -> None:
+    """The turned stack, cropped, is the turned crop of the registered one."""
+    from astrometricslib.pipelines.shared.registration_record import (
+        RegistrationRecord,
+        read_registration_record,
+        write_registration_record,
+    )
+    from astrometricslib.pipelines.stacking.post_processing.quarter_turn import turn_image
+    from astrometricslib.pipelines.stacking.post_processing.stack_preview import picture_crop_box
+
+    registered = np.arange(60 * 100, dtype=np.float32).reshape(60, 100)
+    stack = tmp_path / "M_1_Stacked.fits"
+    header = fits.Header()
+    header["QTURN"] = degrees
+    fits.writeto(stack, turn_image(registered, degrees), header)
+    record = RegistrationRecord(
+        ("a.fits",), (tuple(shift_matrix(0, 0)),), (True,), (0, 0), None, False, degrees, (10, 70, 5, 45)
+    )
+    write_registration_record(str(stack), record)
+    assert read_registration_record(str(stack)).processed_crop == (10, 70, 5, 45)
+
+    box = picture_crop_box(str(stack))
+
+    assert box is not None
+    with fits.open(stack, memmap=False) as hdul:
+        picture = hdul[0].data[box.y0 : box.y1, box.x0 : box.x1]
+    assert np.array_equal(picture, turn_image(registered[5:45, 10:70], degrees))

@@ -319,6 +319,28 @@ def _header_of(path: str) -> fits.Header:
         return hdul[0].header.copy()
 
 
+def _picture_offset(path: str) -> tuple[int, int]:
+    """Say where a cropped processed picture starts on its stack.
+
+    The picture is cropped to the well-covered area, and its header holds the
+    columns and rows cut from the stack's left and top (``CROPX0`` and
+    ``CROPY0``). A stack, or a picture with no crop, has none.
+
+    Parameters
+    ----------
+    path : `str`
+        The image.
+
+    Returns
+    -------
+    offset : `tuple` [`int`, `int`]
+        Columns and rows to subtract from a stack pixel to get the picture
+        pixel; (0, 0) for an image with no crop.
+    """
+    header = _header_of(path)
+    return int(header.get("CROPX0", 0)), int(header.get("CROPY0", 0))
+
+
 def _is_plate_solved(header: fits.Header) -> bool:
     """Say whether a header holds a real plate solution.
 
@@ -500,10 +522,15 @@ class PositionMapper:
         """
         to_record = self._record_of_stack(to_path)
         if to_record is not None and (position := _position_of(to_record, from_path)) is not None:
-            return frame_to_stack(to_record, position, x, y, self._frame_height(from_path))
+            stack_x, stack_y = frame_to_stack(to_record, position, x, y, self._frame_height(from_path))
+            offset_x, offset_y = _picture_offset(to_path)
+            return stack_x - offset_x, stack_y - offset_y
         from_record = self._record_of_stack(from_path)
         if from_record is not None and (position := _position_of(from_record, to_path)) is not None:
-            return stack_to_frame(from_record, position, x, y, self._frame_height(to_path))
+            offset_x, offset_y = _picture_offset(from_path)
+            return stack_to_frame(
+                from_record, position, x + offset_x, y + offset_y, self._frame_height(to_path)
+            )
         # Two frames of one stack.
         for record in self._records_holding(from_path):
             from_position = _position_of(record, from_path)

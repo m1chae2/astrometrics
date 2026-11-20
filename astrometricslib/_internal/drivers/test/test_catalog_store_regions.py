@@ -121,31 +121,7 @@ def test_recording_the_same_region_again_replaces_the_record(tmp_path: Path) -> 
     assert catalog_store.is_gaia_region_complete(config, 100.0, 20.0, 1.0, 18.0)
 
 
-def test_the_schema_migration_adds_the_table_to_an_existing_database(tmp_path: Path) -> None:
-    """An old cache file gains ``gaia_cache_regions`` and keeps its data."""
-    config = _Config(tmp_path)
-    connection = sqlite3.connect(catalog_store.get_catalog_cache_path(config))
-    connection.execute(
-        "CREATE TABLE gaia_sources (source_id TEXT PRIMARY KEY, ra REAL, dec REAL, phot_g_mean_mag REAL, "
-        "designation TEXT, pmra REAL, pmdec REAL)"
-    )
-    connection.execute(
-        "CREATE TABLE cached_regions (region_key TEXT PRIMARY KEY, ra REAL, dec REAL, radius REAL)"
-    )
-    connection.execute("INSERT INTO gaia_sources VALUES ('1', 10.0, 20.0, 12.0, 'Gaia DR3 1', NULL, NULL)")
-    connection.execute("INSERT INTO cached_regions VALUES ('old', 10.0, 20.0, 0.5)")
-    connection.commit()
-    connection.close()
-    assert "gaia_cache_regions" not in _table_names(config)
-
-    rows = catalog_store.query_gaia_sources_in_bounds(config, 9.0, 11.0, 19.0, 21.0)
-
-    assert "gaia_cache_regions" in _table_names(config)
-    assert len(rows) == 1
-    assert catalog_store.is_region_cached(config, "old")
-
-
-def test_old_cache_regions_are_not_complete_after_the_migration(tmp_path: Path) -> None:
+def test_old_cache_regions_are_not_complete_in_a_new_file(tmp_path: Path) -> None:
     """Old ``cached_regions`` rows say nothing about depth: not complete."""
     config = _Config(tmp_path)
     catalog_store.mark_region_cached(config, "old", 10.0, 20.0, 0.5)

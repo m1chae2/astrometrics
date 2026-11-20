@@ -24,11 +24,9 @@ database has these tables:
   use ``gaia_cache_regions`` until the star identifier works in tiles.
 
 ``PRAGMA user_version`` holds the schema version. A file from before tiles
-existed (version 0, with a ``gaia_sources`` table) is converted the first
-time it is opened: every tile that lies wholly inside a complete circle is
-marked complete to that circle's depth, and all its stars are copied over.
-If the conversion fails, the old stars are dropped and the cache starts
-empty, which costs only a new download.
+existed (version 0, with a ``gaia_sources`` table) is treated as empty: the
+tile tables are created next to the old ones and nothing is converted, so
+the stars download again.
 """
 
 import logging
@@ -84,9 +82,6 @@ _DEPTH_TOLERANCE = 1e-6
 
 # The most tile numbers put into one SQL statement (SQLite allows 999 values).
 _SQL_CHUNK = 500
-
-# The conversion warning is logged once per process.
-_migration_warning_logged = False
 
 __all__ = [
     "GAIA_TILE_LEVEL",
@@ -259,90 +254,26 @@ def _raise_tile_depths(connection: sqlite3.Connection, tiles: Iterable[int], dep
         )
 
 
-def _convert_old_cache(connection: sqlite3.Connection) -> None:
-    """Move the stars and complete circles of a pre-tile cache into tiles.
-
-    Every old star is copied into ``gaia_stars`` with its tile. Every old
-    circle that did not hit the row limit marks the tiles wholly inside it
-    as complete to the circle's depth. A tile cut by the circle's edge stays
-    unmarked, because the circle holds only part of it. The old star table
-    is then dropped. The circle records stay for the circle functions.
-
-    Parameters
-    ----------
-    connection : `sqlite3.Connection`
-        An open connection, inside a transaction.
-    """
-    level = int(resolve(GAIA_TILE_LEVEL).value)
-    if _table_exists(connection, "gaia_sources"):
-        columns = {row[1] for row in connection.execute("PRAGMA table_info(gaia_sources)")}
-        proper_motion = ", pmra, pmdec" if {"pmra", "pmdec"} <= columns else ", NULL, NULL"
-        # The suffix is one of two fixed strings chosen above, never user text.
-        cursor = connection.execute(
-            f"SELECT source_id, ra, dec, phot_g_mean_mag{proper_motion} FROM gaia_sources"  # ruff: ignore[hardcoded-sql-expression]
-        )
-        while batch := cursor.fetchmany(50_000):
-            rows = []
-            for source_id, ra, dec, magnitude, pmra, pmdec in batch:
-                try:
-                    number = int(source_id)
-                except TypeError, ValueError:
-                    continue
-                rows.append((number, int(tile_of_source_id(number, level)), ra, dec, magnitude, pmra, pmdec))
-            connection.executemany("INSERT OR REPLACE INTO gaia_stars VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
-    if _table_exists(connection, "gaia_cache_regions"):
-        regions = connection.execute(
-            "SELECT ra, dec, radius, magnitude_limit FROM gaia_cache_regions "
-            "WHERE row_limit_hit = 0 AND magnitude_limit IS NOT NULL"
-        ).fetchall()
-        for ra, dec, radius, magnitude_limit in regions:
-            _raise_tile_depths(connection, _tiles_inside_cone(ra, dec, radius, level), magnitude_limit)
-    connection.execute("DROP TABLE IF EXISTS gaia_sources")
-
-
 def _ensure_schema(connection: sqlite3.Connection) -> None:
-    """Make the database current, converting an older file if needed.
+    """Make sure the tile tables exist and the schema version is set.
 
     Safe to call every time a connection is opened: a file already at the
-    current version is left alone after one cheap check. A file from before
-    tiles existed is converted once, under a write lock, so two processes do
-    not convert it twice. If the conversion fails, the old star table is
-    dropped and the cache starts empty (see `_convert_old_cache`).
+    current version is left alone after one cheap check. A file with any
+    other version, such as one from before tiles existed, is treated as
+    empty: the tile tables are created next to whatever it holds and
+    nothing is converted or copied. The stars then download again.
 
     Parameters
     ----------
     connection : `sqlite3.Connection`
         An open connection to the cache database.
     """
-    global _migration_warning_logged
-    if connection.execute("PRAGMA user_version").fetchone()[0] >= _SCHEMA_VERSION:
+    if connection.execute("PRAGMA user_version").fetchone()[0] == _SCHEMA_VERSION:
         return
     connection.execute("BEGIN IMMEDIATE")
-    try:
-        if connection.execute("PRAGMA user_version").fetchone()[0] < _SCHEMA_VERSION:
-            _create_tables(connection)
-            _convert_old_cache(connection)
-            connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
-        connection.commit()
-    except (sqlite3.Error, ValueError, ArithmeticError) as conversion_error:
-        connection.rollback()
-        if not _migration_warning_logged:
-            _migration_warning_logged = True
-            logger.warning(
-                "Could not convert the Gaia cache to sky tiles (%s); the old stars are dropped and "
-                "the cache starts empty.",
-                conversion_error,
-            )
-        connection.execute("BEGIN IMMEDIATE")
-        connection.execute("DROP TABLE IF EXISTS gaia_sources")
-        connection.execute("DROP TABLE IF EXISTS gaia_stars")
-        connection.execute("DROP TABLE IF EXISTS gaia_tiles")
-        _create_tables(connection)
-        # The circle records vouched for stars that are gone now.
-        connection.execute("DELETE FROM gaia_cache_regions")
-        connection.execute("DELETE FROM cached_regions")
-        connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
-        connection.commit()
+    _create_tables(connection)
+    connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+    connection.commit()
 
 
 def is_region_cached(config: Any, region_key: str) -> bool:

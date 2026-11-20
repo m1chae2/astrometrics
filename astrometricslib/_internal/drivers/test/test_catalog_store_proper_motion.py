@@ -1,17 +1,13 @@
 """Purpose: Tests for the proper motion columns of the Gaia cache.
 
 Description: The cache stores each star's proper motion (how far it moves
-across the sky each year) next to its epoch 2016.0 position. A cache file
-written before those columns existed must keep working: the store adds the
-columns, and the stars already in the file read back with an unknown
-(`None`) proper motion. These tests build such an old file by hand.
+across the sky each year) next to its epoch 2016.0 position. These tests
+check that proper motion and its absence round-trip through the cache.
 """
 
-import sqlite3
 from pathlib import Path
 
 from astrometricslib._internal.drivers import catalog_store
-from astrometricslib.foundation.paths import catalog_cache_directory
 
 
 class _Config:
@@ -38,25 +34,6 @@ class _Config:
         return self.library_path
 
 
-def _write_old_cache(library_path: Path) -> None:
-    """Write a cache file with the original five-column ``gaia_sources`` table.
-
-    Parameters
-    ----------
-    library_path : `pathlib.Path`
-        The library folder (not used for the cache file)..
-    """
-    catalogs = Path(catalog_cache_directory())
-    connection = sqlite3.connect(catalogs / "catalog_cache.db")
-    connection.execute(
-        "CREATE TABLE gaia_sources "
-        "(source_id TEXT PRIMARY KEY, ra REAL, dec REAL, phot_g_mean_mag REAL, designation TEXT)"
-    )
-    connection.execute("INSERT INTO gaia_sources VALUES ('1', 10.0, 20.0, 12.0, 'Gaia DR3 1')")
-    connection.commit()
-    connection.close()
-
-
 def _fetch(config: _Config, *, include_proper_motion: bool) -> list[tuple]:
     """Read every cached star in a box around (10, 20) degrees.
 
@@ -78,24 +55,6 @@ def _fetch(config: _Config, *, include_proper_motion: bool) -> list[tuple]:
     return sorted(tuple(row) for row in rows)
 
 
-def test_an_old_cache_gains_the_columns_and_reads_back_unknown_proper_motion(tmp_path: Path) -> None:
-    """A star stored before proper motions existed has `None` for both."""
-    _write_old_cache(tmp_path)
-
-    rows = _fetch(_Config(tmp_path), include_proper_motion=True)
-
-    assert rows == [("1", 10.0, 20.0, 12.0, "Gaia DR3 1", None, None)]
-
-
-def test_the_default_query_still_returns_five_values_per_star(tmp_path: Path) -> None:
-    """Callers that do not ask for proper motion see the old row shape."""
-    _write_old_cache(tmp_path)
-
-    rows = _fetch(_Config(tmp_path), include_proper_motion=False)
-
-    assert rows == [("1", 10.0, 20.0, 12.0, "Gaia DR3 1")]
-
-
 def test_proper_motion_round_trips_through_the_cache(tmp_path: Path) -> None:
     """A stored proper motion is returned; a five-value row stores `None`."""
     config = _Config(tmp_path)
@@ -112,14 +71,3 @@ def test_proper_motion_round_trips_through_the_cache(tmp_path: Path) -> None:
         ("101", 10.0, 20.0, 11.0, "Gaia DR3 101", 1000.0, -250.5),
         ("102", 10.1, 20.1, 12.0, "Gaia DR3 102", None, None),
     ]
-
-
-def test_opening_a_migrated_cache_again_changes_nothing(tmp_path: Path) -> None:
-    """The second open finds the columns already there."""
-    _write_old_cache(tmp_path)
-    config = _Config(tmp_path)
-
-    first = _fetch(config, include_proper_motion=True)
-    second = _fetch(config, include_proper_motion=True)
-
-    assert first == second

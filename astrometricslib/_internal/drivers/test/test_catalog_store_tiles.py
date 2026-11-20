@@ -5,13 +5,11 @@ how deep each tile is complete. These tests check that a star's tile matches
 its source ID, that a tile fills in deeper step by step, that a cut-short
 download records only the depth it reached, that a failed download is
 recorded without hiding stars, and that a cache file from before tiles
-existed is converted (inner tiles complete, edge tiles not).
+existed opens as an empty cache without being converted.
 """
 
 import sqlite3
 from pathlib import Path
-
-import pytest
 
 from astrometricslib._internal.drivers import catalog_store
 from astrometricslib._internal.drivers.sky_tiles import tile_of_source_id, tiles_for_cone
@@ -139,122 +137,33 @@ def test_a_failed_fetch_is_recorded_and_keeps_the_stars(tmp_path: Path) -> None:
     assert cleared == (0, None)
 
 
-def _write_old_cache(config: _Config, region_magnitude: float, row_limit_hit: int) -> list[int]:
-    """Write a cache file in the old circle layout.
-
-    Parameters
-    ----------
-    config : `_Config`
-        The stand-in settings that locate the cache.
-    region_magnitude : `float`
-        The depth of the one recorded circle.
-    row_limit_hit : `int`
-        1 if the circle's download was cut short.
-
-    Returns
-    -------
-    tiles : `list` [`int`]
-        The tiles the circle touches.
-    """
-    tiles = tiles_for_cone(100.0, 20.0, 1.0, LEVEL)
+def test_an_old_format_file_opens_without_conversion(tmp_path: Path) -> None:
+    """A file from before tiles existed opens as empty and is not converted."""
+    config = _Config(tmp_path)
     connection = sqlite3.connect(catalog_store.get_catalog_cache_path(config))
     connection.execute(
         "CREATE TABLE gaia_sources (source_id TEXT PRIMARY KEY, ra REAL, dec REAL, phot_g_mean_mag REAL, "
         "designation TEXT, pmra REAL, pmdec REAL)"
     )
-    connection.execute(
-        "CREATE TABLE gaia_cache_regions (region_key TEXT PRIMARY KEY, ra REAL NOT NULL, dec REAL NOT NULL, "
-        "radius REAL NOT NULL, magnitude_limit REAL, row_limit_hit INTEGER NOT NULL)"
-    )
-    for tile in tiles:
-        source_id = (tile << 45) + 11
-        connection.execute(
-            "INSERT INTO gaia_sources VALUES (?, 100.0, 20.0, 12.0, ?, 3.0, 4.0)",
-            (str(source_id), f"Gaia DR3 {source_id}"),
-        )
-    connection.execute(
-        "INSERT INTO gaia_cache_regions VALUES ('k', 100.0, 20.0, 1.0, ?, ?)",
-        (region_magnitude, row_limit_hit),
-    )
+    connection.execute("INSERT INTO gaia_sources VALUES ('1', 100.0, 20.0, 12.0, 'Gaia DR3 1', 3.0, 4.0)")
     connection.commit()
     connection.close()
-    return tiles
-
-
-def test_a_complete_circle_makes_its_inner_tiles_complete(tmp_path: Path) -> None:
-    """Tiles wholly inside the circle are complete; edge tiles are not."""
-    config = _Config(tmp_path)
-    tiles = _write_old_cache(config, 18.0, 0)
+    tiles = tiles_for_cone(100.0, 20.0, 1.0, LEVEL)
 
     depths = catalog_store.tile_status(config, tiles)
 
-    complete = [tile for tile, depth in depths.items() if depth is not None and depth > 17.999]
-    partial = [tile for tile, depth in depths.items() if depth is None]
-    assert complete
-    assert partial
-    assert len(complete) + len(partial) == len(tiles)
-    # Every stored star was copied with its tile, complete or not.
-    assert len(catalog_store.stars_in_tiles(config, tiles, 13.0)) == len(tiles)
+    assert set(depths.values()) == {None}
+    assert catalog_store.stars_in_tiles(config, tiles, 99.0) == []
     connection = sqlite3.connect(catalog_store.get_catalog_cache_path(config))
     try:
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         version = connection.execute("PRAGMA user_version").fetchone()[0]
+        old_rows = connection.execute("SELECT COUNT(*) FROM gaia_sources").fetchone()[0]
     finally:
         connection.close()
-    assert "gaia_sources" not in tables
+    assert {"gaia_stars", "gaia_tiles"} <= tables
     assert version == 2
-
-
-def test_a_cut_short_circle_makes_no_tile_complete(tmp_path: Path) -> None:
-    """A circle that hit the row limit proves nothing about any tile."""
-    config = _Config(tmp_path)
-    tiles = _write_old_cache(config, 18.0, 1)
-
-    assert set(catalog_store.tile_status(config, tiles).values()) == {None}
-
-
-def test_the_conversion_runs_once(tmp_path: Path) -> None:
-    """Opening the file again changes nothing."""
-    config = _Config(tmp_path)
-    tiles = _write_old_cache(config, 18.0, 0)
-    first = catalog_store.tile_status(config, tiles)
-    count = len(catalog_store.stars_in_tiles(config, tiles, 99.0))
-
-    assert catalog_store.tile_status(config, tiles) == first
-    assert len(catalog_store.stars_in_tiles(config, tiles, 99.0)) == count
-
-
-def test_a_failed_conversion_starts_an_empty_cache(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """A failed conversion drops the old stars and warns once."""
-    config = _Config(tmp_path)
-    tiles = _write_old_cache(config, 18.0, 0)
-
-    def fail(*arguments: object) -> list[int]:
-        """Stand in for the tile finder and always fail.
-
-        Parameters
-        ----------
-        *arguments : `object`
-            Ignored.
-
-        Raises
-        ------
-        ValueError
-            Always.
-        """
-        raise ValueError("broken")
-
-    monkeypatch.setattr(catalog_store, "_tiles_inside_cone", fail)
-    monkeypatch.setattr(catalog_store, "_migration_warning_logged", False)
-    with caplog.at_level("WARNING"):
-        depths = catalog_store.tile_status(config, tiles)
-
-    assert set(depths.values()) == {None}
-    assert catalog_store.stars_in_tiles(config, tiles, 99.0) == []
-    assert not catalog_store.is_gaia_region_complete(config, 100.0, 20.0, 0.5, 10.0)
-    assert len([record for record in caplog.records if "sky tiles" in record.getMessage()]) == 1
+    assert old_rows == 1
 
 
 def test_the_circle_functions_work_on_top_of_tiles(tmp_path: Path) -> None:

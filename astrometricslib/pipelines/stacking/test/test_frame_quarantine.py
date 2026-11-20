@@ -203,18 +203,34 @@ def test_judge_batch_scales_the_elongation_limit_to_the_session() -> None:
     assert moved == {"worst.fits", "bad.fits"}
 
 
-def test_find_frames_refuses_a_batch_where_too_many_look_bad(tmp_path: Path) -> None:
-    """A rule that flags over a quarter of a batch moves nothing."""
-    frames = [make_frame(tmp_path / f"f{index}.fits", float(index)) for index in range(12)]
+def test_find_frames_moves_every_bad_frame_and_warns_when_many_look_bad(tmp_path: Path) -> None:
+    """With 30% of a batch bad, all of them move and the report warns."""
+    frames = [make_frame(tmp_path / f"f{index}.fits", float(index)) for index in range(10)]
     measurements = {
-        frame.path: make_measurement(frame.path, elongation=2.5 if index < 5 else 1.05)
+        frame.path: make_measurement(frame.path, elongation=2.5 if index < 3 else 1.05)
         for index, frame in enumerate(frames)
     }
 
     report = find_frames_to_quarantine(frames, measure=lambda path: dict(measurements[path]))
 
-    assert report.moved == []
-    assert any("none moved" in note for note in report.notes)
+    assert len(report.moved) == 3
+    assert report.batches_with_many_set_aside == 1
+    assert report.warnings == ["3 of 10 frames set aside: 3 trailed"]
+    assert set(report.warning_by_path) == {decision.path for decision in report.moved}
+
+
+def test_find_frames_does_not_warn_at_a_quarter_or_less(tmp_path: Path) -> None:
+    """Two bad frames of 10 are moved without a warning."""
+    frames = [make_frame(tmp_path / f"f{index}.fits", float(index)) for index in range(10)]
+    measurements = {
+        frame.path: make_measurement(frame.path, elongation=2.5 if index < 2 else 1.05)
+        for index, frame in enumerate(frames)
+    }
+
+    report = find_frames_to_quarantine(frames, measure=lambda path: dict(measurements[path]))
+
+    assert len(report.moved) == 2
+    assert report.warnings == []
 
 
 def test_find_frames_notes_small_batches_and_reports_unreadable_frames(tmp_path: Path) -> None:
@@ -542,18 +558,18 @@ def test_a_frame_that_breaks_two_rules_lists_both_reasons() -> None:
     assert decisions[0].reason.startswith("Stars trailed: elongation 1.90, limit 1.32; Few stars: 900")
 
 
-def test_a_rule_over_its_cap_is_dropped_but_the_other_rules_still_act() -> None:
-    """Each rule has its own cap, so many trailed frames do not block cloud."""
+def test_the_warning_counts_each_rule_in_words() -> None:
+    """The warning says how many frames each rule caught."""
     measurements = clean_batch()
     for index in range(5):
         measurements[index] = make_measurement(f"trail_{index}.fits", elongation=2.5)
     measurements[8] = make_measurement("cloud.fits", stars=900, sky=3500.0)
+    decisions = judge_batch(measurements)
 
-    decisions, notes = frame_quarantine.apply_cap_per_rule(judge_batch(measurements), len(measurements))
+    warning = frame_quarantine.describe_many_set_aside(decisions, len(measurements))
 
-    assert [decision.path for decision in decisions] == ["cloud.fits"]
-    assert len(notes) == 1
-    assert "'trailed' rule" in notes[0]
+    assert len(decisions) == 6
+    assert warning == "6 of 12 frames set aside: 5 trailed, 1 few stars"
 
 
 def test_frames_with_no_elongation_are_noted_not_judged_for_trailing() -> None:
@@ -588,3 +604,29 @@ def test_the_manifest_records_the_rule_value_and_limit(tmp_path: Path) -> None:
     assert manifest[0]["reason"] == "Stars trailed: elongation 1.64, limit 1.32"
     assert manifest[0]["star_elongation"] == pytest.approx(1.64)
     assert manifest[0]["rules"] == ["trailed"]
+
+
+def test_the_manifest_carries_the_warning_when_many_frames_are_set_aside(tmp_path: Path) -> None:
+    """With 30% bad, every moved frame is listed with the warning."""
+    directory = tmp_path / "Camera"
+    directory.mkdir()
+    frames = []
+    for index in range(10):
+        path = directory / f"f{index}.fits"
+        path.write_bytes(b"x")
+        frames.append(make_frame(path, float(index)))
+    target = SimpleNamespace(id="T", frames=list(frames), recalculate_total_exposure=lambda: None)
+
+    kept, report = quarantine_bad_frames(
+        target,
+        frames,
+        measure=lambda path: make_measurement(
+            path, elongation=1.64 if "f0" in path or "f1" in path or "f2" in path else 1.05
+        ),
+    )
+
+    manifest = json.loads((directory / QUARANTINE_FOLDER_NAME / MANIFEST_FILE_NAME).read_text())
+    assert len(manifest) == 3
+    assert len(kept) == 7
+    assert {entry["warning"] for entry in manifest} == {"3 of 10 frames set aside: 3 trailed"}
+    assert report.warnings == ["3 of 10 frames set aside: 3 trailed"]

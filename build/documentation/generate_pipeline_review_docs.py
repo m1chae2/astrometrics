@@ -302,8 +302,8 @@ GATE_DESCRIPTIONS: dict[str, str] = {
         "aside, which corrects the stack. Not checked when no frame records its gain setting."
     ),
     "frame_quarantine": (
-        "Fails when a batch had more bad frames (too few stars, or stars not round) than "
-        "`MAXIMUM_QUARANTINED_FRACTION`, so none were moved."
+        "Fails (as a warning) when more than `WARN_QUARANTINED_FRACTION` of a batch was set "
+        "aside. The frames are moved all the same; the detail says how many and why."
     ),
     "background_homogeneity": (
         "Fails when the sky-background levels of the frames of one exposure length split into "
@@ -3149,7 +3149,7 @@ def build_stacking_doc() -> str:
         ),
         "quarantine": require_symbol(
             "astrometricslib.pipelines.stacking.pre_processing.frame_quarantine",
-            "MAXIMUM_QUARANTINED_FRACTION",
+            "WARN_QUARANTINED_FRACTION",
         ),
         "penalty": require_symbol(
             "astrometricslib.pipelines.stacking.pre_processing.exposure_weighting",
@@ -3272,12 +3272,12 @@ def build_stacking_doc() -> str:
             "`rejected_pixel_fraction` fails. Set above the share a normal session rejects.",
         ],
         [
-            "`MAXIMUM_QUARANTINED_FRACTION`",
+            "`WARN_QUARANTINED_FRACTION`",
             f"`{values['quarantine']}`",
             status_cell(STATUS_PARTLY_MEASURED, "STK-03"),
-            "Largest share of a batch the quarantine (setting bad frames aside) may move. About "
-            "twice the share it picks from a normal batch: room for a bad stretch, without "
-            "gutting a session whose limits do not suit the equipment.",
+            "Share of a batch above which setting frames aside draws a warning. It blocks nothing: "
+            "every frame that fails a check is moved. About twice the share the step picks from a "
+            "normal batch, so a larger share is unusual.",
         ],
         [
             "`MINIMUM_PENALTY_TO_WEIGHT`",

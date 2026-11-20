@@ -56,7 +56,7 @@ These limits are partly measured (see [STK-01](../../../documentation/library_de
 
 A satellite or aircraft streak does not trigger it, because the stacker's pixel rejection removes those. The measurements come from `shared/quality/raw_frame_check.py`.
 
-**Safeguards.** The step leaves a session of fewer than 8 frames alone, because its median cannot be trusted (partly measured; see [STK-01](../../../documentation/library_design/validation/stacking.md#stk-01)). If one rule would move more than a quarter of a session, that rule moves none and the step logs why, because the session itself is then the problem (partly measured; see [STK-03](../../../documentation/library_design/validation/stacking.md#stk-03)).
+**Safeguards.** The step leaves a session of fewer than 8 frames alone, because its median cannot be trusted (partly measured; see [STK-01](../../../documentation/library_design/validation/stacking.md#stk-01)). The step sets aside every frame that fails a check, however many. When it sets aside more than a quarter of a session, it still moves them and warns, for example "35 of 123 frames set aside: 4 trailed, 12 off field, 19 uneven sky", in the gate record, the log and each frame's `excluded_frames.json` entry. A warning that large often means a poor night or a limit that does not suit the equipment (partly measured; see [STK-03](../../../documentation/library_design/validation/stacking.md#stk-03)). If every frame of a stack fails, nothing is stacked and the job says so.
 
 **Undoing it.** The step moves frames and never deletes them. Each `_excluded` folder holds `excluded_frames.json`, which records every frame's original path, why it was moved and what was measured. The scanner and the downloader both leave `_excluded` alone, so moved frames neither return to the target nor download again. Two calls work with them:
 
@@ -67,8 +67,8 @@ A satellite or aircraft streak does not trigger it, because the stacker's pixel 
 
 **What it records.** The step is recorded in the stack's gate record as `frame_quarantine`:
 
-- `passed` when at least one session was judged and none was over the cap;
-- `failed` when a session had too many bad frames to move (the bad frames are still in the stack);
+- `passed` when at least one session was judged and none had more than a quarter of its frames set aside;
+- `failed` when more than a quarter of a session was set aside (the frames are moved all the same, and the detail gives the counts);
 - `not_checked` when no session had enough readable frames, or when the step is off or the stack is spectral.
 
 **What it stores.** The step measures every frame of a session it can read, not only the frames it moves. The stage stores two of those numbers for every such frame in the quality database, as `frame.quarantine_roundness` and `frame.quarantine_sky_median_adu`, so a frame that was kept can be compared with the frames that were moved. A session too small to judge is not measured. The stage also measures, in full, up to 40 kept frames that have never been measured (see [Frame measurement](#frame-measurement)). A failure to measure or store never stops a stack.
@@ -345,7 +345,7 @@ The pipeline records each gate in the stack's `gates` as `passed`, `failed` or `
 
 | Gate | Fails when | Not checked when |
 | --- | --- | --- |
-| `frame_quarantine` | A session had too many bad frames to move, so they stay in the stack | No session had enough readable frames; the step is off; the stack is spectral |
+| `frame_quarantine` | More than a quarter of a session was set aside (the frames are moved; the detail gives the counts) | No session had enough readable frames; the step is off; the stack is spectral |
 | `gain_homogeneity` | Never. Setting aside a minority gain corrects the stack | No frame records its gain |
 | `background_homogeneity` | An exposure length shows a sudden change of sky background | The check is off, or no exposure length has three frames with a measured background |
 | `flat_level`, `flat_noise` | The flats are too faint, too bright or too noisy, or cannot be read | The stack used no flats; the noise could not be estimated |

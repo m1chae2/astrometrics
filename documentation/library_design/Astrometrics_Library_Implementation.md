@@ -179,7 +179,7 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 | Frame screening: session gap | 4 h | Design estimate ([table](validation/stacking.md#design-estimates)) | §3.4.1 |
 | Frame screening: fewest frames to judge; clouded frame star count; trailed frame elongation | 8; below 0.5 of session median; above 1.32 and 0.22 over median | Partly measured ([STK-01](validation/stacking.md#stk-01)) | §3.4.1 |
 | Elongation rise, color camera | at least 0.22 over median | Measured ([STK-02](validation/stacking.md#stk-02)) | §3.4.1 |
-| Largest share of a session moved aside | 25% | Partly measured ([STK-03](validation/stacking.md#stk-03)) | §3.4.1 |
+| Warning share of a session set aside | 25% | Partly measured ([STK-03](validation/stacking.md#stk-03)) | §3.4.1 |
 | Dark temperature slot width | 3 °C | Partly measured ([STK-06](validation/stacking.md#stk-06)) | §3.2 |
 | Minimum frames kept after quality filtering | 5 | Partly measured ([STK-10](validation/stacking.md#stk-10)) | §3.3 (Table 3, step 3) and §3.4.1 |
 | Brightness scale: fewest shared stars before pixel fallback | 16 | Measured ([STK-19](validation/stacking.md#stk-19)) | §3.2 |
@@ -340,7 +340,7 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.CLOUD_STAR_FRACTION -->
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.TRAILED_ELONGATION_LIMIT -->
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.ELONGATION_RISE_ABOVE_MEDIAN -->
-<!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.MAXIMUM_QUARANTINED_FRACTION -->
+<!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.WARN_QUARANTINED_FRACTION -->
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.exposure_weighting.MINIMUM_PENALTY_TO_WEIGHT -->
 <!-- impl: astrometricslib.pipelines.stacking.stack_runner.MINIMUM_REGISTERED_FRACTION -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD -->

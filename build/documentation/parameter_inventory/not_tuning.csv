@@ -373,6 +373,7 @@ astrometricslib/pipelines/stacking/post_processing/stack_preview.py,_STALE_SCRAT
 astrometricslib/pipelines/stacking/post_processing/star_tone.py,_MINIMUM_ROOM,Divide-by-zero guard.
 astrometricslib/pipelines/stacking/pre_processing/calibration_assessment.py,MAXIMUM_FRAMES_OF_CONCERN,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/pre_processing/frame_quarantine.py,MEASUREMENT_THREADS,software plumbing
+astrometricslib/pipelines/stacking/pre_processing/frame_quarantine.py,WARN_QUARANTINED_FRACTION,Share of a session set aside above which a warning is added; it blocks nothing (STK-03)
 astrometricslib/pipelines/stacking/pre_processing/sensor_noise.py,MAD_TO_STANDARD_DEVIATION,unit or physical constant
 astrometricslib/pipelines/stacking/pre_processing/stack_calibration_health.py,_BATCH_EXPOSURE_DECIMALS,software plumbing
 astrometricslib/pipelines/stacking/pre_processing/stack_inputs.py,STACKING_ALGORITHM_VERSION,software plumbing

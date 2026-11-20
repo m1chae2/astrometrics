@@ -20,9 +20,12 @@ The step is built to be undone:
   without moving any.
 - It judges each frame against the other frames of its own session, camera,
   filter and exposure, so a poor night is not mistaken for a few bad frames.
-- It refuses to move more than a quarter of any batch for any one rule. If a
-  limit were wrong for some equipment, the step would flag the rule and move
-  nothing for it.
+- It sets aside every frame that fails a check, however many that is. When
+  more than a quarter of a batch is set aside, it still moves them and adds a
+  warning (for example "35 of 123 frames set aside: 4 trailed, 12 off field,
+  19 uneven sky") to the job's gate record, the log and each frame's entry in
+  `excluded_frames.json`, so a limit that does not suit the equipment is
+  easy to see.
 
 The star count, sky level, sky grid and star positions come from
 `raw_frame_check`, the same code that checks frames during an observing
@@ -31,7 +34,6 @@ session. Trailing is judged on the frame's stored star elongation
 """
 
 import contextvars
-import dataclasses
 import json
 import logging
 import math
@@ -125,24 +127,16 @@ stayed within 5.8% to 18.3%. The star limit below (half the median) leaves
 room for that spread.
 """
 
-MAXIMUM_QUARANTINED_FRACTION = TunedParameter(
-    name="stacking.maximum_quarantined_fraction",
-    default=0.25,
-    unit="fraction",
-    description="Largest share of a batch the quarantine step will move; above it the step moves none.",
-    role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.RELATIVE,
-    register_entry="STK-03",
-)
-"""The most of one batch this step will move; above it, the step moves none.
+WARN_QUARANTINED_FRACTION = 0.25
+"""The share of a batch above which setting frames aside draws a warning.
 
-Run on the real library without moving anything, the step picked 4 of 56
-frames (7%) of the 2026-10-02 target, 4 of 30 (13%) and 5 of 40 (12%) of two
-M 27 sessions, and none in the other six batches. A quarter is about twice
-the largest of those. A larger share means the batch itself is the problem
-(poor seeing all night, or a limit that does not suit the equipment), and
-the stacker's weighting is the better tool.
+This is a documented constant, not a tuned parameter, and it blocks nothing:
+every frame that fails a check is moved. Run on the real library without
+moving anything, the step picked 4 of 56 frames (7%) of the 2026-10-02
+target, 4 of 30 (13%) and 5 of 40 (12%) of two M 27 sessions, and none in the
+other six batches. A quarter is about twice the largest of those, so a larger
+share is unusual. It may mean a poor night, or a limit that does not suit the
+equipment, and the person reading the warning should look at it.
 """
 
 CLOUD_STAR_FRACTION = resolve(raw_frame_check.LOW_STAR_FRACTION).value
@@ -481,9 +475,15 @@ class QuarantineReport:
         Batches with enough readable frames to be judged and acted on.
     batches_too_small : `int`
         Batches with too few frames, or too few readable ones, to judge.
-    batches_over_cap : `int`
-        Batches judged but left alone because more than the allowed share
-        looked bad. The bad frames stay in the stack.
+    batches_with_many_set_aside : `int`
+        Batches judged in which more than `WARN_QUARANTINED_FRACTION` of the
+        frames were set aside. The frames are moved all the same.
+    warnings : `list` [`str`]
+        One sentence for each such batch, for example "35 of 123 frames set
+        aside: 4 trailed, 12 off field, 19 uneven sky".
+    warning_by_path : `dict` [`str`, `str`]
+        The sentence of a batch, for each frame set aside in that batch.
+        The frame's `excluded_frames.json` entry carries it.
     measurements : `list` [`dict`]
         What `raw_frame_check.measure_raw_frame` measured for every frame
         the step could read, whether the frame was moved or kept. A batch
@@ -499,7 +499,9 @@ class QuarantineReport:
     # is different from being checked and found clean.
     batches_judged: int = 0
     batches_too_small: int = 0
-    batches_over_cap: int = 0
+    batches_with_many_set_aside: int = 0
+    warnings: list[str] = field(default_factory=list)
+    warning_by_path: dict[str, str] = field(default_factory=dict)
     measurements: list[dict[str, Any]] = field(default_factory=list)
 
     def actions_by_path(self) -> dict[str, str]:
@@ -876,61 +878,41 @@ def judge_batch(measurements: Sequence[dict[str, Any]]) -> list[QuarantineDecisi
     return judge_batch_with_notes(measurements)[0]
 
 
-def apply_cap_per_rule(
-    decisions: Sequence[QuarantineDecision], batch_size: int
-) -> tuple[list[QuarantineDecision], list[str]]:
-    """Drop every rule that caught more of a batch than the cap allows.
+RULE_WORDS = {
+    "trailed": "trailed",
+    "few_stars": "few stars",
+    "uneven_sky": "uneven sky",
+    "off_field": "off field",
+}
+"""The words that name each rule in a warning."""
 
-    Each rule is held to `MAXIMUM_QUARANTINED_FRACTION` on its own. A rule
-    that catches more of the batch than that is more likely a wrong limit
-    (or a poor night) than a few bad frames, so its findings are ignored. A
-    frame that broke only that rule stays. The three rules answer different
-    problems (trails, cloud, pointing), so one night that has all of them,
-    as NGC 7331 did, is not blocked by their total.
+
+def describe_many_set_aside(decisions: Sequence[QuarantineDecision], batch_size: int) -> str | None:
+    """Write the warning for a batch in which many frames were set aside.
 
     Parameters
     ----------
     decisions : `Sequence` [`QuarantineDecision`]
-        What `judge_batch_with_notes` found.
+        What `judge_batch_with_notes` found for the batch.
     batch_size : `int`
         Frames judged in the batch.
 
     Returns
     -------
-    kept : `list` [`QuarantineDecision`]
-        The decisions that remain, with their kind and reason rebuilt from
-        the rules that were not dropped.
-    notes : `list` [`str`]
-        One sentence for each rule that was dropped.
+    warning : `str` or `None`
+        For example "35 of 123 frames set aside: 4 trailed, 12 off field, 19
+        uneven sky". A frame that broke two rules counts under each. `None`
+        when no more than `WARN_QUARANTINED_FRACTION` of the batch was set
+        aside.
     """
-    allowed = int(resolve(MAXIMUM_QUARANTINED_FRACTION).value * batch_size)
+    if len(decisions) <= WARN_QUARANTINED_FRACTION * batch_size:
+        return None
     counts: dict[str, int] = defaultdict(int)
     for decision in decisions:
         for finding in decision.findings:
             counts[finding.rule] += 1
-    dropped = {rule for rule, count in counts.items() if count > allowed}
-    notes = [
-        f"{counts[rule]} of {batch_size} frames in one session broke the '{rule}' rule, more than the "
-        f"{allowed} allowed; none moved for it. The batch itself may be poor."
-        for rule in sorted(dropped)
-    ]
-    kept: list[QuarantineDecision] = []
-    for decision in decisions:
-        remaining = tuple(finding for finding in decision.findings if finding.rule not in dropped)
-        if not remaining:
-            continue
-        if len(remaining) == len(decision.findings):
-            kept.append(decision)
-        else:
-            kept.append(
-                dataclasses.replace(
-                    decision,
-                    kind=remaining[0].kind,
-                    reason="; ".join(finding.reason for finding in remaining),
-                    findings=remaining,
-                )
-            )
-    return kept, notes
+    parts = ", ".join(f"{count} {RULE_WORDS.get(rule, rule)}" for rule, count in counts.items())
+    return f"{len(decisions)} of {batch_size} frames set aside: {parts}"
 
 
 def stored_star_elongations(target_id: str) -> dict[str, float]:
@@ -1171,10 +1153,11 @@ def find_frames_to_quarantine(
         for measurement in measurements:
             # The star positions were needed only to match the pointing.
             measurement.pop("_stars", None)
-        decisions, capped_notes = apply_cap_per_rule(decisions, len(measurements))
-        if capped_notes:
-            report.batches_over_cap += 1
-            report.notes.extend(capped_notes)
+        warning = describe_many_set_aside(decisions, len(measurements))
+        if warning:
+            report.batches_with_many_set_aside += 1
+            report.warnings.append(warning)
+            report.warning_by_path.update({decision.path: warning for decision in decisions})
         report.batches_judged += 1
         report.moved.extend(decisions)
     return report
@@ -1185,12 +1168,13 @@ def quarantine_gate(report: QuarantineReport) -> GateResult:
 
     The three outcomes are kept apart on purpose:
 
-    - ``failed``: a batch had more bad frames than the cap allows, so none
-      were moved and the bad frames are in the stack.
+    - ``failed``: more than a quarter of a batch was set aside. The frames
+      were moved all the same; the gate says how many and why, so a limit that
+      does not suit the equipment is easy to see.
     - ``not_checked``: no batch had enough readable frames to judge, so
       nothing was checked.
-    - ``passed``: at least one batch was judged and none was over the cap.
-      Batches too small to judge are named in the detail.
+    - ``passed``: at least one batch was judged and none had many frames set
+      aside. Batches too small to judge are named in the detail.
 
     Parameters
     ----------
@@ -1202,17 +1186,15 @@ def quarantine_gate(report: QuarantineReport) -> GateResult:
     gate : `GateResult`
         The result, named ``frame_quarantine``.
     """
-    maximum_quarantined_fraction = resolve(MAXIMUM_QUARANTINED_FRACTION).value
     source = (
         f"at least {resolve(MINIMUM_FRAMES_TO_JUDGE).value} frames per session; "
-        f"at most {maximum_quarantined_fraction:.0%} moved"
+        f"warns above {WARN_QUARANTINED_FRACTION:.0%} set aside"
     )
-    if report.batches_over_cap:
+    if report.batches_with_many_set_aside:
         return failed_gate(
             GATE_NAME,
-            f"{report.batches_over_cap} session(s) had too many bad frames to move safely; "
-            "the bad frames are still in the stack",
-            limit=maximum_quarantined_fraction,
+            "; ".join(report.warnings),
+            limit=WARN_QUARANTINED_FRACTION,
             limit_source=source,
         )
     if report.batches_judged == 0:
@@ -1224,7 +1206,7 @@ def quarantine_gate(report: QuarantineReport) -> GateResult:
     detail = f"{report.batches_judged} session(s) checked, {len(report.moved)} frame(s) moved"
     if report.batches_too_small:
         detail += f"; {report.batches_too_small} session(s) too small to check"
-    return passed_gate(GATE_NAME, limit=maximum_quarantined_fraction, limit_source=source, detail=detail)
+    return passed_gate(GATE_NAME, limit=WARN_QUARANTINED_FRACTION, limit_source=source, detail=detail)
 
 
 def _unused_destination(directory: str, file_name: str) -> str:
@@ -1271,8 +1253,16 @@ def _write_manifest(manifest_path: str, entries: list[dict[str, Any]]) -> None:
     os.replace(temporary_path, manifest_path)
 
 
-def _move_to_quarantine(decision: QuarantineDecision) -> str:
+def _move_to_quarantine(decision: QuarantineDecision, warning: str | None = None) -> str:
     """Move one frame into the `_excluded` folder beside it and record it.
+
+    Parameters
+    ----------
+    decision : `QuarantineDecision`
+        The frame to move and why.
+    warning : `str`, optional
+        The batch warning to store in the frame's manifest entry, when many
+        frames of its batch were set aside.
 
     Returns
     -------
@@ -1300,6 +1290,8 @@ def _move_to_quarantine(decision: QuarantineDecision) -> str:
         "rules": [finding.rule for finding in decision.findings],
         "moved_at": datetime.now(UTC).isoformat(timespec="seconds"),
     })
+    if warning:
+        entries[-1]["warning"] = warning
     _write_manifest(manifest_path, entries)
     return new_path
 
@@ -1339,7 +1331,7 @@ def quarantine_bad_frames(
     moved_paths: set[str] = set()
     for decision in list(report.moved):
         try:
-            _move_to_quarantine(decision)
+            _move_to_quarantine(decision, report.warning_by_path.get(decision.path))
         except OSError as error:
             logger.warning("Could not move '%s' into %s: %s", decision.path, QUARANTINE_FOLDER_NAME, error)
             report.moved.remove(decision)
@@ -1347,6 +1339,8 @@ def quarantine_bad_frames(
             continue
         moved_paths.add(decision.path)
 
+    for warning in report.warnings:
+        logger.warning("Frame quarantine for target '%s': %s", getattr(target, "id", "?"), warning)
     if moved_paths:
         logger.info(
             "Moved %d frame(s) with clouds or trailed stars into %s for target '%s'.",
@@ -1564,7 +1558,7 @@ def quarantine_preview_report(
     }
     judged = [frame for frame in same_gain if frame.path not in already_set_aside]
     found = find_frames_to_quarantine(judged, target_id=target.id)
-    notes = list(found.notes)
+    notes = [*found.notes, *found.warnings]
     if minority_gain:
         notes.append(
             f"{len(minority_gain)} frame(s) with a minority gain setting are left out of a stack "

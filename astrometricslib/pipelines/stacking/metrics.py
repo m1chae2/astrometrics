@@ -1526,12 +1526,12 @@ _GATE_METRICS: tuple[MetricSpec, ...] = (
     _gate_metric(
         STACKING_GATE_FRAME_QUARANTINE,
         "fraction",
-        "Whether the quarantine step could judge each session and stay within its cap.",
-        "No number: the check reports its outcome and the cap (the largest share of a session it may move).",
+        "Whether the quarantine step judged each session, and whether it set aside over a quarter of one.",
+        "No number: the check reports its outcome and the share of a session above which it warns.",
         "pipelines.stacking.pre_processing.frame_quarantine.quarantine_gate",
         (
-            "A session with too many apparent bad frames is probably a bad night, so none are moved "
-            "and the stack is flagged."
+            "A session with many apparent bad frames is probably a bad night, or a limit that does not "
+            "suit the equipment. The frames are moved all the same and the stack is flagged."
         ),
         register_entry="STK-03",
     ),

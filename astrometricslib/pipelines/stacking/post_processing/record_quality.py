@@ -199,7 +199,7 @@ _SPEC_BY_NAME: dict[str, MetricSpec] = {spec.name: spec for spec in STACKING_MET
 _GATE_TIERS: dict[str, tuple[LimitTier, str | None]] = {
     # No limit at all: setting a minority gain aside corrects the stack.
     "gain_homogeneity": (LimitTier.GEOMETRY, None),
-    # STK-03: the 25% cap is a sanity check (13% is the largest normal share).
+    # STK-03: the 25% warning threshold (13% is the largest normal share).
     "frame_quarantine": (LimitTier.DESIGN_ESTIMATE, "STK-03"),
     # STK-04: the gap ratio of 4 rests on unit tests with made-up sky levels.
     "background_homogeneity": (LimitTier.DESIGN_ESTIMATE, "STK-04"),

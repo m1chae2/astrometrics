@@ -516,7 +516,6 @@ stacking.maximum_flat_noise_fraction,STK-05,judgment,Partly measured
 stacking.maximum_frames_averaged,STK-D63,judgment,Design estimate
 stacking.maximum_pair_gap_seconds,STK-35,exclusion criteria,Partly measured
 stacking.maximum_pixel_scale_change,STK-D52,judgment,Design estimate
-stacking.maximum_quarantined_fraction,STK-03,exclusion criteria,Partly measured
 stacking.maximum_reliable_peak_to_room_ratio,STK-40,judgment,Partly measured
 stacking.maximum_rotation_deg,STK-36,measurement,Partly measured
 stacking.maximum_smoothing_sigma_pixels,STK-D06,measurement,Design estimate

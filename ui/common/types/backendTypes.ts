@@ -274,6 +274,20 @@ export interface TargetFilesResponse {
 }
 
 /**
+ * What the stacker would use of one calibration kind for a light group.
+ *
+ * The numbers come from the same selection the stacking stage runs
+ * (`CalibrationLibrary.select_dark_frames`, `select_bias_frames` and
+ * `select_flat_frames`), so a count above zero with no notes means stacking
+ * finds an exact match.
+ */
+export interface CalibrationGroupMatch {
+  count?: number;
+  fallbacks?: string[];
+  problem?: string;
+}
+
+/**
  * A count of how many images share the same filter and exposure time.
  */
 export interface GroupedFrameStat {
@@ -283,6 +297,11 @@ export interface GroupedFrameStat {
   count: number;
   darks?: string | null;
   camera?: string | null;
+  offset?: string | null;
+  binning?: string | null;
+  darkMatch?: CalibrationGroupMatch | null;
+  flatMatch?: CalibrationGroupMatch | null;
+  biasMatch?: CalibrationGroupMatch | null;
 }
 
 /**

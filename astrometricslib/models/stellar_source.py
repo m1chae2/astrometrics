@@ -1501,6 +1501,26 @@ class FileItem(BaseModel):
     focal_length_mm: float | None = Field(default=None, alias="focalLengthMm")
 
 
+class CalibrationGroupMatch(BaseModel):
+    """What the stacker would use of one calibration kind for a light group.
+
+    The numbers come from the same selection the stacking stage runs
+    (`CalibrationLibrary.select_dark_frames`, `select_bias_frames` and
+    `select_flat_frames`), so a count above zero with no notes means stacking
+    finds an exact match.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    count: int = Field(default=0, ge=0, alias="count")
+    # Plain sentences for a mismatch the stacker works around (frames of
+    # another gain, offset or temperature were chosen, so the frames are used).
+    fallbacks: list[str] = Field(default_factory=list, alias="fallbacks")
+    # Why no frame is used, as one sentence such as "no bias at gain 100,
+    # offset 10". Empty when frames were found.
+    problem: str = Field(default="", alias="problem")
+
+
 class GroupedFrameStat(BaseModel):
     """A count of how many images share the same filter and exposure time."""
 
@@ -1515,6 +1535,13 @@ class GroupedFrameStat(BaseModel):
     # camera sensor's own background noise.
     darks: str | None = Field(default=None, alias="darks")
     camera: str | None = Field(default=None, alias="camera")
+    # The camera offset and binning of the group, as the stacker matches them.
+    offset: str | None = Field(default=None, alias="offset")
+    binning: str | None = Field(default=None, alias="binning")
+    # What the stacker would use for this group, per calibration kind.
+    dark_match: CalibrationGroupMatch | None = Field(default=None, alias="darkMatch")
+    flat_match: CalibrationGroupMatch | None = Field(default=None, alias="flatMatch")
+    bias_match: CalibrationGroupMatch | None = Field(default=None, alias="biasMatch")
 
 
 class TargetFilesResponse(BaseModel):

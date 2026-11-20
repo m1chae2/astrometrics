@@ -104,6 +104,7 @@ from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasureme
 from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
 from astrometricslib.models.stellar_source import (
     AnalysisResult,
+    CalibrationGroupMatch,
     DifferentialRefractionRecord,
     ExtinctionCorrectionRecord,
     FileItem,
@@ -545,6 +546,7 @@ def render_types() -> str:
         generate_interface(Target, "TargetObject"),
         generate_interface(FileItem, "FileItem"),
         generate_interface(TargetFilesResponse, "TargetFilesResponse"),
+        generate_interface(CalibrationGroupMatch, "CalibrationGroupMatch"),
         generate_interface(GroupedFrameStat, "GroupedFrameStat"),
         generate_interface(PlotData, "PlotData"),
         generate_interface(StellarObject, "Spectrum"),

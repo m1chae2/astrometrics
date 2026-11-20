@@ -2,14 +2,12 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { TabView } from '../../common/components/TabView';
 import { SectionPanel } from '../../common/components/SectionPanel';
 import { Tabs } from '../../common/components/Tabs';
-import { PopoverSelect } from '../../common/components/PopoverSelect';
 
-import { useCalibrationStats } from '../../common/hooks/useCalibrationStats';
 import { useTargetContext } from '../../common/context/TargetContext';
 import { ProcessingStatus } from './ProcessingStatus';
 import { AnalysisResults } from '../analysisResults/AnalysisResults';
 import { StackedImagePanel } from './StackedImagePanel';
-import { UnifiedFrameAnalysis } from './FrameCountTable';
+import { CalibrationLine } from './CalibrationLine';
 import { ImageDetailsManager } from '../imageDetailsManager/ImageDetailsManager';
 import { JobHistoryList } from './JobHistoryList';
 import { StarShapesSummary } from './StarShapesSummary';
@@ -74,23 +72,12 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
       openSiril, requestJobHistory
     } = useImageProcessingContext();
 
-  const { stats: calStats, loading: calLoading } = useCalibrationStats(reloadKey);
   const [activeAnalysisTab, setActiveAnalysisTab] = useState('data');
   // The job history only shows on the Analysis tab, so it is read when that tab is first opened.
   useEffect(() => {
     if (activeAnalysisTab === 'analysis') requestJobHistory?.();
   }, [activeAnalysisTab, requestJobHistory]);
-  const [dataTabCamera, setDataTabCamera] = useState('All');
   const [lightStats, setLightStats] = useState<GroupedFrameStat[]>([]);
-
-  // Compute unique cameras for the Data tab dropdown
-  const uniqueCameras = useMemo(() => {
-    const cams = new Set<string>();
-    if (allFiles) {
-      allFiles.forEach(f => cams.add(f.camera));
-    }
-    return Array.from(cams).sort();
-  }, [allFiles]);
 
   // Fetch grouped stats from backend
   useEffect(() => {
@@ -98,29 +85,10 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
       setLightStats([]);
       return;
     }
-    fetchFrameStatsGrouped(selectedTarget, dataTabCamera === 'All' ? undefined : dataTabCamera)
+    fetchFrameStatsGrouped(selectedTarget)
       .then(setLightStats)
       .catch(err => console.error("Failed to fetch grouped stats", err));
-  }, [selectedTarget, dataTabCamera, reloadKey]);
-
-  // Filter darks/biases/flats based on selected camera
-  const filteredDarks = useMemo(() => {
-    if (!calStats?.darks) return [];
-    if (dataTabCamera === 'All') return calStats.darks;
-    return calStats.darks.filter((d: any) => d.camera === dataTabCamera);
-  }, [calStats, dataTabCamera]);
-
-  const filteredBiases = useMemo(() => {
-    if (!calStats?.biases) return [];
-    if (dataTabCamera === 'All') return calStats.biases;
-    return calStats.biases.filter((d: any) => d.camera === dataTabCamera);
-  }, [calStats, dataTabCamera]);
-
-  const filteredFlats = useMemo(() => {
-    if (!calStats?.flats) return [];
-    if (dataTabCamera === 'All') return calStats.flats;
-    return calStats.flats.filter((d: any) => d.camera === dataTabCamera);
-  }, [calStats, dataTabCamera]);
+  }, [selectedTarget, reloadKey]);
 
   const multiCameraStatus = useMemo(() => {
     const filesToConsider = checkedFiles.size > 0
@@ -258,26 +226,7 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
                     selectedPath={selectedFile}
                     onSelectFrame={handleSelectFile}
                   />
-                  <UnifiedFrameAnalysis
-                    lightFrames={lightStats}
-                    darkFrames={filteredDarks}
-                    biasFrames={filteredBiases}
-                    flatFrames={filteredFlats}
-                    isLoading={calLoading}
-                    selectedCamera={dataTabCamera}
-                    cameraSelector={
-                      <div className="data-tab-filter" style={{ margin: 0 }}>
-                        <PopoverSelect
-                          label="Camera"
-                          options={uniqueCameras.map((camera: string) => ({ id: camera, label: camera }))}
-                          selectedId={dataTabCamera === 'All' ? null : dataTabCamera}
-                          onSelect={(id) => setDataTabCamera(id ?? 'All')}
-                          emptyLabel="All Cameras"
-                          size="compact"
-                        />
-                      </div>
-                    }
-                  />
+                  <CalibrationLine lightFrames={lightStats} />
                 </>
               )
             }

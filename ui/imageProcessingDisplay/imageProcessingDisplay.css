@@ -750,10 +750,6 @@
   white-space: nowrap;
 }
 
-.data-tab-filter {
-  margin-bottom: 10px;
-}
-
 .file-browser__checkbox-cell {
   width: 40px;
 }
@@ -901,88 +897,6 @@
   border-bottom-right-radius: var(--radius-md);
 }
 
-/* Category Cell Styling */
-.category-cell {
-  font-weight: 600;
-  color: var(--text-primary);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.category-icon {
-  opacity: 0.7;
-  font-size: var(--large-font-size);
-  width: 20px;
-  text-align: center;
-}
-
-/* Status Indicators */
-.cal-status {
-  font-weight: 500;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 1px 6px;
-  border-radius: var(--radius-xl);
-  font-size: var(--control-font-size);
-}
-
-.cal-status--success {
-  color: var(--status-green-dim);
-  /* bright green */
-  background: color-mix(in srgb, var(--status-green-dim) 10%, transparent);
-}
-
-.cal-status--warning {
-  color: var(--status-yellow);
-  /* amber */
-  background: color-mix(in srgb, var(--warning-amber) 10%, transparent);
-}
-
-.cal-status--missing {
-  color: var(--status-red);
-  /* red */
-  background: color-mix(in srgb, var(--btn-red-pending) 10%, transparent);
-}
-
-.cal-status--checking {
-  opacity: 0.7;
-  font-style: italic;
-  color: var(--text-muted);
-}
-
-.frame-analysis-empty {
-  padding: 1rem;
-  text-align: center;
-  color: var(--text-muted);
-  font-style: italic;
-}
-
-.category-cell-duration {
-  color: var(--text-muted);
-  font-size: var(--control-font-size);
-}
-
-.session-count-cell {
-  font-weight: 700;
-}
-
-.session-count--placeholder {
-  opacity: 0.3;
-  font-weight: 400;
-}
-
-.cal-status__icon {
-  margin-right: 2px;
-}
-
-.cal-status__label-suffix {
-  opacity: 0.7;
-  font-size: var(--compact-font-size);
-  margin-left: 2px;
-}
-
 /* Separator for analysis results */
 .analysis-separator td {
   height: 8px;
@@ -1045,17 +959,6 @@
   margin-right: var(--space-3);
 }
 
-/* The "Session Frames" heading row with the camera picker on the right. */
-.frame-analysis-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  margin-bottom: var(--space-3);
-  font-weight: bold;
-  font-size: var(--large-font-size);
-}
-
 .image-processing-display__analysis-section .tab-view__content {
   padding: 0;
   background: transparent;
@@ -1067,36 +970,9 @@
   flex-direction: column;
 }
 
-.analysis-results-content,
-.frame-analysis-content {
-  padding-top: 4px;
-}
-
-/* Session Frames fills the rest of the Data tab. The table scrolls inside
-   it, and never gets shorter than 280px; when the panels above it are
-   opened, the whole tab scrolls instead. */
-.frame-analysis-content {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  min-height: 280px;
-}
-
-.frame-analysis-table-container {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-
 .analysis-results-content {
+  padding-top: 4px;
   margin-bottom: 8px;
-}
-
-.data-tab-filter {
-  margin-bottom: 6px;
-  display: flex;
-  justify-content: flex-start;
 }
 
 .stacked-image-panel-container {
@@ -1296,32 +1172,6 @@
   font-size: var(--compact-font-size);
   color: var(--text-muted, var(--text-dimmest));
 }
-.category-cell--nested {
-  padding-left: 20px;
-  font-size: var(--control-font-size);
-  opacity: 0.9;
-}
-.category-cell__tree-icon {
-  margin-right: 8px;
-  opacity: 0.5;
-}
-.cal-status--right {
-  justify-content: flex-end;
-}
-.frame-count-group-header {
-  padding: 8px 12px;
-  font-size: var(--compact-font-size);
-  opacity: 0.6;
-  text-transform: uppercase;
-}
-.frame-count-section-header {
-  padding: 12px 12px 4px 12px;
-  font-size: var(--section-label-size);
-  font-weight: bold;
-  color: var(--text-dim);
-  letter-spacing: 0.05em;
-}
-
 .analysis-modal-content {
   display: flex;
   flex-direction: column;

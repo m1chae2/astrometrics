@@ -369,10 +369,40 @@ class TargetService:
 
         return {
             "files": files,
-            "stackedImage": target.stacking.stacked_image or None,
-            "stackedSpectralTarget": target.spectral_stacking.stacked_image or None,
+            "stackedImage": self._existing_stack_path(target.stacking.stacked_image),
+            "stackedSpectralTarget": self._existing_stack_path(target.spectral_stacking.stacked_image),
             "totalExposure": target.exposure_sec,
         }
+
+    def _existing_stack_path(self, recorded_path: str | None) -> str | None:
+        """Return a recorded stack path only if the file is on disk.
+
+        A record made before the stacks moved to the stacks folder may
+        still name the old place under ``lights/``. The same file name is
+        looked for under ``lights/<target>/`` in the stacks folder. A
+        stack that exists nowhere is a status (there is no stack), not an
+        error, so the answer is `None`.
+
+        Parameters
+        ----------
+        recorded_path : `str` or `None`
+            The stack path saved in the target record.
+
+        Returns
+        -------
+        path : `str` or `None`
+            A path that exists, or `None` if there is no such stack.
+        """
+        if not recorded_path:
+            return None
+        if os.path.exists(recorded_path):
+            return recorded_path
+        get_stacks_path = getattr(getattr(self, "config", None), "get_stacks_path", None)
+        if not callable(get_stacks_path):
+            return None
+        target_folder = os.path.basename(os.path.dirname(recorded_path))
+        moved = os.path.join(str(get_stacks_path()), "lights", target_folder, os.path.basename(recorded_path))
+        return moved if os.path.exists(moved) else None
 
     def get_frame_stats_grouped(self, target_id: str, camera: str | None = None) -> list:
         """Calculate exposure specs grouped by filter, with calibration status.

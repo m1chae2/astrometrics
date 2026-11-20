@@ -1,4 +1,5 @@
 import React, { useCallback, useState } from 'react';
+import { usePersistentFlag } from '../hooks/usePersistentFlag';
 import { SectionPanel } from '../../common/components/SectionPanel';
 import { SwitchDisplayButton } from '../../common/components/SwitchDisplayButton';
 import { FitsViewerManager, FitsRendererHandle } from '../../common/fitsViewer/FitsViewerManager';
@@ -75,7 +76,7 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
   // True while the image shows a line along the long axis of each measured star.
   const [shapesEnabled, setShapesEnabled] = useState(false);
   // True while the File Browser is folded down to a tab bar, which gives the viewer the full height.
-  const [browserCollapsed, setBrowserCollapsed] = useState(false);
+  const [browserCollapsed, setBrowserCollapsed] = usePersistentFlag('astrometrics:imageProcessing:browserCollapsed', false);
 
   /** Finds the FITS file on screen: the file picked in the browser, else the light frame being shown. */
   const resolveMeasurePath = useCallback(async (): Promise<string | null> => {

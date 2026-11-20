@@ -67,6 +67,9 @@ function answerFiles(stackedImage: string | null, gate?: Promise<void>) {
             return { files: RAW_FILES, stackedImage, stackedSpectralTarget: null, totalExposure: 70 };
         }
         if (method === 'target:get_frames_grouped') return [];
+        if (method === 'images:convert_fits' || method === 'images:get_fits_file') {
+            throw new Error('Image not found');
+        }
         if (method === 'calibration:query') return { darks: [], biases: [], flats: [] };
         return null;
     });
@@ -108,5 +111,13 @@ describe('Image Processing default file', () => {
         await waitFor(() => expect(screen.getByTestId('selected').textContent).toBe('/raw/a.fits'));
         await new Promise((resolve) => setTimeout(resolve, 50));
         expect(screen.getByTestId('selected').textContent).toBe('/raw/a.fits');
+    });
+
+    it('falls back to the highest-exposure frame once when the stack cannot be opened', async () => {
+        answerFiles('/stack/missing.fits');
+        renderDisplay();
+        await waitFor(() => expect(screen.getByTestId('selected').textContent).toBe('/raw/b.fits'));
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(screen.getByTestId('selected').textContent).toBe('/raw/b.fits');
     });
 });

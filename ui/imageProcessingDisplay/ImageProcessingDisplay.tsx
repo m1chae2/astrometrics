@@ -5,6 +5,7 @@ import { useTargetActions } from '../common/hooks/useTargetActions';
 import { ImageProcessingProvider, useImageProcessingContext } from './context/ImageProcessingContext';
 import { useRemoteStatusContext } from '../common/context/RemoteStatusContext';
 import { useViewerState } from './hooks/useViewerState';
+import { usePersistentFlag } from './hooks/usePersistentFlag';
 import { ImageProcessingLayout } from './ImageProcessingLayout';
 import { RadioListManager } from '../common/radioList/RadioListManager';
 import { TargetListFilterPanel } from '../common/radioList/TargetListFilterPanel';
@@ -27,6 +28,25 @@ import { useHandoffConsumer } from '../common/utils/displayHandoffStore';
  * Main component for the image processing view.
  * Composes target list, FITS viewer, and processing details.
  */
+/**
+ * Pick the raw frame with the highest exposure time.
+ *
+ * @param files - The frames in the file list; `exposure` may read "30s" or "30".
+ * @returns The frame to show, or `undefined` for an empty list.
+ */
+function highestExposureFile<T extends { exposure: string }>(files: T[]): T | undefined {
+  let bestFile = files[0];
+  let maxExposure = -1;
+  files.forEach((file) => {
+    const exposureSeconds = parseFloat(file.exposure);
+    if (!isNaN(exposureSeconds) && exposureSeconds > maxExposure) {
+      maxExposure = exposureSeconds;
+      bestFile = file;
+    }
+  });
+  return bestFile;
+}
+
 export const ImageProcessingDisplay: React.FC = () => {
   const {
     selectedTarget, setSelectedTarget,
@@ -119,8 +139,8 @@ const ImageProcessingDisplayInner: React.FC = () => {
   const fitsRendererRef = React.useRef<FitsRendererHandle>(null);
 
   // Frame Analysis folds to the right; Image Controls folds down into a tab bar.
-  const [analysisCollapsed, setAnalysisCollapsed] = useState(false);
-  const [controlsCollapsed, setControlsCollapsed] = useState(false);
+  const [analysisCollapsed, setAnalysisCollapsed] = usePersistentFlag('astrometrics:imageProcessing:analysisCollapsed', false);
+  const [controlsCollapsed, setControlsCollapsed] = usePersistentFlag('astrometrics:imageProcessing:controlsCollapsed', false);
   const [showAstrometryOverlay, setShowAstrometryOverlay] = useState<boolean>(() => {
     try {
       return localStorage.getItem('astrometrics:enableAstrometryOverlay') === 'true';
@@ -313,11 +333,23 @@ const ImageProcessingDisplayInner: React.FC = () => {
   // stack has already been shown. Both start over when the target changes.
   const pickedByUserRef = React.useRef(false);
   const stackShownRef = React.useRef(false);
+  const stackFallbackDoneRef = React.useRef(false);
   // Declared before the effect that picks the default file, so it runs first on a target change.
   React.useEffect(() => {
     pickedByUserRef.current = false;
     stackShownRef.current = false;
+    stackFallbackDoneRef.current = false;
   }, [selectedTarget]);
+
+  // If the stack the default chose cannot be read, show the raw frame with the highest
+  // exposure instead, once, so the viewer does not keep retrying the stack.
+  React.useEffect(() => {
+    if (!error || stackFallbackDoneRef.current || pickedByUserRef.current) return;
+    if (!selectedFile || (selectedFile !== stackedImage && selectedFile !== stackedSpectralTarget)) return;
+    stackFallbackDoneRef.current = true;
+    const bestFile = highestExposureFile(filteredFiles);
+    if (bestFile) setSelectedFile(bestFile.path);
+  }, [error, selectedFile, stackedImage, stackedSpectralTarget, filteredFiles, setSelectedFile]);
 
   // A file chosen by hand (File Browser or stack panel) is never replaced by the default.
   const pickFile = React.useCallback((path: string | null) => {
@@ -363,21 +395,8 @@ const ImageProcessingDisplayInner: React.FC = () => {
       return;
     }
 
-    // Otherwise, find the file with the highest exposure time
-    let bestFile = filteredFiles[0];
-    let maxExp = -1;
-
-    (filteredFiles || []).forEach(f => {
-      // Parse exposure time safely. Handle "30s", "30", etc.
-      const expVal = parseFloat(f.exposure);
-      if (!isNaN(expVal)) {
-        if (expVal > maxExp) {
-          maxExp = expVal;
-          bestFile = f;
-        }
-      }
-    });
-
+    // Otherwise, show the raw frame with the highest exposure time
+    const bestFile = highestExposureFile(filteredFiles);
     if (bestFile) {
       setSelectedFile(bestFile.path);
     }

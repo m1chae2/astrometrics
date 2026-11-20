@@ -5,6 +5,7 @@ not need the thousands of frame records. ``detail="summary"`` returns every
 target with an empty frame list, and everything else the same.
 """
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -114,3 +115,22 @@ def test_the_file_list_sends_each_frames_focal_length() -> None:
 
     assert [file["focalLengthMm"] for file in files] == [300.0, 405.2, None]
     assert all(value is None or type(value) is float for value in (file["focalLengthMm"] for file in files))
+
+
+def test_file_list_reports_only_stacks_that_exist(tmp_path: Path) -> None:
+    """A missing stack gives none; a moved one is found in the stacks."""
+    moved = tmp_path / "stacks" / "lights" / "Mars" / "Mars_SPEC_Stacked.fits"
+    moved.parent.mkdir(parents=True)
+    moved.write_text("x")
+    target = _target("Mars")
+    target.stacking.stacked_image = str(tmp_path / "lights" / "Mars" / "Mars_NONE_Stacked.fits")
+    target.spectral_stacking.stacked_image = str(tmp_path / "lights" / "Mars" / "Mars_SPEC_Stacked.fits")
+    service = _service_with(target)
+    service.config = MagicMock()
+    service.config.get_stacks_path.return_value = str(tmp_path / "stacks")
+    service.get_targets = lambda target_id: target
+
+    result = service.get_file_list("Mars")
+
+    assert result["stackedImage"] is None
+    assert result["stackedSpectralTarget"] == str(moved)

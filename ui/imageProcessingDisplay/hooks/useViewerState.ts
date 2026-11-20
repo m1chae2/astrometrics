@@ -232,6 +232,9 @@ export const useViewerState = (
                         min: data.min as number,
                         max: data.max as number
                     });
+                } else if (!aborted) {
+                    // The picture could not be made (the file is gone or unreadable).
+                    setError(`Could not open ${externalSelectedFilePath}`);
                 }
             } catch (err) {
                 if (!aborted) setError(String(err));

@@ -1880,6 +1880,8 @@ export interface StackingPipelineQualityMetrics {
   framesExcludedForGain?: number;
   framesExcludedForBackground?: number;
   framesQuarantined?: number;
+  stackCropReason?: string | null;
+  stackCropAreaFraction?: number | null;
   rejectedPixelFraction?: number | null;
   backgroundSplitDetected?: boolean;
   backgroundSplitDetail?: string | null;

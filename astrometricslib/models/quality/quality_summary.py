@@ -271,6 +271,11 @@ class StackingPipelineQualityMetrics(BaseModel):
     # Frames with clouds or trailed stars that the stage moved into the
     # `_excluded` folder before stacking.
     frames_quarantined: int = Field(default=0, alias="framesQuarantined")
+    # Why the stage cropped the stack's edges, in one sentence with the rule's
+    # numbers, and the share of the image area the crop removed (0 to 1).
+    # Both are `None` when the stack was not cropped.
+    stack_crop_reason: str | None = Field(default=None, alias="stackCropReason")
+    stack_crop_area_fraction: float | None = Field(default=None, alias="stackCropAreaFraction")
 
     rejected_pixel_fraction: float | None = Field(default=None, alias="rejectedPixelFraction")
 

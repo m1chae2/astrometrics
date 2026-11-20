@@ -4,12 +4,14 @@ The synthetic stacks have flat sky and a known noise, with extra noise added in
 strips along chosen edges, as fewer overlapping frames would make.
 """
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.stacking.post_processing import stack_crop as sc
 
 SIZE = 1000
@@ -137,3 +139,200 @@ def test_cropping_a_clean_file_changes_nothing(tmp_path: Path) -> None:
 
     assert sc.crop_stack_edges(str(stack)) is None
     assert stack.stat().st_mtime_ns == before
+
+
+def shift_matrix(dx: float, dy: float) -> list[float]:
+    """Give the nine numbers of a transform that only shifts a frame.
+
+    Parameters
+    ----------
+    dx, dy : `float`
+        The shift in pixels, along the columns and along Siril's y axis.
+
+    Returns
+    -------
+    values : `list` [`float`]
+        The 3 x 3 transform in row order.
+    """
+    return [1.0, 0.0, dx, 0.0, 1.0, dy, 0.0, 0.0, 1.0]
+
+
+def shifted_group_diagnostics(count: int, shifted: int, dx: float, dy: float) -> dict:
+    """Build the registration facts of frames where the last few are shifted.
+
+    Parameters
+    ----------
+    count : `int`
+        Number of frames.
+    shifted : `int`
+        Number of frames, from the end, shifted by (dx, dy).
+    dx, dy : `float`
+        The shift of those frames.
+
+    Returns
+    -------
+    diagnostics : `dict`
+        The ``registration_frames`` and ``registration_included`` entries.
+    """
+    frames = [
+        {"homography": shift_matrix(dx, dy) if i >= count - shifted else shift_matrix(0, 0)}
+        for i in range(count)
+    ]
+    return {"registration_frames": frames, "registration_included": [True] * count}
+
+
+def test_a_thin_edge_covered_by_few_frames_is_cut_and_the_shape_is_kept() -> None:
+    """A group shifted 100 px leaves a thin edge; the crop is square."""
+    diagnostics = shifted_group_diagnostics(120, 12, 100.0, 40.0)
+    counts = sc._coverage_from_diagnostics(diagnostics, SIZE, SIZE)
+    assert counts is not None
+
+    box = sc.find_coverage_crop_box(counts, 4, SIZE, SIZE)
+
+    assert box.x1 - box.x0 == box.y1 - box.y0
+    assert box.x0 >= 100 - 4
+    assert box.y1 <= SIZE - 40 + 4
+    assert box.x1 <= SIZE
+    assert box.y0 >= 0
+
+
+def test_the_coverage_crop_leaves_only_pixels_that_enough_frames_cover() -> None:
+    """Every kept pixel is covered by at least 95% of the frames."""
+    diagnostics = shifted_group_diagnostics(120, 12, 100.0, 40.0)
+    counts = sc._coverage_from_diagnostics(diagnostics, SIZE, SIZE)
+    assert counts is not None
+
+    box = sc.find_coverage_crop_box(counts, 4, SIZE, SIZE)
+
+    kept = counts[box.y0 // 4 : (box.y1 - 1) // 4 + 1, box.x0 // 4 : (box.x1 - 1) // 4 + 1]
+    assert kept.min() >= 114
+
+
+def test_a_few_frames_shifted_a_little_cost_only_a_thin_margin() -> None:
+    """A group shifted 10 px cuts about 10 px from the crop, not hundreds."""
+    diagnostics = shifted_group_diagnostics(100, 10, 10.0, 0.0)
+    counts = sc._coverage_from_diagnostics(diagnostics, SIZE, SIZE)
+    assert counts is not None
+
+    box = sc.find_coverage_crop_box(counts, 4, SIZE, SIZE)
+
+    assert SIZE - 30 <= box.x1 - box.x0 < SIZE
+
+
+def test_full_coverage_does_not_crop() -> None:
+    """Frames that all cover the whole stack leave it whole, with no reason."""
+    diagnostics = shifted_group_diagnostics(50, 0, 0.0, 0.0)
+    counts = sc._coverage_from_diagnostics(diagnostics, SIZE, SIZE)
+    assert counts is not None
+
+    box = sc.find_coverage_crop_box(counts, 4, SIZE, SIZE)
+
+    assert (box.x0, box.x1, box.y0, box.y1) == (0, SIZE, 0, SIZE)
+    assert box.reason == ""
+
+
+def test_the_reason_names_the_cut_sides_the_frame_counts_and_the_rule() -> None:
+    """The reason names the edge, the pixels, the frame count and the rule."""
+    diagnostics = shifted_group_diagnostics(120, 12, 100.0, 0.0)
+    counts = sc._coverage_from_diagnostics(diagnostics, SIZE, SIZE)
+    assert counts is not None
+
+    box = sc.find_coverage_crop_box(counts, 4, SIZE, SIZE)
+
+    assert "left" in box.reason
+    assert "108 of 120 frames" in box.reason
+    assert "at least 114 of 120 frames (95%)" in box.reason
+
+
+def test_frames_that_are_not_included_are_not_counted() -> None:
+    """A shifted frame left out of the stack does not shrink the crop."""
+    diagnostics = shifted_group_diagnostics(20, 1, 300.0, 0.0)
+    diagnostics["registration_included"][-1] = False
+    counts = sc._coverage_from_diagnostics(diagnostics, SIZE, SIZE)
+    assert counts is not None
+
+    box = sc.find_coverage_crop_box(counts, 4, SIZE, SIZE)
+
+    assert (box.x0, box.x1) == (0, SIZE)
+
+
+def test_a_group_shifted_over_a_quarter_of_the_side_leaves_the_stack_whole() -> None:
+    """A crop that large means something else is wrong; nothing is cut."""
+    diagnostics = shifted_group_diagnostics(50, 10, 400.0, 0.0)
+    counts = sc._coverage_from_diagnostics(diagnostics, SIZE, SIZE)
+    assert counts is not None
+
+    assert sc.find_coverage_crop_box(counts, 4, SIZE, SIZE).x0 == 0
+
+
+def test_cropping_a_file_by_coverage_records_the_reason(tmp_path: Path) -> None:
+    """The file is cropped to the box, which carries the reason."""
+    stack = tmp_path / "NGC_7331_L_Stacked.fits"
+    fits.writeto(stack, make_stack().astype(np.float32))
+
+    box = sc.crop_stack_edges(str(stack), shifted_group_diagnostics(120, 12, 100.0, 40.0))
+
+    assert box is not None
+    assert "covered by as few as" in box.reason
+    with fits.open(stack, memmap=False) as hdul:
+        assert hdul[0].data.shape == (box.y1 - box.y0, box.x1 - box.x0)
+
+
+def test_the_crop_reason_is_stored_as_a_notice_row_of_the_stack() -> None:
+    """The crop reason becomes a notice row holding the area share."""
+    from astrometricslib.models.quality.quality_summary import (
+        StackingPipelineQualityMetrics,
+        StackQualitySummary,
+    )
+    from astrometricslib.pipelines.stacking.post_processing.record_quality import (
+        stacking_notice_measurements,
+    )
+    from astrometricslib.pipelines.stacking.stage import _record_stack_crop
+
+    summary = StackQualitySummary(
+        targetId="NGC 7331",
+        stackingMetrics=StackingPipelineQualityMetrics(isSpectral=False, framesSubmitted=3, framesStacked=3),
+    )
+    _record_stack_crop(
+        summary, {"stack_crop": {"reason": "Cropped to the area covered.", "area_fraction": 0.2}}
+    )
+    context = PipelineRunContext.from_options(
+        "NGC 7331", "stacking", "1", {"job_id": "job-1", "measured_at": datetime(2026, 11, 20, tzinfo=UTC)}
+    )
+
+    rows = [
+        row
+        for row in stacking_notice_measurements(summary, context, "NGC_7331_Stacked.fits")
+        if row.metric == "stacking.notice_stack_cropped"
+    ]
+
+    assert len(rows) == 1
+    assert rows[0].value == pytest.approx(0.2)
+    assert "Cropped to the area covered." in rows[0].reason
+
+
+def test_trimming_a_stack_puts_the_reason_in_the_run_diagnostics(tmp_path: Path) -> None:
+    """Trimming leaves the crop's reason and area share in the diagnostics."""
+    from astrometricslib.pipelines.stacking.stack_settings import trim_noisy_stack_edges
+
+    stack = tmp_path / "NGC_7331_L_Stacked.fits"
+    fits.writeto(stack, make_stack().astype(np.float32))
+    diagnostics = shifted_group_diagnostics(120, 12, 100.0, 40.0)
+
+    class Configuration:
+        """A configuration with the trim switched on."""
+
+        def get_trim_noisy_stack_edges_enabled(self) -> bool:
+            """Say that trimming is on.
+
+            Returns
+            -------
+            enabled : `bool`
+                Always `True`.
+            """
+            return True
+
+    trim_noisy_stack_edges(str(stack), Configuration(), is_spectral=False, diagnostics=diagnostics)
+
+    assert "covered by as few as" in diagnostics["stack_crop"]["reason"]
+    assert 0.0 < diagnostics["stack_crop"]["area_fraction"] < 0.5

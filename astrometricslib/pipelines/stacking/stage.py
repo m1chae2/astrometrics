@@ -547,7 +547,7 @@ def _trim_stack_edges(run: StackRun) -> None:
     from astrometricslib.pipelines.stacking.stack_settings import trim_noisy_stack_edges
 
     run.crop_offset = trim_noisy_stack_edges(
-        run.stacked_path, get_configuration(), is_spectral=run.has_spectral
+        run.stacked_path, get_configuration(), is_spectral=run.has_spectral, diagnostics=run.diagnostics
     )
     run.excluded_frames.extend(
         ExcludedFrame(path=path, reason="corrupt or unreadable FITS file")
@@ -1460,6 +1460,18 @@ def _measure_stacked_pixel_fractions(
         summary.stacking_metrics.saturated_pixel_fraction = saturated_fraction
 
 
+def _record_stack_crop(summary: StackQualitySummary, diagnostics: dict) -> None:
+    """Copy the stack crop's reason and area share from a run.
+
+    The trim step puts them in ``diagnostics["stack_crop"]`` when it crops.
+    Sets the crop fields of `summary.stacking_metrics` in place.
+    """
+    crop = diagnostics.get("stack_crop")
+    if crop:
+        summary.stacking_metrics.stack_crop_reason = crop["reason"]
+        summary.stacking_metrics.stack_crop_area_fraction = crop["area_fraction"]
+
+
 def _record_exposure_groups(summary: StackQualitySummary, diagnostics: dict) -> None:
     """Copy the exposure-group entries and recommended exposure from a run.
 
@@ -1533,6 +1545,7 @@ def _build_stack_quality_summary(
         summary.stacking_metrics.background_split_detail = split_detail
 
     _record_exposure_groups(summary, diagnostics)
+    _record_stack_crop(summary, diagnostics)
 
     if stacked_path:
         _measure_stacked_pixel_fractions(summary, stacked_path, diagnostics)

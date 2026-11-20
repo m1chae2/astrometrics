@@ -237,6 +237,8 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `frames_excluded_for_gain` | `int` | Number of frames set aside because their camera gain differed from the rest. |
 | `frames_excluded_for_background` | `int` | Number of frames set aside because their sky background differed from the rest. |
 | `frames_quarantined` | `int` | Number of frames with clouds or trailed stars moved to the excluded folder. |
+| `stack_crop_reason` | `str \| None` | Quality metric attribute. |
+| `stack_crop_area_fraction` | `float \| None` | Quality metric attribute. |
 | `rejected_pixel_fraction` | `float \| None` | Share of pixel values rejected (clipped) while building the stack. |
 | `background_split_detected` | `bool` | True if the frames' sky-background levels split into two groups with a sudden jump between them (gap at least 4 times the spread within a group, checked for each exposure length), for example clouds arriving. The frames outside the larger group are set aside. |
 | `background_split_detail` | `str \| None` | Description of the sky-background jump. |

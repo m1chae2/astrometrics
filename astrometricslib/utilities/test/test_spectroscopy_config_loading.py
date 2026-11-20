@@ -157,7 +157,6 @@ def test_tuning_settings_that_are_left_out_do_not_warn(caplog: pytest.LogCapture
         config = load("Test Full Camera", FULL_CAMERA_SECTION)
 
     assert config.dispersion_offset_x == pytest.approx(0.0)
-    assert config.expected_fwhm == pytest.approx(8.0)
     assert config.extraction_radius == 10
     assert caplog.records == []
 

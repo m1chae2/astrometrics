@@ -8,8 +8,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from astrometricslib.foundation.parameter_context import run_basis_value
 from astrometricslib.foundation.parameters import resolve
-from astrometricslib.foundation.run_bases import factor_for
+from astrometricslib.foundation.run_bases import REFERENCE_SETUP_BASES, factor_for, scale_by_basis
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     ParameterRole,
@@ -148,6 +149,25 @@ EXTRACTION_RADIUS_PX = TunedParameter(
     reference_value=10,
 )
 
+
+def default_extraction_radius() -> int:
+    """Give the extraction radius for the trail width known now, quietly.
+
+    The config is usually built outside a run, before any trail is
+    measured. Then the setup's typical trail width (a tuned value) stands
+    in, and the reference setup's when even that is unknown. Unlike
+    `resolve`, this logs no warning, because loading the config with no
+    measured trail is the normal case, not a problem.
+
+    Returns
+    -------
+    radius_px : `int`
+        `EXTRACTION_RADIUS_PX` scaled by the trail width, rounded.
+    """
+    trail_width = run_basis_value(RunBasis.TRAIL_WIDTH_PX) or REFERENCE_SETUP_BASES[RunBasis.TRAIL_WIDTH_PX]
+    return round(float(scale_by_basis(EXTRACTION_RADIUS_PX, trail_width)))
+
+
 # The degree of the polynomial that smooths the traced trail's centers. 2 (a
 # gentle curve) lets the smooth trail bend a little, as a tilted grating or
 # lens distortion makes it, without following step-to-step noise (a
@@ -181,13 +201,14 @@ class CameraConfig(BaseModel):
     sensor_height_px : `int`
         Sensor height in pixels.
     grating_distance_mm : `float`
-        Default grating distance for this camera, by default 0.0.
+        Default grating distance for this camera, by default
+        `FALLBACK_GRATING_DISTANCE_MM` (0, reported as missing).
     sensor_min_wavelength : `float`
         Minimum wavelength sensor is sensitive to (nm), by default
-        350.0.
+        `FALLBACK_SENSOR_MIN_WAVELENGTH_NM` (350).
     sensor_max_wavelength : `float`
         Maximum wavelength sensor is sensitive to (nm), by default
-        900.0.
+        `FALLBACK_SENSOR_MAX_WAVELENGTH_NM` (900).
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -197,9 +218,21 @@ class CameraConfig(BaseModel):
     sensor_height_px: int = Field(..., description="Sensor height in pixels")
 
     # Spectroscopy specific defaults that can be overridden
-    grating_distance_mm: float = Field(0.0, description="Default grating distance for this camera")
-    sensor_min_wavelength: float = Field(350.0, description="Minimum wavelength sensor is sensitive to (nm)")
-    sensor_max_wavelength: float = Field(900.0, description="Maximum wavelength sensor is sensitive to (nm)")
+    # The defaults are the stand-in values the config loader also uses
+    # (`FALLBACK_*`, register SPE-D56), so a camera built in code and one read
+    # from an incomplete config get the same values.
+    grating_distance_mm: float = Field(
+        default_factory=lambda: float(resolve(FALLBACK_GRATING_DISTANCE_MM).value),
+        description="Default grating distance for this camera",
+    )
+    sensor_min_wavelength: float = Field(
+        default_factory=lambda: float(resolve(FALLBACK_SENSOR_MIN_WAVELENGTH_NM).value),
+        description="Minimum wavelength sensor is sensitive to (nm)",
+    )
+    sensor_max_wavelength: float = Field(
+        default_factory=lambda: float(resolve(FALLBACK_SENSOR_MAX_WAVELENGTH_NM).value),
+        description="Maximum wavelength sensor is sensitive to (nm)",
+    )
 
 
 class SpectroscopyConfig(BaseModel):
@@ -210,7 +243,8 @@ class SpectroscopyConfig(BaseModel):
     camera : `CameraConfig`
         Camera sensor configuration used for this session.
     grating_lines_per_mm : `float`
-        Lines per mm of the grating filter, by default 100.0.
+        Lines per mm of the grating filter, by default
+        `FALLBACK_GRATING_LINES_PER_MM` (100).
     grating_distance_mm : `float`
         Current physical distance between grating and sensor. Normally
         fitted from a calibration frame by
@@ -218,10 +252,10 @@ class SpectroscopyConfig(BaseModel):
         hand-set.
     dispersion_orientation : {"horizontal", "vertical"}
         Orientation of the dispersion axis, by default
-        ``"horizontal"``.
+        `FALLBACK_DISPERSION_ORIENTATION` (``"horizontal"``).
     dispersion_direction : {"positive", "negative"}
         Direction of increasing wavelength along the dispersion axis,
-        by default ``"negative"``.
+        by default `FALLBACK_DISPERSION_DIRECTION` (``"negative"``).
     dispersion_start_px : `float` or `None`
         Manual zero-order offset override, by default `None`. Normally
         fitted from a calibration frame by
@@ -242,8 +276,6 @@ class SpectroscopyConfig(BaseModel):
         start of the spectrum when it works out where extraction begins,
         by default 380.0. Set it per camera in the config file with the key
         ``extraction_start_wavelength_nm``.
-    expected_fwhm : `float`
-        Expected FWHM of stars in pixels, by default 8.0.
     extraction_radius : `int`
         Radius for spectrum extraction box. By default it is the value of
         `EXTRACTION_RADIUS_PX` (10 on the reference setup), which follows
@@ -317,14 +349,17 @@ class SpectroscopyConfig(BaseModel):
     camera: CameraConfig
 
     # Grating properties
-    grating_lines_per_mm: float = Field(100.0, description="Lines per mm of the grating filter")
+    grating_lines_per_mm: float = Field(
+        default_factory=lambda: float(resolve(FALLBACK_GRATING_LINES_PER_MM).value),
+        description="Lines per mm of the grating filter",
+    )
     grating_distance_mm: float = Field(
         ..., description="Current physical distance between grating and sensor"
     )
 
     # Dispersion characteristics
-    dispersion_orientation: Literal["horizontal", "vertical"] = Field("horizontal")
-    dispersion_direction: Literal["positive", "negative"] = Field("negative")
+    dispersion_orientation: Literal["horizontal", "vertical"] = Field(FALLBACK_DISPERSION_ORIENTATION)
+    dispersion_direction: Literal["positive", "negative"] = Field(FALLBACK_DISPERSION_DIRECTION)
     dispersion_start_px: float | None = Field(None, description="Manual zero-order offset override")
     dispersion_offset_x: float = Field(0.0, description="Fine-tuning horizontal offset of the dispersion box")
     dispersion_offset_y: float = Field(0.0, description="Fine-tuning vertical offset of the dispersion box")
@@ -339,9 +374,8 @@ class SpectroscopyConfig(BaseModel):
     )
 
     # Processing hints
-    expected_fwhm: float = Field(8.0, description="Expected FWHM of stars in pixels")
     extraction_radius: int = Field(
-        default_factory=lambda: round(resolve(EXTRACTION_RADIUS_PX).value),
+        default_factory=default_extraction_radius,
         description="Radius for spectrum extraction box (follows the trail width unless set)",
     )
     extraction_method: Literal["fixed", "traced"] = Field(
@@ -577,8 +611,7 @@ class ConfigLoader:
             extraction_start_wavelength_nm=get_f(
                 "extraction_start_wavelength_nm", resolve(DEFAULT_EXTRACTION_START_WAVELENGTH_NM).value
             ),
-            expected_fwhm=get_f("expected_fwhm", 8.0),
-            extraction_radius=int(get_f("extraction_radius", resolve(EXTRACTION_RADIUS_PX).value)),
+            extraction_radius=int(get_f("extraction_radius", default_extraction_radius())),
             extraction_method=get_s("extraction_method", "traced"),
             centerline_polynomial_degree=int(
                 get_f("centerline_polynomial_degree", resolve(CENTERLINE_POLYNOMIAL_DEGREE).value)

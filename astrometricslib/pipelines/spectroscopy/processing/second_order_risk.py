@@ -22,6 +22,7 @@ import numpy as np
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
+    HardcodedKind,
     ParameterRole,
     ParameterSource,
     TunedParameter,
@@ -52,7 +53,8 @@ SECOND_ORDER_MAXIMUM_PLAUSIBLE_FRACTION = TunedParameter(
 # The share of a wavelength's brightness that second-order light must be
 # able to add before that wavelength is called risky. 10% is a judgement
 # call, not a derived number: it is roughly where an added signal starts to
-# change a spectrum's shape visibly. Not validated against any data.
+# change a spectrum's shape visibly. It is hardcoded (a design estimate, not
+# validated against any data).
 SECOND_ORDER_RISKY_SHARE_OF_BRIGHTNESS = TunedParameter(
     name="spectroscopy.second_order_risky_share_of_brightness",
     default=0.10,
@@ -61,12 +63,9 @@ SECOND_ORDER_RISKY_SHARE_OF_BRIGHTNESS = TunedParameter(
         "The share of a wavelength's brightness that second-order light must add before it is called risky."
     ),
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="SPE-D18",
-    allowed_range=(0.02, 0.5),
-    # A sample is a stored star spectrum.
-    minimum_sample=20,
 )
 
 # The largest ratio that is ever stored. Where the star is dim or

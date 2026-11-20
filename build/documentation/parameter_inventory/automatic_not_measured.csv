@@ -265,18 +265,6 @@ spectroscopy.dispersion_angle_roi_half_width_px,SPE-D33,exclusion criteria,Desig
 spectroscopy.dispersion_angle_roi_minimum_half_width_px,SPE-D33,exclusion criteria,Design estimate
 spectroscopy.dispersion_angle_seed_slope_count,SPE-D33,exclusion criteria,Design estimate
 spectroscopy.emission_exclusion_half_width_resolution_elements,SPE-D45,exclusion criteria,Design estimate
-spectroscopy.emission_tuning.candidate_covered_fractions,SPE-D40,judgment,Design estimate
-spectroscopy.emission_tuning.candidate_point_counts,SPE-D40,judgment,Design estimate
-spectroscopy.emission_tuning.continuum_block_count,SPE-D40,judgment,Design estimate
-spectroscopy.emission_tuning.degree_tolerance,SPE-D40,judgment,Design estimate
-spectroscopy.emission_tuning.false_source_rate,SPE-D40,judgment,Design estimate
-spectroscopy.emission_tuning.inflation_coverage,SPE-D40,judgment,Design estimate
-spectroscopy.emission_tuning.injected_amplitude_sigmas,SPE-D40,judgment,Design estimate
-spectroscopy.emission_tuning.maximum_candidate_degree,SPE-D40,judgment,Design estimate
-spectroscopy.emission_tuning.minimum_pairs_for_blend_gap,SPE-D40,judgment,Design estimate
-spectroscopy.emission_tuning.noise_spread_tolerance,SPE-D40,judgment,Design estimate
-spectroscopy.emission_tuning.recovery_tolerance,SPE-D40,judgment,Design estimate
-spectroscopy.emission_tuning.spectra_coverage,SPE-D40,judgment,Design estimate
 spectroscopy.equivalent_width_window_line_spreads,SPE-23,measurement,Partly measured
 spectroscopy.excess_scatter_sigma,SPE-D39,exclusion criteria,Design estimate
 spectroscopy.expected_depth_fractional_uncertainty,SPE-D43,judgment,Design estimate
@@ -426,7 +414,6 @@ spectroscopy.tuning_defocus_limit_sigma_multiple,SPE-D09,measurement,Design esti
 spectroscopy.tuning_defocus_median_relative_error,SPE-D09,measurement,Design estimate
 spectroscopy.tuning_defocus_red_window_start_share,SPE-D09,measurement,Design estimate
 spectroscopy.tuning_defocus_window_width_angstrom,SPE-D09,measurement,Design estimate
-spectroscopy.tuning_gaia_limit_sigma_multiple,SPE-D14,measurement,Design estimate
 spectroscopy.tuning_range_band_angstrom,SPE-D31,measurement,Design estimate
 spectroscopy.tuning_range_minimum_stars_per_band,SPE-D31,measurement,Design estimate
 spectroscopy.tuning_range_peak_share,SPE-D31,measurement,Design estimate

@@ -1,6 +1,6 @@
 """Purpose: Derive instrument-dependent spectroscopy values from stored data.
 
-Description: Issue #175 Phase D. Six tuners, each setting one family of
+Description: Issue #175 Phase D. Four tuners, each setting one family of
 values from the spectra already in the library:
 
 * ``spectroscopy.usable_range``: every wavelength range that follows from
@@ -10,10 +10,6 @@ values from the spectra already in the library:
   chromatic defocus check (SPE-D09).
 * ``spectroscopy.response_fit``: the polynomial degree and the band skipped
   around each line when the instrument response is fitted (SPE-D55).
-* ``spectroscopy.second_order_share``: the share of brightness that makes
-  second-order light risky (SPE-D18).
-* ``spectroscopy.gaia_xp_limits``: the residual and tilt limits against
-  Gaia XP (SPE-D14 and SPE-D15).
 * ``spectroscopy.colour_limit``: the colour disagreement limit (SPE-27).
 
 Each tuner keeps its arithmetic in small functions that take plain numbers
@@ -38,8 +34,6 @@ from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_catalog i
 )
 from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp import (
     COMPARISON_RANGE_ANGSTROM,
-    GAIA_XP_RESIDUAL_RMS_LIMIT,
-    GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.differential_refraction import (
     BLUE_REPORT_WAVELENGTH_ANGSTROM,
@@ -73,9 +67,6 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution i
 )
 from astrometricslib.pipelines.spectroscopy.processing.emission_line_detector import (
     MAXIMUM_FITTED_WAVELENGTH_ANGSTROM,
-)
-from astrometricslib.pipelines.spectroscopy.processing.second_order_risk import (
-    SECOND_ORDER_RISKY_SHARE_OF_BRIGHTNESS,
 )
 from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier import (
     _get_reference_templates,
@@ -909,175 +900,6 @@ RESPONSE_FIT_TUNER = Tuner(
         "residual falls to 1% above the baseline, in line spreads and, for the floor, in Angstroms."
     ),
     tune=tune_response_fit,
-    per_filter=True,
-)
-
-
-# --- Second-order share (SPE-D18) -------------------------------------------
-
-
-def median_relative_noise(
-    wavelength_angstrom: np.ndarray,
-    intensity: np.ndarray,
-    intensity_error: np.ndarray,
-    low: float,
-    high: float,
-) -> float | None:
-    """Find a spectrum's typical per-sample error over its brightness.
-
-    Parameters
-    ----------
-    wavelength_angstrom : `numpy.ndarray`
-        The wavelengths, in Angstroms.
-    intensity : `numpy.ndarray`
-        The brightness.
-    intensity_error : `numpy.ndarray`
-        The 1-sigma error of each brightness.
-    low, high : `float`
-        The wavelength range to measure over, in Angstroms.
-
-    Returns
-    -------
-    relative_noise : `float` or `None`
-        The median of error over brightness in the range, or `None` when no
-        sample has a positive brightness and error.
-    """
-    usable = (
-        np.isfinite(intensity)
-        & np.isfinite(intensity_error)
-        & (intensity > 0)
-        & (intensity_error > 0)
-        & (wavelength_angstrom >= low)
-        & (wavelength_angstrom <= high)
-    )
-    if not usable.any():
-        return None
-    return float(np.median(intensity_error[usable] / intensity[usable]))
-
-
-def tune_second_order_share(inputs: TuningInputs) -> TuningResult:
-    """Derive the share of brightness that makes second-order light risky.
-
-    Parameters
-    ----------
-    inputs : `TuningInputs`
-        What the tuner may read.
-
-    Returns
-    -------
-    result : `TuningResult`
-        The share: the typical per-sample noise of the red half of the range.
-
-    Raises
-    ------
-    TuningSkippedError
-        If the filter is not the grating or no spectrum has stored errors.
-    """
-    require_spectral_filter(inputs)
-    spectra = load_stored_star_spectra(inputs.service("astrometrics"))
-    (usable_low, usable_high), _ = measure_usable_range(spectra)
-    middle = 0.5 * (usable_low + usable_high)
-    noise_values = [
-        value
-        for spectrum in spectra
-        if spectrum.intensity_error is not None
-        for value in [
-            median_relative_noise(
-                spectrum.wavelength_angstrom,
-                spectrum.intensity,
-                spectrum.intensity_error,
-                middle,
-                usable_high,
-            )
-        ]
-        if value is not None
-    ]
-    if not noise_values:
-        raise TuningSkippedError("no stored spectrum has per-sample errors in the red half of the range")
-    return TuningResult(
-        values={SECOND_ORDER_RISKY_SHARE_OF_BRIGHTNESS.name: float(np.median(noise_values))},
-        sample=len(noise_values),
-        source=(
-            f"Median per-sample error over brightness in the red half of the usable range, "
-            f"over {len(noise_values)} stored star spectra"
-        ),
-    )
-
-
-SECOND_ORDER_SHARE_TUNER = Tuner(
-    name="spectroscopy.second_order_share",
-    parameters=(SECOND_ORDER_RISKY_SHARE_OF_BRIGHTNESS,),
-    method=(
-        "Takes the median per-sample error over brightness of the stored star spectra in the red half of the "
-        "usable range: second-order light below it cannot change a spectrum's shape visibly."
-    ),
-    tune=tune_second_order_share,
-    per_filter=True,
-)
-
-
-# --- Gaia XP limits (SPE-D14, SPE-D15) --------------------------------------
-
-# How many robust standard deviations the Gaia XP limits sit above the
-# ordinary spread. Three leaves about one in a thousand ordinary stars out.
-GAIA_LIMIT_SIGMA_MULTIPLE = declare_method_choice(
-    "spectroscopy.tuning_gaia_limit_sigma_multiple",
-    3.0,
-    "sigma",
-    "Robust standard deviations above the ordinary spread at which a Gaia XP limit sits.",
-    "SPE-D14",
-    HardcodedKind.STATISTICS,
-)
-
-
-def tune_gaia_xp_limits(inputs: TuningInputs) -> TuningResult:
-    """Derive the Gaia XP residual and tilt limits.
-
-    Parameters
-    ----------
-    inputs : `TuningInputs`
-        What the tuner may read.
-
-    Returns
-    -------
-    result : `TuningResult`
-        The residual RMS limit and the tilt limit.
-
-    Raises
-    ------
-    TuningSkippedError
-        If the filter is not the grating or no spectrum has a stored
-        Gaia XP comparison.
-    """
-    require_spectral_filter(inputs)
-    spectra = load_stored_star_spectra(inputs.service("astrometrics"))
-    residuals = [s.gaia_residual_rms for s in spectra if s.gaia_residual_rms is not None]
-    slopes = [s.gaia_slope_percent for s in spectra if s.gaia_slope_percent is not None]
-    if not residuals or not slopes:
-        raise TuningSkippedError("no stored spectrum has a Gaia XP comparison")
-    multiple = GAIA_LIMIT_SIGMA_MULTIPLE.default
-    return TuningResult(
-        values={
-            GAIA_XP_RESIDUAL_RMS_LIMIT.name: upper_limit_from_spread(residuals, multiple),
-            GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM.name: symmetric_limit_from_spread(slopes, multiple),
-        },
-        sample=min(len(residuals), len(slopes)),
-        source=(
-            f"Residual limit 3 robust standard deviations above the median, and tilt limit 3 above zero, "
-            f"over {len(residuals)} stored Gaia XP comparisons"
-        ),
-    )
-
-
-GAIA_XP_LIMITS_TUNER = Tuner(
-    name="spectroscopy.gaia_xp_limits",
-    parameters=(GAIA_XP_RESIDUAL_RMS_LIMIT, GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM),
-    method=(
-        "Reads the stored Gaia XP comparisons and puts each limit 3 robust standard deviations "
-        "beyond the median "
-        "(the residual) or beyond zero (the tilt) of the spectra compared."
-    ),
-    tune=tune_gaia_xp_limits,
     per_filter=True,
 )
 

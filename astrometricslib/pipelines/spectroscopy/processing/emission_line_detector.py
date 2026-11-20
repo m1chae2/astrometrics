@@ -101,32 +101,29 @@ MAXIMUM_FITTED_WAVELENGTH_ANGSTROM = TunedParameter(
 
 # The continuum is a polynomial of this degree. 2 is a gentle curve: a
 # higher degree could bend into a hump 600 A wide and hide it. Chosen for
-# M 57 only.
+# M 57 only. Hardcoded: a design estimate.
 CONTINUUM_POLYNOMIAL_DEGREE = TunedParameter(
     name="spectroscopy.continuum_polynomial_degree",
     default=2,
     unit="degree",
     description="The continuum under an emission line is a polynomial of this degree.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="SPE-D40",
-    allowed_range=(1, 4),
-    minimum_sample=5,  # a sample is a stored spectrum of the grating
 )
 
-# The fewest samples a spectrum needs before a fit is attempted.
+# The fewest samples a spectrum needs before a fit is attempted. Hardcoded:
+# a design estimate.
 _MINIMUM_SPECTRUM_POINTS = TunedParameter(
     name="spectroscopy.minimum_spectrum_points",
     default=30,
     unit="count",
     description="The fewest samples a spectrum needs before an emission-line fit is attempted.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="SPE-D40",
-    allowed_range=(8, 120),
-    minimum_sample=5,  # a sample is a stored spectrum of the grating
 )
 
 # The caller should pass the box half-width as (extraction box width in
@@ -148,11 +145,9 @@ BLEND_CORRELATION_THRESHOLD = TunedParameter(
     unit="correlation",
     description="Two lines whose fitted amplitudes correlate above this are reported as a blend.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="SPE-D40",
-    allowed_range=(0.3, 0.95),
-    minimum_sample=2,  # a sample is a stored nebula spectrum
 )
 
 # How many error bars above zero a line must be. 5 means "very unlikely to
@@ -187,11 +182,9 @@ MINIMUM_COVERED_FRACTION = TunedParameter(
     unit="fraction",
     description="A line is covered only when at least this much of its box lies inside the fitted range.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="SPE-D40",
-    allowed_range=(0.2, 0.95),
-    minimum_sample=2,  # a sample is a stored nebula spectrum
 )
 
 # A spectrum is called an emission-line source when at least this many
@@ -203,11 +196,9 @@ MINIMUM_DETECTED_FOR_EMISSION_SOURCE = TunedParameter(
     unit="count",
     description="The fewest detected lines or blends for a spectrum to be called an emission-line source.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
     register_entry="SPE-D40",
-    allowed_range=(2, 5),
-    minimum_sample=5,  # a sample is a stored spectrum of the grating
 )
 
 # The noise inflation for correlated samples is never allowed to be larger
@@ -219,11 +210,9 @@ _MAXIMUM_INFLATION_FRACTION = TunedParameter(
     unit="fraction",
     description="The largest noise inflation for correlated samples, as a fraction of the sample count.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
     register_entry="SPE-D40",
-    allowed_range=(0.01, 0.5),
-    minimum_sample=5,  # a sample is a stored spectrum of the grating
 )
 
 

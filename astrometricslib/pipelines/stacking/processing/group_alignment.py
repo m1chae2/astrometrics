@@ -109,13 +109,16 @@ NEGLIGIBLE_SHIFT_PIXELS = TunedParameter(
 )
 
 # The spline order used when a group stack is moved or turned onto the
-# reference: 3 (cubic), the sharpest order that keeps the star shape. A group
-# stack is resampled once to line it up, and the single-pass measurement of
-# 2026-11-15 on M 27 showed what a second cubic resample costs: 0.4 to 2
-# percent of the flux on faint stars but 19 to 27 percent more ringing on
-# saturated stars, so the library keeps to one resample (STK-13). A map of
-# counts that must not overshoot passes order 1 by itself. A method choice,
-# not tied to the equipment.
+# reference: 3 (cubic), the sharpest order that keeps the star shape. A map
+# of counts that must not overshoot passes order 1 by itself. A method
+# choice, not tied to the equipment (STK-13).
+#
+# A group stack moved here has already been resampled once, when Siril
+# aligned its frames, so this is a second resample. The measurement of
+# 2026-11-15 shows what it costs: faint stars 0.4 to 2.1 percent wider, but
+# the brightest (clipped) stars 19 to 27 percent wider on M 27 and 33 percent
+# on M 57, from cubic ringing around their cores. Issue #192 removes the
+# second resample by registering every frame to one reference in one pass.
 GROUP_RESAMPLE_SPLINE_ORDER = TunedParameter(
     name="stacking.group_resample_spline_order",
     default=3,

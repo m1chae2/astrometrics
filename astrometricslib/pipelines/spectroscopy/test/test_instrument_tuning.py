@@ -25,8 +25,6 @@ ALL_TUNERS = (
     instrument_tuning.USABLE_RANGE_TUNER,
     instrument_tuning.LINE_SPREAD_WINDOWS_TUNER,
     instrument_tuning.RESPONSE_FIT_TUNER,
-    instrument_tuning.SECOND_ORDER_SHARE_TUNER,
-    instrument_tuning.GAIA_XP_LIMITS_TUNER,
     instrument_tuning.COLOUR_LIMIT_TUNER,
 )
 
@@ -183,17 +181,6 @@ def test_wing_radius_is_zero_without_a_wing_and_none_without_samples() -> None:
         distance, np.zeros(distance.size), 0.0, 0.25, 4.0, 0.01
     ) == pytest.approx(0.0)
     assert instrument_tuning.wing_radius(np.array([9.0]), np.array([0.0]), 0.0, 0.25, 4.0, 0.01) is None
-
-
-def test_median_relative_noise_reads_the_range_only() -> None:
-    """Only samples inside the range count."""
-    wavelength = np.array([4000.0, 6000.0, 7000.0])
-    intensity = np.array([10.0, 10.0, 10.0])
-    error = np.array([5.0, 1.0, 1.0])
-    assert instrument_tuning.median_relative_noise(
-        wavelength, intensity, error, 5500.0, 8000.0
-    ) == pytest.approx(0.1)
-    assert instrument_tuning.median_relative_noise(wavelength, intensity, error, 9000.0, 9500.0) is None
 
 
 def test_spread_limits() -> None:

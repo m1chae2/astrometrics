@@ -323,7 +323,10 @@ MINIMUM_SHIFT_CORRELATION = TunedParameter(
     register_entry="SPE-28",
 )
 
-# The designed limits of the checkpoint metrics and of the run gate.
+# The designed limits of the checkpoint metrics and of the run gate. The first
+# two are hardcoded design estimates. They sit above Gaia XP's own calibration
+# error, and a tuner fitted to stored results would be circular (the results
+# would set the limit that judges them).
 #
 # 0.05: the whole-spectrum scatter of observed / XP. About the size of the
 #   instrument-response errors the owner would want to find (a few percent),
@@ -339,12 +342,9 @@ GAIA_XP_RESIDUAL_RMS_LIMIT = TunedParameter(
     unit="fraction",
     description="The largest residual RMS against Gaia XP the checkpoint and run gate accept.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="SPE-D14",
-    allowed_range=(0.01, 0.2),
-    # A sample is a star compared with Gaia XP.
-    minimum_sample=10,
 )
 GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM = TunedParameter(
     name="spectroscopy.gaia_xp_slope_limit_percent_per_1000_angstrom",
@@ -352,12 +352,9 @@ GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM = TunedParameter(
     unit="% per 1000 Å",
     description="The largest spectral slope error against Gaia XP the checkpoint and run gate accept.",
     role=ParameterRole.JUDGMENT,
-    source=ParameterSource.TUNED_PARAMETER,
-    equipment=frozenset({EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
     register_entry="SPE-D15",
-    allowed_range=(0.5, 10.0),
-    # A sample is a star compared with Gaia XP.
-    minimum_sample=10,
 )
 # It stands for about one pixel of dispersion in wavelength (11 on the
 # reference setup, 0.97 × the dispersion), so it follows the dispersion the

@@ -16,7 +16,6 @@ tools:
   - mcp__astrometricslib-core__quality_measure_frames
   - mcp__astrometricslib-core__quality_measure_stack
   - mcp__astrometricslib-core__quality_measure_star_profile
-  - mcp__astrometricslib-core__quality_measure_star_shapes
   - mcp__astrometricslib-core__quality_metrics
   - mcp__astrometricslib-core__quality_query
   - mcp__astrometricslib-core__quality_resolve_rows

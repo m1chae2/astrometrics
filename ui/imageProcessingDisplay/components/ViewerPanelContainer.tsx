@@ -4,12 +4,13 @@ import { SectionPanel } from '../../common/components/SectionPanel';
 import { SwitchDisplayButton } from '../../common/components/SwitchDisplayButton';
 import { FitsViewerManager, FitsRendererHandle } from '../../common/fitsViewer/FitsViewerManager';
 import { FileBrowser, FileBrowserToolbar } from '../fileBrowser/FileBrowser';
+import type { FileItem } from '../fileBrowser/FileBrowser';
+import type { FrameStatusInfo } from '../utils/frameStatus';
 import { AstrometryOverlayStar } from '../../common/services/astronomyService';
 import { Button } from '../../common/components/Button';
 import { DisplayModeSelect } from '../../common/fitsViewer/DisplayModeSelect';
 import type { DisplayMode } from '../../common/fitsViewer/displayMode';
 import { DetectionsToggle } from '../../common/fitsViewer/DetectionsToggle';
-import { StarShapesToggle } from '../../common/fitsViewer/StarShapesToggle';
 import { resolveTargetFramePath } from '../../common/services/imaging/measurementPath';
 
 /** Shown under an Auto Stretch picture, which holds no pixel values. */
@@ -54,6 +55,12 @@ interface ViewerPanelContainerProps {
   toggleFile: (path: string | null) => void;
   toggleAllFiles: () => void;
   analysisResults: any;
+  /** Each frame's status by file path, for the File Browser's Status column. */
+  frameStatuses?: ReadonlyMap<string, FrameStatusInfo>;
+  /** The frames the stacker set aside, listed in the File Browser. */
+  setAsideFiles?: FileItem[];
+  /** Puts one set-aside frame back into the target. */
+  onPutBackFrame?: (path: string) => void;
 
   /** Set while Image Controls is folded and the right column too: its tab joins the bottom bar here. */
   onOpenImageControls?: () => void;
@@ -69,12 +76,10 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
   selectedStarId,
   allFiles, filteredFiles, fileFilterText, setFileFilterText, fileBrowserCamera, setFileBrowserCamera, selectedOptic, setSelectedOptic,
   checkedFiles, handleRequestDeleteFiles, onOpenHeaderModal, onFileClick, selectedFile,
-  toggleFile, toggleAllFiles, analysisResults, onOpenImageControls
+  toggleFile, toggleAllFiles, analysisResults, frameStatuses, setAsideFiles, onPutBackFrame, onOpenImageControls
 }) => {
   // True while the image shows a marker at every star the astrometry run's star finder detects.
   const [detectionsEnabled, setDetectionsEnabled] = useState(false);
-  // True while the image shows a line along the long axis of each measured star.
-  const [shapesEnabled, setShapesEnabled] = useState(false);
   // True while the File Browser is folded down to a tab bar, which gives the viewer the full height.
   const [browserCollapsed, setBrowserCollapsed] = usePersistentFlag('astrometrics:imageProcessing:browserCollapsed', false);
 
@@ -98,7 +103,6 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
           <div className="fits-header-controls">
             <DisplayModeSelect mode={displayMode} onChange={onDisplayModeChange} />
             <DetectionsToggle enabled={detectionsEnabled} onChange={setDetectionsEnabled} />
-            <StarShapesToggle enabled={shapesEnabled} onChange={setShapesEnabled} />
             <Button
               size="small"
               active={showAstrometryOverlay}
@@ -144,7 +148,6 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
           onStarClick={onStarClick}
           selectedStarId={selectedStarId}
           showDetections={detectionsEnabled}
-          showShapes={shapesEnabled}
           resolveMeasurePath={resolveMeasurePath}
         />
       </SectionPanel>
@@ -184,6 +187,9 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
           onToggleFile={toggleFile}
           onToggleAll={toggleAllFiles}
           selectedCamera={fileBrowserCamera}
+          frameStatuses={frameStatuses}
+          setAsideFiles={setAsideFiles}
+          onPutBackFrame={onPutBackFrame}
         />
       </SectionPanel>
       )}

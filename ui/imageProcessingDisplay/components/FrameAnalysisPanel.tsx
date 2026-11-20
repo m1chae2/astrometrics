@@ -12,10 +12,11 @@ import { StackedImagePanel } from './StackedImagePanel';
 import { UnifiedFrameAnalysis } from './FrameCountTable';
 import { ImageDetailsManager } from '../imageDetailsManager/ImageDetailsManager';
 import { JobHistoryList } from './JobHistoryList';
+import { StarShapesSummary } from './StarShapesSummary';
 
 import { useImageProcessingContext } from '../context/ImageProcessingContext';
 import { fetchFrameStatsGrouped, refreshTarget, updateTargetById } from '../../common/services/targetService';
-import { GroupedFrameStat } from '../../common/types/backendTypes';
+import { GroupedFrameStat, StarShapeReview } from '../../common/types/backendTypes';
 import { getMultiOpticStatus } from '../utils/opticSelection';
 import { chooseAnalysisSelection, chooseTemporalVariationSelection } from '../utils/analysisSelection';
 
@@ -34,6 +35,8 @@ interface FrameAnalysisPanelProps {
   setIsAddModalOpen: (open: boolean) => void;
   selectedFile: string | null;
   onShowHeader?: (path: string) => void;
+  /** The stored star-shape verdicts of the target, or `null` when not available. */
+  starShapeReview?: StarShapeReview | null;
 
   // Fold state, held by the screen because the Image Controls tab can sit in the viewer's bottom bar.
   analysisCollapsed: boolean;
@@ -50,7 +53,7 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
   allFiles, filteredFiles, checkedFiles, stackedImage, stackedSpectralTarget, totalExposure,
   handleSelectFile,
   handleAddImages, setIsAddModalOpen,
-  selectedFile, onShowHeader,
+  selectedFile, onShowHeader, starShapeReview = null,
   analysisCollapsed, setAnalysisCollapsed, controlsCollapsed, setControlsCollapsed
 }) => {
   const {
@@ -243,6 +246,11 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
                     depthGoalRefreshKey={`${reloadKey}-${isProcessing ? 'busy' : 'idle'}`}
                   />
                   <AnalysisResults results={analysisResults} />
+                  <StarShapesSummary
+                    review={starShapeReview}
+                    selectedPath={selectedFile}
+                    onSelectFrame={handleSelectFile}
+                  />
                   <UnifiedFrameAnalysis
                     lightFrames={lightStats}
                     darkFrames={filteredDarks}

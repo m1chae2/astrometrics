@@ -53,8 +53,6 @@ interface Props {
   acceptPrefetch?: boolean;
   /** True while the Detections overlay is on; see `FitsRenderer`. */
   showDetections?: boolean;
-  /** True while the Shapes overlay is on; see `FitsRenderer`. */
-  showShapes?: boolean;
   /** Finds the file path of the image on screen, for the star profile; see `FitsRenderer`. */
   resolveMeasurePath?: () => Promise<string | null>;
   /** What the star profile panel says when the image holds no pixel values; see `FitsRenderer`. */
@@ -86,7 +84,6 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
   previewBlob,
   acceptPrefetch,
   showDetections,
-  showShapes,
   resolveMeasurePath,
   noPixelDataMessage,
   starProfilePictureNote
@@ -114,7 +111,6 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
         previewBlob={previewBlob ?? null}
         acceptPrefetch={acceptPrefetch}
         showDetections={showDetections}
-        showShapes={showShapes}
         resolveMeasurePath={resolveMeasurePath}
         noPixelDataMessage={noPixelDataMessage}
         starProfilePictureNote={starProfilePictureNote}

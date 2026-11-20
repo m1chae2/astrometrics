@@ -100,7 +100,6 @@ from astrometricslib.models.quality.star_profile import (
     RingNeighbor,
     StarProfileMeasurement,
 )
-from astrometricslib.models.quality.star_shapes import StarShape, StarShapesMeasurement
 from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasurement
 from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
 from astrometricslib.models.stellar_source import (
@@ -142,6 +141,7 @@ from astrometricslib.models.wavelength_scale import (
     WavelengthZeroPointRecord,
 )
 from backend.public_interface import ROUTES, RPC_METHODS, UI_EVENTS
+from backend.services.data.frame_status import FrameStatus, FrameStatusReport
 from backend.services.infrastructure.system_status_service import (
     FrameCopyPulse,
     IndiStatus,
@@ -582,6 +582,8 @@ def render_types() -> str:
         generate_interface(SessionPhotometrySummary, "SessionPhotometrySummary"),
         generate_interface(PhotometryResult, "PhotometryResult"),
         generate_interface(FrameCopyPulse, "FrameCopyPulse"),
+        generate_interface(FrameStatus, "FrameStatus"),
+        generate_interface(FrameStatusReport, "FrameStatusReport"),
         generate_interface(TelescopePulse, "TelescopePulse"),
         generate_interface(ProcessingJobPulse, "ProcessingJobPulse"),
         generate_interface(SystemPulse, "SystemPulse"),
@@ -674,8 +676,6 @@ def render_types() -> str:
         generate_interface(StarDetection, "StarDetection"),
         generate_interface(DetectionsMeasurement, "DetectionsMeasurement"),
         generate_interface(StarProfileMeasurement, "StarProfileMeasurement"),
-        generate_interface(StarShape, "StarShape"),
-        generate_interface(StarShapesMeasurement, "StarShapesMeasurement"),
     ]
 
     # The night plan, its change record, the sequence summary and the target

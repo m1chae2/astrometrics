@@ -93,7 +93,8 @@ const ImageProcessingDisplayInner: React.FC = () => {
     selectedFile, setSelectedFile, filesToDelete, handleRequestDeleteFiles, confirmDeleteFiles,
     showFileDeleteConfirm, setShowFileDeleteConfirm,
     checkedFiles, setCheckedFiles, toggleFile, toggleAllFiles,
-    stackedImage, stackedSpectralTarget, totalExposure
+    stackedImage, stackedSpectralTarget, totalExposure,
+    starShapeReview, frameStatuses, setAsideFiles, putBackFrame
   } = files;
 
   const {
@@ -505,6 +506,9 @@ const ImageProcessingDisplayInner: React.FC = () => {
       toggleFile={toggleFile}
       toggleAllFiles={toggleAllFiles}
       analysisResults={analysisResults}
+      frameStatuses={frameStatuses}
+      setAsideFiles={setAsideFiles}
+      onPutBackFrame={putBackFrame}
       onOpenImageControls={analysisCollapsed && controlsCollapsed ? () => setControlsCollapsed(false) : undefined}
     />
   );
@@ -522,6 +526,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
       setIsAddModalOpen={setIsAddModalOpen}
       selectedFile={selectedFile}
       onShowHeader={handleOpenHeaderModal}
+      starShapeReview={starShapeReview}
       analysisCollapsed={analysisCollapsed}
       setAnalysisCollapsed={setAnalysisCollapsed}
       controlsCollapsed={controlsCollapsed}

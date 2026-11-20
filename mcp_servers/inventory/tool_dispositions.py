@@ -336,11 +336,6 @@ DECISIONS = {
         "Built 2026-11-16. Lists the star finder's detections in a FITS file. Reads the file only; "
         "nothing is stored.",
     ),
-    "quality_measure_star_shapes": ToolDecision(
-        "keep",
-        "Built 2026-11-20 (#199). Gives each fitted star's width, stretch and stretch direction in a FITS "
-        "file, with a frame summary. Reads the file only; nothing is stored.",
-    ),
     "quality_measure_tuned_parameters": ToolDecision(
         "withhold",
         "Built 2026-11-16 (#175). Works out the image-processing tuned values; with save=True it backs "
@@ -654,6 +649,13 @@ DECISIONS = {
         "withhold",
         "Saves a focus model record to the database. It sends nothing to a device, but the delegation rules "
         "trust the record, and the AI is read-only. Read the saved one with observatory_imaging_status.",
+        "change-data",
+    ),
+    "quality_put_back_set_aside_frames": ToolDecision(
+        "withhold",
+        "Moves chosen set-aside frames out of a target's _excluded folder back into the target and "
+        "rescans it. It moves files, and the AI is read-only, so a person puts frames back in the File "
+        "Browser. The AI lists them with quality_set_aside_frames.",
         "change-data",
     ),
     "quality_forget": ToolDecision(

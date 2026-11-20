@@ -6,8 +6,7 @@
  * (the angle is set with a slider). The curve is the fitted star shape, mirrored to both sides, with a
  * dashed line at half its height to show the width. The "Around the star" tab plots the library's ring (the
  * brightness by direction with the neighbor stars left out), the smooth curve of its significant Fourier terms,
- * and a small bar chart of the size of each term, with a one-line summary. When the Shapes overlay has measured
- * the image, a small line under the header gives the frame's star shapes and how the clicked star compares.
+ * and a small bar chart of the size of each term, with a one-line summary.
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from '../components/Button';
@@ -18,10 +17,9 @@ import { Tabs, tabElementId, tabPanelElementId } from '../components/Tabs';
 import { BasePlot } from '../components/plotting/BasePlot';
 import { buildLayout, getVar, getVarAsNum } from '../utils/plotTools';
 import type { PlotlyTrace } from '../utils/plotTools';
-import type { ProfileFit, RingHarmonic, StarProfileMeasurement, StarShapesMeasurement } from '../types/backendTypes';
+import type { ProfileFit, RingHarmonic, StarProfileMeasurement } from '../types/backendTypes';
 import type { StarProfileState } from './hooks/useStarProfile';
 import { rebuildCut } from './utils/starCut';
-import { describeFrameShapes, describeStarAgainstFrame } from './utils/starShapes';
 import { describeRing, harmonicCurve, hasFewPixels, screenDirection } from './utils/starRing';
 import './starProfilePanel.css';
 
@@ -146,8 +144,6 @@ export interface StarProfilePanelProps {
   followNote?: { method: string; note: string } | null;
   /** Called when what the image should draw changes (the tab, the cut length, the ring). */
   onViewChange?: (view: StarProfileView) => void;
-  /** The star shapes of the image, when the Shapes overlay has measured them; adds a frame summary line. */
-  shapes?: StarShapesMeasurement | null;
 }
 
 /**
@@ -379,7 +375,7 @@ function HarmonicBars({ harmonics }: { harmonics: RingHarmonic[] }): React.React
  * @returns The panel, or null when it is closed.
  */
 export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
-  state, cutAngleDegrees, onCutAngleChange, onClose, pictureNote, cutLengthPx = null, onCutLengthChange, onViewChange, followNote = null, shapes = null,
+  state, cutAngleDegrees, onCutAngleChange, onClose, pictureNote, cutLengthPx = null, onCutLengthChange, onViewChange, followNote = null,
 }) => {
   // Kept while the panel is open, and for the next star.
   const [logScale, setLogScale] = useState(false);
@@ -411,9 +407,6 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
     message = <p className="star-profile__message" data-testid="star-profile-measuring">Measuring the star.</p>;
   }
 
-  // Under the header when the Shapes overlay has measured the image: the frame's summary, and how this star compares.
-  const frameShapes = shapes ? describeFrameShapes(shapes) : null;
-  const starAgainstFrame = shapes && measurement ? describeStarAgainstFrame(shapes, measurement.center_x, measurement.center_y) : null;
   const notes = [measurement?.color_note, pictureNote].filter(Boolean).join(' ');
 
   return (
@@ -435,12 +428,6 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
         </Button>
       </div>
       {followNote && <p className="star-profile__note" title={followNote.note} data-testid="star-profile-follow">{describeFollow(followNote.method)}</p>}
-      {frameShapes && (
-        <p className="star-profile__note" data-testid="star-profile-frame-shapes">
-          {frameShapes}
-          {starAgainstFrame && <><br />{starAgainstFrame}</>}
-        </p>
-      )}
       {message}
       {measurement && (
         <div className={`star-profile__body${state.status === 'measuring' ? ' star-profile__body--updating' : ''}`}>

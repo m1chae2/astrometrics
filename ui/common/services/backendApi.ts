@@ -175,6 +175,8 @@ export interface ActionRegistry {
     "target:update": { payload: { target_id: string; updates: Partial<TargetObject> }; response: TargetObject | null };
     "target:delete": { payload: { target_id: string }; response: boolean };
     "target:get_files": { payload: { target_id: string }; response: TargetFilesResponse };
+    "target:get_frame_statuses": { payload: { target_id: string }; response: import('../types/backendTypes').FrameStatusReport };
+    "target:put_back_frames": { payload: { target_id: string; paths: string[] }; response: { restored: string[] } };
     "target:get_camera_index": { payload: Record<string, never>; response: TargetCameraIndex };
     "target:get_frames": { payload: { target_id: string }; response: FrameRecord[] };
     "target:get_frames_grouped": { payload: { target_id: string; camera?: string }; response: GroupedFrameStat[] };
@@ -397,7 +399,6 @@ export interface ActionRegistry {
     "images:measure_star_profile": { payload: { path: string; x: number; y: number; radius_px?: number; cut_angle_degrees?: number; cut_half_length_px?: number; search_radius_px?: number }; response: import('../types/backendTypes').StarProfileMeasurement };
     "images:map_position": { payload: { from_path: string; x: number; y: number; to_path: string }; response: { x: number | null; y: number | null; method: string; note: string } };
     "images:measure_detections": { payload: { path: string }; response: import('../types/backendTypes').DetectionsMeasurement };
-    "images:measure_star_shapes": { payload: { path: string }; response: import('../types/backendTypes').StarShapesMeasurement };
     "images:delete": { payload: { paths: string[]; target_id?: string }; response: { deleted: string[]; failed: { path: string; reason: string }[] } };
     "images:last": { payload: { stretch?: boolean }; response: { id: string; min: number; max: number; image_data: string; path: string } | null };
 
@@ -622,6 +623,7 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'advisory:tonight',
     'advisory:result',
     'advisory:star_shapes',
+    'target:get_frame_statuses',
     'advisory:depth_goal',
     'processing:stack_summary',
     'quality:set_aside_frames',

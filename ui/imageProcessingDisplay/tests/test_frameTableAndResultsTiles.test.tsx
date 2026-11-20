@@ -66,8 +66,8 @@ describe('FileBrowser', () => {
                 selectedCamera="All"
             />
         );
-        const status = screen.getByText('Unusual brightness');
-        expect(status.getAttribute('title')).toMatch(/still in the stack/);
+        const status = screen.getByText('Unusual brightness').closest('[title]');
+        expect(status?.getAttribute('title')).toMatch(/still in the stack/);
         expect(screen.queryByText('Rejected')).toBeNull();
     });
 });

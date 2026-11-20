@@ -156,6 +156,13 @@
       "interim_block": "",
       "note": "Built 2026-10-24. Reads the camera, telescope, filter, exposure, gain setting, offset and binning that stored quality measurements point at, by capture setting id. Writes nothing and creates no table."
     },
+    "quality_put_back_set_aside_frames": {
+      "tool_class": "change-data",
+      "category": "image-processing",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Moves chosen set-aside frames out of a target's _excluded folder back into the target and rescans it. It moves files, and the AI is read-only, so a person puts frames back in the File Browser. The AI lists them with quality_set_aside_frames."
+    },
     "quality_forget": {
       "tool_class": "change-data",
       "category": "image-processing",
@@ -176,13 +183,6 @@
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-11-16. Lists the star finder's detections in a FITS file. Reads the file only; nothing is stored."
-    },
-    "quality_measure_star_shapes": {
-      "tool_class": "compute",
-      "category": "image-processing",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-11-20 (#199). Gives each fitted star's width, stretch and stretch direction in a FITS file, with a frame summary. Reads the file only; nothing is stored."
     },
     "quality_measure_folder": {
       "tool_class": "compute",

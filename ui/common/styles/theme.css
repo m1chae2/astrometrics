@@ -157,7 +157,6 @@
   --accent-sky: #4fc1ff;          /* light blue for sky-map overlays, links and selections */
   --detection-marker-color: #ffd54a;         /* circle on a star the star finder detected */
   --detection-merged-color: #ff6ec7;         /* diamond on a star reported twice and merged */
-  --star-shape-line-color: #5ee6c8;          /* line along the long axis of a stretched star (Shapes overlay) */
   --danger-red: #e01b24;
 
   /* ------------------------------------------------------------------
@@ -222,6 +221,7 @@
   --skeleton-pulse-duration: 1.8s;                 /* one fade from the resting to the lighter shade */
   --skeleton-row-height: 16px;                     /* one table row or text line */
   --skeleton-chart-height: 180px;                  /* plot area */
+  --star-shape-chart-height: 170px;                /* the star stretch by frame chart in Frame Analysis */
   --updating-bar-height: 2px;                      /* thin bar at a panel's top edge */
   --updating-bar-opacity: 0.55;                    /* understated accent segment of the bar */
   --updating-bar-duration: 2.4s;                   /* one slow slide of the segment */

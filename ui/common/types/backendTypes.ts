@@ -987,6 +987,64 @@ export interface FrameCopyPulse {
 }
 
 /**
+ * The status of one frame, with the reason when there is one.
+ *
+ * Attributes
+ * ----------
+ * path : `str`
+ * The frame's file. For a set-aside frame, its place in `_excluded`.
+ * name : `str`
+ * The file name.
+ * state : `str`
+ * ``included``, ``not_stacked`` or ``set_aside``.
+ * kind : `str` or `None`
+ * The kind the stacker recorded for a set-aside frame, such as
+ * ``clouded``, ``trailed`` or ``off_field``. `None` when none is
+ * recorded.
+ * reason : `str`
+ * The stacker's own words for a set-aside frame; empty otherwise.
+ * date : `str`
+ * When the frame was taken, as ``YYYY-MM-DD HH:MM:SS``. Empty when the
+ * file name has no date (set-aside frames only).
+ * exposure : `str`
+ * The exposure in seconds, for a set-aside frame; empty otherwise.
+ * original_path : `str` or `None`
+ * Where a set-aside frame was before it was moved.
+ * restorable : `bool`
+ * Whether the app can put a set-aside frame back.
+ * restore_note : `str`
+ * Why a set-aside frame cannot be put back, when it cannot.
+ */
+export interface FrameStatus {
+  path: string;
+  name: string;
+  state: string;
+  kind?: string | null;
+  reason?: string;
+  date?: string;
+  exposure?: string;
+  originalPath?: string | null;
+  restorable?: boolean;
+  restoreNote?: string;
+}
+
+/**
+ * The statuses of every frame of a target.
+ *
+ * Attributes
+ * ----------
+ * frames : `list` [`FrameStatus`]
+ * One entry per frame in the target, then one per set-aside frame.
+ * stacked_at : `float` or `None`
+ * When the latest stack file was written, in seconds since the Unix
+ * epoch. `None` when the target has no stack.
+ */
+export interface FrameStatusReport {
+  frames?: FrameStatus[];
+  stackedAt?: number | null;
+}
+
+/**
  * Lightweight snapshot of current telescope state for polling.
  */
 export interface TelescopePulse {
@@ -3124,88 +3182,6 @@ export interface StarProfileMeasurement {
   ring_masked_neighbor_count: number;
   ring_masked_fraction: number;
   ring_note?: string | null;
-}
-
-/**
- * The width and stretch of one star.
- *
- * Parameters
- * ----------
- * x, y : `float`
- * The star's position in 1-based pixels (as in FITS and DS9): the
- * center of the first pixel is (1, 1). Same convention as
- * `StarDetection` and `StarProfileMeasurement`.
- * width_px : `float`
- * The star's width (FWHM) in pixels, the geometric mean of its two axes.
- * elongation : `float`
- * How much the star is stretched, ``1 - b / a`` for a long axis ``a`` and
- * a short axis ``b``. 0 is a round star and 0.5 is a star twice as long
- * as it is wide.
- * angle_degrees : `float`
- * The direction of the long axis, from 0 up to but not including 180,
- * measured from the +y axis toward the +x axis. This is the same
- * convention as the cut angle of `StarProfileMeasurement`. A star
- * stretched along y has 0, and one stretched along x has 90.
- */
-export interface StarShape {
-  x: number;
-  y: number;
-  width_px: number;
-  elongation: number;
-  angle_degrees: number;
-}
-
-/**
- * The star shapes of one image, with a summary.
- *
- * Parameters
- * ----------
- * path : `str`
- * The image that was measured.
- * width : `int`
- * The image width in pixels.
- * height : `int`
- * The image height in pixels.
- * shapes : `list` [`StarShape`]
- * The measured stars. Empty when the image has too few usable stars.
- * star_count : `int`
- * The number of stars (the length of ``shapes``).
- * median_width_px : `float` or `None`
- * The median star width in pixels, or `None` when not measured.
- * median_elongation : `float` or `None`
- * The median of the stars' ``1 - b / a``, or `None` when not measured.
- * direction_degrees : `float` or `None`
- * The direction the stars are stretched in as a group, from +y toward
- * +x as for each star. It comes from the average of the stars' stretch
- * vectors, so a round star counts for little and a stretched one for
- * much. `None` when not measured.
- * direction_coherence : `float` or `None`
- * From 0 (the stars point every which way) to 1 (all stars point the same
- * way). A high value with a high elongation points to tracking.
- * center_width_px : `float` or `None`
- * The median width of the stars in the middle of the frame (the middle
- * 4 x 4 cells of a 14 x 14 grid over the frame). `None` when the middle
- * holds too few stars.
- * corner_width_px : `float` or `None`
- * The median width of the stars in the four corners of the frame (the
- * 4 x 4 cells at each corner of the same grid), taken together. `None`
- * when the corners hold too few stars.
- * reason : `str`
- * Why nothing was measured, or an empty string.
- */
-export interface StarShapesMeasurement {
-  path: string;
-  width: number;
-  height: number;
-  shapes: StarShape[];
-  star_count: number;
-  median_width_px?: number | null;
-  median_elongation?: number | null;
-  direction_degrees?: number | null;
-  direction_coherence?: number | null;
-  center_width_px?: number | null;
-  corner_width_px?: number | null;
-  reason?: string;
 }
 
 /**
@@ -6378,6 +6354,8 @@ export const RPC_METHODS = [
   "target:send_to_phone",
   "target:refresh",
   "target:get_files",
+  "target:get_frame_statuses",
+  "target:put_back_frames",
   "target:get_camera_index",
   "target:get_frames",
   "target:get_frames_grouped",
@@ -6413,7 +6391,6 @@ export const RPC_METHODS = [
   "images:measure_star_profile",
   "images:map_position",
   "images:measure_detections",
-  "images:measure_star_shapes",
   "images:delete",
   "images:last",
   "calibration:get_stats",

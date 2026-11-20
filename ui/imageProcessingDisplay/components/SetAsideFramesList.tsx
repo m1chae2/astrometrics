@@ -3,7 +3,8 @@
  * @description The list behind the "Set aside before stacking" count in the Stack Summary block.
  * It says, for each frame the stacker moved into an `_excluded` folder, why it was set aside:
  * a plain sentence, the measurement behind it, the file and the exposure. It only reads. A
- * frame whose reason was never recorded says so. There is no button to put a frame back.
+ * frame whose reason was never recorded says so. This list has no button to put a frame back;
+ * the File Browser lists the same frames with a Put back button.
  */
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';

@@ -13,8 +13,8 @@
   through it.
 * Detections: `measure_detections` lists the stars the astrometry run's star
   finder detects in one image, so a viewer can draw them.
-* Star shapes: `measure_star_shapes` measures the width, stretch and stretch
-  direction of the stars across one image, for the viewer's Shapes overlay.
+* Put back: `put_back_set_aside_frames` moves chosen set-aside frames back into
+  their target.
 * Recorded: `record_frame_measurements` measures a target's light frames and
   stores the numbers that `query` reads.
 
@@ -53,7 +53,6 @@ from astrometricslib.models.quality.quality_reports import (
 from astrometricslib.models.quality.query_result import QualityQueryResult
 from astrometricslib.models.quality.row_frames import QualityRowFile, QualityRowResolution
 from astrometricslib.models.quality.star_profile import StarProfileMeasurement
-from astrometricslib.models.quality.star_shapes import StarShapesMeasurement
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.api_arguments import (
     STACK_KINDS,
@@ -1002,6 +1001,60 @@ class QualityRecords:
             resolved.id, folders, rows, {key: value.exposure_seconds for key, value in settings.items()}
         )
 
+    def put_back_set_aside_frames(self, target: str | Target, paths: list[str]) -> list[str]:
+        """Move chosen set-aside frames back into their target.
+
+        This is the one-frame form of putting frames back. Each path must be
+        a frame that `set_aside_frames` lists. A frame whose original place is
+        taken, or that has no `excluded_frames.json` entry saying where it
+        came from, stays where it is. The target is re-scanned afterwards, so
+        it lists the moved frames again, and the next stack may set them
+        aside again.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target, or its id or name.
+        paths : `list` [`str`]
+            The set-aside frames to move back, as listed in the ``path`` of
+            `set_aside_frames`.
+
+        Returns
+        -------
+        restored : `list` [`str`]
+            The original paths of the frames that were moved back.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If a path is not in one of the target's `_excluded` folders.
+        """
+        from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+            restore_quarantined_frames,
+            target_folder_names,
+        )
+        from astrometricslib.pipelines.stacking.pre_processing.set_aside_listing import find_excluded_folders
+
+        resolved = resolve_target(self._targets, target)
+        folders = {
+            os.path.realpath(folder): folder
+            for folder in find_excluded_folders(
+                str(self._config.get_frames_path()), target_folder_names(resolved.id)
+            )
+        }
+        files_by_folder: dict[str, set[str]] = {}
+        for path in paths:
+            folder = os.path.realpath(os.path.dirname(path))
+            if folder not in folders:
+                raise InvalidArgumentError(f"'{path}' is not in an _excluded folder of {resolved.id}.")
+            files_by_folder.setdefault(folders[folder], set()).add(os.path.basename(path))
+        restored: list[str] = []
+        for folder, file_names in files_by_folder.items():
+            restored.extend(restore_quarantined_frames(folder, file_names))
+        if restored:
+            self._targets.reindex_frames(resolved)
+        return restored
+
     def measure_star_profile(
         self,
         path: str,
@@ -1118,41 +1171,6 @@ class QualityRecords:
         from astrometricslib.pipelines.astrometry.processing.detections import measure_detections_in_file
 
         return measure_detections_in_file(path)
-
-    def measure_star_shapes(self, path: str) -> StarShapesMeasurement:
-        """Measure how stretched each star of an image is, and which way.
-
-        Nothing is stored. The stars are the ones the frame measurement fits
-        (bright enough, not saturated, away from their neighbors, at most one
-        for each cell of a 14 x 14 grid over the image), so their widths and
-        stretch agree with the stored ``frame.*`` star metrics. A missing file
-        raises `NotFoundError`; an image with no pixels raises
-        `InvalidArgumentError`. An image with too few usable stars is not an
-        error: the list is empty and ``reason`` says why.
-
-        Parameters
-        ----------
-        path : `str`
-            A FITS image.
-
-        Returns
-        -------
-        shapes : `StarShapesMeasurement`
-            Fields: ``path``, ``width`` and ``height``, ``shapes`` (each with
-            ``x`` and ``y`` in 1-based pixels as in `measure_detections`,
-            ``width_px``, ``elongation`` and ``angle_degrees``), ``star_count``
-            and the frame summary: ``median_width_px``, ``median_elongation``,
-            ``direction_degrees`` with ``direction_coherence``,
-            ``center_width_px``, ``corner_width_px`` and ``reason``.
-            ``elongation`` is ``1 - b / a`` for a long axis ``a`` and a short
-            axis ``b``: 0 for a round star, 0.5 for a star twice as long as it
-            is wide. ``angle_degrees`` is the direction of the long axis, from
-            0 up to but not including 180, measured from +y toward +x like the
-            cut angle of `measure_star_profile`.
-        """
-        from astrometricslib.pipelines.shared.quality.star_shapes import measure_star_shapes_in_file
-
-        return measure_star_shapes_in_file(path)
 
     @background_job("diagnostics", grace_period_seconds=20.0)
     def measure_stack(

@@ -4,6 +4,7 @@
  * transform that lets an overlay drawn for an earlier view follow the image.
  */
 import { createPixelToSky } from '../wcs';
+import { fitsPixelToTurnedPicture, turnedPictureToFitsPixel, turnedSize } from '../displayTurn';
 import type { FitsHeaderCards, SkyPosition } from '../wcs';
 
 export interface Point {
@@ -84,9 +85,11 @@ export interface ImageGeometry {
     height: number;
     /** Header cards, when the image is a FITS file; a plain picture has none. */
     header?: FitsHeaderCards;
+    /** How far the picture is shown turned, clockwise in degrees (default 0). The fractions below are fractions of the turned picture. */
+    turn?: number;
 }
 
-/** A point of an image as fractions of its width and height, counted from the top-left corner. */
+/** A point of an image as fractions of the picture shown (turned, when it is turned) from its top-left corner. */
 export interface Fraction {
     x: number;
     y: number;
@@ -108,10 +111,12 @@ const isTopDown = (header: FitsHeaderCards): boolean =>
  * @returns The FITS pixel position.
  */
 export const fractionToFitsPixel = (fraction: Fraction, geometry: ImageGeometry): Point => {
-    const column = fraction.x * geometry.width;
-    const rowFromTop = fraction.y * geometry.height;
+    const turn = geometry.turn ?? 0;
+    const shown = turnedSize(geometry.width, geometry.height, turn);
     const topDown = geometry.header ? isTopDown(geometry.header) : false;
-    return { x: column + 0.5, y: topDown ? rowFromTop + 0.5 : geometry.height - rowFromTop + 0.5 };
+    return turnedPictureToFitsPixel(
+        { x: fraction.x * shown.w, y: fraction.y * shown.h }, geometry.width, geometry.height, turn, topDown
+    );
 };
 
 /**
@@ -122,9 +127,11 @@ export const fractionToFitsPixel = (fraction: Fraction, geometry: ImageGeometry)
  * @returns The point as fractions of width and height from the top-left corner.
  */
 export const fitsPixelToFraction = (pixel: Point, geometry: ImageGeometry): Fraction => {
+    const turn = geometry.turn ?? 0;
+    const shown = turnedSize(geometry.width, geometry.height, turn);
     const topDown = geometry.header ? isTopDown(geometry.header) : false;
-    const rowFromTop = topDown ? pixel.y - 0.5 : geometry.height - pixel.y + 0.5;
-    return { x: (pixel.x - 0.5) / geometry.width, y: rowFromTop / geometry.height };
+    const point = fitsPixelToTurnedPicture(pixel.x, pixel.y, geometry.width, geometry.height, turn, topDown);
+    return { x: point.x / shown.w, y: point.y / shown.h };
 };
 
 /**

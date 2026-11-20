@@ -11,6 +11,7 @@ import { Button } from '../../common/components/Button';
 import { DisplayModeSelect } from '../../common/fitsViewer/DisplayModeSelect';
 import type { DisplayMode } from '../../common/fitsViewer/displayMode';
 import { DetectionsToggle } from '../../common/fitsViewer/DetectionsToggle';
+import type { StackOrientation } from '../../common/fitsViewer/displayTurn';
 import { resolveTargetFramePath } from '../../common/services/imaging/measurementPath';
 
 /** Shown under an Auto Stretch picture, which holds no pixel values. */
@@ -37,6 +38,8 @@ interface ViewerPanelContainerProps {
   overlayReason?: string | null;
   onStarClick?: (star: AstrometryOverlayStar) => void;
   selectedStarId?: string | null;
+  /** The target's stack orientation; raw frames are shown turned to match it. */
+  stackOrientation?: StackOrientation | null;
 
   // File Browser Props
   allFiles: any[];
@@ -73,7 +76,7 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
   fitsRendererRef, imageUrl, imageBlob, imageFrameInfo, loading, error, selectedTarget,
   autoPanTrigger, disableStretch, displayMode, onDisplayModeChange,
   overlayStars, showAstrometryOverlay, onToggleAstrometryOverlay, isLoadingOverlay, overlayReason, onStarClick,
-  selectedStarId,
+  selectedStarId, stackOrientation,
   allFiles, filteredFiles, fileFilterText, setFileFilterText, fileBrowserCamera, setFileBrowserCamera, selectedOptic, setSelectedOptic,
   checkedFiles, handleRequestDeleteFiles, onOpenHeaderModal, onFileClick, selectedFile,
   toggleFile, toggleAllFiles, analysisResults, frameStatuses, setAsideFiles, onPutBackFrame, onOpenImageControls
@@ -148,6 +151,7 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
           onStarClick={onStarClick}
           selectedStarId={selectedStarId}
           showDetections={detectionsEnabled}
+          stackOrientation={stackOrientation}
           resolveMeasurePath={resolveMeasurePath}
         />
       </SectionPanel>

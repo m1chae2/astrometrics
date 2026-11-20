@@ -17,7 +17,13 @@
  *               them the view is linear; the stretch is never worked out here).
  *   - `release` forget the image filed under `imageId`.
  *   - `pixel`   read the original value (every channel) at one pixel of the image filed under
- *               `imageId`, for the viewer's pixel readout. Replies with `pixelComplete`.
+ *               `imageId`, for the viewer's pixel readout. The pixel is named by its place in the
+ *               picture as drawn (column and row from the top), and the reply gives the file's own
+ *               pixel position. Replies with `pixelComplete`.
+ *
+ * A `render` may carry `turn` (0, 90, 180 or 270): the picture is then drawn turned clockwise by
+ * that many degrees, and the pixel readout follows. This only re-indexes the grid when drawing; the
+ * decoded pixels are never changed.
  *
  * With the stretch off and no `displayRange`, the view is linear between the
  * black and white points set from the sky's noise (see skyRange.ts), worked out
@@ -39,6 +45,7 @@ import {
 } from './mtfStretchGL';
 import { decodeFitsPixels } from './fitsParse';
 import { computeSkyRange } from './skyRange';
+import { turnRgbaPixels, turnedCellToFileCell, turnedSize } from './displayTurn';
 
 /** One decoded image held by the worker. */
 interface StoredImage {
@@ -53,6 +60,8 @@ interface StoredImage {
   skyRange?: { low: number; high: number };
   /** True when the last draw put the file's first row at the top; the pixel readout needs it to find the row under the pointer. */
   lastDrawnFirstRowAtTop?: boolean;
+  /** How far the last draw turned the picture, clockwise in degrees; the pixel readout needs it to find the file pixel under the pointer. */
+  lastDrawnTurn?: number;
 }
 
 const storedImages = new Map<number, StoredImage>();
@@ -117,6 +126,7 @@ function discardGlContext(): void {
  * @param image - The image to draw.
  * @param parameters - Black point, range and midtones balance to draw with.
  * @param isTopDownRowOrder - True to draw the file's first row at the top, false to draw it at the bottom.
+ * @param turn - How far to turn the picture, clockwise in degrees (0, 90, 180 or 270).
  * @returns A full-resolution bitmap, or null if the GPU path is unavailable (use the JS fallback).
  */
 function renderViaWebGL(
@@ -124,18 +134,21 @@ function renderViaWebGL(
   image: StoredImage,
   parameters: MtfStretchParameters,
   isTopDownRowOrder: boolean,
+  turn: number,
 ): ImageBitmap | null {
   const context = getGlContext();
   if (!context || !glCanvas) return null;
   try {
+    const drawnSize = turnedSize(image.width, image.height, turn);
     renderMtfStretch(context, {
       raw: image.pixels,
       sourceWidth: image.width,
       sourceHeight: image.height,
       channels: image.channels === 3 ? 3 : 1,
       isTopDownRowOrder,
-      destinationWidth: image.width,
-      destinationHeight: image.height,
+      turnDegrees: turn,
+      destinationWidth: drawnSize.w,
+      destinationHeight: drawnSize.h,
       parameters,
       textureKey: imageId,
     });
@@ -158,6 +171,7 @@ function renderViaWebGL(
  *   value drawn white).
  * @param destinationWidth - Width of the bitmap to return.
  * @param destinationHeight - Height of the bitmap to return.
+ * @param turn - How far to turn the picture, clockwise in degrees (0, 90, 180 or 270).
  * @returns The bitmap, resized to the destination size.
  */
 async function renderViaScalarLoops(
@@ -166,6 +180,7 @@ async function renderViaScalarLoops(
   parameters: MtfStretchParameters,
   destinationWidth: number,
   destinationHeight: number,
+  turn: number,
 ): Promise<ImageBitmap> {
   const { pixels: raw, width: w, height: h, channels } = image;
   const pixels = new Uint8ClampedArray(w * h * 4);
@@ -222,8 +237,9 @@ async function renderViaScalarLoops(
     }
   }
 
-  const imageData = new ImageData(pixels, w, h);
-  return createImageBitmap(imageData, 0, 0, w, h, {
+  const turned = turnRgbaPixels(pixels, w, h, turn);
+  const imageData = new ImageData(turned.pixels, turned.width, turned.height);
+  return createImageBitmap(imageData, 0, 0, turned.width, turned.height, {
     resizeWidth: destinationWidth,
     resizeHeight: destinationHeight,
     resizeQuality: 'high',
@@ -245,23 +261,27 @@ self.onmessage = async (ev: MessageEvent) => {
       (self as any).postMessage({ cmd: 'pixelComplete', requestId, imageId, result: null });
       return;
     }
-    if (column < 0 || column >= image.width || rowFromTop < 0 || rowFromTop >= image.height) {
+    // The drawn picture may be turned, and has the file's first row at the top or at the bottom
+    // (the FITS default); this finds the file's own pixel behind the cell.
+    const fileCell = turnedCellToFileCell(
+      column, rowFromTop, image.width, image.height,
+      image.lastDrawnTurn ?? 0, image.lastDrawnFirstRowAtTop !== false,
+    );
+    if (!fileCell) {
       (self as any).postMessage({ cmd: 'pixelComplete', requestId, imageId, result: null });
       return;
     }
-    // The drawn picture has the file's first row at the top, or at the bottom (the FITS default).
-    const fileRow = image.lastDrawnFirstRowAtTop === false ? image.height - 1 - rowFromTop : rowFromTop;
     const planeSize = image.width * image.height;
     const values: number[] = [];
     for (let channel = 0; channel < image.channels; channel++) {
-      values.push(image.pixels[channel * planeSize + fileRow * image.width + column]);
+      values.push(image.pixels[channel * planeSize + fileCell.fileRow * image.width + fileCell.column]);
     }
     // FITS pixel numbers count from 1.
     (self as any).postMessage({
       cmd: 'pixelComplete',
       requestId,
       imageId,
-      result: { x: column + 1, y: fileRow + 1, values },
+      result: { x: fileCell.column + 1, y: fileCell.fileRow + 1, values },
     });
     return;
   }
@@ -296,7 +316,7 @@ self.onmessage = async (ev: MessageEvent) => {
 
   if (cmd === 'render') {
     try {
-      const { dstW, dstH, dpr, stretch = true, displayRange, stretchParameters } = ev.data;
+      const { dstW, dstH, dpr, stretch = true, displayRange, stretchParameters, turn = 0 } = ev.data;
       const image = storedImages.get(imageId);
       if (!image) {
         throw new Error(`No decoded image filed under id ${imageId}`);
@@ -335,7 +355,8 @@ self.onmessage = async (ev: MessageEvent) => {
       // that way do not suddenly turn over.
       const isTopDownRowOrder = stretch || !displayRange ? image.rowOrder === 'TOP-DOWN' : true;
       image.lastDrawnFirstRowAtTop = isTopDownRowOrder;
-      const fullResolutionBitmap = renderViaWebGL(imageId, image, parameters, isTopDownRowOrder);
+      image.lastDrawnTurn = turn;
+      const fullResolutionBitmap = renderViaWebGL(imageId, image, parameters, isTopDownRowOrder, turn);
       if (fullResolutionBitmap) {
         bitmap = await createImageBitmap(fullResolutionBitmap, {
           resizeWidth: destinationWidth,
@@ -346,7 +367,7 @@ self.onmessage = async (ev: MessageEvent) => {
       } else {
         // The fallback draws the file's first row at the top whatever the row order.
         image.lastDrawnFirstRowAtTop = true;
-        bitmap = await renderViaScalarLoops(image, stretch, parameters, destinationWidth, destinationHeight);
+        bitmap = await renderViaScalarLoops(image, stretch, parameters, destinationWidth, destinationHeight, turn);
       }
 
       (self as any).postMessage({ cmd: 'renderComplete', requestId, imageId, bitmap }, [bitmap]);

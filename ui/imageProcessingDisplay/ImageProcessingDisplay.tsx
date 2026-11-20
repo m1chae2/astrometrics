@@ -12,6 +12,7 @@ import { TargetListFilterPanel } from '../common/radioList/TargetListFilterPanel
 import { ListActions } from '../common/components/ListActions';
 import { FitsRendererHandle } from '../common/fitsViewer/FitsViewerManager';
 import { ViewerPanelContainer } from './components/ViewerPanelContainer';
+import { useStackOrientation } from './hooks/useStackOrientation';
 import { FrameAnalysisPanel } from './components/FrameAnalysisPanel';
 import { addTargetData, createTarget, fetchTargetObject } from '../common/services/targetService';
 import { useQuery } from '@tanstack/react-query';
@@ -117,6 +118,8 @@ const ImageProcessingDisplayInner: React.FC = () => {
   // A stack that is waiting to be shown counts as something to load, so a target with a stack
   // but no raw frames settles once the stack is on screen.
   const preferredStack = stackedImage ?? stackedSpectralTarget;
+  // Raw frames are shown turned to match the stack, so the two sides of a meridian flip look alike.
+  const stackOrientation = useStackOrientation(selectedTarget, stackedImage ?? null);
   const hasFrameToAutoLoad = (lightFrames.length > 0 || preferredStack !== null) && !selectedFile;
   const isViewerSettled = !loading && (
     !selectedTarget || !hasFrameToAutoLoad || imageUrl !== null || imageBlob !== null || error !== null
@@ -490,6 +493,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
       overlayReason={overlayReason}
       onStarClick={handleStarClick}
       selectedStarId={selectedStarId}
+      stackOrientation={stackOrientation}
       allFiles={allFiles}
       filteredFiles={filteredFiles}
       fileFilterText={fileFilterText}

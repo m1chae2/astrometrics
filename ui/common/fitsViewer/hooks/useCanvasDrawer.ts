@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { ParsedFitsData } from './useFitsLoader';
 import { StretchParameters } from '../../types/backendTypes';
 import { drawBitmapSafely, isBitmapUsable } from '../utils/bitmapGuard';
+import { turnedSize } from '../displayTurn';
 
 /** Source of ids that tie each draw request to its reply, so a late reply for an old image is ignored. */
 let nextRenderRequestId = 1;
@@ -22,6 +23,9 @@ let nextRenderRequestId = 1;
  * `onDrawn` is called after each draw with the object that was drawn (the
  * `ParsedFitsData` or the `ImageBitmap`), so the viewer knows when a picture
  * is really on the canvas. Pass a stable function.
+ *
+ * `turn` (0, 90, 180 or 270) shows a FITS image turned clockwise by that many degrees; the drawn
+ * size is then the file's width and height swapped for 90 and 270. The file is not changed.
  */
 export const useCanvasDrawer = (
     canvasRef: React.RefObject<HTMLCanvasElement | null>,
@@ -32,7 +36,8 @@ export const useCanvasDrawer = (
     stretch: boolean = true,
     displayRange?: readonly [number, number],
     stretchParameters?: StretchParameters | null,
-    onDrawn?: (drawn: ParsedFitsData | ImageBitmap) => void
+    onDrawn?: (drawn: ParsedFitsData | ImageBitmap) => void,
+    turn: number = 0
 ) => {
 
     // Initial draw for Bitmaps (Processed Backend Images)
@@ -77,7 +82,9 @@ export const useCanvasDrawer = (
         const worker = workerRef.current;
         if (!canvas || !worker || !parsedData) return;
 
-        const { w, h, channels, imageId } = parsedData;
+        const { channels, imageId } = parsedData;
+        // The picture is drawn turned, so its width and height may be the file's swapped.
+        const { w, h } = turnedSize(parsedData.w, parsedData.h, turn);
 
         // Logical Size calculation
         const maxDim = 3000;
@@ -128,10 +135,11 @@ export const useCanvasDrawer = (
             displayRange,
             stretchParameters,
             channels,
+            turn,
         });
 
         return () => {
             worker.removeEventListener('message', handleMessage);
         };
-    }, [canvasRef, workerRef, parsedData, setDrawnSize, stretch, displayRange, stretchParameters, onDrawn]);
+    }, [canvasRef, workerRef, parsedData, setDrawnSize, stretch, displayRange, stretchParameters, onDrawn, turn]);
 };

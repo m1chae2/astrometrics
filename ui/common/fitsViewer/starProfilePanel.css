@@ -222,3 +222,12 @@
 .fits-renderer__detections-note--error {
   color: var(--danger-red);
 }
+
+/* The note in the bottom-right corner of the viewer while a raw frame is shown turned to match its stack. */
+.fits-renderer__turn-note {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 2;
+  pointer-events: none;
+}

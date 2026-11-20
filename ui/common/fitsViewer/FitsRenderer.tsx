@@ -15,6 +15,9 @@ import { useStarProfile } from './hooks/useStarProfile';
 import { useDetections } from './hooks/useDetections';
 import { buildDetectionPaths } from './utils/detectionMarkers';
 import { askWorkerForPixel, pointerToFileCell } from './utils/pixelQuery';
+import { baseToTurned, describeTurn, fitsPixelToTurnedPicture, rowOrderProbeCell, turnedSize, turnStep, turnToMatchStack } from './displayTurn';
+import type { QuarterTurn, StackOrientation } from './displayTurn';
+import { Badge } from '../components/Badge';
 import { fractionAtSky, skyAtFraction } from './utils/transformUtils';
 import type { Fraction, ImageGeometry } from './utils/transformUtils';
 import type { SkyPosition } from './wcs';
@@ -172,6 +175,12 @@ export interface FitsRendererProps {
   noPixelDataMessage?: string;
   /** A sentence about the picture shown in the star profile panel, for example that it is already stretched. */
   starProfilePictureNote?: string;
+  /**
+   * The target's stack orientation. A raw frame is then shown turned by the quarter turn that makes it
+   * match the stack (display only), so frames from both sides of a meridian flip look the same way round.
+   * Leave it out to show every frame as it is stored.
+   */
+  stackOrientation?: StackOrientation | null;
 }
 
 export interface FitsRendererHandle {
@@ -196,7 +205,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     disableStretch,
     displayRange,
     stretchParameters,
-    overlayStars,
+    overlayStars: overlayStarsAsSent,
     showOverlay,
     onStarClick,
     selectedStarId,
@@ -206,7 +215,8 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     showDetections = false,
     resolveMeasurePath,
     noPixelDataMessage = SET_DISPLAY_TO_LINEAR_MESSAGE,
-    starProfilePictureNote
+    starProfilePictureNote,
+    stackOrientation = null
   } = props;
 
   // Local State
@@ -252,6 +262,16 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   const previewDrawn = previewObject !== null && drawnObject === previewObject;
   const firstFrameDrawn = mainDrawn || previewDrawn;
 
+  // A raw frame is shown turned to match the stack; the file itself is never changed.
+  const stackOrientationRef = useRef(stackOrientation);
+  stackOrientationRef.current = stackOrientation;
+  const turn: QuarterTurn = React.useMemo(
+    () => (mainReady && parsedData ? turnToMatchStack(parsedData.header, stackOrientation) : 0),
+    [mainReady, parsedData, stackOrientation]
+  );
+  // The size of the picture as shown: the file's width and height, swapped for a quarter turn.
+  const shownSize = parsedData ? turnedSize(parsedData.w, parsedData.h, turn) : { w: 0, h: 0 };
+
   const previewShownRef = useRef(false);
   previewShownRef.current = previewDrawn;
   const previewBitmapRef = useRef<ImageBitmap | null>(null);
@@ -287,7 +307,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
       }
     }
     const geometry: ImageGeometry = 'imageId' in drawn
-      ? { width: drawn.w, height: drawn.h, header: drawn.header }
+      ? { width: drawn.w, height: drawn.h, header: drawn.header, turn: turnToMatchStack(drawn.header, stackOrientationRef.current) }
       : { width: drawn.width, height: drawn.height };
     lastImageRef.current = { object: drawn, target, isMain: !isPreview, geometry };
     setDrawnObject(drawn);
@@ -328,7 +348,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   // Automatically draw with AutoStretch (handled in worker for FITS)
   useCanvasDrawer(
     canvasRef, workerRef, mainReady ? parsedData : null, mainReady ? bitmap : previewBitmap,
-    handleSetDrawnSize, effectiveStretch, displayRange, stretchParameters, handleDrawn
+    handleSetDrawnSize, effectiveStretch, displayRange, stretchParameters, handleDrawn, turn
   );
 
   // Click-to-measure: the panel's state, and the measurements behind it.
@@ -355,6 +375,18 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   useEffect(() => {
     if (autoPanTrigger) resetView();
   }, [autoPanTrigger, resetView]);
+
+  // The astrometry stars are placed on the picture as the backend drew it; a turned picture turns them with it.
+  const overlayStars = React.useMemo(() => {
+    if (!overlayStarsAsSent || turn === 0) return overlayStarsAsSent;
+    return overlayStarsAsSent.map((star) => {
+      const width = star.referenceWidth ?? parsedData?.w ?? 1;
+      const height = star.referenceHeight ?? parsedData?.h ?? 1;
+      const place = baseToTurned({ x: star.x, y: star.y }, width, height, turn);
+      const shown = turnedSize(width, height, turn);
+      return { ...star, x: place.x, y: place.y, referenceWidth: shown.w, referenceHeight: shown.h };
+    });
+  }, [overlayStarsAsSent, turn, parsedData]);
 
   const refWidth = overlayStars && overlayStars[0]?.referenceWidth ? overlayStars[0].referenceWidth : (drawnSize.w || 1);
   const refHeight = overlayStars && overlayStars[0]?.referenceHeight ? overlayStars[0].referenceHeight : (drawnSize.h || 1);
@@ -449,7 +481,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   /**
    * Turns 6 screen pixels into image pixels at the current zoom.
    *
-   * @param imageWidth Width of the decoded image, in pixels.
+   * @param imageWidth Width of the picture as shown, in pixels.
    * @returns The search radius, from 3 to 50 image pixels.
    */
   const searchRadiusFor = (imageWidth: number): number => {
@@ -466,17 +498,18 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
       starProfile.showUnavailable(noPixelDataMessage);
       return;
     }
-    const cell = pointerToFileCell(pointerX, pointerY, parsedData, drawnSize, effectiveZoom, panX, panY);
+    const cell = pointerToFileCell(pointerX, pointerY, parsedData, drawnSize, effectiveZoom, panX, panY, turn);
     if (!cell) return;
+    // The reading names the file's own pixel; the probe (the picture's top-left base corner) tells the row order.
     const [reading, topRowReading] = await Promise.all([
       askWorkerForPixel(worker, parsedData.imageId, cell),
-      askWorkerForPixel(worker, parsedData.imageId, { column: cell.column, rowFromTop: 0 }),
+      askWorkerForPixel(worker, parsedData.imageId, rowOrderProbeCell(parsedData.w, parsedData.h, turn)),
     ]);
     if (!reading) return;
     // The center may snap to a star within about 6 screen pixels of the click, so the search radius follows the zoom.
-    const searchRadiusPx = searchRadiusFor(parsedData.w);
+    const searchRadiusPx = searchRadiusFor(shownSize.w);
     followedKeyRef.current = currentKey;
-    starProfile.measureAt({ x: reading.x, y: reading.y, firstRowAtTop: topRowReading?.y === 1, searchRadiusPx });
+    starProfile.measureAt({ x: reading.x, y: reading.y, firstRowAtTop: topRowReading?.y === 1, searchRadiusPx, turn });
   };
 
   // When another image is drawn while a star is pinned, find the star on it (once per image).
@@ -492,9 +525,9 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
       starProfile.showUnavailable(noPixelDataMessage);
       return;
     }
-    const firstCell = { column: 0, rowFromTop: 0 };
+    const firstCell = rowOrderProbeCell(parsedData.w, parsedData.h, turn);
     void askWorkerForPixel(worker, parsedData.imageId, firstCell).then((reading) => {
-      void followProfile({ firstRowAtTop: reading?.y === 1, searchRadiusPx: searchRadiusFor(parsedData.w) });
+      void followProfile({ firstRowAtTop: reading?.y === 1, searchRadiusPx: searchRadiusFor(shownSize.w), turn });
     });
     // The search radius reads the zoom once, when the new image is first drawn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -545,12 +578,15 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     const firstRowAtTop = profileState.anchor.firstRowAtTop;
     const centerX = measurement ? measurement.center_x : profileState.anchor.x;
     const centerY = measurement ? measurement.center_y : profileState.anchor.y;
-    // Screen pixels for one file pixel, along the columns and along the rows.
-    const stepX = (drawnSize.w / parsedData.w) * effectiveZoom;
-    const stepY = (drawnSize.h / parsedData.h) * effectiveZoom;
-    const rowFromTop = firstRowAtTop ? centerY - 0.5 : parsedData.h - centerY + 0.5;
-    const screenX = panX + (centerX - 0.5) * stepX;
-    const screenY = panY + rowFromTop * stepY;
+    // Screen pixels for one file pixel, along the screen's horizontal and vertical axes.
+    const stepX = (drawnSize.w / shownSize.w) * effectiveZoom;
+    const stepY = (drawnSize.h / shownSize.h) * effectiveZoom;
+    /** Finds the screen position of a FITS pixel position, with the picture's row order and turn. */
+    const screenPositionOf = (fitsX: number, fitsY: number) => {
+      const place = fitsPixelToTurnedPicture(fitsX, fitsY, parsedData.w, parsedData.h, turn, firstRowAtTop);
+      return { x: panX + place.x * stepX, y: panY + place.y * stepY };
+    };
+    const { x: screenX, y: screenY } = screenPositionOf(centerX, centerY);
     // The ring is one FWHM across (radius is half of it), in the size the picture is drawn at.
     const fittedWidth = measurement?.moffat.fitted ? measurement.moffat.fwhm_px : measurement?.gaussian.fitted ? measurement.gaussian.fwhm_px : null;
     const starFound = measurement ? measurement.star_found : true;
@@ -563,15 +599,17 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
       band = { inner: profileView.ringInnerPx * stepX, outer: profileView.ringOuterPx * stepX };
       // The neighbor stars the library left out of the ring, as circles of their mask radius.
       neighbors = measurement.ring_neighbors.map((neighbor) => ({
-        x: panX + (neighbor.x - 0.5) * stepX,
-        y: panY + (firstRowAtTop ? neighbor.y - 0.5 : parsedData.h - neighbor.y + 0.5) * stepY,
+        ...screenPositionOf(neighbor.x, neighbor.y),
         radius: neighbor.mask_radius_px * stepX,
       }));
     } else if (measurement) {
       // The angle runs from +y (up a column) toward +x; screen rows grow downward when the first row is at the top.
+      // A turned picture turns the cut with it.
       const angle = (starProfile.cutAngleDegrees * Math.PI) / 180;
-      const alongX = Math.sin(angle) * (profileView?.cutHalfLengthPx ?? measurement.cut_half_length_px) * stepX;
-      const alongRows = Math.cos(angle) * (profileView?.cutHalfLengthPx ?? measurement.cut_half_length_px) * stepY * (firstRowAtTop ? 1 : -1);
+      const halfLength = profileView?.cutHalfLengthPx ?? measurement.cut_half_length_px;
+      const turnedHalfCut = turnStep(Math.sin(angle) * halfLength, Math.cos(angle) * halfLength * (firstRowAtTop ? 1 : -1), turn);
+      const alongX = turnedHalfCut.x * stepX;
+      const alongRows = turnedHalfCut.y * stepY;
       cut = { x1: screenX - alongX, y1: screenY - alongRows, x2: screenX + alongX, y2: screenY + alongRows };
     }
     return { screenX, screenY, radius, cut, band, neighbors, starFound };
@@ -584,11 +622,11 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     const worker = workerRef.current;
     if (!showDetections || !mainDrawn || !parsedData || !worker) return;
     let cancelled = false;
-    void askWorkerForPixel(worker, parsedData.imageId, { column: 0, rowFromTop: 0 }).then((reading) => {
+    void askWorkerForPixel(worker, parsedData.imageId, rowOrderProbeCell(parsedData.w, parsedData.h, turn)).then((reading) => {
       if (!cancelled) setDetectionsFirstRowAtTop(reading ? reading.y === 1 : null);
     });
     return () => { cancelled = true; };
-  }, [showDetections, mainDrawn, parsedData, workerRef]);
+  }, [showDetections, mainDrawn, parsedData, workerRef, turn]);
   // Rebuilt only when the view or the detections change, not on every other re-render (hover, panel changes).
   const detectionPaths = React.useMemo(() => {
     if (detections.status !== 'ready' || detectionsFirstRowAtTop === null || !parsedData || !mainDrawn) return null;
@@ -596,16 +634,19 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     return buildDetectionPaths(detections.measurement.detections, {
       imageWidth: parsedData.w,
       imageHeight: parsedData.h,
-      stepX: (drawnSize.w / parsedData.w) * effectiveZoom,
-      stepY: (drawnSize.h / parsedData.h) * effectiveZoom,
+      stepX: (drawnSize.w / shownSize.w) * effectiveZoom,
+      stepY: (drawnSize.h / shownSize.h) * effectiveZoom,
       panX,
       panY,
       firstRowAtTop: detectionsFirstRowAtTop,
+      turn,
       viewWidth: containerW,
       viewHeight: containerH,
       apertureRadiusPx: detections.measurement.aperture_radius_px,
     });
-  }, [detections, detectionsFirstRowAtTop, parsedData, mainDrawn, drawnSize.w, drawnSize.h, effectiveZoom, panX, panY, containerW, containerH]);
+    // shownSize follows parsedData and turn, which are listed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detections, detectionsFirstRowAtTop, parsedData, mainDrawn, drawnSize.w, drawnSize.h, effectiveZoom, panX, panY, containerW, containerH, turn]);
   const detectionsNote: string | null = !showDetections ? null
     : mainDrawn && !parsedData ? noPixelDataMessage
     : detections.status === 'loading' ? 'Finding stars…'
@@ -831,7 +872,20 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
         zoom={effectiveZoom}
         panX={panX}
         panY={panY}
+        turn={turn}
       />
+
+      {mainDrawn && turn !== 0 && (
+        <div className="fits-renderer__turn-note" data-testid="turn-note">
+          <Badge
+            opaque
+            tone="info"
+            title="This frame is stored the other way round from the stack, so the viewer draws it turned to match. The file is not changed, and pixel positions are the file's own."
+          >
+            {describeTurn(turn)}
+          </Badge>
+        </div>
+      )}
 
       <StarProfilePanel
         state={starProfile.state}
@@ -885,6 +939,7 @@ export const FitsRenderer = React.memo(FitsRendererInternal, (prevProps, nextPro
     prevProps.showDetections === nextProps.showDetections &&
     prevProps.resolveMeasurePath === nextProps.resolveMeasurePath &&
     prevProps.noPixelDataMessage === nextProps.noPixelDataMessage &&
-    prevProps.starProfilePictureNote === nextProps.starProfilePictureNote
+    prevProps.starProfilePictureNote === nextProps.starProfilePictureNote &&
+    prevProps.stackOrientation === nextProps.stackOrientation
   );
 });

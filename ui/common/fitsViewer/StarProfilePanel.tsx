@@ -265,8 +265,8 @@ function ProfilePlot({ measurement, logScale, angleDegrees, halfLengthPx }: { me
  * @param props The measurement, the axis kind, the cut angle and the picture's row order.
  * @returns The plot.
  */
-function RingPlot({ measurement, logScale, angleDegrees, firstRowAtTop }: {
-  measurement: StarProfileMeasurement; logScale: boolean; angleDegrees: number; firstRowAtTop: boolean;
+function RingPlot({ measurement, logScale, angleDegrees, firstRowAtTop, turn }: {
+  measurement: StarProfileMeasurement; logScale: boolean; angleDegrees: number; firstRowAtTop: boolean; turn: number;
 }): React.ReactElement {
   const { traces, floorValue, highestValue, fewPixels } = useMemo(() => {
     const floor = measurement.sky_noise > 0 ? measurement.sky_noise : Math.abs(measurement.peak) * 1e-4;
@@ -307,7 +307,7 @@ function RingPlot({ measurement, logScale, angleDegrees, firstRowAtTop }: {
         ...base.xaxis,
         range: [0, 360],
         tickvals: ticks,
-        ticktext: ticks.map((angle) => `${screenDirection(angle, firstRowAtTop)}<br>${angle}°`),
+        ticktext: ticks.map((angle) => `${screenDirection(angle, firstRowAtTop, turn)}<br>${angle}°`),
       },
       yaxis: logScale
         ? { ...base.yaxis, type: 'log', autorange: false, range: [Math.log10(floorValue), Math.log10(highestValue * 1.5)] }
@@ -315,7 +315,7 @@ function RingPlot({ measurement, logScale, angleDegrees, firstRowAtTop }: {
       shapes: [markerLine(angleDegrees), markerLine(partner)],
       showlegend: false,
     };
-  }, [logScale, angleDegrees, firstRowAtTop, floorValue, highestValue]);
+  }, [logScale, angleDegrees, firstRowAtTop, turn, floorValue, highestValue]);
   return (
     <div className="star-profile__plot-area star-profile__plot-area--ring">
       <BasePlot data={traces} layout={layout} config={{ responsive: true, displayModeBar: false }} data-testid="star-profile-ring-plot" />
@@ -460,6 +460,7 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
                 logScale={logScale}
                 angleDegrees={cutAngleDegrees}
                 firstRowAtTop={anchor?.firstRowAtTop ?? false}
+                turn={anchor?.turn ?? 0}
               />
             )}
             {tabId === 'ring' && (
@@ -467,7 +468,7 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
                 <HarmonicBars harmonics={measurement.ring_harmonics} />
                 <p className="star-profile__note star-profile__summary" data-testid="star-profile-ring-summary" title={RING_SUMMARY_TOOLTIP}>
                   {measurement.ring_harmonics.length > 0
-                    ? describeRing(measurement.ring_harmonics, anchor?.firstRowAtTop ?? false)
+                    ? describeRing(measurement.ring_harmonics, anchor?.firstRowAtTop ?? false, anchor?.turn ?? 0)
                     : (measurement.ring_note ?? '')}
                 </p>
               </>

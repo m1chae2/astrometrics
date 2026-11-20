@@ -9,6 +9,7 @@
  * would count.
  */
 import type { StarDetection } from '../../types/backendTypes';
+import { fitsPixelToTurnedPicture } from '../displayTurn';
 
 /** Radius, in screen pixels, of the circle drawn for a single detection when no photometry radius is known. */
 export const DETECTION_MARKER_RADIUS_PX = 5;
@@ -28,9 +29,9 @@ export interface DetectionGeometry {
   imageWidth: number;
   /** Height of the decoded image, in file pixels. */
   imageHeight: number;
-  /** Screen pixels for one file pixel along the columns. */
+  /** Screen pixels for one file pixel along the screen's horizontal axis. */
   stepX: number;
-  /** Screen pixels for one file pixel along the rows. */
+  /** Screen pixels for one file pixel along the screen's vertical axis. */
   stepY: number;
   /** Offset of the image's left edge from the viewer's left edge, in screen pixels. */
   panX: number;
@@ -38,6 +39,8 @@ export interface DetectionGeometry {
   panY: number;
   /** True when the picture shows the file's first row at the top. */
   firstRowAtTop: boolean;
+  /** How far the picture is shown turned, clockwise in degrees (default 0). */
+  turn?: number;
   /** Width of the viewer, in screen pixels. */
   viewWidth: number;
   /** Height of the viewer, in screen pixels. */
@@ -70,10 +73,12 @@ export function detectionScreenPosition(
   detection: Pick<StarDetection, 'x' | 'y'>,
   geometry: DetectionGeometry,
 ): { x: number; y: number } {
-  const rowFromTop = geometry.firstRowAtTop ? detection.y - 0.5 : geometry.imageHeight - detection.y + 0.5;
+  const place = fitsPixelToTurnedPicture(
+    detection.x, detection.y, geometry.imageWidth, geometry.imageHeight, geometry.turn ?? 0, geometry.firstRowAtTop,
+  );
   return {
-    x: geometry.panX + (detection.x - 0.5) * geometry.stepX,
-    y: geometry.panY + rowFromTop * geometry.stepY,
+    x: geometry.panX + place.x * geometry.stepX,
+    y: geometry.panY + place.y * geometry.stepY,
   };
 }
 

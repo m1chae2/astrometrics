@@ -144,6 +144,8 @@ astrometricslib/pipelines/astrometry/pre_processing/source_detection.py,BACKGROU
 astrometricslib/pipelines/astrometry/pre_processing/source_detection.py,_BACKGROUND_STATS_SUBSAMPLE_MIN_PIXELS,Speed switch for subsampling; no result choice
 astrometricslib/pipelines/astrometry/pre_processing/source_detection.py,_STAR_RADIUS_PEAK_FRACTION,Decided not tuning in the #175 review (AST-D18): radius drawn on the star overlay only
 astrometricslib/pipelines/astrometry/pre_processing/source_detection.py,_STAR_RADIUS_WINDOW_HALF_WIDTH_PX,Decided not tuning in the #175 review (AST-D18): radius drawn on the star overlay only
+astrometricslib/pipelines/astrometry/processing/detections.py,DETECTIONS_CACHE_LIMIT,Number of detection lists the cache folder keeps; plumbing
+astrometricslib/pipelines/astrometry/processing/detections.py,DETECTIONS_FILE_VERSION,Version number of the saved detection-list layout; plumbing
 astrometricslib/pipelines/astrometry/processing/gaia_depth.py,_BAND_SAMPLES,Sampling resolution of the passband integral; structure
 astrometricslib/pipelines/astrometry/processing/gaia_depth.py,predict_gaia_query_depth.central_obstruction_fraction,Argument default of 0 for an optic with no central obstruction; the caller passes the real value
 astrometricslib/pipelines/astrometry/processing/pointing_tuning.py,ARCSEC_PER_DEGREE,Unit conversion
@@ -162,6 +164,8 @@ astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,derive_field_c
 astrometricslib/pipelines/photometry/post_processing/known_variability_labels.py,split_scores_by_catalog_status.chunk_size,Query batch size; plumbing
 astrometricslib/pipelines/photometry/post_processing/record_noise_budget.py,[Observatory.Location] elevation,Site setting; the default of zero stands for sea level
 astrometricslib/pipelines/photometry/post_processing/record_quality.py,MAXIMUM_TIMESTAMP_REASONS_SHOWN,Display cap on quoted reasons
+astrometricslib/pipelines/photometry/post_processing/record_quality.py,_LOGGED_WARNING_TEXT_LENGTH,Display cap on the text kept for one logged warning
+astrometricslib/pipelines/photometry/post_processing/record_quality.py,logged_warnings_notice_measurement.dropped_count,Count the caller passes; zero means none were dropped
 astrometricslib/pipelines/photometry/post_processing/variability_skill.py,_MAGNITUDES_PER_FRACTION,unit or physical constant
 astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,CENTROID_SEARCH_HALF_WIDTH_PX,Default search half width of the centroid locator; the drift limit is half of it (PHO-D16); method choice
 astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,_MAXIMUM_UTC_OFFSET_HOURS,"Time zone range, not a choice"
@@ -190,6 +194,7 @@ astrometricslib/pipelines/photometry/processing/variability_analyzer.py,_MAXIMUM
 astrometricslib/pipelines/photometry/processing/variability_analyzer.py,_MEDIAN_STANDARD_ERROR_FACTOR,Statistical constant sqrt(pi/2)
 astrometricslib/pipelines/photometry/processing/variability_indices.py,_MAD_TO_SIGMA,unit or physical constant
 astrometricslib/pipelines/photometry/processing/variability_indices.py,false_alarm_probability.scale,Unit scale; 1 means unchanged
+astrometricslib/pipelines/photometry/run_warnings.py,_MAXIMUM_KEPT_WARNINGS,Row or item cap on distinct warnings kept; later ones are counted; plumbing
 astrometricslib/pipelines/shared/image_conversions.py,ImageConverter.convert_fits_to_png_with_stats.max_dimensions,Display size cap for an image; not used in results
 astrometricslib/pipelines/shared/image_conversions.py,get_frame.index,Index of the frame or layer; 0 means the first
 astrometricslib/pipelines/shared/image_conversions.py,render_data_url.max_dimensions,Display size cap for an image; not used in results
@@ -356,6 +361,7 @@ astrometricslib/pipelines/stacking/post_processing/half_pattern.py,BOOTSTRAP_SEE
 astrometricslib/pipelines/stacking/post_processing/half_pattern.py,SHIFTED_MASK_LEVEL,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/normalization_scale.py,EXPOSURE_MATCH_FRACTION,exposure equality check; the code says it is not tuned
 astrometricslib/pipelines/stacking/post_processing/odd_even_apertures.py,APERTURE_RECORD_VERSION,software plumbing
+astrometricslib/pipelines/stacking/post_processing/quarter_turn.py,_TURNS_DEGREES,The four quarter turns of an image; geometry
 astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,IDENTITY_TOLERANCE_PX,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,MAXIMUM_SLOPE_PAIRS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,MINIMUM_HOMOGRAPHY_SCALE,"Sampling, numerics, plumbing or math constant."

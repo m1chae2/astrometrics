@@ -363,6 +363,49 @@ def _summarize_session_for_star(session_id: str, analyzer: Any, light_curve: Any
     )
 
 
+def _merged_crowding(canonical: Any, new: Any) -> dict[str, Any]:
+    """Combine the crowding fields of two segments of one star's light curve.
+
+    Each session measures crowding on its own reference frame, so the
+    segments can disagree: seeing, focus and the frame's rotation change how
+    close and how bright a neighbor looks. The merged record keeps the worst
+    case, because the fields exist to warn about light from a neighbor, and
+    points from a night on which a neighbor reached the aperture are in the
+    merged curve too:
+
+    * ``crowded`` is `True` when either segment is crowded, `False` when
+      both recorded it and neither is, and `None` when neither recorded it.
+    * ``nearest_neighbor_distance_px`` and ``nearest_neighbor_flux_ratio``
+      come together from the segment with the closer neighbor, so the pair
+      still describes one neighbor seen on one night.
+    * ``masked_sky_fraction`` is the larger of the two.
+
+    Parameters
+    ----------
+    canonical, new : `PhotometryResult`
+        The two segments.
+
+    Returns
+    -------
+    fields : `dict` [`str`, `Any`]
+        The four crowding fields of the merged record.
+    """
+    flags = [segment.crowded for segment in (canonical, new) if segment.crowded is not None]
+    with_neighbor = [
+        segment for segment in (canonical, new) if segment.nearest_neighbor_distance_px is not None
+    ]
+    closest = min(with_neighbor, key=lambda segment: segment.nearest_neighbor_distance_px, default=None)
+    masked = [
+        segment.masked_sky_fraction for segment in (canonical, new) if segment.masked_sky_fraction is not None
+    ]
+    return {
+        "crowded": any(flags) if flags else None,
+        "nearest_neighbor_distance_px": None if closest is None else closest.nearest_neighbor_distance_px,
+        "nearest_neighbor_flux_ratio": None if closest is None else closest.nearest_neighbor_flux_ratio,
+        "masked_sky_fraction": max(masked) if masked else None,
+    }
+
+
 def _merge_light_curves(canonical: Any, new: Any) -> Any:
     """Merge a star's brightness data from two different nights.
 
@@ -390,6 +433,8 @@ def _merge_light_curves(canonical: Any, new: Any) -> Any:
     when either segment's errors assumed it. The merged `time_basis` is the
     shared one, or the less exact geocentric one when the segments differ.
     `magnitudes` (always empty today) is carried over untouched.
+    The crowding fields keep the worst case of the two segments (see
+    `_merged_crowding`), so a star crowded on any night stays crowded.
     `periodogram`, `transit_candidate` and the between-session fields are
     single computed results, not per-timestamp arrays, and are dropped
     instead of carrying a stale value onto the merged curve.
@@ -488,6 +533,7 @@ def _merge_light_curves(canonical: Any, new: Any) -> Any:
         periodogram=None,
         transit_candidate=None,
         session_summaries=list(canonical.session_summaries) + list(new.session_summaries),
+        **_merged_crowding(canonical, new),
     )
     # The merged curve has its own mean and scatter, measured the same way as
     # a session's. Left empty, the first star flagged by its change between

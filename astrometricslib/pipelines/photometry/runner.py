@@ -50,6 +50,11 @@ from astrometricslib.pipelines.photometry.pre_processing.observation_times impor
 )
 from astrometricslib.pipelines.photometry.processing.noise_budget import SessionNoiseInputs
 from astrometricslib.pipelines.photometry.processing.variability_indices import NoiseModel, fit_noise_model
+from astrometricslib.pipelines.photometry.run_warnings import (
+    SESSION_NOTICE_LOG_EXTRA,
+    SessionWithoutComparisonStars,
+    collect_logged_warnings,
+)
 from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
     PipelineRequest,
@@ -347,7 +352,34 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         )
 
     def run(self, request: PipelineRequest, result: Result) -> Result:
+        """Run the sessions and keep every warning the run logged.
+
+        The warnings are gathered by `collect_logged_warnings` while
+        `_run_sessions` works and are put in the payload as
+        ``logged_warnings``, so `validate_output` can store them in a notice
+        row that `Jobs.query(detail="warnings")` lists.
+
+        Returns
+        -------
+        result : `Result`
+            What `_run_sessions` returned, with ``logged_warnings`` and
+            ``dropped_logged_warning_count`` added to the payload.
+        """
+        with collect_logged_warnings() as collector:
+            run_result = self._run_sessions(request, result)
+        run_result.payload["logged_warnings"] = collector.warnings()
+        run_result.payload["dropped_logged_warning_count"] = collector.dropped_count
+        return run_result
+
+    def _run_sessions(self, request: PipelineRequest, result: Result) -> Result:
         """Run one `VariabilityAnalyzer` pass per session, then merge them.
+
+        A session whose light curves could not be divided by comparison
+        stars keeps raw flux. Its variable-star candidates are dropped, and
+        when another session was normalized its light curves are left out
+        of the cross-session merge, so raw and normalized flux are never
+        mixed in one light curve. Each such session is listed in the payload
+        as ``sessions_without_comparison_stars``.
 
         Returns
         -------
@@ -386,6 +418,10 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         # `SessionNoiseInputs`).
         all_session_noise_inputs = []
         session_empty_reasons = []
+        # Sessions whose light curves kept raw flux (see
+        # `SessionWithoutComparisonStars`), as (session id, reason, number
+        # of candidates dropped).
+        unnormalized_sessions: list[tuple[str, str, int]] = []
         # Only session-prefix ids when there's more than one session,
         # so the common single-session target keeps today's plain
         # Star_N ids and doesn't churn its stellar_catalog rows.
@@ -448,6 +484,19 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                     session_empty_reasons.append(
                         f"session {session.id}: reference-frame star detection failed, 0 stars processed"
                     )
+            failure_reason = getattr(analyzer, "normalization_failure_reason", None)
+            if analyzer.stellar_objects and failure_reason is not None:
+                # Candidates found in raw flux follow the sky, not the star.
+                logger.warning(
+                    "[%s] Session %s has no comparison stars (%s); its %s variable candidate(s) are dropped.",
+                    target.id,
+                    session.id,
+                    failure_reason,
+                    len(session_candidates),
+                    extra=SESSION_NOTICE_LOG_EXTRA,
+                )
+                unnormalized_sessions.append((session.id, failure_reason, len(session_candidates)))
+                session_candidates = []
             per_session_results.append((analyzer, session_candidates))
             all_candidates.extend(session_candidates)
             all_rejected_files.extend(analyzer.rejected_files)
@@ -493,17 +542,46 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         cross_session_match_count = 0
         long_term_candidates = []
 
+        unnormalized_ids = {session_id for session_id, _, _ in unnormalized_sessions}
+        # Leave the raw-flux sessions out of the merge whenever a session was
+        # normalized. When none was, every session is raw and they are merged
+        # as before, but no change between sessions is searched for.
+        exclude_unnormalized = bool(unnormalized_ids) and any(
+            session.id not in unnormalized_ids for session in photometry_sessions
+        )
+        sessions_without_comparison_stars = [
+            SessionWithoutComparisonStars(
+                session_id=session_id,
+                reason=reason,
+                excluded_from_merge=id_prefix_enabled and exclude_unnormalized,
+                dropped_candidate_count=dropped,
+            )
+            for session_id, reason, dropped in unnormalized_sessions
+        ]
         if id_prefix_enabled:
+            merged_pairs = [
+                (session, session_result)
+                for session, session_result in zip(photometry_sessions, per_session_results, strict=True)
+                if not (exclude_unnormalized and session.id in unnormalized_ids)
+            ]
+            if exclude_unnormalized:
+                logger.warning(
+                    "[%s] Left %s session(s) without comparison stars out of the merged light curves: %s.",
+                    target.id,
+                    len(unnormalized_ids),
+                    ", ".join(sorted(unnormalized_ids)),
+                    extra=SESSION_NOTICE_LOG_EXTRA,
+                )
             all_stellar_objects, sessions_missing_wcs, cross_session_match_count = (
                 _match_and_merge_across_sessions(
-                    photometry_sessions,
-                    per_session_results,
+                    [session for session, _ in merged_pairs],
+                    [session_result for _, session_result in merged_pairs],
                     target,
                     session_wcs_map=session_wcs_map,
                     drivers=options.get("drivers"),
                 )
             )
-            if cross_session_match_count > 0:
+            if cross_session_match_count > 0 and not (unnormalized_ids and not exclude_unnormalized):
                 from astrometricslib.pipelines.photometry.processing.variability_analyzer import (
                     identify_long_term_variable_candidates,
                 )
@@ -551,6 +629,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 "all_session_zero_points": all_session_zero_points,
                 "all_session_noise_inputs": all_session_noise_inputs,
                 "session_empty_reasons": session_empty_reasons,
+                "sessions_without_comparison_stars": sessions_without_comparison_stars,
                 "sessions_missing_wcs": sessions_missing_wcs,
                 "cross_session_match_count": cross_session_match_count,
                 "long_term_candidate_count": len(long_term_candidates),
@@ -724,6 +803,9 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                     median_flux_error_mag=flux_error_mag,
                     errors_assume_unit_gain=errors_assume_unit_gain,
                     session_zero_points=payload.get("all_session_zero_points", []),
+                    sessions_without_comparison_stars=payload.get("sessions_without_comparison_stars", []),
+                    logged_warnings=payload.get("logged_warnings", []),
+                    dropped_logged_warning_count=payload.get("dropped_logged_warning_count", 0),
                 ),
                 measurement_context,
             )

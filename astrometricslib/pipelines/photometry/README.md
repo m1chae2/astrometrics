@@ -94,6 +94,10 @@ For that reason, the merge across sessions (`batch.py`, `_merge_light_curves`) d
 
 The merge joins `fluxErrors`, `fluxesNormalizedErrors`, `fluxesDetrendedErrors` and `timeBjdTdb` the same way. The merge drops an array that only one session has, because it cannot be paired with the merged timestamps. The merged flags say "assumed" if either session assumed.
 
+The merge keeps the worst case of the crowding fields (`_merged_crowding`). A star crowded on any night stays `crowded`. `nearestNeighborDistancePx` and `nearestNeighborFluxRatio` come together from the night with the closest neighbor, so they still describe one neighbor. `maskedSkyFraction` is the largest of the nights. `crowded` is `null` only when no night recorded it.
+
+**A session with no comparison stars.** When a session has fewer than two usable comparison stars, its light curves keep raw flux. Raw flux follows the sky's clearness and the airmass, so it cannot be joined with another night's normalized flux. The runner then drops that session's variable candidates. When another session was normalized, it also leaves the session out of the merge, so its stars are not saved by this run. When no session was normalized, the raw sessions are merged as before, but no change between sessions is searched for. Each such session is named in the `photometry.notice_session_without_comparison_stars` row, with the number of stars left after each rule of the choice (see [Quality outputs](#quality-outputs)). The usual cause is cloud that takes about half the stars from many frames, so no star has a flux in every frame.
+
 The merge also records one `sessionSummaries` entry per session on the light curve.
 
 | Field | Meaning |
@@ -201,6 +205,15 @@ Besides each star's own quality records, a run keeps one record per run-level ga
 | `flux_uncertainty` | Never. It passes with the median per-point error in magnitudes as its measured value | No light curve carries errors, or the camera's gain is unknown and the errors assume 1 electron per ADU (the detail still quotes the median error) |
 
 `registration_drift` and `comparison_ensemble` report a lost-tracking session and a thin or unstable comparison set at the level of the run.
+
+**Notices.** Two warnings that are not gates are stored as notice rows (failed rows with a limit of zero, see `pipelines/shared/quality/notices.py`), so `Jobs.query(detail="warnings")` lists them with the failed gates. Each is stored only when it happened.
+
+| Notice | Value | Reason |
+| --- | --- | --- |
+| `photometry.notice_session_without_comparison_stars` | Sessions without comparison stars | Each session and why; the action says whether it was left out of the merge |
+| `photometry.notice_logged_warnings` | Different warnings the run logged | Each warning's module, first text and count |
+
+The second row is filled by `run_warnings.collect_logged_warnings`, which listens to the job's log while `run` works. It keeps warnings such as a catalog server that did not answer, a camera profile with no gain for the frames' settings, and a period search that failed. A warning that has its own notice row is logged with `SESSION_NOTICE_LOG_EXTRA` and skipped. Warnings logged inside the frame-measuring worker processes do not reach it.
 
 **Gate limits.** The 10-star limit for `scatter_population`, the 0.7 floor of `variability_discrimination` and the 0.3 mag limit of `detectable_amplitude` are design estimates (design estimate; see [photometry design estimates](../../../documentation/library_design/validation/photometry.md#design-estimates)). The 7.4 multiplier in the CV cutoff has no measured false-alarm rate, but its behavior on the library is measured (measured; see [PHO-10](../../../documentation/library_design/validation/photometry.md#pho-10)).
 

@@ -102,6 +102,7 @@ from astrometricslib.pipelines.photometry.processing.comparison_ensemble import 
     ComparisonSetResult,
     build_ensemble_signal,
     build_flux_table,
+    describe_missing_comparison_stars,
     fractional_to_magnitudes,
     select_comparison_set,
     set_result,
@@ -113,6 +114,7 @@ from astrometricslib.pipelines.photometry.processing.variability_indices import 
     VariabilityThresholds,
     assess_variability,
 )
+from astrometricslib.pipelines.photometry.run_warnings import SESSION_NOTICE_LOG_EXTRA
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -884,6 +886,12 @@ class VariabilityAnalyzer:
         # The comparison set chosen for this session, or `None` before
         # `normalize_light_curves()` has run on stars with light curves.
         self.comparison_set: ComparisonSetResult | None = None
+        # Why the session's light curves could not be divided by a
+        # comparison ensemble, or `None` when they were (or when
+        # `normalize_light_curves()` has not run). When it is set the light
+        # curves hold raw flux, which must not be mixed with another
+        # session's normalized flux.
+        self.normalization_failure_reason: str | None = None
         # The airmass slope the optional correction removed, as a fractional
         # change of flux per unit of airmass. `None` when it was not applied.
         self.ensemble_airmass_slope: float | None = None
@@ -1357,6 +1365,7 @@ class VariabilityAnalyzer:
             return
 
         self.comparison_set = None
+        self.normalization_failure_reason = None
         self.frame_reference_flux = {}
         self.frame_reference_flux_error = {}
         self._member_references = {}
@@ -1364,7 +1373,10 @@ class VariabilityAnalyzer:
 
         table = build_flux_table(self.stellar_objects)
         if table is None:
-            logger.warning("  Normalization: no star has a positive flux in any frame.")
+            self.normalization_failure_reason = "no star has a positive flux in any frame"
+            logger.warning(
+                "  Normalization: %s.", self.normalization_failure_reason, extra=SESSION_NOTICE_LOG_EXTRA
+            )
             self._apply_frame_normalization()
             return
         selection = select_comparison_set(table, self.maximum_comparison_stars)
@@ -1381,9 +1393,12 @@ class VariabilityAnalyzer:
             "from the CCD equation" if selection.uses_errors else "estimated from the light curves",
         )
         if member_count < 2:
+            self.normalization_failure_reason = describe_missing_comparison_stars(table, selection)
             logger.warning(
-                "  Normalization: %s usable comparison star(s); leaving raw light curves intact.",
+                "  Normalization: %s usable comparison star(s) (%s); leaving raw light curves intact.",
                 member_count,
+                self.normalization_failure_reason,
+                extra=SESSION_NOTICE_LOG_EXTRA,
             )
             self._apply_frame_normalization()
             return
@@ -1583,9 +1598,12 @@ class VariabilityAnalyzer:
         # star's raw measurements intact, so a caller/UI can still show
         # (unnormalized) photometry rather than nothing at all.
         if not self.frame_reference_flux:
+            if self.normalization_failure_reason is None:
+                self.normalization_failure_reason = "no frame kept a comparison-ensemble level"
             logger.warning(
                 "  Ensemble normalization produced no usable per-frame factors; "
-                "leaving raw (unnormalized) light curves intact."
+                "leaving raw (unnormalized) light curves intact.",
+                extra=SESSION_NOTICE_LOG_EXTRA,
             )
             for star in self.stellar_objects:
                 star.photometry.fluxes_normalized = list(star.photometry.fluxes)

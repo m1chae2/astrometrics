@@ -16,7 +16,10 @@ a pass. The failed gates' sentences are the run's warnings.
 The same module turns the run's counts, measurements and gates into quality
 measurements (`photometry_run_measurements`) and stores them
 (`record_photometry_quality`). The gates and the summary stay as they are;
-the measurements are written next to them.
+the measurements are written next to them. Two notice rows carry the
+warnings that are not gates: the sessions that had no comparison stars
+(`session_without_comparison_stars_notice_measurement`) and every other
+warning the run logged (`logged_warnings_notice_measurement`).
 """
 
 from collections.abc import Sequence
@@ -67,6 +70,8 @@ from astrometricslib.pipelines.photometry.metrics import (
     PHOTOMETRY_LONG_TERM_VARIABLE_CANDIDATE_COUNT,
     PHOTOMETRY_METRICS,
     PHOTOMETRY_NOISE_MODEL_STAR_COUNT,
+    PHOTOMETRY_NOTICE_LOGGED_WARNINGS,
+    PHOTOMETRY_NOTICE_SESSION_WITHOUT_COMPARISON_STARS,
     PHOTOMETRY_POSITION_ONLY_STAR_COUNT,
     PHOTOMETRY_STARS_FOUND,
     PHOTOMETRY_STARS_PROCESSED,
@@ -99,6 +104,8 @@ from astrometricslib.pipelines.photometry.processing.comparison_ensemble import 
 from astrometricslib.pipelines.photometry.processing.variability_indices import (
     MINIMUM_STARS_FOR_NOISE_MODEL,
 )
+from astrometricslib.pipelines.photometry.run_warnings import LoggedWarning, SessionWithoutComparisonStars
+from astrometricslib.pipelines.shared.quality.notices import notice_measurement
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     GateLimitSource,
     PipelineRunContext,
@@ -1019,6 +1026,13 @@ class PhotometryRunInputs:
         The catalog zero point of every measured frame, for each session.
         Empty when none was found (for example, a run with no catalog
         stars), in which case no zero point measurement is stored.
+    sessions_without_comparison_stars : `Sequence`
+        The sessions whose light curves kept raw flux, as
+        `SessionWithoutComparisonStars` records.
+    logged_warnings : `Sequence` [`LoggedWarning`]
+        The other warnings the run logged, grouped.
+    dropped_logged_warning_count : `int`
+        Warnings logged after the collector was full, counted only.
     """
 
     comparison_sets: Sequence[ComparisonSetResult] = field(default_factory=tuple)
@@ -1029,6 +1043,9 @@ class PhotometryRunInputs:
     median_flux_error_mag: float | None = None
     errors_assume_unit_gain: bool = False
     session_zero_points: Sequence[SessionZeroPoints] = field(default_factory=tuple)
+    sessions_without_comparison_stars: Sequence[SessionWithoutComparisonStars] = field(default_factory=tuple)
+    logged_warnings: Sequence[LoggedWarning] = field(default_factory=tuple)
+    dropped_logged_warning_count: int = 0
 
 
 # The metric that stands for each gate, and how its limit was obtained. The
@@ -1322,7 +1339,109 @@ def photometry_run_measurements(
             # The gate's own detail names the assumed gain as the source.
             measurement = measurement.model_copy(update={"status": MeasurementStatus.ASSUMED})
         measurements.append(measurement)
+    if inputs.sessions_without_comparison_stars:
+        measurements.append(
+            session_without_comparison_stars_notice_measurement(
+                inputs.sessions_without_comparison_stars, context
+            )
+        )
+    if inputs.logged_warnings or inputs.dropped_logged_warning_count:
+        measurements.append(
+            logged_warnings_notice_measurement(
+                inputs.logged_warnings, context, inputs.dropped_logged_warning_count
+            )
+        )
     return measurements
+
+
+# The longest text kept for one logged warning in the notice's reason. The
+# job list shows at most 500 characters of a reason, so this keeps room for
+# several warnings.
+_LOGGED_WARNING_TEXT_LENGTH = 160
+
+
+def session_without_comparison_stars_notice_measurement(
+    sessions: Sequence[SessionWithoutComparisonStars], context: PipelineRunContext
+) -> QualityMeasurement:
+    """Build the row that says some sessions had no comparison stars.
+
+    Parameters
+    ----------
+    sessions : `Sequence` [`SessionWithoutComparisonStars`]
+        The sessions whose light curves kept raw flux. Not empty.
+    context : `PipelineRunContext`
+        The run's shared facts.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        A failed notice whose value is the number of sessions. The reason
+        names each session and why it had no comparison stars; the action
+        says what was done with its light curves.
+    """
+    excluded = [session for session in sessions if session.excluded_from_merge]
+    dropped = sum(session.dropped_candidate_count for session in sessions)
+    reason = "; ".join(f"session {session.session_id}: {session.reason}" for session in sessions)
+    if excluded:
+        action = (
+            f"left {len(excluded)} session(s) out of the merged light curves and dropped their "
+            f"{dropped} variable-star candidate(s)"
+        )
+    else:
+        action = (
+            f"kept the raw light curves, dropped {dropped} variable-star candidate(s) and searched for no "
+            "change between sessions"
+        )
+    return notice_measurement(
+        _SPEC_BY_NAME[PHOTOMETRY_NOTICE_SESSION_WITHOUT_COMPARISON_STARS],
+        float(len(sessions)),
+        context,
+        context.run_subject(),
+        f"{len(sessions)} session(s) had no usable comparison stars, so their light curves are raw flux: "
+        f"{reason}",
+        action_taken=action,
+    )
+
+
+def logged_warnings_notice_measurement(
+    warnings: Sequence[LoggedWarning], context: PipelineRunContext, dropped_count: int = 0
+) -> QualityMeasurement:
+    """Build the row that lists the other warnings the run logged.
+
+    Parameters
+    ----------
+    warnings : `Sequence` [`LoggedWarning`]
+        The warnings, grouped, in the order they were first logged.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    dropped_count : `int`, optional
+        Warnings logged after the collector was full; counted only.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        A failed notice whose value is the number of different warnings.
+        The reason lists each one with its module and how often it was
+        logged.
+    """
+    shown = []
+    for warning in warnings:
+        text = warning.message.strip().splitlines()[0] if warning.message.strip() else warning.message
+        if len(text) > _LOGGED_WARNING_TEXT_LENGTH:
+            text = text[: _LOGGED_WARNING_TEXT_LENGTH - 1] + "…"
+        module = warning.logger_name.rsplit(".", 1)[-1]
+        repeats = f" ({warning.count} times)" if warning.count > 1 else ""
+        shown.append(f"{module}: {text}{repeats}")
+    reason = f"the run logged {len(warnings)} different warning(s): " + "; ".join(shown)
+    if dropped_count:
+        reason += f"; and {dropped_count} more not kept"
+    return notice_measurement(
+        _SPEC_BY_NAME[PHOTOMETRY_NOTICE_LOGGED_WARNINGS],
+        float(len(warnings) + dropped_count),
+        context,
+        context.run_subject(),
+        reason,
+    )
 
 
 def record_photometry_quality(

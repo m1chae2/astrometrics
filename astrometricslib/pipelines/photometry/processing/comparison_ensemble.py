@@ -651,6 +651,56 @@ def select_comparison_set(table: FluxTable, maximum: int | None = None) -> Compa
     )
 
 
+def describe_missing_comparison_stars(table: FluxTable, selection: ComparisonSelection) -> str:
+    """Say in one sentence why a session has too few comparison stars.
+
+    The sentence counts the stars left after each rule of
+    `select_comparison_set`, in the order the rules are applied. When no
+    star has a flux in every usable frame, it also names the frame with the
+    most missing stars, because a frame lost to cloud is the usual cause.
+
+    Parameters
+    ----------
+    table : `FluxTable`
+        The session's fluxes.
+    selection : `ComparisonSelection`
+        What `select_comparison_set` chose from the table.
+
+    Returns
+    -------
+    reason : `str`
+        The sentence, without a final period.
+    """
+    measured_everywhere = np.all(np.isfinite(table.fluxes), axis=1)
+    unsaturated = measured_everywhere & ~table.ever_saturated & table.saturation_trusted
+    uncrowded = unsaturated & ~table.crowded if table.crowded is not None else unsaturated
+    unlisted = uncrowded & ~table.listed_variable
+    parts = [
+        f"{int(measured_everywhere.sum())} of {len(table.star_ids)} stars have a positive flux in all "
+        f"{len(table.timestamps)} usable frames",
+        f"{int(unsaturated.sum())} of those are never saturated",
+    ]
+    if table.crowded is not None:
+        parts.append(f"{int(uncrowded.sum())} are not crowded")
+    parts.append(f"{int(unlisted.sum())} are not listed as variable")
+    if selection.candidate_count:
+        parts.append(
+            f"{len(selection.member_rows)} of {selection.candidate_count} candidates passed the "
+            "constancy check"
+        )
+    reason = "; ".join(parts)
+    if table.timestamps and not measured_everywhere.any():
+        missing_per_frame = np.sum(~np.isfinite(table.fluxes), axis=0)
+        worst = int(np.argmax(missing_per_frame))
+        frames_missing_many = int(np.sum(missing_per_frame > 0.1 * len(table.star_ids)))
+        reason += (
+            f". {frames_missing_many} frame(s) lack a flux for more than a tenth of the stars; the worst, "
+            f"{table.timestamps[worst].isoformat()}, lacks {int(missing_per_frame[worst])} (cloud or a lost "
+            "field is the usual cause)"
+        )
+    return reason
+
+
 def build_ensemble_signal(
     fluxes: np.ndarray, errors: np.ndarray | None, frame_mask: np.ndarray
 ) -> EnsembleSignal:

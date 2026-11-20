@@ -29,6 +29,8 @@ The code picks the comparison stars once for the whole session. It follows these
 
 A frame in which fewer than half the usual number of stars were measured is left out of the session. A star that is missing, zero or saturated in any other frame never becomes a candidate. The set therefore has the same stars in every frame. A star that fails in one frame cannot add a step to the signal.
 
+The rule has a cost when cloud takes many stars from many frames, but not half of them from any single frame. Then no star has a flux in every frame and the pool is empty. With fewer than two comparison stars the session is not normalized. `normalization_failure_reason` on the analyzer then holds a sentence from `describe_missing_comparison_stars`: how many stars passed each rule, and which frame lacked the most stars. The runner reads it (see [Change between sessions](../README.md#change-between-sessions)).
+
 When every candidate has CCD-equation errors (see [Uncertainties](../README.md#uncertainties)), those errors set the weights and the expected scatter. Otherwise the code estimates each star's noise from the differences between neighboring frames of its residuals (1.4826 times the median absolute deviation of the differences, divided by the square root of 2). The median absolute deviation (MAD) is the median distance of the values from their median; 1.4826 times the MAD estimates the standard deviation of normally distributed data without being pulled by a few wild points. It then publishes no normalized errors.
 
 ### The signal and the normalized flux

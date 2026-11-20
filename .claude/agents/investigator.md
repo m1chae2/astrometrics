@@ -11,9 +11,11 @@ tools:
   - mcp__astrometricslib-core__processing_stack_summary
   - mcp__astrometricslib-core__quality_calibration_identities
   - mcp__astrometricslib-core__quality_capture_settings
+  - mcp__astrometricslib-core__quality_measure_detections
   - mcp__astrometricslib-core__quality_measure_folder
   - mcp__astrometricslib-core__quality_measure_frames
   - mcp__astrometricslib-core__quality_measure_stack
+  - mcp__astrometricslib-core__quality_measure_star_profile
   - mcp__astrometricslib-core__quality_metrics
   - mcp__astrometricslib-core__quality_query
   - mcp__astrometricslib-core__quality_resolve_rows

@@ -326,6 +326,21 @@ DECISIONS = {
         "Built 2026-10-05. Calibration counts, or how a target's light frames match the darks. refresh "
         "reloads the index into memory and writes nothing.",
     ),
+    "quality_measure_star_profile": ToolDecision(
+        "keep",
+        "Built 2026-11-16. Measures one star at a pixel position of a FITS file: profile, Moffat and "
+        "Gaussian fits, a cut and the ring around it. Reads the file only; nothing is stored.",
+    ),
+    "quality_measure_detections": ToolDecision(
+        "keep",
+        "Built 2026-11-16. Lists the star finder's detections in a FITS file. Reads the file only; "
+        "nothing is stored.",
+    ),
+    "quality_measure_tuned_parameters": ToolDecision(
+        "withhold",
+        "Built 2026-11-16 (#175). Works out the image-processing tuned values; with save=True it backs "
+        "up and writes the configuration file. The AI does not change settings.",
+    ),
     "quality_measure_stack": ToolDecision(
         "keep",
         "Built 2026-10-05. Measures a stack (star width, rejected share, registration) and compares it with "
@@ -460,6 +475,11 @@ DECISIONS = {
         "Built 2026-11-07. Reads the recorded guide samples and guiding runs and fits the mount's own "
         "error (periodic error, drift, jitter). Nothing is stored or sent. Slow on a long history.",
         "observe",
+    ),
+    "review_measure_tuned_parameters": ToolDecision(
+        "withhold",
+        "Built 2026-11-16 (#175). Works out the wayfinding tuned values; with save=True it backs up and "
+        "writes the configuration file. The AI does not change settings.",
     ),
     "review_measure_guiding_spectrum": ToolDecision(
         "keep",

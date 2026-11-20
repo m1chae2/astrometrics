@@ -546,13 +546,10 @@ def measure_star_profile_in_file(
         raise InvalidArgumentError(
             f"The position ({x}, {y}) is outside the image ({width} x {height} pixels)."
         )
-    with_color = False
     try:
-        from astropy.io import fits
+        from astrometricslib._internal.drivers.fits_access import read_header
 
-        with fits.open(path, memmap=False) as hdul:
-            hdu = hdul[1] if hdul[0].data is None and len(hdul) > 1 else hdul[0]
-            with_color = hdu.header.get("NAXIS", 2) == 3
+        with_color = read_header(path).get("NAXIS", 2) == 3
     except OSError:
         with_color = False
     color_note = (

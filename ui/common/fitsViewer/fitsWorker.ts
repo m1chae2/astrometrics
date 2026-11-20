@@ -20,7 +20,7 @@
  *               `imageId`, for the viewer's pixel readout. Replies with `pixelComplete`.
  *
  * With the stretch off and no `displayRange`, the view is linear between the
- * black and white points of the zscale algorithm (see zscale.ts), worked out
+ * black and white points set from the sky's noise (see skyRange.ts), worked out
  * once per image from the decoded pixels.
  *
  * Drawing prefers one long-lived OffscreenCanvas+WebGL2 context (see
@@ -38,7 +38,7 @@ import {
   MtfStretchParameters,
 } from './mtfStretchGL';
 import { decodeFitsPixels } from './fitsParse';
-import { computeZscaleRange } from './zscale';
+import { computeSkyRange } from './skyRange';
 
 /** One decoded image held by the worker. */
 interface StoredImage {
@@ -50,7 +50,7 @@ interface StoredImage {
   min: number;
   max: number;
   /** Black and white points of the Linear display, worked out the first time they are needed. */
-  zscaleRange?: { low: number; high: number };
+  skyRange?: { low: number; high: number };
   /** True when the last draw put the file's first row at the top; the pixel readout needs it to find the row under the pointer. */
   lastDrawnFirstRowAtTop?: boolean;
 }
@@ -67,12 +67,12 @@ let glContext: WebGL2RenderingContext | null = null;
  * @returns The value drawn black and the value drawn white. Falls back to the image's
  *   darkest and brightest pixels when the image has no finite pixel to sample.
  */
-function getZscaleRange(image: StoredImage): { low: number; high: number } {
-  if (!image.zscaleRange) {
-    image.zscaleRange = computeZscaleRange(image.pixels, image.width, image.height, image.channels)
+function getSkyRange(image: StoredImage): { low: number; high: number } {
+  if (!image.skyRange) {
+    image.skyRange = computeSkyRange(image.pixels, image.width, image.height, image.channels)
       ?? { low: image.min, high: image.max };
   }
-  return image.zscaleRange;
+  return image.skyRange;
 }
 
 function midtoneTransferFunction(mid: number, x: number): number {
@@ -321,7 +321,7 @@ self.onmessage = async (ev: MessageEvent) => {
       } else {
         // The Linear display of raw data: a straight line between the sky-based
         // black and white points, so a few saturated stars do not set the scale.
-        const { low, high } = getZscaleRange(image);
+        const { low, high } = getSkyRange(image);
         parameters = computeLinearStretchParameters(low, high);
       }
 
@@ -329,7 +329,7 @@ self.onmessage = async (ev: MessageEvent) => {
       // let createImageBitmap's own high-quality resize handle the downscale
       // to destination size.
       let bitmap: ImageBitmap;
-      // The auto-stretch and the zscale Linear view honour the file's ROWORDER.
+      // The auto-stretch and the Linear view honour the file's ROWORDER.
       // A picture drawn over a fixed `displayRange` never did (it always drew the
       // first row at the top), and that is kept as is so pictures already shown
       // that way do not suddenly turn over.

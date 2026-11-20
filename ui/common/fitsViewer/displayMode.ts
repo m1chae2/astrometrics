@@ -16,7 +16,7 @@ export const DISPLAY_MODE_OPTIONS: ReadonlyArray<{ id: DisplayMode; label: strin
   {
     id: 'linear',
     label: 'Linear',
-    title: 'Brightness shown in proportion. Use this to judge star sizes, halos and pairs.',
+    title: 'Brightness shown in proportion, with the range set from the sky noise, so equal noise looks equally grainy on any image. Use this to judge star sizes, halos and pairs.',
   },
   {
     id: 'auto-stretch',

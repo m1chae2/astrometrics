@@ -37,7 +37,7 @@ def test_gate_fails_when_too_many_bad_frames_are_left_in_the_stack(tmp_path: Pat
     """Five bad frames of 12 exceed the cap, so the gate is red."""
     frames = _batch(tmp_path, 12)
     measurements = {
-        frame.path: make_measurement(frame.path, roundness=0.4 if index < 5 else 0.97)
+        frame.path: make_measurement(frame.path, elongation=2.5 if index < 5 else 1.05)
         for index, frame in enumerate(frames)
     }
 

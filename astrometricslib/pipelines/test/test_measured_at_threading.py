@@ -90,7 +90,7 @@ def _stack_that_records_quality(
         """
         received.append(measured_at)
         report = QuarantineReport(
-            measurements=[{"path": f.path, "roundness": 0.9, "sky_median_adu": 500.0} for f in target.frames]
+            measurements=[{"path": f.path, "sky_median_adu": 500.0} for f in target.frames]
         )
         frame_screening.record_frame_quality(
             target, [], report, list(target.frames), measured_at, quality_recording
@@ -110,7 +110,7 @@ def test_the_full_pipeline_path_stores_frame_quality(tmp_path: Path, monkeypatch
     )
 
     assert received == [MEASURED_AT]
-    assert len(store.query(metric="frame.quarantine_roundness")) == 1
+    assert len(store.query(metric="frame.quarantine_sky_median_adu")) == 1
 
 
 def test_the_rebuild_script_path_stores_frame_quality(
@@ -131,7 +131,7 @@ def test_the_rebuild_script_path_stores_frame_quality(
     rebuild_stacks.rebuild_target(astrometrics, "M 99", str(tmp_path / "backup"))
 
     assert len(received) == 1 and received[0] is not None and received[0].tzinfo is not None
-    assert len(store.query(metric="frame.quarantine_roundness")) == 1
+    assert len(store.query(metric="frame.quarantine_sky_median_adu")) == 1
 
 
 def test_the_batch_worker_passes_the_time_to_the_full_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:

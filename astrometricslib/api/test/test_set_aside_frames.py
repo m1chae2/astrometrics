@@ -31,7 +31,11 @@ from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject_id
 from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
 from astrometricslib.pipelines.stacking.frame_measurement_run import quarantine_measurements_for_frame
-from astrometricslib.pipelines.stacking.metrics import FRAME_QUARANTINE_ROUNDNESS, FRAME_QUARANTINE_SKY_MEDIAN
+from astrometricslib.pipelines.stacking.metrics import (
+    FRAME_POINTING_OFFSET_FRACTION,
+    FRAME_QUARANTINE_SKY_MEDIAN,
+    FRAME_SKY_UNEVENNESS,
+)
 from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
     MANIFEST_FILE_NAME,
     QuarantineDecision,
@@ -92,7 +96,7 @@ def _excluded_folder(folder: Path, names: list[str], manifest_names: list[str]) 
             "reason": REASON,
             "star_count": 203,
             "typical_star_count": 3348.0,
-            "roundness": 0.88,
+            "star_elongation": 1.2,
             "sky_median_adu": 5000.0,
             "moved_at": "2026-10-03T08:00:00+00:00",
         }
@@ -120,17 +124,29 @@ def test_report_gives_an_action_for_each_moved_frame_only() -> None:
 
 
 def test_both_quarantine_rows_of_a_moved_frame_carry_the_action(tmp_path: Path) -> None:
-    """A moved frame's roundness and sky rows store the action taken."""
+    """A moved frame's quarantine rows all store the action taken."""
     frame = FrameRecord(path=str(tmp_path / "lights" / "M 1" / "S" / "C" / "f.fits"), timestamp=1.0e9)
     action = set_aside_action_text("clouded", REASON)
     kwargs = {"run_id": "r", "job_id": None, "measured_at": MEASURED_AT, "capture_setting_id": None}
     moved = quarantine_measurements_for_frame(
-        {"roundness": None, "sky_median_adu": 7000.0}, frame, "M 1", action_taken=action, **kwargs
+        {"sky_unevenness": None, "pointing_offset_fraction": 0.3, "sky_median_adu": 7000.0},
+        frame,
+        "M 1",
+        action_taken=action,
+        **kwargs,
     )
     kept = quarantine_measurements_for_frame(
-        {"roundness": 0.9, "sky_median_adu": 5000.0}, frame, "M 1", **kwargs
+        {"sky_unevenness": 0.001, "pointing_offset_fraction": 0.01, "sky_median_adu": 5000.0},
+        frame,
+        "M 1",
+        **kwargs,
     )
-    assert {row.metric for row in moved} == {FRAME_QUARANTINE_ROUNDNESS, FRAME_QUARANTINE_SKY_MEDIAN}
+    assert {row.metric for row in moved} == {
+        FRAME_QUARANTINE_SKY_MEDIAN,
+        FRAME_SKY_UNEVENNESS,
+        FRAME_POINTING_OFFSET_FRACTION,
+    }
+    assert next(row for row in moved if row.metric == FRAME_SKY_UNEVENNESS).status.value == "not_measured"
     assert all(row.action_taken == action for row in moved)
     assert all(row.action_taken is None for row in kept)
 
@@ -258,7 +274,7 @@ def test_the_stacking_stage_stores_the_action_for_moved_frames(
     target = Target(id="M 99", frames=frames)
     report = QuarantineReport(
         moved=[QuarantineDecision(frames[0].path, "clouded", REASON, 203, 3348.0, 0.9, 7000.0)],
-        measurements=[{"path": f.path, "roundness": 0.9, "sky_median_adu": 500.0} for f in frames],
+        measurements=[{"path": f.path, "sky_median_adu": 500.0} for f in frames],
     )
     library = SimpleNamespace(
         select_bias_frames=lambda *a, **k: SimpleNamespace(frames=[], flags=[], blocking_flags=[])

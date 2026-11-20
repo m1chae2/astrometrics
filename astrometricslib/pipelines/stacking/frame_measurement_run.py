@@ -118,7 +118,11 @@ from astrometricslib.pipelines.shared.quality.metrics import (
 from astrometricslib.pipelines.shared.quality.record_measurements import record_measurements
 from astrometricslib.pipelines.shared.quality.time_budget import TIME_BUDGET_REASON_PREFIX
 from astrometricslib.pipelines.stacking.exact_bias_frames import exact_setting_bias_frames
-from astrometricslib.pipelines.stacking.metrics import FRAME_QUARANTINE_ROUNDNESS, FRAME_QUARANTINE_SKY_MEDIAN
+from astrometricslib.pipelines.stacking.metrics import (
+    FRAME_POINTING_OFFSET_FRACTION,
+    FRAME_QUARANTINE_SKY_MEDIAN,
+    FRAME_SKY_UNEVENNESS,
+)
 from astrometricslib.pipelines.stacking.processing.group_gains import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.pipelines.stacking.stage_progress import LoopProgress
 from astrometricslib.utilities.camera_setting_text import (
@@ -919,8 +923,10 @@ def quarantine_measurements_for_frame(
     Parameters
     ----------
     measurement : `dict`
-        One entry from `raw_frame_check.measure_raw_frame`: ``roundness``
-        (`None` when no star had a measurable shape) and ``sky_median_adu``.
+        One frame's entry from `QuarantineReport.measurements`:
+        ``sky_median_adu``, and ``sky_unevenness`` and
+        ``pointing_offset_fraction`` (each `None` when the check could not
+        be made).
     frame : `FrameRecord`
         The frame the entry measures.
     target_id : `str`
@@ -942,8 +948,11 @@ def quarantine_measurements_for_frame(
     Returns
     -------
     measurements : `list` [`QualityMeasurement`]
-        One roundness row and one sky median row. The roundness row is
-        ``not_measured`` with a reason when the frame had no measurable star.
+        One sky median row, one sky unevenness row and one pointing offset
+        row. A row is ``not_measured`` with a reason when the check could
+        not be made for the frame. The sky median row carries the action
+        taken (the other two are the same decision's evidence, so they
+        carry it too).
     """
     subject = frame_subject(frame.path, target_id, frame.timestamp, capture_setting_id=capture_setting_id)
     common = {
@@ -955,12 +964,19 @@ def quarantine_measurements_for_frame(
         "measured_at": measured_at,
         "action_taken": action_taken,
     }
-    roundness = measurement.get("roundness")
-    sky = measurement.get("sky_median_adu")
     rows = []
     for metric, value, missing_reason in (
-        (FRAME_QUARANTINE_ROUNDNESS, roundness, "no star with a measurable shape was found"),
-        (FRAME_QUARANTINE_SKY_MEDIAN, sky, "the median could not be computed"),
+        (FRAME_QUARANTINE_SKY_MEDIAN, measurement.get("sky_median_adu"), "the median could not be computed"),
+        (
+            FRAME_SKY_UNEVENNESS,
+            measurement.get("sky_unevenness"),
+            "the session had too few frames with a sky grid to compare against",
+        ),
+        (
+            FRAME_POINTING_OFFSET_FRACTION,
+            measurement.get("pointing_offset_fraction"),
+            "the frame's stars could not be matched to the session's reference frame",
+        ),
     ):
         if value is None or not math.isfinite(float(value)):
             rows.append(
@@ -1247,9 +1263,9 @@ def record_stage_frame_quality(
     The stacking stage calls this after the quarantine step, which runs only
     for imaging stacks with the quarantine turned on. It records two things:
 
-    1. The quarantine step's own numbers (star roundness and median pixel
-       value) for every frame it measured, kept or moved. Today only the
-       moved frames' numbers reach a file.
+    1. The quarantine step's own numbers (median pixel value, sky
+       unevenness and pointing offset) for every frame it measured, kept
+       or moved. Today only the moved frames' numbers reach a file.
     2. The full frame measurement for kept frames whose file has not been
        measured yet, up to `STACKING_STAGE_MEASUREMENT_LIMIT` frames, through
        `record_frame_measurements_for_target` (the same path as every other

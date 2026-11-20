@@ -288,10 +288,10 @@ def test_the_quarantine_measuring_loop_reports_progress(
 
     frames = [SimpleNamespace(path=f"/f{i}.fits") for i in range(40)]
     monkeypatch.setattr(frame_quarantine, "split_into_batches", lambda frames_: [list(frames_)])
-    monkeypatch.setattr(frame_quarantine, "judge_batch", lambda measurements: [])
+    monkeypatch.setattr(frame_quarantine, "judge_batch_with_notes", lambda measurements: ([], []))
 
     with caplog.at_level(logging.INFO, logger=PROGRESS_LOGGER), track_stages(FakeJob()):
-        find_frames_to_quarantine(frames, lambda path: {"roundness": 0.9})
+        find_frames_to_quarantine(frames, lambda path: {"star_elongation": 1.1})
 
     checked = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Checked")]
     assert checked[-1] == "Checked 40 of 40 frames…"

@@ -1,8 +1,10 @@
-"""Moves frames with clouds or trailed stars out of a target's folder.
+"""Moves frames with clouds, trails or a bad pointing out of the stack.
 
-A frame shot through cloud has few stars, and a frame shot while the mount
-drifted has stars smeared into streaks. Stacking either one adds noise to
-the result, and the stacker's own weighting only reduces the damage. This
+A frame shot through cloud has few stars or an uneven sky, a frame shot while
+the mount drifted has stars smeared into streaks, and a frame that points far
+from the rest of the session forces the stack to be cut down to the area all
+frames share. Stacking any of them adds noise or loses image area, and the
+stacker's own weighting only reduces the damage. This
 step finds those frames before the stack runs and moves them into a folder
 named `_excluded`, next to where they were. The stack then uses only the
 sound frames.
@@ -11,24 +13,31 @@ The step is built to be undone:
 
 - It moves frames and never deletes them.
 - It writes `excluded_frames.json` in the `_excluded` folder, listing where
-  each frame came from and why it was moved.
+  each frame came from and why it was moved (the rule, the frame's value and
+  the limit, in plain words).
 - `restore_quarantined_frames` moves the frames back.
 - `quarantine_preview_report` shows which frames the step would move,
   without moving any.
 - It judges each frame against the other frames of its own session, camera,
   filter and exposure, so a poor night is not mistaken for a few bad frames.
-- It refuses to move more than a quarter of any batch. If a limit were
-  wrong for some equipment, the step would flag the batch and move nothing.
+- It refuses to move more than a quarter of any batch for any one rule. If a
+  limit were wrong for some equipment, the step would flag the rule and move
+  nothing for it.
 
-The measurements come from `raw_frame_check`, the same code that checks
-frames during an observing session.
+The star count, sky level, sky grid and star positions come from
+`raw_frame_check`, the same code that checks frames during an observing
+session. Trailing is judged on the frame's stored star elongation
+(`frame.star_elongation`), which the frame measurement makes.
 """
 
 import contextvars
+import dataclasses
 import json
 import logging
+import math
 import os
 import shutil
+import sqlite3
 import statistics
 from collections import defaultdict
 from collections.abc import Callable, Sequence
@@ -37,11 +46,17 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+import numpy as np
+
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib._internal.drivers.quality_store import QualityStore
+from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.excluded_frames import QuarantinePreview, SetAsideFrame
 from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
+from astrometricslib.models.quality.measurement import SubjectLevel
 from astrometricslib.models.target import Target
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
@@ -52,12 +67,16 @@ from astrometricslib.models.tuned_parameter import (
 )
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.shared.quality import raw_frame_check
+from astrometricslib.pipelines.shared.quality.frame_measurement import measure_image_star_profiles
+from astrometricslib.pipelines.shared.quality.metrics import FRAME_STAR_ELONGATION
+from astrometricslib.pipelines.shared.quality.star_profile_fitting import usable_top_level_adu
 from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
 from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
     QUARANTINE_EXCLUSION_REASON_PREFIX,
 )
 from astrometricslib.pipelines.stacking.stage_progress import LoopProgress
 from astrometricslib.utilities.exceptions import DATA_ERRORS
+from astrometricslib.utilities.frame_identity import frame_subject_id
 
 logger = logging.getLogger(__name__)
 
@@ -154,95 +173,164 @@ Only the wording of the reason depends on it. Clean frames of the
 moon rose. The two clouded frames reached 2.25 and 3.52 times.
 """
 
-TRAILED_ROUNDNESS_LIMIT = TunedParameter(
-    name="stacking.trailed_roundness_limit",
-    default=0.80,
+TRAILED_ELONGATION_LIMIT = TunedParameter(
+    name="stacking.trailed_elongation_limit",
+    default=1.32,
     unit="ratio",
-    description="Median star roundness below which a frame may have trailed stars.",
+    description="Star elongation above which a frame may have trailed stars.",
     role=ParameterRole.EXCLUSION_CRITERIA,
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="STK-01",
-    allowed_range=(0.5, 0.95),
+    allowed_range=(1.1, 2.0),
     # A sample is one session (target, night, capture setting).
     minimum_sample=5,
 )
-"""A frame whose median star roundness is below this may have trailed stars.
+"""A frame whose star elongation is above this may have trailed stars.
 
-Roundness is the narrow width divided by the wide width of a star, 1.0 for
-a circle. On the 2026-10-02 target the clean frames measured 0.87 to 0.99,
-and the two frames shot during the mount drift measured 0.44 and 0.65. A
-frame with one 4 arcsec guiding spike (0.90) stayed in the stack. The limit
-sits between those groups. It is stricter than the 0.88 used to flag a frame
-for a person to look at.
+Elongation is the long width of a star divided by its short width, 1.0 for
+a circle. It is the stored `frame.star_elongation` of the frame (the median
+over up to 196 isolated, unsaturated stars, from their full second moments,
+so a trail at any angle counts). The earlier test used the median ratio of
+the x and y widths alone (`frame.quarantine_roundness`). It missed trails at
+an angle to the pixel axes: NGC 7331 L_037 (elongation 1.58, by eye a
+trail) read 0.93.
 
-A satellite or aircraft trail does not lower the median roundness, and
-the stacker's pixel rejection removes it, so such a frame stays.
+On 21 sessions of the ZWO ASI 533MM Pro (675 frames, STK-01) the middle of
+all frames is 1.096 and the spread of a frame about its own session's median
+is 0.045 (robust standard deviation). The limit sits five of those spreads
+above the library median, 1.32 (the repository's usual cut for an outlier,
+see `quarantine_tuning.ELONGATION_OUTLIER_SIGMAS`). It is the floor under
+the session-relative limit below, so a very round session is not cut at a
+tiny rise.
+
+A satellite or aircraft trail does not raise the median elongation, and the
+stacker's pixel rejection removes it, so such a frame stays.
 """
 
-ROUNDNESS_DROP_BELOW_MEDIAN = TunedParameter(
-    name="stacking.roundness_drop_below_median",
-    default=0.15,
+ELONGATION_RISE_ABOVE_MEDIAN = TunedParameter(
+    name="stacking.elongation_rise_above_median",
+    default=0.22,
     unit="ratio",
-    description="How far below the batch's median roundness a frame must be to count as trailed.",
+    description="How far above the batch's median elongation a frame must be to count as trailed.",
     role=ParameterRole.EXCLUSION_CRITERIA,
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.MOUNT}),
     register_entry="STK-01",
-    allowed_range=(0.03, 0.4),
+    allowed_range=(0.05, 0.6),
     # A sample is one session (target, night, capture setting).
     minimum_sample=5,
 )
-"""A frame must also be this far below the batch's median roundness.
+"""A frame must also be this far above the batch's median elongation.
 
 Some sessions are mildly elongated throughout. The M 27 session of
-2026-09-24 had a median of 0.90 and a long tail: 0.47, 0.49, 0.55, then 0.71,
-0.74, 0.76, 0.76, 0.78, 0.79 and 0.80. With the fixed limit alone, nine of
-its 40 frames moved. The drop of 0.15 below the median (a cut-off of 0.75
-there) moves the five clearly trailed frames and keeps the four that are
-only mildly elongated. On the 2026-10-02 target (median 0.98) the cut-off
-stays at the fixed 0.80.
+2026-09-24 had a median elongation of 1.28 and 15 of its 33 frames above
+1.30. With the fixed limit alone most of them would move. With the rise of
+0.22 the cut-off there is 1.50. On a round session such as NGC 7331 (median
+1.096) the cut-off is the fixed 1.32.
+
+The rise is five robust standard deviations of a frame's distance above its
+own session's median, over the same 675 frames as the fixed limit.
 """
 
-COLOUR_CAMERA_ROUNDNESS_DROP_BELOW_MEDIAN = TunedParameter(
-    name="stacking.colour_camera_roundness_drop_below_median",
-    default=0.20,
+COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN = TunedParameter(
+    name="stacking.colour_camera_elongation_rise_above_median",
+    default=0.22,
     unit="ratio",
-    description="Roundness drop below the median that counts as trailed for a colour camera.",
+    description="Elongation rise above the median that counts as trailed for a colour camera.",
     role=ParameterRole.EXCLUSION_CRITERIA,
     source=ParameterSource.TUNED_PARAMETER,
     equipment=frozenset({EquipmentKind.CAMERA}),
     register_entry="STK-02",
-    allowed_range=(0.05, 0.5),
+    allowed_range=(0.05, 0.8),
     # A sample is one session (target, night, capture setting).
     minimum_sample=5,
 )
-"""The drop below the median for a colour (Bayer) camera, instead of 0.15.
+"""The rise above the median for a colour (Bayer) camera.
 
 A colour sensor puts one red, green or blue filter over each pixel. At
 405 mm the Nikon D5300 sees stars only 2 to 2.5 pixels wide, so each star
-is sampled coarsely and its measured roundness scatters widely, even when
-the star is round. On 667 frames of eight Nikon targets (checked again on
-2026-10-13) the session median was 0.73 to 0.97, against 0.97 to 0.99 on
-the mono ZWO ASI 533MM Pro the 0.15 was chosen on. The 37 frames moved on
-2026-10-12 included 14 whose roundness sat 0.15 to 0.20 below their
-session median, with nothing visibly wrong in their thumbnails.
+is sampled coarsely and its measured shape scatters more, even when the star
+is round. The star shape of a raw mosaic is measured on 2 x 2 super-pixels
+(see `frame_measurement`), which removes the filter pattern.
 
-With 0.20 all 13 clearly bad frames are still caught: the dawn run of
-NGC 6888 (frames 159 to 168, no stars left), NGC 6888 008, M 106 035 and
-018 (a satellite) and NGC 2024 004. They sit 0.20 to 0.45 below their
-session median. 0.25 would miss two of them, so 0.20 is the largest
-allowance that keeps them all. No frame that was kept before is caught
-now, and the mono controls (M 13, M 57, NGC 7331, M 81) decide exactly as
-before. The camera is recognised by its ``BAYERPAT`` header keyword.
+No stored `frame.star_elongation` rows exist for the colour camera in this
+library, so the tuner cannot yet set this value. It was measured on 257
+Nikon frames with the frame measurement's own code on 2026-11-20 (three
+sessions, 2024). The 167 frames of NGC 6888 (one session) have a median of
+1.16 and a robust spread of 0.019, so five spreads is 0.10, smaller than the
+mono value. The two M 106 sessions (90 frames) scatter far more (medians 1.39
+and 1.36, spreads 0.31): by roundness only two of their frames were judged
+bad, so it is not known whether the scatter is trailing or measurement noise
+in a sparse field. Pooling all three sessions gives 0.17. Until more colour
+sessions are stored, the colour value equals the mono one (0.22), which is
+above all three measurements of the clean session and cannot be tuned lower
+without data (STK-02).
+"""
 
-Measuring on 2 by 2 summed pixels instead was tried and rejected. Summing
-at full resolution (which removes the filter pattern and keeps the pixel
-scale) changed the roundness by a median of 0.004 (at most 0.07) on 1,070
-frames, so the filter pattern is not what skews the measurement. True 2 by
-2 binning gave higher medians only because its centroid window is twice as
-wide, and it caught 24 more frames in the eight targets, mostly good ones in
-crowded fields (IC 1396 044: 0.96 on the mosaic, 0.46 binned).
+UNEVEN_SKY_SIGMAS = TunedParameter(
+    name="stacking.uneven_sky_sigmas",
+    default=5.0,
+    unit="× robust standard deviation",
+    description="How many robust standard deviations above a session's usual unevenness is cloud.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D72",
+)
+"""A frame is uneven when it lies this many robust spreads above the session.
+
+Five is the repository's usual cut for an outlier against the spread of its
+own run (see `stacking.step_jump_sigmas`). The unevenness of the 95 clear
+frames of NGC 7331 (before the sky began to change at frame 99) has a
+median of 0.0023 and a robust spread of 0.0009, so the cut falls at 0.0068
+before the floor below applies (STK-D72).
+"""
+
+UNEVEN_SKY_MINIMUM = TunedParameter(
+    name="stacking.uneven_sky_minimum",
+    default=0.01,
+    unit="fraction of the sky level",
+    description="Least sky unevenness that can set a frame aside, whatever the session's spread.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D72",
+)
+"""The sky must differ from the session pattern by 1% to count as uneven.
+
+Unevenness is the root-mean-square difference, over a 4 x 4 grid of boxes,
+between the frame's sky pattern and the session's median pattern, as a
+fraction of the frame's own sky level (bias included, so a sky-only fraction
+is about twice as large). On the clear frames of NGC 7331 it is 0.0005 to
+0.0027, almost all of it the noise of the box medians. A session with an
+unusually steady sky would give a tiny spread and a cut inside that noise,
+so the cut never goes below four times the clear frames' largest value,
+rounded to 0.01 (STK-D72).
+"""
+
+OFF_FIELD_POINTING_FRACTION = TunedParameter(
+    name="stacking.off_field_pointing_fraction",
+    default=0.10,
+    unit="× frame width",
+    description="How far from the main field a frame's centre may lie, as a share of frame width.",
+    role=ParameterRole.EXCLUSION_CRITERIA,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.RELATIVE,
+    register_entry="STK-D73",
+)
+"""A frame centred farther than this from the main field is set aside.
+
+The offset is found by matching the brightest stars of each frame with those
+of one reference frame of the session, trying the frame as it is and turned
+half a revolution (a meridian flip turns the camera, and a flipped frame of
+the same field is not offset). The main field is the median of the offsets.
+On NGC 7331 the frames of the same field sit within 0.020 of the width (a
+slow drift of up to 75 pixels), the 12 frames after the flip that missed
+the field sit at 0.243, and the 0.10 limit lies between them. A frame this
+far off cuts the stack's overlap, so the stack is trimmed to its common area
+(a 42% crop on NGC 7331). The M 31 session (shifts of 25 pixels or less)
+sets nothing aside (STK-D73).
 """
 
 SESSION_GAP_SECONDS = TunedParameter(
@@ -315,6 +403,25 @@ def parse_set_aside_action(action_taken: str | None) -> tuple[str, str] | None:
 
 
 @dataclass(frozen=True)
+class RuleFinding:
+    """One rule a frame broke, and the plain words that say so.
+
+    Attributes
+    ----------
+    rule : `str`
+        ``"trailed"``, ``"few_stars"``, ``"uneven_sky"`` or ``"off_field"``.
+    kind : `str`
+        The stored kind: ``"clouded"``, ``"trailed"`` or ``"off_field"``.
+    reason : `str`
+        One sentence with the rule, the frame's value and the limit.
+    """
+
+    rule: str
+    kind: str
+    reason: str
+
+
+@dataclass(frozen=True)
 class QuarantineDecision:
     """One frame this step judged unfit to stack.
 
@@ -323,17 +430,27 @@ class QuarantineDecision:
     path : `str`
         Where the frame was before it was moved.
     kind : `str`
-        ``"clouded"`` or ``"trailed"``.
+        ``"clouded"``, ``"trailed"`` or ``"off_field"``, from the first rule
+        the frame broke.
     reason : `str`
-        One sentence saying what was measured.
+        What was measured, in plain words: each rule the frame broke, its
+        value and its limit, joined by semicolons.
     star_count : `int`
         Bright regions found in this frame.
     typical_star_count : `float`
         Median of the batch.
-    roundness : `float` or `None`
-        Median star roundness of this frame.
+    star_elongation : `float` or `None`
+        The frame's stored star elongation (long width over short width), or
+        `None` when it has none.
     sky_median_adu : `float`
         Median pixel value of this frame.
+    sky_unevenness : `float` or `None`
+        How much the sky pattern of this frame differs from the session's.
+    pointing_offset_fraction : `float` or `None`
+        How far the frame's centre lies from the session's main field, as a
+        share of the frame width.
+    findings : `tuple` [`RuleFinding`, ...]
+        Every rule the frame broke, in the order they are tried.
     """
 
     path: str
@@ -341,8 +458,11 @@ class QuarantineDecision:
     reason: str
     star_count: int
     typical_star_count: float
-    roundness: float | None
+    star_elongation: float | None
     sky_median_adu: float
+    sky_unevenness: float | None = None
+    pointing_offset_fraction: float | None = None
+    findings: tuple[RuleFinding, ...] = ()
 
 
 @dataclass
@@ -452,16 +572,300 @@ def split_into_batches(frames: Sequence[Any]) -> list[list[Any]]:
     return batches
 
 
-def judge_batch(measurements: Sequence[dict[str, Any]]) -> list[QuarantineDecision]:
-    """Pick the frames of one batch that have clouds or trailed stars.
+def _robust_spread(values: Sequence[float]) -> float:
+    """Measure the spread of some numbers in a way a stray value cannot move.
+
+    Returns
+    -------
+    spread : `float`
+        The median absolute deviation about the median, times 1.4826, so it
+        equals the standard deviation for normally spread numbers.
+    """
+    middle = statistics.median(values)
+    return 1.4826 * statistics.median(abs(value - middle) for value in values)
+
+
+def measure_sky_unevenness(measurements: Sequence[dict[str, Any]]) -> list[float | None]:
+    """Measure how much each frame's sky pattern differs from the session's.
+
+    Each frame carries the sky level in a grid of boxes (``sky_grid_adu``).
+    The boxes are divided by the frame's own sky level (the median of its
+    boxes), which removes the overall brightness. The session's typical
+    pattern is the median of those fractions box by box. It holds what every
+    frame shares: vignetting, the dust the flat does not remove and the
+    steady gradient of the sky glow, which is the plane that best fits the
+    pattern. A frame's unevenness is the root-mean-square difference between
+    its fractions and that pattern. Thin cloud lights part of the frame, so
+    it raises the number.
 
     Parameters
     ----------
     measurements : `Sequence` [`dict`]
-        One entry per frame from `raw_frame_check.measure_raw_frame`:
-        ``path``, ``star_count``, ``roundness`` and ``sky_median_adu``, and
-        optionally ``colour_camera`` (a colour camera gets the wider
-        `COLOUR_CAMERA_ROUNDNESS_DROP_BELOW_MEDIAN`).
+        Frame measurements of one batch.
+
+    Returns
+    -------
+    unevenness : `list` [`float` or `None`]
+        One value per frame, `None` for a frame with no grid.
+    """
+    patterns: list[np.ndarray | None] = []
+    for measurement in measurements:
+        grid = measurement.get("sky_grid_adu")
+        if grid is None:
+            patterns.append(None)
+            continue
+        boxes = np.asarray(grid, dtype=float).ravel()
+        level = float(np.median(boxes))
+        patterns.append(boxes / level - 1.0 if level > 0 else None)
+    usable = [pattern for pattern in patterns if pattern is not None]
+    if not usable:
+        return [None] * len(measurements)
+    typical_pattern = np.median(np.array(usable), axis=0)
+    return [
+        None if pattern is None else float(np.sqrt(np.mean((pattern - typical_pattern) ** 2)))
+        for pattern in patterns
+    ]
+
+
+def measure_pointing_offsets(measurements: Sequence[dict[str, Any]]) -> tuple[list[float | None], str]:
+    """Measure how far each frame's centre lies from the session's main field.
+
+    The brightest stars of the frame in the middle of the batch are the
+    reference. Every frame is matched to it
+    (`raw_frame_check.measure_field_offset`), which tries the frame as it
+    is and turned half a revolution, so a meridian flip does not count as a
+    move. The main field is the median centre of all the matched frames,
+    and a frame's offset is its distance from it divided by the frame width.
+
+    The star positions come from the frames themselves, not from the header
+    pointing or from a stored stack's shifts. On NGC 7331 the header
+    pointing did not show the 720-pixel miss after the flip, and stored shifts
+    do not exist before the first stack.
+
+    Parameters
+    ----------
+    measurements : `Sequence` [`dict`]
+        Frame measurements of one batch, in time order, each with ``_stars``,
+        ``width_px`` and ``height_px``.
+
+    Returns
+    -------
+    offsets : `list` [`float` or `None`]
+        One value per frame, `None` for a frame that could not be matched.
+    note : `str`
+        A sentence about frames left unjudged, or an empty string.
+    """
+    measured = [m for m in measurements if m.get("_stars") is not None and len(m["_stars"])]
+    if len(measured) < len(measurements) / 2 or not measured:
+        return [None] * len(measurements), (
+            "Pointing was not judged: too few frames had stars to match." if measurements else ""
+        )
+    reference = measurements[len(measurements) // 2]
+    if reference.get("_stars") is None or not len(reference["_stars"]):
+        reference = measured[len(measured) // 2]
+    centres: list[tuple[float, float] | None] = []
+    for measurement in measurements:
+        stars = measurement.get("_stars")
+        if measurement is reference:
+            centres.append((0.0, 0.0))
+        elif stars is None or not len(stars):
+            centres.append(None)
+        else:
+            found = raw_frame_check.measure_field_offset(
+                reference["_stars"], stars, (measurement["height_px"], measurement["width_px"])
+            )
+            centres.append(None if found is None else (found[0], found[1]))
+    matched = [centre for centre in centres if centre is not None]
+    if len(matched) < len(measurements) / 2:
+        return [None] * len(measurements), (
+            f"Pointing was not judged: only {len(matched)} of {len(measurements)} frames could be "
+            "matched to the reference frame's stars."
+        )
+    main_row = statistics.median(centre[0] for centre in matched)
+    main_column = statistics.median(centre[1] for centre in matched)
+    offsets = [
+        None
+        if centre is None
+        else math.hypot(centre[0] - main_row, centre[1] - main_column) / measurement["width_px"]
+        for centre, measurement in zip(centres, measurements, strict=True)
+    ]
+    unmatched = len(measurements) - len(matched)
+    note = (
+        f"Pointing could not be matched for {unmatched} of {len(measurements)} frames; "
+        "those frames were not judged for it."
+        if unmatched
+        else ""
+    )
+    return offsets, note
+
+
+def judge_batch_with_notes(
+    measurements: Sequence[dict[str, Any]],
+) -> tuple[list[QuarantineDecision], list[str]]:
+    """Pick the frames of one batch that are clouded, trailed or off the field.
+
+    Four rules are tried on every frame, and a frame that breaks several is
+    reported for each (see `RuleFinding`):
+
+    - Trailed stars: the frame's stored star elongation is above both
+      `TRAILED_ELONGATION_LIMIT` and the batch median plus the rise
+      (`ELONGATION_RISE_ABOVE_MEDIAN`, or the colour camera's).
+    - Few stars: fewer than `CLOUD_STAR_FRACTION` of the batch median.
+    - Uneven sky: the sky pattern differs from the session's by more than
+      `UNEVEN_SKY_SIGMAS` robust spreads above the typical difference, and
+      by at least `UNEVEN_SKY_MINIMUM` (see `measure_sky_unevenness`).
+    - Off the field: the frame's centre is more than
+      `OFF_FIELD_POINTING_FRACTION` of the frame width from the session's
+      main field (see `measure_pointing_offsets`).
+
+    The measurements are updated in place with ``sky_unevenness`` and
+    ``pointing_offset_fraction``, so the caller can store them for kept
+    frames too.
+
+    Parameters
+    ----------
+    measurements : `Sequence` [`dict`]
+        One entry per frame, in time order: ``path``, ``star_count``,
+        ``star_elongation`` (or `None`), ``sky_median_adu``, ``sky_grid_adu``,
+        ``_stars``, ``width_px``, ``height_px``, and optionally
+        ``colour_camera`` (a colour camera gets the wider
+        `COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN`).
+
+    Returns
+    -------
+    decisions : `list` [`QuarantineDecision`]
+        The frames to move, in the order given. Empty when the batch is
+        too small to judge.
+    notes : `list` [`str`]
+        One sentence for each check that could not be made on some frames.
+    """
+    notes: list[str] = []
+    if len(measurements) < resolve(MINIMUM_FRAMES_TO_JUDGE).value:
+        return [], notes
+    cloud_sky_multiple = resolve(CLOUD_SKY_MULTIPLE).value
+    typical_stars = statistics.median(m["star_count"] for m in measurements)
+    typical_sky = statistics.median(m["sky_median_adu"] for m in measurements)
+
+    elongations = [m.get("star_elongation") for m in measurements]
+    known_elongations = [value for value in elongations if value is not None]
+    elongation_limit = None
+    if known_elongations:
+        rise = (
+            resolve(COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN).value
+            if any(m.get("colour_camera") for m in measurements)
+            else resolve(ELONGATION_RISE_ABOVE_MEDIAN).value
+        )
+        elongation_limit = max(
+            resolve(TRAILED_ELONGATION_LIMIT).value, statistics.median(known_elongations) + rise
+        )
+    if len(known_elongations) < len(measurements):
+        missing = len(measurements) - len(known_elongations)
+        notes.append(
+            f"{missing} of {len(measurements)} frames have no star elongation, so trailing was not "
+            "judged for them."
+        )
+
+    unevenness = measure_sky_unevenness(measurements)
+    known_unevenness = [value for value in unevenness if value is not None]
+    unevenness_limit = None
+    if len(known_unevenness) >= resolve(MINIMUM_FRAMES_TO_JUDGE).value:
+        unevenness_limit = max(
+            resolve(UNEVEN_SKY_MINIMUM).value,
+            statistics.median(known_unevenness)
+            + resolve(UNEVEN_SKY_SIGMAS).value * _robust_spread(known_unevenness),
+        )
+    else:
+        notes.append("The sky was not checked for unevenness: too few frames had a sky grid.")
+
+    pointing_offsets, pointing_note = measure_pointing_offsets(measurements)
+    if pointing_note:
+        notes.append(pointing_note)
+    pointing_limit = resolve(OFF_FIELD_POINTING_FRACTION).value
+
+    decisions: list[QuarantineDecision] = []
+    for measurement, elongation, uneven, offset in zip(
+        measurements, elongations, unevenness, pointing_offsets, strict=True
+    ):
+        measurement["sky_unevenness"] = uneven
+        measurement["pointing_offset_fraction"] = offset
+        star_count = measurement["star_count"]
+        sky = measurement["sky_median_adu"]
+        findings: list[RuleFinding] = []
+        if elongation is not None and elongation_limit is not None and elongation > elongation_limit:
+            findings.append(
+                RuleFinding(
+                    "trailed",
+                    "trailed",
+                    f"Stars trailed: elongation {elongation:.2f}, limit {elongation_limit:.2f}",
+                )
+            )
+        if star_count < CLOUD_STAR_FRACTION * typical_stars:
+            cloudy_sky = typical_sky > 0 and sky > cloud_sky_multiple * typical_sky
+            # Few stars under a normal sky is stored as "trailed" too. The
+            # name is kept, because it is stored in the quality rows and in
+            # `excluded_frames.json`; readers word it as "stars smeared, or far
+            # fewer than usual".
+            findings.append(
+                RuleFinding(
+                    "few_stars",
+                    "clouded" if cloudy_sky else "trailed",
+                    f"Few stars: {star_count} against a typical {typical_stars:.0f}"
+                    + (f", sky {sky / typical_sky:.1f} times normal" if cloudy_sky else ", sky level normal"),
+                )
+            )
+        if uneven is not None and unevenness_limit is not None and uneven > unevenness_limit:
+            findings.append(
+                RuleFinding(
+                    "uneven_sky",
+                    "clouded",
+                    f"Uneven sky, likely cloud: {uneven:.3f}, limit {unevenness_limit:.3f}",
+                )
+            )
+        if offset is not None and offset > pointing_limit:
+            findings.append(
+                RuleFinding(
+                    "off_field",
+                    "off_field",
+                    f"Pointing off the main field: {offset:.2f} of the field width, "
+                    f"limit {pointing_limit:.2f}",
+                )
+            )
+        if findings:
+            decisions.append(_decision_from_findings(measurement, findings, typical_stars))
+    return decisions, notes
+
+
+def _decision_from_findings(
+    measurement: dict[str, Any], findings: Sequence[RuleFinding], typical_stars: float
+) -> QuarantineDecision:
+    """Build a decision from a frame's measurements and the rules it broke.
+
+    Returns
+    -------
+    decision : `QuarantineDecision`
+        The kind of the first finding, and every finding's reason.
+    """
+    return QuarantineDecision(
+        path=measurement["path"],
+        kind=findings[0].kind,
+        reason="; ".join(finding.reason for finding in findings),
+        star_count=int(measurement["star_count"]),
+        typical_star_count=float(typical_stars),
+        star_elongation=measurement.get("star_elongation"),
+        sky_median_adu=float(measurement["sky_median_adu"]),
+        sky_unevenness=measurement.get("sky_unevenness"),
+        pointing_offset_fraction=measurement.get("pointing_offset_fraction"),
+        findings=tuple(findings),
+    )
+
+
+def judge_batch(measurements: Sequence[dict[str, Any]]) -> list[QuarantineDecision]:
+    """Pick the frames of one batch that are clouded, trailed or off the field.
+
+    Parameters
+    ----------
+    measurements : `Sequence` [`dict`]
+        See `judge_batch_with_notes`.
 
     Returns
     -------
@@ -469,56 +873,176 @@ def judge_batch(measurements: Sequence[dict[str, Any]]) -> list[QuarantineDecisi
         The frames to move, in the order given. Empty when the batch is
         too small to judge.
     """
-    trailed_roundness_limit = resolve(TRAILED_ROUNDNESS_LIMIT).value
-    cloud_sky_multiple = resolve(CLOUD_SKY_MULTIPLE).value
-    if len(measurements) < resolve(MINIMUM_FRAMES_TO_JUDGE).value:
-        return []
-    typical_stars = statistics.median(m["star_count"] for m in measurements)
-    typical_sky = statistics.median(m["sky_median_adu"] for m in measurements)
-    roundness_values = [m["roundness"] for m in measurements if m["roundness"] is not None]
-    roundness_limit = trailed_roundness_limit
-    if roundness_values:
-        drop_below_median = (
-            resolve(COLOUR_CAMERA_ROUNDNESS_DROP_BELOW_MEDIAN).value
-            if any(m.get("colour_camera") for m in measurements)
-            else resolve(ROUNDNESS_DROP_BELOW_MEDIAN).value
-        )
-        roundness_limit = min(
-            trailed_roundness_limit, statistics.median(roundness_values) - drop_below_median
-        )
+    return judge_batch_with_notes(measurements)[0]
 
-    decisions: list[QuarantineDecision] = []
-    for measurement in measurements:
-        roundness = measurement["roundness"]
-        star_count = measurement["star_count"]
-        sky = measurement["sky_median_adu"]
-        kind = reason = None
-        if roundness is not None and roundness < roundness_limit:
-            kind = "trailed"
-            reason = f"star roundness {roundness:.2f}, below {roundness_limit:.2f}"
-        elif star_count < CLOUD_STAR_FRACTION * typical_stars:
-            cloudy_sky = typical_sky > 0 and sky > cloud_sky_multiple * typical_sky
-            # Few stars under a normal sky is stored as "trailed" too. The
-            # name is kept, because it is stored in the quality rows and in
-            # `excluded_frames.json`; readers word it as "stars smeared, or far
-            # fewer than usual".
-            kind = "clouded" if cloudy_sky else "trailed"
-            reason = f"{star_count} stars against a typical {typical_stars:.0f}" + (
-                f", sky {sky / typical_sky:.1f} times normal" if cloudy_sky else ", sky level normal"
-            )
-        if kind is not None:
-            decisions.append(
-                QuarantineDecision(
-                    path=measurement["path"],
-                    kind=kind,
-                    reason=reason,
-                    star_count=int(star_count),
-                    typical_star_count=float(typical_stars),
-                    roundness=roundness,
-                    sky_median_adu=float(sky),
+
+def apply_cap_per_rule(
+    decisions: Sequence[QuarantineDecision], batch_size: int
+) -> tuple[list[QuarantineDecision], list[str]]:
+    """Drop every rule that caught more of a batch than the cap allows.
+
+    Each rule is held to `MAXIMUM_QUARANTINED_FRACTION` on its own. A rule
+    that catches more of the batch than that is more likely a wrong limit
+    (or a poor night) than a few bad frames, so its findings are ignored. A
+    frame that broke only that rule stays. The three rules answer different
+    problems (trails, cloud, pointing), so one night that has all of them,
+    as NGC 7331 did, is not blocked by their total.
+
+    Parameters
+    ----------
+    decisions : `Sequence` [`QuarantineDecision`]
+        What `judge_batch_with_notes` found.
+    batch_size : `int`
+        Frames judged in the batch.
+
+    Returns
+    -------
+    kept : `list` [`QuarantineDecision`]
+        The decisions that remain, with their kind and reason rebuilt from
+        the rules that were not dropped.
+    notes : `list` [`str`]
+        One sentence for each rule that was dropped.
+    """
+    allowed = int(resolve(MAXIMUM_QUARANTINED_FRACTION).value * batch_size)
+    counts: dict[str, int] = defaultdict(int)
+    for decision in decisions:
+        for finding in decision.findings:
+            counts[finding.rule] += 1
+    dropped = {rule for rule, count in counts.items() if count > allowed}
+    notes = [
+        f"{counts[rule]} of {batch_size} frames in one session broke the '{rule}' rule, more than the "
+        f"{allowed} allowed; none moved for it. The batch itself may be poor."
+        for rule in sorted(dropped)
+    ]
+    kept: list[QuarantineDecision] = []
+    for decision in decisions:
+        remaining = tuple(finding for finding in decision.findings if finding.rule not in dropped)
+        if not remaining:
+            continue
+        if len(remaining) == len(decision.findings):
+            kept.append(decision)
+        else:
+            kept.append(
+                dataclasses.replace(
+                    decision,
+                    kind=remaining[0].kind,
+                    reason="; ".join(finding.reason for finding in remaining),
+                    findings=remaining,
                 )
             )
-    return decisions
+    return kept, notes
+
+
+def stored_star_elongations(target_id: str) -> dict[str, float]:
+    """Read the stored star elongation of each frame of a target.
+
+    The frame measurement stores ``frame.star_elongation`` for every frame it
+    measures. A frame stored by colour plane has one row per plane, and the
+    median of the planes is used. The store is only read.
+
+    Parameters
+    ----------
+    target_id : `str`
+        The target's id.
+
+    Returns
+    -------
+    elongations : `dict` [`str`, `float`]
+        The newest stored value of each frame, by the frame's subject id
+        (see `frame_subject_id`). Empty when the library has no such rows or
+        no quality database.
+    """
+    try:
+        store = QualityStore.from_configuration(get_configuration())
+        rows = store.query(
+            metric=FRAME_STAR_ELONGATION, level=SubjectLevel.FRAME, target_id=target_id, library_only=True
+        )
+    except (AstrometricsError, sqlite3.Error, OSError) as error:
+        logger.debug("Could not read the stored star elongations of '%s': %s", target_id, error)
+        return {}
+    by_frame: dict[str, list[float]] = defaultdict(list)
+    for row in rows:
+        if row.value is not None and math.isfinite(row.value):
+            by_frame[row.subject.subject_id].append(row.value)
+    return {subject_id: statistics.median(values) for subject_id, values in by_frame.items()}
+
+
+def measure_star_elongation(path: str, camera: str | None) -> float | None:
+    """Measure a frame's star elongation, for a frame with no stored value.
+
+    This runs the frame measurement's own star-shape step
+    (`measure_image_star_profiles`), so the number has the same definition as
+    the stored one. It is slow (seconds per frame), which is why stored values
+    are read first.
+
+    Parameters
+    ----------
+    path : `str`
+        The frame's FITS file.
+    camera : `str` or `None`
+        The camera name from the header, for the pixel level above which a
+        pixel is not trusted.
+
+    Returns
+    -------
+    elongation : `float` or `None`
+        The median over the frame's colour planes, or `None` if no star
+        could be measured.
+    """
+    try:
+        top_level = usable_top_level_adu(resolve_camera_profile(camera))
+    except AstrometricsError:
+        top_level = None
+    values = [
+        result.elongation
+        for _, result, _ in measure_image_star_profiles(path, top_level)
+        if result.elongation is not None and math.isfinite(result.elongation)
+    ]
+    return float(statistics.median(values)) if values else None
+
+
+def make_quarantine_measurer(target_id: str | None) -> Callable[[str], dict[str, Any]]:
+    """Build the function that measures one frame for the quarantine step.
+
+    The raw-frame check gives the star count, sky level, sky grid and star
+    positions. The star elongation is the frame's stored
+    ``frame.star_elongation``, or, for a frame with none, measured with the
+    same code (`measure_star_elongation`). The stored values of the target are
+    read once, when this function is built.
+
+    Parameters
+    ----------
+    target_id : `str` or `None`
+        The target's id. `None` reads no stored values.
+
+    Returns
+    -------
+    measure : `Callable`
+        Takes a frame path and returns the measurement dict, with
+        ``star_elongation`` and ``elongation_source`` (``"stored"``,
+        ``"measured"`` or `None`) added.
+    """
+    stored = stored_star_elongations(target_id) if target_id else {}
+
+    def measure(path: str) -> dict[str, Any]:
+        """Measure one frame.
+
+        Returns
+        -------
+        measurement : `dict`
+            The raw-frame measurement plus the star elongation.
+        """
+        measurement = raw_frame_check.measure_raw_frame(path)
+        elongation = stored.get(frame_subject_id(path, target_id)) if target_id else None
+        source = "stored" if elongation is not None else None
+        if elongation is None:
+            elongation = measure_star_elongation(path, measurement.get("camera"))
+            source = "measured" if elongation is not None else None
+        measurement["star_elongation"] = elongation
+        measurement["elongation_source"] = source
+        return measurement
+
+    return measure
 
 
 def _measure_frames(
@@ -551,7 +1075,6 @@ def _measure_frames(
         except (AstrometricsError, *FITS_READ_ERRORS, *DATA_ERRORS) as error:
             logger.debug("Cannot measure '%s' for the quarantine check: %s", frame.path, error)
             return None
-        measurement.pop("_stars", None)
         measurement["path"] = frame.path
         return measurement
 
@@ -592,7 +1115,8 @@ def _measure_frames(
 
 def find_frames_to_quarantine(
     frames: Sequence[Any],
-    measure: Callable[[str], dict[str, Any]] = raw_frame_check.measure_raw_frame,
+    measure: Callable[[str], dict[str, Any]] | None = None,
+    target_id: str | None = None,
 ) -> QuarantineReport:
     """Decide which frames to move, without moving any.
 
@@ -601,8 +1125,11 @@ def find_frames_to_quarantine(
     frames : `Sequence`
         Light frame records of the target.
     measure : `Callable`, optional
-        Measures one frame file. Defaults to
-        `raw_frame_check.measure_raw_frame`; tests pass a stand-in.
+        Measures one frame file. Defaults to `make_quarantine_measurer`;
+        tests pass a stand-in.
+    target_id : `str`, optional
+        The target's id, to read the stored star elongations of its frames
+        when `measure` is not given.
 
     Returns
     -------
@@ -612,7 +1139,8 @@ def find_frames_to_quarantine(
         measured.
     """
     minimum_frames_to_judge = resolve(MINIMUM_FRAMES_TO_JUDGE).value
-    maximum_quarantined_fraction = resolve(MAXIMUM_QUARANTINED_FRACTION).value
+    if measure is None:
+        measure = make_quarantine_measurer(target_id)
     report = QuarantineReport()
     batches = split_into_batches(frames)
     # Only batches big enough to judge are measured, so only they are counted.
@@ -638,15 +1166,15 @@ def find_frames_to_quarantine(
                 f"(at least {minimum_frames_to_judge} needed to judge); none moved."
             )
             continue
-        decisions = judge_batch(measurements)
-        allowed = int(maximum_quarantined_fraction * len(measurements))
-        if len(decisions) > allowed:
+        decisions, judging_notes = judge_batch_with_notes(measurements)
+        report.notes.extend(judging_notes)
+        for measurement in measurements:
+            # The star positions were needed only to match the pointing.
+            measurement.pop("_stars", None)
+        decisions, capped_notes = apply_cap_per_rule(decisions, len(measurements))
+        if capped_notes:
             report.batches_over_cap += 1
-            report.notes.append(
-                f"{len(decisions)} of {len(measurements)} frames in one session look bad, more than the "
-                f"{allowed} allowed; none moved. The batch itself may be poor."
-            )
-            continue
+            report.notes.extend(capped_notes)
         report.batches_judged += 1
         report.moved.extend(decisions)
     return report
@@ -765,8 +1293,11 @@ def _move_to_quarantine(decision: QuarantineDecision) -> str:
         "reason": decision.reason,
         "star_count": decision.star_count,
         "typical_star_count": decision.typical_star_count,
-        "roundness": decision.roundness,
+        "star_elongation": decision.star_elongation,
         "sky_median_adu": decision.sky_median_adu,
+        "sky_unevenness": decision.sky_unevenness,
+        "pointing_offset_fraction": decision.pointing_offset_fraction,
+        "rules": [finding.rule for finding in decision.findings],
         "moved_at": datetime.now(UTC).isoformat(timespec="seconds"),
     })
     _write_manifest(manifest_path, entries)
@@ -776,7 +1307,7 @@ def _move_to_quarantine(decision: QuarantineDecision) -> str:
 def quarantine_bad_frames(
     target: Any,
     frames: Sequence[Any],
-    measure: Callable[[str], dict[str, Any]] = raw_frame_check.measure_raw_frame,
+    measure: Callable[[str], dict[str, Any]] | None = None,
 ) -> tuple[list[Any], QuarantineReport]:
     """Move the frames with clouds or trailed stars out of the target's folder.
 
@@ -792,7 +1323,8 @@ def quarantine_bad_frames(
     frames : `Sequence`
         The frames the stack is about to use.
     measure : `Callable`, optional
-        Measures one frame file; tests pass a stand-in.
+        Measures one frame file; tests pass a stand-in. Defaults to
+        `make_quarantine_measurer`.
 
     Returns
     -------
@@ -802,7 +1334,7 @@ def quarantine_bad_frames(
         What was moved and what was left alone.
     """
     light_frames = [frame for frame in frames if str(frame.role).upper() == "LIGHT"]
-    report = find_frames_to_quarantine(light_frames, measure)
+    report = find_frames_to_quarantine(light_frames, measure, getattr(target, "id", None))
 
     moved_paths: set[str] = set()
     for decision in list(report.moved):
@@ -961,7 +1493,6 @@ def decision_to_set_aside_frame(decision: QuarantineDecision) -> SetAsideFrame:
         reason=decision.reason,
         star_count=decision.star_count,
         typical_star_count=decision.typical_star_count,
-        roundness=decision.roundness,
         sky_median_adu=decision.sky_median_adu,
     )
 
@@ -1025,7 +1556,7 @@ def quarantine_preview_report(
         frame.path for frame in find_frames_already_set_aside(target.id, same_gain, frames_path)
     }
     judged = [frame for frame in same_gain if frame.path not in already_set_aside]
-    found = find_frames_to_quarantine(judged)
+    found = find_frames_to_quarantine(judged, target_id=target.id)
     notes = list(found.notes)
     if minority_gain:
         notes.append(

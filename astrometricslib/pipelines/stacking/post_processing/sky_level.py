@@ -48,7 +48,7 @@ from astrometricslib.models.tuned_parameter import (
 )
 from astrometricslib.pipelines.shared.image_scaling import (
     AUTOSTRETCH_SHADOWS_CLIP_SIGMA,
-    measure_sky,
+    measure_sky_background,
     sky_level_for_peak,
 )
 
@@ -245,10 +245,11 @@ def choose_sky_level(data: np.ndarray) -> SkyLevelChoice:
     arr = np.asarray(data, dtype=np.float64)
     if arr.ndim == 3:
         arr = arr.mean(axis=0 if arr.shape[0] in (1, 3, 4) else 2)
-    sky = measure_sky(arr)
+    sky = measure_sky_background(arr)
     if sky is None or arr.ndim != 2:
         return SkyLevelChoice(fallback_sky_level, None, "the sky could not be measured")
-    median, sigma, peak = sky
+    median, sigma = sky
+    peak = float(np.nanmax(arr))
     black_point = max(median + AUTOSTRETCH_SHADOWS_CLIP_SIGMA * sigma, float(np.nanmin(arr)))
     if peak <= black_point:
         return SkyLevelChoice(fallback_sky_level, None, "the image has no usable brightness range")

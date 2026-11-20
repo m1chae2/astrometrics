@@ -5,8 +5,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeSkyRange,
+  NEIGHBOR_DIFFERENCE_SPACING_PX,
   measureSkyFromSample,
   sampleNeighborDifferences,
+  sampleSkyAndDifferences,
   skyRangeFromSample,
 } from '../skyRange';
 import { sampleImageGrid } from '../zscale';
@@ -130,5 +132,36 @@ describe('computeSkyRange fallbacks', () => {
     const tiny = Float32Array.from([1, 2, 3, 4]);
     expect(skyRangeFromSample(tiny)).toBeNull();
     expect(computeSkyRange(tiny, 2, 2, 1)).not.toBeNull();
+  });
+});
+
+describe('agreement with the library', () => {
+  it('measures the same sky and noise as measure_sky_background in Python', () => {
+    // A fixed 64 x 64 image: sky 100 + 20 * u + 0.1 * column, with u from the linear congruential
+    // generator below (seed 12345), and a bright 20 x 20 block (+500) at rows and columns 20-39.
+    // The expected numbers were computed once in Python with `measure_sky_background` from
+    // astrometricslib/pipelines/shared/image_scaling.py on the same float32 image, then hard-coded:
+    //   sky = 113.00745010375977, sigma = 6.257965818588004.
+    const size = 64;
+    const pixels = new Float32Array(size * size);
+    let state = 12345;
+    for (let row = 0; row < size; row++) {
+      for (let column = 0; column < size; column++) {
+        state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+        let value = 100 + 20 * (state / 4294967296) + 0.1 * column;
+        if (row >= 20 && row < 40 && column >= 20 && column < 40) value += 500;
+        pixels[row * size + column] = value;
+      }
+    }
+    // The grid step is 1 for an image this small, so the viewer visits every pixel that has a
+    // partner, as the library does (the last columns have none and are left out of the level too).
+    const { sample, differences } = sampleSkyAndDifferences(pixels, size, size, 1);
+    expect(sample.length).toBe(size * (size - NEIGHBOR_DIFFERENCE_SPACING_PX));
+
+    const measured = measureSkyFromSample(sample, differences);
+
+    expect(measured).not.toBeNull();
+    expect(measured!.sky).toBeCloseTo(113.00745010375977, 6);
+    expect(measured!.sigma).toBeCloseTo(6.257965818588004, 6);
   });
 });

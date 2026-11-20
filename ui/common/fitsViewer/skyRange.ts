@@ -8,8 +8,13 @@
  * spread of the sky pixels, measured from differences of pixels a few columns apart so smooth light cancels) after throwing out stars and other bright things, then puts black a
  * fixed number of noise steps below the sky and white a fixed number above it.
  * Equal sky noise then looks equally grainy on any image.
+ *
+ * Reference implementation: `measure_sky_background` in
+ * `astrometricslib/pipelines/shared/image_scaling.py`, the library's one sky measurement. This
+ * module is its port (same clipping, same neighbor-difference noise); keep the two in step.
+ * `test_skyRange.test.ts` checks that both give the same numbers on one fixed image.
  */
-import { computeZscaleRange, sampleImageGrid, ZSCALE_SAMPLE_COUNT } from './zscale';
+import { computeZscaleRange, ZSCALE_SAMPLE_COUNT } from './zscale';
 
 /** Black is set this many noise steps (sigmas) below the sky level. */
 export const SKY_RANGE_BLACK_SIGMAS = -2;
@@ -88,12 +93,54 @@ function clippedMedianAndSigma(values: ArrayLike<number>): { middle: number; sig
 }
 
 /**
- * Collects the differences between sampled pixels and the pixels a few columns to their right.
+ * Samples the sky pixels and the differences to the pixels a few columns to their right.
  *
- * It visits the same grid positions as `sampleImageGrid`. The partner pixel is
- * `NEIGHBOR_DIFFERENCE_SPACING_PX` columns away, so resampling cannot make the two alike. Smooth
- * light (a galaxy or a gradient) changes little over that short distance, so it cancels in the
- * difference. Only the pixel-to-pixel noise (and star edges) remain.
+ * It visits the grid positions of `sampleImageGrid`, but only those that have a partner pixel
+ * `NEIGHBOR_DIFFERENCE_SPACING_PX` columns away, and only when both pixels are finite. This is the
+ * same choice `measure_sky_background` makes in the library: the last columns, which have no
+ * partner, are left out of the level as well as the noise, so the two measure the same pixels.
+ * Resampling cannot make the two pixels alike at that spacing. Smooth light (a galaxy or a
+ * gradient) changes little over that short distance, so it cancels in the difference. Only the
+ * pixel-to-pixel noise (and star edges) remain.
+ *
+ * @param pixels Pixel values; one plane, or three planes one after another for colour.
+ * @param width Image width in pixels.
+ * @param height Image height in pixels.
+ * @param channels Number of planes: 1 or 3.
+ * @returns The sampled pixel values and, in the same order, the differences to their partners.
+ */
+export function sampleSkyAndDifferences(
+  pixels: Float32Array,
+  width: number,
+  height: number,
+  channels: number,
+): { sample: Float32Array; differences: Float32Array } {
+  const planeCount = Math.max(1, channels);
+  const pixelsPerPlane = width * height;
+  const samplesPerPlane = Math.max(1, Math.floor(ZSCALE_SAMPLE_COUNT / planeCount));
+  // The same step as sampleImageGrid, so the positions match.
+  const step = Math.max(1, Math.floor(Math.sqrt(pixelsPerPlane / samplesPerPlane)));
+  const sample: number[] = [];
+  const differences: number[] = [];
+  for (let plane = 0; plane < planeCount; plane++) {
+    const planeStart = plane * pixelsPerPlane;
+    for (let row = Math.floor(step / 2); row < height; row += step) {
+      for (let column = Math.floor(step / 2); column < width - NEIGHBOR_DIFFERENCE_SPACING_PX; column += step) {
+        const index = planeStart + row * width + column;
+        const value = pixels[index];
+        const difference = pixels[index + NEIGHBOR_DIFFERENCE_SPACING_PX] - value;
+        if (Number.isFinite(value) && Number.isFinite(difference)) {
+          sample.push(value);
+          differences.push(difference);
+        }
+      }
+    }
+  }
+  return { sample: Float32Array.from(sample), differences: Float32Array.from(differences) };
+}
+
+/**
+ * Collects the differences between sampled pixels and the pixels a few columns to their right.
  *
  * @param pixels Pixel values; one plane, or three planes one after another for colour.
  * @param width Image width in pixels.
@@ -107,23 +154,7 @@ export function sampleNeighborDifferences(
   height: number,
   channels: number,
 ): Float32Array {
-  const planeCount = Math.max(1, channels);
-  const pixelsPerPlane = width * height;
-  const samplesPerPlane = Math.max(1, Math.floor(ZSCALE_SAMPLE_COUNT / planeCount));
-  // The same step as sampleImageGrid, so the positions match.
-  const step = Math.max(1, Math.floor(Math.sqrt(pixelsPerPlane / samplesPerPlane)));
-  const differences: number[] = [];
-  for (let plane = 0; plane < planeCount; plane++) {
-    const planeStart = plane * pixelsPerPlane;
-    for (let row = Math.floor(step / 2); row < height; row += step) {
-      for (let column = Math.floor(step / 2); column < width - NEIGHBOR_DIFFERENCE_SPACING_PX; column += step) {
-        const index = planeStart + row * width + column;
-        const difference = pixels[index + NEIGHBOR_DIFFERENCE_SPACING_PX] - pixels[index];
-        if (Number.isFinite(difference)) differences.push(difference);
-      }
-    }
-  }
-  return Float32Array.from(differences);
+  return sampleSkyAndDifferences(pixels, width, height, channels).differences;
 }
 
 /**
@@ -172,8 +203,8 @@ export function skyRangeFromSample(
 /**
  * Works out the black and white points for the Linear display of an image.
  *
- * Uses the same pixel sample as zscale for the sky level, and neighbor differences at the same
- * positions for the noise. When the sky cannot be measured, it falls back to the
+ * Uses the grid of zscale for the sky level, and neighbor differences at the same positions for
+ * the noise (see `sampleSkyAndDifferences`). When the sky cannot be measured, it falls back to the
  * zscale range.
  *
  * @param pixels Pixel values; one plane, or three planes one after another for colour.
@@ -189,7 +220,6 @@ export function computeSkyRange(
   height: number,
   channels: number,
 ): { low: number; high: number } | null {
-  const sample = sampleImageGrid(pixels, width, height, channels);
-  const differences = sampleNeighborDifferences(pixels, width, height, channels);
+  const { sample, differences } = sampleSkyAndDifferences(pixels, width, height, channels);
   return skyRangeFromSample(sample, differences) ?? computeZscaleRange(pixels, width, height, channels);
 }

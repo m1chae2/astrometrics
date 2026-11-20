@@ -46,7 +46,7 @@ def _stretch_used(data: Any, auto_stretched: bool) -> StretchParameters | None:
         The stretch, measured the way `ImageScaler.scale_to_uint8` measures
         it, or `None` when none was used.
     """
-    return ImageScaler.autostretch_parameters(data, sample_sky=True) if auto_stretched else None
+    return ImageScaler.autostretch_parameters(data) if auto_stretched else None
 
 
 def _siril_preview_picture(path: str, max_dimensions: int) -> str | None:
@@ -129,11 +129,7 @@ class ImageConverter:
         vmin = (center - width / 2.0) if center is not None and width is not None else None
         vmax = (center + width / 2.0) if center is not None and width is not None else None
 
-        # Measuring the sky from a sample of the pixels gives the same picture
-        # in a fraction of the time on a large frame (see `measure_sky`).
-        img8, vmin, vmax = ImageScaler.scale_to_uint8(
-            data, vmin=vmin, vmax=vmax, stretch=stretch, sample_sky=True
-        )
+        img8, vmin, vmax = ImageScaler.scale_to_uint8(data, vmin=vmin, vmax=vmax, stretch=stretch)
         stretch_parameters = _stretch_used(data, stretch and center is None)
 
         pil_image = Image.fromarray(img8)
@@ -353,9 +349,7 @@ def render_viewable_image(
 
     vmin = (center - width / 2.0) if center is not None else None
     vmax = (center + width / 2.0) if center is not None else None
-    img8, vmin, vmax = ImageScaler.scale_to_uint8(
-        data, vmin=vmin, vmax=vmax, stretch=stretch, sample_sky=True
-    )
+    img8, vmin, vmax = ImageScaler.scale_to_uint8(data, vmin=vmin, vmax=vmax, stretch=stretch)
     stretch_parameters = _stretch_used(data, stretch and center is None)
     picture = Image.fromarray(img8)
     if picture.mode != "L":

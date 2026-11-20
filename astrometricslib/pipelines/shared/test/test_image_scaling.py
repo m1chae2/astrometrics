@@ -21,7 +21,6 @@ from astrometricslib.pipelines.shared.image_scaling import (
     _midtones_transfer_function,
     _scale_to_uint8_in_blocks,
     _solve_midtones_balance,
-    measure_sky,
     midtones_balance_for,
     percentile_sample,
     white_fraction_after_autostretch,
@@ -163,67 +162,6 @@ def test_the_white_fraction_is_none_without_a_measurable_sky() -> None:
     assert white_fraction_after_autostretch(np.zeros((50, 50)), 0.2) is None
 
 
-def _large_sky_with_stars(seed: int = 0) -> np.ndarray:
-    """Build a sky big enough that the sky sample is smaller than the image.
-
-    Returns
-    -------
-    image : `numpy.ndarray`
-        A 1000 x 1000 image (1 million pixels, twice the sample size): sky
-        near 1000 with noise of about 20, a faint gradient, and one very
-        bright pixel.
-    """
-    rng = np.random.default_rng(seed)
-    image = 1000.0 + rng.normal(0.0, 20.0, size=(1000, 1000))
-    image += np.linspace(0.0, 30.0, 1000)[:, None]
-    image[10, 10] = 60000.0
-    return image
-
-
-def test_a_sampled_sky_measurement_matches_the_full_one_closely() -> None:
-    """Measuring from a sample finds nearly the same sky level and noise."""
-    image = _large_sky_with_stars()
-
-    full_median, full_sigma, _ = measure_sky(image)
-    sampled_median, sampled_sigma, _ = measure_sky(image, sample_pixels=True)
-
-    assert sampled_median == pytest.approx(full_median, abs=0.05 * full_sigma)
-    assert sampled_sigma == pytest.approx(full_sigma, rel=0.02)
-
-
-def test_a_sampled_sky_measurement_still_finds_the_true_brightest_pixel() -> None:
-    """The brightest pixel comes from the whole image, not from the sample."""
-    image = _large_sky_with_stars()
-
-    _, _, peak = measure_sky(image, sample_pixels=True)
-
-    assert peak == pytest.approx(60000.0)
-
-
-def test_a_sampled_sky_measurement_gives_the_same_answer_every_time() -> None:
-    """The same image always picks the same sample."""
-    image = _large_sky_with_stars()
-
-    assert measure_sky(image, sample_pixels=True) == measure_sky(image, sample_pixels=True)
-
-
-def test_small_images_are_measured_in_full_even_when_sampling_is_asked_for() -> None:
-    """An image smaller than the sample has nothing to sample."""
-    image = _sky_with_stars()
-
-    assert measure_sky(image, sample_pixels=True) == measure_sky(image)
-
-
-def test_a_sampled_stretch_gives_the_same_picture_to_within_one_grey_level() -> None:
-    """Sampling the sky must not visibly change the picture."""
-    image = _large_sky_with_stars()
-
-    full, _, _ = ImageScaler.scale_to_uint8(image)
-    sampled, _, _ = ImageScaler.scale_to_uint8(image, sample_sky=True)
-
-    assert np.abs(full.astype(int) - sampled.astype(int)).max() <= 1
-
-
 @pytest.mark.parametrize("shape", [(7, 5), (4000, 3), (1, 9), (13, 4, 3)])
 @pytest.mark.parametrize("midtones", [None, 0.2])
 def test_scaling_in_blocks_matches_scaling_all_at_once(
@@ -246,8 +184,8 @@ def test_the_autostretch_parameters_are_the_ones_the_picture_used() -> None:
     """The reported points match the drawing's; the sky lands at 25%."""
     image = _sky_with_stars()
 
-    _, black_point, white_point = ImageScaler.scale_to_uint8(image, sample_sky=True)
-    parameters = ImageScaler.autostretch_parameters(image, sample_sky=True)
+    _, black_point, white_point = ImageScaler.scale_to_uint8(image)
+    parameters = ImageScaler.autostretch_parameters(image)
 
     assert parameters.black_point == pytest.approx(black_point)
     assert parameters.white_point == pytest.approx(white_point)

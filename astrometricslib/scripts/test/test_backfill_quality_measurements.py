@@ -617,7 +617,7 @@ def test_what_the_json_never_held_is_counted_not_written(tmp_path: Path) -> None
     """Skip and count noise, weights, run-data gates and notice rows."""
     database = make_database(tmp_path, {TARGET: full_document()})
     report = backfill.run_backfill(database, log=lambda _: None)
-    assert report.skipped["stacking", backfill.SkipReason.NOT_HELD] == 82 + 5
+    assert report.skipped["stacking", backfill.SkipReason.NOT_HELD] == 82 + 5 + 8
     assert report.skipped["astrometry", backfill.SkipReason.NOT_HELD] == 6 + 1
     assert report.skipped["photometry", backfill.SkipReason.NOT_HELD] == 10 + 9 + 1 + 6 + 3 + 1
     assert report.skipped["photometry", backfill.SkipReason.NEEDS_RUN_DATA] == 1
@@ -1036,6 +1036,8 @@ def test_every_stacking_summary_field_is_a_measurement_or_listed_as_not_one() ->
         "stacking_engine": "text",
         "stacking_engine_version": "text",
         "registration_reference_frame": "a file name",
+        "stack_crop_reason": "text; the crop notice row holds it",
+        "stack_crop_area_fraction": "a share the crop notice row holds",
     }
     fields = set(StackingPipelineQualityMetrics.model_fields)
     mapped = set(stacking_record._METRICS_FIELDS)

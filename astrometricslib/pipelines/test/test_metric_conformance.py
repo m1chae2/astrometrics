@@ -230,6 +230,8 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
             framesAccepted=1,
             framesQuarantined=2,
             flatCalibrationIssues=["not smoothed: a test note"],
+            stackCropReason="cropped 120 px on the left: fewer than half the frames covered it",
+            stackCropAreaFraction=0.04,
         ),
     )
     summary.quality_processing_applied = False
@@ -257,6 +259,10 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
         notice_rows.append(reddening_lookup_failed_notice_measurement(2, context, context.run_subject()))
     return [*rows, *notice_rows]
 
+
+# Metrics that stay declared so stored rows and reports citing them can be
+# read, although no step measures them any more.
+RETIRED_METRICS = frozenset({"frame.quarantine_roundness"})
 
 # Phase 3: a pipeline listed here produces every metric it
 # declares. Each entry maps the pipeline to a function that runs its record
@@ -583,7 +589,7 @@ def test_a_phase_3_pipeline_emits_every_metric_it_declares(pipeline: str) -> Non
     """The record step emits each declared metric and nothing undeclared."""
     from astrometricslib.pipelines.shared.quality.metric_registry import load_pipeline_metrics
 
-    declared = {spec.name for spec in load_pipeline_metrics(pipeline)}
+    declared = {spec.name for spec in load_pipeline_metrics(pipeline)} - RETIRED_METRICS
     emitted = {
         measurement.metric for measurement in _with_notice_rows(pipeline, PHASE_3_RECORD_STEPS[pipeline]())
     }

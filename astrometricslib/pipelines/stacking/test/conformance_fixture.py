@@ -8,8 +8,10 @@ measurement and two member frames, and runs the stacking record step on it.
 It adds the two rows of one leave-one-night-out stack and the seventeen rows of
 the odd–even difference noise, which the subset jobs store
 (`subset_noise_run.py`).
-The two quarantine metrics are frame metrics that the frame measurement run
+The quarantine metrics are frame metrics that the frame measurement run
 (`frame_measurement_run.py`) stores, so the fixture adds the rows it would add.
+The stack star-shape rows come from `stack_star_shape_measurements`, as in the
+stage.
 """
 
 import math
@@ -74,6 +76,9 @@ from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     StackNoiseResult,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_preview import SkippedPreviewStep
+from astrometricslib.pipelines.stacking.post_processing.stack_star_shape import (
+    stack_star_shape_measurements,
+)
 from astrometricslib.pipelines.stacking.subset_noise_run import (
     expected_ratio_measurement,
     night_measurements,
@@ -432,7 +437,7 @@ def stacking_emitted_measurements() -> list[QualityMeasurement]:
     )
     measurements.extend(
         quarantine_measurements_for_frame(
-            {"roundness": 0.9, "sky_median_adu": 500.0},
+            {"sky_median_adu": 500.0, "sky_unevenness": 0.02, "pointing_offset_fraction": 0.01},
             frame,
             "M 99",
             run_id="job-1",
@@ -440,5 +445,11 @@ def stacking_emitted_measurements() -> list[QualityMeasurement]:
             measured_at=FIXTURE_TIME,
             capture_setting_id=None,
         )
+    )
+    measurements.extend(
+        # A stack file that is not there gives the not-measured row of every
+        # star-shape metric, which is what the stage records when the stars
+        # cannot be measured.
+        stack_star_shape_measurements(context, "/nonexistent/M99_Stacked.fits", is_spectral=False)
     )
     return measurements

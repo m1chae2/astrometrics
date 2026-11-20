@@ -230,6 +230,7 @@ def _stack_frames_guarded(
             # An up-to-date stack made before the solution was saved still
             # needs one for the viewer's star names.
             _save_stack_plate_solution(run, run.stacked_path)
+            _record_stack_star_shapes(run, run.stacked_path, only_if_missing=True)
             _remake_preview_if_out_of_date(run)
             finish_stages()
             return run.stacked_path
@@ -645,6 +646,7 @@ def _finish_made_stack(run: StackRun, stacked_path: str, summary: StackQualitySu
         "measuring the stack's quality (reads up to 16 flat, 24 light and 5 bias frames again)",
     )
     _store_stack_quality(run, stacked_path, summary)
+    _record_stack_star_shapes(run, stacked_path)
     # Before the preview, so the new stretched FITS the preview writes copies
     # the solution from the stack's header.
     _save_stack_plate_solution(run, stacked_path)
@@ -838,6 +840,48 @@ def _store_stack_quality(run: StackRun, stacked_path: str, summary: StackQuality
         run.measured_at,
         run.quality_recording,
         run.drivers,
+    )
+
+
+def _record_stack_star_shapes(
+    run: StackRun, stacked_path: str | None, *, only_if_missing: bool = False
+) -> None:
+    """Store how round the stack's stars are, as the frames' star shapes are.
+
+    This runs for a stack that was just made and for one that was up to date
+    and skipped, so an older stack gets its rows on the next run (once: the
+    skipped stack passes `only_if_missing`). A failure is logged as a warning
+    and never fails the stack. Spectral stacks are skipped.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run.
+    stacked_path : `str` or `None`
+        The stack, made or kept. Nothing happens without one.
+    only_if_missing : `bool`, optional
+        Measure only when the store holds no star-shape row for the stack.
+    """
+    if run.has_spectral or not stacked_path or run.measured_at is None:
+        return
+    from astrometricslib.models.quality.quality_summary import STACKING_PIPELINE_VERSION
+    from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
+    from astrometricslib.pipelines.stacking.post_processing.stack_star_shape import record_stack_star_shapes
+
+    context = PipelineRunContext.from_options(
+        run.target.id,
+        "stacking",
+        STACKING_PIPELINE_VERSION,
+        {"job_id": run.job_id, "measured_at": run.measured_at},
+    )
+    if context is None:
+        return
+    record_stack_star_shapes(
+        context,
+        stacked_path,
+        is_spectral=run.has_spectral,
+        config=None if run.quality_recording is None else run.quality_recording.configuration,
+        only_if_missing=only_if_missing,
     )
 
 

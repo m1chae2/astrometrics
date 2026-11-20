@@ -27,12 +27,21 @@ from astrometricslib.models.quality.metric_spec import (
     MetricSpec,
     UncertaintyKind,
 )
+from astrometricslib.pipelines.shared.quality.metrics import (
+    FRAME_METRICS,
+    FRAME_STAR_ELONGATION,
+    FRAME_STAR_ELONGATION_ANGLE_DEG,
+    FRAME_STAR_WIDTH_REGION_PX,
+)
 from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_spec, notice_spec
 from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
     CHECKED_ESTIMATE_ERROR_FRACTION,
 )
 
 STACKING_REJECTED_PIXEL_FRACTION = "stacking.rejected_pixel_fraction"
+STACKING_STAR_ELONGATION = "stacking.star_elongation"
+STACKING_STAR_ELONGATION_ANGLE_DEG = "stacking.star_elongation_angle_deg"
+STACKING_STAR_WIDTH_CENTER_PX = "stacking.star_width_center_px"
 FRAME_QUARANTINE_ROUNDNESS = "frame.quarantine_roundness"
 FRAME_QUARANTINE_SKY_MEDIAN = "frame.quarantine_sky_median_adu"
 
@@ -3049,8 +3058,82 @@ _NOTICE_METRICS: tuple[MetricSpec, ...] = (
     camera_without_profile_spec("stacking"),
 )
 
+# ---------------------------------------------------------------------------
+# The star shape of the stack image: the frame star-shape metrics, measured on
+# the stacked pixels by the same code.
+# ---------------------------------------------------------------------------
+
+# The note added to the sample definition of each stack star-shape metric.
+_STACK_STAR_SHAPE_NOTE = (
+    " For a stack the same measurement runs on the stacked image: the stars are those of the stack, "
+    "the stack's own plateau (not a camera limit) decides which stars are near saturation, and a "
+    "stack made of color planes is measured plane by plane. A spectral stack is not measured."
+)
+
+
+def _stack_star_shape_spec(frame_name: str, stack_name: str) -> MetricSpec:
+    """Declare the stack form of a frame star-shape metric.
+
+    The stack metric repeats the frame metric's unit, direction, estimator,
+    purpose and register entry, so one definition holds at both levels. Only
+    the name, the checkpoint, the subject level and the texts that name the
+    subject change.
+
+    Parameters
+    ----------
+    frame_name : `str`
+        The name of the frame metric to repeat.
+    stack_name : `str`
+        The name of the stack metric.
+
+    Returns
+    -------
+    spec : `MetricSpec`
+        The declaration of the stack metric.
+    """
+    frame_spec = next(spec for spec in FRAME_METRICS if spec.name == frame_name)
+    fields = frame_spec.model_dump()
+    fields.update(
+        name=stack_name,
+        definition_version=1,
+        checkpoint=Checkpoint.STACKING,
+        levels=(SubjectLevel.STACK,),
+        meaning=f"In the stacked image: {frame_spec.meaning[0].lower()}{frame_spec.meaning[1:]}",
+        sample_definition=frame_spec.sample_definition + _STACK_STAR_SHAPE_NOTE,
+        band="The stack's filter or channel; a stack stored as color planes is measured plane by plane.",
+        estimator=frame_spec.estimator.replace(frame_name, stack_name),
+    )
+    if frame_spec.purpose_reason:
+        fields["purpose_reason"] = (
+            frame_spec.purpose_reason.replace(frame_name, stack_name)
+            + " In a stack the stars are the sum of many frames, so a round stack from stretched "
+            "frames means the stretch changed from frame to frame."
+        )
+    return MetricSpec.model_validate(fields)
+
+
+_STACK_STAR_SHAPE_METRICS: tuple[MetricSpec, ...] = (
+    _stack_star_shape_spec(FRAME_STAR_ELONGATION, STACKING_STAR_ELONGATION),
+    _stack_star_shape_spec(FRAME_STAR_ELONGATION_ANGLE_DEG, STACKING_STAR_ELONGATION_ANGLE_DEG),
+    *(
+        _stack_star_shape_spec(frame_name, frame_name.replace("frame.", "stacking.", 1))
+        for frame_name in FRAME_STAR_WIDTH_REGION_PX.values()
+    ),
+)
+
+# The stack metric that repeats each frame star-shape metric, by frame name.
+STACK_STAR_SHAPE_METRIC_BY_FRAME_METRIC: dict[str, str] = {
+    FRAME_STAR_ELONGATION: STACKING_STAR_ELONGATION,
+    FRAME_STAR_ELONGATION_ANGLE_DEG: STACKING_STAR_ELONGATION_ANGLE_DEG,
+    **{
+        frame_name: frame_name.replace("frame.", "stacking.", 1)
+        for frame_name in FRAME_STAR_WIDTH_REGION_PX.values()
+    },
+}
+
 STACKING_METRICS: tuple[MetricSpec, ...] = (
     *_DECLARED_BEFORE_PHASE_3,
+    *_STACK_STAR_SHAPE_METRICS,
     *_VALUE_METRICS,
     *_NOISE_AND_WEIGHT_METRICS,
     *_NIGHT_METRICS,

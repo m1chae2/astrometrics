@@ -789,6 +789,58 @@ def measure_frame(
     return context.measurements
 
 
+def measure_image_star_profiles(
+    path: str, top_level_adu: float | None = None
+) -> list[tuple[str | None, StarProfileResult, str]]:
+    """Measure the star profiles of every plane of an image file.
+
+    This is the star-shape step of `measure_frame`, made available for an
+    image that is not a frame, such as a stack. It reads the pixels the same
+    way (a color image is split into planes, a raw color mosaic is one plane
+    measured on 2 x 2 super-pixels) and calls `measure_star_profiles` for each
+    plane, so a frame and a stack share one definition of every star-shape
+    number.
+
+    Parameters
+    ----------
+    path : `str`
+        Path to the FITS file.
+    top_level_adu : `float` or `None`, optional
+        The pixel value above which the sensor is not trusted. `None` makes
+        `measure_star_profiles` use the plane's own plateau of equal brightest
+        pixels, which suits a stack (it has no single camera limit).
+
+    Returns
+    -------
+    planes : `list` of `tuple`
+        ``(channel name or None, result, mosaic note)`` for each plane. The
+        note is text for a raw mosaic's reasons, else empty. A plane that
+        cannot be measured holds a result with no values and a reason.
+
+    Notes
+    -----
+    An unreadable file raises one of `FITS_READ_ERRORS`; the caller decides
+    what that means.
+    """
+    planes, _collapsed, header = _read_planes(path)
+    is_mosaic = bool(str(header.get("BAYERPAT", "")).strip()) and len(planes) == 1
+    mosaic_note = (
+        f"; raw color mosaic: the star shapes use {BAYER_CELL_SIZE_PX} x {BAYER_CELL_SIZE_PX} "
+        "super-pixels (widths given back in original pixels)"
+        if is_mosaic
+        else ""
+    )
+    results: list[tuple[str | None, StarProfileResult, str]] = []
+    for channel, plane in planes:
+        try:
+            result = measure_star_profiles(plane, top_level_adu, bayer_mosaic=is_mosaic)
+        except DATA_ERRORS as error:
+            logger.warning("Moffat star profiles failed for %s: %s", path, error)
+            result = StarProfileResult(reason=f"the star fits failed: {error}")
+        results.append((channel, result, mosaic_note))
+    return results
+
+
 def _emit_synthetic_notice(context: _Context, header: fits.Header) -> None:
     """Add a warning when the header says the frame was drawn, not taken.
 

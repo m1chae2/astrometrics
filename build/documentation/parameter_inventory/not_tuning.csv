@@ -64,6 +64,7 @@ astrometricslib/api/targets.py,TargetCatalog.query.offset,Pagination start; 0 me
 astrometricslib/api/visualization.py,Visualization.plot.limit,Row or item cap that callers pass; plumbing
 astrometricslib/api/visualization.py,Visualization.render_fits.index,Index of the frame or layer; 0 means the first
 astrometricslib/api/visualization.py,_DEFAULT_FIGURE_SIZES,Plumbing or protocol constant
+astrometricslib/foundation/_system_posix.py,PR_SET_PDEATHSIG,"The Linux prctl option number for the parent-death signal, fixed by the kernel API"
 astrometricslib/foundation/config.py,CONFIG_RECHECK_SECONDS,Plumbing or protocol constant
 astrometricslib/foundation/config.py,[Observatory.Constraints] max_altitude,"Physical limit of altitude, used as the setting's default"
 astrometricslib/foundation/config.py,[Observatory.Constraints] min_altitude,"Physical limit of altitude, used as the setting's default"
@@ -195,11 +196,11 @@ astrometricslib/pipelines/shared/quality/star_profile.py,MINIMUM_RADIUS_PX,"Fewe
 astrometricslib/pipelines/shared/quality/star_profile.py,_BETA_LIMITS,"Bounds that keep the Moffat fit from running off to a flat or a spiked curve"
 astrometricslib/pipelines/shared/quality/star_profile.py,_CURVE_POINT_COUNT,"Number of points drawn for the fitted curve; does not change a measured value"
 astrometricslib/pipelines/shared/quality/star_profile.py,measure_star_profile_in_file.cut_angle_degrees,"A direction chosen by the caller; 0 means along a column"
+astrometricslib/pipelines/shared/quality/star_profile_fitting.py,BAYER_CELL_SIZE_PX,Sensor structure (Bayer cell)
+astrometricslib/pipelines/shared/quality/star_profile_fitting.py,MOFFAT_BETA_START,Starting guess for fit; no effect on result
 astrometricslib/pipelines/shared/quality/star_ring.py,_SKY_CLIP_ITERATIONS,"Rounds of sigma clipping for the ring sky plane; the same 5 rounds as the profile sky, and the fit settles in fewer"
 astrometricslib/pipelines/shared/quality/star_ring.py,_SKY_CLIP_SIGMA,"Clipping limit of the ring sky plane; the same 3 sigma as the profile sky"
 astrometricslib/pipelines/shared/quality/star_ring.py,_SKY_MINIMUM_PIXELS,"Fewest pixels the sky annulus needs, as for the profile's sky; below it the profile sky is used"
-astrometricslib/pipelines/shared/quality/star_profile_fitting.py,BAYER_CELL_SIZE_PX,Sensor structure (Bayer cell)
-astrometricslib/pipelines/shared/quality/star_profile_fitting.py,MOFFAT_BETA_START,Starting guess for fit; no effect on result
 astrometricslib/pipelines/shared/quality/time_budget.py,FRAME_MEASUREMENT_TIME_BUDGET_SECONDS,Plumbing: time budget
 astrometricslib/pipelines/shared/registration_record.py,HOMOGRAPHY_LENGTH,Homography has nine entries
 astrometricslib/pipelines/shared/registration_record.py,REGISTRATION_RECORD_VERSION,software plumbing

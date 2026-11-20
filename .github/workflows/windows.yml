@@ -9,6 +9,10 @@
 # Siril's FIFOs) are not collected on Windows, and single tests of Linux-only
 # behavior carry a `linux_only` marker; the root conftest.py lists both, with
 # their reasons. The frontend job runs the Windows-sensitive UI tests.
+#
+# The paths below start the workflow; the `changes` job then runs each job
+# only when its own files changed, so an npm-only change does not run the
+# Python suite and a Python-only change does not run the UI tests.
 # ==============================================================================
 
 name: windows CI
@@ -40,13 +44,53 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Both jobs only read the repository.
+# The jobs only read the repository. The `changes` job also reads the pull
+# request's file list.
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
+  changes:
+    name: Detect Changed Parts
+    runs-on: ubuntu-latest
+    outputs:
+      python: ${{ steps.filter.outputs.python }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      # electron/** is in both lists: backend/tests/test_public_interface.py
+      # reads the Electron files.
+      - name: Filter Changed Paths
+        id: filter
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            python:
+              - 'astrometricslib/**'
+              - 'wayfindinglib/**'
+              - 'backend/**'
+              - 'mcp_servers/**'
+              - 'build/mcp/**'
+              - 'build/windows/**'
+              - 'electron/**'
+              - 'conftest.py'
+              - 'pyproject.toml'
+              - '.github/workflows/windows.yml'
+            frontend:
+              - 'electron/**'
+              - 'ui/common/fitsViewer/**'
+              - 'ui/tests/test_platformAdapters.test.ts'
+              - 'package.json'
+              - 'package-lock.json'
+              - '.github/workflows/windows.yml'
+
   python:
     name: Run Windows Python Tests
+    needs: changes
+    if: needs.changes.outputs.python == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     steps:
       - name: Checkout Repository
@@ -75,6 +119,8 @@ jobs:
 
   frontend:
     name: Run Windows Frontend Tests
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     steps:
       - name: Checkout Repository

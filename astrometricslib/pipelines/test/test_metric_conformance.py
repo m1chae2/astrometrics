@@ -253,6 +253,26 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
         )
 
         notice_rows.append(ephemeris_query_cap_notice_measurement(2, context, context.run_subject()))
+    if pipeline == "photometry":
+        from astrometricslib.pipelines.photometry.post_processing.record_quality import (
+            logged_warnings_notice_measurement,
+            session_without_comparison_stars_notice_measurement,
+        )
+        from astrometricslib.pipelines.photometry.run_warnings import (
+            LoggedWarning,
+            SessionWithoutComparisonStars,
+        )
+
+        notice_rows.append(
+            session_without_comparison_stars_notice_measurement(
+                [SessionWithoutComparisonStars("night-1", "fewer than two usable stars", True, 2)], context
+            )
+        )
+        notice_rows.append(
+            logged_warnings_notice_measurement(
+                [LoggedWarning("astrometricslib.catalog", "server silent", 3)], context
+            )
+        )
     if pipeline == "spectroscopy":
         from astrometricslib.pipelines.spectroscopy.post_processing.record_quality import (
             below_feature_limit_notice_measurement,

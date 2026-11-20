@@ -118,7 +118,7 @@ def test_a_bad_reference_frame_stops_the_session_and_says_why(tmp_path: Path) ->
 
 
 def _fake_worker(
-    args: tuple[str, list[tuple[str, float, float]], list[tuple[str, float, float]], float, object],
+    args: tuple,
 ) -> tuple[str, tuple]:
     """Stand in for the frame worker; refuse the first star's centroid.
 
@@ -129,7 +129,7 @@ def _fake_worker(
         flux 1 and sits at its reference position. The first star carries a
         fallback reason, the others do not.
     """
-    path, reference_stars, _, _, _ = args
+    path, reference_stars, *_ = args
     minute = int(Path(path).stem.removeprefix("f"))
     fluxes = {star_id: (1.0, False, 0.1) for star_id, _, _ in reference_stars}
     positions = {

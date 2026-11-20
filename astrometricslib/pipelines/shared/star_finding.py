@@ -57,6 +57,7 @@ def find_sources_above_background(
     threshold_sigma: float,
     roundness_range: tuple[float, float] | None,
     mask: np.ndarray | None = None,
+    min_separation: float | None = None,
 ) -> list[dict[str, Any]]:
     """Run the star finder on a picture whose background is already removed.
 
@@ -78,6 +79,11 @@ def find_sources_above_background(
         every roundness, so stretched stars are not dropped.
     mask : `numpy.ndarray`, optional
         Pixels to ignore (`True` marks a bad pixel).
+    min_separation : `float`, optional
+        The closest two sources may lie, in pixels. `None` keeps the finder's
+        own value, 2.5 star widths, so two stars closer than that merge into
+        one source. A caller that needs close pairs, such as the photometry
+        neighbor list, passes a smaller value.
 
     Returns
     -------
@@ -86,12 +92,14 @@ def find_sources_above_background(
         finder's columns, including ``x_centroid``, ``y_centroid`` and
         ``flux``.
     """
+    separation_option = {} if min_separation is None else {"min_separation": min_separation}
     finder = DAOStarFinder(
         fwhm=expected_fwhm_px,
         threshold=threshold_sigma * noise,
         exclude_border=True,
         sharpness_range=resolve(STAR_SHARPNESS_RANGE).value,
         roundness_range=roundness_range,
+        **separation_option,
     )
     found = finder(background_subtracted, mask=mask)
     if found is None:

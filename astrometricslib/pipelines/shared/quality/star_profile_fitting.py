@@ -21,7 +21,6 @@ import numpy as np
 from astropy.stats import SigmaClip, sigma_clipped_stats
 from photutils.background import Background2D, MedianBackground
 from scipy import optimize
-from scipy.spatial import cKDTree
 
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.run_bases import factor_for
@@ -34,6 +33,7 @@ from astrometricslib.models.tuned_parameter import (
     RunBasis,
     TunedParameter,
 )
+from astrometricslib.pipelines.shared.neighbor_masking import nearest_neighbors
 from astrometricslib.pipelines.shared.quality.frame_statistics import (
     BOOTSTRAP_RESAMPLE_COUNT,
     BOOTSTRAP_SEED,
@@ -945,7 +945,9 @@ STAR_FINDER_MINIMUM_BOXES_PER_AXIS = TunedParameter(
 )
 
 
-def detect_stars_without_shape_cut(plane: np.ndarray, expected_fwhm_px: float | None = None) -> list[dict]:
+def detect_stars_without_shape_cut(
+    plane: np.ndarray, expected_fwhm_px: float | None = None, min_separation: float | None = None
+) -> list[dict]:
     """Find the stars of a plane without refusing the stretched ones.
 
     `SourceDetector` keeps only sources whose DAOStarFinder roundness lies in
@@ -968,6 +970,9 @@ def detect_stars_without_shape_cut(plane: np.ndarray, expected_fwhm_px: float | 
         How wide a star is expected to be, in the plane's own pixels. Defaults
         to `STAR_FINDER_EXPECTED_FWHM_PX`. A plane of 2 x 2 super-pixels needs
         half that.
+    min_separation : `float`, optional
+        The closest two sources may lie, in pixels. `None` keeps the finder's
+        own value (2.5 star widths), as the astrometry stage does.
 
     Returns
     -------
@@ -1007,6 +1012,7 @@ def detect_stars_without_shape_cut(plane: np.ndarray, expected_fwhm_px: float | 
         expected_fwhm_px=expected_fwhm_px,
         threshold_sigma=resolve(STAR_FINDER_THRESHOLD_SIGMA).value,
         roundness_range=None,
+        min_separation=min_separation,
     )
 
 
@@ -1053,7 +1059,7 @@ def _grid_candidates(
     cells_x = max(round(columns / cell_side), 1)
     cells_y = max(round(rows / cell_side), 1)
     positions = np.array([[source["x_centroid"], source["y_centroid"]] for source in sources], dtype=float)
-    tree = cKDTree(positions)
+    neighbor_counts = nearest_neighbors(positions, None, isolation_radius_px).count
     half = resolve(MOFFAT_FIT_BOX_HALF_WIDTH_PX).value
     cell_lists: dict[tuple[int, int], list[tuple[float, float]]] = {}
     near_edge = near_neighbor = near_saturation = 0
@@ -1062,8 +1068,7 @@ def _grid_candidates(
         if center_x < half or center_y < half or center_x + half >= columns or center_y + half >= rows:
             near_edge += 1
             continue
-        neighbors = tree.query_ball_point(positions[index], isolation_radius_px)
-        if len(neighbors) > 1:
+        if neighbor_counts[index] > 0:
             near_neighbor += 1
             continue
         if top_level_adu is not None:

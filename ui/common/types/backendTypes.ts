@@ -952,6 +952,10 @@ export interface PhotometryResult {
   errorsAssumeZeroReadNoise?: boolean | null;
   timeBjdTdb?: number[];
   timeBasis?: string | null;
+  nearestNeighborDistancePx?: number | null;
+  nearestNeighborFluxRatio?: number | null;
+  maskedSkyFraction?: number | null;
+  crowded?: boolean | null;
   periodogram?: PeriodogramResult | null;
   transitCandidate?: TransitCandidate | null;
   meanFlux?: number | null;

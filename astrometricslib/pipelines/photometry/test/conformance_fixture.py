@@ -20,6 +20,7 @@ from astrometricslib.pipelines.photometry.post_processing.record_period_sensitiv
 )
 from astrometricslib.pipelines.photometry.post_processing.record_quality import (
     PhotometryRunInputs,
+    TargetCrowding,
     photometry_run_gates,
     photometry_run_measurements,
 )
@@ -149,7 +150,7 @@ def photometry_fixture_inputs() -> PhotometryRunInputs:
 
 
 def photometry_fixture_gates() -> list[GateResult]:
-    """Build the eleven gates of the healthy run.
+    """Build the twelve gates of the healthy run.
 
     Returns
     -------
@@ -174,6 +175,7 @@ def photometry_fixture_gates() -> list[GateResult]:
         noise_model_stars=60,
         noise_floor_mag=0.01,
         median_flux_error_mag=0.02,
+        target_crowding=TargetCrowding("Star_1", False, 40.0, 0.01),
     )
 
 

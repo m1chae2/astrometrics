@@ -592,6 +592,21 @@ class PhotometryResult(BaseModel):
     # Earth's center (see `pre_processing.observation_times`). `None` when
     # `time_bjd_tdb` is empty.
     time_basis: str | None = Field(default=None, alias="timeBasis")
+    # How crowded the star is, measured on the reference frame from the
+    # frame's detected stars (see `pre_processing.frame_photometry`). The
+    # distance to the nearest other detection, in pixels, and its peak over
+    # this star's. `None` when no neighbor lies within the search radius or
+    # the light curve was saved before crowding was recorded.
+    nearest_neighbor_distance_px: float | None = Field(default=None, alias="nearestNeighborDistancePx")
+    nearest_neighbor_flux_ratio: float | None = Field(default=None, alias="nearestNeighborFluxRatio")
+    # The share of the sky ring's pixels left out because a bright neighbor
+    # lights them. `None` when crowding was not recorded.
+    masked_sky_fraction: float | None = Field(default=None, alias="maskedSkyFraction")
+    # `True` when a neighbor bright enough to matter lies within the aperture
+    # radius plus the crowding margin, so its light may add to this star's
+    # flux. Comparison stars are never chosen from crowded stars. `None` when
+    # crowding was not recorded.
+    crowded: bool | None = Field(default=None, alias="crowded")
     periodogram: PeriodogramResult | None = Field(default=None, alias="periodogram")
     transit_candidate: TransitCandidate | None = Field(default=None, alias="transitCandidate")
     mean_flux: float | None = Field(default=None, alias="meanFlux")

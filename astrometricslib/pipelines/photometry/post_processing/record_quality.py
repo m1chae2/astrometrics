@@ -61,6 +61,7 @@ from astrometricslib.pipelines.photometry.metrics import (
     PHOTOMETRY_GATE_SCATTER_POPULATION,
     PHOTOMETRY_GATE_SESSION_CONTENT,
     PHOTOMETRY_GATE_SESSION_PLATE_SOLVE,
+    PHOTOMETRY_GATE_TARGET_CROWDING,
     PHOTOMETRY_GATE_VARIABILITY_DISCRIMINATION,
     PHOTOMETRY_LIGHT_CURVE_SCATTER_RMS_MEDIAN_MAG,
     PHOTOMETRY_LONG_TERM_VARIABLE_CANDIDATE_COUNT,
@@ -87,6 +88,7 @@ from astrometricslib.pipelines.photometry.pre_processing.assess_input_quality im
 )
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
     ANCHOR_RULE_RANK_BAND,
+    CROWDING_NEIGHBOR_PEAK_FRACTION,
     CentroidShiftSummary,
 )
 from astrometricslib.pipelines.photometry.processing.catalog_zero_point import SessionZeroPoints
@@ -258,6 +260,7 @@ SCATTER_POPULATION_GATE_NAME = "scatter_population"
 VARIABILITY_DISCRIMINATION_GATE_NAME = "variability_discrimination"
 DETECTABLE_AMPLITUDE_GATE_NAME = "detectable_amplitude"
 FLUX_UNCERTAINTY_GATE_NAME = "flux_uncertainty"
+TARGET_CROWDING_GATE_NAME = "target_crowding"
 
 # How the comparison_ensemble gate words the limit on the size of a set. The
 # stored measurement of that gate always uses it, whichever test failed.
@@ -290,6 +293,7 @@ def photometry_run_gates(
     median_flux_error_mag: float | None = None,
     errors_assume_unit_gain: bool = False,
     errors_assume_zero_read_noise: bool = False,
+    target_crowding: TargetCrowding | None = None,
 ) -> list[GateResult]:
     """Build the gates for one photometry run.
 
@@ -360,11 +364,14 @@ def photometry_run_gates(
     errors_assume_zero_read_noise : `bool`, optional
         Whether those errors assumed no read noise because the camera's read
         noise was unknown.
+    target_crowding : `TargetCrowding`, optional
+        What the reference frame says about the run's target star. `None`
+        when the run has no single target star.
 
     Returns
     -------
     gates : `list` [`GateResult`]
-        Eleven gates, in a fixed order.
+        Twelve gates, in a fixed order.
     """
     minimum_ensemble_rejection_count_to_flag = resolve(MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG).value
     minimum_ensemble_rejection_fraction_to_flag = resolve(MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG).value
@@ -596,6 +603,7 @@ def photometry_run_gates(
     gates.append(
         _flux_uncertainty_gate(median_flux_error_mag, errors_assume_unit_gain, errors_assume_zero_read_noise)
     )
+    gates.append(_target_crowding_gate(target_crowding))
     return gates
 
 
@@ -852,6 +860,73 @@ def _comparison_ensemble_gate(comparison_sets: Sequence[ComparisonSetResult]) ->
     )
 
 
+@dataclass(frozen=True)
+class TargetCrowding:
+    """What the reference frame says about how crowded the target star is.
+
+    Parameters
+    ----------
+    star_id : `str`
+        The target star's id.
+    crowded : `bool` or `None`
+        Whether a bright neighbor lies close enough to add to its light.
+        `None` when crowding was not recorded for it.
+    nearest_neighbor_distance_px : `float` or `None`
+        The distance to the nearest other detection, in pixels.
+    nearest_neighbor_flux_ratio : `float` or `None`
+        That neighbor's peak over the target's.
+    """
+
+    star_id: str
+    crowded: bool | None
+    nearest_neighbor_distance_px: float | None = None
+    nearest_neighbor_flux_ratio: float | None = None
+
+
+def _target_crowding_gate(target: TargetCrowding | None) -> GateResult:
+    """Say whether a bright neighbor sits on the target star.
+
+    Parameters
+    ----------
+    target : `TargetCrowding` or `None`
+        The target star's crowding, or `None` when the run has no single
+        target star.
+
+    Returns
+    -------
+    gate : `GateResult`
+        ``not_checked`` without a recorded crowding, ``failed`` when the
+        target is crowded, otherwise ``passed``.
+    """
+    fraction = resolve(CROWDING_NEIGHBOR_PEAK_FRACTION).value
+    source = (
+        f"a neighbor with at least {fraction:g} of the star's peak within the aperture radius plus "
+        "1.5 star widths (design estimate)"
+    )
+    if target is None or target.crowded is None:
+        return unchecked_gate(
+            TARGET_CROWDING_GATE_NAME,
+            "the run has no single target star with a recorded crowding",
+            source,
+        )
+    ratio = target.nearest_neighbor_flux_ratio
+    if target.crowded:
+        distance = target.nearest_neighbor_distance_px
+        where = f" {distance:.1f} px away" if distance is not None else ""
+        return failed_gate(
+            TARGET_CROWDING_GATE_NAME,
+            f"the target star {target.star_id} has a bright neighbor{where} (peak {ratio:.2f} of its own), "
+            "so its light curve may carry the neighbor's light and its brightness changes are less certain"
+            if ratio is not None
+            else f"the target star {target.star_id} has a bright neighbor close enough to add to its light, "
+            "so its light curve may carry the neighbor's light and its brightness changes are less certain",
+            ratio,
+            fraction,
+            source,
+        )
+    return passed_gate(TARGET_CROWDING_GATE_NAME, ratio, fraction, source)
+
+
 def _flux_uncertainty_gate(
     median_error_mag: float | None, assumes_unit_gain: bool, assumes_zero_read_noise: bool
 ) -> GateResult:
@@ -993,6 +1068,9 @@ GATE_LIMIT_SOURCES: dict[str, GateLimitSource] = {
         PHOTOMETRY_GATE_DETECTABLE_AMPLITUDE, LimitTier.DESIGN_ESTIMATE, "PHO-D15"
     ),
     FLUX_UNCERTAINTY_GATE_NAME: GateLimitSource(PHOTOMETRY_GATE_FLUX_UNCERTAINTY, LimitTier.PHYSICAL_BUDGET),
+    TARGET_CROWDING_GATE_NAME: GateLimitSource(
+        PHOTOMETRY_GATE_TARGET_CROWDING, LimitTier.DESIGN_ESTIMATE, "PHO-D35"
+    ),
 }
 
 _SPEC_BY_NAME: dict[str, MetricSpec] = {spec.name: spec for spec in PHOTOMETRY_METRICS}

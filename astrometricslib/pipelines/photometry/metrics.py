@@ -190,6 +190,7 @@ PHOTOMETRY_GATE_SCATTER_POPULATION = "photometry.gate_scatter_population"
 PHOTOMETRY_GATE_VARIABILITY_DISCRIMINATION = "photometry.gate_variability_discrimination"
 PHOTOMETRY_GATE_DETECTABLE_AMPLITUDE = "photometry.gate_detectable_amplitude"
 PHOTOMETRY_GATE_FLUX_UNCERTAINTY = "photometry.gate_flux_uncertainty"
+PHOTOMETRY_GATE_TARGET_CROWDING = "photometry.gate_target_crowding"
 
 _RUN_ONLY = (SubjectLevel.RUN,)
 _NO_UNCERTAINTY = "No uncertainty is reported. The value is an exact count."
@@ -1080,6 +1081,17 @@ PHOTOMETRY_METRICS: tuple[MetricSpec, ...] = (
         "or when the gain was assumed to be 1 e-/ADU; the value is then stored as an assumed value, "
         "so it is only a guide.",
         "Every point of every normalized light curve that carries an error.",
+        register_entry="PHO-02",
+    ),
+    _gate_metric(
+        PHOTOMETRY_GATE_TARGET_CROWDING,
+        "",
+        "Whether a bright neighbor lies close enough to the target star to add to its light.",
+        "The value is the peak of the target's nearest neighbor divided by the target's own peak. The "
+        "limit is 0.1. The check fails when a neighbor of at least that share of the target's peak "
+        "lies within the aperture radius plus 1.5 star widths. It is not checked when the run has no "
+        "single target star with a recorded crowding.",
+        "The target star of the run, measured on the reference frame.",
         register_entry="PHO-02",
     ),
     _zero_point_metric(

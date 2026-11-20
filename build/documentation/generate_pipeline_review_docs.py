@@ -218,6 +218,11 @@ GATE_DESCRIPTIONS: dict[str, str] = {
         "Cannot fail. Reports the median per-point error. Not checked when the errors assumed "
         "a gain of 1 e-/ADU (electrons per camera count), because the camera's gain was unknown."
     ),
+    "target_crowding": (
+        "Fails when a neighbor with at least `CROWDING_NEIGHBOR_PEAK_FRACTION` of the target "
+        "star's peak lies within the aperture radius plus `CROWDING_MARGIN_PX`, so the target's "
+        "light curve may carry the neighbor's light. Not checked without a single target star."
+    ),
     # Photometry period checks
     "holdout_nights": (
         "Period check. Leaves each night out in turn and asks whether the period found from the "

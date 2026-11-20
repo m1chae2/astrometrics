@@ -81,6 +81,8 @@ from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import
     _read_exposure_seconds,
     centroid_offsets_px,
     compute_frame_airmass,
+    crowding_fields,
+    detect_neighbor_field,
     measure_aperture_photometry,
     read_observation_time,
     select_alignment_anchors,
@@ -1034,6 +1036,12 @@ class VariabilityAnalyzer:
             reference_data, reference_stars_detected, saturation_threshold_adu=saturation_threshold_adu
         )
         reference_top_refs_minimal = list(anchors.stars)
+        # The stars of the reference frame, found with a finder that also
+        # lists close pairs (the run's own detections keep stars about 10 px
+        # apart), so each star's sky ring can leave out its bright neighbors
+        # and each star can be checked for crowding. The same list, moved by
+        # each frame's alignment, serves every frame.
+        reference_neighbors = detect_neighbor_field(reference_data)
         self.alignment_anchor_rule = anchors.rule
         self.alignment_anchor_count = len(anchors.stars)
         logger.info("  Alignment anchors: %s stars (%s).", len(anchors.stars), anchors.rule)
@@ -1077,6 +1085,7 @@ class VariabilityAnalyzer:
                     y_ref,
                     saturation_threshold_adu=saturation_threshold_adu,
                     noise=self.detector_noise,
+                    neighbors=reference_neighbors,
                 )
                 flux = reference_measurement.net_flux_adu / reference_exposure_seconds
                 if flux <= 0:
@@ -1091,6 +1100,7 @@ class VariabilityAnalyzer:
                     errors_assume_zero_read_noise=self.detector_noise.read_noise_is_assumed,
                     is_saturated=[reference_measurement.is_saturated],
                     airmasses=[reference_airmass],
+                    **crowding_fields(reference_measurement),
                 )
                 self.stellar_objects.append(seed_star)
                 self.star_peak_adu[seed_star.id] = [reference_measurement.peak_adu]
@@ -1119,6 +1129,7 @@ class VariabilityAnalyzer:
                     y_ref,
                     saturation_threshold_adu=saturation_threshold_adu,
                     noise=self.detector_noise,
+                    neighbors=reference_neighbors,
                 )
                 flux = reference_measurement.net_flux_adu / reference_exposure_seconds
                 new_star.flux = flux
@@ -1130,6 +1141,7 @@ class VariabilityAnalyzer:
                     errors_assume_zero_read_noise=self.detector_noise.read_noise_is_assumed,
                     is_saturated=[reference_measurement.is_saturated],
                     airmasses=[reference_airmass],
+                    **crowding_fields(reference_measurement),
                 )
                 self.stellar_objects.append(new_star)
                 self.star_peak_adu[new_star.id] = [reference_measurement.peak_adu]
@@ -1153,6 +1165,7 @@ class VariabilityAnalyzer:
                     reference_top_refs_minimal,
                     saturation_threshold_adu,
                     self.detector_noise,
+                    reference_neighbors,
                 )
                 for path in image_paths[1:]
             ]

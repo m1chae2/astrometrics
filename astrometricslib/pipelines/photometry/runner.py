@@ -41,6 +41,7 @@ from astrometricslib.pipelines.photometry.post_processing.record_quality import 
 )
 from astrometricslib.pipelines.photometry.post_processing.record_target_amplitude import (
     record_target_amplitude_quality,
+    target_crowding,
 )
 from astrometricslib.pipelines.photometry.pre_processing.observation_times import (
     TIME_BASIS_BJD_TDB,
@@ -698,6 +699,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             errors_assume_zero_read_noise=any(
                 photometry.errors_assume_zero_read_noise for photometry in star_photometry
             ),
+            target_crowding=target_crowding(result.stellar_objects, target),
         )
         for gate in gates:
             summary.record_gate(gate)

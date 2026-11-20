@@ -112,11 +112,9 @@ export const useViewerState = (
             if (!row) return;
             const [iso, exposure] = row;
 
-            if (prevSelectedLightRowRef.current !== selectedLightRow) {
-                prevSelectedLightRowRef.current = selectedLightRow;
-                setAutoPanTrigger((n) => n + 1);
-            }
-
+            // Another image of the same target keeps the viewer's zoom and position, so the trigger
+            // is not bumped here; the viewer fits again on its own when the target changes.
+            prevSelectedLightRowRef.current = selectedLightRow;
             setLoading(true);
             setError(null);
             setDisableStretch(false); // Default lights always stretch
@@ -197,13 +195,9 @@ export const useViewerState = (
         let aborted = false;
         const doFetch = async () => {
             if (!externalSelectedFilePath) return;
-            const isDifferentFile = prevFetchedFilePathRef.current !== externalSelectedFilePath;
-            if (isDifferentFile) {
-                prevFetchedFilePathRef.current = externalSelectedFilePath;
-                setImageUrl(null); // Clear old image only when switching to a different file
-                setImageBlob(null);
-                setAutoPanTrigger((n) => n + 1);
-            }
+            // The old image stays on screen until the new file arrives, so the viewer is not
+            // taken apart and keeps its zoom and position for another image of the same target.
+            prevFetchedFilePathRef.current = externalSelectedFilePath;
             setLoading(true);
             setError(null);
             try {

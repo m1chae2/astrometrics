@@ -21,9 +21,12 @@ interface InteractionState {
  * @param containerRef Reference to the parent container element.
  * @param drawnSize Current dimensions of the drawn image on the canvas.
  * @param onLevelChange Optional callback for level adjustment gestures.
- * @param keepViewOnResizeRef While its value is true, a change of the drawn size that keeps the
- *   same shape (a small preview replaced by the full picture) keeps what the user sees: the
- *   zoom is rescaled so the picture covers the same area on screen. Read once per change, then set back to false.
+ * @param keepViewOnResizeRef While its value is true, a change of the drawn size keeps what the user
+ *   sees (a small preview replaced by the full picture, or another picture of the same target): the
+ *   zoom is rescaled so the picture covers the same width on screen, and the point at the center
+ *   of the view stays at the same fraction of the picture. A view still on the automatic fit is
+ *   kept only when the shape stays the same, and otherwise fitted again. Read once per change,
+ *   then set back to false.
  * @returns Object with zoom, pan positions, transform helpers, and pointer event handlers.
  */
 export const useCanvasInteraction = (
@@ -375,9 +378,29 @@ export const useCanvasInteraction = (
         if (keepViewOnResizeRef && hasDimensionChanged) keepViewOnResizeRef.current = false;
         const sameShape = hasDimensionChanged && drawnSize.w > 0 && drawnSize.h > 0 &&
             Math.abs((prev.w / prev.h) / (drawnSize.w / drawnSize.h) - 1) < 0.01;
+        const container = containerRef.current;
+        const viewCanBeKept = keepView && hasDimensionChanged && drawnSize.w > 0 && drawnSize.h > 0 &&
+            (userAdjustedViewRef.current || sameShape);
 
-        if (keepView && sameShape) {
-            // Same picture at a new pixel size: keep it covering the same screen area.
+        if (viewCanBeKept && container && container.clientWidth > 0 && container.clientHeight > 0) {
+            // Another picture of the same thing at a new size: it covers the same screen width, and
+            // the point at the center of the view stays at the same fraction of the picture.
+            const halfWidth = container.clientWidth / 2;
+            const halfHeight = container.clientHeight / 2;
+            const oldZoom = zoomRef.current;
+            const fractionX = ((halfWidth - panRef.current.x) / oldZoom) / prev.w;
+            const fractionY = ((halfHeight - panRef.current.y) / oldZoom) / prev.h;
+            const newZoom = oldZoom * (prev.w / drawnSize.w);
+            zoomRef.current = newZoom;
+            panRef.current.x = halfWidth - fractionX * drawnSize.w * newZoom;
+            panRef.current.y = halfHeight - fractionY * drawnSize.h * newZoom;
+            clampPan();
+            scheduleTransformWrite();
+            setZoom(newZoom);
+            setPanX(panRef.current.x);
+            setPanY(panRef.current.y);
+        } else if (viewCanBeKept && sameShape) {
+            // The container has no size to measure: the same picture at a new pixel size covers the same screen area.
             const newZoom = zoomRef.current * (prev.w / drawnSize.w);
             zoomRef.current = newZoom;
             clampPan();
@@ -425,7 +448,40 @@ export const useCanvasInteraction = (
         return () => observer.disconnect();
     }, [containerRef, drawnSize.w, drawnSize.h, resetView]);
 
+    /**
+     * Tells which point of the picture is at the center of the view now.
+     *
+     * @returns The point as fractions of the drawn width and height from the top-left corner, or
+     *   null while there is no picture or the container has no size.
+     */
+    const getCenterFraction = useCallback((): { x: number; y: number } | null => {
+        const container = containerRef.current;
+        if (!container || drawnSize.w <= 0 || drawnSize.h <= 0 || container.clientWidth === 0 || container.clientHeight === 0) return null;
+        return {
+            x: ((container.clientWidth / 2 - panRef.current.x) / zoomRef.current) / drawnSize.w,
+            y: ((container.clientHeight / 2 - panRef.current.y) / zoomRef.current) / drawnSize.h,
+        };
+    }, [containerRef, drawnSize.w, drawnSize.h]);
+
+    /**
+     * Moves the view, keeping the zoom, so a point of the picture is at the center. Does nothing
+     * while the view is still the automatic fit, because a fit is centered already.
+     *
+     * @param fraction The point, as fractions of the drawn width and height from the top-left corner.
+     */
+    const placeCenter = useCallback((fraction: { x: number; y: number }) => {
+        const container = containerRef.current;
+        if (!container || !userAdjustedViewRef.current || drawnSize.w <= 0 || drawnSize.h <= 0) return;
+        panRef.current.x = container.clientWidth / 2 - fraction.x * drawnSize.w * zoomRef.current;
+        panRef.current.y = container.clientHeight / 2 - fraction.y * drawnSize.h * zoomRef.current;
+        clampPan();
+        scheduleTransformWrite();
+        flushState();
+    }, [containerRef, drawnSize.w, drawnSize.h, clampPan, scheduleTransformWrite, flushState]);
+
     return {
+        getCenterFraction,
+        placeCenter,
         zoom,
         panX,
         panY,

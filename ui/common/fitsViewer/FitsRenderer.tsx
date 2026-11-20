@@ -17,6 +17,9 @@ import { useStarShapes } from './hooks/useStarShapes';
 import { buildDetectionPaths } from './utils/detectionMarkers';
 import { buildShapeLinePaths, describeFrameShapes } from './utils/starShapes';
 import { askWorkerForPixel, pointerToFileCell } from './utils/pixelQuery';
+import { fractionAtSky, skyAtFraction } from './utils/transformUtils';
+import type { Fraction, ImageGeometry } from './utils/transformUtils';
+import type { SkyPosition } from './wcs';
 import { AstrometryOverlayStar } from '../services/astronomyService';
 import { formatStarListLabel } from '../utils/starDisplayFormat';
 import { Skeleton, UpdatingBar } from '../components/Skeleton';
@@ -201,6 +204,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     showOverlay,
     onStarClick,
     selectedStarId,
+    selectedTarget,
     previewBlob = null,
     acceptPrefetch = false,
     showDetections = false,
@@ -237,7 +241,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
 
   const {
     zoom, panX, panY,
-    resetView, zoomBy, zoomToFit, zoomToScale,
+    resetView, zoomBy, zoomToFit, zoomToScale, getCenterFraction, placeCenter,
     onPointerDown, onPointerMove, onPointerUp
   } = useCanvasInteraction(containerRef, drawnSize, undefined, keepViewOnResizeRef);
 
@@ -257,11 +261,61 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   previewShownRef.current = previewDrawn;
   const previewBitmapRef = useRef<ImageBitmap | null>(null);
   previewBitmapRef.current = previewBitmap;
+  // What was drawn last, so a different picture of the same target can take over the view.
+  const lastImageRef = useRef<{ object: ParsedFitsData | ImageBitmap; target: string | null; isMain: boolean; geometry: ImageGeometry } | null>(null);
+  // The point of the picture at the center of the view when it was replaced, and the sky position there.
+  const carryRef = useRef<{ fraction: Fraction; sky: SkyPosition | null } | null>(null);
+  // True when the picture drawn next belongs to another target and starts from a fresh fit.
+  const freshFitRef = useRef(false);
+  const targetRef = useRef(selectedTarget);
+  targetRef.current = selectedTarget;
+  const centerFractionRef = useRef(getCenterFraction);
+  centerFractionRef.current = getCenterFraction;
+
   const handleDrawn = useCallback((drawn: ParsedFitsData | ImageBitmap) => {
-    // Replacing the preview with the full image: keep the zoom and position.
-    if (drawn !== previewBitmapRef.current && previewShownRef.current) keepViewOnResizeRef.current = true;
+    const previous = lastImageRef.current;
+    const isPreview = drawn === previewBitmapRef.current;
+    const target = targetRef.current ?? null;
+    if (previous && previous.object !== drawn) {
+      if (previewShownRef.current && !isPreview) {
+        // Replacing the preview with the full image: keep the zoom and position.
+        keepViewOnResizeRef.current = true;
+      } else if (target !== null && target === previous.target) {
+        // Another picture of the same target: keep the zoom and the point at the center of the view.
+        keepViewOnResizeRef.current = true;
+        const fraction = previous.isMain ? centerFractionRef.current() : null;
+        if (fraction) carryRef.current = { fraction, sky: skyAtFraction(fraction, previous.geometry) };
+      } else {
+        keepViewOnResizeRef.current = false;
+        carryRef.current = null;
+        freshFitRef.current = true;
+      }
+    }
+    const geometry: ImageGeometry = 'imageId' in drawn
+      ? { width: drawn.w, height: drawn.h, header: drawn.header }
+      : { width: drawn.width, height: drawn.height };
+    lastImageRef.current = { object: drawn, target, isMain: !isPreview, geometry };
     setDrawnObject(drawn);
   }, []);
+
+  // After a different picture is drawn: fit again for a new target, or put the sky position
+  // (or else the relative position) that was at the center of the view back at the center.
+  useEffect(() => {
+    const image = lastImageRef.current;
+    if (!drawnObject || !image || image.object !== drawnObject) return;
+    if (freshFitRef.current) {
+      freshFitRef.current = false;
+      resetView();
+    } else if (carryRef.current && image.isMain) {
+      const { fraction, sky } = carryRef.current;
+      const matched = sky ? fractionAtSky(sky, image.geometry) : null;
+      placeCenter(matched ?? fraction);
+      carryRef.current = null;
+    }
+    keepViewOnResizeRef.current = false;
+    // Only a newly drawn picture matters here, not later changes to the view functions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawnObject]);
 
   // A different image starts from a fresh fit.
   useEffect(() => {

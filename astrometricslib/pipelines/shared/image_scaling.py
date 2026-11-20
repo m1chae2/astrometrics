@@ -111,6 +111,49 @@ _AUTOSTRETCH_MINIMUM_POPULATED_PIXELS = TunedParameter(
 # Checked on two real 24-megapixel frames, not tuned further.
 _AUTOSTRETCH_SKY_SAMPLE_COUNT = 500_000
 
+# How many columns apart the two pixels of a noise difference are, when the
+# sky noise is measured (see `measure_sky_background`). Registration
+# resamples the frames, which blends neighbouring pixels and makes their noise
+# partly alike, so two pixels that are too close cancel too much and the noise
+# reads too low. Measured on the M 31 and NGC 7331 L stacks on 2026-11-20 (the
+# same test as the viewer's Linear mode): M 31 read 3.56e-5 at 1 px, 4.28e-5
+# at 3 px and 4.42e-5 at 8 px, so it settles from about 3 px. 4 px is the
+# first spacing past that, close enough that a galaxy's smooth light still
+# cancels in the difference.
+_SKY_NEIGHBOR_SPACING_PIXELS = TunedParameter(
+    name="shared.sky_neighbor_spacing_pixels",
+    default=4,
+    unit="pixels",
+    description="Columns between the two pixels whose difference measures the sky noise.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.METHOD_CHOICE,
+    register_entry="STK-D45",
+)
+
+# A sampled pixel further than this many sky sigmas from the sky level is
+# left out of the sky statistics, and the clipping repeats until nothing more
+# is dropped. 3 sigma drops stars and galaxy light but keeps 99.7% of
+# Gaussian sky. The same value the viewer's Linear mode uses.
+_SKY_CLIP_SIGMAS = TunedParameter(
+    name="shared.sky_clip_sigmas",
+    default=3.0,
+    unit="sigma",
+    description="Sky pixels further than this from the sky level are clipped out of its statistics.",
+    role=ParameterRole.MEASUREMENT,
+    source=ParameterSource.HARDCODED,
+    kind=HardcodedKind.STATISTICS,
+    register_entry="STK-D45",
+)
+
+# The most clipping rounds. Each round drops the bright tail, so the median
+# moves down toward the sky. Five rounds settled on the two real stacks
+# (the viewer's Linear mode uses the same limit).
+_SKY_MAXIMUM_CLIP_ROUNDS = 5
+
+# The fewest sampled pixels that can describe the sky.
+_SKY_MINIMUM_SAMPLE_PIXELS = 25
+
 # The picture is scaled to 0-255 this many pixels at a time. Whole-image
 # arithmetic makes several temporary copies of the image (192 MB each for a
 # 24-megapixel float64 frame); a block this size stays in the processor's
@@ -215,6 +258,90 @@ def measure_sky(arr: np.ndarray, sample_pixels: bool = False) -> tuple[float, fl
     if not sigma > 0.0:
         return None
     return median, sigma, peak
+
+
+def _clipped_median_and_sigma(values: np.ndarray) -> tuple[float, float] | None:
+    """Find the middle and spread of values by repeated sigma clipping.
+
+    Each round takes the median as the middle and the median absolute
+    deviation (scaled to a standard deviation) as the spread, then drops the
+    values further than the clip limit from the middle. It stops when nothing
+    more is dropped.
+
+    Parameters
+    ----------
+    values : `numpy.ndarray`
+        Finite values, 1-D.
+
+    Returns
+    -------
+    middle_and_sigma : `tuple` [`float`, `float`] or `None`
+        The middle and the spread, or `None` when too few values are left or
+        the spread is not above zero.
+    """
+    kept = np.sort(values)
+    clip_sigmas = resolve(_SKY_CLIP_SIGMAS).value
+    middle = sigma = 0.0
+    for _ in range(_SKY_MAXIMUM_CLIP_ROUNDS):
+        if kept.size < _SKY_MINIMUM_SAMPLE_PIXELS:
+            return None
+        middle = float(np.median(kept))
+        sigma = float(np.median(np.abs(kept - middle))) * _MAD_TO_SIGMA
+        if not sigma > 0.0:
+            return None
+        clipped = kept[np.abs(kept - middle) <= clip_sigmas * sigma]
+        if clipped.size == kept.size:
+            break
+        kept = clipped
+    if kept.size < _SKY_MINIMUM_SAMPLE_PIXELS:
+        return None
+    return middle, sigma
+
+
+def measure_sky_background(arr: np.ndarray) -> tuple[float, float] | None:
+    """Measure the empty sky's level and noise, ignoring big bright objects.
+
+    `measure_sky` takes the median of every pixel. When a galaxy covers much
+    of the frame, that median is galaxy light, not sky. This function samples
+    the image on a regular grid and clips out everything that stands above
+    the sky, so a large galaxy or nebula does not raise the level. The noise
+    comes from differences between pixels a few columns apart: smooth light
+    cancels in a difference, so the noise is not widened by the galaxy.
+
+    Parameters
+    ----------
+    arr : `numpy.ndarray`
+        The image, 2-D.
+
+    Returns
+    -------
+    sky : `tuple` [`float`, `float`] or `None`
+        The sky level and the noise (one standard deviation). `None` when the
+        image is not 2-D or the sky cannot be measured (too few usable
+        pixels, or no spread). Pixels smaller than a tiny fraction of the
+        brightest one are numerical dust (empty registration borders) and are
+        left out, as in `measure_sky`.
+    """
+    if arr.ndim != 2 or arr.size == 0:
+        return None
+    peak = float(np.nanmax(arr))
+    if not np.isfinite(peak):
+        return None
+    spacing = int(resolve(_SKY_NEIGHBOR_SPACING_PIXELS).value)
+    step = max(1, int(np.sqrt(arr.size / _AUTOSTRETCH_SKY_SAMPLE_COUNT)))
+    rows = np.arange(step // 2, arr.shape[0], step)
+    columns = np.arange(step // 2, arr.shape[1] - spacing, step)
+    if rows.size == 0 or columns.size == 0:
+        return None
+    sample = arr[np.ix_(rows, columns)].astype(np.float64)
+    partner = arr[np.ix_(rows, columns + spacing)].astype(np.float64)
+    dust = peak * resolve(_AUTOSTRETCH_DUST_FRACTION_OF_PEAK).value
+    usable = np.isfinite(sample) & np.isfinite(partner) & (np.abs(sample) > dust) & (np.abs(partner) > dust)
+    from_sample = _clipped_median_and_sigma(sample[usable])
+    from_differences = _clipped_median_and_sigma((partner - sample)[usable])
+    if from_sample is None or from_differences is None:
+        return None
+    return from_sample[0], from_differences[1] / float(np.sqrt(2.0))
 
 
 def sky_level_for_peak(normalized_median: float, normalized_peak: float, peak_brightness: float) -> float:
@@ -370,8 +497,9 @@ def _autostretch_parameters(
     arr : `numpy.ndarray`
         The image, 2-D or colour.
     sample_pixels : `bool`, optional
-        Measure the sky from a sample of the pixels (see `measure_sky`).
-        Defaults to `False`.
+        Measure the whole-image fallback sky from a sample of the pixels (see
+        `measure_sky`). The sky-only measurement always uses its own grid
+        sample. Defaults to `False`.
 
     Returns
     -------
@@ -381,11 +509,17 @@ def _autostretch_parameters(
         (for instance one that is almost entirely exactly 0). The caller
         should fall back to a plain percentile stretch then.
     """
+    # The empty sky sets the black point and midtones, so a large galaxy that
+    # covers much of the frame does not pull them. If the sky alone cannot be
+    # measured, the whole-image median and spread are used as before.
+    sky_only = measure_sky_background(arr)
     sky = measure_sky(arr, sample_pixels=sample_pixels)
     if sky is None:
         logger.debug("Image background has no measurable spread; using a percentile stretch instead.")
         return None
     median, sigma, peak = sky
+    if sky_only is not None:
+        median, sigma = sky_only
 
     black_point = max(median + resolve(_AUTOSTRETCH_SHADOWS_CLIP_SIGMA).value * sigma, float(np.nanmin(arr)))
     if peak <= black_point:

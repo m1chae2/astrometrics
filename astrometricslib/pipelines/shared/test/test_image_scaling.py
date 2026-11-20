@@ -316,3 +316,61 @@ def test_percentile_stretch_of_a_large_image_is_repeatable() -> None:
 
     assert np.array_equal(first[0], second[0])
     assert first[1:] == second[1:]
+
+
+def _sky_with_optional_galaxy(with_galaxy: bool) -> np.ndarray:
+    """Make a noisy flat sky, with a smooth galaxy over its left half if asked.
+
+    Parameters
+    ----------
+    with_galaxy : `bool`
+        Whether to add the galaxy.
+
+    Returns
+    -------
+    image : `numpy.ndarray`
+        The 600 by 600 image.
+    """
+    rng = np.random.default_rng(3)
+    sky = 0.01 + 2e-4 * rng.standard_normal((600, 600))
+    if with_galaxy:
+        columns = np.arange(600)
+        # A smooth ramp, 0.004 at the left edge falling to 0 at the middle.
+        sky[:, :300] += 0.004 * (1.0 - columns[:300] / 300.0)
+    return sky
+
+
+def test_measure_sky_background_ignores_a_galaxy_over_half_the_frame() -> None:
+    """A galaxy over half the frame leaves the sky level and noise alone."""
+    from astrometricslib.pipelines.shared.image_scaling import measure_sky_background
+
+    bare = measure_sky_background(_sky_with_optional_galaxy(False))
+    galaxy = measure_sky_background(_sky_with_optional_galaxy(True))
+    assert bare is not None and galaxy is not None
+    assert galaxy[0] == pytest.approx(bare[0], abs=0.3 * bare[1])
+    assert galaxy[1] == pytest.approx(bare[1], rel=0.1)
+    assert bare[1] == pytest.approx(2e-4, rel=0.1)
+
+
+def test_autostretch_parameters_ignore_a_galaxy_over_half_the_frame() -> None:
+    """A galaxy over half the frame leaves the Auto Stretch sky unmoved."""
+    bare = ImageScaler.autostretch_parameters(_sky_with_optional_galaxy(False))
+    galaxy = ImageScaler.autostretch_parameters(_sky_with_optional_galaxy(True))
+    assert bare is not None and galaxy is not None
+    assert galaxy.black_point == pytest.approx(bare.black_point, abs=1e-4)
+    # The midtones depend on the brightest pixel, which the galaxy raises. What
+    # must match is where the sky itself lands: the target background.
+    for parameters in (bare, galaxy):
+        normalized_sky = (0.01 - parameters.black_point) / (parameters.white_point - parameters.black_point)
+        landed = _midtones_transfer_function(np.array([normalized_sky]), parameters.midtones)[0]
+        assert landed == pytest.approx(0.25, abs=0.05)
+
+
+def test_autostretch_command_uses_measured_sky() -> None:
+    """A measured sky gives an mtf command with the black point below it."""
+    from astrometricslib.pipelines.stacking.post_processing.stack_preview import _autostretch_command
+
+    command = _autostretch_command(0.2, False, (0.01, 1e-4)).split()
+    assert command[0] == "mtf" and command[3] == "1"
+    assert float(command[1]) == pytest.approx(0.01 - 2.8e-4)
+    assert _autostretch_command(0.2).startswith("autostretch")

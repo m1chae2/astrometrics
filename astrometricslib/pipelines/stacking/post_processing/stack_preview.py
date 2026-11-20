@@ -80,7 +80,11 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
-from astrometricslib.pipelines.shared.image_scaling import AUTOSTRETCH_SHADOWS_CLIP_SIGMA
+from astrometricslib.pipelines.shared.image_scaling import (
+    AUTOSTRETCH_SHADOWS_CLIP_SIGMA,
+    measure_sky_background,
+    midtones_balance_for,
+)
 from astrometricslib.pipelines.shared.stack_preview_path import (
     PREVIEW_JPEG_QUALITY,
     is_preview_path,
@@ -176,8 +180,16 @@ _JPEG_ORIENTATION_COMMAND = "mirrorx"
 _MINIMUM_SIRIL_VERSION = "1.2.0"
 
 
-def _autostretch_command(sky_level: float, linked: bool = False) -> str:
+def _autostretch_command(
+    sky_level: float, linked: bool = False, sky_background: tuple[float, float] | None = None
+) -> str:
     """Write the Siril command that stretches the loaded image.
+
+    Siril's own ``autostretch`` takes the median and spread of every pixel as
+    the sky. When a large galaxy covers much of the frame, those are galaxy
+    light and the sky lands darker than asked. When the empty sky has been
+    measured (`sky_background`), this writes the same stretch as an ``mtf``
+    command (black point and midtones balance) set from that measurement.
 
     Parameters
     ----------
@@ -189,15 +201,56 @@ def _autostretch_command(sky_level: float, linked: bool = False) -> str:
         brightness scale to the same values. That undoes any colour balance
         made on the linear data, so a picture whose colours were calibrated
         needs the shared stretch. Default `False`.
+    sky_background : `tuple` [`float`, `float`], optional
+        The empty sky's level and noise in the image's own units, from
+        `measure_sky_background`. Only for a single-channel image. If `None`
+        (the default), Siril's ``autostretch`` measures the sky itself.
 
     Returns
     -------
     command : `str`
         Siril's ``autostretch`` command with the black-point clip and the
-        sky level written out.
+        sky level written out, or the ``mtf`` command that gives the same
+        stretch from the measured sky.
     """
+    if sky_background is not None:
+        level, noise = sky_background
+        black_point = max(level + AUTOSTRETCH_SHADOWS_CLIP_SIGMA * noise, 0.0)
+        normalized_sky = (level - black_point) / (1.0 - black_point)
+        if 0.0 < normalized_sky < 1.0 and 0.0 < sky_level < 1.0:
+            midtones = midtones_balance_for(normalized_sky, sky_level)
+            return f"mtf {black_point:.9f} {midtones:.9f} 1"
     flag = "-linked " if linked else ""
     return f"autostretch {flag}{AUTOSTRETCH_SHADOWS_CLIP_SIGMA} {sky_level:.3f}"
+
+
+def sky_background_for_file(path: str, data_edited_first: bool = False) -> tuple[float, float] | None:
+    """Measure the empty sky of a stack's linear image for the stretch.
+
+    Parameters
+    ----------
+    path : `str`
+        The FITS image the stretch will be applied to.
+    data_edited_first : `bool`, optional
+        Whether a Siril step that changes the pixel values (Remove Green
+        Noise) runs before the stretch, so a measurement made here would not
+        match what the stretch sees. Default `False`.
+
+    Returns
+    -------
+    sky_background : `tuple` [`float`, `float`] or `None`
+        The sky level and noise, or `None` when Siril should measure the sky
+        itself: a colour image, a step that edits the data first, a file that
+        cannot be read, or a sky that cannot be measured.
+    """
+    if data_edited_first:
+        return None
+    try:
+        data = AstrometricsImage(path).data
+    except (OSError, ValueError, KeyError, NotFoundError, StorageError) as error:
+        logger.debug("Could not read '%s' to measure its sky: %s", path, error)
+        return None
+    return measure_sky_background(np.asarray(data))
 
 
 # Siril's Remove Green Noise command. With no options it uses the "average
@@ -299,6 +352,7 @@ def build_preview_script(
     sky_level: float,
     remove_green: bool = False,
     linked: bool = False,
+    sky_background: tuple[float, float] | None = None,
 ) -> list[str]:
     """Write the Siril commands that stretch one stack and save it.
 
@@ -324,6 +378,10 @@ def build_preview_script(
         Whether the colour channels share one stretch (see
         `_autostretch_command`). Default `False`.
 
+    sky_background : `tuple` [`float`, `float`], optional
+        The empty sky's level and noise (see `_autostretch_command`).
+        Default `None`.
+
     Returns
     -------
     commands : `list` [`str`]
@@ -333,7 +391,7 @@ def build_preview_script(
         f"requires {_MINIMUM_SIRIL_VERSION}",
         f'load "{stacked_file_name}"',
         *([_REMOVE_GREEN_COMMAND] if remove_green else []),
-        _autostretch_command(sky_level, linked),
+        _autostretch_command(sky_level, linked, sky_background),
         f'save "{_PROCESSED_STEM}"',
         _JPEG_ORIENTATION_COMMAND,
         f'savejpg "{preview_stem}" {PREVIEW_JPEG_QUALITY}',
@@ -386,6 +444,7 @@ def build_stretch_script(
     sky_level: float,
     remove_green: bool = False,
     linked: bool = False,
+    sky_background: tuple[float, float] | None = None,
 ) -> list[str]:
     """Write the Siril commands that stretch an image and save it as FITS.
 
@@ -410,6 +469,10 @@ def build_stretch_script(
         Whether the colour channels share one stretch (see
         `_autostretch_command`). Default `False`.
 
+    sky_background : `tuple` [`float`, `float`], optional
+        The empty sky's level and noise (see `_autostretch_command`).
+        Default `None`.
+
     Returns
     -------
     commands : `list` [`str`]
@@ -419,7 +482,7 @@ def build_stretch_script(
         f"requires {_MINIMUM_SIRIL_VERSION}",
         f'load "{source_file_name}"',
         *([_REMOVE_GREEN_COMMAND] if remove_green else []),
-        _autostretch_command(sky_level, linked),
+        _autostretch_command(sky_level, linked, sky_background),
         f'save "{stretched_stem}"',
         "close",
     ]
@@ -833,7 +896,14 @@ def _stretch_with_starnet(
     try:
         stretched = run_preview_script(
             scratch,
-            build_stretch_script(STARLESS_NAME, "starless_stretched", level, remove_green, linked),
+            build_stretch_script(
+                STARLESS_NAME,
+                "starless_stretched",
+                level,
+                remove_green,
+                linked,
+                sky_background_for_file(os.path.join(scratch, STARLESS_NAME), remove_green),
+            ),
             siril_executable,
         )
     except (OSError, subprocess.SubprocessError) as error:
@@ -1043,11 +1113,25 @@ def _picture_script(
         logger.info("Preview steps: %s.", "; ".join(steps))
         if steps_log is not None:
             steps_log.extend(steps)
-        return build_preview_script(name, "preview", choice.sky_level, remove_green, linked)
+        return build_preview_script(
+            name,
+            "preview",
+            choice.sky_level,
+            remove_green,
+            linked,
+            sky_background_for_file(os.path.join(scratch, name), remove_green),
+        )
     if not stretched_by_starnet:
         stretched = run_preview_script(
             scratch,
-            build_stretch_script(name, "stretched", choice.sky_level, remove_green, linked),
+            build_stretch_script(
+                name,
+                "stretched",
+                choice.sky_level,
+                remove_green,
+                linked,
+                sky_background_for_file(os.path.join(scratch, name), remove_green),
+            ),
             siril_executable,
         )
         if not stretched or not os.path.isfile(os.path.join(scratch, "stretched.fits")):

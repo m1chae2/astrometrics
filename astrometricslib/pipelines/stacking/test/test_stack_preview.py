@@ -349,7 +349,7 @@ def test_the_denoise_runs_on_the_stretched_copy_after_graxpert(
     assert Path(programs.flatten_calls[0][1]).name == "stack.fits"
     stretch_script, picture_script = programs.siril_calls[0][1], programs.siril_calls[1][1]
     assert 'load "flat.fits"' in stretch_script
-    assert any(command.startswith("autostretch") for command in stretch_script)
+    assert any(command.startswith(("autostretch", "mtf")) for command in stretch_script)
     executable, denoise_input, denoise_output, strength = programs.denoise_calls[0]
     assert executable == "/opt/cc/denoise"
     assert Path(denoise_input).name == "stretched.fits"
@@ -386,7 +386,7 @@ def test_without_cosmic_clarity_one_siril_script_stretches_and_saves(
 
     assert write_stack_preview(str(stack)) is not None
     assert len(programs.siril_calls) == 1
-    assert any(command.startswith("autostretch") for command in programs.siril_calls[0][1])
+    assert any(command.startswith(("autostretch", "mtf")) for command in programs.siril_calls[0][1])
     assert programs.denoise_calls == []
 
 

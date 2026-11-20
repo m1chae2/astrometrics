@@ -100,6 +100,7 @@ UNUSED_DECISION_METRICS = {
     "frame.notice_synthetic": _NOTICE_ROW_REASON,
     "stacking.notice_single_frame_stack": _NOTICE_ROW_REASON,
     "stacking.notice_stack_cropped": _NOTICE_ROW_REASON,
+    "stacking.notice_stack_turned": _NOTICE_ROW_REASON,
     "frame.sky_unevenness": (
         "evidence of a set-aside frame, cited by the target report inputs next to the star count; the "
         "quarantine step judges it, no rule of this table compares it with a limit"
@@ -117,9 +118,9 @@ UNUSED_DECISION_METRICS = {
     "stacking.notice_camera_without_profile": _NOTICE_ROW_REASON,
     "astrometry.notice_camera_without_profile": _NOTICE_ROW_REASON,
     "photometry.notice_camera_without_profile": _NOTICE_ROW_REASON,
-    "spectroscopy.notice_camera_without_profile": _NOTICE_ROW_REASON,
     "photometry.notice_session_without_comparison_stars": _NOTICE_ROW_REASON,
     "photometry.notice_logged_warnings": _NOTICE_ROW_REASON,
+    "spectroscopy.notice_camera_without_profile": _NOTICE_ROW_REASON,
     "spectroscopy.notice_stars_below_feature_limit": (
         "issue 97: counts the extracted spectra too faint for feature detection and classification "
         "(SPE-31), so a job can list them as a warning. No rule reads it yet; the pipeline-quality view "

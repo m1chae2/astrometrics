@@ -207,7 +207,10 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
     )
     from astrometricslib.pipelines.shared.applied_camera_profile import record_camera_profile
     from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
-    from astrometricslib.pipelines.stacking.post_processing.record_quality import stacking_notice_measurements
+    from astrometricslib.pipelines.stacking.post_processing.record_quality import (
+        stack_turned_measurement,
+        stacking_notice_measurements,
+    )
 
     context = PipelineRunContext(
         "M 99", pipeline, "1.0.0", "job-1", "job-1", datetime(2026, 11, 1, tzinfo=UTC)
@@ -237,7 +240,10 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
     summary.quality_processing_applied = False
     record_camera_profile(summary, "Acme Imager 9000")
     if pipeline == "stacking":
-        return [*rows, *stacking_notice_measurements(summary, context, "M99_Stacked.fits")]
+        turned_row = stack_turned_measurement(
+            context, "M99_Stacked.fits", 180, "Turned 180 degrees so north is near the top."
+        )
+        return [*rows, *stacking_notice_measurements(summary, context, "M99_Stacked.fits"), turned_row]
     from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_measurement
 
     notice_rows = [camera_without_profile_measurement("Acme Imager 9000", context, context.run_subject())]

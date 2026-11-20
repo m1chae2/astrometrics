@@ -246,6 +246,7 @@ STACKING_ABANDONED_AFTER_S = "stacking.abandoned_after_s"
 STACKING_NOTICE_FRAMES_MOVED_TO_EXCLUDED = "stacking.notice_frames_moved_to_excluded"
 STACKING_NOTICE_SINGLE_FRAME_STACK = "stacking.notice_single_frame_stack"
 STACKING_NOTICE_STACK_CROPPED = "stacking.notice_stack_cropped"
+STACKING_NOTICE_STACK_TURNED = "stacking.notice_stack_turned"
 STACKING_NOTICE_EXPOSURE_GROUP_LEFT_OUT = "stacking.notice_exposure_group_left_out"
 STACKING_NOTICE_FLAT_CALIBRATION_NOTE = "stacking.notice_flat_calibration_note"
 STACKING_NOTICE_PREVIEW_STEP_SKIPPED = "stacking.notice_preview_step_skipped"
@@ -3111,6 +3112,17 @@ _NOTICE_METRICS: tuple[MetricSpec, ...] = (
         "The share of the image area the crop removed, from 0 to 1.",
         _NOTICE_COMPUTED_BY,
         "A cropped stack is smaller than its frames, so a person should know which edges went and why.",
+    ),
+    notice_spec(
+        STACKING_NOTICE_STACK_TURNED,
+        Checkpoint.STACKING,
+        SubjectLevel.STACK,
+        "deg",
+        "Whether the saved stack was turned by a quarter turn so that north is near the top.",
+        "The degrees the stack was turned: 90, 180 or 270.",
+        f"{_STACKING}.post_processing.record_quality.stack_turned_measurement",
+        "A turned stack no longer has the pixel grid of Siril's registration reference frame, so a person "
+        "comparing it with a frame should know it was turned.",
     ),
     notice_spec(
         STACKING_NOTICE_EXPOSURE_GROUP_LEFT_OUT,

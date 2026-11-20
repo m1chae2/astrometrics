@@ -231,7 +231,10 @@ def _stack_frames_guarded(
             # needs one for the viewer's star names.
             _save_stack_plate_solution(run, run.stacked_path)
             _record_stack_star_shapes(run, run.stacked_path, only_if_missing=True)
-            _remake_preview_if_out_of_date(run)
+            was_turned = _turn_stack_north_up(run, run.stacked_path)
+            _remake_preview_if_out_of_date(
+                run, "the stack was turned so that north is near the top" if was_turned else None
+            )
             finish_stages()
             return run.stacked_path
         begin_stage(
@@ -650,6 +653,8 @@ def _finish_made_stack(run: StackRun, stacked_path: str, summary: StackQualitySu
     # Before the preview, so the new stretched FITS the preview writes copies
     # the solution from the stack's header.
     _save_stack_plate_solution(run, stacked_path)
+    # The quality rows above are measured on the stack as Siril registered it.
+    _turn_stack_north_up(run, stacked_path)
     begin_stage(PREVIEW_STAGE, "making the preview picture (GraXpert, Cosmic Clarity, star toning)")
     _make_preview(run, stacked_path)  # run.preview_path
     _save_stack_inputs(run, stacked_path)
@@ -729,6 +734,95 @@ def _save_stack_plate_solution(run: StackRun, stacked_path: str | None) -> None:
     if same_grid and not header_is_plate_solved(processed_header):
         write_wcs_to_fits_header(processed_path, wcs)
         logger.info("Saved the plate solution in the viewer's copy %s.", os.path.basename(processed_path))
+
+
+def _turn_stack_north_up(run: StackRun, stacked_path: str | None) -> bool:
+    """Save the stack turned so that north is near the top.
+
+    Siril registers to one reference frame, so the stack's north can be at the
+    bottom (after a meridian flip) or at a side. The turn moves pixels only
+    (no resampling), and it moves the stack's plate solution with them (see
+    `quarter_turn`). The stack's viewer copy and rejection map are turned too.
+    The registration record keeps the turn, so the later steps that match the
+    stack with the registered frames can undo it. The turn is recorded in the
+    stack's header (``QTURN``), as a notice row and in ``run.quarter_turn``.
+
+    This runs for a stack that was just made, after its quality rows (which
+    are measured on the stack as registered) and its plate solution, and for
+    one that was up to date and skipped, so an older stack is turned once on
+    the next run. A stack with no plate solution, a spectral stack and a stack
+    that has already been checked are left alone. A failure is logged and
+    never fails the stack.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run.
+    stacked_path : `str` or `None`
+        The stack, made or kept. Nothing happens without one.
+
+    Returns
+    -------
+    turned : `bool`
+        `True` when the stack file was turned now, so its picture must be made
+        again.
+    """
+    if run.has_spectral or not stacked_path:
+        return False
+    from astrometricslib.pipelines.shared.registration_record import record_quarter_turn
+    from astrometricslib.pipelines.stacking.post_processing.quarter_turn import apply_quarter_turn
+
+    result = apply_quarter_turn(stacked_path)
+    if result is None:
+        return False
+    run.quarter_turn = result
+    if result.degrees == 0:
+        return False
+    record_quarter_turn(stacked_path, result.degrees)
+    _record_stack_turn_notice(run, stacked_path, result.degrees, result.reason)
+    return True
+
+
+def _record_stack_turn_notice(run: StackRun, stacked_path: str, degrees: int, reason: str) -> None:
+    """Store the notice row that says the stack was turned.
+
+    A failure is logged and never fails the stack.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run.
+    stacked_path : `str`
+        The stack that was turned.
+    degrees : `int`
+        The turn applied.
+    reason : `str`
+        The turn's own sentence.
+    """
+    if run.measured_at is None:
+        return
+    from astrometricslib.models.quality.quality_summary import STACKING_PIPELINE_VERSION
+    from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
+        PipelineRunContext,
+        record_run_measurements,
+    )
+    from astrometricslib.pipelines.stacking.post_processing.record_quality import stack_turned_measurement
+
+    context = PipelineRunContext.from_options(
+        run.target.id,
+        "stacking",
+        STACKING_PIPELINE_VERSION,
+        {"job_id": run.job_id, "measured_at": run.measured_at},
+    )
+    if context is None:
+        return
+    try:
+        row = stack_turned_measurement(context, os.path.basename(stacked_path), degrees, reason)
+        record_run_measurements(
+            [row], config=None if run.quality_recording is None else run.quality_recording.configuration
+        )
+    except Exception:  # a by-product of the stack: no failure here may fail it
+        logger.exception("The turn notice of the stack %s was not stored", stacked_path)
 
 
 def _point_target_at_stack(run: StackRun, stacked_path: str) -> None:
@@ -923,7 +1017,7 @@ def _make_preview(run: StackRun, stacked_path: str) -> None:
         record_preview_as_processed_image(run.target, run.has_spectral, stacked_path, run.preview_path)
 
 
-def _remake_preview_if_out_of_date(run: StackRun) -> None:
+def _remake_preview_if_out_of_date(run: StackRun, forced_reason: str | None = None) -> None:
     """Skip the stages after an up-to-date stack; remake its picture if needed.
 
     The stack is kept. Its preview picture is made again when it is missing
@@ -935,10 +1029,13 @@ def _remake_preview_if_out_of_date(run: StackRun) -> None:
     ----------
     run : `StackRun`
         The run, with an up-to-date stack at ``run.stacked_path``.
+    forced_reason : `str`, optional
+        A reason to make the picture again whatever its settings say, such as
+        a stack that was just turned.
     """
     from astrometricslib.pipelines.stacking.post_processing.stack_preview import preview_is_out_of_date
 
-    reason = preview_is_out_of_date(run.stacked_path)
+    reason = forced_reason or preview_is_out_of_date(run.stacked_path)
     if reason is None:
         skip_remaining_stages("the stack is already up to date")
         return

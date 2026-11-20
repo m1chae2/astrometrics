@@ -174,6 +174,32 @@ def header_is_plate_solved(header: fits.Header) -> bool:
     return bool(header.get(PLATE_SOLVED_KEYWORD, False)) or "A_ORDER" in header
 
 
+def put_wcs_in_header(header: fits.Header, wcs: WCS, *, mark_plate_solved: bool) -> None:
+    """Replace the sky-map keywords of a header in memory.
+
+    The old sky-map keywords are deleted first (see `write_wcs_to_fits_header`
+    for why), then the keywords of ``wcs`` are written, with the SIP
+    distortion terms.
+
+    Parameters
+    ----------
+    header : `astropy.io.fits.Header`
+        The header to change.
+    wcs : `astropy.wcs.WCS`
+        The sky map to store.
+    mark_plate_solved : `bool`
+        Whether to write `PLATE_SOLVED_KEYWORD`.
+    """
+    for keyword in [key for key in header if _STALE_WCS_KEYWORD_PATTERN.match(key)]:
+        del header[keyword]
+    for card in wcs.to_header(relax=True).cards:
+        if not card.keyword:
+            continue
+        header[card.keyword] = (card.value, card.comment)
+    if mark_plate_solved:
+        header[PLATE_SOLVED_KEYWORD] = (True, "sky map written by a plate solve")
+
+
 def write_wcs_to_fits_header(path: str, wcs: WCS) -> None:
     """Save a solved sky map (WCS) into a FITS file's header.
 
@@ -216,13 +242,7 @@ def write_wcs_to_fits_header(path: str, wcs: WCS) -> None:
             changed : `bool`
                 Always `True`, because the header is changed.
             """
-            for keyword in [key for key in header if _STALE_WCS_KEYWORD_PATTERN.match(key)]:
-                del header[keyword]
-            for card in wcs.to_header(relax=True).cards:
-                if not card.keyword:
-                    continue
-                header[card.keyword] = (card.value, card.comment)
-            header[PLATE_SOLVED_KEYWORD] = (True, "sky map written by a plate solve")
+            put_wcs_in_header(header, wcs, mark_plate_solved=True)
             return True
 
         update_first_header(path, _write_solved_wcs)

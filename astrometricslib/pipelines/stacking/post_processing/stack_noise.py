@@ -169,6 +169,11 @@ from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
     is_plate_solve_wcs_source,
     setup_key,
 )
+from astrometricslib.pipelines.stacking.post_processing.quarter_turn import (
+    read_quarter_turn,
+    registration_grid_header,
+    registration_grid_wcs,
+)
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     MAD_SIGMA_ERROR_FACTOR,
     MAD_TO_SIGMA,
@@ -1591,7 +1596,14 @@ class _StackPlateSolve:
             Why there is none. Empty when there is one.
         """
         if self._answer is None:
-            self._answer = _plate_solve_stack_wcs(self._stack_path, self._drivers)
+            solved, reason, source = _plate_solve_stack_wcs(self._stack_path, self._drivers)
+            header = read_header(self._stack_path)
+            degrees = read_quarter_turn(header) or 0
+            if solved is not None and degrees:
+                # The stack file was turned after it was registered, and the
+                # measurement reads it as registered.
+                solved = registration_grid_wcs(solved, degrees, int(header["NAXIS1"]), int(header["NAXIS2"]))
+            self._answer = (solved, reason, source)
         return self._answer[0], self._answer[1]
 
 
@@ -2240,7 +2252,7 @@ def measure_noise_in_plane(
     window = None
     if covered_mask is not None:
         window = _covered_window(covered_mask, plane.shape, crop_offset)
-    stack_header = read_header(stack_path)
+    stack_header = registration_grid_header(read_header(stack_path))
     plate_solve = _StackPlateSolve(stack_path, drivers)
     choice = _choose_wcs(
         plane, stack_header, reference_frame_path, member_frame_paths, crop_offset, plate_solve

@@ -26,7 +26,7 @@ import json
 import logging
 import os
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -37,6 +37,7 @@ __all__ = [
     "build_registration_record",
     "is_already_registered",
     "read_registration_record",
+    "record_quarter_turn",
     "registration_record_path",
     "write_registration_record",
 ]
@@ -79,6 +80,13 @@ class RegistrationRecord:
         Whether the stack is spectral. A spectral stack is lined up by shift
         only, on the zero-order star, so its transforms are not those of an
         image.
+    quarter_turn_degrees : `int`
+        How far the saved stack file was turned (0, 90, 180 or 270 degrees,
+        counterclockwise on the screen with the first row at the top) after
+        the registration, so that north is near the top. The transforms, the
+        trim and the stack's pixels in this record are all on the grid before
+        the turn; use `to_registration_grid` to move a pixel of the saved
+        stack there.
     """
 
     light_paths: tuple[str, ...]
@@ -87,6 +95,7 @@ class RegistrationRecord:
     crop_offset: tuple[int, int]
     reference_frame: str | None
     is_spectral: bool = False
+    quarter_turn_degrees: int = 0
 
 
 def _is_identity(homography: Sequence[float]) -> bool:
@@ -215,6 +224,7 @@ def write_registration_record(stack_path: str, record: RegistrationRecord) -> No
         "crop_offset": list(record.crop_offset),
         "reference_frame": record.reference_frame,
         "is_spectral": record.is_spectral,
+        "quarter_turn_degrees": record.quarter_turn_degrees,
     }
     path = registration_record_path(stack_path)
     try:
@@ -250,6 +260,8 @@ def read_registration_record(stack_path: str) -> RegistrationRecord | None:
         crop_offset = (int(document["crop_offset"][0]), int(document["crop_offset"][1]))
         reference = document["reference_frame"]
         is_spectral = bool(document["is_spectral"])
+        # Older records have no turn: the stack was saved as registered.
+        quarter_turn_degrees = int(document.get("quarter_turn_degrees", 0))
     except (OSError, ValueError, KeyError, IndexError, TypeError) as error:
         logger.debug("No usable registration record at %s: %s", path, error)
         return None
@@ -258,5 +270,29 @@ def read_registration_record(stack_path: str) -> RegistrationRecord | None:
     ):
         return None
     return RegistrationRecord(
-        paths, homographies, included, crop_offset, None if reference is None else str(reference), is_spectral
+        paths,
+        homographies,
+        included,
+        crop_offset,
+        None if reference is None else str(reference),
+        is_spectral,
+        quarter_turn_degrees,
     )
+
+
+def record_quarter_turn(stack_path: str, degrees: int) -> None:
+    """Note in a stack's registration record that the stack file was turned.
+
+    Nothing happens when the stack has no readable record. A failure to write
+    is logged and never raised.
+
+    Parameters
+    ----------
+    stack_path : `str`
+        The stack.
+    degrees : `int`
+        The turn applied to the saved stack: 0, 90, 180 or 270.
+    """
+    record = read_registration_record(stack_path)
+    if record is not None and record.quarter_turn_degrees != degrees:
+        write_registration_record(stack_path, replace(record, quarter_turn_degrees=degrees))

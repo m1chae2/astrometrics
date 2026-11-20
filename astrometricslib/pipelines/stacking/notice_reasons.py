@@ -11,6 +11,7 @@ __all__ = [
     "frames_moved_to_excluded_reason",
     "single_frame_stack_reason",
     "stack_cropped_reason",
+    "stack_turned_reason",
     "uncovered_flat_calibration_issues",
 ]
 
@@ -124,3 +125,20 @@ def stack_cropped_reason(crop_reason: str) -> str:
         The sentence.
     """
     return f"stack cropped at the edges: {crop_reason}"
+
+
+def stack_turned_reason(turn_reason: str) -> str:
+    """Write the sentence for a stack that was turned by a quarter turn.
+
+    Parameters
+    ----------
+    turn_reason : `str`
+        The turn's own reason, with the degrees turned and where the top of
+        the picture pointed before and after.
+
+    Returns
+    -------
+    reason : `str`
+        The sentence.
+    """
+    return f"stack turned so that north is near the top: {turn_reason}"

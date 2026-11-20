@@ -354,7 +354,9 @@ def _saved_centers_fit(target: Any, image_path: str | None, reference_path: str 
 
     The centers carry no tag of the image they were measured on. They are
     trusted only when the image is the target's current stack and that is
-    the target's only stack, so no other image could have supplied them.
+    the target's only stack, so no other image could have supplied them. A
+    stack saved turned by a quarter turn (header card ``QTURN`` not 0) is not
+    trusted: the centers may have been saved before the turn.
 
     Returns
     -------
@@ -365,6 +367,14 @@ def _saved_centers_fit(target: Any, image_path: str | None, reference_path: str 
     if not image_path:
         return True
     if image_path != reference_path:
+        return False
+    # The centers were saved on the stack's pixels before it was turned by a
+    # quarter turn to put north near the top, so they do not fit the turned
+    # file. The stars are then placed from the plate solution instead.
+    try:
+        if read_header(image_path).get("QTURN"):
+            return False
+    except FITS_READ_ERRORS:
         return False
     stacking = getattr(target, "stacking", None)
     configurations = getattr(stacking, "stacks_by_configuration", None) or {}

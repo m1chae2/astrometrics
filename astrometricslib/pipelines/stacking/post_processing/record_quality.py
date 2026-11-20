@@ -98,6 +98,7 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_NOTICE_FRAMES_MOVED_TO_EXCLUDED,
     STACKING_NOTICE_SINGLE_FRAME_STACK,
     STACKING_NOTICE_STACK_CROPPED,
+    STACKING_NOTICE_STACK_TURNED,
     STACKING_POINT_SOURCE_DEPTH_5SIGMA_MAG,
     STACKING_REGISTRATION_REFERENCE_STAR_COUNT,
     STACKING_REJECTED_PIXEL_FRACTION,
@@ -112,6 +113,7 @@ from astrometricslib.pipelines.stacking.notice_reasons import (
     frames_moved_to_excluded_reason,
     single_frame_stack_reason,
     stack_cropped_reason,
+    stack_turned_reason,
     uncovered_flat_calibration_issues,
 )
 from astrometricslib.pipelines.stacking.post_processing.aperture_size_noise import ApertureSizeNoiseOutcome
@@ -179,6 +181,7 @@ __all__ = [
     "record_stacking_quality",
     "size_exponent_measurements",
     "stack_depth_of",
+    "stack_turned_measurement",
     "stacking_measurements",
     "stacking_notice_measurements",
 ]
@@ -451,6 +454,41 @@ def abandoned_stack_measurements(
             ),
         )
     ]
+
+
+def stack_turned_measurement(
+    context: PipelineRunContext, stack_file_name: str, degrees: int, turn_reason: str
+) -> QualityMeasurement:
+    """Build the row that says a stack was saved turned by a quarter turn.
+
+    The row is stored apart from the stack's other rows, because the turn is
+    made after them (see `quarter_turn.apply_quarter_turn`), and it is also
+    made for an up-to-date stack that is turned later.
+
+    Parameters
+    ----------
+    context : `PipelineRunContext`
+        The run's shared facts.
+    stack_file_name : `str`
+        The stack's file name.
+    degrees : `int`
+        The turn applied: 90, 180 or 270.
+    turn_reason : `str`
+        The turn's own sentence.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        A notice row whose value is the degrees turned.
+    """
+    return notice_measurement(
+        _SPEC_BY_NAME[STACKING_NOTICE_STACK_TURNED],
+        float(degrees),
+        context,
+        context.stack_subject(stack_file_name),
+        stack_turned_reason(turn_reason),
+        action_taken=f"stack turned {degrees} degrees so north is near the top",
+    )
 
 
 def stacking_notice_measurements(

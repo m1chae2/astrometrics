@@ -1099,7 +1099,7 @@ def estimate_gaia_magnitude_limit(stellar_objects: list[StellarObject]) -> float
 
 
 def find_unique_stars(
-    detector: SourceDetector, data: np.ndarray, is_color_frame: bool = False
+    detector: SourceDetector, data: np.ndarray, is_color_frame: bool = False, with_radius: bool = True
 ) -> tuple[list[dict], list[dict]]:
     """Find the stars of an image the way the astrometry run does.
 
@@ -1119,6 +1119,10 @@ def find_unique_stars(
         The image to search, two-dimensional.
     is_color_frame : `bool`, optional
         True if the image started as a color image.
+    with_radius : `bool`, optional
+        Whether to measure each star's ``radius_px``. The run reads it. The
+        viewer's overlay does not, and skipping it saves most of the time.
+        The stars, their positions and their fluxes are the same either way.
 
     Returns
     -------
@@ -1130,7 +1134,7 @@ def find_unique_stars(
     if is_color_frame and data is not None:
         bin_factor = resolve(_COLOR_DETECTION_BIN_FACTOR).value
         binned = _block_average(data, bin_factor)
-        sources = detector.detect(binned)
+        sources = detector.detect(binned, with_radius=with_radius)
         unique_sources = detector.deduplicate(sources)
         _rescale_source_centroids(sources, bin_factor)
         _rescale_source_centroids(unique_sources, bin_factor)
@@ -1148,7 +1152,7 @@ def find_unique_stars(
         logger.debug("Sizing the detection kernel from the measured blob width: %.2fpx", blob_width)
         detector.fwhm = blob_width
 
-    sources = detector.detect(data)
+    sources = detector.detect(data, with_radius=with_radius)
     unique_sources = detector.deduplicate(sources)
     return sources, unique_sources
 
@@ -1186,6 +1190,10 @@ class StarIdentifier:
         self.simbad: SimbadDriver = drivers.simbad_or_default()
         self.stellar_objects: list[StellarObject] = []
         self.sources_detected: int = 0
+        # The stars the last `process_image` call found, every one of them
+        # (before the cap on how many are named). The astrometry run saves
+        # them next to a stack for the viewer's Detections overlay.
+        self.detected_unique_sources: list[dict] = []
         self.solve_attempted: bool = False
         # The brightest pixel of the last image processed, used to tell a real
         # star from a noise detection (see `_select_target_star`).
@@ -1518,6 +1526,7 @@ class StarIdentifier:
         sources, unique_sources = self.detect_stars(data, is_color_frame=is_color_frame)
         logger.debug("Detected %s sources, %s unique.", len(sources), len(unique_sources))
         self.sources_detected = len(unique_sources)
+        self.detected_unique_sources = list(unique_sources)
         self.catalog_match_separations_arcsec = []
         self.plate_solve_fit_residual_rms_arcsec = None
         self.plate_solve_matched_star_count = None

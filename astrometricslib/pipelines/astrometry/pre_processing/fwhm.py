@@ -652,7 +652,7 @@ def measure_blob_width_from_data(data: np.ndarray, n_stars: int | None = None) -
     maximum_elongation = resolve(FWHM_MEASUREMENT_MAX_ELONGATION).value
     box = resolve(BLOB_WIDTH_BOX_RADIUS_PX).value
 
-    sources = SourceDetector().detect(data)
+    sources = SourceDetector().detect(data, with_radius=False)
     if not sources:
         return None
 

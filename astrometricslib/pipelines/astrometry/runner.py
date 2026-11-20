@@ -271,6 +271,33 @@ def _measure_star_fwhm_px(image: Any, target: Any = None) -> float | None:
         return None
 
 
+def _save_stack_detections(path: str, star_identifier: Any) -> None:
+    """Save the stars the run found on a stack, for the viewer's overlay.
+
+    The list goes next to the stack (see `save_run_detections`), so the
+    Detections overlay opens at once. A failure is ignored: the viewer finds
+    the stars itself when there is no file.
+
+    Parameters
+    ----------
+    path : `str`
+        The analyzed image.
+    star_identifier : `StarIdentifier`
+        The identifier that did the run; it holds the stars it found.
+    """
+    from astrometricslib.pipelines.astrometry.processing.detections import save_run_detections
+
+    sources = getattr(star_identifier, "detected_unique_sources", None)
+    if not path or not isinstance(sources, list) or not sources:
+        return
+    save_run_detections(
+        path,
+        sources,
+        float(star_identifier.detector.fwhm),
+        bool(getattr(star_identifier, "_detected_on_binned_copy", False)),
+    )
+
+
 class AstrometryPipelineAdapter(AnalysisPipeline):
     """Adapts `AstrometryPipeline` to the shared `AnalysisPipeline`."""
 
@@ -354,6 +381,8 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
 
         _fill_target_position(target, context, request.options.get("drivers"))
         _write_solved_wcs_to_fits_header(path, context)
+        # After the header write, so the saved file's stamp is the final one.
+        _save_stack_detections(path, getattr(pipeline, "star_identifier", None))
 
         context.stellar_objects, _ = record_pipeline_stars(
             context.stellar_objects,

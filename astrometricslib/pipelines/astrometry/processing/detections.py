@@ -4,7 +4,16 @@ The viewer's Detections overlay needs the stars the run would find in an
 image, computed now from the pixels, so it works on every image without
 running the analysis again. This module reads one file and calls
 `find_unique_stars`, the same function `StarIdentifier.detect_stars` calls,
-so the two cannot drift apart. It changes nothing on disk.
+so the two cannot drift apart. The viewer never reads a star's own radius,
+so the finder is asked to skip it, which is most of the time.
+
+A finished list is kept so the next request is instant. The astrometry run
+saves its list next to a stack (``<stack>_detections.json``, derived data in
+the stacks folder). Any other image, or a stack with no such file, gets a copy
+in the app's cache folder. Each copy carries the file's size and modification
+time and the finder's settings. It is used only while all of them still match,
+so a changed file or a changed setting always finds the stars again. Nothing
+is ever written next to a raw frame.
 
 The photometry circle is sized from this image's own star width, measured
 first the way a run measures it, so it fits the stars on screen whichever
@@ -14,6 +23,12 @@ builds it: for a mono image it sizes its kernel from the image's measured
 blob width, and for a color image it uses the setup's width.
 """
 
+import hashlib
+import json
+import logging
+import os
+from typing import Any
+
 import numpy as np
 
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d
@@ -21,13 +36,40 @@ from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.parameter_context import setup_parameter_context
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.paths import scratch_directory
 from astrometricslib.foundation.run_bases import StarWidthEstimator, record_star_width, star_width_on_scale
 from astrometricslib.models.quality.detections import DetectionsMeasurement, StarDetection
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
-from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
-from astrometricslib.pipelines.astrometry.processing.star_identifier import find_unique_stars
+from astrometricslib.pipelines.astrometry.pre_processing.source_detection import (
+    SOURCE_DETECTOR_KERNEL_FWHM_PX,
+    SOURCE_DETECTOR_ROUNDNESS_RANGE,
+    SourceDetector,
+)
+from astrometricslib.pipelines.astrometry.processing.star_identifier import (
+    _COLOR_DETECTION_BIN_FACTOR,
+    find_unique_stars,
+)
+from astrometricslib.pipelines.shared.quality.star_profile_fitting import STAR_FINDER_THRESHOLD_SIGMA
 
-__all__ = ["find_star_centers", "measure_detections_in_file"]
+__all__ = [
+    "DETECTIONS_SIDECAR_SUFFIX",
+    "find_star_centers",
+    "measure_detections_in_file",
+    "save_run_detections",
+]
+
+logger = logging.getLogger(__name__)
+
+# What follows a stack's own name (without .fits) in the name of its saved
+# detection list, like the other files kept next to a stack.
+DETECTIONS_SIDECAR_SUFFIX = "_detections.json"
+
+# Raise this when the layout of a saved list changes, so an old file is not
+# read as a new one.
+DETECTIONS_FILE_VERSION = 1
+
+# The cache folder keeps at most this many lists; the oldest are deleted.
+DETECTIONS_CACHE_LIMIT = 200
 
 
 def find_star_centers(data: np.ndarray) -> list[tuple[float, float]]:
@@ -81,6 +123,10 @@ def _star_width_estimator(stack_frame_count: int) -> StarWidthEstimator:
 def measure_detections_in_file(path: str) -> DetectionsMeasurement:
     """List the stars the astrometry run's star finder detects in an image.
 
+    A saved list is used when it is still valid (see `_load_saved`): first
+    the one the run saved next to a stack, then the one in the cache folder.
+    Otherwise the finder runs and the result goes to the cache folder.
+
     Parameters
     ----------
     path : `str`
@@ -91,11 +137,79 @@ def measure_detections_in_file(path: str) -> DetectionsMeasurement:
     measurement : `DetectionsMeasurement`
         The detected stars, brightest first, with the kernel width used.
 
+    Notes
+    -----
+    A file that does not exist raises `NotFoundError`. An image with no pixel
+    data raises `InvalidArgumentError`.
+    """
+    saved = _load_saved(path, _sidecar_path(path)) or _load_saved(path, _cache_path(path))
+    if saved is not None:
+        return saved
+    measurement = _find_detections(path)
+    _write_saved(_cache_path(path), path, measurement)
+    return measurement
+
+
+def save_run_detections(
+    path: str, unique_sources: list[dict[str, Any]], kernel_fwhm_px: float, binned_on_color: bool
+) -> bool:
+    """Save the list the astrometry run found on a stack, next to the stack.
+
+    Call it after the run has finished changing the file (it writes the
+    solved coordinates into the header), so the saved size and modification
+    time are the ones the viewer will see. Only a stack gets a file: a single
+    frame belongs to the raw folders, where nothing is written.
+
+    Parameters
+    ----------
+    path : `str`
+        The stack's FITS file.
+    unique_sources : `list` [`dict`]
+        The stars the run's finder found, merged, as `find_unique_stars`
+        returns them.
+    kernel_fwhm_px : `float`
+        The kernel width the finder used.
+    binned_on_color : `bool`
+        Whether the finder searched a binned copy of a color image.
+
+    Returns
+    -------
+    saved : `bool`
+        `True` when a file was written.
+    """
+    try:
+        image = AstrometricsImage(path)
+        if int(image.header.get("STACKCNT", 0) or 0) <= 1:
+            return False
+        raw = image.data
+        data = np.asarray(collapse_to_2d(raw) if np.asarray(raw).ndim == 3 else raw, dtype=float)
+        measurement = _build_measurement(
+            path, data, image.header, unique_sources, kernel_fwhm_px, binned_on_color
+        )
+        _write_saved(_sidecar_path(path), path, measurement)
+    except (OSError, ValueError, TypeError, InvalidArgumentError) as error:
+        logger.debug("Could not save the detection list of %s: %s", path, error)
+        return False
+    return True
+
+
+def _find_detections(path: str) -> DetectionsMeasurement:
+    """Run the star finder on an image and describe what it found.
+
+    Parameters
+    ----------
+    path : `str`
+        A FITS image.
+
+    Returns
+    -------
+    measurement : `DetectionsMeasurement`
+        The detected stars.
+
     Raises
     ------
     InvalidArgumentError
-        If the image has no pixel data. A file that does not exist raises
-        `NotFoundError`.
+        If the image has no pixel data.
     """
     image = AstrometricsImage(path)
     raw = image.data
@@ -108,21 +222,54 @@ def measure_detections_in_file(path: str) -> DetectionsMeasurement:
     data = np.asarray(data, dtype=float)
     if data.ndim != 2:
         raise InvalidArgumentError("The image has no pixel data.")
-    height, width = data.shape
+    # The finder is built exactly as the run builds it, so the markers are
+    # the stars a run finds. The run reads each star's radius; the viewer
+    # does not, so it is skipped here.
+    detector = SourceDetector()
+    _, unique_sources = find_unique_stars(detector, data, is_color_frame=is_color_frame, with_radius=False)
+    return _build_measurement(path, data, image.header, unique_sources, float(detector.fwhm), is_color_frame)
 
+
+def _build_measurement(
+    path: str,
+    data: np.ndarray,
+    header: Any,
+    unique_sources: list[dict[str, Any]],
+    kernel_fwhm_px: float,
+    binned_on_color: bool,
+) -> DetectionsMeasurement:
+    """Turn the finder's stars into the result, with the circle size.
+
+    The image's own star width is recorded in a context of its own, so it
+    sizes the circle and nothing leaks into a run going on.
+
+    Parameters
+    ----------
+    path : `str`
+        The image.
+    data : `numpy.ndarray`
+        Its two-dimensional pixels.
+    header : `astropy.io.fits.Header`
+        Its header.
+    unique_sources : `list` [`dict`]
+        The merged stars from `find_unique_stars`.
+    kernel_fwhm_px : `float`
+        The kernel width the finder used.
+    binned_on_color : `bool`
+        Whether the finder searched a binned copy.
+
+    Returns
+    -------
+    measurement : `DetectionsMeasurement`
+        The result.
+    """
+    height, width = data.shape
     try:
-        stack_frame_count = int(image.header.get("STACKCNT", 0) or 0)
+        stack_frame_count = int(header.get("STACKCNT", 0) or 0)
     except TypeError, ValueError:
         stack_frame_count = 0
     estimator = _star_width_estimator(stack_frame_count)
 
-    # A context of its own, so the width measured here sizes everything below
-    # and nothing leaks into a run that may be going on.
-    # The finder first, as the run builds it, so the markers are the stars a
-    # run finds. Then this image's star width is recorded in a context of its
-    # own, so it sizes the circle and nothing leaks into a run going on.
-    detector = SourceDetector()
-    _, unique_sources = find_unique_stars(detector, data, is_color_frame=is_color_frame)
     with setup_parameter_context():
         measured_width_px = measure_fwhm_from_data(data)
         record_star_width(measured_width_px, estimator)
@@ -153,11 +300,173 @@ def measure_detections_in_file(path: str) -> DetectionsMeasurement:
         detections=detections,
         detection_count=len(detections),
         merged_count=sum(1 for detection in detections if detection.merged),
-        kernel_fwhm_px=float(detector.fwhm),
-        binned_on_color=is_color_frame,
+        kernel_fwhm_px=kernel_fwhm_px,
+        binned_on_color=binned_on_color,
         star_width_px=star_width_px,
         aperture_radius_px=aperture_radius_px,
     )
+
+
+def _finder_settings() -> dict[str, Any]:
+    """List the settings that decide which stars the finder reports.
+
+    A saved list is valid only for the settings it was made with, so tuning
+    one of them finds the stars again.
+
+    Returns
+    -------
+    settings : `dict`
+        The values, as plain data.
+    """
+    return {
+        "threshold_sigma": float(resolve(STAR_FINDER_THRESHOLD_SIGMA).value),
+        "kernel_fwhm_px": float(resolve(SOURCE_DETECTOR_KERNEL_FWHM_PX).value),
+        "roundness_range": [float(value) for value in resolve(SOURCE_DETECTOR_ROUNDNESS_RANGE).value],
+        "color_bin_factor": int(resolve(_COLOR_DETECTION_BIN_FACTOR).value),
+    }
+
+
+def _file_stamp(path: str) -> list[int] | None:
+    """Describe a file by its size and modification time.
+
+    Parameters
+    ----------
+    path : `str`
+        The file.
+
+    Returns
+    -------
+    stamp : `list` [`int`] or `None`
+        ``[size, modification time in nanoseconds]``, `None` if unreadable.
+    """
+    try:
+        status = os.stat(path)
+    except OSError:
+        return None
+    return [int(status.st_size), int(status.st_mtime_ns)]
+
+
+def _sidecar_path(path: str) -> str:
+    """Give the path of the list the run saves next to a stack.
+
+    Parameters
+    ----------
+    path : `str`
+        The stack's FITS file.
+
+    Returns
+    -------
+    sidecar : `str`
+        The file's path.
+    """
+    return os.path.splitext(path)[0] + DETECTIONS_SIDECAR_SUFFIX
+
+
+def _cache_path(path: str) -> str:
+    """Give the path of an image's list in the cache folder.
+
+    Parameters
+    ----------
+    path : `str`
+        The image.
+
+    Returns
+    -------
+    cache_path : `str`
+        A file in ``<scratch folder>/detections``, named from the image's
+        real path.
+    """
+    key = hashlib.sha256(os.path.realpath(path).encode("utf-8")).hexdigest()
+    return os.path.join(scratch_directory(), "detections", f"{key}.json")
+
+
+def _load_saved(path: str, saved_path: str) -> DetectionsMeasurement | None:
+    """Read a saved list, if it is for this file as it is now.
+
+    Parameters
+    ----------
+    path : `str`
+        The image.
+    saved_path : `str`
+        The saved file to read.
+
+    Returns
+    -------
+    measurement : `DetectionsMeasurement` or `None`
+        The list, or `None` when there is no file, it cannot be read, or its
+        version, image stamp or finder settings differ from now.
+    """
+    stamp = _file_stamp(path)
+    if stamp is None or not os.path.isfile(saved_path):
+        return None
+    try:
+        with open(saved_path, encoding="utf-8") as handle:
+            record = json.load(handle)
+        if (
+            record.get("version") != DETECTIONS_FILE_VERSION
+            or record.get("image_stamp") != stamp
+            or record.get("finder_settings") != _finder_settings()
+        ):
+            return None
+        measurement = DetectionsMeasurement.model_validate(record["measurement"])
+    except OSError, ValueError, KeyError, TypeError, AttributeError:
+        return None
+    measurement.path = path
+    return measurement
+
+
+def _write_saved(saved_path: str, path: str, measurement: DetectionsMeasurement) -> None:
+    """Save a list with the image's stamp and the finder's settings.
+
+    A failure to write is logged and ignored: the list is only a shortcut.
+
+    Parameters
+    ----------
+    saved_path : `str`
+        The file to write.
+    path : `str`
+        The image the list is for.
+    measurement : `DetectionsMeasurement`
+        The list.
+    """
+    stamp = _file_stamp(path)
+    if stamp is None:
+        return
+    record = {
+        "version": DETECTIONS_FILE_VERSION,
+        "image_stamp": stamp,
+        "finder_settings": _finder_settings(),
+        "measurement": measurement.model_dump(),
+    }
+    try:
+        os.makedirs(os.path.dirname(saved_path), exist_ok=True)
+        temporary_path = f"{saved_path}.{os.getpid()}.tmp"
+        with open(temporary_path, "w", encoding="utf-8") as handle:
+            json.dump(record, handle, separators=(",", ":"))
+        os.replace(temporary_path, saved_path)
+        if os.path.basename(os.path.dirname(saved_path)) == "detections":
+            _prune_cache(os.path.dirname(saved_path))
+    except OSError as error:
+        logger.debug("Could not save the detection list %s: %s", saved_path, error)
+
+
+def _prune_cache(folder: str) -> None:
+    """Delete the oldest lists when the cache folder holds too many.
+
+    Parameters
+    ----------
+    folder : `str`
+        The cache folder.
+    """
+    try:
+        entries = [entry for entry in os.scandir(folder) if entry.name.endswith(".json")]
+        if len(entries) <= DETECTIONS_CACHE_LIMIT:
+            return
+        entries.sort(key=lambda entry: entry.stat().st_mtime)
+        for entry in entries[: len(entries) - DETECTIONS_CACHE_LIMIT]:
+            os.remove(entry.path)
+    except OSError:
+        return
 
 
 def _photometry_aperture_radius_px() -> float:

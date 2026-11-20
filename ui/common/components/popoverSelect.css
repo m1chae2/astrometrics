@@ -60,9 +60,8 @@
 }
 
 .popover-select__menu {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
+  /* Drawn in a portal on document.body; PopoverSelect.tsx sets top, left and width from the button. */
+  position: fixed;
   min-width: 240px;
   max-height: 320px;
   overflow-y: auto;
@@ -74,7 +73,7 @@
   border: 1px solid var(--border-control);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card-lifted);
-  z-index: 110;
+  z-index: var(--z-popover);
 }
 
 .popover-select__option {
@@ -129,14 +128,13 @@
   font-size: var(--button-font-size-small);
 }
 
-/* Above: the menu opens upward, for pickers at the bottom of a panel. */
-.popover-select--above .popover-select__menu {
-  top: auto;
-  bottom: calc(100% + 8px);
+/* fill: the picker takes the whole width of its container; the portaled menu is sized in code. */
+.popover-select--fill {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
 }
 
-/* fill: the picker takes the whole width of its container, and the menu matches the button. */
-.popover-select--fill,
 .popover-select--fill .popover-select__popover-container {
   flex: 1;
   min-width: 0;
@@ -148,8 +146,7 @@
   min-width: 0;
 }
 
-.popover-select--fill .popover-select__menu {
+.popover-select__menu--fill {
   min-width: 0;
-  width: 100%;
   box-sizing: border-box;
 }

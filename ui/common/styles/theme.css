@@ -208,6 +208,7 @@
   --surface-overlay: rgba(0, 0, 0, 0.4);          /* image area, dimming layer */
   --shadow-card: 0 4px 6px rgba(0, 0, 0, 0.3);    /* panel and card shadow */
   --shadow-card-lifted: 0 8px 16px rgba(0, 0, 0, 0.5); /* a card being dragged */
+  --z-popover: 3000; /* menus drawn in a portal on document.body: above every panel and dialog */
   --surface-floating: rgba(10, 14, 22, 0.95);     /* panel floating over the sky map (not for menus) */
   --surface-menu: var(--grey-medium);             /* dropdown, popover and context menu: neutral grey, a step above the panels */
   --surface-control: rgba(255, 255, 255, 0.08);   /* button on a floating panel */
